@@ -1,0 +1,23 @@
+# Visa-filing databases and research scratch (2.5 GB; several files exceed GitHub's 100 MB limit)
+.research/
+.ats/
+
+# Refresh working files, backups, logs and the generated report
+refresh/work/
+refresh/backups/
+refresh/refresh.log
+refresh/LAST_RUN.md
+
+# Cold email: contacts (other people's names and addresses), runtime settings, logs, locks
+mail/contacts.json
+mail/config.json
+mail/*.log
+mail/*.out
+mail/.lock
+mail/*.tmp
+
+# Python, editor and OS clutter
+__pycache__/
+*.pyc
+.DS_Store
+*.pem

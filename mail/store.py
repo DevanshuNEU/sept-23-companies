@@ -5,11 +5,15 @@ A contact moves through:
   drafted -> approved -> sent -> replied | bounced | followup_ready
   followup_ready -> followup_approved -> followup_sent -> replied | bounced | closed
   (any unsent stage) -> skipped
+Sending: approved | followup_approved -> sending (claimed, Message-ID saved) -> sent | followup_sent
+  sending -> send_unknown (Gmail call failed or timed out) -> found in Sent: sent | followup_sent;
+                                                            not in Sent after 10 min: failed | followup_ready
+  sending and send_unknown cannot be approved, edited or skipped, so nothing goes out twice.
 Only a click on Approve in the dashboard moves a draft to approved; only the sender sends.
 """
 import json, os, fcntl, datetime, contextlib
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.environ.get("OUTREACH_MAIL_HOME") or os.path.dirname(os.path.abspath(__file__))   # tests point this elsewhere
 CONTACTS, CONFIG, LOCK = (os.path.join(HERE, n) for n in ("contacts.json", "config.json", ".lock"))
 
 DEFAULT_CONFIG = {

@@ -355,6 +355,7 @@ async function mailPost(path, body){
 const OB_GROUPS = [
   ["Waiting for your approval", REVIEW],
   ["Approved, sending soon", ["approved", "followup_approved"]],
+  ["Checking whether it went out", ["sending", "send_unknown"]],
   ["Sent, waiting for a reply", ["sent", "followup_sent"]],
   ["Replied", ["replied"]],
   ["Bounced, closed or skipped", ["bounced", "closed", "skipped"]],

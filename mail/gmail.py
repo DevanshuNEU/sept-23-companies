@@ -90,12 +90,15 @@ def api(method, path, body=None, query=None):
 def whoami():
     return api("GET", "/profile")["emailAddress"]
 
-def send(to, subject, body, from_name, from_addr, thread_id=None, in_reply_to=None):
-    """Send one plain-text email. Returns ids needed to track the thread and reply in it later."""
+def new_message_id(from_addr):
+    return make_msgid(domain=from_addr.split("@")[-1])
+
+def send(to, subject, body, from_name, from_addr, thread_id=None, in_reply_to=None, message_id=None):
+    """Send one plain-text email. Returns ids needed to track the thread and reply in it later.
+    The caller passes the Message-ID it saved before calling, so an unclear outcome can be checked in Sent."""
     m = EmailMessage()
     m["To"], m["From"], m["Subject"] = to, formataddr((from_name, from_addr)), subject
-    domain = from_addr.split("@")[-1]
-    m["Message-ID"] = make_msgid(domain=domain)
+    m["Message-ID"] = message_id or new_message_id(from_addr)
     if in_reply_to:
         m["In-Reply-To"], m["References"] = in_reply_to, in_reply_to
     m.set_content(body)
@@ -103,15 +106,37 @@ def send(to, subject, body, from_name, from_addr, thread_id=None, in_reply_to=No
     res = api("POST", "/messages/send", {"raw": raw, **({"threadId": thread_id} if thread_id else {})})
     return {"messageId": res["id"], "threadId": res["threadId"], "rfcMessageId": m["Message-ID"]}
 
+AUTO_HEADERS = ["Auto-Submitted", "X-Autoreply", "X-Autorespond", "Precedence", "X-Auto-Response-Suppress"]
+
+def _headers(msg):
+    return {x["name"].lower(): x["value"] for x in (msg or {}).get("payload", {}).get("headers", [])}
+
 def thread(thread_id):
-    """Headers of every message in a thread: [{from, subject, date, internalDate}]."""
-    t = api("GET", f"/threads/{thread_id}", query={"format": "metadata", "metadataHeaders": ["From", "Subject", "Date"]})
+    """Every message in a thread: [{from, subject, date, internalDate, labels, headers}].
+    headers holds the auto-reply markers (lower-cased names) so the sender can tell an out-of-office from a person."""
+    t = api("GET", f"/threads/{thread_id}",
+            query={"format": "metadata", "metadataHeaders": ["From", "Subject", "Date"] + AUTO_HEADERS})
     out = []
     for msg in t.get("messages", []):
-        h = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
+        h = _headers(msg)
         out.append({"from": h.get("from", ""), "subject": h.get("subject", ""), "date": h.get("date", ""),
-                    "internalDate": int(msg.get("internalDate", 0)), "labels": msg.get("labelIds", [])})
+                    "internalDate": int(msg.get("internalDate", 0)), "labels": msg.get("labelIds", []),
+                    "headers": {k.lower(): h[k.lower()] for k in AUTO_HEADERS if k.lower() in h}})
     return out
+
+def find_sent(rfc_id, to, subject, look_back=50):
+    """Look in Sent for a message we may or may not have sent. Matches on our Message-ID, else on the same
+    recipient and subject. Returns {messageId, threadId, rfcMessageId} or None. (The metadata scope cannot search,
+    so this pages the newest Sent messages.)"""
+    listing = api("GET", "/messages", query={"labelIds": "SENT", "maxResults": look_back}) or {}
+    fallback = None
+    for ref in listing.get("messages", []):
+        h = _headers(api("GET", f"/messages/{ref['id']}",
+                         query={"format": "metadata", "metadataHeaders": ["Message-ID", "To", "Subject"]}))
+        hit = {"messageId": ref["id"], "threadId": ref["threadId"], "rfcMessageId": h.get("message-id", "")}
+        if h.get("message-id") == rfc_id: return hit
+        if not fallback and to.lower() in h.get("to", "").lower() and h.get("subject") == subject: fallback = hit
+    return fallback
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""

@@ -54,6 +54,7 @@ def act(path, body):
             store.log(c, f"{which} edited")
         elif path == "/api/skip":
             if s in ("sent", "followup_sent", "replied", "bounced", "closed"): return {"error": "already sent"}
+            if s in ("sending", "send_unknown"): return {"error": "checking whether it went out; try again in a few minutes"}
             c["status"] = "skipped"; store.log(c, "skipped")
         else: return {"error": "unknown action"}
         store.save(db)

@@ -1,4 +1,6 @@
 import type { OutreachClient } from './client';
+import { FixtureClient } from './fixture/client';
+import { buildFixture, SCENARIOS, type Scenario } from './fixture/data';
 
 export type * from './types';
 export type { OutreachClient, WriteOptions, ApiErrorCode } from './client';
@@ -6,8 +8,9 @@ export { ApiError } from './client';
 export { ClientProvider, useClient } from './provider';
 export { queryKeys, pollMs, newRequestId } from './keys';
 
-// Phase 1 returns a FixtureClient for the ?scenario= value; Task 4 writes it.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function createClient(_search: string = location.search): OutreachClient {
-  throw new Error('FixtureClient arrives in Task 4');
+/** Phase 1 has no backend: the client is a FixtureClient for the `?scenario=` value, with 150 ms of latency so loading states show. */
+export function createClient(search: string = location.search): OutreachClient {
+  const asked = new URLSearchParams(search).get('scenario');
+  const scenario: Scenario = SCENARIOS.find((s) => s === asked) ?? 'default';
+  return new FixtureClient(buildFixture(scenario), { latencyMs: 150 });
 }

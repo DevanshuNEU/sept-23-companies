@@ -39,7 +39,9 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ['@/api/fixture/*', '**/api/fixture/**', '@/api/schema', '**/api/schema', '@/api/client', '**/api/client'],
+              group: [
+                '@/api/fixture/*', '**/api/fixture/**', '@/api/schema', '**/api/schema', '**/api/schema.*', '@/api/client', '**/api/client', '**/api/client.*',
+              ],
               message: 'Import from "@/api" only. The fixture, schema and client modules are internal to the seam.',
             },
           ],

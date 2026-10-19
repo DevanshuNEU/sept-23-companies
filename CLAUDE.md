@@ -55,6 +55,10 @@ Claude never approves or sends an email; approval is Devanshu's click, sending i
 the mail API on :3002 (`/api/approve`, `/api/save`, `/api/skip`, `/api/unapprove`, `/api/pause`) by any means;
 `.claude/settings.json` denies the obvious curl forms, and the rule covers every other way too.
 
+The old dashboard's code (`dashboard/app.js`) always talks to the live mail API on `127.0.0.1:3002`. Preview it only
+on `:3011` (`.claude/launch.json`): the mail API accepts calls only from pages on `:3001`, so a preview there
+cannot read or change real contacts. Never serve a copy on `:3001`.
+
 In the live checkout, `refresh.py` rewrites `dashboard/data.js` and `dashboard/index.html`. Leave both files
 untouched on branches so the live checkout can always fast-forward.
 
@@ -94,5 +98,6 @@ launchd jobs) are written as part of #17.
 ## Writing
 
 Plain words, short sentences, no em dashes or en dashes in anything a person reads: emails, docs, UI copy,
-commit messages, PR bodies. Email drafts follow `.claude/skills/cold-email/SKILL.md` and use only facts from
+commit messages, PR bodies. Email drafts follow `.claude/skills/cold-email/SKILL.md`; until #10 rewrites it, #9's Drafts section overrides
+anything in the skill that disagrees (word count, subject, links, follow-ups). Drafts use only facts from
 `mail/me.md` and what Devanshu supplies about the person.

@@ -87,9 +87,10 @@ launchd jobs) are written as part of #17.
 ## Building
 
 - Python is Homebrew's: `/opt/homebrew/bin/python3` (3.14), the same one launchd uses.
-- Tests: `/opt/homebrew/bin/python3 -m unittest discover -s tests -t .` from the repo root. Once #4 adds
-  `pyproject.toml`, run them with `uv run python -m unittest discover -s tests -t .`. `tests/__init__.py` points
-  every test at scratch settings; new tests rely on that and never use the live paths.
+- Tests: `uv run python -m unittest discover -s tests -t .` from the repo root. A new checkout runs
+  `uv venv --python /opt/homebrew/bin/python3 && uv sync` once first; the live checkout needs the same once
+  before the deploy test run. `tests/__init__.py` points every test at scratch settings; new tests rely on that
+  and never use the live paths.
 - Test first: write the test, watch it go red for the right reason, then make it green. Every bug fix starts
   with a test that reproduces it. Tests never run a real refresh, a real send, or a crawl.
 - Current code (`mail/`, `refresh/`, `dashboard/`) is standard library only. The new platform lives in the

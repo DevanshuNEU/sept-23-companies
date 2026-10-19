@@ -140,7 +140,7 @@ python-preference = "only-system"
 
 `outreach/store/migrations/0001_initial.sql` is exact copy: the implementer of Task 4 writes this file as below. Page-level settings (`auto_vacuum=INCREMENTAL`, `journal_mode=WAL`) are set by `install` before this file runs, because `auto_vacuum` must precede the first table.
 
-Notation used only in this plan, never in the file: none. Every timestamp column carries the full CHECK. `x IS strftime(...)` (not `=`) is deliberate: with `=`, an impossible value such as month 13 makes `strftime` return NULL and the CHECK passes; `IS` rejects it and still lets NULL through for nullable columns. Verified on SQLite 3.51.2 on 2026-10-19.
+Every timestamp column carries the full CHECK. `x IS strftime(...)` (not `=`) is deliberate: with `=`, an impossible value such as month 13 makes `strftime` return NULL and the CHECK passes; `IS` rejects it and still lets NULL through for nullable columns. Verified on SQLite 3.51.2 on 2026-10-19.
 
 ### Companies and facts
 
@@ -272,17 +272,18 @@ CREATE INDEX decision_version ON decision(ruleset_version);
 CREATE TABLE evidence (
   evidence_id  INTEGER PRIMARY KEY,
   company_id   INTEGER NOT NULL REFERENCES company(company_id),
-  fact         TEXT NOT NULL CHECK (fact IN ('size','stage','sponsorship','domain','hq')),
+  fact         TEXT NOT NULL CHECK (fact IN ('size','stage','sponsorship','domain','hq','everify')),
   value        TEXT NOT NULL CHECK (length(value) > 0),
   num_low      INTEGER CHECK (num_low >= 0),
   num_high     INTEGER CHECK (num_high >= num_low),
   confidence   TEXT NOT NULL CHECK (confidence IN ('confirmed','estimate','guess')),
   locked       INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0,1)),
   source_kind  TEXT NOT NULL CHECK (source_kind IN ('hand','posting','old_dashboard','yc','builtin',
-                                                    'linkedin','website','formd','lca','other')),
+                                                    'linkedin','website','formd','lca','everify','other')),
   source_ref   TEXT NOT NULL DEFAULT '',
   quote        TEXT NOT NULL DEFAULT '',
   posting_id   INTEGER REFERENCES posting(posting_id),
+  observed_on  TEXT CHECK (observed_on IS date(observed_on)),
   recorded_at  TEXT NOT NULL CHECK (recorded_at IS strftime('%Y-%m-%dT%H:%M:%SZ', recorded_at)),
   CHECK (locked = 0 OR source_kind = 'hand'),
   CHECK (fact <> 'size' OR num_low IS NOT NULL),
@@ -290,7 +291,8 @@ CREATE TABLE evidence (
   CHECK (fact <> 'sponsorship' OR value IN ('yes','no','opt_only','unclear')),
   CHECK (fact <> 'stage' OR value IN ('pre_seed','seed','series_a','series_b','series_c','series_d',
                                       'series_e_plus','late_private','public','yc','early')),
-  CHECK (fact <> 'domain' OR (value = lower(value) AND value NOT LIKE '%@%' AND value LIKE '%_._%'))
+  CHECK (fact <> 'domain' OR (value = lower(value) AND value NOT LIKE '%@%' AND value LIKE '%_._%')),
+  CHECK (fact <> 'everify' OR (value IN ('enrolled','not_enrolled') AND observed_on IS NOT NULL))
 ) STRICT;
 CREATE INDEX evidence_company ON evidence(company_id, fact);
 -- Automation re-reading the same source adds nothing; hand rows are never de-duplicated (Review Focus 3).
@@ -562,7 +564,7 @@ CREATE TRIGGER posting_never_deleted BEFORE DELETE ON posting
 -- guess, then the newest. Automation can add rows but can never outrank a hand value.
 CREATE VIEW company_fact AS
 SELECT evidence_id, company_id, fact, value, num_low, num_high, confidence, locked,
-       source_kind, source_ref, quote, posting_id, recorded_at
+       source_kind, source_ref, quote, posting_id, observed_on, recorded_at
 FROM (
   SELECT e.*, ROW_NUMBER() OVER (
            PARTITION BY e.company_id, e.fact
@@ -584,7 +586,7 @@ JOIN ruleset r ON r.ruleset_version = d.ruleset_version AND r.is_current = 1;
 | `schema_migration` | applied migrations | install | install, health |
 | `company` | identity and status (candidate, backlog, working, paused, closed with reason, removed with reason) | #15 pick and remove, #11 pause, resume, close, #17 import | everyone |
 | `company_alias` | every name a company is known by (`name_key`) | #17, #13 add_people, #21 | #17 dedupe, #11 and #12 search |
-| `evidence` | one fact (size, stage, sponsorship, domain, HQ) with source, quote, confidence, lock | rules (Task 15 `record_evidence`), #16 hand edits (locked), #17 hand verdicts (locked) | `company_fact`, #6, #12 company page |
+| `evidence` | one fact (size, stage, sponsorship, domain, HQ, E-Verify enrollment) with source, quote, confidence, lock and the date the source was read (`observed_on`) | rules (Task 15 `record_evidence`), #16 hand edits (locked), #17 hand verdicts (locked) | `company_fact`, #6, #12 company page |
 | `board` | ATS and token, last read, empty and error streaks | #21 crawler, #17 (frozen history: `active = 0`) | #16 triggers 1 and 2, #11 health |
 | `posting` | every posting ever seen, body for rebuilds, never deleted | #21, #17 | rules, #6, #15, #12 |
 | `ruleset` | each ruleset version with its config text, one current | rules rebuild | rules, #11 health |

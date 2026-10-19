@@ -329,6 +329,12 @@ listed inside the reply's detail, not in Approved, so nothing in Approved can be
 - Footer (sticky): Approve (A) primary, disabled when anything blocks, with a tooltip naming the block; Save (⌘S);
   Skip (S); on the right, Pause company (P) and Close company (C).
 
+The sample drafts in `outbox.html` follow the merged cold-email skill (`.claude/skills/cold-email/SKILL.md`) and pass
+`mail/check_draft.py`: bare links on their own lines (portfolio first, then one project), the work-authorization
+line from `mail/me.md` word for word for the recruiter, lowercase subjects of 4 to 7 words, and the signature
+"Devanshu Chicholikar". Kenji Watanabe's draft passes on its own and is blocked only because Ava Moreno's is a 92%
+copy, which is the real checker's result.
+
 #### Detail: reply
 
 - Green alert: "Browserbase is on hold. Priya replied, so nothing else goes to Browserbase: Lena Szabo
@@ -779,20 +785,23 @@ Actions: open company; reopen lives on the company page.
 
 ## 14. Open questions for Devanshu
 
+Devanshu has not answered these yet. Each one carries a working default that phase 1 builds; changing a default later is a
+small, local change.
+
 1. **Should Claude's `mark_no_go` (#13) take effect at once, or wait for you?** #9 says Claude can "flag" and
-   only you approve. Recommendation: Claude's no-go creates a Needs you item ("Claude suggests no-go: profile says
+   only you approve. Default until Devanshu decides: Claude's no-go creates a Needs you item ("Claude suggests no-go: profile says
    no cold outreach") that you confirm with one key. The People tab shows it as "Flagged by Claude" only after you
    confirm.
 2. **When does Today's capacity move from 5 to 10 companies?** #9 says "once the send limit has ramped up"
-   without a number. Recommendation: 10 once the limit reaches 60 (level 5), since 10 companies at up to 3 a day
+   without a number. Default until Devanshu decides: 10 once the limit reaches 60 (level 5), since 10 companies at up to 3 a day
    plus follow-ups needs about that many.
-3. **Can a removed company come back?** #15 says remove is permanent. Recommendation: never proposed again
+3. **Can a removed company come back?** #15 says remove is permanent. Default until Devanshu decides: never proposed again
    automatically, but you can take it off the No-go list by hand (with a reason), because a mis-click on R should
    not be forever.
 4. **Should you tag every reply (Interested, Not now, Said no, Asked to stop)?** It costs one click and gives
-   replies per month by kind, and "Asked to stop" feeds the clean-day rule. Recommendation: yes, with Interested
+   replies per month by kind, and "Asked to stop" feeds the clean-day rule. Default until Devanshu decides: yes, with Interested
    preselected so it is usually zero clicks.
-5. **Light or dark by default?** Recommendation: follow the Mac's setting, toggle with the palette or the
+5. **Light or dark by default?** Default until Devanshu decides: follow the Mac's setting, toggle with the palette or the
    sidebar button.
 
 ## 15. Where the issues disagree with #9, or leave gaps

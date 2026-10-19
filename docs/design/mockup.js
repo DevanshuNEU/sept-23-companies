@@ -129,7 +129,7 @@
   ];
   var people = [
     ["Priya Natarajan", "Engineering Manager, Browserbase"], ["Marcus Feld", "Software Engineer, Mintlify"],
-    ["Dana Whitcomb", "Technical Recruiter, Mintlify"], ["Omar Haddad", "Founding Engineer, Resend"], ["Lena Szabo", "Staff Engineer, Browserbase"]
+    ["Dana Whitcomb", "Technical Recruiter, Mintlify"], ["Omar Haddad", "Co-founder and CTO, Resend"], ["Lena Szabo", "Staff Engineer, Browserbase"]
   ];
   var actions = [
     ["Pause sending", "Stops the sender after the email in flight", "pause"], ["Toggle theme", "Light or dark", "moon"],

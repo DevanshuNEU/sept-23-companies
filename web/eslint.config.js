@@ -5,23 +5,27 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'src/components/ui/**', 'src/hooks/use-mobile.ts'] },
+  {
+    ignores: [
+      'dist',
+      'test-results',
+      'playwright-report',
+      'src/components/ui/**',
+      'src/hooks/use-mobile.ts',
+    ],
+  },
   {
     files: ['**/*.{ts,tsx}'],
-    extends: [
-      js.configs.recommended,
-      ...tseslint.configs.recommended,
-      reactHooks.configs.flat.recommended,
-      reactRefresh.configs.vite,
-    ],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2023,
       globals: globals.browser,
     },
   },
   {
-    // Playwright's fixture callback is named `use`, which is not a React hook.
-    files: ['e2e/**/*.ts'],
-    rules: { 'react-hooks/rules-of-hooks': 'off' },
+    // React rules apply to app code only. Playwright's fixture callback is named `use`,
+    // which is not a React hook, so e2e stays out of this block.
+    files: ['src/**/*.{ts,tsx}'],
+    extends: [reactHooks.configs.flat.recommended, reactRefresh.configs.vite],
   },
 );

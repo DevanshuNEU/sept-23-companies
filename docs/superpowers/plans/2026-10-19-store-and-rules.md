@@ -768,19 +768,23 @@ The CHECK lists on `board.ats`, `event.entity`, `evidence.source_kind` and simil
 
 ### Order and parallel groups
 
-Every task ends with the whole suite green. Tasks in one group touch different files and can run as parallel subagents; a group starts when the tasks it depends on are merged.
+Every task ends with the whole suite green. After Task 1 there are two lanes that touch disjoint files and can run as two parallel subagents; inside a lane tasks run in order, because each depends on the one before (Task 3 uses Task 2's `utcnow`; Task 11 reads Task 10's place lists; Tasks 8 to 13 all edit `config.toml`, each only its own section).
 
-| Group | Tasks | Depends on |
+| Step | Store lane | Rules lane |
 |---|---|---|
-| 0 | 1 Project scaffold | nothing |
-| A | 2 Time helpers, 3 Migration runner, 7 Rules config and version | 1 |
-| B | 4 Schema 0001 (needs 3); 8 Title, 9 Years, 10 Location, 11 Sponsorship, 12 Eligibility, 13 Facts (need 7) | as listed |
-| C | 5 Connect, guard, install | 2, 3, 4 |
-| D | 6 Store write helpers; 14 decide() and the misfire suite (needs 8 to 13) | 5 for 6; 8 to 13 for 14 |
-| E | 15 Rebuild, decide_and_store, record_evidence | 6, 14 |
-| F | 16 Mutation check and final verification | all |
+| 0 | 1 Project scaffold (alone, first) | |
+| 1 | 2 Time helpers | 7 Rules config, text helpers and version |
+| 2 | 3 Migration runner | 8 Title |
+| 3 | 4 Schema 0001 | 9 Years |
+| 4 | 5 Connect, guard, install | 10 Location |
+| 5 | 6 Store write helpers | 11 Sponsorship and citizenship |
+| 6 | | 12 Eligibility |
+| 7 | | 13 Facts |
+| 8 | | 14 decide() and the misfire suite |
+| 9 | 15 Rebuild, decide_and_store, record_evidence (needs both lanes) | |
+| 10 | 16 Mutation check and final verification | |
 
-Group B rule tasks share `outreach/rules/config.toml`: Task 7 writes every section, and each rule task edits only its own section (`[title]`, `[years]`, `[location]`, `[sponsorship]`, `[eligibility]`, `[facts]`), so merges do not collide.
+The lanes share no file: the store lane writes `outreach/store/`, `outreach/install.py`, `tests/test_store_*.py`, `tests/storetest.py` and the `CLAUDE.md` edit in Task 5; the rules lane writes `outreach/rules/` and `tests/test_rules_*.py`. Within the rules lane each task edits only its own `config.toml` section (`[title]`, `[years]`, `[location]`, `[sponsorship]`, `[eligibility]`, `[facts]`).
 
 ---
 
@@ -876,7 +880,7 @@ def test_iso_date_forms(self):
 
 **Interfaces:**
 - Consumes: `timefmt.utcnow`.
-- Produces: `MIGRATIONS_DIR: pathlib.Path`; `split_sql(sql: str) -> list[str]`; `migration_files(directory: Path = MIGRATIONS_DIR) -> list[tuple[int, str, Path]]` (sorted; raises `ValueError` on a gap, a duplicate number or a file not named `NNNN_name.sql`); `latest_version(directory=MIGRATIONS_DIR) -> int`; `migrate(conn: sqlite3.Connection, directory=MIGRATIONS_DIR) -> int` (applies pending files, each in `BEGIN IMMEDIATE`, records `schema_migration`, sets `PRAGMA user_version`, returns the new version; raises `RuntimeError` when the database is newer than the files). `conn` must have `isolation_level=None`.
+- Produces: `MIGRATIONS_DIR: pathlib.Path`; `split_sql(sql: str) -> list[str]`; `migration_files(directory: Path = MIGRATIONS_DIR) -> list[tuple[int, str, Path]]` (sorted; ignores names starting with `.`, such as `.gitkeep`; raises `ValueError` on a gap, a duplicate number or any other file not named `NNNN_name.sql`); `latest_version(directory=MIGRATIONS_DIR) -> int`; `migrate(conn: sqlite3.Connection, directory=MIGRATIONS_DIR) -> int` (applies pending files, each in `BEGIN IMMEDIATE`, records `schema_migration`, sets `PRAGMA user_version`, returns the new version; raises `RuntimeError` when the database is newer than the files). `conn` must have `isolation_level=None`.
 
 - [ ] **Step 1: Write the failing tests** against temp migration directories (each test writes its own `0001_*.sql`, `0002_*.sql`; the first always creates `schema_migration` with the Task 4 definition).
 
@@ -888,6 +892,7 @@ def test_refuses_a_newer_database(self):                  # PRAGMA user_version 
 def test_gap_in_numbers_is_refused(self):                 # 0001 and 0003 -> ValueError
 def test_semicolon_inside_a_comment_does_not_split(self): # split_sql("CREATE TABLE t (a INT -- x; y\n) STRICT;") has 1 statement
 def test_bad_file_name_is_refused(self):                  # "1_init.sql" -> ValueError
+def test_dotfiles_are_ignored(self):                       # a .gitkeep next to 0001_init.sql -> one migration, no error
 ```
 
 - [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_migrate -v` -> ImportError.
@@ -906,7 +911,7 @@ def test_bad_file_name_is_refused(self):                  # "1_init.sql" -> Valu
 
 **Interfaces:**
 - Consumes: `migrate.migrate`.
-- Produces: the schema; `tests/storetest.py: fresh_store() -> sqlite3.Connection` (a migrated store in a new temp directory, `isolation_level=None`, `row_factory=sqlite3.Row`, `foreign_keys=ON`). In this task it opens with `sqlite3.connect` and calls `migrate`; Task 5 changes it to `install` plus `connect` without changing its signature. Also `storetest.seed_company(conn, name="Acme") -> int` and `storetest.seed_posting(conn, company_id, title, body="", location="") -> int`.
+- Produces: the schema; `tests/storetest.py: fresh_store() -> sqlite3.Connection` (a migrated store in a new temp directory, `isolation_level=None`, `row_factory=sqlite3.Row`, `foreign_keys=ON`). In this task it opens with `sqlite3.connect` and calls `migrate`; Task 5 changes it to `install` plus `connect` without changing its signature. Also `storetest.seed_company(conn, name="Acme") -> int`, `storetest.seed_posting(conn, company_id, title, body="", location="") -> int` and `storetest.seed_touch(conn, company_id, email) -> int`. Test modules import it as `from tests.storetest import fresh_store, seed_company, seed_posting, seed_touch`.
 
 - [ ] **Step 1: Write the failing tests.** Generic checks first, then one test per invariant.
 
@@ -939,7 +944,30 @@ def test_hand_value_wins_and_is_never_deduplicated(self):      # Review Focus 3
     # company_fact for size -> num_low 50 (the newest hand row), and 3 hand rows exist
 def test_automation_never_outranks_a_hand_value(self):
     # hand sponsorship 'yes'; later automated 'no' with confidence 'confirmed' -> company_fact value 'yes'
-def test_automation_repeats_are_ignored(self):  # same automated evidence twice with INSERT OR IGNORE -> 1 row
+def test_automation_repeats_are_ignored(self):  # same automated evidence twice with INSERT ... ON CONFLICT DO NOTHING -> 1 row
+def test_on_conflict_do_nothing_still_raises_on_check(self):
+    # stage 'series_z', or size with num_low NULL, through ON CONFLICT DO NOTHING -> IntegrityError (INSERT OR IGNORE would return 0 rows silently)
+def test_newest_hand_row_wins_whatever_its_confidence(self):
+    # hand 80 'confirmed' at 10:00, hand 120 'estimate' at 11:00 -> company_fact size value '120'
+def test_message_state_machine(self):
+    # insert 'approved' -> refused; drafted -> approved -> sending -> sent accepted; sent -> drafted refused;
+    # subject or body edit while sending refused; second message to 'sending' while one is sending refused
+def test_follow_up_waits_for_the_first_send(self):
+    # seq 1 'planned' row; planned -> drafted refused while touch.first_sent_at is NULL; accepted after it is set;
+    # inserting a seq 1 row as 'drafted' before the first send refused
+def test_touch_flags_are_one_way(self):        # replied (replied_at, reply_kind) then closed -> accepted, replied_at kept
+def test_imported_history(self):
+    # person added_by 'import', channel 'email', email NULL -> accepted; same with added_by 'claude' -> refused;
+    # touch origin 'import' with first_sent_at and no first_rfc_id -> accepted; origin 'sender' -> refused
+def test_merge_and_hold(self):
+    # merged_into self -> refused; merged_into without status 'removed' -> refused;
+    # paused_at plus held_by_touch on one working company -> accepted (his pause survives a reply hold)
+def test_review_item_can_clear_itself(self):    # resolution 'cleared' accepted
+def test_linkedin_undo_is_a_new_row(self):      # undo row accepted; a second undo of the same entry refused; DELETE refused
+def test_ruleset_revert_takes_two_statements(self):
+    # one UPDATE SET is_current = (ruleset_version = old) -> IntegrityError; clear-then-set -> accepted
+def test_checks_must_be_a_json_array(self):     # message.checks '{}' -> refused; '[]' accepted
+def test_board_streak_since_follows_last_read(self):  # last_read 'ok' with streak_since NULL -> refused
 def test_everify_needs_a_date(self):           # fact 'everify' with observed_on NULL -> IntegrityError; value 'maybe' -> IntegrityError
 def test_current_decision_view_follows_the_current_ruleset(self):
 def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserting sender_id 2 -> IntegrityError
@@ -963,8 +991,8 @@ def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserti
 - Consumes: `live_checkout.is_live`, `live_checkout.require_live`; `migrate.migrate`, `migrate.latest_version`.
 - Produces:
   - `DEFAULT_PATH = os.path.expanduser("~/Library/Application Support/outreach/outreach.db")`
-  - `db_path() -> str`: `OUTREACH_DB` if set, else `DEFAULT_PATH`; always `os.path.realpath(os.path.expanduser(...))`.
-  - `is_live_path(path: str) -> bool`: realpath equality with `DEFAULT_PATH`'s realpath.
+  - `db_path() -> str`: `OUTREACH_DB` if set, else `DEFAULT_PATH`; always `os.path.realpath(os.path.abspath(os.path.expanduser(...)))`, so a relative path is resolved against the working folder before any URI is built.
+  - `is_live_path(path: str) -> bool`: true when the case-folded realpaths are equal (APFS is case-insensitive, so `~/library/APPLICATION SUPPORT/...` is the same file), or when both files exist and `os.path.samefile` is true.
   - `guard(path: str) -> None`: when `is_live_path(path)`, calls `live_checkout.require_live("opening the live store")`.
   - `connect(path: str | None = None) -> sqlite3.Connection`: guard; open with URI `Path(path).as_uri() + "?mode=rw"` so a missing file raises `StoreError("no store at ...; run: uv run python -m outreach.install")` instead of creating one; `isolation_level=None`, `row_factory=sqlite3.Row`; pragmas `foreign_keys=ON`, `synchronous=FULL`, `busy_timeout=5000`, `temp_store=MEMORY`, `journal_size_limit=67108864`; raises `StoreError` when `user_version` is not `latest_version()` (older: "run install"; newer: "this code is older than the store"). Never migrates.
   - `transaction(conn)`: context manager, `BEGIN IMMEDIATE`, `COMMIT`, `ROLLBACK` on any exception.
@@ -977,11 +1005,13 @@ def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserti
 def test_tests_never_use_the_live_path(self):        # db_path() != realpath(DEFAULT_PATH)  (tests/__init__.py)
 @unittest.skipIf(live_checkout.is_live(), "in the live checkout the default path is allowed; the patched-path tests below cover the rule")
 def test_default_path_is_refused_outside_live(self):
-    # subprocess: env without OUTREACH_DB, run `python -c "import outreach.store as s; s.connect()"` from ROOT
-    # -> returncode != 0, stderr or stdout contains "live checkout"; os.path.exists(real DEFAULT_PATH) unchanged
+    # subprocess: env without OUTREACH_DB and with HOME set to a new temp folder (so even a broken guard can only
+    # ever touch a temp file, never the real store), run `python -c "import outreach.store as s; s.connect()"` from ROOT
+    # -> returncode != 0, output contains "live checkout"; nothing created under the temp HOME
 def test_other_spellings_of_the_live_path_are_refused(self):      # Review Focus 1
     # DEFAULT_PATH patched to <tmp>/live/outreach.db; is_live False; for each of: a symlink <tmp>/link -> <tmp>/live
-    # (path <tmp>/link/outreach.db), "<tmp>/live/../live/outreach.db", a relative path to it -> connect raises SystemExit
+    # (path <tmp>/link/outreach.db), "<tmp>/live/../live/outreach.db", a relative path to it, and the same path in
+    # other letter case ("<tmp>/LIVE/Outreach.db") -> connect raises SystemExit
 def test_live_path_opens_in_the_live_checkout(self):  # same patch, is_live True, after install -> connect works
 def test_install_is_refused_on_the_live_path_outside_live(self):  # install.install(patched DEFAULT_PATH) -> SystemExit; no file created
 def test_missing_store_is_not_created_by_connect(self):           # connect(<tmp>/none.db) -> StoreError; file does not exist
@@ -1047,17 +1077,17 @@ def test_job_run_round_trip(self):                     # start_job -> status run
 - Produces:
   - `config.CONFIG_PATH: pathlib.Path`; `load_config(path: Path = CONFIG_PATH) -> Config`. `Config` is a frozen dataclass with one `dict` per section (`candidate`, `title`, `years`, `location`, `sponsorship`, `eligibility`, `facts`) plus `raw: bytes` (the file bytes, for the ruleset row). Missing keys raise `KeyError` at load, naming the key.
   - `config.phrases(words: list[str], *, case: bool = False) -> re.Pattern`: one alternation of the escaped words with word boundaries; inside a phrase a space matches a space, a hyphen or nothing (so "early career" matches "Early-Career"). `case=True` keeps it case sensitive (state codes).
-  - `text.sentences(text: str) -> list[str]`: splits on `.`, `!`, `?`, `;`, newlines and bullets; keeps "U.S." and "e.g." whole.
+  - `text.sentences(text: str) -> list[str]`: splits on `.`, `!`, `?`, `;`, newlines and bullets; keeps abbreviations whole (`i.e.`, `e.g.`, `U.S.`, `B.S.`, `M.S.`, `Ph.D.`, `etc.`, `Inc.`) and decimals (`3.5`, `$120.5k`).
   - `text.quote_around(text: str, start: int, end: int, limit: int = 260) -> str`: the sentence holding the match, trimmed to whole words (port of `refresh/finalcheck.py:86-90` and `refresh/final_merge.py:19-27`).
-  - `version.RULE_FILES = ("config.toml", "config.py", "text.py", "title.py", "years.py", "location.py", "sponsorship.py", "eligibility.py", "facts.py", "decide.py")` (`config.py` is in because `phrases()` decides how every word list matches); `version.NOT_RULES = ("__init__.py", "version.py", "rebuild.py")`; `version.ruleset_version(rules_dir: Path = RULES_DIR) -> str` = `"r-"` plus the first 12 hex of SHA-256 over, for each name in `sorted(RULE_FILES)`, `name.encode() + b"\0" + file bytes + b"\0"`. A file in `RULE_FILES` that does not exist yet is hashed as empty, so this task can land before the rule modules.
+  - `version.RULE_FILES = ("config.toml", "config.py", "text.py", "title.py", "years.py", "location.py", "sponsorship.py", "eligibility.py", "facts.py", "decide.py")` (`config.py` is in because `phrases()` decides how every word list matches); `version.NOT_RULES = ("__init__.py", "version.py", "rebuild.py")`; `version.ruleset_version(rules_dir: Path = RULES_DIR) -> str` (cached per folder with `functools.lru_cache`, so the crawler does not re-hash per posting) = `"r-"` plus the first 12 hex of SHA-256 over, for each name in `sorted(RULE_FILES)`, `name.encode() + b"\0" + file bytes + b"\0"`. A file in `RULE_FILES` that does not exist yet is hashed as empty, so this task can land before the rule modules.
 - `config.toml` sections and keys (values ported from the cited lines; each later task may adjust only its own section):
 
 | Section | Keys | Source |
 |---|---|---|
 | `[candidate]` | `graduated = "2026-05"`, `max_years_asked = 3` | `refresh/eligibility.py:32`, #9 |
 | `[title]` | `engineering`, `intern`, `off_lane`, `general_application`, `senior`, `manager`, `strong_entry`, `new_grad`, `early_career`, `open_level`, `level_nouns` | `refresh/finalcheck.py:25-40, 104-105`; `refresh/crawl_boards.py:26-28, 59`; `refresh/final_merge.py:18, 60` |
-| `[years]` | `experience_words`, `degree_alternative`, `company_age`, `body_entry` | `refresh/finalcheck.py:41-44`; `refresh/crawl_boards.py:29-32` |
-| `[location]` | `us_marks`, `us_state_codes`, `us_state_names`, `us_cities`, `non_us` | `refresh/finalcheck.py:69-82`; `refresh/crawl_boards.py:34-49` |
+| `[years]` | `experience_words`, `preferred`, `degree_alternative`, `company_age`, `body_entry` | `refresh/finalcheck.py:41-44`; `refresh/crawl_boards.py:29-32` |
+| `[location]` | `us_marks`, `us_state_codes`, `us_state_names`, `us_cities`, `non_us_countries`, `non_us_cities` (names found only outside the US: Tel Aviv, Munich, Toronto, Tbilisi, Bengaluru), `shared_city_names` (Paris, Athens, Lima, London, Dublin, Berlin, Cambridge, Birmingham, Manchester) | `refresh/finalcheck.py:69-82`; `refresh/crawl_boards.py:34-49` |
 | `[sponsorship]` | `topic`, `negation`, `hedge`, `opt`, `citizenship`, `citizenship_negation` | `refresh/finalcheck.py:61-68`; `refresh/crawl_boards.py:127` |
 | `[eligibility]` | `grad_words`, `current_student`, `graduates_welcome`, `soft`, `company_history`, `upper_bound`, `cohort_title`, `start_2027`, `immediate_start` | `refresh/eligibility.py:36-62`; `refresh/finalcheck.py:46-56`; `refresh/final_merge.py:17` |
 | `[facts]` | `stage` (table of value -> phrases), `size_guess_words` (`guess`, `uncertain`, `est.`) | data.js field survey in Task 13 |
@@ -1074,6 +1104,9 @@ def test_phrase_space_matches_hyphen_and_nothing(self):
     p = phrases(["early career"]); p.search("Early-Career Engineer") and p.search("earlycareer") and not p.search("yearly careers")
 def test_case_sensitive_phrases(self):          # phrases(["IN"], case=True) matches "Indianapolis, IN" and not "Remote in Ohio"
 def test_sentences_keep_us_whole(self):         # sentences("Must be a U.S. citizen. We ship.") == ["Must be a U.S. citizen.", "We ship."]
+def test_sentences_keep_abbreviations_and_decimals(self):
+    # the Capital One sentence from Task 11 (with "(i.e. H1B, F-1 OPT, ...)") is one sentence;
+    # "B.S. or M.S. in Computer Science. We ship." -> 2; "Pay is $120.5k. Benefits." -> 2
 def test_version_shape_and_stability(self):     # re.fullmatch(r"r-[0-9a-f]{12}", v); same value twice
 def test_version_changes_with_config(self):     # copy rules dir to temp, append "# x" to config.toml -> different version
 def test_version_changes_with_a_rule_file(self):# same, editing title.py (create it if absent)
@@ -1102,7 +1135,7 @@ def test_every_rules_file_is_classified(self):
   - `tier` (only meaningful for engineering): `senior`, `new_grad`, `early_career`, `swe1`, `swe2`, `open`, or None when the title states no level.
   - Algorithm order, after rewriting "member of technical|product|engineering staff" to `MTS`:
     1. a `manager` word -> `senior` (managers are not his level);
-    2. a `senior` word, unless a `strong_entry` phrase is also present -> `senior`;
+    2. a `senior` word, unless a `strong_entry` phrase is also present -> `senior`; `III`, `IV`, `3`, `4` or `5` right after a level noun (the position in step 5) -> `senior`, with no override;
     3. `new_grad` phrase -> `new_grad`; 4. `early_career` phrase -> `early_career`;
     5. `I`, `1` right after a level noun (`engineer`, `developer`, `swe`, `sde`, `programmer`, `MTS`; optional space, hyphen, comma) or `level 1` -> `swe1`; `I/II` or `1/2` -> `swe1`;
     6. `II`, `2` in the same position, or `level 2` -> `swe2`;
@@ -1129,6 +1162,10 @@ CASES = [  # (title, lane, tier)
   ("Staff Engineer I", "engineering", "senior"),
   ("Staff Software Engineer, Agent Platform", "engineering", "senior"),
   ("Software Engineer III", "engineering", "senior"),
+  ("Software Engineer IV", "engineering", "senior"),
+  ("Software Engineer 3", "engineering", "senior"),
+  ("Full Stack Engineer 4 (Go, AWS)", "engineering", "senior"),
+  ("Backend Engineer 5", "engineering", "senior"),
   ("Machine Learning Engineer Graduate - Lead Ads", "engineering", "new_grad"),
   ("Forward Deployed Engineer Fellow", "engineering", "early_career"),
   ("AI Fellow - Member of Technical Staff", "engineering", "early_career"),
@@ -1165,11 +1202,12 @@ def test_basis_is_never_empty(self): every case has a non-empty basis
 
 **Interfaces:**
 - Consumes: `Config`, `phrases`, `text.sentences`, `text.quote_around`.
-- Produces: `years_asked(body: str, cfg: Config) -> tuple[int | None, str]` (smallest required number of years and its quote, `(None, "")` when none); `entry_wording(body: str, cfg: Config) -> str` (quote of new grad, entry level, early career, "0 to 2 years", "no experience required" wording in the first 6,000 characters, or "").
+- Produces: `years_asked(body: str, cfg: Config) -> tuple[int | None, str]` (the **largest** required number of years and its quote, `(None, "")` when none; the old `min()` in `refresh/finalcheck.py:107-108` let "5+ years ... 1+ years of Go" read as 1: in Radar's corpus 3,094 of 18,576 year-stating bodies have a smallest number of 3 or less and a largest of 5 or more); `entry_wording(body: str, cfg: Config) -> str` (quote of new grad, entry level, early career, "0 to 2 years", "no experience required" wording in the first 6,000 characters, or "").
   - A number counts only when "years" (or "yrs") is followed within the same sentence by an `experience_words` word, as in `refresh/finalcheck.py:41`, and is not excluded:
-    - the sentence has a `degree_alternative` shape: a degree word and "or" before the number ("Bachelor's degree or 4 years"), or "in lieu of", or "equivalent experience" right after it;
+    - the sentence is a preference, not a requirement: it contains a `preferred` phrase (`preferred`, `nice to have`, `a plus`, `bonus`, `ideally`);
+    - the number is an alternative to a degree: "or" comes right before it ("degree or 4 years", "or 4+ years"), or "in lieu of a degree" or "equivalent experience" follows it in the same clause. A degree word elsewhere in the sentence does not exclude it ("BS or MS in Computer Science and 5+ years" still asks 5);
     - a `company_age` word sits within 3 words of the number ("founded", "ago", "in business", "history").
-  - Ranges count their low end ("1-3 years" is 1). Numbers above 30 are ignored.
+  - Ranges count their low end ("1-3 years", "1\u20133 years" with an en dash, "1 to 3 years" are all 1). Numbers above 30 are ignored.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1183,6 +1221,10 @@ CASES = [  # (body, years)
   ("1-3 years of professional experience.", 1),
   ("BS in Computer Science or equivalent practical experience. 2+ years of experience with Python.", 2),
   ("Our customers have trusted us for 10 years.", None),
+  ("5+ years of server-side experience. 1+ years of professional experience with Go.", 5),
+  ("BS or MS in Computer Science and 5+ years of professional experience.", 5),
+  ("1\u20133 years of professional experience.", 1),          # en dash, written as an escape
+  ("2+ years of experience with Python. 5+ years of experience with Rust is a plus.", 2),
   ("", None),
 ]
 def test_cases(self): years_asked(body, cfg)[0] == years for each
@@ -1195,7 +1237,7 @@ def test_entry_wording(self):
 - [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_years -v`.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: years asked ignores degree alternatives and company age (#4)"`
+- [ ] **Step 5: Commit** `git commit -m "Rules: years asked takes the largest requirement; ignores preferences, degree alternatives and company age (#4)"`
 
 ---
 
@@ -1209,10 +1251,14 @@ def test_entry_wording(self):
 **Interfaces:**
 - Produces: `us_status(location: str, country: str | None, cfg: Config) -> str` returning `yes`, `no` or `unknown`. Order:
   1. a structured `country` wins: US spellings (`US`, `USA`, `United States`, `United States of America`) -> `yes`; any other non-empty value -> `no`;
-  2. split `location` on `|`, `;` and " or "; if any part names the US (a `us_marks` word, an upper-case `us_state_codes` code after a comma or at the end, a `us_state_names` name, or a `us_cities` city) -> `yes`;
-  3. else if any part matches the word-bounded `non_us` list -> `no`;
-  4. else -> `unknown` (this includes a bare "Remote" and an empty location).
-  US checks run before the non-US list on purpose: "Paris, TX" and "Albuquerque, New Mexico" contain non-US words.
+  2. split `location` on `|`, `;` and " or "; read each part alone:
+     a. find US state names first and set them aside, so "New Mexico" never reads as Mexico;
+     b. a `non_us_countries` word or a `non_us_cities` name in what is left -> `no` for this part, even next to a two-letter code ("Toronto, CA", "Munich, DE", "Tel Aviv - IL", "Madrid, MD, Spain", "Tbilisi, Georgia");
+     c. else a `us_marks` word, an upper-case `us_state_codes` code after a comma or at the end, a state name from step a, or a `us_cities` city -> `yes` for this part;
+     d. else a `shared_city_names` name alone ("Paris", "London") -> `no`;
+     e. else `unknown` for this part;
+  3. any part `yes` -> `yes`; else any part `no` -> `no`; else `unknown` (a bare "Remote" and an empty location).
+  A shared city name gives way to a US state code ("Paris, TX", "Athens, GA", "Lima, OH"); a non-US country or a non-US-only city beats one.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1226,6 +1272,9 @@ CASES = [  # (location, country, expected)
   ("Remote - EMEA", None, "no"), ("Bengaluru, India", None, "no"),
   ("Remote", None, "unknown"), ("", None, "unknown"),
   ("Remote", "United States", "yes"), ("Austin, TX", "Canada", "no"),
+  ("Tel Aviv - IL", None, "no"), ("Madrid, MD, Spain", None, "no"), ("Munich, DE", None, "no"),
+  ("Toronto, CA", None, "no"), ("Tbilisi, Georgia", None, "no"), ("Atlanta, Georgia", None, "yes"),
+  ("Paris", None, "no"),
 ]
 def test_cases(self): us_status(loc, country, cfg) == expected for each
 def test_lowercase_state_words_are_not_codes(self): us_status("Remote in Berlin", None, cfg) == "no"
@@ -1248,7 +1297,8 @@ def test_lowercase_state_words_are_not_codes(self): us_status("Remote in Berlin"
 **Interfaces:**
 - Consumes: `text.sentences`, `phrases`, the `[location]` `non_us` list (for foreign-country sponsorship).
 - Produces: `sponsorship_stance(body: str, cfg: Config) -> tuple[str, str]` returning (`yes` | `no` | `opt_only` | `unclear` | `silent`, quote); `citizenship_required(body: str, cfg: Config) -> tuple[bool, str]`.
-  - Each sentence that mentions a `topic` word is read on its own: `negation` present -> `no`, but `opt_only` when the same sentence also names OPT, STEM OPT or CPT positively; a `hedge` word -> `unclear`; it names a non-US country -> `unclear`; otherwise -> `yes`.
+  - `topic` is exactly: `sponsor`, `sponsors`, `sponsored`, `sponsoring`, `sponsorship`, `visa`, `visas`, `H-1B`, `H1B`. Not bare `immigration` and not `work authorization`: 472 Radar postings carry an EEO line ("without regard to ... citizenship ... immigration status") that would otherwise read as `no`, hide the posting and let #6 no-go the company.
+  - Each sentence that mentions a `topic` word is split into clauses at ", but", " but ", "; however" and "however,"; each clause is read on its own: a `negation` -> `no`; a clause that names OPT, STEM OPT or CPT with a support word (`support`, `accept`, `welcome`, `open to`) and no negation -> OPT-positive; a `hedge` word -> `unclear`; a non-US country (from `[location]`) -> `unclear`; otherwise -> `yes`. A sentence with a `no` clause and an OPT-positive clause is `opt_only`; OPT named inside a negated clause (Capital One's "will not sponsor ... (i.e. H1B, F-1 OPT, F-1 STEM OPT ...)") stays `no`.
   - Across sentences: any `opt_only` -> `opt_only`; `no` with no `yes` -> `no`; `yes` with no `no` -> `yes`; both, or any `unclear` with no clear answer -> `unclear`; no topic sentence -> `silent`. The quote is the deciding sentence (for `unclear`, the first unclear or conflicting one).
   - Citizenship: a `citizenship` phrase in a sentence that has no `citizenship_negation` ("No security clearance required." is not a requirement).
 
@@ -1268,6 +1318,9 @@ STANCE = [  # (body, stance)
   ("Visa sponsorship is available for this role.", "yes"),
   ("Retell AI is open to sponsoring work authorization for qualified candidates, including H-1B, TN, L-1.", "yes"),
   ("We support candidates on OPT and STEM OPT, but we are unable to sponsor H-1B visas.", "opt_only"),
+  ("At this time, Capital One will not sponsor a new applicant for employment authorization, or offer any immigration related support for this position (i.e. H1B, F-1 OPT, F-1 STEM OPT, F-1 CPT, J-1, TN, E-2, E-3, L-1 and O-1, or any EADs or other forms of work authorization that require immigration support from an employer).", "no"),
+  ("All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, disability, protected veteran status, citizenship, or immigration status.", "silent"),
+  ("Must be authorized to work in the U.S.", "silent"),
   ("We build voice agents for hospitals.", "silent"),
   ("", "silent"),
 ]
@@ -1278,8 +1331,10 @@ CITIZEN = [  # (body, required)
   ("This role requires access to ITAR-controlled data; applicants must be U.S. persons.", True),
   ("No security clearance required.", False),
   ("We welcome applicants regardless of citizenship.", False),
+  ("All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, disability, protected veteran status, citizenship, or immigration status.", False),
 ]
 def test_stance(self):     stance and a non-empty quote for every non-silent case; quote == "" for silent
+def test_work_authorization_alone_is_never_yes(self): sponsorship_stance("Must be authorized to work in the U.S.", cfg)[0] != "yes"
 def test_citizenship(self): flag per case; quote non-empty when True
 ```
 

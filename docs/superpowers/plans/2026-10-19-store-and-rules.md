@@ -1178,7 +1178,7 @@ def test_citizenship(self): flag per case; quote non-empty when True
   - Port `refresh/eligibility.py:63-91` in the same order: (1) a graduation sentence with dates decides (skip company history; `graduates_welcome` or `soft` wording -> ok; an `upper_bound` "by", "no later than" makes the window open below; `graduated` month inside the window -> ok, else `grad_window`); (2) `graduates_welcome` wording -> ok; (3) a `current_student` requirement -> `current_student`; (4) a `cohort_title` -> `cohort_title`; (5) ok.
   - `GRAD_MONTH` comes from `[candidate].graduated`, never a constant in code.
   - `cohort_title` names graduates, not start dates: "2027 graduate(s)", "class of 2027", "2027 university or college or campus grad or hire", "(college grad 2027)". "New Grad 2027" and "New Grad (2027)" are a 2027 start: ok, `starts_2027` True (#9 ruling; open question 3).
-  - `starts_2027`: a `start_2027` phrase or a 2027 cohort in the title, and no `immediate_start` phrase (`refresh/finalcheck.py:48-56`, `refresh/final_merge.py:17, 62`).
+  - `starts_2027`: start wording (`start_2027` phrases such as "2027 start", "starts in July 2027", "summer 2027 start", "join our team in 2027") or a title that names 2027 without naming graduates ("New Grad 2027", "New Grad (2027)"), and no `immediate_start` phrase (`refresh/finalcheck.py:48-56`, `refresh/final_merge.py:17, 62`). Graduation wording ("class of 2027", "graduate in 2027") is not a start date.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1190,7 +1190,7 @@ CASES = [  # (title, body, status, reason, start_2027)
   ("Software Engineer, New Grad", "Currently pursuing a Bachelor's degree or higher or a recent graduate studying Computer Science, Mathematics, or a related technical field.", "ok", None, False),
   ("Software Engineer, New Grad", "Bachelor's degree in Computer Science, earned or expected by Summer 2027.", "ok", None, False),
   ("Software Engineer, New Grad", "Graduated between May 2025 and August 2026 with a degree in Computer Science.", "ok", None, False),
-  ("2027 University Graduate - Software Engineer", "", "excluded", "cohort_title", True),
+  ("2027 University Graduate - Software Engineer", "", "excluded", "cohort_title", False),
   ("Software Engineer, New Grad (2027)", "", "ok", None, True),
   ("Software Engineer, New Grad", "This role starts in July 2027.", "ok", None, True),
   ("Software Engineer", "Our founders graduated from Y Combinator's Winter 2024 batch.", "ok", None, False),

@@ -15,7 +15,7 @@
 - Store path: `OUTREACH_DB`, default `~/Library/Application Support/outreach/outreach.db`. Opening the default path (by any spelling) outside the live checkout is refused through `live_checkout.require_live`. No bypass flag, no environment switch.
 - Only `python -m outreach.install` creates a store or applies migrations. Opening never migrates. Migrations are ordered files `NNNN_name.sql`, forward only, one transaction each.
 - Every table is `STRICT`. Foreign keys on. `journal_mode=WAL`. Timestamps are canonical UTC text `YYYY-MM-DDTHH:MM:SSZ`; dates are `YYYY-MM-DD`. Both are enforced by CHECK constraints.
-- `event`, `import_record`, `linkedin_log` and `evidence` are append-only (triggers refuse UPDATE and DELETE). `posting` rows are never deleted.
+- `event`, `import_record`, `linkedin_log`, `inbound_message` and `evidence` are append-only (triggers refuse UPDATE and DELETE). `posting` rows are never deleted. `message` changes state only along the legal transitions (trigger), and `sent` is final.
 - Rules config lives in `outreach/rules/config.toml`. Values pinned by #9 and the design: `max_years_asked = 3`; `graduated = "2026-05"`; a posting requiring graduation in 2027 or current-student status is ineligible; a 2027 start date is not.
 - Read results are exactly `"ok"`, `"empty"`, `"error"` (#3). An error never closes anything.
 - New code is standard library only in this issue; `pyproject.toml` declares `dependencies = []` and every future dependency must be an exact `==` pin.
@@ -123,11 +123,11 @@ python-preference = "only-system"
 | Rule | From | Fix applied |
 |---|---|---|
 | Lane (engineering, intern, off-lane, general application) | `refresh/finalcheck.py:25-34, 104-105`; `refresh/crawl_boards.py:56-61` | one vocabulary in config; MTS rewrite happens before any senior check |
-| Senior words | `refresh/finalcheck.py:26`; `refresh/crawl_boards.py:59` | no "staff engineer i" exemption; "fellow" removed; a strong entry marker overrides seniority words (not manager words) |
+| Senior words | `refresh/finalcheck.py:26`; `refresh/crawl_boards.py:59` | no "staff engineer i" exemption; "fellow" removed; III, IV, 3, 4, 5 after a level noun are senior; a strong entry marker overrides seniority words (not manager words or level numerals) |
 | Level tier | `refresh/finalcheck.py:36-44, 91-100`; `refresh/final_merge.py:16, 28-37` | numerals only right after engineer, developer, SWE, SDE, programmer or MTS; MTS and FDE titles with no level signal become tier `open` (`refresh/crawl_boards.py:28`) |
-| Years asked | `refresh/finalcheck.py:41` | ignore "degree or N years" alternatives and company-age phrases |
+| Years asked | `refresh/finalcheck.py:41, 107-108` | the largest requirement, not the smallest; ignore preferences, "degree or N years" alternatives and company-age phrases |
 | US location | `refresh/finalcheck.py:69-82`; `refresh/crawl_boards.py:34-49` | structured country first, then US state codes and names, then a word-bounded non-US list |
-| Sponsorship stance | `refresh/finalcheck.py:64-68` | sentence level, negation first, `opt_only`, foreign-country sponsorship is `unclear` |
+| Sponsorship stance | `refresh/finalcheck.py:64-68` | exact topic words (no bare "immigration"), clause level, negation first, `opt_only` only for a positive OPT clause, foreign-country sponsorship is `unclear` |
 | Citizenship or clearance | `refresh/finalcheck.py:61-63`; `refresh/crawl_boards.py:127` | one pattern; "no clearance required" is not a requirement |
 | Graduation eligibility | `refresh/eligibility.py:32-91`; `refresh/finalcheck.py:46-47, 110-119` | one copy; `GRAD_MONTH` from config; cohort-title list per the #9 ruling |
 | 2027 start | `refresh/finalcheck.py:48-56`; `refresh/final_merge.py:17` | flag only, never ineligible |
@@ -925,7 +925,7 @@ def test_every_date_column_rejects_timestamps(self):
     # every column ending in "_on", plus daily_list_entry.list_date and send_day.day: "2026-10-19T00:00:00Z" and "2026-13-01" -> IntegrityError
 def test_foreign_keys_are_enforced(self):      # posting with company_id 999 -> IntegrityError
 def test_events_are_append_only(self):          # UPDATE event / DELETE FROM event -> IntegrityError "append-only"
-def test_evidence_import_record_linkedin_log_are_append_only(self):
+def test_evidence_import_record_linkedin_log_inbound_are_append_only(self):
 def test_postings_are_never_deleted(self):      # DELETE FROM posting -> IntegrityError "never deleted"
 def test_company_close_needs_a_reason(self):    # status 'closed' with close_reason NULL -> IntegrityError
 def test_board_streaks_follow_the_read_contract(self):
@@ -994,7 +994,7 @@ def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserti
   - `db_path() -> str`: `OUTREACH_DB` if set, else `DEFAULT_PATH`; always `os.path.realpath(os.path.abspath(os.path.expanduser(...)))`, so a relative path is resolved against the working folder before any URI is built.
   - `is_live_path(path: str) -> bool`: true when the case-folded realpaths are equal (APFS is case-insensitive, so `~/library/APPLICATION SUPPORT/...` is the same file), or when both files exist and `os.path.samefile` is true.
   - `guard(path: str) -> None`: when `is_live_path(path)`, calls `live_checkout.require_live("opening the live store")`.
-  - `connect(path: str | None = None) -> sqlite3.Connection`: guard; open with URI `Path(path).as_uri() + "?mode=rw"` so a missing file raises `StoreError("no store at ...; run: uv run python -m outreach.install")` instead of creating one; `isolation_level=None`, `row_factory=sqlite3.Row`; pragmas `foreign_keys=ON`, `synchronous=FULL`, `busy_timeout=5000`, `temp_store=MEMORY`, `journal_size_limit=67108864`; raises `StoreError` when `user_version` is not `latest_version()` (older: "run install"; newer: "this code is older than the store"). Never migrates.
+  - `connect(path: str | None = None) -> sqlite3.Connection`: normalise `path` like `db_path()` (expand `~`, make absolute, resolve links); guard; open with URI `Path(path).as_uri() + "?mode=rw"` so a missing file raises `StoreError("no store at ...; run: uv run python -m outreach.install")` instead of creating one; `isolation_level=None`, `row_factory=sqlite3.Row`; pragmas `foreign_keys=ON`, `synchronous=FULL`, `busy_timeout=5000`, `temp_store=MEMORY`, `journal_size_limit=67108864`; raises `StoreError` when `user_version` is not `latest_version()` (older: "run install"; newer: "this code is older than the store"). Never migrates.
   - `transaction(conn)`: context manager, `BEGIN IMMEDIATE`, `COMMIT`, `ROLLBACK` on any exception.
   - `install.install(path: str) -> int`: guard; create the parent folder; on a new file set `PRAGMA auto_vacuum=INCREMENTAL` then `PRAGMA journal_mode=WAL` before any table; `migrate`; return the version. (Task 15 adds the ruleset registration.)
   - `install.main(argv: list[str] | None = None) -> int`: `install(db_path())`, prints `"<path>: store at version N"` and the applied migrations, returns 0.

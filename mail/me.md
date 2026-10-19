@@ -15,8 +15,13 @@ Sources: [site] https://www.devanshuchicholikar.com, [resume] https://www.devans
 - B.Tech, Information and Communication Technology, Dhirubhai Ambani Institute of ICT, Gujarat, India,
   2018 to 2022. [resume]
 - Based in Boston, MA; open to relocation [resume]; San Francisco preferred (Devanshu's earlier note in this file).
-- On F-1 OPT: authorized to work in the US now (Devanshu's earlier note in this file). Say this plainly when the
-  role or person makes it relevant; never claim he needs no sponsorship ever.
+- Work authorization: F-1 post-completion OPT, card valid Sep 18 2026 to Jul 8 2027; eligible for the 24-month
+  STEM OPT extension after that, through 2029 (Devanshu, 2026-10-19, from his EAD card). The STEM extension needs
+  an employer enrolled in E-Verify. Never claim he needs no sponsorship ever.
+- Can start immediately (Devanshu, 2026-10-19).
+- Work-authorization line, for recruiters and managers: "I'm on F-1 OPT, authorized to work now, and eligible for
+  STEM OPT through 2029. I can start right away."
+- Every number on this page was confirmed current by Devanshu on 2026-10-19.
 - Open to Software Engineer, AI Engineer and Forward Deployed Engineer roles. [site] [gh profile]
 
 ## Experience
@@ -107,13 +112,8 @@ Devanshu Chicholikar
 Open questions from #8. Answer one by moving the fact above with "(Devanshu, <date>)" as its source and deleting
 the ASK line.
 
-- ASK: work authorization line for recruiters. Public pages say nothing past F-1 OPT. Is it STEM OPT, and through
-  when? Until answered, drafts say only "on F-1 OPT, authorized to work in the US now" and never `STEM OPT`.
 - ASK: sponsorship and H-1B, if at all. Until answered, drafts never mention `H-1B` and never say `no sponsorship`.
-- ASK: earliest start date. Until answered, drafts name no start date.
 - ASK: a Saar user or install count, if you want one quoted. No public source states one; until answered, drafts
   give no `installs` number.
 - ASK: a public Overhear demo link. The hosted app is behind a login; until answered, the second link is the repo.
 - ASK: phone number for the signature (optional). Until answered, the signature is the name only.
-- ASK: review this file once (#10). Every number above comes from your own public pages; confirm each is current,
-  the Jaksh and Pitney Bowes numbers above all.

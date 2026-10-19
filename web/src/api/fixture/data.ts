@@ -97,7 +97,7 @@ export const ids = {
     lena: 2020, tom: 2021,
   },
 } as const;
-const messageOf = (touchId: Id): Id => touchId + 3000;
+export const messageOf = (touchId: Id): Id => touchId + 3000;
 
 /* ------------------------------------------------------------------ companies */
 
@@ -383,7 +383,7 @@ function buildToday(c: Ctx): TodayView {
 
 /* ------------------------------------------------------------------ Outbox (outbox.html) */
 
-const GROUP_INDEX: Record<OutboxGroup, number> = { replied: 0, review: 1, approved: 2, sending: 3, checking: 4, sent: 5, paused: 6, closed: 7 };
+export const GROUP_INDEX: Record<OutboxGroup, number> = { replied: 0, review: 1, approved: 2, sending: 3, checking: 4, sent: 5, paused: 6, closed: 7 };
 const ME = 'Devanshu Chicholikar';
 const SIGN = `Thanks,\n${ME}`;
 const LINKS = 'https://www.devanshuchicholikar.com\nhttps://opencodeintel.com';
@@ -702,9 +702,14 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
     }
   });
 
+  // The Sent group reads newest first: sort its rows by `at` before ranking, each row keeping the slot it was declared in.
+  const sentNewestFirst = specs.filter((s) => s.group === 'sent').sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  let nextSent = 0;
+  const ordered = specs.map((s) => (s.group === 'sent' ? (sentNewestFirst[nextSent++] ?? s) : s));
+
   const items: OutboxItem[] = [];
   const details: Record<Id, OutboxDetail> = {};
-  specs.forEach((s, rank) => {
+  ordered.forEach((s, rank) => {
     const built = buildItem(c, s, rank);
     items.push(built.item);
     details[s.touch] = built.detail;
@@ -730,7 +735,7 @@ function sharedParagraphs(a: string, b: string): DraftCompare['matches'] {
   return matches;
 }
 
-function countGroups(items: OutboxItem[]): OutboxCounts {
+export function countGroups(items: OutboxItem[]): OutboxCounts {
   const counts: OutboxCounts = { replied: 0, review: 0, approved: 0, sending: 0, checking: 0, sent: 0, paused: 0, closed: 0 };
   items.forEach((i) => { counts[i.group] += 1; });
   return counts;
@@ -1033,7 +1038,7 @@ function browserbaseView(c: Ctx, v: Views): CompanyView {
 }
 
 const NO_GO_LINE: Partial<Record<NoGoReason, string>> = { no_sponsorship: 'No-go: no sponsorship', citizenship: 'No-go: citizenship or clearance', over_300: 'No-go: over 300 people' };
-const STEP_LINE: Record<LinkedInPerson['tab'], string> = { to_reach: 'Not started', waiting: 'Waiting', replied: 'Replied' };
+export const STEP_LINE: Record<LinkedInPerson['tab'], string> = { to_reach: 'Not started', waiting: 'Waiting', replied: 'Replied' };
 const GROUP_LINE: Record<OutboxGroup, { text: string; tone: CompanyPerson['tone'] }> = {
   replied: { text: 'Replied', tone: 'ok' }, review: { text: 'Draft to review', tone: 'idle' }, approved: { text: 'Approved', tone: 'info' }, sending: { text: 'Sending', tone: 'info' },
   checking: { text: 'Checking', tone: 'info' }, sent: { text: 'Sent', tone: 'idle' }, paused: { text: 'Paused', tone: 'idle' }, closed: { text: 'Closed', tone: 'idle' },
@@ -1122,7 +1127,7 @@ function buildSearch(c: Ctx, v: Views): SearchIndex {
   return { asOf: AS_OF, companies, people };
 }
 
-function computeShell(db: Pick<FixtureDb, 'today' | 'outbox' | 'linkedin' | 'needsYou' | 'noGo' | 'done'> & { jobs: JobRunSummary[] }): ShellSummary {
+export function computeShell(db: Pick<FixtureDb, 'today' | 'outbox' | 'linkedin' | 'needsYou' | 'noGo' | 'done'> & { jobs: JobRunSummary[] }): ShellSummary {
   const s = db.outbox.sending;
   return {
     asOf: db.today.asOf, pickedToday: db.today.picked, capacityToday: db.today.capacity, unhandledReplies: db.outbox.counts.replied, draftsToReview: db.outbox.counts.review,

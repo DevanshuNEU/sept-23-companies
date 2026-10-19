@@ -79,7 +79,8 @@ emails; the checker blocks near-copies.
 | founder | one line on why their product, then the evidence | one concrete next step tied to what they build | leave out unless relevant |
 | recruiter | the exact role title and req ID | a screen at two concrete times he gives you (ask him) | first or second line |
 
-The work-authorization line is me.md's: on F-1 OPT, authorized to work in the US now.
+The work-authorization line is me.md's, word for word: on F-1 OPT, authorized to work now, eligible for STEM OPT
+through 2029, can start right away.
 
 **Links.** Exactly 2 in a first email, as bare URLs on their own lines: https://www.devanshuchicholikar.com
 first, then the project link from me.md. The role is named by title, not linked. Gmail turns any written domain

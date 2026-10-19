@@ -124,7 +124,7 @@
   ];
   var companies = [
     ["Browserbase", "Held: reply from Priya Natarajan"], ["Mintlify", "Emailing, day 2 of 3"], ["Resend", "Picked today"],
-    ["Trigger.dev", "Picked today"], ["Graphite", "Proposed"], ["Inngest", "Backlog"], ["Retell AI", "Done: interviewed"],
+    ["Trigger.dev", "Picked today"], ["Graphite", "Emailing, day 2 of 3"], ["Inngest", "Proposed"], ["Retell AI", "Done: interviewed"],
     ["Distyl AI", "Done: interviewed"], ["Crusoe", "Done: interviewing"], ["Halberd Systems", "No-go: no sponsorship"]
   ];
   var people = [
@@ -193,6 +193,12 @@
   function openKeys() { kov.hidden = false; kov.querySelector("[data-close]").focus(); }
   kov.addEventListener("mousedown", function (e) { if (e.target === kov || e.target.closest("[data-close]")) closeAll(); });
   document.querySelectorAll("[data-keys]").forEach(function (b) { b.addEventListener("click", openKeys); });
+
+  /* review helper: ?open=palette or ?open=keys opens that overlay on load */
+  var want = /open=(palette|keys)/.exec(location.search);
+  if (want) (want[1] === "palette" ? openCmd : openKeys)();
+  var pane = /pane=([\w-]+)/.exec(location.search);
+  if (pane) activate(document.querySelector('[data-pane="' + pane[1] + '"]'));
 
   /* ---------- global keys ---------- */
   var chord = false, chordT = 0;

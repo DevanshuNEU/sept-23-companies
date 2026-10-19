@@ -540,7 +540,7 @@ details.passed ul { display: grid; gap: 4px; padding: 0 12px 12px 38px; font-siz
 .runs { display: inline-flex; gap: 3px; vertical-align: middle; }
 .runs i { width: 10px; height: 10px; border-radius: 2px; background: var(--ok-dot); }
 .runs i.err { background: var(--bad-dot); }
-.runs i.empty { background: var(--warn-dot); }
+.runs i.nil { background: var(--warn-dot); }
 
 /* ======================= view: Company ======================= */
 .co-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; align-items: start; margin-bottom: 16px; }

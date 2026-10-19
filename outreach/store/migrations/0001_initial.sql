@@ -1,0 +1,527 @@
+CREATE TABLE schema_migration (
+  version    INTEGER PRIMARY KEY,
+  name       TEXT NOT NULL,
+  applied_at TEXT NOT NULL CHECK (applied_at IS strftime('%Y-%m-%dT%H:%M:%SZ', applied_at))
+) STRICT;
+
+CREATE TABLE company (
+  company_id    INTEGER PRIMARY KEY,
+  name          TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  status        TEXT NOT NULL DEFAULT 'candidate'
+                CHECK (status IN ('candidate','backlog','working','closed','removed')),
+  close_reason  TEXT CHECK (close_reason IN ('referral','interview','no_sponsorship','no_referrals',
+                                             'already_hired','not_now','other')),
+  remove_reason TEXT,
+  status_note   TEXT NOT NULL DEFAULT '',
+  status_at     TEXT NOT NULL CHECK (status_at IS strftime('%Y-%m-%dT%H:%M:%SZ', status_at)),
+  -- Paused by Devanshu and held by a reply are separate, so a reply never overwrites his pause.
+  paused_at     TEXT CHECK (paused_at IS strftime('%Y-%m-%dT%H:%M:%SZ', paused_at)),
+  pause_note    TEXT NOT NULL DEFAULT '',
+  held_by_touch INTEGER REFERENCES touch(touch_id),
+  held_at       TEXT CHECK (held_at IS strftime('%Y-%m-%dT%H:%M:%SZ', held_at)),
+  -- A duplicate merged into another company; every read follows it.
+  merged_into   INTEGER REFERENCES company(company_id),
+  created_at    TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at)),
+  revision      INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  CHECK ((status = 'closed') = (close_reason IS NOT NULL)),
+  CHECK ((status = 'removed') = (remove_reason IS NOT NULL AND length(trim(remove_reason)) > 0)),
+  CHECK (paused_at IS NULL OR status = 'working'),
+  CHECK ((held_by_touch IS NULL) = (held_at IS NULL)),
+  CHECK (merged_into IS NULL OR (merged_into <> company_id AND status = 'removed'))
+) STRICT;
+CREATE INDEX company_merged ON company(merged_into) WHERE merged_into IS NOT NULL;
+
+CREATE TABLE company_alias (
+  alias_key  TEXT PRIMARY KEY CHECK (length(alias_key) > 0 AND alias_key = lower(alias_key)),
+  company_id INTEGER NOT NULL REFERENCES company(company_id),
+  alias      TEXT NOT NULL,
+  source     TEXT NOT NULL CHECK (source IN ('name','hand','import','crawl','merge')),
+  created_at TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at))
+) STRICT;
+CREATE INDEX company_alias_company ON company_alias(company_id);
+
+CREATE TABLE board (
+  board_id     INTEGER PRIMARY KEY,
+  company_id   INTEGER NOT NULL REFERENCES company(company_id),
+  ats          TEXT NOT NULL CHECK (ats IN ('ashby','greenhouse','lever','workable','smartrecruiters',
+                                            'rippling','gem','recruitee','bamboohr','dover','breezy',
+                                            'workday','eightfold','oracle_orc','amazon','apple','google')),
+  token        TEXT NOT NULL CHECK (length(token) > 0),
+  active       INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+  last_read    TEXT CHECK (last_read IN ('ok','empty','error')),
+  last_read_at TEXT CHECK (last_read_at IS strftime('%Y-%m-%dT%H:%M:%SZ', last_read_at)),
+  empty_streak INTEGER NOT NULL DEFAULT 0 CHECK (empty_streak >= 0),
+  error_streak INTEGER NOT NULL DEFAULT 0 CHECK (error_streak >= 0),
+  streak_since TEXT CHECK (streak_since IS strftime('%Y-%m-%dT%H:%M:%SZ', streak_since)),
+  last_error   TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at)),
+  UNIQUE (ats, token),
+  CHECK ((last_read IS NULL) = (last_read_at IS NULL)),
+  CHECK ((last_read IS NULL) = (streak_since IS NULL)),
+  CHECK (last_read IS NOT NULL OR (empty_streak = 0 AND error_streak = 0)),
+  CHECK (last_read IS NOT 'ok'    OR (empty_streak = 0 AND error_streak = 0)),
+  CHECK (last_read IS NOT 'empty' OR (empty_streak >= 1 AND error_streak = 0)),
+  CHECK (last_read IS NOT 'error' OR error_streak >= 1)
+) STRICT;
+CREATE INDEX board_company ON board(company_id);
+
+-- Recent reads per board, for the Needs-you evidence (#16, #12 view 4). #21 keeps the last 10 per board.
+CREATE TABLE board_read (
+  board_id    INTEGER NOT NULL REFERENCES board(board_id),
+  run_id      INTEGER NOT NULL REFERENCES job_run(run_id),
+  at          TEXT NOT NULL CHECK (at IS strftime('%Y-%m-%dT%H:%M:%SZ', at)),
+  result      TEXT NOT NULL CHECK (result IN ('ok','empty','error')),
+  http_status INTEGER,
+  error       TEXT NOT NULL DEFAULT '',
+  postings    INTEGER NOT NULL DEFAULT 0 CHECK (postings >= 0),
+  PRIMARY KEY (board_id, run_id),
+  CHECK (result = 'error' OR error = '')
+) STRICT;
+
+CREATE TABLE posting (
+  posting_id    INTEGER PRIMARY KEY,
+  company_id    INTEGER NOT NULL REFERENCES company(company_id),
+  board_id      INTEGER REFERENCES board(board_id),
+  source_key    TEXT NOT NULL UNIQUE,
+  title         TEXT NOT NULL,
+  location      TEXT NOT NULL DEFAULT '',
+  country       TEXT,
+  url           TEXT NOT NULL DEFAULT '',
+  posted_on     TEXT CHECK (posted_on IS date(posted_on)),
+  pay           TEXT NOT NULL DEFAULT '',
+  body          TEXT NOT NULL DEFAULT '',
+  first_seen_at TEXT NOT NULL CHECK (first_seen_at IS strftime('%Y-%m-%dT%H:%M:%SZ', first_seen_at)),
+  last_seen_at  TEXT NOT NULL CHECK (last_seen_at IS strftime('%Y-%m-%dT%H:%M:%SZ', last_seen_at)),
+  closed_at     TEXT CHECK (closed_at IS strftime('%Y-%m-%dT%H:%M:%SZ', closed_at)),
+  close_reason  TEXT CHECK (close_reason IN ('gone_from_board','board_empty_twice','page_closed',
+                                             'hand','imported_closed')),
+  CHECK ((closed_at IS NULL) = (close_reason IS NULL)),
+  CHECK (last_seen_at >= first_seen_at),
+  CHECK (board_id IS NOT NULL OR source_key LIKE 'url:%')
+) STRICT;
+CREATE INDEX posting_company_open ON posting(company_id, closed_at);
+CREATE INDEX posting_board ON posting(board_id);
+
+CREATE TABLE ruleset (
+  ruleset_version TEXT PRIMARY KEY CHECK (ruleset_version GLOB 'r-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+  config_toml     TEXT NOT NULL,
+  created_at      TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at)),
+  is_current      INTEGER NOT NULL DEFAULT 0 CHECK (is_current IN (0,1))
+) STRICT;
+-- Change the current ruleset in two statements (clear, then set); one UPDATE trips this index going backwards.
+CREATE UNIQUE INDEX ruleset_one_current ON ruleset(is_current) WHERE is_current = 1;
+
+CREATE TABLE decision (
+  posting_id         INTEGER NOT NULL REFERENCES posting(posting_id),
+  ruleset_version    TEXT NOT NULL REFERENCES ruleset(ruleset_version),
+  decided_at         TEXT NOT NULL CHECK (decided_at IS strftime('%Y-%m-%dT%H:%M:%SZ', decided_at)),
+  lane               TEXT NOT NULL CHECK (lane IN ('engineering','intern','off_lane','not_engineering',
+                                                   'general_application')),
+  level_tier         TEXT NOT NULL CHECK (level_tier IN ('new_grad','early_career','swe1','swe2','open',
+                                                         'not_stated','senior')),
+  level_ok           INTEGER NOT NULL CHECK (level_ok IN (0,1)),
+  level_basis        TEXT NOT NULL CHECK (length(level_basis) > 0),
+  years_asked        INTEGER CHECK (years_asked BETWEEN 0 AND 30),
+  years_quote        TEXT NOT NULL DEFAULT '',
+  us                 TEXT NOT NULL CHECK (us IN ('yes','no','unknown')),
+  sponsorship        TEXT NOT NULL CHECK (sponsorship IN ('yes','no','opt_only','unclear','silent')),
+  sponsorship_quote  TEXT NOT NULL DEFAULT '',
+  citizenship        INTEGER NOT NULL CHECK (citizenship IN (0,1)),
+  citizenship_quote  TEXT NOT NULL DEFAULT '',
+  eligibility        TEXT NOT NULL CHECK (eligibility IN ('ok','excluded')),
+  eligibility_reason TEXT CHECK (eligibility_reason IN ('grad_window','current_student','cohort_title')),
+  eligibility_quote  TEXT NOT NULL DEFAULT '',
+  start_2027         INTEGER NOT NULL CHECK (start_2027 IN (0,1)),
+  PRIMARY KEY (posting_id, ruleset_version),
+  CHECK ((eligibility = 'excluded') = (eligibility_reason IS NOT NULL)),
+  CHECK (eligibility = 'ok' OR length(eligibility_quote) > 0),
+  CHECK ((sponsorship = 'silent') = (sponsorship_quote = '')),
+  CHECK (citizenship = 0 OR length(citizenship_quote) > 0),
+  CHECK ((years_asked IS NULL) = (years_quote = '')),
+  CHECK (level_ok = 0 OR (lane = 'engineering' AND level_tier NOT IN ('not_stated','senior')))
+) STRICT;
+CREATE INDEX decision_version ON decision(ruleset_version);
+
+CREATE TABLE evidence (
+  evidence_id  INTEGER PRIMARY KEY,
+  company_id   INTEGER NOT NULL REFERENCES company(company_id),
+  fact         TEXT NOT NULL CHECK (fact IN ('size','stage','sponsorship','domain','hq','everify')),
+  value        TEXT NOT NULL CHECK (length(value) > 0),
+  num_low      INTEGER CHECK (num_low >= 0),
+  num_high     INTEGER CHECK (num_high >= num_low),
+  confidence   TEXT NOT NULL CHECK (confidence IN ('confirmed','estimate','guess')),
+  locked       INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0,1)),
+  source_kind  TEXT NOT NULL CHECK (source_kind IN ('hand','posting','old_dashboard','yc','builtin',
+                                                    'linkedin','website','formd','lca','everify','other')),
+  source_ref   TEXT NOT NULL DEFAULT '',
+  quote        TEXT NOT NULL DEFAULT '',
+  posting_id   INTEGER REFERENCES posting(posting_id),
+  observed_on  TEXT CHECK (observed_on IS date(observed_on)),
+  recorded_at  TEXT NOT NULL CHECK (recorded_at IS strftime('%Y-%m-%dT%H:%M:%SZ', recorded_at)),
+  CHECK (locked = 0 OR source_kind = 'hand'),
+  CHECK (fact <> 'size' OR num_low IS NOT NULL),
+  CHECK (fact = 'size' OR (num_low IS NULL AND num_high IS NULL)),
+  CHECK (fact <> 'sponsorship' OR value IN ('yes','no','opt_only','unclear')),
+  CHECK (fact <> 'stage' OR value IN ('pre_seed','seed','series_a','series_b','series_c','series_d',
+                                      'series_e_plus','late_private','public','yc','early')),
+  CHECK (fact <> 'domain' OR (value = lower(value) AND value NOT LIKE '%@%' AND value LIKE '%_._%')),
+  CHECK (fact <> 'everify' OR (value IN ('enrolled','not_enrolled') AND observed_on IS NOT NULL))
+) STRICT;
+CREATE INDEX evidence_company ON evidence(company_id, fact);
+-- Automation re-reading the same source adds nothing; hand rows are never de-duplicated (Review Focus 3).
+-- Writers use INSERT ... ON CONFLICT DO NOTHING, never INSERT OR IGNORE, which also swallows CHECK failures.
+CREATE UNIQUE INDEX evidence_once ON evidence(company_id, fact, source_kind, source_ref, value, quote,
+  ifnull(observed_on, '')) WHERE locked = 0;
+
+CREATE TABLE person (
+  person_id       INTEGER PRIMARY KEY,
+  company_id      INTEGER NOT NULL REFERENCES company(company_id),
+  name            TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  title           TEXT NOT NULL DEFAULT '',
+  role_kind       TEXT NOT NULL CHECK (role_kind IN ('engineer','manager','founder','recruiter','alum','other')),
+  email           TEXT CHECK (email IS NULL OR (email = lower(trim(email)) AND email LIKE '_%@_%._%')),
+  linkedin_url    TEXT,
+  profile_text    TEXT NOT NULL DEFAULT '',
+  notes           TEXT NOT NULL DEFAULT '',
+  tz              TEXT NOT NULL DEFAULT 'America/New_York',
+  channel         TEXT NOT NULL CHECK (channel IN ('email','linkedin')),
+  linkedin_reason TEXT CHECK (linkedin_reason IN ('past_budget','no_email','alum_first')),
+  email_rank      INTEGER CHECK (email_rank >= 1),
+  added_by        TEXT NOT NULL CHECK (added_by IN ('devanshu','claude','import')),
+  created_at      TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at)),
+  updated_at      TEXT NOT NULL CHECK (updated_at IS strftime('%Y-%m-%dT%H:%M:%SZ', updated_at)),
+  revision        INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  -- People emailed before the system (contacted.txt) may have no address on record.
+  CHECK (channel <> 'email' OR email IS NOT NULL OR added_by = 'import'),
+  CHECK (channel <> 'linkedin' OR linkedin_reason IS NOT NULL)
+) STRICT;
+CREATE UNIQUE INDEX person_email ON person(email) WHERE email IS NOT NULL;
+CREATE UNIQUE INDEX person_linkedin ON person(linkedin_url) WHERE linkedin_url IS NOT NULL;
+CREATE INDEX person_company ON person(company_id);
+
+-- One email sequence per person: the outcome of the whole thread. State flags are one-way, so closing a
+-- replied or bounced touch keeps when it replied or bounced.
+CREATE TABLE touch (
+  touch_id        INTEGER PRIMARY KEY,
+  person_id       INTEGER NOT NULL UNIQUE REFERENCES person(person_id),
+  origin          TEXT NOT NULL DEFAULT 'sender' CHECK (origin IN ('sender','import')),
+  state           TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open','replied','bounced','closed')),
+  close_reason    TEXT CHECK (close_reason IN ('no_reply','skipped','company_closed','no_go')),
+  gmail_thread_id TEXT,
+  first_rfc_id    TEXT,
+  first_sent_at   TEXT CHECK (first_sent_at IS strftime('%Y-%m-%dT%H:%M:%SZ', first_sent_at)),
+  replied_at      TEXT CHECK (replied_at IS strftime('%Y-%m-%dT%H:%M:%SZ', replied_at)),
+  reply_kind      TEXT CHECK (reply_kind IN ('unsorted','interested','not_now','said_no','asked_to_stop',
+                                             'auto_reply')),
+  bounced_at      TEXT CHECK (bounced_at IS strftime('%Y-%m-%dT%H:%M:%SZ', bounced_at)),
+  auto_reply_at   TEXT CHECK (auto_reply_at IS strftime('%Y-%m-%dT%H:%M:%SZ', auto_reply_at)),
+  closed_at       TEXT CHECK (closed_at IS strftime('%Y-%m-%dT%H:%M:%SZ', closed_at)),
+  created_at      TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at)),
+  updated_at      TEXT NOT NULL CHECK (updated_at IS strftime('%Y-%m-%dT%H:%M:%SZ', updated_at)),
+  revision        INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  CHECK (state <> 'replied' OR (replied_at IS NOT NULL AND reply_kind IS NOT NULL AND reply_kind <> 'auto_reply')),
+  CHECK (state <> 'bounced' OR bounced_at IS NOT NULL),
+  CHECK (state <> 'closed' OR (closed_at IS NOT NULL AND close_reason IS NOT NULL)),
+  CHECK (origin = 'import' OR (first_sent_at IS NULL) = (first_rfc_id IS NULL)),
+  CHECK (origin = 'import' OR (first_sent_at IS NULL) = (gmail_thread_id IS NULL))
+) STRICT;
+
+-- One email: seq 0 is the first email, 1 to 3 the follow-ups (#9: 3, 7 and 15 business days).
+CREATE TABLE message (
+  message_id       INTEGER PRIMARY KEY,
+  touch_id         INTEGER NOT NULL REFERENCES touch(touch_id),
+  seq              INTEGER NOT NULL CHECK (seq BETWEEN 0 AND 3),
+  state            TEXT NOT NULL CHECK (state IN ('planned','drafted','approved','sending','send_unknown',
+                                                  'sent','failed','skipped')),
+  subject          TEXT NOT NULL DEFAULT '',
+  body             TEXT NOT NULL DEFAULT '',
+  hook             TEXT NOT NULL DEFAULT '',
+  project          TEXT NOT NULL DEFAULT '',
+  due_on           TEXT CHECK (due_on IS date(due_on)),
+  -- [{code, severity: block|warn|pass, title, detail, fix, spans}], written by #11 on every save.
+  checks           TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(checks) AND json_type(checks) = 'array'),
+  saved_by         TEXT NOT NULL DEFAULT 'claude' CHECK (saved_by IN ('claude','devanshu','sender','import')),
+  approved_at      TEXT CHECK (approved_at IS strftime('%Y-%m-%dT%H:%M:%SZ', approved_at)),
+  pending_rfc_id   TEXT,
+  claimed_at       TEXT CHECK (claimed_at IS strftime('%Y-%m-%dT%H:%M:%SZ', claimed_at)),
+  rfc_message_id   TEXT,
+  gmail_message_id TEXT,
+  sent_at          TEXT CHECK (sent_at IS strftime('%Y-%m-%dT%H:%M:%SZ', sent_at)),
+  reconciled_at    TEXT CHECK (reconciled_at IS strftime('%Y-%m-%dT%H:%M:%SZ', reconciled_at)),
+  error            TEXT NOT NULL DEFAULT '',
+  created_at       TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at)),
+  updated_at       TEXT NOT NULL CHECK (updated_at IS strftime('%Y-%m-%dT%H:%M:%SZ', updated_at)),
+  revision         INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  UNIQUE (touch_id, seq),
+  CHECK (state = 'planned' OR (length(trim(subject)) > 0 AND length(trim(body)) > 0)),
+  CHECK (seq = 0 OR due_on IS NOT NULL),
+  CHECK ((state IN ('sending','send_unknown')) = (pending_rfc_id IS NOT NULL)),
+  CHECK ((state IN ('sending','send_unknown')) = (claimed_at IS NOT NULL)),
+  CHECK ((state = 'sent') = (sent_at IS NOT NULL)),
+  CHECK ((state = 'sent') = (rfc_message_id IS NOT NULL)),
+  CHECK (state NOT IN ('approved','sending','send_unknown') OR approved_at IS NOT NULL)
+) STRICT;
+CREATE UNIQUE INDEX message_rfc ON message(rfc_message_id) WHERE rfc_message_id IS NOT NULL;
+CREATE UNIQUE INDEX message_pending_rfc ON message(pending_rfc_id) WHERE pending_rfc_id IS NOT NULL;
+-- At most one send in flight across the whole store: a second sender process cannot claim.
+CREATE UNIQUE INDEX message_one_sending ON message(state) WHERE state = 'sending';
+CREATE INDEX message_state ON message(state, due_on);
+CREATE INDEX message_sent_at ON message(sent_at) WHERE sent_at IS NOT NULL;
+
+-- Replies, auto-replies and bounces read from Gmail, shown in the thread (#12 view 3).
+CREATE TABLE inbound_message (
+  inbound_id       INTEGER PRIMARY KEY,
+  touch_id         INTEGER NOT NULL REFERENCES touch(touch_id),
+  gmail_message_id TEXT NOT NULL UNIQUE,
+  from_addr        TEXT NOT NULL,
+  subject          TEXT NOT NULL DEFAULT '',
+  body_text        TEXT NOT NULL DEFAULT '',
+  kind             TEXT NOT NULL CHECK (kind IN ('human','auto_reply','bounce')),
+  received_at      TEXT NOT NULL CHECK (received_at IS strftime('%Y-%m-%dT%H:%M:%SZ', received_at)),
+  recorded_at      TEXT NOT NULL CHECK (recorded_at IS strftime('%Y-%m-%dT%H:%M:%SZ', recorded_at))
+) STRICT;
+CREATE INDEX inbound_touch ON inbound_message(touch_id, received_at);
+
+CREATE TABLE linkedin_log (
+  entry_id    INTEGER PRIMARY KEY,
+  person_id   INTEGER NOT NULL REFERENCES person(person_id),
+  kind        TEXT NOT NULL CHECK (kind IN ('request_sent','accepted','message_sent','replied','note','undo')),
+  reply_kind  TEXT CHECK (reply_kind IN ('interested','not_now','said_no','asked_to_stop')),
+  undoes      INTEGER REFERENCES linkedin_log(entry_id),
+  at          TEXT NOT NULL CHECK (at IS strftime('%Y-%m-%dT%H:%M:%SZ', at)),
+  note        TEXT NOT NULL DEFAULT '',
+  recorded_at TEXT NOT NULL CHECK (recorded_at IS strftime('%Y-%m-%dT%H:%M:%SZ', recorded_at)),
+  CHECK ((kind = 'undo') = (undoes IS NOT NULL)),
+  CHECK (kind = 'replied' OR reply_kind IS NULL)
+) STRICT;
+CREATE INDEX linkedin_log_person ON linkedin_log(person_id, at);
+CREATE UNIQUE INDEX linkedin_log_undo_once ON linkedin_log(undoes) WHERE undoes IS NOT NULL;
+
+CREATE TABLE sender (
+  sender_id     INTEGER PRIMARY KEY CHECK (sender_id = 1),
+  paused        INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0,1)),
+  pause_kind    TEXT CHECK (pause_kind IN ('by_you','hard_block')),
+  paused_reason TEXT NOT NULL DEFAULT '',
+  paused_at     TEXT CHECK (paused_at IS strftime('%Y-%m-%dT%H:%M:%SZ', paused_at)),
+  updated_at    TEXT NOT NULL CHECK (updated_at IS strftime('%Y-%m-%dT%H:%M:%SZ', updated_at)),
+  revision      INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  CHECK ((paused = 1) = (paused_at IS NOT NULL)),
+  CHECK ((paused = 1) = (pause_kind IS NOT NULL))
+) STRICT;
+INSERT INTO sender (sender_id, updated_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
+
+-- One row per sending day (America/New_York date): the ramp level that day and how the day ended.
+CREATE TABLE send_day (
+  day          TEXT PRIMARY KEY CHECK (day IS date(day)),
+  send_limit   INTEGER NOT NULL CHECK (send_limit BETWEEN 0 AND 100),
+  outcome      TEXT CHECK (outcome IN ('clean','warning','hard_block')),
+  outcome_note TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at))
+) STRICT;
+
+CREATE TABLE no_go (
+  no_go_id    INTEGER PRIMARY KEY,
+  company_id  INTEGER REFERENCES company(company_id),
+  person_id   INTEGER REFERENCES person(person_id),
+  reason      TEXT NOT NULL CHECK (reason IN ('no_sponsorship','citizenship','over_300','defence_contractor',
+                                              'agency','said_no','stop_reply','not_a_fit','other')),
+  quote       TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  source      TEXT NOT NULL CHECK (source IN ('devanshu','rules','reply','import','claude')),
+  source_ref  TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at)),
+  -- Taken off the list: the row stays, so automation can see the choice and never re-adds it.
+  lifted_at   TEXT CHECK (lifted_at IS strftime('%Y-%m-%dT%H:%M:%SZ', lifted_at)),
+  lift_reason TEXT,
+  CHECK ((company_id IS NOT NULL) + (person_id IS NOT NULL) = 1),
+  CHECK ((lifted_at IS NULL) = (lift_reason IS NULL))
+) STRICT;
+CREATE UNIQUE INDEX no_go_company ON no_go(company_id) WHERE company_id IS NOT NULL AND lifted_at IS NULL;
+CREATE UNIQUE INDEX no_go_person  ON no_go(person_id)  WHERE person_id  IS NOT NULL AND lifted_at IS NULL;
+
+CREATE TABLE review_item (
+  review_id       INTEGER PRIMARY KEY,
+  kind            TEXT NOT NULL CHECK (kind IN ('board_unreadable','board_empty','sponsorship_unclear',
+                                                'size_unknown','size_guess','domain_missing','flagged')),
+  company_id      INTEGER NOT NULL REFERENCES company(company_id),
+  board_id        INTEGER REFERENCES board(board_id),
+  posting_id      INTEGER REFERENCES posting(posting_id),
+  person_id       INTEGER REFERENCES person(person_id),
+  reason          TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+  evidence_key    TEXT NOT NULL,
+  raised_by       TEXT NOT NULL CHECK (raised_by IN ('crawler','rules','daily_list','sender','claude','import')),
+  state           TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open','resolved')),
+  -- cleared: the condition went away by itself (the board read ok again, new evidence arrived).
+  resolution      TEXT CHECK (resolution IN ('marked_ok','marked_no_go','field_edited','cleared')),
+  resolution_note TEXT NOT NULL DEFAULT '',
+  created_at      TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at)),
+  resolved_at     TEXT CHECK (resolved_at IS strftime('%Y-%m-%dT%H:%M:%SZ', resolved_at)),
+  revision        INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  CHECK ((state = 'resolved') = (resolution IS NOT NULL)),
+  CHECK ((state = 'resolved') = (resolved_at IS NOT NULL)),
+  CHECK (kind NOT IN ('board_unreadable','board_empty') OR board_id IS NOT NULL),
+  CHECK (kind <> 'sponsorship_unclear' OR posting_id IS NOT NULL)
+) STRICT;
+-- Raising the same item on the same evidence again is a no-op, so a resolved item stays resolved
+-- until the evidence (and so evidence_key) changes (#16).
+CREATE UNIQUE INDEX review_item_once ON review_item(kind, company_id, ifnull(board_id, 0),
+  ifnull(posting_id, 0), ifnull(person_id, 0), evidence_key);
+CREATE INDEX review_item_open ON review_item(state, created_at);
+
+CREATE TABLE daily_list (
+  list_date TEXT PRIMARY KEY CHECK (list_date IS date(list_date)),
+  built_at  TEXT NOT NULL CHECK (built_at IS strftime('%Y-%m-%dT%H:%M:%SZ', built_at)),
+  capacity  INTEGER NOT NULL CHECK (capacity BETWEEN 0 AND 20)
+) STRICT;
+
+CREATE TABLE daily_list_entry (
+  list_date   TEXT NOT NULL REFERENCES daily_list(list_date),
+  company_id  INTEGER NOT NULL REFERENCES company(company_id),
+  list_group  TEXT NOT NULL CHECK (list_group IN ('level_role','any_us_role')),
+  rank        INTEGER NOT NULL CHECK (rank >= 1),
+  state       TEXT NOT NULL DEFAULT 'proposed' CHECK (state IN ('proposed','picked','backlog','removed')),
+  posting_id  INTEGER REFERENCES posting(posting_id),
+  why         TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(why)),
+  proposed_at TEXT NOT NULL CHECK (proposed_at IS strftime('%Y-%m-%dT%H:%M:%SZ', proposed_at)),
+  decided_at  TEXT CHECK (decided_at IS strftime('%Y-%m-%dT%H:%M:%SZ', decided_at)),
+  revision    INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  PRIMARY KEY (list_date, company_id),
+  UNIQUE (list_date, rank),
+  CHECK ((state = 'proposed') = (decided_at IS NULL))
+) STRICT;
+
+CREATE TABLE event (
+  event_id        INTEGER PRIMARY KEY,
+  at              TEXT NOT NULL CHECK (at IS strftime('%Y-%m-%dT%H:%M:%SZ', at)),
+  recorded_at     TEXT NOT NULL CHECK (recorded_at IS strftime('%Y-%m-%dT%H:%M:%SZ', recorded_at)),
+  entity          TEXT NOT NULL CHECK (entity IN ('company','person','touch','message','posting','board',
+                                                  'evidence','review_item','no_go','daily_list','linkedin',
+                                                  'sender','application')),
+  entity_id       INTEGER,
+  company_id      INTEGER REFERENCES company(company_id),
+  kind            TEXT NOT NULL CHECK (length(kind) > 0),
+  actor           TEXT NOT NULL CHECK (actor IN ('devanshu','claude','sender','crawler','rules','daily_list',
+                                                 'import','system')),
+  detail          TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(detail)),
+  idempotency_key TEXT UNIQUE
+) STRICT;
+CREATE INDEX event_company ON event(company_id, at);
+CREATE INDEX event_entity ON event(entity, entity_id, at);
+
+CREATE TABLE job_run (
+  run_id          INTEGER PRIMARY KEY,
+  job             TEXT NOT NULL CHECK (job IN ('install','rebuild','crawl','daily_list','sender','import')),
+  started_at      TEXT NOT NULL CHECK (started_at IS strftime('%Y-%m-%dT%H:%M:%SZ', started_at)),
+  finished_at     TEXT CHECK (finished_at IS strftime('%Y-%m-%dT%H:%M:%SZ', finished_at)),
+  status          TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','ok','partial','failed')),
+  summary         TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(summary)),
+  error           TEXT NOT NULL DEFAULT '',
+  ruleset_version TEXT REFERENCES ruleset(ruleset_version),
+  CHECK ((status = 'running') = (finished_at IS NULL))
+) STRICT;
+CREATE INDEX job_run_job ON job_run(job, started_at);
+
+CREATE TABLE import_record (
+  import_id   INTEGER PRIMARY KEY,
+  run_id      INTEGER NOT NULL REFERENCES job_run(run_id),
+  source      TEXT NOT NULL CHECK (source IN ('data_js','local_storage','contacts_json','radar_db',
+                                              'devboard','contacted_txt','devvault_notes')),
+  source_key  TEXT NOT NULL CHECK (length(source_key) > 0),
+  raw         TEXT NOT NULL,
+  raw_sha256  TEXT NOT NULL CHECK (length(raw_sha256) = 64),
+  outcome     TEXT NOT NULL CHECK (outcome IN ('imported','merged','skipped')),
+  reason      TEXT NOT NULL DEFAULT '',
+  entity      TEXT,
+  entity_id   INTEGER,
+  imported_at TEXT NOT NULL CHECK (imported_at IS strftime('%Y-%m-%dT%H:%M:%SZ', imported_at)),
+  UNIQUE (source, source_key, raw_sha256),
+  CHECK (outcome = 'imported' OR length(reason) > 0),
+  CHECK ((outcome = 'skipped') = (entity_id IS NULL))
+) STRICT;
+
+CREATE TRIGGER event_no_update BEFORE UPDATE ON event
+  BEGIN SELECT RAISE(ABORT, 'event is append-only'); END;
+CREATE TRIGGER event_no_delete BEFORE DELETE ON event
+  BEGIN SELECT RAISE(ABORT, 'event is append-only'); END;
+CREATE TRIGGER evidence_no_update BEFORE UPDATE ON evidence
+  BEGIN SELECT RAISE(ABORT, 'evidence is append-only; add a new row'); END;
+CREATE TRIGGER evidence_no_delete BEFORE DELETE ON evidence
+  BEGIN SELECT RAISE(ABORT, 'evidence is append-only; add a new row'); END;
+CREATE TRIGGER import_record_no_update BEFORE UPDATE ON import_record
+  BEGIN SELECT RAISE(ABORT, 'import_record is append-only'); END;
+CREATE TRIGGER import_record_no_delete BEFORE DELETE ON import_record
+  BEGIN SELECT RAISE(ABORT, 'import_record is append-only'); END;
+CREATE TRIGGER linkedin_log_no_update BEFORE UPDATE ON linkedin_log
+  BEGIN SELECT RAISE(ABORT, 'linkedin_log is append-only; log an undo'); END;
+CREATE TRIGGER linkedin_log_no_delete BEFORE DELETE ON linkedin_log
+  BEGIN SELECT RAISE(ABORT, 'linkedin_log is append-only; log an undo'); END;
+CREATE TRIGGER inbound_no_update BEFORE UPDATE ON inbound_message
+  BEGIN SELECT RAISE(ABORT, 'inbound_message is append-only'); END;
+CREATE TRIGGER inbound_no_delete BEFORE DELETE ON inbound_message
+  BEGIN SELECT RAISE(ABORT, 'inbound_message is append-only'); END;
+CREATE TRIGGER posting_never_deleted BEFORE DELETE ON posting
+  BEGIN SELECT RAISE(ABORT, 'postings are never deleted; set closed_at and close_reason'); END;
+
+-- A message is born planned or drafted (sent only for imported history); approval is always an UPDATE.
+-- A follow-up exists beyond planned only once the first email has gone out.
+CREATE TRIGGER message_insert_state BEFORE INSERT ON message
+  WHEN NEW.state NOT IN ('planned','drafted','sent')
+    OR (NEW.seq > 0 AND NEW.state <> 'planned'
+        AND (SELECT first_sent_at FROM touch WHERE touch_id = NEW.touch_id) IS NULL)
+  BEGIN SELECT RAISE(ABORT, 'a message starts planned or drafted; a follow-up waits for the first send'); END;
+
+-- Only these state changes exist. sent is final, so a sent message can never be re-drafted and re-sent.
+CREATE TRIGGER message_legal_transition BEFORE UPDATE OF state ON message
+  WHEN NEW.state <> OLD.state AND (OLD.state || '>' || NEW.state) NOT IN (
+    'planned>drafted', 'planned>skipped',
+    'drafted>approved', 'drafted>skipped',
+    'approved>drafted', 'approved>sending', 'approved>skipped',
+    'sending>sent', 'sending>send_unknown',
+    'send_unknown>sent', 'send_unknown>failed',
+    'failed>approved', 'failed>drafted', 'failed>skipped',
+    'skipped>drafted')
+  BEGIN SELECT RAISE(ABORT, 'illegal message state change'); END;
+
+CREATE TRIGGER message_followup_waits BEFORE UPDATE OF state ON message
+  WHEN NEW.seq > 0 AND OLD.state = 'planned' AND NEW.state <> 'planned'
+    AND (SELECT first_sent_at FROM touch WHERE touch_id = NEW.touch_id) IS NULL
+  BEGIN SELECT RAISE(ABORT, 'a follow-up leaves planned only after the first email is sent'); END;
+
+-- Once claimed, the text and identity of a message are frozen.
+CREATE TRIGGER message_frozen_once_claimed BEFORE UPDATE OF subject, body, seq, touch_id ON message
+  WHEN OLD.state IN ('sending','send_unknown','sent')
+    AND (NEW.subject IS NOT OLD.subject OR NEW.body IS NOT OLD.body
+         OR NEW.seq IS NOT OLD.seq OR NEW.touch_id IS NOT OLD.touch_id)
+  BEGIN SELECT RAISE(ABORT, 'a message is frozen once it is claimed for sending'); END;
+
+-- The value of each fact a company shows: a hand (locked) row wins, and among hand rows the newest wins
+-- whatever its confidence; then confirmed over estimate over guess; then the newest.
+CREATE VIEW company_fact AS
+SELECT evidence_id, company_id, fact, value, num_low, num_high, confidence, locked,
+       source_kind, source_ref, quote, posting_id, observed_on, recorded_at
+FROM (
+  SELECT e.*, ROW_NUMBER() OVER (
+           PARTITION BY e.company_id, e.fact
+           ORDER BY e.locked DESC,
+                    CASE WHEN e.locked = 1 THEN e.recorded_at END DESC,
+                    CASE e.confidence WHEN 'confirmed' THEN 0 WHEN 'estimate' THEN 1 ELSE 2 END,
+                    e.recorded_at DESC, e.evidence_id DESC) AS rn
+  FROM evidence e
+) WHERE rn = 1;
+
+-- Decisions under the current ruleset (every open posting has one after a rebuild).
+CREATE VIEW current_decision AS
+SELECT d.* FROM decision d
+JOIN ruleset r ON r.ruleset_version = d.ruleset_version AND r.is_current = 1;
+
+-- One decision per posting: the current one, else the newest kept (closed postings are not re-decided).
+CREATE VIEW posting_decision AS
+SELECT posting_id, ruleset_version, decided_at, lane, level_tier, level_ok, level_basis, years_asked,
+       years_quote, us, sponsorship, sponsorship_quote, citizenship, citizenship_quote, eligibility,
+       eligibility_reason, eligibility_quote, start_2027
+FROM (
+  SELECT d.*, ROW_NUMBER() OVER (
+           PARTITION BY d.posting_id
+           ORDER BY r.is_current DESC, d.decided_at DESC, d.ruleset_version DESC) AS rn
+  FROM decision d JOIN ruleset r ON r.ruleset_version = d.ruleset_version
+) WHERE rn = 1;

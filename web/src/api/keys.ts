@@ -1,0 +1,20 @@
+import type { Id } from './types';
+
+export const queryKeys = {
+  shell: ['shell'],
+  search: ['search'],
+  today: ['today'],
+  outbox: ['outbox'],
+  outboxDetail: (touchId: Id) => ['outbox', touchId],
+  linkedin: ['linkedin'],
+  needsYou: ['needs-you'],
+  noGo: ['no-go'],
+  company: (id: Id) => ['company', id],
+  done: ['done'],
+} as const;
+
+export const pollMs = { outbox: 15000, default: 60000 } as const;
+
+export function newRequestId(): string {
+  return crypto.randomUUID();
+}

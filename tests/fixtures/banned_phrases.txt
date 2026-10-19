@@ -1,0 +1,10 @@
+# test fixture in the DevVault format: SCOPE<TAB>EXTENDED-REGEX
+
+both	leveraged
+both	passionate about
+both	I.d love to
+email	MS from Northeastern
+email	hope this finds you well
+both	not[[:space:]]+just[[:space:]]+[a-z]+,[[:space:]]*but
+dm	let.s connect
+comment	^great post

@@ -46,9 +46,14 @@ def load_banned(path):
 
 
 def load_unconfirmed(me_path):
-    """Values quoted in backticks on the ASK lines of me.md: the drafter may not use them yet."""
+    """Values quoted in backticks on the ASK items of me.md (an item may wrap onto indented lines)."""
+    out, in_ask = [], False
     with open(me_path, encoding="utf-8") as f:
-        return [v for line in f if line.lstrip().startswith("- ASK:") for v in re.findall(r"`([^`]+)`", line)]
+        for line in f:
+            if line.lstrip().startswith("- "): in_ask = line.lstrip().startswith("- ASK:")
+            elif not line.startswith((" ", "\t")) or not line.strip(): in_ask = False
+            if in_ask: out += re.findall(r"`([^`]+)`", line)
+    return out
 
 
 def _trim(u): return u.rstrip(".,;:!?")

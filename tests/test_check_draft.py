@@ -94,7 +94,7 @@ class CheckDraftTest(unittest.TestCase):
             cd.load_banned(os.path.join(FIX, "nope.txt"))
 
     def test_load_unconfirmed_reads_backticks_on_ask_lines(self):
-        self.assertEqual(self.unconfirmed, ["STEM OPT", "H-1B", "no sponsorship needed"])
+        self.assertEqual(self.unconfirmed, ["STEM OPT", "H-1B", "no sponsorship needed", "installs"])
 
     # --- blocking checks ---
     def test_banned_phrase_in_body_blocks_case_insensitive(self):

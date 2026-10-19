@@ -32,6 +32,7 @@ def save(path, state):
 
 
 def update(prev, read, today):
+    """`since` is the date the current streak of `read` began."""
     empty = prev.get("empty", 0)
     error = prev.get("error", 0)
     if read == "ok":
@@ -43,7 +44,8 @@ def update(prev, read, today):
         error += 1
     else:
         raise ValueError("unknown read: %r" % (read,))
-    return {"empty": empty, "error": error, "last": read, "since": today}
+    since = prev.get("since", today) if read == prev.get("last") else today
+    return {"empty": empty, "error": error, "last": read, "since": since}
 
 
 def action(entry):
@@ -55,3 +57,24 @@ def action(entry):
 
 def needs_review(entry):
     return entry.get("error", 0) >= 3
+
+
+def report_lines(state, names):
+    """The three LAST_RUN sections for boards that were not read cleanly."""
+    def name(cid):
+        return names.get(cid, cid)
+
+    entries = sorted(state.items(), key=lambda kv: name(kv[0]).lower())
+    unread = [name(c) for c, e in entries if e.get("last") == "error"]
+    empty_once = [name(c) for c, e in entries
+                  if e.get("last") == "empty" and action(e) == "keep"]
+    review = ["%s (since %s)" % (name(c), e.get("since", "?"))
+              for c, e in entries if needs_review(e)]
+
+    def section(title, items):
+        return ["## %s (%d)" % (title, len(items)), ""] + (
+            ["- " + x for x in items] if items else ["None."]) + [""]
+
+    return (section("Boards that could not be read this run, kept as before", unread)
+            + section("Empty once, kept; closes if empty again next run", empty_once)
+            + section("Needs review: unreadable 3 runs in a row", review))

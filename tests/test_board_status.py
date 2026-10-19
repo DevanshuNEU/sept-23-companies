@@ -57,6 +57,49 @@ class BoardStatusTests(unittest.TestCase):
             self.assertEqual(board_status.load(p), state)
             self.assertEqual(os.listdir(d), ["status.json"])
 
+    def test_since_is_the_start_of_the_current_streak(self):
+        e = board_status.update({}, "error", "2026-10-12")
+        self.assertEqual(e["since"], "2026-10-12")
+        e = board_status.update(e, "error", "2026-10-15")
+        e = board_status.update(e, "error", "2026-10-18")
+        self.assertEqual(e["since"], "2026-10-12")
+        self.assertEqual(e["error"], 3)
+        e = board_status.update(e, "ok", "2026-10-19")
+        self.assertEqual(e["since"], "2026-10-19")
+
+    def test_since_resets_when_the_read_kind_changes(self):
+        e = board_status.update({}, "empty", "2026-10-12")
+        e = board_status.update(e, "error", "2026-10-15")
+        self.assertEqual(e["since"], "2026-10-15")
+
+    def test_report_lines_lists_each_group(self):
+        state = {"a": {"empty": 0, "error": 1, "last": "error", "since": "2026-10-18"},
+                 "b": {"empty": 1, "error": 0, "last": "empty", "since": "2026-10-18"},
+                 "c": {"empty": 0, "error": 3, "last": "error", "since": "2026-10-12"},
+                 "d": {"empty": 0, "error": 0, "last": "ok", "since": "2026-10-18"}}
+        names = {"a": "Acme", "b": "Beta", "c": "Corp", "d": "Delta"}
+        text = "\n".join(board_status.report_lines(state, names))
+        self.assertIn("could not be read this run, kept as before (2)", text)
+        self.assertIn("Empty once, kept; closes if empty again next run (1)", text)
+        self.assertIn("- Beta", text)
+        self.assertIn("Needs review: unreadable 3 runs in a row (1)", text)
+        self.assertIn("- Corp (since 2026-10-12)", text)
+        self.assertNotIn("Delta", text)
+
+    def test_report_lines_order_and_none(self):
+        text = "\n".join(board_status.report_lines({}, {}))
+        titles = [l for l in text.splitlines() if l.startswith("## ")]
+        self.assertEqual(titles, [
+            "## Boards that could not be read this run, kept as before (0)",
+            "## Empty once, kept; closes if empty again next run (0)",
+            "## Needs review: unreadable 3 runs in a row (0)"])
+        self.assertEqual(text.count("None."), 3)
+
+    def test_report_lines_falls_back_to_id_for_unknown_company(self):
+        state = {"zed": {"empty": 0, "error": 1, "last": "error", "since": D}}
+        text = "\n".join(board_status.report_lines(state, {}))
+        self.assertIn("- zed", text)
+
 
 if __name__ == "__main__":
     unittest.main()

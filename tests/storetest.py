@@ -10,7 +10,8 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from outreach.store.migrate import migrate
+from outreach.install import install
+from outreach.store import connect
 from outreach.store.timefmt import utcnow
 
 _counter = itertools.count(1)
@@ -19,16 +20,15 @@ _counter = itertools.count(1)
 def fresh_store() -> sqlite3.Connection:
     """A migrated store in a new temp directory.
 
-    Autocommit (`isolation_level=None`), `sqlite3.Row` rows and foreign keys on.
-    The folder is removed when the test process exits.
+    Built by `install` and opened by `connect`, so tests run on the real connection
+    settings: autocommit, `sqlite3.Row` rows, foreign keys on. The folder is removed
+    when the test process exits.
     """
     folder = tempfile.mkdtemp(prefix="outreach-store-test-")
     atexit.register(shutil.rmtree, folder, True)
-    conn = sqlite3.connect(Path(folder) / "outreach.db", isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    migrate(conn)
-    return conn
+    path = str(Path(folder) / "outreach.db")
+    install(path)
+    return connect(path)
 
 
 def seed_company(conn: sqlite3.Connection, name: str = "Acme") -> int:

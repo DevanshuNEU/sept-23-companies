@@ -910,3 +910,355 @@ def test_job_run_round_trip(self):                     # start_job -> status run
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run and see them pass**, then the whole suite.
 - [ ] **Step 5: Commit** `git commit -m "Store write helpers: events with idempotency keys, job runs, name keys (#4)"`
+
+---
+
+### Task 7: Rules config, text helpers and ruleset version
+
+**Files:**
+- Create: `outreach/rules/__init__.py` (empty for now), `outreach/rules/config.toml`, `outreach/rules/config.py`, `outreach/rules/text.py`, `outreach/rules/version.py`
+- Test: `tests/test_rules_config.py`
+
+**Interfaces:**
+- Produces:
+  - `config.CONFIG_PATH: pathlib.Path`; `load_config(path: Path = CONFIG_PATH) -> Config`. `Config` is a frozen dataclass with one `dict` per section (`candidate`, `title`, `years`, `location`, `sponsorship`, `eligibility`, `facts`) plus `raw: bytes` (the file bytes, for the ruleset row). Missing keys raise `KeyError` at load, naming the key.
+  - `config.phrases(words: list[str], *, case: bool = False) -> re.Pattern`: one alternation of the escaped words with word boundaries; inside a phrase a space matches a space, a hyphen or nothing (so "early career" matches "Early-Career"). `case=True` keeps it case sensitive (state codes).
+  - `text.sentences(text: str) -> list[str]`: splits on `.`, `!`, `?`, `;`, newlines and bullets; keeps "U.S." and "e.g." whole.
+  - `text.quote_around(text: str, start: int, end: int, limit: int = 260) -> str`: the sentence holding the match, trimmed to whole words (port of `refresh/finalcheck.py:86-90` and `refresh/final_merge.py:19-27`).
+  - `version.RULE_FILES = ("config.toml", "text.py", "title.py", "years.py", "location.py", "sponsorship.py", "eligibility.py", "facts.py", "decide.py")`; `version.NOT_RULES = ("__init__.py", "config.py", "version.py", "rebuild.py")`; `version.ruleset_version(rules_dir: Path = RULES_DIR) -> str` = `"r-"` plus the first 12 hex of SHA-256 over, for each name in `sorted(RULE_FILES)`, `name.encode() + b"\0" + file bytes + b"\0"`. A file in `RULE_FILES` that does not exist yet is hashed as empty, so this task can land before the rule modules.
+- `config.toml` sections and keys (values ported from the cited lines; each later task may adjust only its own section):
+
+| Section | Keys | Source |
+|---|---|---|
+| `[candidate]` | `graduated = "2026-05"`, `max_years_asked = 3` | `refresh/eligibility.py:32`, #9 |
+| `[title]` | `engineering`, `intern`, `off_lane`, `general_application`, `senior`, `manager`, `strong_entry`, `new_grad`, `early_career`, `open_level`, `level_nouns` | `refresh/finalcheck.py:25-40, 104-105`; `refresh/crawl_boards.py:26-28, 59`; `refresh/final_merge.py:18, 60` |
+| `[years]` | `experience_words`, `degree_alternative`, `company_age`, `body_entry` | `refresh/finalcheck.py:41-44`; `refresh/crawl_boards.py:29-32` |
+| `[location]` | `us_marks`, `us_state_codes`, `us_state_names`, `us_cities`, `non_us` | `refresh/finalcheck.py:69-82`; `refresh/crawl_boards.py:34-49` |
+| `[sponsorship]` | `topic`, `negation`, `hedge`, `opt`, `citizenship`, `citizenship_negation` | `refresh/finalcheck.py:61-68`; `refresh/crawl_boards.py:127` |
+| `[eligibility]` | `grad_words`, `current_student`, `graduates_welcome`, `soft`, `company_history`, `upper_bound`, `cohort_title`, `start_2027`, `immediate_start` | `refresh/eligibility.py:36-62`; `refresh/finalcheck.py:46-56`; `refresh/final_merge.py:17` |
+| `[facts]` | `stage` (table of value -> phrases), `size_guess_words` (`guess`, `uncertain`, `est.`) | data.js field survey in Task 13 |
+
+  Word list changes from the old code, decided here: `senior` drops `fellow` and keeps `distinguished`; `strong_entry` includes `fellow` and `fellowship`; `open_level` is `member of technical staff`, `member of product staff`, `member of engineering staff`, `mts`, `forward deployed`, `fde` (not `founding`: the design names MTS and FDE only).
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+def test_config_loads_and_pins_the_decided_numbers(self):
+    cfg = load_config(); cfg.candidate["graduated"] == "2026-05"; cfg.candidate["max_years_asked"] == 3
+def test_missing_key_is_named(self):            # a temp config without [candidate].graduated -> KeyError mentioning "graduated"
+def test_phrase_space_matches_hyphen_and_nothing(self):
+    p = phrases(["early career"]); p.search("Early-Career Engineer") and p.search("earlycareer") and not p.search("yearly careers")
+def test_case_sensitive_phrases(self):          # phrases(["IN"], case=True) matches "Indianapolis, IN" and not "Remote in Ohio"
+def test_sentences_keep_us_whole(self):         # sentences("Must be a U.S. citizen. We ship.") == ["Must be a U.S. citizen.", "We ship."]
+def test_version_shape_and_stability(self):     # re.fullmatch(r"r-[0-9a-f]{12}", v); same value twice
+def test_version_changes_with_config(self):     # copy rules dir to temp, append "# x" to config.toml -> different version
+def test_version_changes_with_a_rule_file(self):# same, editing title.py (create it if absent)
+def test_every_rules_file_is_classified(self):
+    # every *.py and *.toml in outreach/rules is in RULE_FILES or NOT_RULES, and none is in both
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_config -v`.
+- [ ] **Step 3: Implement** the three modules and write the full `config.toml`, every section, with a one-line comment per key citing its source line.
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Rules config, text helpers and the ruleset version hash (#4)"`
+
+---
+
+### Task 8: Title: lane and title level
+
+**Files:**
+- Create: `outreach/rules/title.py`
+- Modify: `outreach/rules/config.toml` `[title]` only
+- Test: `tests/test_rules_title.py`
+
+**Interfaces:**
+- Consumes: `Config`, `phrases`.
+- Produces: `TitleResult` (frozen: `lane: str`, `tier: str | None`, `basis: str`) and `classify_title(title: str, cfg: Config) -> TitleResult`.
+  - `lane`: `general_application` (talent pool, general application, future opportunities) else `intern` else `not_engineering` (no engineering word) else `off_lane` else `engineering`.
+  - `tier` (only meaningful for engineering): `senior`, `new_grad`, `early_career`, `swe1`, `swe2`, `open`, or None when the title states no level.
+  - Algorithm order, after rewriting "member of technical|product|engineering staff" to `MTS`:
+    1. a `manager` word -> `senior` (managers are not his level);
+    2. a `senior` word, unless a `strong_entry` phrase is also present -> `senior`;
+    3. `new_grad` phrase -> `new_grad`; 4. `early_career` phrase -> `early_career`;
+    5. `I`, `1` right after a level noun (`engineer`, `developer`, `swe`, `sde`, `programmer`, `MTS`; optional space, hyphen, comma) or `level 1` -> `swe1`; `I/II` or `1/2` -> `swe1`;
+    6. `II`, `2` in the same position, or `level 2` -> `swe2`;
+    7. an `open_level` phrase -> `open`;
+    8. otherwise None.
+  - `basis` is a short sentence for the UI, for example "Title says new grad", "Title says Engineer II", "MTS role, no level in the title" (ported from `refresh/final_merge.py:28-37`).
+
+- [ ] **Step 1: Write the failing tests** (lane and tier per title; the misfire titles are repeated end to end in Task 14)
+
+```python
+CASES = [  # (title, lane, tier)
+  ("Member of Technical Staff", "engineering", "open"),
+  ("Member of Technical Staff, Applied AI", "engineering", "open"),
+  ("Member of Technical Staff 2", "engineering", "swe2"),
+  ("Senior Member of Technical Staff", "engineering", "senior"),
+  ("Forward Deployed Engineer", "engineering", "open"),
+  ("Software Engineer II", "engineering", "swe2"),
+  ("Software Engineer 2", "engineering", "swe2"),
+  ("SWE II", "engineering", "swe2"),
+  ("Software Engineer Front-End 2", "engineering", "swe2"),
+  ("Software Engineer I", "engineering", "swe1"),
+  ("Software Engineer I/II", "engineering", "swe1"),
+  ("Staff Engineer II", "engineering", "senior"),
+  ("Staff Engineer I", "engineering", "senior"),
+  ("Staff Software Engineer, Agent Platform", "engineering", "senior"),
+  ("Software Engineer III", "engineering", "senior"),
+  ("Machine Learning Engineer Graduate - Lead Ads", "engineering", "new_grad"),
+  ("Forward Deployed Engineer Fellow", "engineering", "early_career"),
+  ("AI Fellow - Member of Technical Staff", "engineering", "early_career"),
+  ("Backend Engineer, New Grad to Staff Level", "engineering", "new_grad"),
+  ("Engineering Manager, New Grad Hiring", "engineering", "senior"),
+  ("Associate Software Engineer", "engineering", "early_career"),
+  ("Software Engineer", "engineering", None),
+  ("Cellular Layer-1 Control Software Engineer", "engineering", None),
+  ("Founding Engineer", "engineering", None),
+  ("Software Engineering Intern", "intern", None),
+  ("Solutions Engineer", "off_lane", None),
+  ("Help Desk Engineer - Linux Level II", "off_lane", None),
+  ("Scientist I/II", "not_engineering", None),
+  ("Recruiter", "not_engineering", None),
+  ("General Application - Engineering", "general_application", None),
+]
+def test_cases(self): for each case, classify_title(t, cfg) has that lane and (for engineering) that tier
+def test_basis_is_never_empty(self): every case has a non-empty basis
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_title -v`.
+- [ ] **Step 3: Implement** `classify_title`; adjust only `[title]` lists if a case needs it.
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Rules: title lane and level, MTS kept, staff always senior (#4)"`
+
+---
+
+### Task 9: Years asked and entry wording
+
+**Files:**
+- Create: `outreach/rules/years.py`
+- Modify: `outreach/rules/config.toml` `[years]` only
+- Test: `tests/test_rules_years.py`
+
+**Interfaces:**
+- Consumes: `Config`, `phrases`, `text.sentences`, `text.quote_around`.
+- Produces: `years_asked(body: str, cfg: Config) -> tuple[int | None, str]` (smallest required number of years and its quote, `(None, "")` when none); `entry_wording(body: str, cfg: Config) -> str` (quote of new grad, entry level, early career, "0 to 2 years", "no experience required" wording in the first 6,000 characters, or "").
+  - A number counts only when "years" (or "yrs") is followed within the same sentence by an `experience_words` word, as in `refresh/finalcheck.py:41`, and is not excluded:
+    - the sentence has a `degree_alternative` shape: a degree word and "or" before the number ("Bachelor's degree or 4 years"), or "in lieu of", or "equivalent experience" right after it;
+    - a `company_age` word sits within 3 words of the number ("founded", "ago", "in business", "history").
+  - Ranges count their low end ("1-3 years" is 1). Numbers above 30 are ignored.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+CASES = [  # (body, years)
+  ("Bachelor's degree or 4 years of equivalent experience.", None),
+  ("We were founded 5 years ago, our engineering team now ships to 2,000 customers.", None),
+  ("You have 2+ years of professional software engineering experience.", 2),
+  ("3+ years of experience building backend systems in production.", 3),
+  ("5+ years of experience with distributed systems.", 5),
+  ("1-3 years of professional experience.", 1),
+  ("BS in Computer Science or equivalent practical experience. 2+ years of experience with Python.", 2),
+  ("Our customers have trusted us for 10 years.", None),
+  ("", None),
+]
+def test_cases(self): years_asked(body, cfg)[0] == years for each
+def test_quote_is_the_sentence(self): years_asked(CASES[2][0], cfg)[1] == CASES[2][0]
+def test_entry_wording(self):
+    entry_wording("This is an entry-level role for recent graduates.", cfg) != ""
+    entry_wording("We hire great engineers.", cfg) == ""
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_years -v`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Rules: years asked ignores degree alternatives and company age (#4)"`
+
+---
+
+### Task 10: US location
+
+**Files:**
+- Create: `outreach/rules/location.py`
+- Modify: `outreach/rules/config.toml` `[location]` only
+- Test: `tests/test_rules_location.py`
+
+**Interfaces:**
+- Produces: `us_status(location: str, country: str | None, cfg: Config) -> str` returning `yes`, `no` or `unknown`. Order:
+  1. a structured `country` wins: US spellings (`US`, `USA`, `United States`, `United States of America`) -> `yes`; any other non-empty value -> `no`;
+  2. split `location` on `|`, `;` and " or "; if any part names the US (a `us_marks` word, an upper-case `us_state_codes` code after a comma or at the end, a `us_state_names` name, or a `us_cities` city) -> `yes`;
+  3. else if any part matches the word-bounded `non_us` list -> `no`;
+  4. else -> `unknown` (this includes a bare "Remote" and an empty location).
+  US checks run before the non-US list on purpose: "Paris, TX" and "Albuquerque, New Mexico" contain non-US words.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+CASES = [  # (location, country, expected)
+  ("Indianapolis, IN", None, "yes"), ("Columbus, Indiana", None, "yes"),
+  ("Albuquerque, New Mexico", None, "yes"), ("Lima, OH", None, "yes"),
+  ("Paris, TX", None, "yes"), ("Athens, GA", None, "yes"),
+  ("San Francisco, CA | London, UK", None, "yes"), ("Remote (US)", None, "yes"), ("New York", None, "yes"),
+  ("Paris, France", None, "no"), ("London, UK", None, "no"), ("Toronto, ON, Canada", None, "no"),
+  ("Remote - EMEA", None, "no"), ("Bengaluru, India", None, "no"),
+  ("Remote", None, "unknown"), ("", None, "unknown"),
+  ("Remote", "United States", "yes"), ("Austin, TX", "Canada", "no"),
+]
+def test_cases(self): us_status(loc, country, cfg) == expected for each
+def test_lowercase_state_words_are_not_codes(self): us_status("Remote in Berlin", None, cfg) == "no"
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_location -v`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Rules: US location checks the country, then states, then a bounded non-US list (#4)"`
+
+---
+
+### Task 11: Sponsorship stance and citizenship
+
+**Files:**
+- Create: `outreach/rules/sponsorship.py`
+- Modify: `outreach/rules/config.toml` `[sponsorship]` only
+- Test: `tests/test_rules_sponsorship.py`
+
+**Interfaces:**
+- Consumes: `text.sentences`, `phrases`, the `[location]` `non_us` list (for foreign-country sponsorship).
+- Produces: `sponsorship_stance(body: str, cfg: Config) -> tuple[str, str]` returning (`yes` | `no` | `opt_only` | `unclear` | `silent`, quote); `citizenship_required(body: str, cfg: Config) -> tuple[bool, str]`.
+  - Each sentence that mentions a `topic` word is read on its own: `negation` present -> `no`, but `opt_only` when the same sentence also names OPT, STEM OPT or CPT positively; a `hedge` word -> `unclear`; it names a non-US country -> `unclear`; otherwise -> `yes`.
+  - Across sentences: any `opt_only` -> `opt_only`; `no` with no `yes` -> `no`; `yes` with no `no` -> `yes`; both, or any `unclear` with no clear answer -> `unclear`; no topic sentence -> `silent`. The quote is the deciding sentence (for `unclear`, the first unclear or conflicting one).
+  - Citizenship: a `citizenship` phrase in a sentence that has no `citizenship_negation` ("No security clearance required." is not a requirement).
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+STANCE = [  # (body, stance)
+  ("We are unable to provide visa sponsorship for this role.", "no"),
+  ("Visa sponsorship is not available for this position.", "no"),
+  ("We will not sponsor H-1B petitions.", "no"),
+  ("This role is not eligible for immigration sponsorship.", "no"),
+  ("We do not sponsor.", "no"),
+  ("Candidates must be authorized to work in the United States without sponsorship now or in the future.", "no"),
+  ("We can sponsor visas to Germany.", "unclear"),
+  ("Sponsorship may be considered for exceptional candidates.", "unclear"),
+  ("We sponsor H-1B visas.", "yes"),
+  ("Visa sponsorship is available for this role.", "yes"),
+  ("Retell AI is open to sponsoring work authorization for qualified candidates, including H-1B, TN, L-1.", "yes"),
+  ("We support candidates on OPT and STEM OPT, but we are unable to sponsor H-1B visas.", "opt_only"),
+  ("We build voice agents for hospitals.", "silent"),
+  ("", "silent"),
+]
+CITIZEN = [  # (body, required)
+  ("U.S. citizenship is required for this role.", True),
+  ("You must be a U.S. citizen.", True),
+  ("An active Secret clearance is required.", True),
+  ("This role requires access to ITAR-controlled data; applicants must be U.S. persons.", True),
+  ("No security clearance required.", False),
+  ("We welcome applicants regardless of citizenship.", False),
+]
+def test_stance(self):     stance and a non-empty quote for every non-silent case; quote == "" for silent
+def test_citizenship(self): flag per case; quote non-empty when True
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_sponsorship -v`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Rules: sponsorship stance reads negation first; citizenship ignores 'not required' (#4)"`
+
+---
+
+### Task 12: Graduation eligibility and 2027 start
+
+**Files:**
+- Create: `outreach/rules/eligibility.py`
+- Modify: `outreach/rules/config.toml` `[eligibility]` only
+- Test: `tests/test_rules_eligibility.py`
+
+**Interfaces:**
+- Produces: `eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, str]` returning (`ok` | `excluded`, reason `grad_window` | `current_student` | `cohort_title` | None, quote); `starts_2027(title: str, body: str, cfg: Config) -> bool`.
+  - Port `refresh/eligibility.py:63-91` in the same order: (1) a graduation sentence with dates decides (skip company history; `graduates_welcome` or `soft` wording -> ok; an `upper_bound` "by", "no later than" makes the window open below; `graduated` month inside the window -> ok, else `grad_window`); (2) `graduates_welcome` wording -> ok; (3) a `current_student` requirement -> `current_student`; (4) a `cohort_title` -> `cohort_title`; (5) ok.
+  - `GRAD_MONTH` comes from `[candidate].graduated`, never a constant in code.
+  - `cohort_title` names graduates, not start dates: "2027 graduate(s)", "class of 2027", "2027 university or college or campus grad or hire", "(college grad 2027)". "New Grad 2027" and "New Grad (2027)" are a 2027 start: ok, `starts_2027` True (#9 ruling; open question 3).
+  - `starts_2027`: a `start_2027` phrase or a 2027 cohort in the title, and no `immediate_start` phrase (`refresh/finalcheck.py:48-56`, `refresh/final_merge.py:17, 62`).
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+CASES = [  # (title, body, status, reason, start_2027)
+  ("Software Engineer, New Grad", "Candidates must graduate between December 2026 and June 2027.", "excluded", "grad_window", False),
+  ("Software Engineer, New Grad", "Class of 2027 graduates only.", "excluded", "grad_window", False),
+  ("Software Engineer", "You must be currently enrolled in a Bachelor's or Master's program in Computer Science.", "excluded", "current_student", False),
+  ("Software Engineer, New Grad", "Currently pursuing a Bachelor's degree or higher or a recent graduate studying Computer Science, Mathematics, or a related technical field.", "ok", None, False),
+  ("Software Engineer, New Grad", "Bachelor's degree in Computer Science, earned or expected by Summer 2027.", "ok", None, False),
+  ("Software Engineer, New Grad", "Graduated between May 2025 and August 2026 with a degree in Computer Science.", "ok", None, False),
+  ("2027 University Graduate - Software Engineer", "", "excluded", "cohort_title", True),
+  ("Software Engineer, New Grad (2027)", "", "ok", None, True),
+  ("Software Engineer, New Grad", "This role starts in July 2027.", "ok", None, True),
+  ("Software Engineer", "Our founders graduated from Y Combinator's Winter 2024 batch.", "ok", None, False),
+  ("Software Engineer, New Grad", "Immediate start. Graduated in 2025 or 2026.", "ok", None, False),
+]
+def test_cases(self): status, reason and starts_2027 per case; quote non-empty whenever excluded
+def test_graduation_month_comes_from_config(self):
+    # cfg with graduated "2027-05" -> CASES[0] becomes ok (the window now contains the month)
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_eligibility -v`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Rules: one graduation-eligibility rule; a 2027 start is a flag, not a hide (#4)"`
+
+---
+
+### Task 13: Company facts: size, stage and E-Verify evidence
+
+**Files:**
+- Create: `outreach/rules/facts.py`
+- Modify: `outreach/rules/config.toml` `[facts]` only
+- Test: `tests/test_rules_facts.py`
+
+**Interfaces:**
+- Produces:
+  - `EvidenceDraft` (frozen): `fact`, `value`, `confidence`, `source_kind`, `source_ref: str = ""`, `quote: str = ""`, `num_low: int | None = None`, `num_high: int | None = None`, `observed_on: str | None = None`. Values obey the `evidence` CHECKs.
+  - `parse_size(text: str, source_kind: str) -> EvidenceDraft | None`: reads "about N people", "around N to M", "N-M employees", "~N", "~N-M", "under N", "est. <N", "known to be well over N people", "source estimate ..." (the part after it, with its source in parentheses, "Built In" -> `builtin`). Confidence `guess` when the text says guess, uncertain or est., else `estimate`. `value` is "N" or "N-M" or "N+". Returns None for anything else, including every "no filing record" and "lifetime visa filings" phrase (LCA counts measure sponsorship, not headcount: audit section 1).
+  - `parse_stage(text: str, source_kind: str) -> EvidenceDraft | None`: `[facts].stage` phrases to the stage vocabulary in the schema; "Series A/B era" -> `series_a`, `guess`; "not researched", "Unverified" -> None.
+  - `everify_status(record: dict) -> EvidenceDraft | None`: from an old dashboard `everify` object: `status` `enrolled` -> `enrolled`, `none` -> `not_enrolled`; `observed_on` = `checked`; quote = `entity` plus `enrolled` date when present; `source_kind` `everify`; confidence `estimate` (the old pipeline matched employers by name, `refresh/apply_everify.py`). No `checked` date -> None.
+  - `from_old_dashboard(company: dict) -> list[EvidenceDraft]`: one `data.js` company to its size, stage and E-Verify evidence, reading `sizeWhy`, `head`, `yc.team`, `funding` and `everify`. **`sizeClass` is never read**: "small" was the default when no visa filing was found (audit section 1; `discover_radar.py:144`), so it is not evidence. `source_kind` is `old_dashboard` except `yc` for `yc.team` and the parenthesised source inside "source estimate". `sizeClass: "big"` text "known to be well over 500 people" yields `501+` as `estimate` (open question 1).
+
+- [ ] **Step 1: Write the failing tests** (strings are real `sizeWhy`, `head` and `funding` values from `dashboard/data.js`)
+
+```python
+def test_small_default_is_not_evidence(self):
+    from_old_dashboard({"sizeClass": "small", "sizeWhy": "no filing record: most likely an early startup"}) == []
+    from_old_dashboard({"sizeClass": "small", "sizeWhy": "no filing record and not a name I recognise as large: most likely an early startup"}) == []
+    from_old_dashboard({"sizeClass": "small", "sizeWhy": "1 lifetime visa filings, consistent with under 500"}) == []
+    from_old_dashboard({"sizeClass": "small", "sizeWhy": "no filing record: most likely an early startup; source estimate unknown (small)"}) == []
+    from_old_dashboard({"sizeClass": "cleared", "sizeWhy": "government or defence contractor, clearance-heavy"}) == []
+SIZE = [  # (text, value, low, high, confidence)
+  ("no filing record: most likely an early startup; source estimate 11-50 employees (Built In)", "11-50", 11, 50, "estimate"),
+  ("about 50 people", "50", 50, 50, "estimate"),
+  ("~50-150", "50-150", 50, 150, "estimate"),
+  ("~1,000", "1000", 1000, 1000, "estimate"),
+  ("size genuinely uncertain, somewhere around 300 to 700", "300-700", 300, 700, "guess"),
+  ("no filing record: most likely an early startup; source estimate ~100 (guess)", "100", 100, 100, "guess"),
+  ("no filing record: most likely an early startup; source estimate under 50", "1-49", 1, 49, "estimate"),
+  ("known to be well over 500 people", "501+", 501, None, "estimate"),
+  ("unknown", None, None, None, None), ("early", None, None, None, None),
+]
+def test_parse_size(self): each case (None row -> parse_size returns None); the builtin case has source_kind "builtin"
+def test_yc_team_is_yc_evidence(self):  from_old_dashboard({"yc": {"team": 50}}) has a size draft 50, source_kind "yc"
+STAGE = [("Series B era", "series_b"), ("YC Winter 2024", "yc"), ("Late-stage private", "late_private"),
+         ("Early stage", "early"), ("not researched", None)]
+def test_parse_stage(self): each case
+def test_everify(self):
+    everify_status({"status": "enrolled", "entity": "Retell AI, Inc", "enrolled": "2025-05-05", "checked": "2026-09-27"})
+      -> value "enrolled", observed_on "2026-09-27", quote contains "Retell AI, Inc" and "2025-05-05"
+    everify_status({"status": "none", "checked": "2026-09-27"}) -> value "not_enrolled"
+    everify_status({"status": "enrolled"}) is None
+def test_retell_record(self):
+    # the Retell fields from data.js (sizeWhy "about 50 people", head "~50-150", yc team 50, funding "Series B era",
+    # everify enrolled, checked 2026-09-27) -> 3 size drafts, 1 stage draft (series_b), 1 everify draft
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_facts -v`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Rules: size, stage and E-Verify evidence; 'small' is never a size (#4)"`

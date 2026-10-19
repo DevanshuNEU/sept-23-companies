@@ -57,7 +57,7 @@ outreach/rules/years.py        years_asked(), entry_wording()
 outreach/rules/location.py     us_status()
 outreach/rules/sponsorship.py  sponsorship_stance(), citizenship_required()
 outreach/rules/eligibility.py  eligibility(), starts_2027()
-outreach/rules/size.py         parse_size(), parse_stage(), from_old_dashboard()
+outreach/rules/facts.py        parse_size(), parse_stage(), everify_status(), from_old_dashboard()
 outreach/rules/decide.py       PostingInput, Decision, decide(), passes()
 outreach/rules/version.py      RULE_FILES, NOT_RULES, ruleset_version()
 outreach/rules/rebuild.py      rebuild(), decide_and_store(), record_evidence(), FlipReport, `python -m outreach.rules.rebuild`
@@ -74,7 +74,7 @@ tests/test_rules_years.py
 tests/test_rules_location.py
 tests/test_rules_sponsorship.py
 tests/test_rules_eligibility.py
-tests/test_rules_size.py
+tests/test_rules_facts.py
 tests/test_rules_decide.py
 tests/test_rules_misfires.py   the 8 audit misfires plus the "small" default, end to end through decide()
 tests/test_rules_rebuild.py
@@ -296,8 +296,8 @@ CREATE TABLE evidence (
 ) STRICT;
 CREATE INDEX evidence_company ON evidence(company_id, fact);
 -- Automation re-reading the same source adds nothing; hand rows are never de-duplicated (Review Focus 3).
-CREATE UNIQUE INDEX evidence_once ON evidence(company_id, fact, source_kind, source_ref, value, quote)
-  WHERE locked = 0;
+CREATE UNIQUE INDEX evidence_once ON evidence(company_id, fact, source_kind, source_ref, value, quote,
+  ifnull(observed_on, '')) WHERE locked = 0;
 ```
 
 ### People and email

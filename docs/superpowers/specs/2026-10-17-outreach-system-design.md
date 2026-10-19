@@ -1,3 +1,6 @@
+> **Superseded on 2026-10-18.** Decisions now live in GitHub issue #9 and the current design is
+> `2026-10-18-outreach-platform-design.md`. Kept for history; do not build from this file.
+
 # Outreach system v2: design
 
 Date: 2026-10-17. Owner: Devanshu Chicholikar. Status: draft v2 for his review.

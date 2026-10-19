@@ -1,3 +1,7 @@
+> **Superseded on 2026-10-18.** The grilling session decided the current mailer stays unchanged until the
+> switch-over (issue #9). Monday's work is issues #3, #10 and #8; the platform work is milestone Switch-over.
+> Kept for history; do not execute this plan.
+
 # Track A: Outreach Live on Current Code, Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

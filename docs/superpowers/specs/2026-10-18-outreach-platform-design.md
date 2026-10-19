@@ -77,7 +77,8 @@ company notes. Every source record is kept verbatim for audit.
 
 ## 5. Rules
 
-One Python module decides every posting and every company filter. Its source plus its config hash to a
+One Python module decides every posting (level, US, sponsorship stance, citizenship, years asked, eligibility) and
+records size and stage evidence. The hide and ordering policy below is built on those decisions in #6. Its source plus its config hash to a
 ruleset version; changing rules rebuilds decisions and lists every posting that flips from shown to hidden.
 
 - **Level:** new grad, early career, SWE I, SWE II (MTS and FDE included); postings asking up to 3 years.
@@ -93,8 +94,8 @@ ruleset version; changing rules rebuilds decisions and lists every posting that 
 
 Board reads return ok, empty or error (error = non-200, network failure, timeout, unreadable body). Error keeps
 the previous state. Empty closes postings only after two empty reads in a row. Three errors in a row raise a
-review item. The existing crawlers keep running on launchd until a later issue replaces them; the cloud crawler
-is deferred (#7).
+review item. The existing refresh keeps running on launchd until the switch; #21 builds the crawler that writes the
+store. The cloud crawler is deferred (#7).
 
 ## 7. Daily flow
 
@@ -110,7 +111,7 @@ is deferred (#7).
 
 ## 8. Sending
 
-Ported from the fixed mailer (#1): claim with Message-ID before calling Gmail, reconcile unclear sends against
+Ported from the fixed mailer (PR #1, issue #2): claim with Message-ID before calling Gmail, reconcile unclear sends against
 Sent, ignore auto-replies, prove the token works, never call Gmail under a lock. Added rules (#14):
 
 - **Ramp:** 20 a day, +10 per clean sending day, ceiling 100. Clean = bounces under 2% over 3 days, no Gmail
@@ -158,3 +159,21 @@ read-only archive. Until then the old :3001 dashboard and current mailer stay un
 
 Cloud crawler, growth signals, automatic research briefs, theses and trends, backups and monitoring, an
 embedded Claude terminal, publishing the Google OAuth app.
+
+## 14. Build conventions (new platform)
+
+Decided 2026-10-18 so the platform issues agree with each other.
+
+| Topic | Convention |
+|---|---|
+| Python package | `outreach/` at the repo root (`outreach/store`, `outreach/rules`, `outreach/crawl`, `outreach/api`, `outreach/mcp`, `outreach/sending`) |
+| Store path | `OUTREACH_DB`, default `~/Library/Application Support/outreach/outreach.db`; tests and worktrees always set it to a scratch file |
+| Create and migrate | `python3 -m outreach.install` (creates the store, applies migrations); against the live path only from the live checkout (`live_checkout.require_live`) |
+| Python dependencies | `pyproject.toml` with exact pins, managed by `uv` (`uv sync`, `uv run ...`); the old `mail/`, `refresh/` code stays standard library only |
+| Rules config | `outreach/rules/config.toml`; its hash plus the rules source make the ruleset version |
+| API | FastAPI on `127.0.0.1:3100`; serves `/api/*` and, in production, the built React app |
+| Web app | `web/`: React + Vite + shadcn/ui, TypeScript, Node 20 (nvm), `pnpm`; dev server on `:5173` proxies `/api` to `:3100` |
+| API types | `openapi-typescript` generates `web/src/api/schema.ts` from FastAPI's OpenAPI schema; regenerated whenever the API changes |
+| MCP server | `outreach/mcp`, official `mcp` package, stdio, registered in `.mcp.json` |
+| Ports in use today | `:3001` old dashboard, `:3002` old mail API (both retire at the switch) |
+| Mockups | `docs/design/`, approved by Devanshu before #12 code starts |

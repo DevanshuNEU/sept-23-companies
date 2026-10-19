@@ -1,3 +1,5 @@
+> **Evidence only.** Decisions live in issue #9; where this file disagrees, #9 wins. Its Recommendation section was overruled by #9 on: the ramp (#9: 20 a day, +10 per clean day, up to 100), follow-ups (#9: 3, at 3, 7 and 15 business days), links (#9: 2 in the first email, portfolio first), what a reply does (#9: stops all queued email at the company), and the per-domain cap (#9: 3 a day per company, recruiters outside it). Its stop signals and Gmail facts still apply.
+
 # Cold email deliverability for a personal Gmail sender (research, 2026-10-18)
 
 Read 2026-10-18. **SECONDARY** = vendor or third-party page, **UNVERIFIED** = unreadable or unsourced, *inference* = my reasoning.

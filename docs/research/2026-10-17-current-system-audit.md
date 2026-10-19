@@ -1,3 +1,5 @@
+> **Evidence only.** Decisions live in issue #9; where this file disagrees, #9 wins. A snapshot of 2026-10-17. Since then: the mailer bugs were fixed (PR #1), Gmail is signed in (2026-10-18), and fetch errors no longer close companies (PR #19). It cites the superseded 2026-10-17 design. Its misfire list (section 2) is the regression list for #4.
+
 # Current system audit (2026-10-17)
 
 Read-only audit of the outreach dashboard, refresh pipeline and mail sender, to decide what v2

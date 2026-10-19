@@ -1,3 +1,5 @@
+> **Evidence only.** Decisions live in issue #9; where this file disagrees, #9 wins. Overruled: GitHub Actions for crawling (its terms put the account at risk; ruled out in #7) and the Modal cloud crawler (deferred, #7). Still useful: ATS endpoints, ETag behavior, launchd across sleep (for #21).
+
 # Crawl sources, ATS APIs and scheduling (research, 2026-10-17)
 
 Repo stats come from `gh api` on 2026-10-17. Header checks were one read-only `curl -I` per ATS plus one conditional repeat.

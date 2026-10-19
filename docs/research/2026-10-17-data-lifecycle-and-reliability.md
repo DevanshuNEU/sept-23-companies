@@ -1,3 +1,5 @@
+> **Evidence only.** Decisions live in issue #9; where this file disagrees, #9 wins. Deferred by #7: Backblaze backups, healthchecks.io, the monthly sweep and the cloud data branch. Still useful: the SQLite settings and measured volumes (for #4).
+
 # Data lifecycle and reliability for the v2 store (research, 2026-10-17)
 
 Part A numbers were measured on 2026-10-17, read-only. Databases were opened with `file:...?mode=ro&immutable=1` (sqlite3 3.43.2 CLI and Homebrew Python 3.14.3 / SQLite 3.51.2), and nothing outside this file was written. Part B cites first-party pages fetched the same day. Anything marked **unverified** is an assumption or a third-party claim.

@@ -1402,6 +1402,8 @@ def test_graduation_month_comes_from_config(self):
   - `parse_stage(text: str, source_kind: str, cfg: Config | None = None) -> EvidenceDraft | None`: `[facts].stage` phrases to the stage vocabulary in the schema; "Series A/B era" -> `series_a`, `guess`; "not researched", "Unverified" -> None.
   - `everify_status(record: dict) -> EvidenceDraft | None`: from an old dashboard `everify` object: `status` `enrolled` -> `enrolled`, `none` -> `not_enrolled`; `observed_on` = `checked`; quote = `entity` plus `enrolled` date when present; `source_kind` `everify`; confidence `estimate` (the old pipeline matched employers by name, `refresh/apply_everify.py`). No `checked` date -> None.
   - `from_old_dashboard(company: dict, cfg: Config | None = None) -> list[EvidenceDraft]`: one `data.js` company to its size, stage and E-Verify evidence, reading `sizeWhy`, `head`, `yc.team`, `funding` and `everify`. **`sizeClass` is never read**: "small" was the default when no visa filing was found (audit section 1; `discover_radar.py:144`), so it is not evidence. `source_kind` is `old_dashboard` except `yc` for `yc.team` and the parenthesised source inside "source estimate". `sizeClass: "big"` text "known to be well over 500 people" yields `501+` as `estimate` (open question 1).
+  - `OldSignal` (frozen): `kind` (`over_500`, `big_by_filings`, `sec_filings`, `defence_contractor`, `agency`), `quote`.
+  - `old_dashboard_signals(company: dict) -> list[OldSignal]`: the old dashboard's hide verdicts that are not headcount: "known to be well over 500 people" (233) -> `over_500`; "N lifetime visa filings; every known under-500 company has 26 or fewer" (9) -> `big_by_filings`; "decades of SEC filings, an established company" (1) -> `sec_filings`; `sizeClass` `cleared` (41, whatever the `sizeWhy` wording) -> `defence_contractor`; `sizeClass` `agency` (1) -> `agency`. This is the only place `sizeClass` is read. #17 records them: `defence_contractor` and `agency` as `no_go` rows (`source 'import'`, `quote` = the `sizeWhy`), the three size signals as a `review_item` (`kind 'flagged'`, `raised_by 'import'`) unless open question 1 makes them size evidence.
 
 - [ ] **Step 1: Write the failing tests** (strings are real `sizeWhy`, `head` and `funding` values from `dashboard/data.js`)
 
@@ -1433,6 +1435,13 @@ def test_everify(self):
       -> value "enrolled", observed_on "2026-09-27", quote contains "Retell AI, Inc" and "2025-05-05"
     everify_status({"status": "none", "checked": "2026-09-27"}) -> value "not_enrolled"
     everify_status({"status": "enrolled"}) is None
+def test_old_hide_signals(self):
+    old_dashboard_signals({"sizeClass": "big", "sizeWhy": "1430 lifetime visa filings; every known under-500 company has 26 or fewer"}) -> [big_by_filings]
+    old_dashboard_signals({"sizeClass": "big", "sizeWhy": "decades of SEC filings, an established company"}) -> [sec_filings]
+    old_dashboard_signals({"sizeClass": "cleared", "sizeWhy": "aerospace, export-controlled"}) -> [defence_contractor]
+    old_dashboard_signals({"sizeClass": "agency", "sizeWhy": "a recruiting agency posting for other companies, not the employer"}) -> [agency]
+    old_dashboard_signals({"sizeClass": "small", "sizeWhy": "no filing record: most likely an early startup"}) -> []
+    parse_size("1430 lifetime visa filings; every known under-500 company has 26 or fewer", "old_dashboard") is None
 def test_retell_record(self):
     # the Retell fields from data.js (sizeWhy "about 50 people", head "~50-150", yc team 50, funding "Series B era",
     # everify enrolled, checked 2026-09-27) -> 3 size drafts, 1 stage draft (series_b), 1 everify draft
@@ -1458,8 +1467,8 @@ def test_retell_record(self):
   - `PostingInput` (frozen): `title: str`, `body: str = ""`, `location: str = ""`, `country: str | None = None`.
   - `Decision` (frozen): `lane`, `level_tier`, `level_ok: bool`, `level_basis`, `years_asked: int | None`, `years_quote`, `us`, `sponsorship`, `sponsorship_quote`, `citizenship: bool`, `citizenship_quote`, `eligibility`, `eligibility_reason: str | None`, `eligibility_quote`, `start_2027: bool`; `as_row() -> dict` with the `decision` column names and 0/1 for booleans.
   - `decide(p: PostingInput, cfg: Config | None = None) -> Decision` (loads and caches the config when None). Pure: no store, no clock, no network.
-  - `passes(d: Decision) -> bool` = `lane == "engineering" and us != "no" and sponsorship != "no" and not citizenship and eligibility == "ok"`. This is the posting-level part of #9's hidden list; #6 adds the company-level part (size over 300 with evidence, no-go) and must call this function rather than restate it.
-- Level combination (port of `refresh/finalcheck.py:91-100`; `m = cfg.candidate["max_years_asked"]`, `y` = years asked, `t` = title tier):
+  - `passes(d: Decision) -> bool` = `lane == "engineering" and us != "no" and sponsorship != "no" and not citizenship and eligibility == "ok"`. This is hide policy, not a classification: the posting-level half of #9's hidden list, kept next to `decide()` so the flip report and #6 use one definition. #6 calls it and adds the company-level half (size over 300 with evidence, no-go); it must not restate it.
+- Level combination (port of `refresh/finalcheck.py:91-100`; `m = cfg.candidate["max_years_asked"]`, `y` = years asked (the largest requirement, Task 9), `t` = title tier):
 
 ```
 lane != engineering          -> tier = t or "not_stated", ok = False
@@ -1530,8 +1539,10 @@ def test_pathological_body_is_fast(self):          # Review Focus 5: body = ("5 
                                                    # -> decide() returns within 2.0 s (time.monotonic)
 def test_as_row_matches_the_decision_table(self):  # set(as_row()) == decision columns minus posting_id, ruleset_version, decided_at
 def test_only_rules_classify(self):                # Done-when line 2
-    # every .py under outreach/ outside outreach/rules/ that imports re must not contain any of (case-insensitive):
-    # "new grad", "senior", "staff", "sponsor", "citizen", "clearance", "years of experience", "entry level", "united states"
+    # parse every .py under outreach/ outside outreach/rules/ with ast; for each call to re.compile, re.search,
+    # re.match, re.fullmatch, re.findall, re.finditer or re.sub whose pattern is a string literal, the pattern must not
+    # contain (case-insensitive) "grad", "senior", "staff", "sponsor", "visa", "citizen", "clearance", "years",
+    # "entry", "intern", "remote" or a US state code list; a test file listing an allowed exception names its reason
 ```
 
 - [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_decide tests.test_rules_misfires -v` -> ImportError for `decide`.
@@ -1554,9 +1565,18 @@ def test_only_rules_classify(self):                # Done-when line 2
   - `RulesetNotCurrent(Exception)`.
   - `Flip` (frozen): `posting_id: int`, `company: str`, `title: str`, `change: str` (for example "sponsorship silent -> no").
   - `FlipReport` (frozen): `version: str`, `previous: str | None`, `decided: int`, `to_hidden: list[Flip]`, `to_shown: list[Flip]`, `level_lost: list[Flip]`; `lines() -> list[str]` (a heading per list with its count, one line per flip, "None." for an empty list).
-  - `rebuild(conn, *, cfg: Config | None = None, version: str | None = None) -> FlipReport` (`cfg` and `version` overrides exist for tests). Steps: `start_job("rebuild", version)`; in one `BEGIN IMMEDIATE`: insert the `ruleset` row if absent (`config_toml` = `cfg.raw` decoded); for every posting, open or closed, compute `decide()` and compare it with the posting's row in `current_decision` (if any): `passes` true to false goes to `to_hidden`, false to true to `to_shown`, `level_ok` true to false to `level_lost`; upsert the row (`INSERT ... ON CONFLICT(posting_id, ruleset_version) DO UPDATE SET` every column); set `is_current` to 1 for this version and 0 for every other; COMMIT. Then `finish_job("ok", summary)` with `decided`, `previous` and the three id lists. On any exception: ROLLBACK, `finish_job("failed", error=...)`, re-raise. Never `DELETE FROM decision` (Radar `rebuild_decisions.py` docstring: a DELETE before upsert destroyed data there).
+  - `BATCH_SIZE = 500`.
+  - `rebuild(conn, *, cfg: Config | None = None, version: str | None = None, batch_size: int = BATCH_SIZE, progress=None) -> FlipReport` (`cfg`, `version` overrides exist for tests; `progress(done: int)` is called after each committed batch). Steps, none of which holds the write lock for longer than one batch:
+    1. In a short transaction, insert the `ruleset` row if absent, **not current** (`config_toml` = `cfg.raw` decoded). Only then `start_job("rebuild", version)`, so `job_run.ruleset_version` has its row.
+    2. Choose the postings: every open posting, plus every posting with no decision row at all. Closed postings that already have a decision keep it (they are not re-decided; `posting_decision` shows their last one).
+    3. In batches of `batch_size`, each its own `BEGIN IMMEDIATE ... COMMIT`: `decide()`, compare with the posting's `current_decision` row (open postings only) to build the three flip lists (`passes` true to false -> `to_hidden`, false to true -> `to_shown`, `level_ok` true to false -> `level_lost`), and upsert (`INSERT ... ON CONFLICT(posting_id, ruleset_version) DO UPDATE SET` every column). The API and sender (5 s busy timeout) wait at most one batch.
+    4. In one short transaction, switch: `UPDATE ruleset SET is_current = 0 WHERE is_current = 1`, then `UPDATE ruleset SET is_current = 1 WHERE ruleset_version = ?` (two statements: one `SET is_current = (ruleset_version = ?)` trips `ruleset_one_current` when going back to an older version).
+    5. Prune in batches: delete decision rows whose version is neither current nor the one just replaced, but only for postings that still have a row under one of those two (a closed posting's only decision is kept). About 40 MB per full version is not kept forever.
+    6. `finish_job("ok", summary)` with `decided`, `previous`, `pruned` and the three id lists. On any exception: ROLLBACK the open batch, `finish_job("failed", error=...)`, re-raise. The previous version stays current; rows already written under the new one are harmless and the next run overwrites them. There is no `DELETE FROM decision` before an upsert (Radar `rebuild_decisions.py` docstring: that destroyed data there).
+  - Rebuild and the crawler must not overlap: #21's job runs `rebuild` first, then crawls.
+  - Going back to an older ruleset (CLAUDE.md: rollback is `git revert`) is the same call: the reverted code hashes to the old version, its `ruleset` row already exists, and steps 2 to 5 run as usual.
   - `decide_and_store(conn, posting_id: int, *, cfg=None) -> Decision`: raises `RulesetNotCurrent("ruleset changed; run: uv run python -m outreach.rules.rebuild")` when the store's current version is not `ruleset_version()`; otherwise decides and upserts one row under the current version. Joins the caller's transaction when `conn.in_transaction`, else opens its own. This is what #21 calls per posting.
-  - `record_evidence(conn, company_id: int, drafts: list[EvidenceDraft], *, posting_id: int | None = None) -> int`: inserts each draft with `locked = 0` and `INSERT OR IGNORE` (the `evidence_once` index drops repeats); raises `ValueError` for a draft with `source_kind == "hand"` (hand values come from #16 edits and #17's locked import, which write `locked = 1` themselves); appends one `event` (`entity "evidence"`, `kind "recorded"`, `actor "rules"`) when at least one row was added; returns the number added.
+  - `record_evidence(conn, company_id: int, drafts: list[EvidenceDraft], *, posting_id: int | None = None) -> int`: inserts each draft with `locked = 0` and `INSERT ... ON CONFLICT DO NOTHING` (the `evidence_once` index drops repeats; `INSERT OR IGNORE` is not used because it also hides CHECK failures); raises `ValueError` for a draft with `source_kind == "hand"` (hand values come from #16 edits and #17's locked import, which write `locked = 1` themselves); appends one `event` (`entity "evidence"`, `kind "recorded"`, `actor "rules"`) when at least one row was added; returns the number added.
   - `main(argv=None) -> int` for `uv run python -m outreach.rules.rebuild`: `connect()`, `rebuild`, print `lines()`, return 0.
   - `install.install` now ends with `rebuild(conn)` when the store has no current ruleset or a different one; `install.main` prints the report's `lines()`.
 
@@ -1564,17 +1584,24 @@ def test_only_rules_classify(self):                # Done-when line 2
 
 ```python
 def test_install_registers_the_current_ruleset(self):   # current ruleset == ruleset_version(); its config_toml == config.toml text
-def test_every_posting_gets_a_decision_closed_too(self): # 2 postings, one closed -> 2 rows in current_decision
+def test_open_and_undecided_postings_get_a_decision(self):
+    # 2 postings, one closed before any rebuild -> both decided; then a second version -> only the open one is
+    # re-decided, the closed one keeps its row and posting_decision shows it
 def test_flip_to_hidden_is_listed(self):
     # posting "Software Engineer, New Grad", "Boston, MA", body "" -> rebuild -> passes
     # UPDATE posting body = "We do not sponsor." -> rebuild(version="r-000000000001") -> to_hidden == [that posting],
     # change mentions "sponsorship"; job_run summary to_hidden == [id]
 def test_flip_to_shown_and_level_lost_are_listed(self):
 def test_same_rules_twice_flip_nothing(self):           # rebuild twice -> second report has 3 empty lists
-def test_old_versions_are_kept(self):                   # after two versions both have rows; only the newest is current
-def test_rebuild_is_all_or_nothing(self):
-    # patch decide to raise on the second posting -> exception; no rows under the new version; previous version still current;
-    # last job_run for "rebuild" has status "failed"
+def test_only_current_and_previous_versions_are_kept(self):
+    # three versions in a row -> rows only under the newest two, except a closed posting's only row, which stays
+def test_revert_to_an_older_ruleset(self):
+    # rebuild as version A, then B, then A again -> A is current, no IntegrityError, flips listed against B
+def test_failed_rebuild_keeps_the_previous_version(self):
+    # patch decide to raise on the third posting with batch_size=2 -> exception; previous version still current;
+    # the last job_run for "rebuild" has status "failed" and ruleset_version set (its ruleset row exists)
+def test_batches_release_the_lock(self):
+    # 5 postings, batch_size=2; in progress(), a second connection with timeout=0 inserts a company -> succeeds every time
 def test_decide_and_store_refuses_a_stale_ruleset(self): # set current to "r-000000000001" -> RulesetNotCurrent
 def test_decide_and_store_writes_under_current(self):
 def test_small_default_leaves_size_unknown(self):       # SmallDefaultIsUnknown, store half
@@ -1582,6 +1609,7 @@ def test_small_default_leaves_size_unknown(self):       # SmallDefaultIsUnknown,
     # == 0, and SELECT * FROM company_fact WHERE company_id = ? AND fact = 'size' returns no row
 def test_record_evidence_ignores_repeats(self):         # same drafts twice -> second call returns 0
 def test_record_evidence_refuses_hand_drafts(self):     # ValueError
+def test_record_evidence_raises_on_a_bad_draft(self):   # an EvidenceDraft with stage "series_z" -> sqlite3.IntegrityError, nothing written
 def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>; main([]) == 0; output contains "shown to hidden"
 ```
 
@@ -1624,13 +1652,20 @@ def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>;
 | 17 | `rules/rebuild.py` | `to_hidden` never appended | `test_flip_to_hidden_is_listed` |
 | 18 | `rules/version.py` | `config.toml` left out of the hash | `test_version_changes_with_config` |
 | 19 | `rules/eligibility.py` | `current_student` step removed | eligibility current-student case |
+| 20 | `rules/years.py` | largest requirement becomes the smallest (`max` to `min`) | years "5+ years ... 1+ years" case |
+| 21 | `rules/sponsorship.py` | `immigration` added to the topic words | sponsorship EEO case |
+| 22 | `rules/title.py` | III, IV, 3, 4, 5 after a level noun no longer senior | "Full Stack Engineer 4 (Go, AWS)" case |
+| 23 | `store/db.py` | `is_live_path` stops case-folding | other-spellings test (letter case) |
+| 24 | `store/migrations/0001_initial.sql` | `message_legal_transition` trigger removed | `test_message_state_machine` |
+| 25 | `rules/rebuild.py` | `record_evidence` uses `INSERT OR IGNORE` | `test_record_evidence_raises_on_a_bad_draft` |
+| 26 | `rules/location.py` | non-US-only cities lose to a two-letter code | "Toronto, CA" case |
 
 - [ ] **Step 2: Run it.** `uv run python tests/mutation_check.py`
-  Expected: `baseline green (19 mutations to apply)`, 19 `CAUGHT` lines, `caught 19  missed 0  skipped 0`, exit 0. A MISSED line means a test is missing: add it to the owning task's test file and rerun.
+  Expected: `baseline green (26 mutations to apply)`, 26 `CAUGHT` lines, `caught 26  missed 0  skipped 0`, exit 0. A MISSED line means a test is missing: add it to the owning task's test file and rerun.
 - [ ] **Step 3: Final checks, each with its expected output.**
   - `uv run python -m unittest discover -s tests -t .` -> `OK`, old and new tests together.
   - `OUTREACH_DB=$(mktemp -d)/outreach.db uv run python -m outreach.install` -> prints `store at version 1` and an empty flip report; running it again changes nothing.
-  - `env -u OUTREACH_DB uv run python -m outreach.install` from this worktree -> exits non-zero naming the live checkout; `ls "$HOME/Library/Application Support/outreach/"` shows no new file.
+  - `H=$(mktemp -d); env -u OUTREACH_DB HOME="$H" .venv/bin/python -m outreach.install` from this worktree -> exits non-zero naming the live checkout, and `find "$H" -type f` prints nothing. HOME points at a fresh temp folder so that even a broken guard could only touch a temp file, never the real store.
   - `uv run python -c "import pathlib,sys; bad=[str(p) for g in ('outreach/**/*','tests/*.py','CLAUDE.md') for p in pathlib.Path('.').glob(g) if p.is_file() and any(c in p.read_text(errors='ignore') for c in chr(0x2013)+chr(0x2014))]; print(bad); sys.exit(bool(bad))"` -> prints `[]` (macOS grep has no `-P`).
   - `git diff --stat origin/master -- dashboard mail refresh` -> no output.
 - [ ] **Step 4: Check every "Done when" line of #4:** store created by one command (step 3 second bullet); rules suite and mutation check pass (steps 2 and 3); nothing in the new platform classifies titles except the rules module (`test_only_rules_classify`); `dashboard/app.js` untouched (last bullet).

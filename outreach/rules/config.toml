@@ -1,0 +1,332 @@
+# Every vocabulary and number the rules use. Word lists are plain words, matched by config.phrases():
+# whole words, case-insensitive (except us_state_codes), and a space inside a phrase also matches a hyphen or nothing.
+# Each key's comment names the line of the old system it was ported from (refresh/ in this repo).
+# Each later rule task may adjust only its own section.
+
+[candidate]
+# refresh/eligibility.py:32 (GRAD_MONTH = 2026*12 + 5, he finished his MS in May 2026); #9
+graduated = "2026-05"
+# #9: a posting asking for more than 3 years is out of his band
+max_years_asked = 3
+
+[title]
+# refresh/finalcheck.py:25 ENG (the title must name an engineering word; whole words, so 'engineering' is listed)
+engineering = [
+  "engineer", "engineers", "engineering", "developer", "developers", "programmer", "programmers", "swe", "sde",
+  "mts", "member of technical staff", "member of product staff", "member of engineering staff",
+]
+# refresh/finalcheck.py:27 INTERN ('co op' also matches co-op and coop)
+intern = [
+  "intern", "interns", "internship", "internships", "co op", "apprenticeship program for students",
+]
+# refresh/finalcheck.py:28-34 OFFLANE (stems such as 'manufactur' and 'recruit' are spelled out as whole words)
+off_lane = [
+  "gtm", "go to market", "it systems", "it support", "help desk", "desktop support", "technical support",
+  "support engineer", "customer support", "sales", "solutions engineer", "solution engineer", "solutions consultant",
+  "solution consultant", "solutions architect", "solution architect", "pre sales", "account", "recruit", "recruiter",
+  "recruiters", "recruiting", "recruitment", "designer", "design engineer", "mechanical", "electrical", "hardware",
+  "firmware", "embedded", "soc", "mechatronic", "mechatronics", "robotics hardware", "analog", "rf", "fpga", "asic",
+  "silicon", "manufacturing", "manufacturer", "manufacture", "process engineer", "quality engineer", "qa",
+  "test engineer", "validation", "technician", "scientist", "research engineer, bio", "research engineer, chem",
+  "actuary", "actuarial", "clinical", "network engineer", "field service", "field technician", "installation",
+  "facilities", "construction", "civil", "structural", "signal integrity", "packaging", "documentation",
+  "technical writer", "technical writing", "developer advocate", "developer advocacy", "developer relations",
+  "devrel", "evangelist", "community", "it engineer", "customer engineer", "customer experience",
+  "marketing engineer", "growth marketing", "product operations", "revenue operations", "business operations",
+]
+# refresh/finalcheck.py:104-105 (talent pool and general application titles are not roles)
+general_application = [
+  "submission", "submissions", "talent pool", "talent network", "talent community", "general application",
+  "general interest", "future opportunities", "future openings", "don't see a role", "don't see the role",
+  "don't see a fit", "don't see the fit", "don’t see a role", "don’t see the role", "don’t see a fit",
+  "don’t see the fit", "expression of interest", "join our network",
+]
+# refresh/finalcheck.py:26 SEN and refresh/crawl_boards.py:59 BAD; 'fellow' dropped, 'distinguished' kept, no 'staff engineer i' exemption (III, IV, 3, 4, 5 are read in code through level_nouns)
+senior = [
+  "senior", "sr", "staff", "principal", "lead", "head", "director", "architect", "vp", "vice president", "chief",
+  "distinguished",
+]
+# refresh/finalcheck.py:26 SEN ('manager'); kept apart because a strong entry marker never overrides it
+manager = [
+  "manager", "managers",
+]
+# refresh/finalcheck.py:42-44 STRONG, plus 'fellow' and 'fellowship' (moved here from senior); the old list has no bare 'graduate', so the title task adds it if a case needs it
+strong_entry = [
+  "new grad", "new grads", "new graduate", "new graduates", "recent grad", "recent grads", "recent graduate",
+  "recent graduates", "recently graduated", "recent college", "graduating", "university grad", "university graduate",
+  "university hire", "college hire", "campus hire", "entry level", "early career", "0-1 years", "0-2 years",
+  "0 to 1 years", "0 to 2 years", "0-1 year", "0 to 1 year", "no experience required", "no experience is required",
+  "no prior experience required", "no prior experience is required", "no professional experience required",
+  "no professional experience is required", "no experience necessary", "no experience needed", "less than 1 year",
+  "less than one year", "less than 2 years", "less than two years", "fellow", "fellowship",
+]
+# refresh/finalcheck.py:36-37 NG_T and refresh/crawl_boards.py:26 TITLE_ENTRY (the 20xx forms fold into 'grad')
+new_grad = [
+  "new grad", "new grads", "new graduate", "new graduates", "university grad", "university grads",
+  "university graduate", "university graduates", "college grad", "college grads", "college graduate",
+  "college graduates", "recent grad", "recent grads", "recent graduate", "recent graduates", "campus", "grad",
+  "grads", "graduate", "graduates", "emerging talent",
+]
+# refresh/finalcheck.py:38 EC_T and refresh/crawl_boards.py:26-27 TITLE_ENTRY; 'fellow' and 'fellowship' read as early career here
+early_career = [
+  "early career", "associate", "junior", "juniors", "jr", "entry level", "rotation", "rotational", "trainee",
+  "trainees", "residency", "resident", "apprentice", "apprentices", "apprenticeship", "fellow", "fellowship",
+]
+# refresh/crawl_boards.py:28 TITLE_OPEN, decided here: MTS and FDE only, not 'founding'
+open_level = [
+  "member of technical staff", "member of product staff", "member of engineering staff", "mts", "forward deployed",
+  "fde",
+]
+# refresh/finalcheck.py:39-40 L1_T and L2_T, refresh/final_merge.py:18: a level numeral counts only right after one of these
+level_nouns = [
+  "engineer", "developer", "swe", "sde", "programmer", "mts",
+]
+
+[years]
+# refresh/finalcheck.py:41 YOE (a number of years counts only when one of these follows 'years' in the sentence)
+experience_words = [
+  "experience", "industry", "building", "engineering", "software", "professional", "of work",
+]
+# new in #4, mirrors refresh/eligibility.py:52 SOFT (a preference is not a requirement)
+preferred = [
+  "preferred", "nice to have", "a plus", "bonus", "ideally",
+]
+# new in #4 (years that stand in for a degree are not a requirement; 'or' right before the number is read in code)
+degree_alternative = [
+  "in lieu of a degree", "equivalent experience", "equivalent practical experience", "equivalent work experience",
+]
+# new in #4 (the company's age is not a requirement)
+company_age = [
+  "founded", "ago", "in business", "history",
+]
+# refresh/finalcheck.py:42-44 STRONG and refresh/crawl_boards.py:29-31 BODY_ENTRY
+body_entry = [
+  "new grad", "new grads", "new graduate", "new graduates", "recent grad", "recent grads", "recent graduate",
+  "recent graduates", "recently graduated", "recent college", "graduating", "university grad", "university hire",
+  "college hire", "campus hire", "entry level", "early career", "0-1 years", "0-2 years", "0-3 years",
+  "0 to 1 years", "0 to 2 years", "0 to 3 years", "0-1 year", "0 to 1 year", "zero to 3 years", "1-3 years",
+  "2-3 years", "1 to 3 years", "2 to 3 years", "1+ years", "1+ year", "no experience required",
+  "no experience is required", "no prior experience required", "no prior experience is required",
+  "no professional experience required", "no professional experience is required", "no experience necessary",
+  "no experience needed", "less than 1 year", "less than one year", "less than 2 years", "less than two years",
+  "all experience levels", "all seniority levels",
+]
+
+[location]
+# refresh/crawl_boards.py:37 _US_MARK and refresh/finalcheck.py:81 USOK
+us_marks = [
+  "us", "usa", "u.s.", "u.s.a.", "united states", "united states of america",
+]
+# refresh/crawl_boards.py:34 _STATES (51 codes with DC); matched case-sensitively
+us_state_codes = [
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA",
+  "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR",
+  "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+]
+# the 50 states and DC, spelled out; read first so 'New Mexico' never reads as Mexico
+us_state_names = [
+  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware",
+  "District of Columbia", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas",
+  "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri",
+  "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina",
+  "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
+  "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
+]
+# refresh/finalcheck.py:81-82 USOK, refresh/crawl_boards.py:45-54 _US_WORDS and REGION
+us_cities = [
+  "san francisco", "south san francisco", "bay area", "new york", "nyc", "brooklyn", "manhattan", "jersey city",
+  "hoboken", "seattle", "austin", "boston", "chicago", "denver", "los angeles", "palo alto", "mountain view",
+  "menlo park", "redwood city", "san mateo", "sunnyvale", "san jose", "oakland", "berkeley", "santa clara",
+  "foster city", "burlingame", "emeryville", "dallas", "houston", "san antonio", "fort worth", "plano", "irving",
+  "frisco", "atlanta", "miami", "philadelphia", "pittsburgh", "san diego",
+]
+# refresh/finalcheck.py:69-80 NONUS and refresh/crawl_boards.py:35-36 _NON_US_PLACE (Georgia is left out: state or country)
+non_us_countries = [
+  "india", "canada", "united kingdom", "uk", "england", "scotland", "wales", "great britain", "britain", "ireland",
+  "germany", "poland", "israel", "singapore", "australia", "japan", "korea", "south korea", "china", "taiwan",
+  "mexico", "brazil", "argentina", "colombia", "netherlands", "france", "spain", "sweden", "switzerland", "portugal",
+  "romania", "ukraine", "philippines", "vietnam", "estonia", "latvia", "lithuania", "czech", "czechia",
+  "czech republic", "hungary", "greece", "italy", "austria", "belgium", "denmark", "norway", "finland", "turkey",
+  "uae", "united arab emirates", "saudi", "saudi arabia", "egypt", "nigeria", "kenya", "south africa", "pakistan",
+  "bangladesh", "sri lanka", "nepal", "indonesia", "malaysia", "thailand", "new zealand", "chile", "peru",
+  "costa rica", "uruguay", "guatemala", "serbia", "croatia", "bulgaria", "slovakia", "hong kong", "macau", "emea",
+  "apac", "latam", "europe",
+]
+# refresh/finalcheck.py:69-80 NONUS (city names found only outside the US; Tel Aviv, Munich, Toronto, Tbilisi and Bengaluru are the ones the design names)
+non_us_cities = [
+  "bangalore", "bengaluru", "hyderabad", "pune", "chennai", "noida", "gurgaon", "gurugram", "mumbai", "delhi",
+  "kolkata", "ahmedabad", "bengal", "toronto", "vancouver", "montreal", "munich", "krakow", "tel aviv", "tbilisi",
+  "sydney", "tokyo", "seoul", "beijing", "shanghai", "shenzhen", "hangzhou", "suzhou", "wuhan", "chengdu", "nanjing",
+  "guangzhou", "haiyan", "taipei", "manila", "cebu", "ho chi minh", "hanoi", "kuala lumpur", "penang", "amsterdam",
+  "madrid", "barcelona", "stockholm", "zurich", "lisbon", "tallinn", "prague", "budapest", "brussels", "copenhagen",
+  "oslo", "helsinki", "istanbul", "dubai", "abu dhabi", "cairo", "lagos", "nairobi", "jakarta", "bangkok",
+  "auckland", "santiago", "belgrade", "sofia", "bogota", "medellin", "mexicali", "tijuana", "monterrey",
+  "guadalajara", "juarez", "queretaro",
+]
+# names of both a non-US city and a US town: no alone, yes next to a US state code. refresh/finalcheck.py:69-80 NONUS and refresh/crawl_boards.py:48 (Cambridge); rome, milan, vienna and warsaw added here
+shared_city_names = [
+  "paris", "athens", "lima", "london", "dublin", "berlin", "cambridge", "birmingham", "manchester", "rome", "milan",
+  "vienna", "warsaw",
+]
+
+[sponsorship]
+# refresh/finalcheck.py:64-68; exact topic words only, no bare 'immigration' (EEO lines say 'immigration status')
+topic = [
+  "sponsor", "sponsors", "sponsored", "sponsoring", "sponsorship", "visa", "visas", "h-1b", "h1b",
+]
+# refresh/finalcheck.py:64-66 NOSPON, spelled out as phrases
+negation = [
+  "unable to sponsor", "unable to provide", "unable to offer", "unable to support", "not able to sponsor",
+  "not able to provide", "not able to offer", "cannot sponsor", "cannot provide", "cannot offer", "can not sponsor",
+  "can't sponsor", "can’t sponsor", "do not sponsor", "does not sponsor", "will not sponsor", "would not sponsor",
+  "won't sponsor", "won’t sponsor", "do not offer", "does not offer", "will not offer", "do not provide",
+  "does not provide", "will not provide", "not offering", "not providing", "not sponsoring", "no sponsorship",
+  "no visa sponsorship", "no visas", "not available", "isn't available", "isn’t available", "not offered",
+  "not provided", "not supported", "not eligible for", "without sponsorship", "without visa sponsorship",
+  "without the need for sponsorship", "without the need for visa sponsorship", "without requiring sponsorship",
+  "without needing sponsorship",
+]
+# new in #4 (a hedged clause reads as unclear, not yes)
+hedge = [
+  "may", "might", "case by case", "depending", "depends", "exceptional", "in some cases", "in certain cases",
+  "select candidates", "limited", "occasionally", "sometimes", "possibly", "potentially", "discretion",
+]
+# new in #4 (the old code has no OPT wording; read with a support word by the sponsorship task)
+opt = [
+  "opt", "stem opt", "cpt", "optional practical training", "curricular practical training",
+]
+# refresh/finalcheck.py:61-63 CITIZ and refresh/crawl_boards.py:127, one list
+citizenship = [
+  "u.s. citizenship is required", "u.s. citizenship required", "us citizenship is required",
+  "us citizenship required", "u.s. citizens only", "u.s. citizen only", "us citizens only", "us citizen only",
+  "must be a u.s. citizen", "must be u.s. citizen", "must be a us citizen", "must be us citizen",
+  "must be a united states citizen", "must be a citizen of the united states", "security clearance",
+  "active clearance", "clearance is required", "clearance required", "ts/sci", "secret clearance", "top secret",
+  "green card holders only", "green card holder only", "permanent residents only", "permanent resident only",
+  "must be a u.s. person", "must be u.s. persons", "must be a us person", "must be us persons", "u.s. persons only",
+  "u.s. persons required", "us persons only", "us persons required", "itar", "export control laws require",
+]
+# new in #4 ('No security clearance required' is not a requirement)
+citizenship_negation = [
+  "no security clearance", "no clearance", "no u.s. citizenship", "no citizenship", "not required", "isn't required",
+  "isn’t required", "not a requirement", "not necessary", "not needed", "does not require", "do not require",
+  "doesn't require", "regardless of", "without regard to",
+]
+
+[eligibility]
+# refresh/eligibility.py:37 GRADSENT
+grad_words = [
+  "graduate", "graduates", "graduated", "graduating", "graduation", "class of", "degree earned", "degree completed",
+  "degree by", "university hire", "campus hire", "incoming grad", "incoming graduate",
+]
+# refresh/eligibility.py:38-40 PURSUING
+current_student = [
+  "currently pursuing", "currently enrolled", "currently working toward", "currently in the process of obtaining",
+  "currently a student", "actively pursuing", "current student", "current students", "current senior",
+  "current seniors", "current undergrad", "current undergrads", "current undergraduate", "current undergraduates",
+  "current college student", "current college students", "current college senior", "current college seniors",
+  "current university student", "current university students", "current university senior",
+  "current university seniors", "must be enrolled", "must be currently enrolled", "must be a student",
+  "must be currently a student", "in your final year", "final year student", "final year students",
+  "final year undergrad", "final year undergraduate",
+]
+# refresh/eligibility.py:41-43 ALTGRAD
+graduates_welcome = [
+  "or a recent grad", "or a recent graduate", "or recent grad", "or recent grads", "or recent graduate",
+  "or recent graduates", "recently graduated or", "recently graduated and", "recent graduates welcome",
+  "recent graduates are welcome", "recent graduates are also welcome", "recent graduates are encouraged",
+  "recent graduates are eligible", "recent graduates are considered", "recent grads welcome",
+  "open to recent graduates", "earned or expected", "or have graduated", "or have recently graduated",
+  "or have completed your degree", "or completed your degree", "or completed a degree", "or completed the degree",
+  "graduated within the last", "graduated within the past", "already graduated",
+]
+# refresh/eligibility.py:52 SOFT
+soft = [
+  "preferred", "prioritized", "prioritised", "also considered", "also be considered", "ideal", "ideally", "a plus",
+  "nice to have", "bonus", "welcome to apply",
+]
+# refresh/eligibility.py:67-68 (the company's own history is not an eligibility rule)
+company_history = [
+  "we graduated", "our company graduated", "our team graduated", "our founders graduated", "the company graduated",
+  "graduated from y combinator", "graduated from yc", "graduated from techstars", "graduated from a16z",
+]
+# refresh/eligibility.py:76 ('by Summer 2027' is an upper bound: anyone already graduated qualifies)
+upper_bound = [
+  "by", "no later than", "before", "prior to",
+]
+# refresh/eligibility.py:53-55 COHORT_T, per the #9 ruling: cohort titles name graduates, not start dates
+cohort_title = [
+  "2027 graduate", "2027 graduates", "2027 grads", "2027 new grads", "2027 new graduates", "class of 2027",
+  "2027 university grad", "2027 university graduate", "2027 university hire", "2027 college grad",
+  "2027 college graduate", "2027 college hire", "2027 campus grad", "2027 campus hire", "college grad 2027",
+  "2027 incoming grad", "2027 incoming graduate", "university hire 2027", "campus full time 2027",
+  "december 2026 graduates", "spring 2027 graduates", "fall 2026 graduates",
+]
+# refresh/finalcheck.py:48-50 STARTL and 53-55 START27 (start wording only; graduation wording is not a start date)
+start_2027 = [
+  "2027 start", "start date 2027", "start date: 2027", "starts in 2027", "starting in 2027", "start in 2027",
+  "starts 2027", "starting 2027", "begins in 2027", "join our team in 2027", "join us in 2027",
+  "start date january 2027", "start date: january 2027", "starts in january 2027", "starting in january 2027",
+  "start in january 2027", "january 2027 start", "starts january 2027", "starting january 2027",
+  "start date february 2027", "start date: february 2027", "starts in february 2027", "starting in february 2027",
+  "start in february 2027", "february 2027 start", "starts february 2027", "starting february 2027",
+  "start date march 2027", "start date: march 2027", "starts in march 2027", "starting in march 2027",
+  "start in march 2027", "march 2027 start", "starts march 2027", "starting march 2027", "start date april 2027",
+  "start date: april 2027", "starts in april 2027", "starting in april 2027", "start in april 2027",
+  "april 2027 start", "starts april 2027", "starting april 2027", "start date may 2027", "start date: may 2027",
+  "starts in may 2027", "starting in may 2027", "start in may 2027", "may 2027 start", "starts may 2027",
+  "starting may 2027", "start date june 2027", "start date: june 2027", "starts in june 2027",
+  "starting in june 2027", "start in june 2027", "june 2027 start", "starts june 2027", "starting june 2027",
+  "start date july 2027", "start date: july 2027", "starts in july 2027", "starting in july 2027",
+  "start in july 2027", "july 2027 start", "starts july 2027", "starting july 2027", "start date august 2027",
+  "start date: august 2027", "starts in august 2027", "starting in august 2027", "start in august 2027",
+  "august 2027 start", "starts august 2027", "starting august 2027", "start date september 2027",
+  "start date: september 2027", "starts in september 2027", "starting in september 2027", "start in september 2027",
+  "september 2027 start", "starts september 2027", "starting september 2027", "start date october 2027",
+  "start date: october 2027", "starts in october 2027", "starting in october 2027", "start in october 2027",
+  "october 2027 start", "starts october 2027", "starting october 2027", "start date november 2027",
+  "start date: november 2027", "starts in november 2027", "starting in november 2027", "start in november 2027",
+  "november 2027 start", "starts november 2027", "starting november 2027", "start date december 2027",
+  "start date: december 2027", "starts in december 2027", "starting in december 2027", "start in december 2027",
+  "december 2027 start", "starts december 2027", "starting december 2027", "start date spring 2027",
+  "start date: spring 2027", "starts in spring 2027", "starting in spring 2027", "start in spring 2027",
+  "spring 2027 start", "starts spring 2027", "starting spring 2027", "start date summer 2027",
+  "start date: summer 2027", "starts in summer 2027", "starting in summer 2027", "start in summer 2027",
+  "summer 2027 start", "starts summer 2027", "starting summer 2027", "start date fall 2027", "start date: fall 2027",
+  "starts in fall 2027", "starting in fall 2027", "start in fall 2027", "fall 2027 start", "starts fall 2027",
+  "starting fall 2027", "start date winter 2027", "start date: winter 2027", "starts in winter 2027",
+  "starting in winter 2027", "start in winter 2027", "winter 2027 start", "starts winter 2027",
+  "starting winter 2027", "start date early 2027", "start date: early 2027", "starts in early 2027",
+  "starting in early 2027", "start in early 2027", "early 2027 start", "starts early 2027", "starting early 2027",
+  "start date mid 2027", "start date: mid 2027", "starts in mid 2027", "starting in mid 2027", "start in mid 2027",
+  "mid 2027 start", "starts mid 2027", "starting mid 2027", "start date late 2027", "start date: late 2027",
+  "starts in late 2027", "starting in late 2027", "start in late 2027", "late 2027 start", "starts late 2027",
+  "starting late 2027",
+]
+# refresh/finalcheck.py:56-57 IMMED
+immediate_start = [
+  "immediate start", "start immediately", "starts immediately", "start asap", "starts asap", "start as soon as",
+  "starts as soon as", "2026 start", "2026 new grad", "2026 new grads", "2026 new graduate", "2026 new graduates",
+  "2026 grad", "2026 grads", "2026 graduate", "2026 graduates", "december 2026 grad", "december 2026 grads",
+  "december 2026 graduate", "december 2026 graduates", "graduated in 2025", "graduated in 2026",
+  "graduating in 2025", "graduating in 2026",
+]
+
+[facts]
+# data.js sizeWhy and head wording: a size written with one of these is a guess, not an estimate
+size_guess_words = [
+  "guess", "uncertain", "est.",
+]
+[facts.stage]
+# data.js 'funding' wording, one list per stage value of the evidence CHECK; pre_seed comes first so it wins over seed
+pre_seed = ["pre seed", "preseed"]
+seed = ["seed", "seed stage", "seed round"]
+series_a = ["series a"]
+series_b = ["series b"]
+series_c = ["series c"]
+series_d = ["series d"]
+series_e_plus = ["series e", "series f", "series g", "series h"]
+late_private = ["late stage", "late stage private", "pre ipo"]
+public = ["publicly traded", "publicly listed", "public company", "nasdaq", "nyse"]
+yc = ["yc", "y combinator"]
+early = ["early stage", "early startup"]

@@ -16,10 +16,10 @@ _MTS = re.compile(r"(?<!\w)member\s+of\s+(?:technical|product|engineering)\s+sta
 _NUMERAL = r"(?:I\s*/\s*II|1\s*/\s*2|III|IV|II|I|V|[1-5])(?!\w|\.\d|/(?![IV\d]))"
 _DASHES = "\\-" + chr(0x2010) + chr(0x2011) + chr(0x2013)  # hyphen, Unicode hyphens, en dash (see config.py)
 _SEP = "[\\s,(" + _DASHES + "]{0,3}"
-# "Software Engineer Front-End 2": up to two qualifier words may sit between the noun and the numeral, but only
-# when the numeral ends the title or a part of it, so "Engineer, Tier 1 Support Tools" states no level.
-_QUALIFIER = "(?:[\\s,(" + _DASHES + "]{1,3}[A-Za-z][\\w+#.&/" + _DASHES + "]{0,24}){1,2}[\\s,()" + _DASHES + "]{1,3}"
-_TAIL = "(?=\\s*(?:$|[(),|:" + _DASHES + "]))"
+# "Software Engineer Front-End 2": one role qualifier from config (title.level_qualifiers) may sit between the noun
+# and the numeral. Any other word in between means the numeral is not a level ("Web 3", "Python 3", "Layer 2").
+_QUAL_BEFORE = "[\\s,(" + _DASHES + "]{1,3}"
+_QUAL_AFTER = "[\\s,()" + _DASHES + "]{1,3}"
 _LEVEL_WORD = re.compile(r"(?<!\w)level[\s" + _DASHES + r"]{0,3}(II|I|2|1)(?!\w|\.\d)", re.IGNORECASE)
 
 _SWE1 = {"i", "1", "i/ii", "1/2"}
@@ -34,12 +34,13 @@ class TitleResult:
     basis: str  # one short sentence for the UI
 
 
-def _level_pattern(nouns: list[str]) -> re.Pattern:
+def _level_pattern(nouns: list[str], qualifiers: list[str]) -> re.Pattern:
     # The nouns are single words. A numeral may sit right on the noun ("SDE2"), so the noun ends at anything but a
     # letter instead of at a word boundary.
     noun = "(?<!\\w)(?P<noun>" + "|".join(re.escape(n) for n in sorted(nouns, key=len, reverse=True)) + ")(?![^\\W\\d])"
+    qualifier = _QUAL_BEFORE + "(?:" + phrases(qualifiers).pattern + ")" + _QUAL_AFTER
     return re.compile(
-        noun + "(?:" + _SEP + "(?P<num>" + _NUMERAL + ")" + "|" + _QUALIFIER + "(?P<tailnum>" + _NUMERAL + ")" + _TAIL + ")",
+        noun + "(?:" + _SEP + "(?P<num>" + _NUMERAL + ")" + "|" + qualifier + "(?P<qualnum>" + _NUMERAL + "))",
         re.IGNORECASE,
     )
 
@@ -47,8 +48,8 @@ def _level_pattern(nouns: list[str]) -> re.Pattern:
 def _levels(title: str, cfg: Config) -> list[tuple[str, str]]:
     """Every (as written, normalised numeral) a level noun or the word "level" gives the title."""
     found = [(m.group(0), m.group(1).lower()) for m in _LEVEL_WORD.finditer(title)]  # first, so the basis says "Level 1"
-    for m in _level_pattern(cfg.title["level_nouns"]).finditer(title):
-        num = m.group("num") or m.group("tailnum")
+    for m in _level_pattern(cfg.title["level_nouns"], cfg.title["level_qualifiers"]).finditer(title):
+        num = m.group("num") or m.group("qualnum")
         found.append((f"{m.group('noun')} {num}", re.sub(r"\s+", "", num).lower()))
     return found
 

@@ -65,6 +65,21 @@ MORE_CASES = [
     ("Senior Engineer, Graduate Program", "engineering", "senior"),
     ("Graduate Software Engineer", "engineering", "new_grad"),
     ("Principal MTS", "engineering", "senior"),
+    # role qualifiers between the noun and the numeral (title.level_qualifiers)
+    ("Software Engineer, Backend II", "engineering", "swe2"),
+    ("Software Engineer - Full Stack 3", "engineering", "senior"),
+    ("Software Engineer, Mobile 1", "engineering", "swe1"),
+    ("Backend Engineer, Back-End 2 (Remote)", "engineering", "swe2"),
+    # any other word in between: the numeral is not a level
+    ("Software Engineer, Web 3", "engineering", None),
+    ("Software Engineer - Python 3", "engineering", None),
+    ("Backend Engineer (Python 3)", "engineering", None),
+    ("Software Engineer, Product 4", "engineering", None),
+    ("Software Engineer, Growth 3", "engineering", None),
+    ("Software Engineer, Search 2", "engineering", None),
+    ("Software Engineer, AI Agents 2", "engineering", None),
+    ("Software Engineer, Series 1", "engineering", None),
+    ("Software Engineer, Layer 2", "engineering", None),
 ]
 
 

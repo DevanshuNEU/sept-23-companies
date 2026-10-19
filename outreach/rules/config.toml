@@ -95,6 +95,11 @@ open_level = [
 level_nouns = [
   "engineer", "developer", "swe", "sde", "programmer", "mts",
 ]
+# Task 8: role specialties that may sit between a level noun and its numeral ("Software Engineer Front-End 2",
+# "Software Engineer, Backend II"); technologies and product areas are left out, so "Web 3" and "Python 3" are not levels
+level_qualifiers = [
+  "front end", "back end", "frontend", "backend", "full stack", "fullstack", "mobile",
+]
 
 [years]
 # refresh/finalcheck.py:41 YOE (a number of years counts only when one of these follows 'years' in the sentence)

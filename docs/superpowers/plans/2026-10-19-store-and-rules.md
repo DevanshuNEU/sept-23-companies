@@ -640,3 +640,273 @@ JOIN ruleset r ON r.ruleset_version = d.ruleset_version AND r.is_current = 1;
 | `history` lines | `event` rows (`entity = 'message'` or `'touch'`) |
 | `firstSendDate`, `dailyCaps` | `min(message.sent_at)`; `send_day.send_limit` |
 | `config.paused`, `pausedWhy` | `sender.paused`, `paused_reason` |
+
+---
+
+## Tasks
+
+### Order and parallel groups
+
+Every task ends with the whole suite green. Tasks in one group touch different files and can run as parallel subagents; a group starts when the tasks it depends on are merged.
+
+| Group | Tasks | Depends on |
+|---|---|---|
+| 0 | 1 Project scaffold | nothing |
+| A | 2 Time helpers, 3 Migration runner, 7 Rules config and version | 1 |
+| B | 4 Schema 0001 (needs 3); 8 Title, 9 Years, 10 Location, 11 Sponsorship, 12 Eligibility, 13 Facts (need 7) | as listed |
+| C | 5 Connect, guard, install | 2, 3, 4 |
+| D | 6 Store write helpers; 14 decide() and the misfire suite (needs 8 to 13) | 5 for 6; 8 to 13 for 14 |
+| E | 15 Rebuild, decide_and_store, record_evidence | 6, 14 |
+| F | 16 Mutation check and final verification | all |
+
+Group B rule tasks share `outreach/rules/config.toml`: Task 7 writes every section, and each rule task edits only its own section (`[title]`, `[years]`, `[location]`, `[sponsorship]`, `[eligibility]`, `[facts]`), so merges do not collide.
+
+---
+
+### Task 1: Project scaffold
+
+**Files:**
+- Create: `pyproject.toml` (content in "Python environment" above), `uv.lock` (via `uv lock`), `outreach/__init__.py` (empty)
+- Modify: `.gitignore` (add `.venv/`), `CLAUDE.md` "Building" section (see step 5)
+- Test: `tests/test_project.py`
+
+**Interfaces:**
+- Produces: an importable `outreach` package; the rule that every dependency is an exact pin.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+class Project(unittest.TestCase):
+    def test_outreach_imports(self):            # import outreach does not raise
+    def test_python_is_pinned_to_314(self):     # tomllib.load(pyproject)["project"]["requires-python"] == "==3.14.*"
+    def test_every_dependency_is_an_exact_pin(self):
+        # each entry in project.dependencies and every list under [dependency-groups] matches r"^[A-Za-z0-9_.\[\],-]+==[0-9][^,;<>~!=]*$"
+    def test_uv_uses_system_python_and_builds_nothing(self):
+        # tool.uv.package is False and tool.uv["python-preference"] == "only-system"
+    def test_lock_file_is_committed(self):      # os.path.exists("uv.lock")
+    def test_old_code_does_not_import_outreach(self):
+        # no file under mail/, refresh/, dashboard/ contains "import outreach" or "from outreach"
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `/opt/homebrew/bin/python3 -m unittest tests.test_project -v`
+Expected: FAIL / ERROR (`No module named 'outreach'`, no `pyproject.toml`).
+
+- [ ] **Step 3: Create the files.** `uv venv --python /opt/homebrew/bin/python3 && uv lock && uv sync`.
+
+- [ ] **Step 4: Run the whole suite under uv**
+
+Run: `uv run python -m unittest discover -s tests -t .` then `.venv/bin/python -c "import sys; print(sys.base_prefix)"`
+Expected: all PASS (old and new tests); the prefix starts with `/opt/homebrew`.
+
+- [ ] **Step 5: Update `CLAUDE.md` "Building".** Replace "Once #4 adds `pyproject.toml`, run them with ..." with: tests run with `uv run python -m unittest discover -s tests -t .`; a new checkout runs `uv venv --python /opt/homebrew/bin/python3 && uv sync` once; the live checkout needs the same once before the deploy test run.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add pyproject.toml uv.lock .gitignore outreach/__init__.py tests/test_project.py CLAUDE.md
+git commit -m "Add the outreach package and a uv project on Homebrew Python 3.14 (#4)"
+```
+
+---
+
+### Task 2: Time helpers
+
+**Files:**
+- Create: `outreach/store/__init__.py` (empty for now), `outreach/store/timefmt.py`
+- Test: `tests/test_store_time.py`
+
+**Interfaces:**
+- Produces: `utcnow() -> str` (`%Y-%m-%dT%H:%M:%SZ`); `iso_utc(s: str | None) -> str | None` (None for None or ""; raises `ValueError` on unparseable); `iso_date(v: str | int | float | None) -> str | None` (ISO prefix, or epoch seconds or milliseconds, port of `refresh/finalcheck.py:14-22`; None when unreadable).
+
+- [ ] **Step 1: Write the failing tests** (cases from Radar `tests/test_store.py:40-90`)
+
+```python
+def test_the_four_wire_formats(self):
+    self.assertEqual(iso_utc("2026-07-30T16:30:19Z"), "2026-07-30T16:30:19Z")
+    self.assertEqual(iso_utc("2026-07-30T16:30:19.242+00:00"), "2026-07-30T16:30:19Z")
+    self.assertEqual(iso_utc("2026-07-28T22:06:03.425Z"), "2026-07-28T22:06:03Z")
+def test_local_offset_crosses_midnight(self):
+    self.assertEqual(iso_utc("2026-07-29T22:26:46-04:00"), "2026-07-30T02:26:46Z")
+def test_naive_is_utc(self):        iso_utc("2026-07-30T16:30:19") == "2026-07-30T16:30:19Z"
+def test_bare_date_is_midnight(self): iso_utc("2026-07-30") == "2026-07-30T00:00:00Z"
+def test_unparseable_raises(self):  assertRaises(ValueError, iso_utc, "last Tuesday")
+def test_empty_is_none(self):       iso_utc(None) is None and iso_utc("") is None
+def test_idempotent(self):          iso_utc(iso_utc(x)) == iso_utc(x) for the cases above
+def test_utcnow_shape(self):        re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", utcnow())
+def test_iso_date_forms(self):
+    iso_date("2026-08-26T10:00:00Z") == "2026-08-26"; iso_date(1756200000000) == "2025-08-26"
+    iso_date("1756200000") == "2025-08-26"; iso_date("soon") is None; iso_date(None) is None
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_time -v` -> ImportError.
+- [ ] **Step 3: Implement** `timefmt.py` by porting Radar `store.py:92-133` with the one change above. `iso_date` uses `datetime.timezone.utc`, not the deprecated `utcfromtimestamp`.
+- [ ] **Step 4: Run and see them pass.** Same command, all PASS; then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Store time helpers: canonical UTC timestamps and dates (#4)"`
+
+---
+
+### Task 3: Migration runner
+
+**Files:**
+- Create: `outreach/store/migrate.py`, `outreach/store/migrations/` (empty directory with a `.gitkeep` until Task 4)
+- Test: `tests/test_store_migrate.py`
+
+**Interfaces:**
+- Consumes: `timefmt.utcnow`.
+- Produces: `MIGRATIONS_DIR: pathlib.Path`; `split_sql(sql: str) -> list[str]`; `migration_files(directory: Path = MIGRATIONS_DIR) -> list[tuple[int, str, Path]]` (sorted; raises `ValueError` on a gap, a duplicate number or a file not named `NNNN_name.sql`); `latest_version(directory=MIGRATIONS_DIR) -> int`; `migrate(conn: sqlite3.Connection, directory=MIGRATIONS_DIR) -> int` (applies pending files, each in `BEGIN IMMEDIATE`, records `schema_migration`, sets `PRAGMA user_version`, returns the new version; raises `RuntimeError` when the database is newer than the files). `conn` must have `isolation_level=None`.
+
+- [ ] **Step 1: Write the failing tests** against temp migration directories (each test writes its own `0001_*.sql`, `0002_*.sql`; the first always creates `schema_migration` with the Task 4 definition).
+
+```python
+def test_applies_in_order_and_sets_user_version(self):   # 0001, 0002 -> returns 2; PRAGMA user_version == 2; schema_migration has 2 rows
+def test_second_run_applies_nothing(self):                # migrate twice -> 2, still 2 rows
+def test_failed_migration_rolls_back_whole_step(self):    # 0002 = valid CREATE then a bad statement -> raises; user_version == 1; the 0002 table does not exist
+def test_refuses_a_newer_database(self):                  # PRAGMA user_version = 5, files go to 2 -> RuntimeError mentioning "newer"
+def test_gap_in_numbers_is_refused(self):                 # 0001 and 0003 -> ValueError
+def test_semicolon_inside_a_comment_does_not_split(self): # split_sql("CREATE TABLE t (a INT -- x; y\n) STRICT;") has 1 statement
+def test_bad_file_name_is_refused(self):                  # "1_init.sql" -> ValueError
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_migrate -v` -> ImportError.
+- [ ] **Step 3: Implement** by porting Radar `store.py:524-582` (statements executed one by one, never `executescript`, which commits implicitly).
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Store migration runner: ordered files, one transaction each (#4)"`
+
+---
+
+### Task 4: Schema migration 0001
+
+**Files:**
+- Create: `outreach/store/migrations/0001_initial.sql` (exact text from "Schema: migration 0001"), `tests/storetest.py`
+- Delete: `outreach/store/migrations/.gitkeep`
+- Test: `tests/test_store_schema.py`
+
+**Interfaces:**
+- Consumes: `migrate.migrate`.
+- Produces: the schema; `tests/storetest.py: fresh_store() -> sqlite3.Connection` (a migrated store in a new temp directory, `isolation_level=None`, `row_factory=sqlite3.Row`, `foreign_keys=ON`). In this task it opens with `sqlite3.connect` and calls `migrate`; Task 5 changes it to `install` plus `connect` without changing its signature. Also `storetest.seed_company(conn, name="Acme") -> int` and `storetest.seed_posting(conn, company_id, title, body="", location="") -> int`.
+
+- [ ] **Step 1: Write the failing tests.** Generic checks first, then one test per invariant.
+
+```python
+def test_every_table_is_strict(self):
+    # SELECT name FROM pragma_table_list WHERE schema='main' AND type='table' AND strict=0 AND name NOT LIKE 'sqlite_%' -> []
+def test_every_at_column_rejects_offsets_and_fractions(self):
+    # for each table, each column whose name ends in "_at" (from pragma_table_info): an INSERT or UPDATE
+    # setting it to "2026-10-19T12:00:00+00:00", "2026-10-19 12:00:00" or "2026-13-01T00:00:00Z" raises sqlite3.IntegrityError
+def test_foreign_keys_are_enforced(self):      # posting with company_id 999 -> IntegrityError
+def test_events_are_append_only(self):          # UPDATE event / DELETE FROM event -> IntegrityError "append-only"
+def test_evidence_import_record_linkedin_log_are_append_only(self):
+def test_postings_are_never_deleted(self):      # DELETE FROM posting -> IntegrityError "never deleted"
+def test_company_close_needs_a_reason(self):    # status 'closed' with close_reason NULL -> IntegrityError
+def test_board_streaks_follow_the_read_contract(self):
+    # last_read 'ok' with empty_streak 1 -> error; 'empty' with error_streak 1 -> error; 'error' with error_streak 0 -> error;
+    # 'error' with empty_streak 1 and error_streak 1 -> accepted (an error leaves the empty count alone, board_status.py:43-44)
+def test_decision_quotes_are_required(self):
+    # sponsorship 'no' with sponsorship_quote '' -> error; eligibility 'excluded' without reason -> error
+def test_only_one_ruleset_is_current(self):     # second is_current = 1 -> IntegrityError
+def test_message_states_carry_their_fields(self):
+    # 'sending' without pending_rfc_id -> error; 'sent' without rfc_message_id -> error; follow-up (seq 1) without due_on -> error
+def test_only_one_message_is_sending(self):     # two messages in 'sending' -> IntegrityError
+def test_review_item_is_raised_once_per_evidence(self):
+    # same (kind, company, board, evidence_key) twice -> IntegrityError; new evidence_key -> accepted
+def test_hand_value_wins_and_is_never_deduplicated(self):      # Review Focus 3
+    # automation size 'estimate' 300..400 recorded now; hand rows 50, then 80, then 50 again (locked=1, source_kind 'hand', later recorded_at each)
+    # company_fact for size -> num_low 50 (the newest hand row), and 3 hand rows exist
+def test_automation_never_outranks_a_hand_value(self):
+    # hand sponsorship 'yes'; later automated 'no' with confidence 'confirmed' -> company_fact value 'yes'
+def test_automation_repeats_are_ignored(self):  # same automated evidence twice with INSERT OR IGNORE -> 1 row
+def test_everify_needs_a_date(self):           # fact 'everify' with observed_on NULL -> IntegrityError; value 'maybe' -> IntegrityError
+def test_current_decision_view_follows_the_current_ruleset(self):
+def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserting sender_id 2 -> IntegrityError
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_schema -v` -> no tables.
+- [ ] **Step 3: Write `0001_initial.sql`** exactly as specified, and `tests/storetest.py`.
+- [ ] **Step 4: Run and see them pass**, then the whole suite. Also: `sqlite3 <fresh file> "PRAGMA integrity_check; PRAGMA foreign_key_check;"` prints `ok` and nothing else.
+- [ ] **Step 5: Commit** `git commit -m "Store schema 0001: STRICT tables, CHECKed states, append-only history (#4)"`
+
+---
+
+### Task 5: Connect, guard and install
+
+**Files:**
+- Create: `outreach/store/db.py`, `outreach/install.py`
+- Modify: `outreach/store/__init__.py` (re-export `connect`, `transaction`, `db_path`, `is_live_path`, `StoreError`, `DEFAULT_PATH`, `utcnow`, `iso_utc`, `iso_date`), `tests/storetest.py` (use `install` and `connect`)
+- Test: `tests/test_store_connect.py`
+
+**Interfaces:**
+- Consumes: `live_checkout.is_live`, `live_checkout.require_live`; `migrate.migrate`, `migrate.latest_version`.
+- Produces:
+  - `DEFAULT_PATH = os.path.expanduser("~/Library/Application Support/outreach/outreach.db")`
+  - `db_path() -> str`: `OUTREACH_DB` if set, else `DEFAULT_PATH`; always `os.path.realpath(os.path.expanduser(...))`.
+  - `is_live_path(path: str) -> bool`: realpath equality with `DEFAULT_PATH`'s realpath.
+  - `guard(path: str) -> None`: when `is_live_path(path)`, calls `live_checkout.require_live("opening the live store")`.
+  - `connect(path: str | None = None) -> sqlite3.Connection`: guard; open with URI `Path(path).as_uri() + "?mode=rw"` so a missing file raises `StoreError("no store at ...; run: uv run python -m outreach.install")` instead of creating one; `isolation_level=None`, `row_factory=sqlite3.Row`; pragmas `foreign_keys=ON`, `synchronous=FULL`, `busy_timeout=5000`, `temp_store=MEMORY`, `journal_size_limit=67108864`; raises `StoreError` when `user_version` is not `latest_version()` (older: "run install"; newer: "this code is older than the store"). Never migrates.
+  - `transaction(conn)`: context manager, `BEGIN IMMEDIATE`, `COMMIT`, `ROLLBACK` on any exception.
+  - `install.install(path: str) -> int`: guard; create the parent folder; on a new file set `PRAGMA auto_vacuum=INCREMENTAL` then `PRAGMA journal_mode=WAL` before any table; `migrate`; return the version. (Task 15 adds the ruleset registration.)
+  - `install.main(argv: list[str] | None = None) -> int`: `install(db_path())`, prints `"<path>: store at version N"` and the applied migrations, returns 0.
+
+- [ ] **Step 1: Write the failing tests.** Tests that need a fake live path patch `outreach.store.db.DEFAULT_PATH` to a temp file and patch `live_checkout.is_live`.
+
+```python
+def test_tests_never_use_the_live_path(self):        # db_path() != realpath(DEFAULT_PATH)  (tests/__init__.py)
+def test_default_path_is_refused_outside_live(self):
+    # subprocess: env without OUTREACH_DB, run `python -c "import outreach.store as s; s.connect()"` from ROOT
+    # -> returncode != 0, stderr or stdout contains "live checkout"; os.path.exists(real DEFAULT_PATH) unchanged
+def test_other_spellings_of_the_live_path_are_refused(self):      # Review Focus 1
+    # DEFAULT_PATH patched to <tmp>/live/outreach.db; is_live False; for each of: a symlink <tmp>/link -> <tmp>/live
+    # (path <tmp>/link/outreach.db), "<tmp>/live/../live/outreach.db", a relative path to it -> connect raises SystemExit
+def test_live_path_opens_in_the_live_checkout(self):  # same patch, is_live True, after install -> connect works
+def test_install_is_refused_on_the_live_path_outside_live(self):  # install.install(patched DEFAULT_PATH) -> SystemExit; no file created
+def test_missing_store_is_not_created_by_connect(self):           # connect(<tmp>/none.db) -> StoreError; file does not exist
+def test_open_never_migrates(self):
+    # create a store at version 0 (empty sqlite file with user_version 0) -> connect raises StoreError "install"; user_version still 0
+def test_newer_store_is_refused(self):                 # user_version = latest + 1 -> StoreError "older"
+def test_install_creates_wal_store_and_is_idempotent(self):
+    # install twice -> same version; PRAGMA journal_mode == "wal"; PRAGMA auto_vacuum == 2; schema_migration has latest rows
+def test_path_with_a_space_works(self):               # Review Focus 2: <tmp>/Application Support/outreach.db -> install and connect work
+def test_connection_pragmas(self):                     # foreign_keys 1, synchronous 2 (FULL), busy_timeout 5000
+def test_transaction_rolls_back(self):                 # insert company then raise inside transaction() -> 0 companies
+def test_install_main_prints_version(self):            # OUTREACH_DB=<tmp>; main([]) == 0 and output contains "version 1"
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_connect -v`.
+- [ ] **Step 3: Implement** `db.py` and `install.py`; switch `tests/storetest.py` to `install.install` plus `connect`.
+- [ ] **Step 4: Run and see them pass**, then the whole suite (Task 4's schema tests now run through `connect`).
+- [ ] **Step 5: Update `CLAUDE.md`** "Only in the live checkout": add that `python -m outreach.install` and anything that opens the default store path refuse to run outside it.
+- [ ] **Step 6: Commit** `git commit -m "Store connect refuses the live path outside the live checkout; install is the only migrator (#4)"`
+
+---
+
+### Task 6: Store write helpers
+
+**Files:**
+- Create: `outreach/store/writes.py`
+- Modify: `outreach/store/__init__.py` (re-export the four functions)
+- Test: `tests/test_store_writes.py`
+
+**Interfaces:**
+- Consumes: `timefmt.utcnow`, `timefmt.iso_utc`.
+- Produces:
+  - `name_key(name: str) -> str`: lower case, drops a trailing legal suffix (`inc`, `llc`, `ltd`, `corp`, `co`, `gmbh`) as a whole word, then keeps `[a-z0-9]` only (Radar `store.py:777-779`).
+  - `append_event(conn, *, entity: str, kind: str, actor: str, entity_id: int | None = None, company_id: int | None = None, detail: dict | None = None, at: str | None = None, idempotency_key: str | None = None) -> int | None`: inserts one event (`at` canonicalised with `iso_utc`, default now; `recorded_at` now; `detail` as JSON); returns the new id, or None when `idempotency_key` was already used (`INSERT ... ON CONFLICT(idempotency_key) DO NOTHING`, never an update).
+  - `start_job(conn, job: str, ruleset_version: str | None = None) -> int` and `finish_job(conn, run_id: int, status: str, summary: dict | None = None, error: str = "") -> None`.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+def test_name_key(self):
+    name_key("Retell AI, Inc.") == "retellai"; name_key("Acme Corp") == "acme"; name_key("Corpay") == "corpay"
+def test_event_is_written_with_canonical_times(self):  # at="2026-10-19T08:00:00-04:00" -> stored "2026-10-19T12:00:00Z"
+def test_same_idempotency_key_is_a_no_op_even_with_a_different_time(self):
+    # first call returns an id; second call with the same key and a DIFFERENT at returns None; the stored at is the first one
+def test_unknown_actor_is_refused(self):               # actor="robot" -> sqlite3.IntegrityError
+def test_job_run_round_trip(self):                     # start_job -> status running; finish_job(ok, {"n": 3}) -> finished_at set, summary {"n": 3}
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_writes -v`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Store write helpers: events with idempotency keys, job runs, name keys (#4)"`

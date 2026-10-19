@@ -795,6 +795,8 @@ def test_every_table_is_strict(self):
 def test_every_at_column_rejects_offsets_and_fractions(self):
     # for each table, each column whose name ends in "_at" (from pragma_table_info): an INSERT or UPDATE
     # setting it to "2026-10-19T12:00:00+00:00", "2026-10-19 12:00:00" or "2026-13-01T00:00:00Z" raises sqlite3.IntegrityError
+def test_every_date_column_rejects_timestamps(self):
+    # every column ending in "_on", plus daily_list_entry.list_date and send_day.day: "2026-10-19T00:00:00Z" and "2026-13-01" -> IntegrityError
 def test_foreign_keys_are_enforced(self):      # posting with company_id 999 -> IntegrityError
 def test_events_are_append_only(self):          # UPDATE event / DELETE FROM event -> IntegrityError "append-only"
 def test_evidence_import_record_linkedin_log_are_append_only(self):
@@ -852,6 +854,7 @@ def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserti
 
 ```python
 def test_tests_never_use_the_live_path(self):        # db_path() != realpath(DEFAULT_PATH)  (tests/__init__.py)
+@unittest.skipIf(live_checkout.is_live(), "in the live checkout the default path is allowed; the patched-path tests below cover the rule")
 def test_default_path_is_refused_outside_live(self):
     # subprocess: env without OUTREACH_DB, run `python -c "import outreach.store as s; s.connect()"` from ROOT
     # -> returncode != 0, stderr or stdout contains "live checkout"; os.path.exists(real DEFAULT_PATH) unchanged
@@ -925,7 +928,7 @@ def test_job_run_round_trip(self):                     # start_job -> status run
   - `config.phrases(words: list[str], *, case: bool = False) -> re.Pattern`: one alternation of the escaped words with word boundaries; inside a phrase a space matches a space, a hyphen or nothing (so "early career" matches "Early-Career"). `case=True` keeps it case sensitive (state codes).
   - `text.sentences(text: str) -> list[str]`: splits on `.`, `!`, `?`, `;`, newlines and bullets; keeps "U.S." and "e.g." whole.
   - `text.quote_around(text: str, start: int, end: int, limit: int = 260) -> str`: the sentence holding the match, trimmed to whole words (port of `refresh/finalcheck.py:86-90` and `refresh/final_merge.py:19-27`).
-  - `version.RULE_FILES = ("config.toml", "text.py", "title.py", "years.py", "location.py", "sponsorship.py", "eligibility.py", "facts.py", "decide.py")`; `version.NOT_RULES = ("__init__.py", "config.py", "version.py", "rebuild.py")`; `version.ruleset_version(rules_dir: Path = RULES_DIR) -> str` = `"r-"` plus the first 12 hex of SHA-256 over, for each name in `sorted(RULE_FILES)`, `name.encode() + b"\0" + file bytes + b"\0"`. A file in `RULE_FILES` that does not exist yet is hashed as empty, so this task can land before the rule modules.
+  - `version.RULE_FILES = ("config.toml", "config.py", "text.py", "title.py", "years.py", "location.py", "sponsorship.py", "eligibility.py", "facts.py", "decide.py")` (`config.py` is in because `phrases()` decides how every word list matches); `version.NOT_RULES = ("__init__.py", "version.py", "rebuild.py")`; `version.ruleset_version(rules_dir: Path = RULES_DIR) -> str` = `"r-"` plus the first 12 hex of SHA-256 over, for each name in `sorted(RULE_FILES)`, `name.encode() + b"\0" + file bytes + b"\0"`. A file in `RULE_FILES` that does not exist yet is hashed as empty, so this task can land before the rule modules.
 - `config.toml` sections and keys (values ported from the cited lines; each later task may adjust only its own section):
 
 | Section | Keys | Source |
@@ -1378,7 +1381,7 @@ def test_only_rules_classify(self):                # Done-when line 2
   - `decide_and_store(conn, posting_id: int, *, cfg=None) -> Decision`: raises `RulesetNotCurrent("ruleset changed; run: uv run python -m outreach.rules.rebuild")` when the store's current version is not `ruleset_version()`; otherwise decides and upserts one row under the current version. Joins the caller's transaction when `conn.in_transaction`, else opens its own. This is what #21 calls per posting.
   - `record_evidence(conn, company_id: int, drafts: list[EvidenceDraft], *, posting_id: int | None = None) -> int`: inserts each draft with `locked = 0` and `INSERT OR IGNORE` (the `evidence_once` index drops repeats); raises `ValueError` for a draft with `source_kind == "hand"` (hand values come from #16 edits and #17's locked import, which write `locked = 1` themselves); appends one `event` (`entity "evidence"`, `kind "recorded"`, `actor "rules"`) when at least one row was added; returns the number added.
   - `main(argv=None) -> int` for `uv run python -m outreach.rules.rebuild`: `connect()`, `rebuild`, print `lines()`, return 0.
-  - `install.install` now ends with `rebuild(conn)` when the store has no current ruleset or a different one, and prints the report.
+  - `install.install` now ends with `rebuild(conn)` when the store has no current ruleset or a different one; `install.main` prints the report's `lines()`.
 
 - [ ] **Step 1: Write the failing tests** (all on `storetest.fresh_store()`)
 
@@ -1416,7 +1419,6 @@ def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>;
 
 **Files:**
 - Create: `tests/mutation_check.py`
-- Modify: `docs/README.md` (mark this plan done when the PR merges, in that PR)
 
 **Interfaces:**
 - Consumes: everything.

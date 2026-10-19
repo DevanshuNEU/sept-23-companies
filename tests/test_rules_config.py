@@ -137,6 +137,115 @@ class PhraseTests(unittest.TestCase):
         self.assertIsNone(p.search("early" + " " * 200_000 + "x"))
 
 
+EN = chr(0x2013)  # an en dash, built from its code point so this file has no literal one
+
+# Strings the OLD regexes in refresh/ matched, per section and key. Each must still match the new word list, so a
+# port from a regex to a list cannot quietly lose a form. Sources are named per group.
+OLD_POSITIVES = {
+    # refresh/finalcheck.py:42-44 STRONG, as a title
+    ("title", "strong_entry"): [
+        "0-2 years", "0" + EN + "2 years", "0 - 2 years", "0-2 year", "0 to 1 year", "0-1 years",
+        "no experience required", "no prior experience is necessary", "no professional experience needed",
+        "less than 1 year", "less than two years", "less than 2 year", "Recent Grads", "recently graduated",
+        "university grads", "University Graduate", "college hire", "campus hire", "graduating", "entry-level",
+        "early career", "new graduates", "recent college",
+    ],
+    # refresh/crawl_boards.py:29-31 BODY_ENTRY and finalcheck.py STRONG, as a body
+    ("years", "body_entry"): [
+        "0" + EN + "3 years", "1" + EN + "3 years", "0 - 3 years", "0-3+ years", "0 to 3 years", "zero to 3 years",
+        "1 to 3 years", "2-3 years", "1+ years", "1+ year", "no experience is required", "no prior experience required",
+        "all seniority levels", "all experience levels", "new graduates", "recently graduated", "recent graduates",
+        "recent grad", "entry level", "early-career", "0-1 years", "0" + EN + "2 years",
+    ],
+    # refresh/finalcheck.py:61-63 CITIZ and refresh/crawl_boards.py:127
+    ("sponsorship", "citizenship"): [
+        "U.S. citizen required", "US citizen is required", "U.S. citizenship only", "U.S. citizenship is required",
+        "us citizen only", "u.s citizen required", "U.S. citizenship required", "Must be a U.S. citizen",
+        "must be us citizen", "Must be a US citizen", "security clearance", "active clearance",
+        "clearance is required", "clearance required", "TS/SCI", "secret clearance", "green card holders only",
+        "permanent residents only", "U.S. persons only", "U.S. persons, as defined", "US person as defined",
+        "U.S. persons required", "ITAR", "export control laws require",
+    ],
+    # refresh/eligibility.py:41-43 ALTGRAD
+    ("eligibility", "graduates_welcome"): [
+        "or a recent grad", "or recent graduates", "recently graduated or",
+        "recent college graduates are welcome", "recent university graduates are also encouraged",
+        "recent graduates welcome", "recent graduate is eligible", "recent graduates are also considered",
+        "open to recent graduates", "earned or expected", "or have graduated", "or have recently graduated",
+        "or completed your degree", "or have completed the degree", "or have completed a degree",
+        "graduated within the last", "graduated within the past", "already graduated", "recent grads welcome",
+    ],
+    # refresh/eligibility.py:38-40 PURSUING
+    ("eligibility", "current_student"): [
+        "currently pursuing", "currently enrolled", "currently working toward", "currently a student",
+        "actively pursuing", "current college senior", "current university student", "current undergrad",
+        "must be enrolled", "must be a student", "must be currently enrolled", "must be a current student",
+        "in your final year", "final-year student", "final year undergrad",
+    ],
+    # refresh/eligibility.py:53-55 COHORT_T (the parts a word list can hold)
+    ("eligibility", "cohort_title"): [
+        "2027 New Grads", "2027 graduates", "2027 new graduates", "Class of 2027", "2027 University Grads",
+        "2027 college graduates", "2027 campus hires", "2027 incoming grads", "University Hire 2027",
+        "Campus Full Time 2027", "(College Grad 2027)", "December 2026 Graduates",
+    ],
+    # refresh/finalcheck.py:48-50 STARTL (the parts a word list can hold)
+    ("eligibility", "start_2027"): [
+        "2027 start", "Start date: July 2027", "start date 2027", "starts in June 2027", "starting in 2027",
+        "starts on 2027", "start in early 2027", "Summer 2027 start", "July 2027 start", "starts summer 2027",
+    ],
+    # refresh/finalcheck.py:56-57 IMMED
+    ("eligibility", "immediate_start"): [
+        "immediate start", "start immediately", "start asap", "start as soon as", "2026 start", "2026 new grad",
+        "2026 grads", "December 2026 grad",
+    ],
+    # refresh/finalcheck.py:64-66 NOSPON
+    ("sponsorship", "negation"): [
+        "unable to sponsor", "not able to sponsor", "do not offer visa sponsorship", "does not provide sponsorship",
+        "will not sponsor visas", "cannot sponsor", "no visa sponsorship", "not offering visa sponsorship",
+        "not providing sponsorship", "without sponsorship", "without visa sponsorship",
+        "without the need for sponsorship", "sponsor H1B transfers; we're unable",
+    ],
+    # refresh/finalcheck.py:104-105
+    ("title", "general_application"): [
+        "Submissions", "talent pool", "Talent Network", "talent community", "General Application", "general interest",
+        "future opportunities", "future openings", "don't see a role", "dont see a role", "Don't see the fit",
+        "don't see a fit", "expression of interest", "join our network",
+    ],
+    # refresh/finalcheck.py:28-34 OFFLANE, refresh/finalcheck.py:27 INTERN
+    ("title", "off_lane"): [
+        "Go-To-Market", "go to market", "Help Desk", "helpdesk", "Pre-Sales", "presales", "Solutions Engineer",
+        "solution consultant", "technical writer", "technical writing", "developer advocate", "developer advocacy",
+        "Mechatronics", "research engineer, bio",
+    ],
+    ("title", "intern"): ["Intern", "Internship", "Co-op", "coop"],
+    # refresh/finalcheck.py:36-38 NG_T and EC_T, refresh/crawl_boards.py:26-27 TITLE_ENTRY
+    ("title", "new_grad"): ["New Grad", "new-grad", "University Graduate", "College Grad", "Recent Grad", "Campus",
+                            "Graduate Software Engineer", "Grad", "2027 New Grad", "Emerging Talent", "university hire"],
+    ("title", "early_career"): ["Early-Career", "Early" + EN + "Career", "Associate", "Junior", "Jr.", "Entry-Level",
+                                "Rotation", "Trainee", "Residency", "Apprentice", "Resident"],
+}
+
+
+class OldRegexCoverageTests(unittest.TestCase):
+    def test_every_old_regex_positive_still_matches(self):
+        cfg = load_config()
+        missed = []
+        for (section, key), strings in OLD_POSITIVES.items():
+            pattern = phrases(getattr(cfg, section)[key])
+            for s in strings:
+                if not pattern.search(s):
+                    missed.append(f"[{section}] {key}: {s!r}")
+        self.assertEqual(missed, [])
+
+    def test_dashes_in_phrases(self):
+        p = phrases(["0-2 years", "early career", "h-1b"])
+        self.assertTrue(p.search("0 - 2 years"))
+        self.assertTrue(p.search("0" + EN + "2 years"))
+        self.assertTrue(p.search("Early" + EN + "Career"))
+        self.assertTrue(p.search("H" + EN + "1B"))
+        self.assertIsNone(p.search("10-2 years"))
+
+
 class SentenceTests(unittest.TestCase):
     def test_sentences_keep_us_whole(self):
         self.assertEqual(sentences("Must be a U.S. citizen. We ship."), ["Must be a U.S. citizen.", "We ship."])

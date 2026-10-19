@@ -50,13 +50,30 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     return Config(raw=raw, **{section: data[section] for section in REQUIRED})
 
 
-# A space inside a phrase matches a space, a hyphen or nothing, so "early career" finds "Early-Career" and
+# Dashes a posting may use where a phrase has a hyphen: hyphen, two Unicode hyphens and the en dash (built from
+# code points so this file stays free of literal en and em dashes).
+_DASHES = "\\-" + chr(0x2010) + chr(0x2011) + chr(0x2013)
+# A space inside a phrase matches a space, a dash or nothing, so "early career" finds "Early-Career" and
 # "earlycareer". The run is capped so a long stretch of spaces cannot make a search slow.
-_GAP = r"[\s\-]{0,3}"
+_GAP = "[\\s" + _DASHES + "]{0,3}"
+# A hyphen inside a word of a phrase matches a dash with optional spaces around it, so "0-2 years" finds "0-2",
+# "0 - 2" and "0" + en dash + "2".
+_HYPHEN = "\\s{0,2}[" + _DASHES + "]\\s{0,2}"
+
+
+def _word(piece: str) -> str:
+    parts = piece.split("-")
+    if len(parts) > 1 and all(parts):
+        return _HYPHEN.join(re.escape(p) for p in parts)
+    return re.escape(piece)  # no hyphen, or a leading or trailing one: literal
 
 
 def phrases(words: list[str], *, case: bool = False) -> re.Pattern:
-    """One pattern for a word list: any of the words, as whole words, case-insensitive unless `case` is set."""
+    """One pattern for a word list: any of the words, as whole words, case-insensitive unless `case` is set.
+
+    A space in a word matches a space, a dash or nothing; a hyphen in a word matches a hyphen or en dash with
+    optional spaces around it.
+    """
     if isinstance(words, str):
         raise TypeError("phrases() takes a list of words, not one string")
     parts = []
@@ -64,7 +81,7 @@ def phrases(words: list[str], *, case: bool = False) -> re.Pattern:
         pieces = word.split()
         if not pieces:
             raise ValueError(f"empty word in phrase list: {word!r}")
-        parts.append(_GAP.join(re.escape(p) for p in pieces))
+        parts.append(_GAP.join(_word(p) for p in pieces))
     if not parts:
         return re.compile(r"(?!)")  # an empty list matches nothing
     # Lookarounds instead of \b, so a word may begin or end with punctuation ("u.s.", "est.").

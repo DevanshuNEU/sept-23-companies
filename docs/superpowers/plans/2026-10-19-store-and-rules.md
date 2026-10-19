@@ -1454,7 +1454,7 @@ def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>;
   - `uv run python -m unittest discover -s tests -t .` -> `OK`, old and new tests together.
   - `OUTREACH_DB=$(mktemp -d)/outreach.db uv run python -m outreach.install` -> prints `store at version 1` and an empty flip report; running it again changes nothing.
   - `env -u OUTREACH_DB uv run python -m outreach.install` from this worktree -> exits non-zero naming the live checkout; `ls "$HOME/Library/Application Support/outreach/"` shows no new file.
-  - `grep -rnP "[\x{2013}\x{2014}]" outreach tests/test_store_*.py tests/test_rules_*.py tests/mutation_check.py CLAUDE.md` -> no output.
+  - `uv run python -c "import pathlib,sys; bad=[str(p) for g in ('outreach/**/*','tests/*.py','CLAUDE.md') for p in pathlib.Path('.').glob(g) if p.is_file() and any(c in p.read_text(errors='ignore') for c in chr(0x2013)+chr(0x2014))]; print(bad); sys.exit(bool(bad))"` -> prints `[]` (macOS grep has no `-P`).
   - `git diff --stat origin/master -- dashboard mail refresh` -> no output.
 - [ ] **Step 4: Check every "Done when" line of #4:** store created by one command (step 3 second bullet); rules suite and mutation check pass (steps 2 and 3); nothing in the new platform classifies titles except the rules module (`test_only_rules_classify`); `dashboard/app.js` untouched (last bullet).
 - [ ] **Step 5: Commit** `git commit -m "Mutation check: every rules and store guarantee has a test that notices (#4)"`

@@ -154,8 +154,8 @@ def reconcile(db, found):
             store.log(c, "not found in Sent: did not go out"); say(f"unclear send to {c['email']} did not go out")
 
 def main():
-    if not DRY and gmail.DIR == gmail.DEFAULT_DIR and not live_checkout.is_live():
-        say(f"not sending: real Gmail secrets are only used from the live checkout ({live_checkout.LIVE_ROOT})"); return
+    if os.path.exists(gmail.TOKEN) and not live_checkout.is_live():     # a real token, wherever it was copied
+        say(f"not running: a real Gmail token is only used from the live checkout ({live_checkout.LIVE_ROOT})"); return
     if not gmail.authorized():
         say_once_a_day("not signed in to Gmail yet (run: python3 mail/gmail.py auth); nothing sent", "not signed in")
         return

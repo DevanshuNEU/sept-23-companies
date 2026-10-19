@@ -12,6 +12,8 @@ notice replies and bounces). Neither scope can read message bodies or delete any
   python3 mail/gmail.py whoami   print the signed-in address
 """
 import base64, hashlib, http.server, json, os, secrets, sys, time, urllib.parse, urllib.request, urllib.error, webbrowser
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import live_checkout
 from email.message import EmailMessage
 from email.utils import make_msgid, formataddr
 
@@ -27,6 +29,11 @@ def _client():
 
 def authorized():
     return os.path.exists(TOKEN)
+
+def check_auth_location():
+    """Signing in writes the real token, so it happens only from the live checkout (a scratch folder is fine)."""
+    if os.path.realpath(DIR) == os.path.realpath(DEFAULT_DIR):
+        live_checkout.require_live("Gmail sign-in into the real secrets folder")
 
 def authorize():
     """Browser sign-in with PKCE and a loopback redirect. Run by you, once."""
@@ -142,6 +149,7 @@ def find_sent(rfc_id, to, subject, look_back=50):
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "auth":
+        check_auth_location()
         if not os.path.exists(CLIENT): raise SystemExit(f"Put your OAuth client file at:\n  {CLIENT}")
         authorize()
     elif cmd == "whoami": print(whoami())

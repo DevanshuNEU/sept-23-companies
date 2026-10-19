@@ -1262,3 +1262,250 @@ def test_retell_record(self):
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run and see them pass**, then the whole suite.
 - [ ] **Step 5: Commit** `git commit -m "Rules: size, stage and E-Verify evidence; 'small' is never a size (#4)"`
+
+---
+
+### Task 14: decide(), passes() and the misfire regression suite
+
+**Files:**
+- Create: `outreach/rules/decide.py`, `tests/test_rules_misfires.py`
+- Modify: `outreach/rules/__init__.py` (re-export `PostingInput`, `Decision`, `decide`, `passes`, `load_config`, `ruleset_version`)
+- Test: `tests/test_rules_decide.py`, `tests/test_rules_misfires.py`
+
+**Interfaces:**
+- Consumes: `classify_title`, `years_asked`, `entry_wording`, `us_status`, `sponsorship_stance`, `citizenship_required`, `eligibility`, `starts_2027`, `load_config`.
+- Produces:
+  - `PostingInput` (frozen): `title: str`, `body: str = ""`, `location: str = ""`, `country: str | None = None`.
+  - `Decision` (frozen): `lane`, `level_tier`, `level_ok: bool`, `level_basis`, `years_asked: int | None`, `years_quote`, `us`, `sponsorship`, `sponsorship_quote`, `citizenship: bool`, `citizenship_quote`, `eligibility`, `eligibility_reason: str | None`, `eligibility_quote`, `start_2027: bool`; `as_row() -> dict` with the `decision` column names and 0/1 for booleans.
+  - `decide(p: PostingInput, cfg: Config | None = None) -> Decision` (loads and caches the config when None). Pure: no store, no clock, no network.
+  - `passes(d: Decision) -> bool` = `lane == "engineering" and us != "no" and sponsorship != "no" and not citizenship and eligibility == "ok"`. This is the posting-level part of #9's hidden list; #6 adds the company-level part (size over 300 with evidence, no-go) and must call this function rather than restate it.
+- Level combination (port of `refresh/finalcheck.py:91-100`; `m = cfg.candidate["max_years_asked"]`, `y` = years asked, `t` = title tier):
+
+```
+lane != engineering          -> tier = t or "not_stated", ok = False
+t == "senior"                -> "senior", ok = False
+y is not None and y > m      -> t or "not_stated", ok = False, basis "Asks {y} years"
+t == "new_grad"              -> "new_grad", ok
+t == "early_career"          -> "early_career", ok
+entry_wording and (y is None or y <= 1) -> "early_career", ok, basis "Posting says entry level"
+y is not None and y <= 1     -> "early_career", ok, basis "Posting asks 0 to 1 years"
+t == "swe1"                  -> "swe1", ok
+t == "swe2"                  -> "swe2", ok
+y is not None                -> "swe2", ok, basis "Asks {y} years"
+t == "open"                  -> "open", ok
+otherwise                    -> "not_stated", ok = False, basis "Posting does not state a level"
+```
+
+- [ ] **Step 1: Write the failing tests.** `tests/test_rules_misfires.py` has one class per audit misfire (section 2) plus the "small" default, each with its corpus count in the docstring, positives and a negative control, all through `decide()`. Default location "Boston, MA" unless the case is about location.
+
+```python
+class Misfire1MTSDroppedByStaffRule(unittest.TestCase):          # 27 of 32 MTS titles dropped (crawl_boards.py:59)
+    # "Member of Technical Staff", "Member of Technical Staff, Applied AI" -> lane engineering, tier "open", level_ok True
+    # control: "Senior Member of Technical Staff" -> tier "senior", level_ok False
+class Misfire2SWEIIUnderDiscovered(unittest.TestCase):           # 34 of 119 found (crawl_boards.py:26)
+    # "Software Engineer II", "Software Engineer 2", "Member of Technical Staff 2", "Software Engineer Front-End 2" -> "swe2", ok
+    # ("Software Engineer", "You have 2+ years of professional software engineering experience.") -> "swe2", ok, years 2
+    # ("Software Engineer", "3+ years of experience building backend systems in production.") -> ok, years 3
+    # control: ("Software Engineer", "4+ years of experience building backend systems.") -> level_ok False
+class Misfire3StaffEngineerII(unittest.TestCase):                # finalcheck.py:26 exemption
+    # "Staff Engineer II", "Staff Software Engineer, Agent Platform" -> "senior", level_ok False
+class Misfire4FalseSenior(unittest.TestCase):                    # 21 corpus titles
+    # "Machine Learning Engineer Graduate - Lead Ads", "Forward Deployed Engineer Fellow",
+    # "AI Fellow - Member of Technical Staff", "Backend Engineer, New Grad to Staff Level" -> tier != "senior", level_ok True
+    # control: "Senior Software Engineer" -> "senior"
+class Misfire5YearsFromDegreeAlternative(unittest.TestCase):     # finalcheck.py:41
+    # ("Software Engineer, New Grad", "Bachelor's degree or 4 years of equivalent experience.") -> years None, "new_grad", ok
+    # ("Software Engineer I", "We were founded 5 years ago, our engineering team now ships to 2,000 customers.") -> years None, "swe1", ok
+class Misfire6USCitiesReadAsNonUS(unittest.TestCase):            # 6 corpus places (finalcheck.py:69-82)
+    # "Indianapolis, IN", "Columbus, Indiana", "Albuquerque, New Mexico", "Lima, OH", "Paris, TX", "Athens, GA"
+    #   with title "Software Engineer, New Grad" -> us "yes", passes True
+    # control: "Paris, France" -> us "no", passes False
+class Misfire7SponsorshipNegation(unittest.TestCase):            # finalcheck.py:64-68; LAST_RUN Beacon AI, Forage, n8n
+    # each body: "We are unable to provide visa sponsorship for this role.", "Visa sponsorship is not available for this position.",
+    #   "We will not sponsor H-1B petitions.", "This role is not eligible for immigration sponsorship.", "We do not sponsor."
+    #   -> sponsorship "no", sponsorship_quote == the sentence, passes False
+    # "We can sponsor visas to Germany." -> sponsorship != "yes"
+    # control: "We sponsor H-1B visas." -> "yes", passes True
+class Misfire8DashboardJuniorRegex(unittest.TestCase):           # 19 req titles (app.js:15)
+    # "Scientist I/II" -> lane "not_engineering", level_ok False
+    # "Cellular Layer-1 Control Software Engineer" -> tier "not_stated", level_ok False
+    # "Help Desk Engineer - Linux Level II" -> lane "off_lane", level_ok False
+class SmallDefaultIsUnknown(unittest.TestCase):                  # 671 "small", 290 with a firm estimate (audit section 1)
+    # from_old_dashboard({"sizeClass": "small", "sizeWhy": "no filing record: most likely an early startup"}) == []
+    # the store-level half (company_fact has no size row) is in Task 15
+```
+
+`tests/test_rules_decide.py`:
+
+```python
+def test_years_over_the_limit_keeps_title_tier_but_fails_level(self):  # ("Software Engineer II", "5+ years of experience with distributed systems.") -> "swe2", ok False
+def test_entry_wording_makes_early_career(self):   # ("Software Engineer", "This is an entry-level role for recent graduates.") -> "early_career", ok
+def test_plain_title_is_not_stated(self):          # "Software Engineer", "" -> "not_stated", ok False, lane engineering, passes True
+def test_eligibility_excluded_fails_passes(self):  # ("Software Engineer, New Grad", "You must be currently enrolled in a Bachelor's or Master's program in Computer Science.") -> passes False
+def test_2027_start_still_passes(self):            # ("Software Engineer, New Grad (2027)", "") -> start_2027 True, passes True
+def test_opt_only_passes(self):                    # sponsorship "opt_only" -> passes True (#9: not hidden)
+def test_citizenship_fails_passes(self):
+def test_empty_body_still_decides(self):           # Review Focus 4: ("Software Engineer I", "", "") -> sponsorship "silent", us "unknown", "swe1", ok
+def test_pathological_body_is_fast(self):          # Review Focus 5: body = ("5 years ago we graduated in 2027 or 2026; sponsorship maybe. é " * 15000)[:1_000_000]
+                                                   # -> decide() returns within 2.0 s (time.monotonic)
+def test_as_row_matches_the_decision_table(self):  # set(as_row()) == decision columns minus posting_id, ruleset_version, decided_at
+def test_only_rules_classify(self):                # Done-when line 2
+    # every .py under outreach/ outside outreach/rules/ that imports re must not contain any of (case-insensitive):
+    # "new grad", "senior", "staff", "sponsor", "citizen", "clearance", "years of experience", "entry level", "united states"
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_decide tests.test_rules_misfires -v` -> ImportError for `decide`.
+- [ ] **Step 3: Implement** `decide.py`. If a misfire case fails because of a vocabulary, fix the list in the owning section of `config.toml`, not with a special case in code.
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Rules: one decide() for every posting, with the 8 audit misfires as regression tests (#4)"`
+
+---
+
+### Task 15: Rebuild, decide_and_store and record_evidence
+
+**Files:**
+- Create: `outreach/rules/rebuild.py`
+- Modify: `outreach/install.py` (register the ruleset after migrating), `outreach/rules/__init__.py` (re-export `rebuild`, `decide_and_store`, `record_evidence`, `RulesetNotCurrent`)
+- Test: `tests/test_rules_rebuild.py`
+
+**Interfaces:**
+- Consumes: `connect`, `transaction`, `utcnow`, `append_event`, `start_job`, `finish_job`, `decide`, `passes`, `ruleset_version`, `load_config`, `EvidenceDraft`.
+- Produces:
+  - `RulesetNotCurrent(Exception)`.
+  - `Flip` (frozen): `posting_id: int`, `company: str`, `title: str`, `change: str` (for example "sponsorship silent -> no").
+  - `FlipReport` (frozen): `version: str`, `previous: str | None`, `decided: int`, `to_hidden: list[Flip]`, `to_shown: list[Flip]`, `level_lost: list[Flip]`; `lines() -> list[str]` (a heading per list with its count, one line per flip, "None." for an empty list).
+  - `rebuild(conn, *, cfg: Config | None = None, version: str | None = None) -> FlipReport` (`cfg` and `version` overrides exist for tests). Steps: `start_job("rebuild", version)`; in one `BEGIN IMMEDIATE`: insert the `ruleset` row if absent (`config_toml` = `cfg.raw` decoded); for every posting, open or closed, compute `decide()` and compare it with the posting's row in `current_decision` (if any): `passes` true to false goes to `to_hidden`, false to true to `to_shown`, `level_ok` true to false to `level_lost`; upsert the row (`INSERT ... ON CONFLICT(posting_id, ruleset_version) DO UPDATE SET` every column); set `is_current` to 1 for this version and 0 for every other; COMMIT. Then `finish_job("ok", summary)` with `decided`, `previous` and the three id lists. On any exception: ROLLBACK, `finish_job("failed", error=...)`, re-raise. Never `DELETE FROM decision` (Radar `rebuild_decisions.py` docstring: a DELETE before upsert destroyed data there).
+  - `decide_and_store(conn, posting_id: int, *, cfg=None) -> Decision`: raises `RulesetNotCurrent("ruleset changed; run: uv run python -m outreach.rules.rebuild")` when the store's current version is not `ruleset_version()`; otherwise decides and upserts one row under the current version. Joins the caller's transaction when `conn.in_transaction`, else opens its own. This is what #21 calls per posting.
+  - `record_evidence(conn, company_id: int, drafts: list[EvidenceDraft], *, posting_id: int | None = None) -> int`: inserts each draft with `locked = 0` and `INSERT OR IGNORE` (the `evidence_once` index drops repeats); raises `ValueError` for a draft with `source_kind == "hand"` (hand values come from #16 edits and #17's locked import, which write `locked = 1` themselves); appends one `event` (`entity "evidence"`, `kind "recorded"`, `actor "rules"`) when at least one row was added; returns the number added.
+  - `main(argv=None) -> int` for `uv run python -m outreach.rules.rebuild`: `connect()`, `rebuild`, print `lines()`, return 0.
+  - `install.install` now ends with `rebuild(conn)` when the store has no current ruleset or a different one, and prints the report.
+
+- [ ] **Step 1: Write the failing tests** (all on `storetest.fresh_store()`)
+
+```python
+def test_install_registers_the_current_ruleset(self):   # current ruleset == ruleset_version(); its config_toml == config.toml text
+def test_every_posting_gets_a_decision_closed_too(self): # 2 postings, one closed -> 2 rows in current_decision
+def test_flip_to_hidden_is_listed(self):
+    # posting "Software Engineer, New Grad", "Boston, MA", body "" -> rebuild -> passes
+    # UPDATE posting body = "We do not sponsor." -> rebuild(version="r-000000000001") -> to_hidden == [that posting],
+    # change mentions "sponsorship"; job_run summary to_hidden == [id]
+def test_flip_to_shown_and_level_lost_are_listed(self):
+def test_same_rules_twice_flip_nothing(self):           # rebuild twice -> second report has 3 empty lists
+def test_old_versions_are_kept(self):                   # after two versions both have rows; only the newest is current
+def test_rebuild_is_all_or_nothing(self):
+    # patch decide to raise on the second posting -> exception; no rows under the new version; previous version still current;
+    # last job_run for "rebuild" has status "failed"
+def test_decide_and_store_refuses_a_stale_ruleset(self): # set current to "r-000000000001" -> RulesetNotCurrent
+def test_decide_and_store_writes_under_current(self):
+def test_small_default_leaves_size_unknown(self):       # SmallDefaultIsUnknown, store half
+    # record_evidence(company, from_old_dashboard({"sizeClass": "small", "sizeWhy": "no filing record: most likely an early startup"}))
+    # == 0, and SELECT * FROM company_fact WHERE company_id = ? AND fact = 'size' returns no row
+def test_record_evidence_ignores_repeats(self):         # same drafts twice -> second call returns 0
+def test_record_evidence_refuses_hand_drafts(self):     # ValueError
+def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>; main([]) == 0; output contains "shown to hidden"
+```
+
+- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_rebuild -v`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run and see them pass**, then the whole suite.
+- [ ] **Step 5: Commit** `git commit -m "Rules rebuild with a shown-to-hidden flip report; install registers the ruleset (#4)"`
+
+---
+
+### Task 16: Mutation check and final verification
+
+**Files:**
+- Create: `tests/mutation_check.py`
+- Modify: `docs/README.md` (mark this plan done when the PR merges, in that PR)
+
+**Interfaces:**
+- Consumes: everything.
+- Produces: `uv run python tests/mutation_check.py [--list]`, exit 0 only when every mutation is caught. Port of Radar `tests/mutation_check.py:45-60, 250-290`: baseline suite must be green; each mutation is `(path, guarantee, find, replace)`; a missing anchor is SKIP and fails the run; each file is restored in `finally` and the restore is verified by re-reading. It refuses to run when `live_checkout.is_live()` (it edits source files in place, and after #21 launchd runs the rules from the live checkout).
+
+- [ ] **Step 1: Write the mutation list.** One entry per guarantee below; the `find` anchors are exact strings from the code as implemented in Tasks 1 to 15.
+
+| # | File | Guarantee broken | Test that must fail |
+|---|---|---|---|
+| 1 | `rules/title.py` | MTS rewrite removed, so the senior check sees "staff" | Misfire1 |
+| 2 | `rules/title.py` | `II` and `2` dropped from the SWE II numeral pattern | Misfire2 |
+| 3 | `rules/title.py` | "staff engineer i" exemption restored | Misfire3 |
+| 4 | `rules/title.py` | strong-entry override of senior words removed | Misfire4 |
+| 5 | `rules/years.py` | degree-alternative exclusion removed | Misfire5 |
+| 6 | `rules/location.py` | non-US list checked before US states | Misfire6 |
+| 7 | `rules/sponsorship.py` | negation check removed | Misfire7 |
+| 8 | `rules/title.py` | numerals accepted anywhere, not only after a level noun | Misfire8 |
+| 9 | `rules/facts.py` | "no filing record" read as a small size | SmallDefaultIsUnknown |
+| 10 | `rules/config.toml` | `max_years_asked = 3` becomes `4` | Misfire2 control |
+| 11 | `rules/config.toml` | `graduated = "2026-05"` becomes `"2027-05"` | eligibility CASES[0] |
+| 12 | `store/db.py` | `is_live_path` always False | live-path refusal tests |
+| 13 | `store/db.py` | `connect` calls `migrate` | `test_open_never_migrates` |
+| 14 | `store/migrations/0001_initial.sql` | `event_no_update` trigger removed | `test_events_are_append_only` |
+| 15 | `store/migrations/0001_initial.sql` | `e.locked DESC` removed from `company_fact` | `test_automation_never_outranks_a_hand_value` |
+| 16 | `store/writes.py` | `DO NOTHING` becomes `DO UPDATE SET at = excluded.at` | idempotency test |
+| 17 | `rules/rebuild.py` | `to_hidden` never appended | `test_flip_to_hidden_is_listed` |
+| 18 | `rules/version.py` | `config.toml` left out of the hash | `test_version_changes_with_config` |
+| 19 | `rules/eligibility.py` | `current_student` step removed | eligibility current-student case |
+
+- [ ] **Step 2: Run it.** `uv run python tests/mutation_check.py`
+  Expected: `baseline green (19 mutations to apply)`, 19 `CAUGHT` lines, `caught 19  missed 0  skipped 0`, exit 0. A MISSED line means a test is missing: add it to the owning task's test file and rerun.
+- [ ] **Step 3: Final checks, each with its expected output.**
+  - `uv run python -m unittest discover -s tests -t .` -> `OK`, old and new tests together.
+  - `OUTREACH_DB=$(mktemp -d)/outreach.db uv run python -m outreach.install` -> prints `store at version 1` and an empty flip report; running it again changes nothing.
+  - `env -u OUTREACH_DB uv run python -m outreach.install` from this worktree -> exits non-zero naming the live checkout; `ls "$HOME/Library/Application Support/outreach/"` shows no new file.
+  - `grep -rnP "[\x{2013}\x{2014}]" outreach tests/test_store_*.py tests/test_rules_*.py tests/mutation_check.py CLAUDE.md` -> no output.
+  - `git diff --stat origin/master -- dashboard mail refresh` -> no output.
+- [ ] **Step 4: Check every "Done when" line of #4:** store created by one command (step 3 second bullet); rules suite and mutation check pass (steps 2 and 3); nothing in the new platform classifies titles except the rules module (`test_only_rules_classify`); `dashboard/app.js` untouched (last bullet).
+- [ ] **Step 5: Commit** `git commit -m "Mutation check: every rules and store guarantee has a test that notices (#4)"`
+
+---
+
+## For downstream issues
+
+What each issue reads (R) and writes (W). Column names are exact; anything not listed here needs its own migration (`0002_...`), added by that issue through `install`.
+
+**#6 Ranking and hide rules.** R `current_decision` (`lane`, `level_tier`, `level_ok`, `level_basis`, `us`, `sponsorship`, `citizenship`, `eligibility`, `start_2027`), `posting` (`posted_on`, `first_seen_at`, `closed_at`), `company_fact` (`size`: `num_low`, `num_high`, `confidence`, `locked`; `sponsorship`; `stage`; `everify`), `no_go`, `company.status`. W `no_go` (`reason 'no_sponsorship'`, `source 'rules'`) for companies with a `sponsorship = 'no'` posting; `review_item` (`kind 'size_guess'`). Calls `outreach.rules.passes()` for the posting-level hide; adds the company-level part. **E-Verify** (`company_fact` where `fact = 'everify'`, with `observed_on` and `source_ref`): a ranking input only, never a hide rule unless #9 says so (open question 4).
+
+**#11 API.** R and W every table. Edits send and check `revision` (`UPDATE ... SET ..., revision = revision + 1 WHERE id = ? AND revision = ?`; zero rows means "changed in another tab"). Repeated requests carry `event.idempotency_key`. Health reads `job_run` (last `ok` per `job`), `ruleset` (current), `board` (`last_read`, streaks). Pause and resume write `company.status`, `pause_reason`, `sender.paused`. Close writes `company.close_reason`, `status_note`, and for `no_sponsorship` a `no_go` row. Approve moves `message.state` `drafted` -> `approved` with `approved_at`, after the #9 checks; results go in `message.checks`.
+
+**#12 React app, by view.**
+1. Today: `daily_list_entry` (`rank`, `state`, `why`, `posting_id`), `company`, `company_fact` (size, stage with `confidence` and `source_kind`), `posting` and `current_decision` for the role to name and its age.
+2. LinkedIn list: `person` where `channel = 'linkedin'`, `linkedin_log`, the company's role to name from `daily_list_entry.posting_id`.
+3. Outbox: `message` (`state`, `seq`, `subject`, `body`, `checks`, `due_on`, `sent_at`, `error`), `touch` (`state`, `replied_at`, `reply_kind`), `person`, `company.status`, `sender`, `send_day` (`send_limit` against today's count of `message.sent_at`).
+4. Needs you: `review_item` (`kind`, `reason`, `state`, `resolution`) with its `company`, `board`, `posting`, `person`.
+5. No-go: `no_go` (`reason`, `note`, `source`, `created_at`) with `company.name` or `person.name`.
+6. Company page and history: `company`, `company_alias`, `evidence` and `company_fact` (size, stage, sponsorship, domain, HQ, **E-Verify enrollment with its date and source**), `board`, `posting` with `current_decision` and its quotes, `person`, `touch`, `message`, `linkedin_log`, `event` (by `company_id`), `import_record` (by `entity`, `entity_id`).
+7. Done companies: `company` where `status = 'closed'` and `close_reason IN ('interview','referral')`.
+
+**#13 MCP server.** `todays_companies`: R `daily_list_entry` (`state = 'picked'`), `company`, `posting`, `current_decision`, `person`, `touch`. `company`: R as view 6, fewer fields. `add_people`: W `person` (`added_by 'claude'`), `company_alias` if needed, `event`; duplicates come from the `person_email` and `person_linkedin` unique indexes; domain mismatch compares the email domain with `company_fact` `domain`. `save_draft`: W `touch`, `message` (`seq 0`, `state 'drafted'`, `subject`, `body`, `hook`, `project`, `checks`). `save_followup`: W `message` (`seq` 1 to 3, `planned` -> `drafted`). `flag_review`: W `review_item` (`kind 'flagged'`, `raised_by 'claude'`). `mark_no_go`: W `no_go` (`source 'claude'`). It never writes `message.state` past `drafted`.
+
+**#14 Sending engine.** R and W `message` (claim: `state 'sending'`, `pending_rfc_id`, `claimed_at`; then `sent` with `rfc_message_id`, `gmail_message_id`, `sent_at`, or `send_unknown`, `failed`, `reconciled_at`), `touch` (`gmail_thread_id`, `first_rfc_id`, `first_sent_at`, `replied_at`, `reply_kind`, `bounced_at`, `auto_reply_at`, `state`, `close_reason`), `company.status` (`paused`, `pause_reason 'reply'`), `sender`, `send_day` (`send_limit`, `outcome`, `outcome_note`), `no_go` (`stop_reply`), `event`, `job_run` (`job 'sender'`). R `person` (`tz`, `role_kind` for recruiter day 2, `email_rank`, `channel`). Creates the three follow-up rows (`state 'planned'`, `due_on` at 3, 7, 15 business days) when seq 0 is sent.
+
+**#15 Daily list.** W `daily_list_entry`, `company.status` (`backlog`, `working`, `removed` with `remove_reason`), `event`, `job_run` (`job 'daily_list'`). R #6's order, `send_day.send_limit` for capacity, `company_fact` for the why snapshot.
+
+**#16 Needs you.** R and W `review_item`. Triggers: 1 `board.error_streak >= 3`; 2 `board.last_read = 'empty'` (`board_empty`, closes on `empty_streak >= 2`); 3 `current_decision.sponsorship = 'unclear'` (`posting_id`, quote as `reason`); 4 a `working` company with no `size` row in `company_fact`; 5 an emailed company with no `domain` row. `evidence_key` is the board's `streak_since`, the quote's hash, or the evidence id it saw. Fixes: `marked_ok`; `marked_no_go` with a `no_go` row; `field_edited` with a new `evidence` row, `source_kind 'hand'`, `locked = 1`, `source_ref` = his source.
+
+**#17 Import.** W `import_record` (every source record verbatim, `outcome` `imported`, `merged` or `skipped` with `reason`), `job_run` (`job 'import'`), and every entity table. Hand visa verdicts become `evidence` with `fact 'sponsorship'`, `source_kind 'hand'`, `locked = 1`. Size, stage and E-Verify come from `outreach.rules.facts.from_old_dashboard()` through `record_evidence()`. Job Radar big-employer and Workday boards are `board.active = 0`; closed history is `posting.close_reason 'imported_closed'`. Browser stages and applications are `event` rows (`entity 'company'` or `'application'`, `actor 'import'`). Done companies are `status 'closed'`, `close_reason 'interview'` or `'referral'`. The count report is `import_record` grouped by `source` and `outcome`; a second run adds nothing (the unique key).
+
+**#21 Crawler.** W `board` (`last_read`, `last_read_at`, `empty_streak`, `error_streak`, `streak_since`, `last_error`, with the update rule of `refresh/board_status.py:34-48`), `posting` (upsert on `source_key`; `last_seen_at`; `closed_at` and `close_reason` only on `board_empty_twice` or `gone_from_board` after an `ok` read; never delete), decisions through `decide_and_store()` (or `rebuild()` first when it raises `RulesetNotCurrent`), evidence through `record_evidence()`, `review_item` (`board_unreadable`, `board_empty`), `job_run` (`job 'crawl'`). The CHECKs enforce the read contract per board; how several boards combine into a company read is #21's choice.
+
+---
+
+## Where the issues and the design disagreed, and what this plan does
+
+1. **Company status.** Design section 4 lists active, backlog, removed, done, no-go. #11 needs pause, resume and close with a reason, and #15 needs a picked state. This plan uses `candidate`, `backlog`, `working`, `paused`, `closed` (with reason), `removed` (with reason). Done is `closed` with interview or referral (#12 view 7's own definition); no-go is the `no_go` table, because it also covers people and carries a reason and source.
+2. **Domain.** Design section 4 puts domain both on the company row and in evidence. #16 needs domain editable with a source and a lock, like size, so it lives only in `evidence`, read through `company_fact`.
+3. **Review triggers.** #16 lists five triggers; design section 5 and #6 also say size guesses raise a review item, and #13's `flag_review` needs one. `review_item.kind` allows the five plus `size_guess` and `flagged`.
+4. **"Reconciled" as a state.** The brief lists it, but `mail/store.py` has no such state: reconciling is the transition from `sending` or `send_unknown` to `sent` or `failed`. It is `message.reconciled_at`.
+5. **Follow-up schedule as an entity.** #4's scope lists it; here it is the three `message` rows (`seq` 1 to 3, `planned`, `due_on`), so a follow-up's schedule, draft and send are one row.
+6. **`synchronous`.** The data-lifecycle research recommends NORMAL; this plan uses FULL, as Job Radar does, because a lost commit of a send claim could mean a second send.
+7. **Install command.** Design section 14 says `python3 -m outreach.install`; with uv it is `uv run python -m outreach.install`.
+8. **Read streaks.** The old `board_status.py` keeps streaks per company; design section 6 and #21 speak of boards. The store keeps them per board.
+
+## Open questions for Devanshu
+
+Each has a default this plan already uses; say if you want it changed.
+
+1. **Old dashboard "big" companies.** 233 companies say "known to be well over 500 people" with no source. Default: counted as size evidence (`estimate`, 501+), so #6 keeps them hidden. The other choice is `guess`, which would show them again with a review flag.
+2. **PhD-only postings.** The old system dropped them; #9 does not list them as hidden. Default: no rule, they show.
+3. **"New Grad 2027" titles.** Default: read as a 2027 start (shown, flagged), unless the title says "2027 graduate", "class of 2027" or "2027 university grad", or the body names a graduation window that leaves out May 2026 (hidden, per the #9 ruling).
+4. **E-Verify, proposed addition to #9.** Your OPT card runs to July 8, 2027; staying past it needs the STEM OPT extension, which works only at an employer enrolled in E-Verify. This plan records E-Verify enrollment as company evidence (`fact 'everify'`, `enrolled` or `not_enrolled`, with source and the date it was checked) and the company page shows it. Proposed for #9: #6 ranks enrolled companies above unknown or not enrolled ones within the same tier, and never hides on it. Until #9 records that, #6 should not use it.

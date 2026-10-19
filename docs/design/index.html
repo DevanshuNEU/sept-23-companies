@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outreach mockups</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="idx">
+  <div class="row">
+    <span class="brand"><span class="brand-mark">O</span>Outreach mockups</span>
+    <span class="grow"></span>
+    <button class="btn btn-outline btn-sm" type="button" data-palette><svg class="i"><use href="#search"/></svg>Try the palette<span class="kbd">⌘K</span></button>
+    <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+  </div>
+  <h1 class="t-2xl" style="margin-top:32px">The seven day-one views</h1>
+  <p class="muted" style="max-width:68ch;margin-top:6px">Static mockups for issue #12. Read the spec in README.md next to this file. Every page shares one stylesheet built on shadcn/ui's default tokens, so each part maps to a real component. Press ? on any page for its keys, and G then a letter to jump between views.</p>
+
+  <div class="idx-grid">
+    <a class="idx-card" href="today.html"><b>1. Today</b><span>18 proposals, why each was picked, pick up to 5. Shows what is still being emailed from earlier days.</span></a>
+    <a class="idx-card" href="linkedin.html"><b>2. LinkedIn list</b><span>People past the email budget, the role to name, and a log of requests, accepts, messages and replies.</span></a>
+    <a class="idx-card" href="outbox.html"><b>3. Outbox</b><span>A reply holding a company at the top, a blocked draft, a recruiter warning, a follow-up, and the limit at 20 of 30.</span></a>
+    <a class="idx-card" href="needs-you.html"><b>4. Needs you</b><span>All five review triggers with one-click fixes, including one waiting 11 days.</span></a>
+    <a class="idx-card" href="no-go.html"><b>5. No-go list</b><span>Companies and people kept out, with reason, evidence and source.</span></a>
+    <a class="idx-card" href="company.html"><b>6. Company page</b><span>Browserbase, held by a reply: roles, people, emails, evidence and imported history.</span></a>
+    <a class="idx-card" href="done.html"><b>7. Done companies</b><span>Crusoe, Retell AI, Distyl AI and a referral, with replies per month on top.</span></a>
+  </div>
+
+  <h2 class="t-lg">Shared states</h2>
+  <p class="muted t-sm" style="margin:4px 0 16px">Every view uses these same pieces for loading, empty, error, stale and partial data.</p>
+  <div class="state-grid">
+    <div class="state-box"><span class="label">Loading: skeleton rows at the final height, so nothing jumps</span>
+      <div class="inner">
+        <div class="row"><span class="skeleton" style="width:16px;height:16px"></span><span class="skeleton" style="width:30%"></span><span class="skeleton" style="width:40%;margin-left:auto"></span></div>
+        <div class="row"><span class="skeleton" style="width:16px;height:16px"></span><span class="skeleton" style="width:24%"></span><span class="skeleton" style="width:36%;margin-left:auto"></span></div>
+        <div class="row"><span class="skeleton" style="width:16px;height:16px"></span><span class="skeleton" style="width:34%"></span><span class="skeleton" style="width:30%;margin-left:auto"></span></div>
+      </div></div>
+    <div class="state-box"><span class="label">Empty: says what to do next</span>
+      <div class="inner"><div class="empty" style="padding:16px"><svg class="i"><use href="#outbox"/></svg><b>No drafts to review</b><span>Paste people for a picked company in the side terminal. Claude's drafts show up here.</span></div></div></div>
+    <div class="state-box"><span class="label">Error: the app cannot reach its server</span>
+      <div class="inner"><div class="alert s-bad"><svg class="i"><use href="#block"/></svg><span class="title">Cannot reach the outreach server</span><span class="desc">Nothing was changed. Showing what loaded at 10:14. The sender keeps its own schedule.</span><span class="act"><button class="btn btn-outline btn-sm" type="button"><svg class="i"><use href="#refresh"/></svg>Try again</button></span></div></div></div>
+    <div class="state-box"><span class="label">Stale: a scheduled job did not run</span>
+      <div class="inner"><div class="alert s-warn"><svg class="i"><use href="#clock"/></svg><span class="title">Boards last read 6 days ago</span><span class="desc">Thursday's read did not run (the Mac was asleep). Roles may have closed since Mon Nov 2.</span><span class="act"><button class="btn btn-outline btn-sm" type="button">See job runs</button></span></div></div></div>
+    <div class="state-box"><span class="label">Sending stopped by a hard block</span>
+      <div class="inner"><div class="alert s-bad"><svg class="i"><use href="#pause"/></svg><span class="title">Sending paused: Gmail said the daily limit was reached</span><span class="desc">Paused at 13:02. Nothing sends until you resume, and today does not count as clean.</span><span class="act"><button class="btn btn-outline btn-sm" type="button">Read Gmail's message</button></span></div></div></div>
+    <div class="state-box"><span class="label">Partial: one section failed, the rest works</span>
+      <div class="inner"><div class="row t-sm"><svg class="i" style="color:var(--warn)"><use href="#warn"/></svg><span>Evidence did not load for this company.</span><button class="btn btn-ghost btn-sm" type="button" style="margin-left:auto">Retry</button></div></div></div>
+    <div class="state-box"><span class="label">Toast with undo (Sonner)</span>
+      <div class="inner"><div class="toast static"><span class="grow">Approved Omar Haddad. Sends after 10:55 ET.</span><button class="btn btn-outline btn-sm" type="button">Undo <span class="kbd">Z</span></button></div></div></div>
+    <div class="state-box"><span class="label">Edit conflict: another tab saved first</span>
+      <div class="inner"><div class="alert s-warn"><svg class="i"><use href="#warn"/></svg><span class="title">This draft changed in another tab</span><span class="desc">Your edit is kept below. Load the newer one, or save yours over it.</span><span class="act"><button class="btn btn-outline btn-sm" type="button">Load newer</button></span></div></div></div>
+  </div>
+
+  <p class="mock-note" style="margin-top:40px">All data here is fake. Company names are real public companies, but every role, number, date and fact about them is invented, and so is every person, email address and message. Email addresses use .example domains so none can be real. The outcomes for Crusoe, Retell AI and Distyl AI come from issue #9; their details are left blank.</p>
+</div>
+<script src="mockup.js"></script>
+</body>
+</html>

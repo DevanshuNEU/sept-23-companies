@@ -40,6 +40,8 @@ def snapshot():
     return json.loads(js.stdout)
 
 def main():
+    sys.path.insert(0, ROOT); import live_checkout
+    live_checkout.require_live("refresh", ROOT)        # never crawl or publish from a worktree; no bypass
     os.makedirs(W, exist_ok=True); os.makedirs("refresh/backups", exist_ok=True)
     backup = f"refresh/backups/data_{STAMP}.js"
     shutil.copy2(DATA, backup)

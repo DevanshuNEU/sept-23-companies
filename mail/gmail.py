@@ -1,7 +1,7 @@
 """
 Gmail access for the cold-email sender, using only the standard library.
 
-Secrets live outside the project, in ~/Library/Application Support/outreach-mail/:
+Secrets live outside the project, in ~/Library/Application Support/outreach-mail/ (OUTREACH_GMAIL_DIR overrides it):
   client_secret.json   the OAuth "Desktop app" client you download from Google Cloud Console
   token.json           written by `python3 mail/gmail.py auth` (chmod 600); holds the refresh token
 
@@ -12,10 +12,13 @@ notice replies and bounces). Neither scope can read message bodies or delete any
   python3 mail/gmail.py whoami   print the signed-in address
 """
 import base64, hashlib, http.server, json, os, secrets, sys, time, urllib.parse, urllib.request, urllib.error, webbrowser
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import live_checkout
 from email.message import EmailMessage
 from email.utils import make_msgid, formataddr
 
-DIR = os.path.expanduser("~/Library/Application Support/outreach-mail")
+DEFAULT_DIR = os.path.expanduser("~/Library/Application Support/outreach-mail")
+DIR = os.environ.get("OUTREACH_GMAIL_DIR") or DEFAULT_DIR      # tests point this at a scratch folder
 CLIENT, TOKEN = os.path.join(DIR, "client_secret.json"), os.path.join(DIR, "token.json")
 SCOPES = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.metadata"
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -26,6 +29,11 @@ def _client():
 
 def authorized():
     return os.path.exists(TOKEN)
+
+def check_auth_location():
+    """Signing in writes the real token, so it happens only from the live checkout (a scratch folder is fine)."""
+    if os.path.realpath(DIR) == os.path.realpath(DEFAULT_DIR):
+        live_checkout.require_live("Gmail sign-in into the real secrets folder")
 
 def authorize():
     """Browser sign-in with PKCE and a loopback redirect. Run by you, once."""
@@ -66,7 +74,10 @@ def _post(url, form):
     with urllib.request.urlopen(req, timeout=30) as r: return json.loads(r.read())
 
 def _token():
-    tok = json.load(open(TOKEN))
+    """Every Gmail call reads the token here, so this is the one place the live-checkout rule is enforced."""
+    if not live_checkout.is_live():
+        raise SystemExit(f"the real Gmail token is only used from the live checkout ({live_checkout.LIVE_ROOT})")
+    with open(TOKEN) as f: tok = json.load(f)
     if time.time() >= tok.get("expires_at", 0):
         c = _client()
         new = _post("https://oauth2.googleapis.com/token", {
@@ -141,6 +152,7 @@ def find_sent(rfc_id, to, subject, look_back=50):
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "auth":
+        check_auth_location()
         if not os.path.exists(CLIENT): raise SystemExit(f"Put your OAuth client file at:\n  {CLIENT}")
         authorize()
     elif cmd == "whoami": print(whoami())

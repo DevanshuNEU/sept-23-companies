@@ -30,10 +30,12 @@ class FetchReadTests(unittest.TestCase):
     def setUp(self):
         self._get = fc.get
         self.addCleanup(setattr, fc, "get", self._get)
+        self.limits = []
 
     def fake(self, responses):
         # responses: substring of URL -> (status, body)
-        def get(u, t=30):
+        def get(u, t=30, limit=1500000):
+            self.limits.append(limit)
             for key, (st, body) in responses.items():
                 if key in u:
                     return st, u, body
@@ -80,6 +82,54 @@ class FetchReadTests(unittest.TestCase):
         self.assertEqual(cid, "x")
         self.assertEqual(out["read"], "empty")
         self.assertTrue(out["boardEmpty"])
+
+    def test_board_reads_use_a_large_size_limit(self):
+        self.fake({"greenhouse": (200, json.dumps({"jobs": [GH_JOB]}))})
+        fc.board({"slugs": {"greenhouse": "acme"}})
+        self.assertEqual(self.limits, [20000000])
+
+    def test_get_reads_more_than_the_page_limit_when_asked(self):
+        import io, urllib.request
+        body = b"x" * 1600000
+
+        class Resp(io.BytesIO):
+            status = 200
+            def geturl(self): return "u"
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        old = urllib.request.urlopen
+        urllib.request.urlopen = lambda *a, **k: Resp(body)
+        self.addCleanup(setattr, urllib.request, "urlopen", old)
+        self.assertEqual(len(fc.get("http://x")[2]), 1500000)
+        self.assertEqual(len(fc.get("http://x", limit=20000000)[2]), 1600000)
+
+    def test_unknown_ats_slugs_are_error(self):
+        self.fake({})
+        rows, read = fc.board({"slugs": {"workable": "x"}})
+        self.assertEqual(read, "error")
+        self.assertEqual(rows, [])
+
+    def test_lever_job_with_malformed_lists_is_error_not_a_crash(self):
+        bad = {"text": "Software Engineer", "lists": ["oops"], "hostedUrl": "https://example.com/3"}
+        self.fake({"lever": (200, json.dumps([bad]))})
+        cid, out = fc.work({"id": "x", "list": "linkedin", "slugs": {"lever": "acme"}, "urls": []})
+        self.assertEqual(out["read"], "error")
+        self.assertEqual(out["jobs"], [])
+        self.assertFalse(out["boardEmpty"])
+
+    def test_greenhouse_job_with_dict_content_is_error_not_a_crash(self):
+        bad = dict(GH_JOB, content={"oops": 1})
+        self.fake({"greenhouse": (200, json.dumps({"jobs": [GH_JOB, bad]}))})
+        cid, out = fc.work({"id": "x", "list": "linkedin", "slugs": {"greenhouse": "acme"}, "urls": []})
+        self.assertEqual(out["read"], "error")
+        self.assertEqual(out["jobs"], [])
+
+    def test_ashby_job_with_null_title_is_error_not_a_crash(self):
+        bad = dict(ASHBY_JOB, title=None)
+        self.fake({"ashby": (200, json.dumps({"jobs": [bad]}))})
+        cid, out = fc.work({"id": "x", "list": "linkedin", "slugs": {"ashby": "acme"}, "urls": []})
+        self.assertEqual(out["read"], "error")
+        self.assertEqual(out["jobs"], [])
 
     def test_import_does_no_work(self):
         # _load() already imported inside an empty temp cwd without raising; confirm the module

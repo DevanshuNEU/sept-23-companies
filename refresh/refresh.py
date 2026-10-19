@@ -102,8 +102,9 @@ def write_report(before, after, error=None):
     # boards the last run could not read, or read empty once: kept as they were, listed for a human
     try:
         sys.path.insert(0, os.path.join(ROOT, "refresh")); import board_status
-        unread = board_status.report_lines(board_status.load(W + "board_status.json"),
-                                           {k: v["n"] for k, v in after.items()})
+        in_run = json.load(open(W + "finalcheck.json"))
+        state = {k: v for k, v in board_status.load(W + "board_status.json").items() if k in in_run}
+        unread = board_status.report_lines(state, {k: v["n"] for k, v in after.items()})
     except Exception as e:
         unread = ["## Boards that could not be read this run", "", f"(could not build this list: {e})", ""]
     def section(title, items, empty):

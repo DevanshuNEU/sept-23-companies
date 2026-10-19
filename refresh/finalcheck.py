@@ -1,9 +1,9 @@
 import json, re, os, datetime, urllib.request, urllib.error, concurrent.futures as cf
 UA={"User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36"}
-def get(u,t=30):
+def get(u,t=30,limit=1500000):
     try:
         with urllib.request.urlopen(urllib.request.Request(u,headers=UA),timeout=t) as f:
-            return f.status, f.geturl(), f.read(1500000).decode("utf-8","replace")
+            return f.status, f.geturl(), f.read(limit).decode("utf-8","replace")
     except urllib.error.HTTPError as e: return e.code, u, ""
     except Exception: return 0, u, ""
 def clean(h):
@@ -132,7 +132,7 @@ def analyse(title, body, loc, posted, url):
 JOBS=lambda x: isinstance(x,dict) and isinstance(x.get("jobs"),list) and all(isinstance(j,dict) for j in x["jobs"])
 def jget(u, shape):
     # (parsed body or None, ok): ok only for a 200 whose body has the shape the ATS returns
-    st,_,d=get(u)
+    st,_,d=get(u,limit=20000000)
     if st!=200: return None, False
     try: x=json.loads(d)
     except Exception: return None, False
@@ -164,6 +164,7 @@ def board(t):
             body+=" "+(j.get("additionalPlain") or "")
             rows.append((j.get("text",""), clean(body), ((j.get("categories") or {}).get("location") or ""),
                          d10(j.get("createdAt")), j.get("hostedUrl","")))
+    if not any(s.get(k) for k in ("ashby","greenhouse","lever")): bad=True  # no ATS we can read: never "empty"
     return rows, ("error" if bad else "ok" if rows else "empty")
 def urlonly(t):
     rows=[]
@@ -180,10 +181,14 @@ def work(t):
     out={"list":t["list"],"source":None,"jobs":[],"closedUrls":0,"checked":0}
     if t["slugs"]:
         out["source"]="board"
-        rows,out["read"]=board(t)
-        for title,body,loc,posted,url in rows:
-            a=analyse(title,body,loc,posted,url)
-            if a: out["jobs"].append(a)
+        try:
+            rows,out["read"]=board(t)
+            for title,body,loc,posted,url in rows:
+                a=analyse(title,body,loc,posted,url)
+                if a: out["jobs"].append(a)
+        except Exception:
+            # one malformed job must not abort the run, nor make a board look empty: the whole company reads "error"
+            out["jobs"]=[]; out["read"]="error"
         out["boardEmpty"] = out["read"]=="empty"
     else:
         out["source"]="url"; out["read"]="ok"

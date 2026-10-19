@@ -35,11 +35,13 @@ def basis(j):
     if j["tier"]==3: return "Title says Engineer I" + (f", asks {y} years" if y else "")
     if j["tier"]==4: return (f"Asks {y} years" if y is not None else "Title says Engineer II")
     return "Posting does not state a level"
+def _read(path):
+    with open(path) as f: return json.load(f)
 def main(work_dir="refresh/work/", today=None):
     B=work_dir
     today=today or datetime.date.today().isoformat()
-    R=json.load(open(B+"finalcheck.json")); E=json.load(open(B+"eligibility.json"))
-    T={t["id"]:t for t in json.load(open(B+"final_targets.json"))}
+    R=_read(B+"finalcheck.json"); E=_read(B+"eligibility.json")
+    T={t["id"]:t for t in _read(B+"final_targets.json")}
     state=board_status.load(B+"board_status.json")
     out={}; cnt=collections.Counter()
     for cid,v in R.items():
@@ -76,7 +78,7 @@ def main(work_dir="refresh/work/", today=None):
                        reqs=[{"t":(j["title"]+(" - "+j["loc"] if j["loc"] else ""))[:100],"u":j["url"],"d":j["posted"],"tier":j["tier"]} for j in ok[:10]])
             cnt[TN[b["tier"]]+(" (2027 start)" if b["start2027"] else "")]+=1
         out[cid]=rec
-    json.dump(out, open(B+"final_merge.json","w"))
+    with open(B+"final_merge.json","w") as f: json.dump(out, f)
     board_status.save(B+"board_status.json", state)
     print("merged:", len(out), "kept as they were:", len(R)-len(out)); print(dict(cnt))
     return out

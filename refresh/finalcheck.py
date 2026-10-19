@@ -205,13 +205,13 @@ def work(t):
             if a: out["jobs"].append(a)
     return t["id"], out
 def main(targets_path="refresh/work/final_targets.json", out_path="refresh/work/finalcheck.json"):
-    T=json.load(open(targets_path))
+    with open(targets_path) as f: T=json.load(f)
     res={}
     with cf.ThreadPoolExecutor(max_workers=14) as ex:
         for i,(cid,o) in enumerate(ex.map(work,T)):
             res[cid]=o
             if i%40==0: print(f"  {i}/{len(T)}", flush=True)
-    json.dump(res, open(out_path,"w"))
+    with open(out_path,"w") as f: json.dump(res, f)
     allj=[j for v in res.values() for j in v["jobs"]]
     print("DONE companies:",len(res),"| in-lane US jobs:",len(allj))
 if __name__=="__main__": main()

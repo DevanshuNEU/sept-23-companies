@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>No-go list | Outreach mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">O</span>Outreach</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today.html"><svg class="i"><use href="#today"/></svg>Today<span class="count">3 of 5</span></a>
+      <a class="sb-item" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">7</span></a>
+      <a class="sb-item" href="linkedin.html"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html" aria-current="page"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Browserbase</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Mintlify</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Trigger.dev</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">20 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>9 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><b>No-go list</b></div>
+      <div class="right">
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="page">
+        <div class="page-head">
+          <div>
+            <h1 class="t-xl">No-go list</h1>
+            <p class="lede">Every company and person kept out, why, and where that came from. Nothing here is proposed or emailed.</p>
+          </div>
+        </div>
+
+        <div class="row" style="margin-bottom:12px">
+          <div class="tabs" role="tablist" aria-label="No-go list">
+            <button class="tab" role="tab" aria-selected="true" aria-controls="ng-co">Companies<span class="count">24</span></button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="ng-pe">People<span class="count">7</span></button>
+          </div>
+          <div class="row-wrap" style="margin-left:12px" role="group" aria-label="Filter by reason">
+            <button class="btn btn-secondary btn-sm" type="button" aria-pressed="true">All reasons</button>
+            <button class="btn btn-outline btn-sm" type="button">Does not sponsor <span class="muted">9</span></button>
+            <button class="btn btn-outline btn-sm" type="button">Citizenship or clearance <span class="muted">4</span></button>
+            <button class="btn btn-outline btn-sm" type="button">Over 300 <span class="muted">6</span></button>
+            <button class="btn btn-outline btn-sm" type="button">Removed by you <span class="muted">5</span></button>
+          </div>
+          <div class="input-icon" style="width:240px;margin-left:auto"><svg class="i"><use href="#search"/></svg><input class="input" placeholder="Filter" aria-label="Filter"></div>
+        </div>
+
+        <div id="ng-co" role="tabpanel">
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Company</th><th>Reason</th><th>Evidence</th><th>Source</th><th>Added</th><th class="shrink"><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody>
+                <tr class="is-active" data-row data-href="company.html" aria-selected="true">
+                  <td class="cell-title">Halberd Systems</td>
+                  <td><span class="badge s-bad"><span class="dot"></span>Does not sponsor</span></td>
+                  <td class="t-sm"><span class="quote">"We are unable to sponsor visas now or in the future."</span></td>
+                  <td class="t-sm"><a class="link" href="#">Backend Engineer posting</a><div class="cell-sub">Rules, Oct 14</div></td>
+                  <td class="t-sm muted num">Oct 14</td>
+                  <td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More" data-dialog="dlg-undo"><svg class="i"><use href="#more"/></svg></button></td>
+                </tr>
+                <tr data-row data-href="company.html">
+                  <td class="cell-title">Quillfeather</td>
+                  <td><span class="badge s-bad"><span class="dot"></span>Does not sponsor</span></td>
+                  <td class="t-sm"><span class="quote">"We don't sponsor and aren't hiring new grads this year."</span></td>
+                  <td class="t-sm"><a class="link" href="#">Reply from their CTO</a><div class="cell-sub">Closed by you, Nov 3</div></td>
+                  <td class="t-sm muted num">Nov 3</td>
+                  <td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More"><svg class="i"><use href="#more"/></svg></button></td>
+                </tr>
+                <tr data-row data-href="company.html">
+                  <td class="cell-title">Meridian Defense Labs</td>
+                  <td><span class="badge s-bad"><span class="dot"></span>Citizenship or clearance</span></td>
+                  <td class="t-sm"><span class="quote">"Must be a US citizen with an active Secret clearance."</span></td>
+                  <td class="t-sm"><a class="link" href="#">Software Engineer I posting</a><div class="cell-sub">Rules, Oct 2</div></td>
+                  <td class="t-sm muted num">Oct 2</td>
+                  <td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More"><svg class="i"><use href="#more"/></svg></button></td>
+                </tr>
+                <tr data-row data-href="company.html">
+                  <td class="cell-title">Larkspur Health</td>
+                  <td><span class="badge s-idle"><span class="dot"></span>Over 300 people</span></td>
+                  <td class="t-sm">1,240 people</td>
+                  <td class="t-sm"><a class="link" href="#">LinkedIn company page</a><div class="cell-sub">Rules, high confidence</div></td>
+                  <td class="t-sm muted num">Sep 24</td>
+                  <td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More"><svg class="i"><use href="#more"/></svg></button></td>
+                </tr>
+                <tr data-row data-href="company.html">
+                  <td class="cell-title">Brightwater Analytics</td>
+                  <td><span class="badge s-idle"><span class="dot"></span>Removed by you</span></td>
+                  <td class="t-sm">Ad tech, not a fit</td>
+                  <td class="t-sm">You, from Today<div class="cell-sub">Not a fit for me</div></td>
+                  <td class="t-sm muted num">Nov 4</td>
+                  <td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More"><svg class="i"><use href="#more"/></svg></button></td>
+                </tr>
+                <tr data-row data-href="company.html">
+                  <td class="cell-title">Ostrander Robotics</td>
+                  <td><span class="badge s-bad"><span class="dot"></span>Does not sponsor</span></td>
+                  <td class="t-sm">Marked by hand in the old dashboard</td>
+                  <td class="t-sm"><span class="src-tag">Imported</span><div class="cell-sub">Old dashboard, locked</div></td>
+                  <td class="t-sm muted num">Sep 28</td>
+                  <td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More"><svg class="i"><use href="#more"/></svg></button></td>
+                </tr>
+                <tr><td colspan="6" class="cell-sub" style="text-align:center"><a class="link" href="#">Show 18 more</a></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="mock-note" style="margin-top:8px">Postings hidden for asking for a 2027 graduation or current students are hidden one posting at a time. Their company stays eligible and is not listed here.</p>
+        </div>
+
+        <div id="ng-pe" role="tabpanel" hidden>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Person</th><th>Reason</th><th>What they said</th><th>Source</th><th>Added</th><th class="shrink"></th></tr></thead>
+              <tbody>
+                <tr data-row><td><div class="cell-title">Ruth Okonkwo</div><div class="cell-sub">Staff Engineer, Supabase</div></td><td><span class="badge s-bad"><span class="dot"></span>Asked to stop</span></td><td class="t-sm"><span class="quote">"Please take me off your list."</span></td><td class="t-sm">Reply, Nov 4</td><td class="t-sm muted">Nov 4</td><td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More"><svg class="i"><use href="#more"/></svg></button></td></tr>
+                <tr data-row><td><div class="cell-title">Tessa Lindgren</div><div class="cell-sub">Engineering Manager, Graphite</div></td><td><span class="badge s-bad"><span class="dot"></span>Said no</span></td><td class="t-sm"><span class="quote">"I don't do referrals for people I haven't worked with."</span></td><td class="t-sm">Reply, Nov 2</td><td class="t-sm muted">Nov 2</td><td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More"><svg class="i"><use href="#more"/></svg></button></td></tr>
+                <tr data-row><td><div class="cell-title">Elena Petrova</div><div class="cell-sub">Recruiter, Mintlify</div></td><td><span class="badge s-idle"><span class="dot"></span>Marked by you</span></td><td class="t-sm">Already talking through a friend</td><td class="t-sm">You</td><td class="t-sm muted">Oct 30</td><td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More"><svg class="i"><use href="#more"/></svg></button></td></tr>
+                <tr data-row><td><div class="cell-title">Victor Hale</div><div class="cell-sub">Founder, Cerebrium</div></td><td><span class="badge s-idle"><span class="dot"></span>Flagged by Claude</span></td><td class="t-sm">Profile says "no cold outreach, please"</td><td class="t-sm">Side terminal, Nov 9</td><td class="t-sm muted">Nov 9</td><td><button class="btn btn-ghost btn-icon btn-sm" type="button" aria-label="More"><svg class="i"><use href="#more"/></svg></button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="dlg-undo" data-modal hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-undo-t">
+    <div class="dialog-body">
+      <h2 class="t-lg" id="dlg-undo-t">Take Halberd Systems off the no-go list?</h2>
+      <p class="t-sm muted">The rules put it here from a posting that says it does not sponsor. Taking it off locks your choice: the rules will not add it back for this posting, and a new posting that says the same raises a review item instead.</p>
+      <div class="field"><label for="why">Why</label><input class="input" id="why" placeholder="For example: their recruiter said they now sponsor"></div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+      <button class="btn" type="button" data-close data-toast="Halberd Systems is off the no-go list. It can be proposed again." data-undo>Take it off</button>
+    </div>
+  </div>
+</div>
+
+<template id="page-keys">
+  <h4>No-go list</h4>
+  <div><span>Companies, People</span><span class="kbd-row"><span class="kbd">1</span><span class="kbd">2</span></span></div>
+  <div><span>Open the source</span><span class="kbd-row"><span class="kbd">O</span></span></div>
+  <div><span>Take off the list</span><span class="kbd-row"><span class="kbd">⌫</span></span></div>
+</template>
+<script src="mockup.js"></script>
+</body>
+</html>

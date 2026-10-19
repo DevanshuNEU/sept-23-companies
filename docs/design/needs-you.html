@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Needs you | Outreach mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">O</span>Outreach</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today.html"><svg class="i"><use href="#today"/></svg>Today<span class="count">3 of 5</span></a>
+      <a class="sb-item" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">7</span></a>
+      <a class="sb-item" href="linkedin.html"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html" aria-current="page"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Browserbase</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Mintlify</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Trigger.dev</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">20 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>9 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><b>Needs you</b></div>
+      <div class="right">
+        <span class="t-xs muted">Boards read Mon Nov 9, 08:04. Next read Thu 08:00</span>
+        <span class="vsep"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="page" style="max-width:1080px">
+        <div class="page-head">
+          <div>
+            <h1 class="t-xl">Needs you</h1>
+            <p class="lede">Things only you can settle. Your fix is locked, so automation never overwrites it. Items that hold up today's email come first.</p>
+          </div>
+        </div>
+
+        <h2 class="section-title">Holding up email<span class="count">2</span></h2>
+        <div class="card">
+          <!-- 1. missing domain, shown mid-edit -->
+          <div class="ny-item is-active" data-row aria-selected="true">
+            <svg class="i" style="color:var(--bad)"><use href="#mail"/></svg>
+            <div class="head"><b>Cerebrium</b><span class="badge s-bad"><span class="dot"></span>Missing email domain</span><span class="badge">Picked today</span></div>
+            <div class="acts">
+              <button class="btn btn-ghost btn-sm" type="button" data-dialog="dlg-nogo">Mark no-go<span class="kbd">N</span></button>
+            </div>
+            <div class="body">
+              <p>No email domain on file, so Claude's drafts cannot be checked for a mail server and none can be approved.</p>
+              <form class="ny-edit" onsubmit="return false">
+                <div class="field"><label for="d1">Email domain</label><input class="input" id="d1" value="cerebrium.example"></div>
+                <div class="field"><label for="d2">Source</label><input class="input" id="d2" value="Company website footer, checked by hand"></div>
+                <button class="btn" type="button" data-toast="Saved and locked. Cerebrium's drafts will be checked now."><svg class="i"><use href="#lock"/></svg>Save and lock</button>
+              </form>
+            </div>
+          </div>
+          <!-- 2. unknown size -->
+          <div class="ny-item" data-row>
+            <svg class="i" style="color:var(--warn)"><use href="#user"/></svg>
+            <div class="head"><b>Trigger.dev</b><span class="badge s-warn"><span class="dot"></span>Unknown size</span><span class="badge">Picked today</span><span class="t-xs muted">Opened today 08:00</span></div>
+            <div class="acts">
+              <button class="btn btn-outline btn-sm" type="button">Set size<span class="kbd">E</span></button>
+              <button class="btn btn-ghost btn-sm" type="button" data-toast="Marked ok. Trigger.dev stays at unknown size." data-undo>Mark ok<span class="kbd">O</span></button>
+              <button class="btn btn-ghost btn-sm" type="button" data-dialog="dlg-nogo">Mark no-go<span class="kbd">N</span></button>
+            </div>
+            <div class="body">
+              <p>You picked a company whose size nobody has confirmed. LinkedIn shows the 11 to 50 band, with no headcount from a second source.</p>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="section-title">Sponsorship<span class="count">1</span></h2>
+        <div class="card">
+          <div class="ny-item" data-row>
+            <svg class="i" style="color:var(--warn)"><use href="#help"/></svg>
+            <div class="head"><b>Hex</b><span class="badge s-warn"><span class="dot"></span>Unclear sponsorship</span><span class="t-xs muted">Opened Mon Nov 9</span></div>
+            <div class="acts">
+              <button class="btn btn-outline btn-sm" type="button">Set sponsorship<span class="kbd">E</span></button>
+              <button class="btn btn-ghost btn-sm" type="button">Mark ok<span class="kbd">O</span></button>
+              <button class="btn btn-ghost btn-sm" type="button" data-dialog="dlg-nogo">Mark no-go<span class="kbd">N</span></button>
+            </div>
+            <div class="body">
+              <p class="quote">"We may be able to support visa sponsorship for exceptional candidates."</p>
+              <p class="t-xs muted">Software Engineer, New Grad posting, first seen Oct 29. <a class="link" href="#">Open the posting</a>. Setting it to No adds Hex to the no-go list.</p>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="section-title">Job boards<span class="count">2</span></h2>
+        <div class="card">
+          <!-- 4. board unreadable, stale -->
+          <div class="ny-item" data-row>
+            <svg class="i" style="color:var(--bad)"><use href="#refresh"/></svg>
+            <div class="head"><b>Zed Industries</b><span class="badge s-bad"><span class="dot"></span>Board unreadable</span><span class="badge s-warn"><svg class="i i-sm"><use href="#clock"/></svg>Waiting 11 days</span></div>
+            <div class="acts">
+              <button class="btn btn-outline btn-sm" type="button">Edit board<span class="kbd">E</span></button>
+              <button class="btn btn-ghost btn-sm" type="button">Mark ok<span class="kbd">O</span></button>
+              <button class="btn btn-ghost btn-sm" type="button" data-dialog="dlg-nogo">Mark no-go<span class="kbd">N</span></button>
+            </div>
+            <div class="body">
+              <p>The Ashby board has answered with an error on every read since Oct 22 (HTTP 503). An error never closes a company, so its 2 postings stay open with what we last saw on Oct 19.</p>
+              <p class="row t-xs muted"><span>Last 6 reads</span><span class="runs" aria-label="ok, error, error, error, error, error"><i></i><i class="err"></i><i class="err"></i><i class="err"></i><i class="err"></i><i class="err"></i></span><span>Oct 19 ok, then 5 errors</span></p>
+            </div>
+          </div>
+          <!-- 5. zero jobs -->
+          <div class="ny-item" data-row>
+            <svg class="i" style="color:var(--warn)"><use href="#archive"/></svg>
+            <div class="head"><b>PlanetScale</b><span class="badge s-warn"><span class="dot"></span>Board shows zero jobs</span><span class="t-xs muted">Opened Mon Nov 9</span></div>
+            <div class="acts">
+              <button class="btn btn-outline btn-sm" type="button">Edit board<span class="kbd">E</span></button>
+              <button class="btn btn-ghost btn-sm" type="button">Mark ok<span class="kbd">O</span></button>
+              <button class="btn btn-ghost btn-sm" type="button" data-dialog="dlg-nogo">Mark no-go<span class="kbd">N</span></button>
+            </div>
+            <div class="body">
+              <p>The Greenhouse board returned no jobs twice in a row, so its 3 postings were closed. If they moved boards, give the new one. If they stopped hiring, mark ok.</p>
+              <p class="row t-xs muted"><span>Last 4 reads</span><span class="runs" aria-label="ok, ok, empty, empty"><i></i><i></i><i class="nil"></i><i class="nil"></i></span><span>Empty on Thu Nov 5 and Mon Nov 9</span></p>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="section-title">Resolved this week<span class="count">6</span><span class="right"><button class="btn btn-ghost btn-sm" type="button"><svg class="i chev"><use href="#down"/></svg>Show</button></span></h2>
+        <div class="table-wrap">
+          <table class="table">
+            <tbody>
+              <tr><td class="cell-title">Turso</td><td><span class="badge">Unknown size</span></td><td class="t-sm">Set to about 45 by you, from LinkedIn 11 to 50</td><td class="t-sm muted">Fri Nov 6</td><td class="shrink"><span class="badge"><svg class="i i-sm"><use href="#lock"/></svg>Locked</span></td></tr>
+              <tr><td class="cell-title">Railway</td><td><span class="badge">Unclear sponsorship</span></td><td class="t-sm">Marked ok by you</td><td class="t-sm muted">Thu Nov 5</td><td class="shrink"><span class="badge"><svg class="i i-sm"><use href="#lock"/></svg>Locked</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="mock-note" style="margin-top:8px">A resolved item comes back only when the evidence under it changes, and then it says what changed.</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="dlg-nogo" data-modal hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-nogo-t">
+    <div class="dialog-body">
+      <h2 class="t-lg" id="dlg-nogo-t">Add Cerebrium to the no-go list?</h2>
+      <p class="t-sm muted">It leaves Today and the backlog, and every queued email there stops. You can take it off the no-go list later.</p>
+      <div class="radio-list" role="radiogroup" aria-label="Reason">
+        <label><input type="radio" name="r" checked>Does not sponsor</label>
+        <label><input type="radio" name="r">Citizenship or clearance required</label>
+        <label><input type="radio" name="r">Over 300 people</label>
+        <label><input type="radio" name="r">Other</label>
+      </div>
+      <input class="input" placeholder="Source: a link or where you saw it" aria-label="Source">
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+      <button class="btn btn-destructive" type="button" data-close data-toast="Cerebrium is on the no-go list." data-undo>Mark no-go</button>
+    </div>
+  </div>
+</div>
+
+<template id="page-keys">
+  <h4>Needs you</h4>
+  <div><span>Edit the field, with a source</span><span class="kbd-row"><span class="kbd">E</span></span></div>
+  <div><span>Mark ok</span><span class="kbd-row"><span class="kbd">O</span></span></div>
+  <div><span>Mark no-go, with a reason</span><span class="kbd-row"><span class="kbd">N</span></span></div>
+  <div><span>Open the company</span><span class="kbd-row"><span class="kbd">Enter</span></span></div>
+  <div><span>Save and lock</span><span class="kbd-row"><span class="kbd">⌘</span><span class="kbd">Enter</span></span></div>
+</template>
+<script src="mockup.js"></script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 import itertools
+import re
 import sqlite3
 import unittest
 
@@ -162,40 +163,50 @@ class SchemaTest(unittest.TestCase):
         """A valid row for each table that has a timestamp or date column."""
         rows = {
             "schema_migration": {"version": 99, "name": "x", "applied_at": NOW},
-            "company": {"name": "Base", "status_at": NOW, "created_at": NOW},
+            "company": {"name": "Base", "status": "working", "status_at": NOW, "created_at": NOW,
+                        "paused_at": NOW, "held_by_touch": self.touch, "held_at": NOW},
             "company_alias": {"alias_key": "base", "company_id": self.company, "alias": "Base",
                               "source": "name", "created_at": NOW},
-            "board": {"company_id": self.company, "ats": "lever", "token": "base", "created_at": NOW},
+            "board": {"company_id": self.company, "ats": "lever", "token": "base", "created_at": NOW,
+                      "last_read": "ok", "last_read_at": NOW, "streak_since": NOW},
             "board_read": {"board_id": self.board, "run_id": self.run, "at": NOW, "result": "ok"},
             "posting": {"company_id": self.company, "source_key": "url:base", "title": "T",
-                        "first_seen_at": NOW, "last_seen_at": NOW},
+                        "first_seen_at": NOW, "last_seen_at": NOW, "posted_on": TODAY,
+                        "closed_at": NOW, "close_reason": "hand"},
             "ruleset": {"ruleset_version": "r-bbbbbbbbbbbb", "config_toml": "", "created_at": NOW},
             "decision": {"posting_id": self.posting, "ruleset_version": self.ruleset_a, "decided_at": NOW,
                          "lane": "engineering", "level_tier": "new_grad", "level_ok": 1,
                          "level_basis": "title", "us": "yes", "sponsorship": "silent",
                          "citizenship": 0, "eligibility": "ok", "start_2027": 0},
             "evidence": {"company_id": self.company, "fact": "sponsorship", "value": "yes",
-                         "confidence": "estimate", "source_kind": "posting", "recorded_at": NOW},
+                         "confidence": "estimate", "source_kind": "posting", "recorded_at": NOW,
+                         "observed_on": TODAY},
             "person": {"company_id": self.company, "name": "P", "role_kind": "engineer",
                        "email": "base2@acme.co", "channel": "email", "added_by": "devanshu",
                        "created_at": NOW, "updated_at": NOW},
-            "touch": {"person_id": self.spare_person, "created_at": NOW, "updated_at": NOW},
-            "message": {"touch_id": self.touch, "seq": 0, "state": "drafted", "subject": "S", "body": "B",
-                        "created_at": NOW, "updated_at": NOW},
+            "touch": {"person_id": self.spare_person, "created_at": NOW, "updated_at": NOW,
+                      "first_sent_at": NOW, "first_rfc_id": "<base@acme.co>", "gmail_thread_id": "t1",
+                      "replied_at": NOW, "bounced_at": NOW, "auto_reply_at": NOW, "closed_at": NOW},
+            "message": {"touch_id": self.touch, "seq": 0, "state": "sent", "subject": "S", "body": "B",
+                        "created_at": NOW, "updated_at": NOW, "due_on": TODAY, "approved_at": NOW,
+                        "sent_at": NOW, "rfc_message_id": "<base-sent@acme.co>", "reconciled_at": NOW},
             "inbound_message": {"touch_id": self.touch, "gmail_message_id": "g1", "from_addr": "a@b.co",
                                 "kind": "human", "received_at": NOW, "recorded_at": NOW},
             "linkedin_log": {"person_id": self.person, "kind": "note", "at": NOW, "recorded_at": NOW},
             "sender": {"sender_id": 1, "paused": 1, "pause_kind": "by_you", "paused_at": NOW,
                        "updated_at": NOW},
             "send_day": {"day": "2026-10-20", "send_limit": 5, "created_at": NOW},
-            "no_go": {"company_id": self.company, "reason": "other", "source": "devanshu", "created_at": NOW},
+            "no_go": {"company_id": self.company, "reason": "other", "source": "devanshu", "created_at": NOW,
+                      "lifted_at": NOW, "lift_reason": "changed my mind"},
             "review_item": {"kind": "flagged", "company_id": self.company, "reason": "r",
-                            "evidence_key": "k", "raised_by": "claude", "created_at": NOW},
+                            "evidence_key": "k", "raised_by": "claude", "created_at": NOW,
+                            "state": "resolved", "resolution": "marked_ok", "resolved_at": NOW},
             "daily_list": {"list_date": "2026-10-02", "built_at": NOW, "capacity": 5},
             "daily_list_entry": {"list_date": "2026-10-01", "company_id": self.company,
-                                 "list_group": "level_role", "rank": 1, "proposed_at": NOW},
+                                 "list_group": "level_role", "rank": 1, "proposed_at": NOW,
+                                 "state": "picked", "decided_at": NOW},
             "event": {"at": NOW, "recorded_at": NOW, "entity": "company", "kind": "k", "actor": "system"},
-            "job_run": {"job": "rebuild", "started_at": NOW},
+            "job_run": {"job": "rebuild", "started_at": NOW, "status": "ok", "finished_at": NOW},
             "import_record": {"run_id": self.run, "source": "data_js", "source_key": "k", "raw": "r",
                               "raw_sha256": "a" * 64, "outcome": "imported", "entity": "company",
                               "entity_id": self.company, "imported_at": NOW},
@@ -259,14 +270,34 @@ class SchemaTest(unittest.TestCase):
     def test_every_at_column_rejects_offsets_and_fractions(self):
         bad = ["2026-10-19T12:00:00+00:00", "2026-10-19 12:00:00", "2026-13-01T00:00:00Z",
                "2026-10-19T12:00:00.5Z"]
-        seen = 0
-        for table in self.tables():
-            for column in self.columns(table):
-                if column == "at" or column.endswith("_at"):
-                    seen += 1
-                    self.assertTrue(self._has_base(table), f"no base row for {table}")
-                    self.assert_bad_value_refused(table, column, bad, f"{column} IS ")
-        self.assertGreater(seen, 40)
+        columns = self.checked_columns("strftime")
+        # Every timestamp column named like one, and streak_since, has the format CHECK.
+        named = {(t, c) for t in self.tables() for c in self.columns(t)
+                 if c == "at" or c.endswith("_at") or c == "streak_since"}
+        self.assertEqual(columns, named)
+        self.assertEqual(len(columns), 50)
+        for table, column in sorted(columns):
+            self.assertTrue(self._has_base(table), f"no base row for {table}")
+            self.assert_bad_value_refused(table, column, bad, f"{column} IS strftime(")
+
+    def checked_columns(self, function):
+        """(table, column) pairs whose CREATE TABLE text has a `<column> IS <function>(` CHECK."""
+        found = set()
+        for name, sql in self.db.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"):
+            for column in re.findall(rf"\b(\w+) IS {function}\(", sql):
+                found.add((name, column))
+        return found
+
+    def test_claimed_and_sent_at_are_checked_in_their_own_states(self):
+        # A message cannot be inserted as sending, so these two are also tried on a live row.
+        for state, column in (("sending", "claimed_at"), ("send_unknown", "claimed_at"), ("sent", "sent_at")):
+            message_id = self.message_in(state)
+            for bad in ("2026-10-19T12:00:00+00:00", "2026-13-01T00:00:00Z"):
+                with self.subTest(state=state, column=column, value=bad):
+                    self.assert_refused(f"UPDATE message SET {column} = ? WHERE message_id = ?",
+                                        (bad, message_id), f"{column} IS strftime(")
+            self.db.execute("DELETE FROM message WHERE message_id = ?", (message_id,))
 
     def _has_base(self, table):
         try:
@@ -278,18 +309,17 @@ class SchemaTest(unittest.TestCase):
     def test_every_date_column_rejects_timestamps(self):
         bad = ["2026-10-19T00:00:00Z", "2026-13-01"]
         extra = {("daily_list", "list_date"), ("daily_list_entry", "list_date"), ("send_day", "day")}
-        seen = 0
-        for table in self.tables():
-            for column in self.columns(table):
-                if column.endswith("_on") or (table, column) in extra:
-                    seen += 1
-                    self.assertTrue(self._has_base(table), f"no base row for {table}")
-                    # daily_list_entry.list_date has no CHECK of its own: the foreign key to
-                    # daily_list refuses a value that is not a stored date.
-                    expect = "FOREIGN KEY" if (table, column) == ("daily_list_entry", "list_date") \
-                        else f"{column} IS "
-                    self.assert_bad_value_refused(table, column, bad, expect)
-        self.assertEqual(seen, 6)  # posted_on, observed_on, due_on and the three named ones
+        columns = {(t, c) for t in self.tables() for c in self.columns(t) if c.endswith("_on")} | extra
+        # Every column the schema checks with date() is tested, and nothing is tested that is not named.
+        self.assertLessEqual(self.checked_columns("date"), columns)
+        self.assertEqual(len(columns), 6)  # posted_on, observed_on, due_on and the three named ones
+        for table, column in sorted(columns):
+            self.assertTrue(self._has_base(table), f"no base row for {table}")
+            # daily_list_entry.list_date has no CHECK of its own: the foreign key to
+            # daily_list refuses a value that is not a stored date.
+            expect = "FOREIGN KEY" if (table, column) == ("daily_list_entry", "list_date") \
+                else f"{column} IS date("
+            self.assert_bad_value_refused(table, column, bad, expect)
 
     def test_foreign_keys_are_enforced(self):
         self.assert_row_refused("posting", {

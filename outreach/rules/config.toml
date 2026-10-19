@@ -10,10 +10,10 @@ graduated = "2026-05"
 max_years_asked = 3
 
 [title]
-# refresh/finalcheck.py:25 ENG (the title must name an engineering word; whole words, so 'engineering' is listed)
+# refresh/finalcheck.py:25 ENG (the title must name an engineering word; whole words, so 'engineering' is listed); 'fde' added so a bare "FDE" title reaches its open level
 engineering = [
   "engineer", "engineers", "engineering", "developer", "developers", "programmer", "programmers", "swe", "sde",
-  "mts", "member of technical staff", "member of product staff", "member of engineering staff",
+  "mts", "fde", "member of technical staff", "member of product staff", "member of engineering staff",
 ]
 # refresh/finalcheck.py:27 INTERN ('co op' also matches co-op and coop)
 intern = [
@@ -43,17 +43,20 @@ general_application = [
   "don’t see the fit", "expression of interest", "join our network", "dont see a role", "dont see a fit",
   "dont see the role", "dont see the fit",
 ]
-# refresh/finalcheck.py:26 SEN and refresh/crawl_boards.py:59 BAD; 'fellow' dropped, 'distinguished' kept, no 'staff engineer i' exemption (III, IV, 3, 4, 5 are read in code through level_nouns)
+# refresh/finalcheck.py:26 SEN and refresh/crawl_boards.py:59 BAD (avp, mid level); 'fellow' dropped, 'distinguished' kept, no 'staff engineer i' exemption (III, IV, V, 3, 4, 5 are read in code through level_nouns)
 senior = [
-  "senior", "sr", "staff", "principal", "lead", "head", "director", "architect", "vp", "vice president", "chief",
-  "distinguished",
+  "senior", "sr", "staff", "principal", "lead", "head", "director", "architect", "vp", "avp", "vice president",
+  "chief", "distinguished", "mid level",
 ]
 # refresh/finalcheck.py:26 SEN ('manager'); kept apart because a strong entry marker never overrides it
 manager = [
   "manager", "managers",
 ]
-# refresh/finalcheck.py:42-44 STRONG, plus 'fellow' and 'fellowship' (moved here from senior); the old list has no bare 'graduate', so the title task adds it if a case needs it
+# refresh/finalcheck.py:42-44 STRONG, plus 'fellow' and 'fellowship' (moved here from senior) and 'graduate' next to a level noun ("Machine Learning Engineer Graduate - Lead Ads" is a graduate role, not a lead; a bare 'graduate' would also clear "Senior Engineer, Graduate Program")
 strong_entry = [
+  "engineer graduate", "engineer graduates", "developer graduate", "developer graduates", "graduate engineer",
+  "graduate engineers", "graduate developer", "graduate developers", "graduate software", "graduate programmer",
+  "graduate programmers",
   "new grad", "new grads", "new graduate", "new graduates", "recent grad", "recent grads", "recent graduate",
   "recent graduates", "recently graduated", "recent college", "graduating", "university grad", "university graduate",
   "university hire", "college hire", "campus hire", "entry level", "early career", "0-1 years", "0-2 years",

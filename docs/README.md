@@ -8,6 +8,7 @@ Decisions live in GitHub issue #9. This folder holds the design, plans, and the 
 |---|---|
 | `superpowers/specs/2026-10-18-outreach-platform-design.md` | The architecture around #9: store, rules, fetching, sending, MCP, API and app, switch-over |
 | `superpowers/plans/2026-10-18-fetch-ok-empty-error.md` | Plan for #3 (done, merged in PR #19); a worked example of the plan format |
+| `superpowers/plans/2026-10-19-monday-readiness.md` | Plan for #10's drafting half: `mail/check_draft.py`, `mail/me.md`, the cold-email skill |
 
 Every other issue gets its own plan here before coding starts.
 

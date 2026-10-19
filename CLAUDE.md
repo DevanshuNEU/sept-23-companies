@@ -68,7 +68,8 @@ untouched on branches so the live checkout can always fast-forward.
 `banned_phrases.txt`, `scripts/lint_draft.sh`, and `voice/authored.jsonl` (messages Devanshu wrote himself).
 That folder's own `CLAUDE.md` says Claude never writes a sendable email and every draft runs `lint_draft.sh`;
 for this repo #9 overrides both: Claude writes one draft per person, the checks #9 lists run inside the
-drafting skill, and `lint_draft.sh` is not run (it needs DevVault company files).
+drafting skill (`mail/check_draft.py`, which reads `banned_phrases.txt`), and `lint_draft.sh` is not run (it
+needs DevVault company files).
 
 ## Deploy
 
@@ -98,6 +99,6 @@ launchd jobs) are written as part of #17.
 ## Writing
 
 Plain words, short sentences, no em dashes or en dashes in anything a person reads: emails, docs, UI copy,
-commit messages, PR bodies. Email drafts follow `.claude/skills/cold-email/SKILL.md`; until #10 rewrites it, #9's Drafts section overrides
-anything in the skill that disagrees (word count, subject, links, follow-ups). Drafts use only facts from
-`mail/me.md` and what Devanshu supplies about the person.
+commit messages, PR bodies. Email drafts follow `.claude/skills/cold-email/SKILL.md`, which carries #9's Drafts
+rules; if the two ever disagree, #9 wins and the skill gets fixed. Drafts use only facts from `mail/me.md` and
+what Devanshu supplies about the person; me.md's `ASK:` lines are open questions, never facts.

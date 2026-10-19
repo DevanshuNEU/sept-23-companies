@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinkedIn list | Outreach mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">O</span>Outreach</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today.html"><svg class="i"><use href="#today"/></svg>Today<span class="count">3 of 5</span></a>
+      <a class="sb-item" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">7</span></a>
+      <a class="sb-item" href="linkedin.html" aria-current="page"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Browserbase</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Mintlify</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Trigger.dev</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">20 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>9 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><b>LinkedIn list</b></div>
+      <div class="right">
+        <span class="t-xs muted">You send these by hand on LinkedIn</span>
+        <span class="vsep"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="page">
+        <div class="page-head">
+          <div>
+            <h1 class="t-xl">LinkedIn list</h1>
+            <p class="lede">People past the email budget for their company, or with no email. Name the role, then log what happened.</p>
+          </div>
+          <div class="actions">
+            <span class="t-sm muted"><b class="num" style="color:var(--foreground)">14</b> requests this week</span>
+          </div>
+        </div>
+
+        <div class="row" style="margin-bottom:12px">
+          <div class="tabs" role="tablist" aria-label="LinkedIn status">
+            <button class="tab" role="tab" aria-selected="true" aria-controls="lp-reach">To reach<span class="count">12</span></button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="lp-wait">Waiting<span class="count">9</span></button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="lp-reply">Replied<span class="count">2</span></button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="lp-all">All<span class="count">31</span></button>
+          </div>
+          <div class="input-icon" style="width:280px;margin-left:auto"><svg class="i"><use href="#search"/></svg><input class="input" placeholder="Filter people or companies" aria-label="Filter"></div>
+        </div>
+
+        <div id="lp-reach" role="tabpanel">
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Person</th><th>Kind</th><th>Why LinkedIn</th><th>Progress</th><th class="shrink right">Next</th></tr></thead>
+            <tbody>
+              <tr class="co-row"><td colspan="5"><div class="row">
+                <a class="cell-title" href="company.html">Mintlify</a>
+                <span class="muted t-sm">Role to name</span><b class="t-sm" style="font-weight:500">Software Engineer, New Grad</b>
+                <button class="btn btn-ghost btn-sm" type="button" data-toast="Copied: Software Engineer, New Grad"><svg class="i"><use href="#copy"/></svg>Copy<span class="kbd">C</span></button>
+                <span class="grow"></span><span class="t-xs muted">8 emailed, 4 here</span></div></td></tr>
+              <tr class="is-active" data-row aria-selected="true">
+                <td><div class="row"><span class="avatar">HC</span><div><div class="cell-title">Hannah Cole</div><div class="cell-sub">Software Engineer, Editor team</div></div></div></td>
+                <td><span class="badge">Engineer</span></td>
+                <td class="t-sm">Past the 8 emailed</td>
+                <td><span class="steps" aria-label="Not started"><span class="st"></span><span class="ln"></span><span class="st"></span><span class="ln"></span><span class="st"></span><span class="ln"></span><span class="st"></span></span><span class="step-label">Not started</span></td>
+                <td><div class="row" style="justify-content:flex-end"><a class="btn btn-ghost btn-icon btn-sm" href="#" aria-label="Open LinkedIn profile"><svg class="i"><use href="#external"/></svg></a><button class="btn btn-outline btn-sm" type="button" data-toast="Logged: request sent to Hannah Cole." data-undo>Log request<span class="kbd">R</span></button></div></td>
+              </tr>
+              <tr data-row>
+                <td><div class="row"><span class="avatar">LR</span><div><div class="cell-title">Luis Romero</div><div class="cell-sub">Engineering Manager</div></div></div></td>
+                <td><span class="badge">Manager</span></td>
+                <td class="t-sm">Past the 8 emailed</td>
+                <td><span class="steps"><span class="st on"></span><span class="ln"></span><span class="st"></span><span class="ln"></span><span class="st"></span><span class="ln"></span><span class="st"></span></span><span class="step-label">Requested Fri Nov 6</span></td>
+                <td><div class="row" style="justify-content:flex-end"><a class="btn btn-ghost btn-icon btn-sm" href="#" aria-label="Open LinkedIn profile"><svg class="i"><use href="#external"/></svg></a><button class="btn btn-outline btn-sm" type="button">Log accepted<span class="kbd">A</span></button></div></td>
+              </tr>
+              <tr data-row>
+                <td><div class="row"><span class="avatar">GK</span><div><div class="cell-title">Grace Kim</div><div class="cell-sub">Developer Advocate</div></div></div></td>
+                <td><span class="badge">Engineer</span></td>
+                <td class="t-sm">No email found</td>
+                <td><span class="steps"><span class="st on"></span><span class="ln on"></span><span class="st on"></span><span class="ln"></span><span class="st"></span><span class="ln"></span><span class="st"></span></span><span class="step-label">Accepted Sun Nov 8</span></td>
+                <td><div class="row" style="justify-content:flex-end"><a class="btn btn-ghost btn-icon btn-sm" href="#" aria-label="Open LinkedIn profile"><svg class="i"><use href="#external"/></svg></a><button class="btn btn-outline btn-sm" type="button">Log message<span class="kbd">M</span></button></div></td>
+              </tr>
+              <tr data-row>
+                <td><div class="row"><span class="avatar">IS</span><div><div class="cell-title">Ibrahim Sall</div><div class="cell-sub">Software Engineer, Northeastern alum</div></div></div></td>
+                <td><span class="badge">Alum</span></td>
+                <td class="t-sm">Alum: LinkedIn first</td>
+                <td><span class="steps"><span class="st on"></span><span class="ln on"></span><span class="st on"></span><span class="ln on"></span><span class="st on"></span><span class="ln"></span><span class="st"></span></span><span class="step-label">Messaged Mon Nov 9</span></td>
+                <td><div class="row" style="justify-content:flex-end"><a class="btn btn-ghost btn-icon btn-sm" href="#" aria-label="Open LinkedIn profile"><svg class="i"><use href="#external"/></svg></a><button class="btn btn-outline btn-sm" type="button">Log reply<span class="kbd">Y</span></button></div></td>
+              </tr>
+
+              <tr class="co-row"><td colspan="5"><div class="row">
+                <a class="cell-title" href="company.html">Browserbase</a>
+                <span class="badge s-ok"><span class="dot"></span>Held: Priya replied by email</span>
+                <span class="muted t-sm">Role to name</span><b class="t-sm" style="font-weight:500">Software Engineer, New Grad</b>
+                <span class="grow"></span><span class="t-xs muted">7 emailed, 2 here</span></div></td></tr>
+              <tr data-row>
+                <td><div class="row"><span class="avatar">OC</span><div><div class="cell-title">Owen Clarke</div><div class="cell-sub">Software Engineer, Stagehand</div></div></div></td>
+                <td><span class="badge">Engineer</span></td>
+                <td class="t-sm">Past the 7 emailed</td>
+                <td><span class="steps"><span class="st"></span><span class="ln"></span><span class="st"></span><span class="ln"></span><span class="st"></span><span class="ln"></span><span class="st"></span></span><span class="step-label">Not started</span></td>
+                <td><div class="row" style="justify-content:flex-end"><span class="t-xs muted" style="white-space:nowrap" data-tip="A reply holds email, not LinkedIn. Usually worth waiting until the conversation with Priya settles.">Wait for Priya?</span><button class="btn btn-outline btn-sm" type="button">Log request<span class="kbd">R</span></button></div></td>
+              </tr>
+
+              <tr class="co-row"><td colspan="5"><div class="row">
+                <a class="cell-title" href="company.html">Resend</a>
+                <span class="muted t-sm">Role to name</span><b class="t-sm" style="font-weight:500">Software Engineer, New Grad</b>
+                <button class="btn btn-ghost btn-sm" type="button"><svg class="i"><use href="#copy"/></svg>Copy<span class="kbd">C</span></button>
+                <span class="grow"></span><span class="t-xs muted">2 emailed, 1 here</span></div></td></tr>
+              <tr data-row>
+                <td><div class="row"><span class="avatar">EW</span><div><div class="cell-title">Ethan Wu</div><div class="cell-sub">Software Engineer</div></div></div></td>
+                <td><span class="badge">Engineer</span></td>
+                <td class="t-sm">No email found</td>
+                <td><span class="steps"><span class="st"></span><span class="ln"></span><span class="st"></span><span class="ln"></span><span class="st"></span><span class="ln"></span><span class="st"></span></span><span class="step-label">Not started</span></td>
+                <td><div class="row" style="justify-content:flex-end"><a class="btn btn-ghost btn-icon btn-sm" href="#" aria-label="Open LinkedIn profile"><svg class="i"><use href="#external"/></svg></a><button class="btn btn-outline btn-sm" type="button">Log request<span class="kbd">R</span></button></div></td>
+              </tr>
+              <tr><td colspan="5" class="cell-sub" style="text-align:center"><a class="link" href="#">Show 5 more at Supabase and Graphite</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+        </div>
+
+        <div id="lp-wait" role="tabpanel" hidden><div class="table-wrap"><div class="empty"><svg class="i"><use href="#clock"/></svg><b>9 waiting</b><span>Requested or messaged, no answer yet. Oldest first.</span></div></div></div>
+        <div id="lp-reply" role="tabpanel" hidden>
+          <div class="table-wrap">
+            <table class="table"><tbody>
+              <tr data-row><td><div class="row"><span class="avatar">MS</span><div><div class="cell-title">Mira Shah</div><div class="cell-sub">Software Engineer, Graphite</div></div></div></td>
+                <td class="t-sm">"Sure, send me your resume and the req link."</td><td><span class="badge s-ok"><span class="dot"></span>Replied Mon Nov 9</span></td>
+                <td class="shrink"><button class="btn btn-outline btn-sm" type="button">Close Graphite with a reason</button></td></tr>
+            </tbody></table>
+          </div>
+        </div>
+        <div id="lp-all" role="tabpanel" hidden><div class="table-wrap"><div class="empty"><b>31 people</b><span>Every LinkedIn entry, newest first.</span></div></div></div>
+
+        <p class="mock-note" style="margin-top:12px">Logging only records what you did, so the company page shows the whole story. Nothing here touches LinkedIn.</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<template id="page-keys">
+  <h4>LinkedIn list</h4>
+  <div><span>Copy role title</span><span class="kbd-row"><span class="kbd">C</span></span></div>
+  <div><span>Open their profile</span><span class="kbd-row"><span class="kbd">L</span></span></div>
+  <div><span>Log request sent</span><span class="kbd-row"><span class="kbd">R</span></span></div>
+  <div><span>Log accepted</span><span class="kbd-row"><span class="kbd">A</span></span></div>
+  <div><span>Log message sent</span><span class="kbd-row"><span class="kbd">M</span></span></div>
+  <div><span>Log reply</span><span class="kbd-row"><span class="kbd">Y</span></span></div>
+  <div><span>Tabs</span><span class="kbd-row"><span class="kbd">1</span><span class="kbd">2</span><span class="kbd">3</span><span class="kbd">4</span></span></div>
+</template>
+<script src="mockup.js"></script>
+</body>
+</html>

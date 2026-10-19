@@ -74,7 +74,10 @@ def _post(url, form):
     with urllib.request.urlopen(req, timeout=30) as r: return json.loads(r.read())
 
 def _token():
-    tok = json.load(open(TOKEN))
+    """Every Gmail call reads the token here, so this is the one place the live-checkout rule is enforced."""
+    if not live_checkout.is_live():
+        raise SystemExit(f"the real Gmail token is only used from the live checkout ({live_checkout.LIVE_ROOT})")
+    with open(TOKEN) as f: tok = json.load(f)
     if time.time() >= tok.get("expires_at", 0):
         c = _client()
         new = _post("https://oauth2.googleapis.com/token", {

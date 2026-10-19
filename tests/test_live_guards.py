@@ -100,5 +100,40 @@ class RefreshRefusesOutsideLive(unittest.TestCase):
         self.assertLess(body.index("live_checkout.require_live("), body.index("os.makedirs("))
 
 
+class TokenGuardedWhereItIsRead(unittest.TestCase):
+    """The real token is refused outside the live checkout by the one function that reads it, so whoami, ad-hoc
+    scripts and any future sender are covered, not only sender.main()."""
+    def test_reading_a_token_outside_live_refuses(self):
+        token_dir = tempfile.mkdtemp(prefix="outreach-gmail-test-")
+        self.addCleanup(setattr, gmail, "TOKEN", gmail.TOKEN)
+        self.addCleanup(setattr, gmail.live_checkout, "is_live", gmail.live_checkout.is_live)
+        gmail.TOKEN = os.path.join(token_dir, "token.json")
+        open(gmail.TOKEN, "w").write('{"access_token": "x", "expires_at": 9999999999}')
+        gmail.live_checkout.is_live = lambda *a, **k: False
+        with self.assertRaises(SystemExit) as cm:
+            gmail._token()
+        self.assertIn("live checkout", str(cm.exception.code))
+
+    def test_reading_a_token_in_live_works(self):
+        token_dir = tempfile.mkdtemp(prefix="outreach-gmail-test-")
+        self.addCleanup(setattr, gmail, "TOKEN", gmail.TOKEN)
+        self.addCleanup(setattr, gmail.live_checkout, "is_live", gmail.live_checkout.is_live)
+        gmail.TOKEN = os.path.join(token_dir, "token.json")
+        open(gmail.TOKEN, "w").write('{"access_token": "x", "expires_at": 9999999999}')
+        gmail.live_checkout.is_live = lambda *a, **k: True
+        self.assertEqual(gmail._token(), "x")
+
+
+class TestsRunOnScratchSettings(unittest.TestCase):
+    """Every test process gets scratch settings from tests/__init__.py, even in the live checkout."""
+    def test_scratch_settings_are_set_for_every_test(self):
+        import tests
+        for var in ("OUTREACH_MAIL_HOME", "OUTREACH_GMAIL_DIR", "OUTREACH_DB"):
+            value = os.environ.get(var, "")          # never assert on os.environ itself: a failure would print it
+            self.assertTrue(value, f"{var} is not set")
+            self.assertTrue(os.path.realpath(value).startswith(os.path.realpath(tempfile.gettempdir())), f"{var} is not a temp path")
+        self.assertTrue(tests.SCRATCH)
+
+
 if __name__ == "__main__":
     unittest.main()

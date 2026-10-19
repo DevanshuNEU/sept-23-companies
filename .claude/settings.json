@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(curl http://127.0.0.1:3002:*)",
+      "Bash(curl http://localhost:3002:*)",
+      "Bash(curl -X POST http://127.0.0.1:3002:*)",
+      "Bash(curl -X POST http://localhost:3002:*)",
+      "Bash(curl -s http://127.0.0.1:3002/api/approve:*)",
+      "Bash(curl -s -X POST http://127.0.0.1:3002:*)",
+      "Bash(curl -s -X POST http://localhost:3002:*)"
+    ]
+  }
+}

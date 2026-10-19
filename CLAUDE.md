@@ -51,7 +51,9 @@ settings below.
 | `OUTREACH_GMAIL_DIR` | Gmail client and token | the real secrets folder |
 | `OUTREACH_DB` | new platform store | the live store path (opening it outside the live checkout is refused, #4) |
 
-Claude never approves or sends an email; approval is Devanshu's click, sending is the sender's job.
+Claude never approves or sends an email; approval is Devanshu's click, sending is the sender's job. Never call
+the mail API on :3002 (`/api/approve`, `/api/save`, `/api/skip`, `/api/unapprove`, `/api/pause`) by any means;
+`.claude/settings.json` denies the obvious curl forms, and the rule covers every other way too.
 
 In the live checkout, `refresh.py` rewrites `dashboard/data.js` and `dashboard/index.html`. Leave both files
 untouched on branches so the live checkout can always fast-forward.
@@ -80,7 +82,9 @@ launchd jobs) are written as part of #17.
 ## Building
 
 - Python is Homebrew's: `/opt/homebrew/bin/python3` (3.14), the same one launchd uses.
-- Tests: `/opt/homebrew/bin/python3 -m unittest discover -s tests -t .` from the repo root.
+- Tests: `/opt/homebrew/bin/python3 -m unittest discover -s tests -t .` from the repo root. Once #4 adds
+  `pyproject.toml`, run them with `uv run python -m unittest discover -s tests -t .`. `tests/__init__.py` points
+  every test at scratch settings; new tests rely on that and never use the live paths.
 - Test first: write the test, watch it go red for the right reason, then make it green. Every bug fix starts
   with a test that reproduces it. Tests never run a real refresh, a real send, or a crawl.
 - Current code (`mail/`, `refresh/`, `dashboard/`) is standard library only. The new platform lives in the

@@ -1,11 +1,9 @@
 import json, re, os, datetime, urllib.request, urllib.error, concurrent.futures as cf
-T=json.load(open("refresh/work/final_targets.json"))
-OUT="refresh/work/finalcheck.json"
 UA={"User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36"}
-def get(u,t=30):
+def get(u,t=30,limit=1500000):
     try:
         with urllib.request.urlopen(urllib.request.Request(u,headers=UA),timeout=t) as f:
-            return f.status, f.geturl(), f.read(1500000).decode("utf-8","replace")
+            return f.status, f.geturl(), f.read(limit).decode("utf-8","replace")
     except urllib.error.HTTPError as e: return e.code, u, ""
     except Exception: return 0, u, ""
 def clean(h):
@@ -131,35 +129,43 @@ def analyse(title, body, loc, posted, url):
             "snip": {k: sent(body, rx) for k, rx in (("citizen",CITIZ),("noSponsor",NOSPON),("yesSponsor",YESSPON),
                                                       ("schoolOnly",SCHOOL),("start2027",STARTL)) if rx.search(body if k!="start2027" else title+" "+body)}}
 
+JOBS=lambda x: isinstance(x,dict) and isinstance(x.get("jobs"),list) and all(isinstance(j,dict) for j in x["jobs"])
+def jget(u, shape):
+    # (parsed body or None, ok): ok only for a 200 whose body has the shape the ATS returns
+    st,_,d=get(u,limit=20000000)
+    if st!=200: return None, False
+    try: x=json.loads(d)
+    except Exception: return None, False
+    return (x, True) if shape(x) else (None, False)
 def board(t):
-    s=t["slugs"]; rows=[]
+    s=t["slugs"]; rows=[]; bad=False
     if s.get("ashby"):
-        st,_,d=get(f"https://api.ashbyhq.com/posting-api/job-board/{s['ashby']}?includeCompensation=true")
-        try:
-            for j in json.loads(d).get("jobs",[]):
-                rows.append((j.get("title",""), clean(j.get("descriptionPlain") or j.get("descriptionHtml") or ""),
-                             j.get("location",""), d10(j.get("publishedAt") or j.get("updatedAt")), j.get("jobUrl","")))
-        except Exception: pass
+        x,ok=jget(f"https://api.ashbyhq.com/posting-api/job-board/{s['ashby']}?includeCompensation=true",
+                  JOBS)
+        bad|=not ok
+        for j in (x or {}).get("jobs",[]):
+            rows.append((j.get("title",""), clean(j.get("descriptionPlain") or j.get("descriptionHtml") or ""),
+                         j.get("location",""), d10(j.get("publishedAt") or j.get("updatedAt")), j.get("jobUrl","")))
     if s.get("greenhouse"):
-        st,_,d=get(f"https://boards-api.greenhouse.io/v1/boards/{s['greenhouse']}/jobs?content=true")
-        try:
-            for j in json.loads(d).get("jobs",[]):
-                loc=(j.get("location") or {}).get("name","") if isinstance(j.get("location"),dict) else (j.get("location") or "")
-                import html as H
-                rows.append((j.get("title",""), clean(H.unescape(j.get("content") or "")), loc,
-                             d10(j.get("first_published") or j.get("updated_at")), j.get("absolute_url","")))
-        except Exception: pass
+        x,ok=jget(f"https://boards-api.greenhouse.io/v1/boards/{s['greenhouse']}/jobs?content=true",
+                  JOBS)
+        bad|=not ok
+        for j in (x or {}).get("jobs",[]):
+            loc=(j.get("location") or {}).get("name","") if isinstance(j.get("location"),dict) else (j.get("location") or "")
+            import html as H
+            rows.append((j.get("title",""), clean(H.unescape(j.get("content") or "")), loc,
+                         d10(j.get("first_published") or j.get("updated_at")), j.get("absolute_url","")))
     if s.get("lever"):
-        st,_,d=get(f"https://api.lever.co/v0/postings/{s['lever']}?mode=json")
-        try:
-            for j in json.loads(d):
-                body=(j.get("descriptionPlain") or j.get("description") or "")
-                for l in (j.get("lists") or []): body+=" "+(l.get("text") or "")+" "+clean(l.get("content") or "")
-                body+=" "+(j.get("additionalPlain") or "")
-                rows.append((j.get("text",""), clean(body), ((j.get("categories") or {}).get("location") or ""),
-                             d10(j.get("createdAt")), j.get("hostedUrl","")))
-        except Exception: pass
-    return rows
+        x,ok=jget(f"https://api.lever.co/v0/postings/{s['lever']}?mode=json", lambda x: isinstance(x,list) and all(isinstance(j,dict) for j in x))
+        bad|=not ok
+        for j in (x or []):
+            body=(j.get("descriptionPlain") or j.get("description") or "")
+            for l in (j.get("lists") or []): body+=" "+(l.get("text") or "")+" "+clean(l.get("content") or "")
+            body+=" "+(j.get("additionalPlain") or "")
+            rows.append((j.get("text",""), clean(body), ((j.get("categories") or {}).get("location") or ""),
+                         d10(j.get("createdAt")), j.get("hostedUrl","")))
+    if not any(s.get(k) for k in ("ashby","greenhouse","lever")): bad=True  # no ATS we can read: never "empty"
+    return rows, ("error" if bad else "ok" if rows else "empty")
 def urlonly(t):
     rows=[]
     for r in t["urls"]:
@@ -175,12 +181,17 @@ def work(t):
     out={"list":t["list"],"source":None,"jobs":[],"closedUrls":0,"checked":0}
     if t["slugs"]:
         out["source"]="board"
-        for title,body,loc,posted,url in board(t):
-            a=analyse(title,body,loc,posted,url)
-            if a: out["jobs"].append(a)
-        out["boardEmpty"] = not out["jobs"]
+        try:
+            rows,out["read"]=board(t)
+            for title,body,loc,posted,url in rows:
+                a=analyse(title,body,loc,posted,url)
+                if a: out["jobs"].append(a)
+        except Exception:
+            # one malformed job must not abort the run, nor make a board look empty: the whole company reads "error"
+            out["jobs"]=[]; out["read"]="error"
+        out["boardEmpty"] = out["read"]=="empty"
     else:
-        out["source"]="url"
+        out["source"]="url"; out["read"]="ok"
         for title,body,loc,posted,url,closed,st,unver in urlonly(t):
             out["checked"]+=1
             if closed: out["closedUrls"]+=1; continue
@@ -193,11 +204,14 @@ def work(t):
             a=analyse(title,body,loc,posted,url)
             if a: out["jobs"].append(a)
     return t["id"], out
-res={}
-with cf.ThreadPoolExecutor(max_workers=14) as ex:
-    for i,(cid,o) in enumerate(ex.map(work,T)):
-        res[cid]=o
-        if i%40==0: print(f"  {i}/{len(T)}", flush=True)
-json.dump(res, open(OUT,"w"))
-allj=[j for v in res.values() for j in v["jobs"]]
-print("DONE companies:",len(res),"| in-lane US jobs:",len(allj))
+def main(targets_path="refresh/work/final_targets.json", out_path="refresh/work/finalcheck.json"):
+    with open(targets_path) as f: T=json.load(f)
+    res={}
+    with cf.ThreadPoolExecutor(max_workers=14) as ex:
+        for i,(cid,o) in enumerate(ex.map(work,T)):
+            res[cid]=o
+            if i%40==0: print(f"  {i}/{len(T)}", flush=True)
+    with open(out_path,"w") as f: json.dump(res, f)
+    allj=[j for v in res.values() for j in v["jobs"]]
+    print("DONE companies:",len(res),"| in-lane US jobs:",len(allj))
+if __name__=="__main__": main()

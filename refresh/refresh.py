@@ -99,6 +99,14 @@ def write_report(before, after, error=None):
                     review.append(f'{names.get(cid, cid)}: {"no" if sn.get("noSponsor") else "yes"}? "{q[:180]}"'); break
     except Exception as e:
         review.append(f"(could not build the review list: {e})")
+    # boards the last run could not read, or read empty once: kept as they were, listed for a human
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "refresh")); import board_status
+        in_run = json.load(open(W + "finalcheck.json"))
+        state = {k: v for k, v in board_status.load(W + "board_status.json").items() if k in in_run}
+        unread = board_status.report_lines(state, {k: v["n"] for k, v in after.items()})
+    except Exception as e:
+        unread = ["## Boards that could not be read this run", "", f"(could not build this list: {e})", ""]
     def section(title, items, empty):
         return [f"## {title} ({len(items)})", ""] + ([f"- {x}" for x in items] if items else [empty]) + [""]
     lines += [f"{len(after)} companies tracked. Backup kept in refresh/backups/.", ""]
@@ -106,6 +114,7 @@ def write_report(before, after, error=None):
     lines += section("Nothing open for you any more", closed, "None.")
     lines += section("Open again", back, "None.")
     lines += section("Role to name changed", newreq, "None.")
+    lines += unread
     lines += section("Sponsorship wording to review by hand (not applied)", review, "Nothing new.")
     open("refresh/LAST_RUN.md", "w").write("\n".join(lines) + "\n")
 

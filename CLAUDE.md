@@ -3,15 +3,16 @@
 Devanshu's job-search system: finds small, hiring companies, drafts cold referral emails in his voice, and
 sends them from his Gmail. The goal it serves is **replies per month**.
 
-## Where decisions live
+## Start here
 
-- **Decisions:** GitHub issue #9 (pinned). It wins over every doc; when a decision changes, edit #9 first.
-- **Design:** `docs/superpowers/specs/2026-10-18-outreach-platform-design.md`. Files marked "Superseded" are
-  history only.
-- **Work:** one GitHub issue per piece, grouped by milestone. Read the issue's "Done when" before starting and
-  check every line before calling it done.
-- **Evidence:** `docs/research/`. Sending limits and stop rules come from
-  `2026-10-18-cold-email-deliverability.md`.
+1. Read GitHub issue **#9** (pinned decision record). Every number and rule (ramp, follow-ups, links, size cap,
+   voice, word count) comes from #9. It wins over every doc; when a decision changes, edit #9 first.
+2. Read your issue, including "Done when" and "Depends on". Check every "Done when" line before calling it done.
+3. Find its plan in `docs/superpowers/plans/`. No plan yet: write one with superpowers:writing-plans before
+   coding.
+4. `docs/README.md` maps every doc and says which are current, evidence only, or superseded.
+
+`gh issue view <n> -R DevanshuNEU/sept-23-companies` reads an issue.
 
 ## Order of work
 
@@ -20,37 +21,65 @@ issue #7 stays parked until the Switch-over milestone closes.
 
 ## Live system
 
-Live means real contacts and real sends. The live checkout is `~/Desktop/Sept 23 Companies`; launchd runs
-everything from there:
+Live means real contacts and real sends.
 
-- `com.devanshu.outreach-mail-sender` (every 10 min), `com.devanshu.outreach-mail-server` (:3002),
-  `com.devanshu.outreach-dashboard` (:3001), `com.devanshu.outreach-refresh` (Mon and Thu 08:00),
-  `com.devanshu.jobradar` (until the switch).
-- Secrets: `~/Library/Application Support/outreach-mail/` (Gmail client and token). Never print them.
+| What | Runs from | launchd label |
+|---|---|---|
+| Mail sender (every 10 min) | `~/Desktop/Sept 23 Companies` (live checkout) | `com.devanshu.outreach-mail-sender` |
+| Mail API (:3002) | live checkout | `com.devanshu.outreach-mail-server` |
+| Dashboard (:3001) | `~/Library/Application Support/outreach-dashboard`, a copy made by `dashboard/publish.sh` | `com.devanshu.outreach-dashboard` |
+| Refresh (Mon and Thu 08:00) | live checkout | `com.devanshu.outreach-refresh` |
+| Job Radar (until the switch) | `~/Desktop/DevVault/job-search/pipeline` | `com.devanshu.jobradar` |
+
+- Gmail secrets: `~/Library/Application Support/outreach-mail/`. Never print them.
 - New platform store: `~/Library/Application Support/outreach/outreach.db`.
+- `live_checkout.is_live()` is true only in the live checkout. Real sends and `refresh.py` refuse to run
+  anywhere else.
 
-Worktrees work on scratch copies: tests point `OUTREACH_MAIL_HOME` (and the store path) at a temp directory,
-so nothing a worktree runs can touch live contacts, the store, or the Gmail account. Claude never approves or
-sends an email; approval is Devanshu's click, sending is the sender's job.
+**Only in the live checkout:** `mail/sender.py` without `--dry-run`, `refresh/refresh.py`, `dashboard/publish.sh`,
+`mail/add.py` (writes the real contact list), `mail/gmail.py auth` (writes the real token). From a worktree, use
+the scratch settings below.
+
+**Scratch settings for tests and worktrees:**
+
+| Variable | Points at | Default |
+|---|---|---|
+| `OUTREACH_MAIL_HOME` | contacts, config, send log | `mail/` in the checkout |
+| `OUTREACH_GMAIL_DIR` | Gmail client and token | the real secrets folder |
+| `OUTREACH_DB` | new platform store | the live store path |
+| `OUTREACH_LIVE_ROOT` | which checkout counts as live | `~/Desktop/Sept 23 Companies` |
+
+Claude never approves or sends an email; approval is Devanshu's click, sending is the sender's job.
 
 In the live checkout, `refresh.py` rewrites `dashboard/data.js` and `dashboard/index.html`. Leave both files
 untouched on branches so the live checkout can always fast-forward.
+
+## Outside this repo
+
+`~/Desktop/DevVault/job-search/outreach/` holds the outreach rulebook used for drafts: `playbook.md`,
+`banned_phrases.txt`, `scripts/lint_draft.sh`, and `voice/authored.jsonl` (messages Devanshu wrote himself).
+Where the playbook disagrees with #9, #9 wins; #9 lists which playbook rules and lint checks apply.
 
 ## Deploy
 
 Merge the PR, then in the live checkout run
 `git pull --ff-only https://github.com/DevanshuNEU/sept-23-companies.git master` (its SSH remote is unreachable
-from agent shells), run the tests there, then `launchctl kickstart -k gui/$(id -u)/<label>` for any service
-whose code changed. Rollback is `git revert`, never a reset.
+from agent shells), run the tests there, then:
+
+- mail code changed: `launchctl kickstart -k gui/$(id -u)/com.devanshu.outreach-mail-server` (the sender
+  starts fresh every run);
+- dashboard files changed: `bash dashboard/publish.sh`.
+
+Rollback is `git revert`, never a reset.
 
 ## Building
 
 - Python is Homebrew's: `/opt/homebrew/bin/python3` (3.14), the same one launchd uses.
 - Tests: `/opt/homebrew/bin/python3 -m unittest discover -s tests -t .` from the repo root.
 - Test first: write the test, watch it go red for the right reason, then make it green. Every bug fix starts
-  with a test that reproduces it.
-- Current code (`mail/`, `refresh/`, `dashboard/`) is standard library only. New-platform dependencies are
-  pinned.
+  with a test that reproduces it. Tests never run a real refresh, a real send, or a crawl.
+- Current code (`mail/`, `refresh/`, `dashboard/`) is standard library only. The new platform lives in the
+  `outreach/` package; its dependencies are pinned (see #4 and #12).
 - One issue per branch and PR; the PR body says which issue it closes.
 
 ## Writing

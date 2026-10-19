@@ -1,3 +1,5 @@
+> **Evidence only.** Decisions live in issue #9; where this file disagrees, #9 wins. Deferred by #7: every growth signal here. The size cap is 300 with evidence (#9), not 200.
+
 # Growth-moment signals: data sources (researched 2026-10-17)
 
 Goal: find US companies under ~200 people, seed through Series E, that just raised and are starting to hire engineers, in the user's themes. Claims carry a source URL. "Measured" means I computed it from the primary data on 2026-10-17. "UNVERIFIED" means no primary source confirmed it.

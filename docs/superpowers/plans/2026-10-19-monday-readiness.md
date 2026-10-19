@@ -101,4 +101,4 @@ Left out, and why: mail-server (MX) lookup needs the network; hook age needs a d
 
 ### Task 4: verify
 
-- [ ] Full suite green; `grep -rn $'—\|–'` over changed files finds nothing; `git status` shows `dashboard/` untouched.
+- [ ] Full suite green; a search for U+2012 to U+2015 over changed files finds nothing; `git status` shows `dashboard/` untouched.

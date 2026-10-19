@@ -23,7 +23,7 @@ NEVER = ["bumping this", "bump this", "got buried", "gentle reminder", "in case 
 WEAK_SUBJECT = ["quick question", "following up", "excited"]
 SHORTENERS = {"bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "buff.ly", "is.gd", "rebrand.ly", "cutt.ly",
               "lnkd.in", "shorturl.at", "rb.gy", "tiny.cc", "s.id", "t.ly"}
-DASHES = re.compile("[‒–—―]")
+DASHES = re.compile(r"[\u2012-\u2015]")
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 URL = re.compile(r"https?://[^\s<>()\"']+", re.I)
 # A bare domain becomes a link in Gmail too, so it counts.

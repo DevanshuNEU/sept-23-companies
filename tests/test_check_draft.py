@@ -108,7 +108,7 @@ class CheckDraftTest(unittest.TestCase):
         self.assertTrue(any("bumping" in b for b in blocks), blocks)
 
     def test_em_and_en_dashes_block(self):
-        for dash in ("—", "–"):
+        for dash in ("\u2014", "\u2013"):
             self.assertBlocks(contact(body=BODY.replace(", and I want", f" {dash} I want")), "dash")
             self.assertBlocks(contact(subject=f"voice agents {dash} testing"), "dash")
 

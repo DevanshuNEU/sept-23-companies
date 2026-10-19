@@ -277,8 +277,8 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table tr.group-row td { height: 32px; background: var(--subtle); font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
 .table tr.group-row:hover { background: none; }
 .table td.shrink, .table th.shrink { width: 1%; white-space: nowrap; }
-.table .cell-title { font-weight: 500; }
-.table .cell-sub { font-size: 12px; color: var(--muted-foreground); }
+.table .cell-title { font-weight: 500; white-space: nowrap; }
+.table .cell-sub { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
 .table .row-actions { display: flex; gap: 4px; justify-content: flex-end; visibility: hidden; }
 .table tr:hover .row-actions, .table tr.is-active .row-actions { visibility: visible; }
 .table td.right, .table th.right { text-align: right; }

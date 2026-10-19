@@ -77,7 +77,8 @@ company notes. Every source record is kept verbatim for audit.
 
 ## 5. Rules
 
-One Python module decides every posting and every company filter. Its source plus its config hash to a
+One Python module decides every posting (level, US, sponsorship stance, citizenship, years asked, eligibility) and
+records size and stage evidence. The hide and ordering policy below is built on those decisions in #6. Its source plus its config hash to a
 ruleset version; changing rules rebuilds decisions and lists every posting that flips from shown to hidden.
 
 - **Level:** new grad, early career, SWE I, SWE II (MTS and FDE included); postings asking up to 3 years.

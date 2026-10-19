@@ -1,4 +1,4 @@
-> **Evidence only.** Decisions live in issue #9; where this file disagrees, #9 wins. Overruled by #9: paid Claude API briefs (#9: Claude Code on the Northeastern seat, paid API capped at $2 a month), LinkedIn invite and note caps enforced by the system (#9: Devanshu handles LinkedIn himself), Datasette and Hunter (not adopted).
+> **Evidence only.** Decisions live in issue #9; where this file disagrees, #9 wins. Overruled by #9: paid Claude API briefs (#9: drafting and research run in a Claude Code session on the Northeastern seat, no paid API), LinkedIn invite and note caps enforced by the system (#9: Devanshu handles LinkedIn himself), Datasette and Hunter (not adopted).
 
 # Outreach and tracking: OSS components and platform rules
 

@@ -302,6 +302,8 @@ export class FixtureClient implements OutreachClient {
         revision: v.company.revision, role: null, size: null, stage: null, sponsorship: 'not_stated', sponsorshipFact: null, domainFact: null, mailServerOk: null,
         why: 'Restored from the removed list by you.', otherRoles: [], peopleCount: 0, draftCount: 0, firstProposedOn: this.db.today.date,
       };
+      // A kept row sat outside the db while the company changed, so take its ref from the current company.
+      entry.company = { ...refOf(v.company), domain: v.company.domain, hq: v.company.hq };
       entry.state = 'backlog';
       entry.revision = v.company.revision;
       this.db.today.backlog.unshift(entry);

@@ -335,7 +335,10 @@ describe('Today writes', () => {
     expect((await c.noGo()).companies.some((r) => r.kind === 'removed' && r.company.name === 'Pylon')).toBe(false);
     const restored = (await c.today()).backlog.find((e) => e.company.name === 'Pylon');
     expect(restored).toMatchObject({ state: 'backlog', role: pylon.role });
-    expect((await c.company(pylon.company.id)).company.status).toBe('backlog');
+    expect(restored?.company.status).toBe('backlog');
+    const view = await c.company(pylon.company.id);
+    expect(view.company.status).toBe('backlog');
+    expect(restored?.revision).toBe(view.company.revision);
   });
 
   it('restoreCompany moves a removed company to the backlog', async () => {

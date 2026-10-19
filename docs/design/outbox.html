@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outbox | Outreach mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">O</span>Outreach</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today.html"><svg class="i"><use href="#today"/></svg>Today<span class="count">3 of 5</span></a>
+      <a class="sb-item" href="outbox.html" aria-current="page"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">7</span></a>
+      <a class="sb-item" href="linkedin.html"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Browserbase</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Mintlify</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Trigger.dev</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">20 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>9 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><b>Outbox</b></div>
+      <div class="right">
+        <span class="t-xs muted">Updated 10:14</span>
+        <span class="vsep"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <!-- Sending strip: the one place the limit, level and state live. -->
+    <section class="strip" aria-label="Sending today">
+      <div class="cell">
+        <span class="k">Sender</span>
+        <span class="v"><span class="dot-only ok pulse"></span>Running</span>
+        <span class="sub">Weekdays 08:30 to 16:30, their time</span>
+      </div>
+      <div class="cell">
+        <span class="k">Sent today</span>
+        <span class="v"><span class="big">20</span><span class="muted">of 30</span>
+          <span class="ladder" role="img" aria-label="Limit level 2 of 9: 30 a day. Today 20 sent.">
+            <span class="step past" style="height:40%"></span>
+            <span class="step now" style="height:47%"><i style="height:67%"></i></span>
+            <span class="step" style="height:54%"></span>
+            <span class="step" style="height:61%"></span>
+            <span class="step" style="height:68%"></span>
+            <span class="step" style="height:75%"></span>
+            <span class="step" style="height:82%"></span>
+            <span class="step" style="height:89%"></span>
+            <span class="step" style="height:100%"></span>
+          </span>
+        </span>
+      </div>
+      <div class="cell">
+        <span class="k">Limit</span>
+        <span class="v t-sm">Level 2 of 9, 30 a day</span>
+        <span class="sub">40 tomorrow if today stays clean</span>
+      </div>
+      <div class="cell">
+        <span class="k">Next send</span>
+        <span class="v t-sm">10:42 ET</span>
+        <span class="sub">Jordan Price, Mintlify</span>
+      </div>
+      <div class="cell">
+        <button class="btn btn-outline" type="button" data-toast="Sending paused. Nothing sends until you resume."><svg class="i"><use href="#pause"/></svg>Pause sending</button>
+      </div>
+    </section>
+
+    <div class="split ob-split">
+      <!-- ============ list ============ -->
+      <section class="pane" aria-label="Emails">
+        <div class="pane-head">
+          <div class="input-icon grow"><svg class="i"><use href="#search"/></svg><input class="input" placeholder="Filter by person, company or subject" aria-label="Filter"></div>
+          <button class="btn btn-outline btn-icon" type="button" aria-label="Filter options"><svg class="i"><use href="#filter"/></svg></button>
+        </div>
+
+        <button class="ob-ghead" type="button" aria-expanded="true"><svg class="i chev"><use href="#down"/></svg><svg class="i" style="color:var(--ok)"><use href="#reply"/></svg>Replied<span class="count">1</span><span class="right">holds the company</span></button>
+        <div class="ob-row replied" data-row data-pane="p-priya" tabindex="-1">
+          <div class="l1"><b>Priya Natarajan</b><span class="co">Browserbase</span><span class="when">9:12</span></div>
+          <div class="l2">Happy to chat. Does Thursday at 2 PT work for 20 minutes?</div>
+          <div class="l3"><span class="badge s-ok"><span class="dot"></span>Replied</span><span>Holding 2 queued emails at Browserbase</span></div>
+        </div>
+
+        <button class="ob-ghead" type="button" aria-expanded="true"><svg class="i chev"><use href="#down"/></svg>Drafts to review<span class="count">7</span><span class="right">2 blocked</span></button>
+        <div class="ob-row is-active" data-row data-pane="p-kenji" tabindex="-1" aria-selected="true">
+          <div class="l1"><b>Kenji Watanabe</b><span class="co">Trigger.dev</span><span class="when">9:58</span></div>
+          <div class="l2">Your retries post, and the Software Engineer I role</div>
+          <div class="l3"><span class="badge s-bad"><span class="dot"></span>Blocked</span><span>Near-identical to Ava Moreno's draft</span></div>
+        </div>
+        <div class="ob-row" data-row data-pane="p-kenji" tabindex="-1">
+          <div class="l1"><b>Rafael Ortiz</b><span class="co">Graphite</span><span class="when">9:51</span></div>
+          <div class="l2">Stacked diffs, and Graphite's early career role</div>
+          <div class="l3"><span class="badge s-bad"><span class="dot"></span>Blocked</span><span>No mail server for graphtie.example</span></div>
+        </div>
+        <div class="ob-row" data-row data-pane="p-dana" tabindex="-1">
+          <div class="l1"><b>Dana Whitcomb</b><span class="co">Mintlify</span><span class="when">9:47</span></div>
+          <div class="l2">New grad engineer for the Software Engineer, New Grad role</div>
+          <div class="l3"><span class="badge s-warn"><span class="dot"></span>1 warning</span><span>Recruiter: sends on day 2</span></div>
+        </div>
+        <div class="ob-row" data-row data-pane="p-marcus" tabindex="-1">
+          <div class="l1"><b>Marcus Feld</b><span class="co">Mintlify</span><span class="when">9:40</span></div>
+          <div class="l2">Re: Docs for agents, and the new grad role</div>
+          <div class="l3"><span class="badge"><span class="dot" style="background:var(--idle-dot)"></span>Follow-up 2 of 3</span><span>Due today</span></div>
+        </div>
+        <div class="ob-row" data-row data-pane="p-omar" tabindex="-1">
+          <div class="l1"><b>Omar Haddad</b><span class="co">Resend</span><span class="when">9:36</span></div>
+          <div class="l2">Batch sending, and Resend's new grad role</div>
+          <div class="l3"><span class="badge"><span class="dot" style="background:var(--idle-dot)"></span>Draft</span><span>All checks passed</span></div>
+        </div>
+        <div class="ob-row" data-row data-pane="p-omar" tabindex="-1">
+          <div class="l1"><b>Sara Lindqvist</b><span class="co">Resend</span><span class="when">9:33</span></div>
+          <div class="l2">Your talk on deliverability, and a new grad question</div>
+          <div class="l3"><span class="badge s-warn"><span class="dot"></span>1 warning</span><span>Hook is 41 days old</span></div>
+        </div>
+        <div class="ob-row" data-row data-pane="p-omar" tabindex="-1">
+          <div class="l1"><b>Ava Moreno</b><span class="co">Trigger.dev</span><span class="when">9:30</span></div>
+          <div class="l2">Queues that survive deploys, and the SWE I role</div>
+          <div class="l3"><span class="badge"><span class="dot" style="background:var(--idle-dot)"></span>Draft</span><span>All checks passed</span></div>
+        </div>
+
+        <button class="ob-ghead" type="button" aria-expanded="true"><svg class="i chev"><use href="#down"/></svg>Approved<span class="count">3</span><span class="right">waiting for a slot</span></button>
+        <div class="ob-row" data-row tabindex="-1">
+          <div class="l1"><b>Jordan Price</b><span class="co">Mintlify</span><span class="when">10:42 ET</span></div>
+          <div class="l2">Your docs search rewrite, and the new grad role</div>
+          <div class="l3"><span class="badge s-info"><span class="dot"></span>Approved</span><span>Next send. Third Mintlify email today</span></div>
+        </div>
+        <div class="ob-row" data-row tabindex="-1">
+          <div class="l1"><b>Arjun Mehta</b><span class="co">Graphite</span><span class="when">after 11:05 ET</span></div>
+          <div class="l2">The merge queue post, and the early career role</div>
+          <div class="l3"><span class="badge s-info"><span class="dot"></span>Approved</span><span>60 minutes after the last Graphite email</span></div>
+        </div>
+        <div class="ob-row" data-row tabindex="-1">
+          <div class="l1"><b>Felix Graham</b><span class="co">Graphite</span><span class="when">tomorrow</span></div>
+          <div class="l2">Graphite's early career role, from a new grad</div>
+          <div class="l3"><span class="badge s-info"><span class="dot"></span>Approved</span><span>Graphite has 3 today already</span></div>
+        </div>
+
+        <button class="ob-ghead" type="button" aria-expanded="true"><svg class="i chev"><use href="#down"/></svg>Sending<span class="count">1</span></button>
+        <div class="ob-row" data-row tabindex="-1">
+          <div class="l1"><b>Chloe Martin</b><span class="co">Supabase</span><span class="when">10:14</span></div>
+          <div class="l2">Realtime at scale, and a new grad question</div>
+          <div class="l3"><span class="badge s-info"><span class="dot pulse"></span>Sending</span><span>Locked: cannot edit, approve or skip</span></div>
+        </div>
+
+        <button class="ob-ghead" type="button" aria-expanded="true"><svg class="i chev"><use href="#down"/></svg>Checking whether it went out<span class="count">1</span></button>
+        <div class="ob-row" data-row tabindex="-1">
+          <div class="l1"><b>Ben Ito</b><span class="co">Graphite</span><span class="when">10:05</span></div>
+          <div class="l2">Graphite's early career role, and stacked PRs</div>
+          <div class="l3"><span class="badge s-info"><span class="dot"></span>Checking</span><span>Gmail did not answer. Looking in Sent at 10:15</span></div>
+        </div>
+
+        <button class="ob-ghead" type="button" aria-expanded="true"><svg class="i chev"><use href="#down"/></svg>Sent<span class="count">64</span><span class="right">20 today</span></button>
+        <div class="ob-row" data-row tabindex="-1">
+          <div class="l1"><b>Nina Kovac</b><span class="co">Mintlify</span><span class="when">9:41</span></div>
+          <div class="l2">The docs linter, and the new grad role</div>
+          <div class="l3"><span class="badge"><span class="dot" style="background:var(--idle-dot)"></span>Sent</span><span>Follow-up 1 due Fri Nov 13</span></div>
+        </div>
+        <div class="ob-row" data-row tabindex="-1">
+          <div class="l1"><b>Theo Brandt</b><span class="co">Supabase</span><span class="when">Nov 5</span></div>
+          <div class="l2">Postgres branching, and the new grad role</div>
+          <div class="l3"><span class="badge"><span class="dot" style="background:var(--idle-dot)"></span>Sent</span><span>Follow-up 1 sent Nov 10. Follow-up 2 due Mon Nov 16</span></div>
+        </div>
+        <a class="ob-more" href="#">Show 62 more</a>
+
+        <button class="ob-ghead" type="button" aria-expanded="true"><svg class="i chev"><use href="#down"/></svg>Paused<span class="count">2</span><span class="right">Cartesia, by you</span></button>
+        <div class="ob-row" data-row tabindex="-1">
+          <div class="l1"><b>Will Turner</b><span class="co">Cartesia</span><span class="when">Nov 9</span></div>
+          <div class="l2">Voice latency, and the new grad role</div>
+          <div class="l3"><span class="badge"><svg class="i i-sm"><use href="#pause"/></svg>Paused</span><span>Waiting on a friend's intro</span></div>
+        </div>
+
+        <button class="ob-ghead" type="button" aria-expanded="false"><svg class="i chev"><use href="#down"/></svg>Closed<span class="count">17</span><span class="right">bounced 1, skipped 4, company closed 12</span></button>
+      </section>
+
+      <!-- ============ detail panes ============ -->
+      <section class="pane" aria-label="Selected email">
+
+        <!-- Blocked draft -->
+        <article class="detail det" id="p-kenji">
+          <header class="det-head">
+            <span class="avatar">KW</span>
+            <div class="grow">
+              <h2>Kenji Watanabe</h2>
+              <div class="meta"><span>Software Engineer at <a class="link" href="company.html">Trigger.dev</a></span><span class="mono">kenji@trigger.example</span><a class="link" href="#">LinkedIn</a></div>
+            </div>
+            <div class="tags"><span class="badge">Engineer</span><span class="badge">First email</span><span class="badge s-bad"><span class="dot"></span>Blocked</span></div>
+          </header>
+          <div class="det-body">
+            <div class="context">
+              <div><span class="k">Role to name</span><span class="v">Software Engineer I</span><span class="s">Posted 4 days ago, Remote US</span></div>
+              <div><span class="k">Hook</span><span class="v">His post on retries without double work</span><span class="s">Oct 28, 13 days old</span></div>
+              <div><span class="k">Trigger.dev today</span><span class="v">1 sent, 2 slots left</span><span class="s">Next slot 11:05 ET</span></div>
+            </div>
+
+            <div class="checks" aria-label="Check results">
+              <div class="check block">
+                <svg class="i"><use href="#block"/></svg>
+                <span class="what">Near-identical to Ava Moreno's draft (91% the same)</span>
+                <span class="how">Two people at one company comparing notes is the fastest way to lose both. Change the middle paragraph or the ask.</span>
+                <span class="act"><button class="btn btn-outline btn-sm" type="button">Compare drafts</button></span>
+              </div>
+              <details class="passed">
+                <summary><svg class="i"><use href="#check"/></svg>9 checks passed<span class="t-xs" style="margin-left:auto">Show</span></summary>
+                <ul>
+                  <li>Mail server found for trigger.example</li><li>2 links, portfolio first, no shortener, no attachment</li>
+                  <li>Not on the no-go or said-no list</li><li>Company not closed for no sponsorship</li>
+                  <li>No banned phrases</li><li>No em or en dashes</li><li>105 words (80 to 120)</li>
+                  <li>Hook 13 days old (30 at most)</li><li>Subject unique to him, no "Re:"</li>
+                </ul>
+              </details>
+            </div>
+
+            <div class="editor">
+              <div class="subj"><label for="s1">Subject</label><input id="s1" value="Your retries post, and the Software Engineer I role"></div>
+              <textarea aria-label="Email body" rows="15">Hi Kenji,
+
+I read your post on how Trigger.dev retries long-running tasks without doing the work twice. That problem is exactly the kind I like chewing on.
+
+I'm Devanshu, a new grad software engineer on OPT, so I can start now. I spent about two years building full-stack products, and right now I'm building tool-crowding, an open benchmark for how AI agents pick the right tool when many MCP servers are installed.
+
+I'd love to be considered for Software Engineer I. Would you be open to referring me, or pointing me to the right person?
+
+Portfolio: https://www.devanshuchicholikar.com
+Project: https://github.com/DevanshuNEU/tool-crowding
+
+Thanks,
+Devanshu</textarea>
+              <div class="meter"><span>105 words</span><span>2 links</span><span>Plain text</span><span class="right">Saved by Claude 9:58</span></div>
+            </div>
+          </div>
+          <footer class="det-foot">
+            <span data-tip="Blocked: near-identical to Ava Moreno's draft. Edit, then approve."><button class="btn" type="button" aria-disabled="true"><svg class="i"><use href="#check"/></svg>Approve<span class="kbd">A</span></button></span>
+            <button class="btn btn-outline" type="button" data-toast="Saved. Checks run again.">Save<span class="kbd">⌘S</span></button>
+            <button class="btn btn-ghost" type="button" data-toast="Skipped Kenji Watanabe. He will not get an email." data-undo>Skip<span class="kbd">S</span></button>
+            <span class="spacer"></span>
+            <button class="btn btn-ghost btn-sm" type="button">Pause Trigger.dev<span class="kbd">P</span></button>
+            <button class="btn btn-ghost btn-sm" type="button">Close company<span class="kbd">C</span></button>
+          </footer>
+        </article>
+
+        <!-- Reply holding the company -->
+        <article class="detail det" id="p-priya" hidden>
+          <header class="det-head">
+            <span class="avatar">PN</span>
+            <div class="grow">
+              <h2>Priya Natarajan</h2>
+              <div class="meta"><span>Engineering Manager at <a class="link" href="company.html">Browserbase</a></span><span class="mono">priya@browserbase.example</span><a class="link" href="#">LinkedIn</a></div>
+            </div>
+            <div class="tags"><span class="badge">Manager</span><span class="badge s-ok"><span class="dot"></span>Replied</span></div>
+          </header>
+          <div class="det-body">
+            <div class="alert s-ok">
+              <svg class="i"><use href="#pause"/></svg>
+              <span class="title">Browserbase is on hold</span>
+              <span class="desc">Priya replied, so nothing else goes to Browserbase: Lena Szabo (approved) and Tom Becker (follow-up 1, due today) are held. Answer her in Gmail. This app never sends a reply.</span>
+              <span class="act"><a class="btn btn-outline btn-sm" href="#"><svg class="i"><use href="#external"/></svg>Open in Gmail</a></span>
+            </div>
+
+            <div class="msg theirs">
+              <div class="msg-head"><b>Priya Natarajan</b><span class="muted">to you</span><span class="when">Today 9:12</span></div>
+              <div class="msg-body mailbody">Hi Devanshu,
+
+Thanks for reaching out. We're hiring for Software Engineer, New Grad and I'm happy to chat. Does Thursday at 2 PT work for 20 minutes?
+
+Priya</div>
+            </div>
+            <div class="row" style="gap:12px">
+              <span class="label">What did she say?</span>
+              <span class="seg" role="group" aria-label="Reply kind">
+                <button type="button" aria-pressed="true">Interested</button><button type="button" aria-pressed="false">Not now</button>
+                <button type="button" aria-pressed="false">Said no</button><button type="button" aria-pressed="false">Asked to stop</button>
+              </span>
+              <span class="hint">Said no and Asked to stop add her to the no-go list.</span>
+            </div>
+            <div class="msg folded">
+              <div class="msg-head"><b>You</b><span class="muted">Follow-up 1</span><span class="when">Wed Nov 4, 11:20 PT</span></div>
+              <div class="msg-body"></div>
+            </div>
+            <div class="msg">
+              <div class="msg-head"><b>You</b><span class="muted">First email: The CDP session pool, and the new grad role</span><span class="when">Fri Oct 30, 10:02 PT</span></div>
+              <div class="msg-body mailbody muted">Hi Priya,
+
+Your team's write-up on pooling browser sessions answered a question I had been stuck on for a week...</div>
+            </div>
+          </div>
+          <footer class="det-foot">
+            <button class="btn" type="button">Close Browserbase with a reason<span class="kbd">C</span></button>
+            <button class="btn btn-outline" type="button">Resume Browserbase</button>
+            <span class="spacer"></span>
+            <span class="hint">Held emails stay held until you resume or close.</span>
+          </footer>
+        </article>
+
+        <!-- Recruiter warning -->
+        <article class="detail det" id="p-dana" hidden>
+          <header class="det-head">
+            <span class="avatar">DW</span>
+            <div class="grow">
+              <h2>Dana Whitcomb</h2>
+              <div class="meta"><span>Technical Recruiter at <a class="link" href="company.html">Mintlify</a></span><span class="mono">dana@mintlify.example</span><a class="link" href="#">LinkedIn</a></div>
+            </div>
+            <div class="tags"><span class="badge s-warn">Recruiter</span><span class="badge">First email</span><span class="badge s-warn"><span class="dot"></span>1 warning</span></div>
+          </header>
+          <div class="det-body">
+            <div class="context">
+              <div><span class="k">Role to name</span><span class="v">Software Engineer, New Grad</span><span class="s">Posted 6 days ago, San Francisco</span></div>
+              <div><span class="k">Hook</span><span class="v">Posted the new grad role herself</span><span class="s">Nov 4, 6 days old</span></div>
+              <div><span class="k">If approved now</span><span class="v">Sends Wed Nov 11</span><span class="s">Day 2 for Mintlify, after engineers</span></div>
+            </div>
+            <div class="checks">
+              <div class="check warn">
+                <svg class="i"><use href="#warn"/></svg>
+                <span class="what">Recruiter title</span>
+                <span class="how">Recruiters go out on day 2, after engineers and managers. They do not count toward Mintlify's 3 a day, but they do count toward today's 30.</span>
+                <span class="act"><select class="select" style="height:28px;width:auto;font-size:12px" aria-label="Role kind"><option>Recruiter</option><option>Engineer</option><option>Manager</option><option>Founder</option></select></span>
+              </div>
+              <details class="passed"><summary><svg class="i"><use href="#check"/></svg>10 checks passed<span class="t-xs" style="margin-left:auto">Show</span></summary><ul><li>91 words (about 90 for recruiters)</li></ul></details>
+            </div>
+            <div class="editor">
+              <div class="subj"><label for="s2">Subject</label><input id="s2" value="New grad engineer for the Software Engineer, New Grad role"></div>
+              <textarea aria-label="Email body" rows="13">Hi Dana,
+
+I saw Mintlify posted Software Engineer, New Grad last week, and I'd like to be in the pile you read.
+
+I'm Devanshu, a new grad software engineer on OPT, so I can start right away. I have about two years of full-stack work behind me, and I'm building tool-crowding, an open benchmark for how agents choose tools.
+
+Is there a good time for a short call this week? I'm flexible.
+
+Portfolio: https://www.devanshuchicholikar.com
+Project: https://github.com/DevanshuNEU/tool-crowding
+
+Thanks,
+Devanshu</textarea>
+              <div class="meter"><span>91 words</span><span>2 links</span><span class="right">Saved by Claude 9:47</span></div>
+            </div>
+          </div>
+          <footer class="det-foot">
+            <button class="btn" type="button" data-toast="Approved. It sends Wed Nov 11, day 2 for Mintlify." data-undo><svg class="i"><use href="#check"/></svg>Approve<span class="kbd">A</span></button>
+            <button class="btn btn-outline" type="button">Save<span class="kbd">⌘S</span></button>
+            <button class="btn btn-ghost" type="button">Skip<span class="kbd">S</span></button>
+            <span class="spacer"></span>
+            <span class="hint">Warnings never block. Approving means you read them.</span>
+          </footer>
+        </article>
+
+        <!-- Follow-up draft -->
+        <article class="detail det" id="p-marcus" hidden>
+          <header class="det-head">
+            <span class="avatar">MF</span>
+            <div class="grow">
+              <h2>Marcus Feld</h2>
+              <div class="meta"><span>Software Engineer at <a class="link" href="company.html">Mintlify</a></span><span class="mono">marcus@mintlify.example</span></div>
+            </div>
+            <div class="tags"><span class="badge">Engineer</span><span class="badge">Follow-up 2 of 3</span></div>
+          </header>
+          <div class="det-body">
+            <div class="fu-track" aria-label="Follow-up schedule">
+              <div class="fu-step done"><b>First email</b><span class="when">Sent Fri Oct 30</span></div>
+              <div class="fu-step done"><b>Follow-up 1</b><span class="when">Sent Wed Nov 4</span></div>
+              <div class="fu-step now"><b>Follow-up 2</b><span class="when">Due today, Tue Nov 10</span></div>
+              <div class="fu-step"><b>Follow-up 3, polite close</b><span class="when">Due Fri Nov 20</span></div>
+            </div>
+            <div class="checks"><details class="passed"><summary><svg class="i"><use href="#check"/></svg>All checks passed. Same thread as the first email.<span class="t-xs" style="margin-left:auto">Show</span></summary><ul><li>Adds one new thing: you confirm that when you read it</li></ul></details></div>
+            <div class="editor">
+              <div class="subj"><label for="s3">Subject</label><input id="s3" value="Re: Docs for agents, and the new grad role"></div>
+              <textarea aria-label="Email body" rows="8">Hi Marcus,
+
+One new thing since my last note: I wrote up how tool-crowding keeps prompt length separate from overlap between similar tools. It's close to how Mintlify thinks about docs that agents read.
+
+If referrals aren't something you do, the name of the right person would help just as much.
+
+Thanks,
+Devanshu</textarea>
+              <div class="meter"><span>58 words</span><span>0 links</span><span class="right">Saved by Claude 9:40</span></div>
+            </div>
+          </div>
+          <footer class="det-foot">
+            <button class="btn" type="button"><svg class="i"><use href="#check"/></svg>Approve<span class="kbd">A</span></button>
+            <button class="btn btn-outline" type="button">Save<span class="kbd">⌘S</span></button>
+            <button class="btn btn-ghost" type="button">Skip this follow-up<span class="kbd">S</span></button>
+          </footer>
+        </article>
+
+        <!-- Clean draft -->
+        <article class="detail det" id="p-omar" hidden>
+          <header class="det-head">
+            <span class="avatar">OH</span>
+            <div class="grow">
+              <h2>Omar Haddad</h2>
+              <div class="meta"><span>Founding Engineer at <a class="link" href="company.html">Resend</a></span><span class="mono">omar@resend.example</span></div>
+            </div>
+            <div class="tags"><span class="badge">Founder</span><span class="badge">First email</span></div>
+          </header>
+          <div class="det-body">
+            <div class="checks"><details class="passed"><summary><svg class="i"><use href="#check"/></svg>All 10 checks passed<span class="t-xs" style="margin-left:auto">Show</span></summary><ul><li>112 words</li></ul></details></div>
+            <div class="editor">
+              <div class="subj"><label for="s4">Subject</label><input id="s4" value="Batch sending, and Resend's new grad role"></div>
+              <textarea aria-label="Email body" rows="14">Hi Omar,
+
+I saw your October write-up on how Resend's batch API handles rate limits. I've been reading about Gmail's limits for my own job search, so it landed at the right time.
+
+I'm Devanshu, a new grad software engineer on OPT, so I can start now. I've spent about two years on full-stack products, and I'm building tool-crowding, an open benchmark for how AI agents pick tools.
+
+I'd like to be considered for Software Engineer, New Grad. Would you be open to a referral, or to pointing me to whoever is hiring?
+
+Portfolio: https://www.devanshuchicholikar.com
+Project: https://github.com/DevanshuNEU/tool-crowding
+
+Thanks,
+Devanshu</textarea>
+              <div class="meter"><span>112 words</span><span>2 links</span><span class="right">Saved by Claude 9:36</span></div>
+            </div>
+          </div>
+          <footer class="det-foot">
+            <button class="btn" type="button" data-toast="Approved. Sends after 10:55 ET." data-undo><svg class="i"><use href="#check"/></svg>Approve<span class="kbd">A</span></button>
+            <button class="btn btn-outline" type="button">Save<span class="kbd">⌘S</span></button>
+            <button class="btn btn-ghost" type="button">Skip<span class="kbd">S</span></button>
+          </footer>
+        </article>
+      </section>
+    </div>
+  </main>
+</div>
+
+<template id="page-keys">
+  <h4>Outbox</h4>
+  <div><span>Approve the selected draft</span><span class="kbd-row"><span class="kbd">A</span></span></div>
+  <div><span>Edit the body</span><span class="kbd-row"><span class="kbd">E</span></span></div>
+  <div><span>Save edits</span><span class="kbd-row"><span class="kbd">⌘</span><span class="kbd">S</span></span></div>
+  <div><span>Skip (with undo)</span><span class="kbd-row"><span class="kbd">S</span></span></div>
+  <div><span>Withdraw approval</span><span class="kbd-row"><span class="kbd">U</span></span></div>
+  <div><span>Next group, previous group</span><span class="kbd-row"><span class="kbd">⇧J</span><span class="kbd">⇧K</span></span></div>
+  <div><span>Pause company</span><span class="kbd-row"><span class="kbd">P</span></span></div>
+  <div><span>Close company</span><span class="kbd-row"><span class="kbd">C</span></span></div>
+  <div><span>Open company page</span><span class="kbd-row"><span class="kbd">O</span></span></div>
+  <div><span>Leave the editor</span><span class="kbd-row"><span class="kbd">Esc</span></span></div>
+</template>
+<script src="mockup.js"></script>
+</body>
+</html>

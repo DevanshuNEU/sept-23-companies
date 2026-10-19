@@ -1,7 +1,7 @@
 """
 Gmail access for the cold-email sender, using only the standard library.
 
-Secrets live outside the project, in ~/Library/Application Support/outreach-mail/:
+Secrets live outside the project, in ~/Library/Application Support/outreach-mail/ (OUTREACH_GMAIL_DIR overrides it):
   client_secret.json   the OAuth "Desktop app" client you download from Google Cloud Console
   token.json           written by `python3 mail/gmail.py auth` (chmod 600); holds the refresh token
 
@@ -15,7 +15,8 @@ import base64, hashlib, http.server, json, os, secrets, sys, time, urllib.parse,
 from email.message import EmailMessage
 from email.utils import make_msgid, formataddr
 
-DIR = os.path.expanduser("~/Library/Application Support/outreach-mail")
+DEFAULT_DIR = os.path.expanduser("~/Library/Application Support/outreach-mail")
+DIR = os.environ.get("OUTREACH_GMAIL_DIR") or DEFAULT_DIR      # tests point this at a scratch folder
 CLIENT, TOKEN = os.path.join(DIR, "client_secret.json"), os.path.join(DIR, "token.json")
 SCOPES = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.metadata"
 API = "https://gmail.googleapis.com/gmail/v1/users/me"

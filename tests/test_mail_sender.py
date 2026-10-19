@@ -7,6 +7,7 @@ import datetime, fcntl, json, os, sys, tempfile, unittest
 
 HOME = tempfile.mkdtemp(prefix="outreach-mail-test-")
 os.environ["OUTREACH_MAIL_HOME"] = HOME
+os.environ["OUTREACH_GMAIL_DIR"] = tempfile.mkdtemp(prefix="outreach-gmail-test-")   # never the real token
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mail"))
 import store, gmail, sender, server  # noqa: E402
 

@@ -18,7 +18,8 @@ Log: mail/send.log
 import datetime, os, random, re, sys
 from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import store, gmail
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import store, gmail, live_checkout
 
 DRY = "--dry-run" in sys.argv
 LOGF = os.path.join(store.HERE, "send.log")
@@ -153,6 +154,8 @@ def reconcile(db, found):
             store.log(c, "not found in Sent: did not go out"); say(f"unclear send to {c['email']} did not go out")
 
 def main():
+    if not DRY and gmail.DIR == gmail.DEFAULT_DIR and not live_checkout.is_live():
+        say(f"not sending: real Gmail secrets are only used from the live checkout ({live_checkout.LIVE_ROOT})"); return
     if not gmail.authorized():
         say_once_a_day("not signed in to Gmail yet (run: python3 mail/gmail.py auth); nothing sent", "not signed in")
         return

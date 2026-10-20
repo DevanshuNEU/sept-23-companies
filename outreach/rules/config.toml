@@ -497,8 +497,11 @@ company_history = [
   "graduated from y combinator", "graduated from yc", "graduated from techstars", "graduated from a16z",
   "we recently graduated", "we have graduated", "we just graduated", "our company recently graduated",
   "founded by", "founded in", "graduate school", "graduate schools", "graduate degree", "graduate degrees",
-  "team of graduates",
+  "team of graduates", "launched", "started in", "established in",
 ]
+# What leads from a graduation word to a year in a company line ("founded by two MIT graduates in 2024"): the year
+# after it belongs to the founders, not to a graduation window. Read only after a company_history phrase.
+history_date_lead = ["in", "since", "during", "back in"]
 # refresh/eligibility.py:76 ('by Summer 2027' is an upper bound: anyone already graduated qualifies)
 upper_bound = [
   "by", "no later than", "before", "prior to",

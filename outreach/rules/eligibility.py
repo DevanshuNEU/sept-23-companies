@@ -1,17 +1,20 @@
 """Graduation eligibility and the 2027 start flag, read from a posting's title and body.
 
 Ported from refresh/eligibility.py:32-91, with the 2027-start reading of refresh/finalcheck.py:48-56 and
-refresh/final_merge.py:17, 62. A dated graduation sentence decides first; then a current-student requirement, unless
-its own sentence offers a graduate route ("currently pursuing or recently graduated"); then wording anywhere that lets
-graduates in; then a title naming a graduating cohort. The old code let graduate wording anywhere in the body cancel
-an enrollment rule, so "Interns and new grads join the same onboarding." undid "You must be currently enrolled"; here
-the route has to be in the same sentence. Per the #9 ruling a cohort title names graduates ("2027 University
+refresh/final_merge.py:17, 62. A dated graduation sentence decides first; then wording anywhere that lets graduates in
+(an explicit welcome, even on the next bullet, cancels an enrollment phrase); then a current-student requirement,
+unless its own sentence offers a graduate route ("currently pursuing or recently graduated"); then a title naming a
+graduating cohort. The graduates_welcome list holds only explicit welcomes, so loose route words ("new grads") in
+another sentence ("Interns and new grads join the same onboarding.") do not undo "You must be currently enrolled";
+those live in graduate_route and count only inside the enrollment sentence. Per the #9 ruling a cohort title names graduates ("2027 University
 Graduate"), while "New Grad 2027" names a start date: that is a flag for the list, never a reason to hide. The
 graduation month is [candidate].graduated.
 
 Company history never skips a whole sentence. A company_history phrase that holds a graduation word ("graduate
-degree", "our founders graduated") stops that word from anchoring a date; one that does not ("founded in") rules out
-the dates within HISTORY_WINDOW characters of it. So "Founded in 2015, we hire engineers who graduate between December
+degree", "our founders graduated") stops that word from anchoring a date and rules out the accelerator year after it;
+one that does not ("founded in") rules out the dates within HISTORY_WINDOW characters of it, inside its clause. A
+graduation word after a founding phrase in the same clause ("founded by two MIT graduates in 2024") loses the date
+it leads into with "in". So "Founded in 2015, we hire engineers who graduate between December
 2026 and June 2027." still reads the window.
 
 The old code read a graduation sentence up to the next period over HTML flattened to one line. Here sentences() also
@@ -30,6 +33,8 @@ DATE_AFTER = 140  # or this many after it, so a year elsewhere in a run-on parag
 START_YEAR = "2027"  # the year starts_2027 flags in a title
 QUOTE_LIMIT = 260  # the longest quote, as every rule uses
 HISTORY_WINDOW = 20  # a date this close to a founding phrase ("Founded in 2023") is the company's, not a window
+HOLD_REACH = 40  # after "we graduated" a date this close is the accelerator year ("we graduated from YC in 2023")
+HISTORY_REACH = 60  # a graduation word this close after a founding phrase is about the founders ("founded by MIT graduates")
 
 _DASHES = "\\-" + chr(0x2010) + chr(0x2011) + chr(0x2013)  # hyphen, Unicode hyphens, en dash (see config.py)
 _MONTH = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|"
@@ -44,6 +49,7 @@ _DATE = re.compile(
 # The years are the old range (eligibility.py:76).
 _BOUND_TAIL = r"\s{1,3}(?:the\s{1,3})?(?:end\s{1,3}of\s{1,3})?(?:[a-z]{1,9},?\s{1,3})?202[5-8](?!\d)"
 _TITLE_YEAR = re.compile(r"(?<!\w)" + START_YEAR + r"(?!\w)")
+_CLAUSE_BREAK = re.compile(r"[,;:.!?\n]")  # where a clause ends, for the company-history phrases
 _JOINS_NEXT = ";:"  # a sentence ending in one of these runs on into the next for step 1
 _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10,
            "nov": 11, "dec": 12}
@@ -63,6 +69,9 @@ class _Patterns:
         self.graduate_route = phrases(e["graduate_route"])
         self.soft = phrases(e["soft"])
         self.company_history = phrases(e["company_history"])
+        # "in", "since": what leads from founders to their year ("MIT graduates in 2024"); the date after it is theirs
+        self.history_date_lead = re.compile(r"\s{0,2}(?:" + phrases(e["history_date_lead"]).pattern + r")\s{1,3}",
+                                            re.IGNORECASE)
         self.upper_bound = re.compile(phrases(e["upper_bound"]).pattern + _BOUND_TAIL, re.IGNORECASE)
         self.cohort_title = phrases(e["cohort_title"])
         # Lowercase words matched case-sensitively against a lowercased text: the same matches, about three times
@@ -128,23 +137,48 @@ def _covered(intervals: list[tuple[int, int]], starts: list[int], a: int, b: int
 def _anchors_and_blocks(sentence: str, p: _Patterns) -> tuple[list[re.Match], list[tuple[int, int]]]:
     """The graduation words that may anchor a date, and the merged spans where a date is the company's own.
 
-    A graduation word inside a company_history phrase ("graduate school", "team of graduates") is not an anchor. A
-    company_history phrase without a graduation word ("founded in") blocks dates within HISTORY_WINDOW of it.
+    A graduation word inside a company_history phrase ("graduate school", "team of graduates") is not an anchor, and
+    a date just after such a phrase ("we graduated from Y Combinator in 2023") is the company's. A phrase without a
+    graduation word ("founded in") blocks the dates within HISTORY_WINDOW of it, inside its clause. A graduation
+    word that follows a founding phrase in the same clause ("founded by two MIT graduates in 2024") keeps its
+    place as an anchor, but the date it leads into with "in" or "since" is the founders' year, not a window.
     """
     grads = list(p.grad.finditer(sentence))
     if not grads:
         return [], []
-    holds, near = [], []
-    for h in p.company_history.finditer(sentence):
+    history = list(p.company_history.finditer(sentence))
+    if not history:
+        return grads, []
+    breaks = [m.start() for m in _CLAUSE_BREAK.finditer(sentence)]
+
+    def clause_start(pos: int) -> int:
+        i = bisect.bisect_left(breaks, pos)
+        return breaks[i - 1] + 1 if i else 0
+
+    def clause_end(pos: int) -> int:
+        i = bisect.bisect_left(breaks, pos)
+        return breaks[i] if i < len(breaks) else len(sentence)
+
+    holds, blocks = [], []
+    for h in history:
         if p.grad.search(h.group(0)):
             holds.append((h.start(), h.end()))
+            blocks.append((h.start(), min(h.end() + HOLD_REACH, clause_end(h.end()))))
         else:
-            near.append((h.start() - HISTORY_WINDOW, h.end() + HISTORY_WINDOW))
+            blocks.append((max(h.start() - HISTORY_WINDOW, clause_start(h.start())),
+                           min(h.end() + HISTORY_WINDOW, clause_end(h.end()))))
     if holds:
         holds = _merged(holds)
         starts = [a for a, _ in holds]
         grads = [g for g in grads if not _covered(holds, starts, g.start(), g.end())]
-    return grads, _merged(near)
+    ends = [h.end() for h in history]
+    for g in grads:
+        i = bisect.bisect_right(ends, g.start()) - 1
+        if i < 0 or g.start() - ends[i] > HISTORY_REACH or clause_end(ends[i]) < g.start():
+            continue
+        if lead := p.history_date_lead.match(sentence, g.end()):
+            blocks.append((lead.end(), lead.end() + 1))
+    return grads, _merged(blocks)
 
 
 def _month_number(cfg: Config) -> int:
@@ -229,7 +263,11 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
         if _window_holds(sentence, dates, graduated, p):
             return "ok", None, quote
         return "excluded", "grad_window", quote
-    # 2) a current-student requirement, unless its own sentence offers a graduate route
+    # 2) wording anywhere that lets graduates in, so a welcome beside an enrollment phrase wins ("Currently pursuing
+    #    a BS.\nRecent grads welcome.")
+    if m := p.graduates_welcome.search(body):
+        return "ok", None, _quote(body, m)
+    # 3) a current-student requirement, unless its own sentence offers a graduate route
     starts = [a for a, _ in spans]
     read: set[int] = set()  # sentences already checked for a route
     for m in p.current_student.finditer(body):
@@ -240,9 +278,6 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
         a, b = spans[i] if spans else (0, len(body))
         if p.graduate_route.search(body, a, b) is None:
             return "excluded", "current_student", _quote(body, m)
-    # 3) wording anywhere that lets graduates in
-    if m := p.graduates_welcome.search(body):
-        return "ok", None, _quote(body, m)
     # 4) a title that names a graduating cohort
     if p.cohort_title.search(title or ""):
         return "excluded", "cohort_title", title

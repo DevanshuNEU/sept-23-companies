@@ -111,6 +111,45 @@ ROUND_2 = [  # (title, body, status, reason, start_2027)
      "June 2027.", "excluded", "grad_window", False),
 ]
 
+# Review round 3: a welcome anywhere in the body (same sentence, next sentence, next bullet) lets graduates in, and a
+# founding line keeps its year out of the window.
+ROUND_3 = [  # (title, body, status, reason, start_2027)
+    ("Software Engineer", "Currently pursuing a degree in Computer Science. Recent graduates are also welcome to apply.",
+     "ok", None, False),
+    ("Software Engineer", "Currently pursuing a Bachelor's or Master's in CS; recent graduates are also encouraged to "
+     "apply.", "ok", None, False),
+    ("Software Engineer", "You must be currently enrolled in a degree program; recent graduates welcome.",
+     "ok", None, False),
+    ("Software Engineer", "Requirements:\n- Currently pursuing a BS or MS in Computer Science, or\n- Graduated within "
+     "the last 12 months", "ok", None, False),
+    ("Software Engineer", "Requirements:\n- Currently enrolled in a BS/MS program\n- Or a recent graduate of one",
+     "ok", None, False),
+    ("Software Engineer", "Currently enrolled in a Bachelor's or Master's program. Or have graduated within the past "
+     "12 months.", "ok", None, False),
+    ("Software Engineer", "Currently pursuing a BS in CS.\nRecent grads welcome.", "ok", None, False),
+    ("Software Engineer", "Currently pursuing a BS in CS.\nOpen to recent graduates.", "ok", None, False),
+    ("Software Engineer", "Currently pursuing a Bachelor's degree in CS. Already graduated? You can apply too.",
+     "ok", None, False),
+    # a founding year is not a window, whatever sits between the founders and the year
+    ("Software Engineer", "Founded by two MIT graduates in 2024.", "ok", None, False),
+    ("Software Engineer", "Founded by two MIT graduates in 2023.", "ok", None, False),
+    ("Software Engineer", "Founded by a team of MIT graduates in 2024.", "ok", None, False),
+    ("Software Engineer", "Founded by two Stanford PhD graduates in 2024, we build developer tools.", "ok", None, False),
+    ("Software Engineer", "Founded by former Stripe engineers and MIT graduates in 2023.", "ok", None, False),
+    ("Software Engineer", "Founded by two MIT graduates, the company launched in 2024.", "ok", None, False),
+    ("Software Engineer", "Founded by Harvard graduates; launched in 2025.", "ok", None, False),
+    ("Software Engineer", "Our company graduated from Techstars in 2024 and hires new graduates.", "ok", None, False),
+    ("Software Engineer", "We graduated from Y Combinator in 2023 and are hiring recent graduates.", "ok", None, False),
+    # a real window stays a window, next to founding wording or with no comma after it
+    ("Software Engineer", "Founded in 2025, hiring December 2026 graduates.", "excluded", "grad_window", False),
+    ("Software Engineer", "Founded in 2015 we hire engineers who graduate between December 2026 and June 2027.",
+     "excluded", "grad_window", False),
+    ("Software Engineer", "Founded by two MIT graduates in 2024, we hire students who graduate between December 2026 "
+     "and June 2027.", "excluded", "grad_window", False),
+    ("Software Engineer", "We graduated from Y Combinator in 2023 and hire students who graduate between December "
+     "2026 and June 2027.", "excluded", "grad_window", False),
+]
+
 # Body start wording is a 2027 start even next to immediate-start wording; only the title reading is cancelled.
 STARTS = [  # (title, body, start_2027)
     ("Software Engineer, New Grad", "Open to 2026 grads. This role starts in July 2027.", True),
@@ -147,6 +186,9 @@ class EligibilityTest(unittest.TestCase):
 
     def test_review_round_2_cases(self):
         self.check(ROUND_2)
+
+    def test_review_round_3_cases(self):
+        self.check(ROUND_3)
 
     def test_a_missing_route_list_fails_at_load(self):
         # graduate_route is a required key, so a config without it is refused at load and the error names it.

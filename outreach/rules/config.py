@@ -20,7 +20,7 @@ REQUIRED = {
               "body_entry"),
     "location": ("us_marks", "us_state_codes", "us_state_names", "us_cities", "non_us_countries", "non_us_cities",
                  "shared_city_names"),
-    "sponsorship": ("topic", "negation", "hedge", "opt", "citizenship", "citizenship_negation"),
+    "sponsorship": ("topic", "negation", "hedge", "opt", "opt_support", "citizenship", "citizenship_negation"),
     "eligibility": ("grad_words", "current_student", "graduates_welcome", "soft", "company_history", "upper_bound",
                     "cohort_title", "start_2027", "immediate_start"),
     "facts": ("stage", "size_guess_words"),

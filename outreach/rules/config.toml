@@ -239,6 +239,20 @@ negation = [
   "without the need for sponsorship", "without the need for visa sponsorship", "without requiring sponsorship",
   "without needing sponsorship", "we're unable", "we’re unable", "we are unable", "don't sponsor", "don’t sponsor",
   "doesn't sponsor", "doesn’t sponsor",
+  # new in #4: refusals the old regex missed. Read only in clauses of sentences that name a topic word, with a
+  # curly apostrophe read as a straight one.
+  "do not support", "does not support", "will not support", "cannot support", "can't support", "don't support",
+  "doesn't support", "won't support", "not able to support", "do not accept", "does not accept", "will not accept",
+  "cannot accept", "can't accept", "don't accept", "doesn't accept", "not accepting", "don't offer", "doesn't offer",
+  "won't offer", "can't offer", "don't provide", "doesn't provide", "won't provide", "can't provide", "unavailable",
+  "not eligible", "not currently sponsor", "not currently sponsoring", "not currently offer", "not currently offering",
+  "not currently provide", "not currently providing", "not currently able", "not be able to sponsor",
+  "not be able to offer", "not be able to provide", "not be able to support", "not be sponsoring", "not be offering",
+  "not be providing", "no h-1b", "no h1b", "no visa", "now or in the future", "now or in future", "current or future",
+  "not require sponsorship", "not require visa sponsorship", "not require employer sponsorship",
+  "not need sponsorship", "not need visa sponsorship", "not be considered", "without requiring visa sponsorship",
+  "without requiring employer sponsorship", "without needing visa sponsorship",
+  "without the need for employer sponsorship", "without employer sponsorship",
 ]
 # new in #4 (a hedged clause reads as unclear, not yes)
 hedge = [
@@ -248,6 +262,11 @@ hedge = [
 # new in #4 (the old code has no OPT wording; read with a support word by the sponsorship task)
 opt = [
   "opt", "stem opt", "cpt", "optional practical training", "curricular practical training",
+]
+# new in #4: a clause naming OPT with one of these, and no negation, supports OPT
+opt_support = [
+  "support", "supports", "supported", "supporting", "accept", "accepts", "accepted", "accepting", "welcome",
+  "welcomes", "welcomed", "welcoming", "open to",
 ]
 # refresh/finalcheck.py:61-63 CITIZ and refresh/crawl_boards.py:127, one list
 # Not expressible as a word list: the old 'u.s. persons' pattern allowed up to 20 characters before only, required or as defined.

@@ -1,5 +1,4 @@
 import type { Confidence } from '@/api';
-import { cn } from '@/lib/utils';
 
 const CONFIDENCE: Record<Confidence, { bars: 1 | 2 | 3; label: string }> = {
   confirmed: { bars: 3, label: 'High confidence' },
@@ -7,17 +6,13 @@ const CONFIDENCE: Record<Confidence, { bars: 1 | 2 | 3; label: string }> = {
   guess: { bars: 1, label: 'Guess' },
 };
 
-/** Three bars of rising height, filled from the left. The label carries the meaning, the bars repeat it. */
+/** Three equal bars, 4px by 10px, the first N lit. The label carries the meaning, the bars repeat it. */
 export function ConfidenceMeter({ confidence }: { confidence: Confidence }) {
   const { bars, label } = CONFIDENCE[confidence];
   return (
-    <span role="img" aria-label={label} className="inline-flex h-3 items-end gap-0.5 align-middle">
+    <span role="img" aria-label={label} className="inline-flex gap-0.5 align-middle">
       {[1, 2, 3].map((n) => (
-        <span
-          key={n}
-          data-on={n <= bars}
-          className={cn('w-[3px] rounded-[1px] bg-muted-foreground/25 data-[on=true]:bg-foreground', n === 1 ? 'h-1' : n === 2 ? 'h-2' : 'h-3')}
-        />
+        <i key={n} data-on={n <= bars} className="h-2.5 w-1 rounded-[1px] bg-muted data-[on=true]:bg-muted-foreground" />
       ))}
     </span>
   );

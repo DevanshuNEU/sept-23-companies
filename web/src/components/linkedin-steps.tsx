@@ -1,5 +1,5 @@
 import type { IsoTime, LinkedInStep } from '@/api';
-import { ageDays, formatRecipientTime } from '@/lib/format';
+import { ageDays, formatDay } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 const ORDER: LinkedInStep[] = ['request_sent', 'accepted', 'message_sent', 'replied'];
@@ -9,9 +9,6 @@ const WORD: Record<LinkedInStep, string> = {
   message_sent: 'Messaged',
   replied: 'Replied',
 };
-
-/** "Fri Nov 6": the day of an instant in the app's zone. The clock part of the helper is cut off. */
-const dayOf = (at: IsoTime) => formatRecipientTime(at, 'America/New_York', { day: true }).split(',')[0] ?? '';
 
 /** Four dots joined by lines, lit up to the latest step, with that step's word and day beside them. */
 export function LinkedInSteps({ steps, asOf }: { steps: { step: LinkedInStep; at: IsoTime }[]; asOf: IsoTime }) {
@@ -24,7 +21,7 @@ export function LinkedInSteps({ steps, asOf }: { steps: { step: LinkedInStep; at
       latest = s;
     }
   }
-  const label = latest ? `${WORD[latest.step]} ${ageDays(latest.at, asOf) === 0 ? 'today' : dayOf(latest.at)}` : 'Not started';
+  const label = latest ? `${WORD[latest.step]} ${ageDays(latest.at, asOf) === 0 ? 'today' : formatDay(latest.at)}` : 'Not started';
   return (
     <span className="inline-flex items-center align-middle">
       <span role="img" aria-label={label} className="inline-flex items-center">

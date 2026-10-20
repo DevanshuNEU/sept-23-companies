@@ -66,15 +66,26 @@ function appDate(at: IsoTime): { y: number; m: number; d: number } {
 
 const dayNumber = ({ y, m, d }: { y: number; m: number; d: number }) => Date.UTC(y, m - 1, d) / DAY_MS;
 
-/** "Due today", or "Due Fri Nov 13". A date is a calendar date: no zone shifts it. */
-export function formatDue(on: IsoDate, asOf: IsoTime): string {
+/** "Tue Nov 10" for a calendar date. A date is a calendar date: no zone shifts it. */
+export function formatDueDay(on: IsoDate): string {
   const date = parseIsoDate(on);
-  if (dayNumber(date) === dayNumber(appDate(asOf))) return 'Due today';
   // Noon UTC, read in UTC, so the weekday and day never slip.
   const p = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' })
     .formatToParts(new Date(Date.UTC(date.y, date.m - 1, date.d, 12)));
   const get = (t: Intl.DateTimeFormatPartTypes) => p.find((x) => x.type === t)?.value ?? '';
-  return `Due ${get('weekday')} ${get('month')} ${get('day')}`;
+  return `${get('weekday')} ${get('month')} ${get('day')}`;
+}
+
+/** "Due today", or "Due Fri Nov 13". */
+export function formatDue(on: IsoDate, asOf: IsoTime): string {
+  if (dayNumber(parseIsoDate(on)) === dayNumber(appDate(asOf))) return 'Due today';
+  return `Due ${formatDueDay(on)}`;
+}
+
+/** "Fri Nov 6": the day of an instant, read in the app's zone. */
+export function formatDay(at: IsoTime): string {
+  const p = partsOf(at, { timeZone: APP_ZONE, weekday: 'short', month: 'short', day: 'numeric' });
+  return `${p.weekday} ${p.month} ${p.day}`;
 }
 
 /** Calendar days between two instants, counted in the app's zone. */

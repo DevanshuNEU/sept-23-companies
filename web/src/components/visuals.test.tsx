@@ -172,7 +172,7 @@ describe('Timeline', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
     expect(screen.getByText('Priya Natarajan replied.')).toBeInTheDocument();
     expect(screen.getByText('Imported')).toBeInTheDocument();
-    expect(screen.getByText('Tue Nov 10, 09:12 ET')).toBeInTheDocument();
+    expect(screen.getByText('Tue Nov 10, 09:12')).toBeInTheDocument();
     expect([...container.querySelectorAll('[data-tone]')].map((e) => e.getAttribute('data-tone'))).toEqual(['ok', 'idle']);
   });
 });

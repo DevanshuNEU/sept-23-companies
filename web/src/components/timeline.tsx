@@ -1,6 +1,6 @@
 import type { IsoTime } from '@/api';
 import { Badge } from '@/components/ui/badge';
-import { formatRecipientTime } from '@/lib/format';
+import { formatDay, formatLocalTime } from '@/lib/format';
 import type { Tone } from '@/lib/status';
 import { cn } from '@/lib/utils';
 
@@ -14,7 +14,7 @@ const DOT: Record<Tone, string> = {
 
 type TimelineItem = { id: string | number; at: IsoTime; text: string; tone: Tone; tag?: string };
 
-/** Newest first as given. A tone dot, the text, an optional source tag, and the time in the app's zone. */
+/** Newest first as given. A tone dot, the text, an optional source tag, and the day and time in the app's zone. */
 export function Timeline({ items }: { items: TimelineItem[] }) {
   return (
     <ol className="grid">
@@ -36,7 +36,7 @@ export function Timeline({ items }: { items: TimelineItem[] }) {
             ) : null}
           </span>
           <span className="text-xs text-muted-foreground tabular-nums">
-            {formatRecipientTime(item.at, 'America/New_York', { day: true })}
+            {`${formatDay(item.at)}, ${formatLocalTime(item.at)}`}
           </span>
         </li>
       ))}

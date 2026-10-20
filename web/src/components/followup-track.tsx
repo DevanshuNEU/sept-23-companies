@@ -1,21 +1,15 @@
 import type { IsoTime, OutboxDetail } from '@/api';
-import { formatDue, formatRecipientTime } from '@/lib/format';
+import { formatDay, formatDue, formatDueDay } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 type Stage = { key: string; title: string; when: string; done: boolean; live: boolean };
-
-/** "Fri Oct 30": the day of an instant in the app's zone. The clock part of the helper is cut off. */
-const dayOf = (at: IsoTime) => formatRecipientTime(at, 'America/New_York', { day: true }).split(',')[0] ?? '';
-
-/** "Tue Nov 10" for a calendar date. Read against a far-off now so it never collapses to "Due today". */
-const dueDay = (on: string) => formatDue(on, '1970-01-01T12:00:00Z').replace(/^Due /, '');
 
 function stages(firstSentAt: IsoTime | null, followups: OutboxDetail['followups'], asOf: IsoTime): Stage[] {
   const out: Stage[] = [
     {
       key: 'first',
       title: 'First email',
-      when: firstSentAt ? `Sent ${dayOf(firstSentAt)}` : 'Not sent yet',
+      when: firstSentAt ? `Sent ${formatDay(firstSentAt)}` : 'Not sent yet',
       done: firstSentAt !== null,
       live: true,
     },
@@ -24,11 +18,11 @@ function stages(firstSentAt: IsoTime | null, followups: OutboxDetail['followups'
     const title = seq === 3 ? 'Follow-up 3, polite close' : `Follow-up ${seq}`;
     const f = followups.find((x) => x.seq === seq);
     if (!f) out.push({ key: String(seq), title, when: 'Not scheduled', done: false, live: false });
-    else if (f.sentAt) out.push({ key: String(seq), title, when: `Sent ${dayOf(f.sentAt)}`, done: true, live: true });
+    else if (f.sentAt) out.push({ key: String(seq), title, when: `Sent ${formatDay(f.sentAt)}`, done: true, live: true });
     else if (f.state === 'skipped') out.push({ key: String(seq), title, when: 'Skipped', done: false, live: false });
     else {
       const due = formatDue(f.dueOn, asOf);
-      out.push({ key: String(seq), title, when: due === 'Due today' ? `${due}, ${dueDay(f.dueOn)}` : due, done: false, live: true });
+      out.push({ key: String(seq), title, when: due === 'Due today' ? `${due}, ${formatDueDay(f.dueOn)}` : due, done: false, live: true });
     }
   }
   return out;

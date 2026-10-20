@@ -1,4 +1,4 @@
-import { ageDays, formatAge, formatDue, formatLocalTime, formatRecipientTime, parseIsoDate } from '@/lib/format';
+import { ageDays, formatAge, formatDay, formatDue, formatDueDay, formatLocalTime, formatRecipientTime, parseIsoDate } from '@/lib/format';
 
 const ASOF = '2026-11-10T15:14:00Z'; // Tuesday 10:14 in Boston
 
@@ -86,5 +86,28 @@ describe('formatAge', () => {
   });
   it('treats a time after asOf as today', () => {
     expect(formatAge('2026-11-10T20:00:00Z', ASOF)).toBe('today');
+  });
+});
+
+describe('formatDay', () => {
+  it('reads the day of an instant in the app zone', () => {
+    expect(formatDay('2026-11-06T15:00:00Z')).toBe('Fri Nov 6');
+  });
+  it('uses the Boston day, not the UTC day', () => {
+    expect(formatDay('2026-11-07T02:30:00Z')).toBe('Fri Nov 6'); // 21:30 EST on Nov 6
+    expect(formatDay('2026-11-01T05:30:00Z')).toBe('Sun Nov 1'); // 01:30 EDT, before the clocks go back
+  });
+});
+
+describe('formatDueDay', () => {
+  it('reads a calendar date, never shifted by a zone', () => {
+    expect(formatDueDay('2026-11-10')).toBe('Tue Nov 10');
+    expect(formatDueDay('2026-11-01')).toBe('Sun Nov 1');
+  });
+  it('does not say today, whatever the date', () => {
+    expect(formatDueDay('1970-01-01')).toBe('Thu Jan 1');
+  });
+  it('rejects a bad date', () => {
+    expect(() => formatDueDay('2026-02-30')).toThrow();
   });
 });

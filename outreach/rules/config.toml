@@ -564,6 +564,17 @@ immediate_start = [
 size_guess_words = [
   "guess", "uncertain", "est.",
 ]
+# Wording that measures visa filings, not headcount (LCA counts are sponsorship evidence: audit section 1). A text
+# with one of these is never a size, unless it has a source_estimate part, which is then the only part read.
+not_size = ["no filing record", "lifetime visa filings", "visa-data name match"]
+# data.js sizeWhy: "...; source estimate 11-50 employees (Built In)". Only the part after this is a size.
+source_estimate = ["source estimate"]
+# data.js funding wording that names two stages: the first one named is the value, as a guess
+stage_guess = ["series a/b", "seed / series a"]
+[facts.size_source]
+# a source named in parentheses after a size ("(Built In)"), one list per evidence source_kind
+builtin = ["built in"]
+linkedin = ["linkedin"]
 [facts.stage]
 # data.js 'funding' wording, one list per stage value of the evidence CHECK; pre_seed comes first so it wins over seed
 pre_seed = ["pre seed", "preseed"]

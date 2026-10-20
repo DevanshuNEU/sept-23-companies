@@ -25,7 +25,7 @@ REQUIRED = {
                     "citizenship_negation", "citizenship_preference"),
     "eligibility": ("grad_words", "current_student", "graduates_welcome", "soft", "company_history", "upper_bound",
                     "cohort_title", "start_2027", "immediate_start"),
-    "facts": ("stage", "size_guess_words"),
+    "facts": ("stage", "size_guess_words", "not_size", "source_estimate", "stage_guess", "size_source"),
 }
 
 

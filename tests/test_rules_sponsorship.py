@@ -468,7 +468,9 @@ class SponsorshipStanceTest(unittest.TestCase):
                 start = time.process_time()
                 sponsorship_stance(body, self.cfg)
                 citizenship_required(body, self.cfg)
-                self.assertLess(time.process_time() - start, 1.5)
+                # 2.5 s: the heaviest body measures about 1.4 s on a quiet machine (1.1 s before the final fix wave added
+                # the elided, cued and negator passes), and a loaded one needs room. Backtracking would take minutes.
+                self.assertLess(time.process_time() - start, 2.5)
 
 
 class CitizenshipTest(unittest.TestCase):

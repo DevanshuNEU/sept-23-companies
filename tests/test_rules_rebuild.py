@@ -172,6 +172,40 @@ class RebuildTests(RebuildTestCase):
                                            (V2,)).fetchone()[0], 4)
         self.assertEqual(report.decided, 4)
 
+    def test_a_failed_prune_is_partial_not_failed(self):
+        pid = self.posting()
+        rebuild(self.conn, version=V1)
+
+        def broken(*args, **kwargs):
+            raise sqlite3.OperationalError("disk is full")
+
+        with mock.patch.object(rebuild_module, "_prune", broken):
+            report = rebuild(self.conn, version=V2)  # does not raise
+        self.assertEqual(current(self.conn), V2)
+        self.assertEqual(report.version, V2)
+        self.assertEqual(versions_of(self.conn, pid), {V1, V2})
+        run = self.conn.execute("SELECT * FROM job_run WHERE job = 'rebuild' ORDER BY run_id DESC").fetchone()
+        self.assertEqual((run["status"], run["ruleset_version"]), ("partial", V2))
+        self.assertIn("disk is full", run["error"])
+        self.assertEqual(json.loads(run["summary"])["decided"], 1)
+
+    def test_a_failing_finish_job_does_not_mask_the_original_error(self):
+        self.posting()
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("decide boom")
+
+        def locked(conn, run_id, status, *args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+        with mock.patch.object(rebuild_module, "decide", boom), \
+                mock.patch.object(rebuild_module, "finish_job", locked):
+            with self.assertRaises(RuntimeError) as caught:
+                rebuild(self.conn, version=V1)
+        self.assertIn("decide boom", str(caught.exception))
+        self.assertTrue(any("database is locked" in n for n in getattr(caught.exception, "__notes__", [])))
+        self.assertFalse(self.conn.in_transaction)
+
     def test_batches_release_the_lock(self):
         for _ in range(5):
             self.posting()
@@ -190,15 +224,18 @@ class RebuildTests(RebuildTestCase):
         rebuild(self.conn, version=V1, batch_size=2, progress=progress)
         self.assertEqual(seen, [2, 4, 5])
 
-    def test_a_batch_holds_the_lock_while_it_runs(self):
-        self.posting()
+    def test_the_lock_is_not_held_while_decide_runs(self):
+        for _ in range(3):
+            self.posting()
         real, outcomes = decide, []
 
         def probing(*args, **kwargs):
-            other = sqlite3.connect(self.path(), timeout=0)
+            other = sqlite3.connect(self.path(), timeout=0, isolation_level=None)
             try:
+                other.execute("BEGIN IMMEDIATE")
                 other.execute("INSERT INTO company(name, status_at, created_at) VALUES ('Other', ?, ?)",
                               (utcnow(), utcnow()))
+                other.execute("COMMIT")
                 outcomes.append("wrote")
             except sqlite3.OperationalError:
                 outcomes.append("locked")
@@ -207,8 +244,8 @@ class RebuildTests(RebuildTestCase):
             return real(*args, **kwargs)
 
         with mock.patch.object(rebuild_module, "decide", probing):
-            rebuild(self.conn, version=V1)
-        self.assertEqual(outcomes, ["locked"])
+            rebuild(self.conn, version=V1, batch_size=2)
+        self.assertEqual(outcomes, ["wrote"] * 3)
 
     def test_empty_store_report_lines(self):
         report = rebuild(self.conn, version=V1)

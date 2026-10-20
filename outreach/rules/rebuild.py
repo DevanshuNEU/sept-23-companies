@@ -2,7 +2,8 @@
 decide_and_store() decides one posting for the crawler. record_evidence() is the one writer of rule-made evidence.
 
 The mail sender and the API share this SQLite file with a 5 second busy timeout, so no step here holds the write lock
-for longer than one batch. A rebuild never deletes a decision before it writes the new one (the old Job Radar
+while rules run: each batch reads its postings and decides them with no transaction open, then takes the lock only to
+write the rows. A rebuild never deletes a decision before it writes the new one (the old Job Radar
 rebuild_decisions.py did, and lost data); it upserts under the new version, switches the current ruleset in one short
 transaction, then prunes versions nobody reads. The crawler must not run at the same time: #21's job runs rebuild
 first, then crawls.
@@ -98,16 +99,23 @@ def _posting_input(row: sqlite3.Row) -> PostingInput:
     return PostingInput(row["title"], row["body"], row["location"], row["country"])
 
 
-def _decide_batch(conn, ids, version, cfg, report: dict) -> None:
-    """Decide one batch inside the caller's transaction and add its flips to `report`."""
+def _decide_batch(conn, ids, cfg, report: dict) -> list[tuple[int, Decision]]:
+    """Decide one batch with no write transaction open; add its flips to `report`; return the rows to write.
+
+    Reads run in autocommit, so the CPU-bound decide() calls never hold the write lock. The flip comparison uses the
+    current_decision row read here: rebuild and the crawler do not overlap, so nothing moves it under us.
+    """
+    decided = []
     for posting_id in ids:
         posting = conn.execute(
             "SELECT p.title, p.body, p.location, p.country, p.closed_at, c.name FROM posting p "
             "JOIN company c ON c.company_id = p.company_id WHERE p.posting_id = ?", (posting_id,)).fetchone()
-        new = decide(_posting_input(posting), cfg)
+        if posting is None:
+            continue
         old_row = None
         if posting["closed_at"] is None:
             old_row = conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (posting_id,)).fetchone()
+        new = decide(_posting_input(posting), cfg)
         if old_row is not None:
             old = _stored(old_row)
             was, now = passes(old), passes(new)
@@ -121,7 +129,8 @@ def _decide_batch(conn, ids, version, cfg, report: dict) -> None:
                 report["level_lost"].append(Flip(
                     posting_id, posting["name"], posting["title"],
                     f"level {old.level_tier} -> {new.level_tier}: {new.level_basis}"))
-        _upsert(conn, posting_id, version, new)
+        decided.append((posting_id, new))
+    return decided
 
 
 def _prune(conn: sqlite3.Connection, keep: list[str], batch_size: int) -> int:
@@ -148,7 +157,8 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
 
     `cfg` and `version` default to the shipped config and the code's ruleset version; tests override them. Returns
     the flips against the ruleset that was current when the run started. A failed run leaves that ruleset current;
-    rows already written under the new version are overwritten by the next run.
+    rows already written under the new version are overwritten by the next run. If only the prune after the switch
+    fails, the new ruleset is already current: the job is closed "partial" with the error, and nothing is raised.
     """
     cfg = cfg if cfg is not None else load_config()
     version = version if version is not None else ruleset_version()
@@ -165,22 +175,33 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
             "SELECT posting_id FROM posting p WHERE closed_at IS NULL OR NOT EXISTS "
             "(SELECT 1 FROM decision d WHERE d.posting_id = p.posting_id) ORDER BY posting_id")]
         for start in range(0, len(ids), batch_size):
+            decided = _decide_batch(conn, ids[start:start + batch_size], cfg, flips)
             with transaction(conn):
-                _decide_batch(conn, ids[start:start + batch_size], version, cfg, flips)
+                for posting_id, decision in decided:
+                    _upsert(conn, posting_id, version, decision)
             if progress is not None:
                 progress(min(start + batch_size, len(ids)))
         with transaction(conn):
             conn.execute("UPDATE ruleset SET is_current = 0 WHERE is_current = 1")
             conn.execute("UPDATE ruleset SET is_current = 1 WHERE ruleset_version = ?", (version,))
         keep = [version] + ([previous] if previous and previous != version else [])
-        pruned = _prune(conn, keep, batch_size)
+        pruned, prune_error = None, ""
+        try:
+            pruned = _prune(conn, keep, batch_size)
+        except Exception as err:  # the switch is done: old rows are only clutter
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            prune_error = f"prune failed: {type(err).__name__}: {err}"
         summary = {"decided": len(ids), "previous": previous, "pruned": pruned,
                    **{name: [f.posting_id for f in found] for name, found in flips.items()}}
-        finish_job(conn, run_id, "ok", summary)
+        finish_job(conn, run_id, "partial" if prune_error else "ok", summary, error=prune_error)
     except BaseException as err:
-        if conn.in_transaction:
-            conn.execute("ROLLBACK")
-        finish_job(conn, run_id, "failed", error=f"{type(err).__name__}: {err}")
+        try:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            finish_job(conn, run_id, "failed", error=f"{type(err).__name__}: {err}")
+        except Exception as finish_err:  # keep the original error as the one that propagates
+            err.add_note(f"could not record the failed run: {type(finish_err).__name__}: {finish_err}")
         raise
     return FlipReport(version, previous, len(ids), **flips)
 

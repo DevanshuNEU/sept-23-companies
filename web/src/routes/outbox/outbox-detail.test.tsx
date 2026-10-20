@@ -442,6 +442,35 @@ describe('reply', () => {
     expect(setReplyKind.mock.calls[0]?.slice(0, 3)).toEqual([T.priya, 'not_now', 1]);
   });
 
+  it('a second choice inside the window replaces the first: Not now, then Said no commits only Said no, at once', async () => {
+    const { client } = await open(T.priya, 'Priya Natarajan');
+    const setReplyKind = vi.spyOn(client, 'setReplyKind');
+    startClock();
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    await settle(1000);
+    expect(setReplyKind).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Said no' }));
+    await settle();
+    expect(setReplyKind).toHaveBeenCalledTimes(1);
+    expect(setReplyKind.mock.calls[0]?.slice(0, 3)).toEqual([T.priya, 'said_no', 1]);
+    await settle(8000);
+    expect(setReplyKind).toHaveBeenCalledTimes(1);
+  });
+
+  it('Not now, then Interested inside the window: the last choice wins and commits once', async () => {
+    const { client } = await open(T.priya, 'Priya Natarajan');
+    const setReplyKind = vi.spyOn(client, 'setReplyKind');
+    startClock();
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    await settle(1000);
+    fireEvent.click(screen.getByRole('button', { name: 'Interested' }));
+    await settle();
+    expect(screen.getByRole('button', { name: 'Interested' })).toHaveAttribute('aria-pressed', 'true');
+    await settle(8000);
+    expect(setReplyKind).toHaveBeenCalledTimes(1);
+    expect(setReplyKind.mock.calls[0]?.slice(0, 3)).toEqual([T.priya, 'interested', 1]);
+  });
+
   it('Asked to stop commits at once, with no Undo', async () => {
     const { client } = await open(T.priya, 'Priya Natarajan');
     const setReplyKind = vi.spyOn(client, 'setReplyKind');

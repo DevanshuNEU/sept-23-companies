@@ -438,6 +438,8 @@ function DetailBody({
     };
     // Said no and Asked to stop add a no-go row and feed the clean-day rule, so they commit at once (lead decision 2).
     const final = next === 'said_no' || next === 'asked_to_stop';
+    // The last choice wins: a choice still inside its window is dropped, or the store would ignore this one.
+    cancel(`reply:${touchId}`);
     write({
       id: `reply:${touchId}`,
       label: final

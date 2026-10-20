@@ -53,6 +53,26 @@ class UsStatusTest(unittest.TestCase):
         self.assertEqual(us_status("Austin, TX 78701", None, self.cfg), "yes")
         self.assertEqual(us_status("IN office, hybrid", None, self.cfg), "unknown")
 
+    def test_a_us_mark_beats_a_non_us_country(self):
+        # Ruling R12: naming the US outright reads yes next to another country.
+        for loc in ("Remote - US & Canada", "US, Canada", "United States or Canada", "USA / Mexico",
+                    "Remote (U.S. or Canada)", "Canada, United States of America"):
+            with self.subTest(location=loc):
+                self.assertEqual(us_status(loc, None, self.cfg), "yes")
+        # A state code, state name or US city next to a non-US country still reads no.
+        for loc in ("Toronto, CA", "Madrid, MD, Spain", "Tbilisi, Georgia", "Munich, DE", "Austin, Canada",
+                    "Texas, Mexico"):
+            with self.subTest(location=loc):
+                self.assertEqual(us_status(loc, None, self.cfg), "no")
+
+    def test_bare_us_mark_is_upper_case_only(self):
+        self.assertEqual(us_status("Remote for us", None, self.cfg), "unknown")
+        self.assertEqual(us_status("Join us in Paris", None, self.cfg), "no")
+        self.assertEqual(us_status("Remote (US)", None, self.cfg), "yes")
+        self.assertEqual(us_status("Remote, usa", None, self.cfg), "yes")  # only the two-letter mark is case-sensitive
+        self.assertEqual(us_status("Remote (CA)", None, self.cfg), "yes")
+        self.assertEqual(us_status("Remote", "us", self.cfg), "yes")  # a structured country is not prose
+
     def test_long_location_is_fast(self):
         loc = ("Paris, " * 20000) + "New " * 20000 + "x" + " " * 50000 + "CA" + " " * 50000 + "y"
         start = time.perf_counter()

@@ -1,9 +1,10 @@
 """Whether a posting's location is in the US: yes, no or unknown.
 
 Ported from refresh/finalcheck.py:69-82 and refresh/crawl_boards.py:34-49, with the order the #4 plan sets: a
-structured country first, then US state names (set aside so "New Mexico" never reads as Mexico), then a bounded,
-word-matched non-US list, then US marks, state codes and cities, and last the city names shared by the US and
-other countries. Every pattern is a list of literals with bounded gaps, so a search is linear in the location.
+structured country first, then US state names (set aside so "New Mexico" never reads as Mexico), then US marks
+(ruling R12: "US" beats a country next to it), then a bounded, word-matched non-US list, then state codes and
+cities, and last the city names shared by the US and other countries. Every pattern is a list of literals with
+bounded gaps, so a search is linear in the location.
 """
 import re
 
@@ -21,7 +22,11 @@ class _Patterns:
         loc = cfg.location
         self.state_names = phrases(loc["us_state_names"])
         self.non_us = phrases(loc["non_us_countries"] + loc["non_us_cities"])
-        self.us_marks = phrases(loc["us_marks"])
+        # A US mark names the country outright (ruling R12). The bare two-letter "us" counts only in upper case, so
+        # "Remote for us" is not a mark; the longer marks ("usa", "u.s.", "united states") match in any case.
+        bare = [m for m in loc["us_marks"] if m.lower() == "us"]
+        self.us_bare = phrases([m.upper() for m in bare], case=True)
+        self.us_marks = phrases([m for m in loc["us_marks"] if m.lower() != "us"])
         # An upper-case state code after a comma ("Lima, OH") or at the end ("Austin TX"), never a word like "in".
         code = phrases(loc["us_state_codes"], case=True).pattern
         self.state_code = re.compile(r",\s{0,3}" + code + "|" + code + r"\W*\Z")
@@ -32,9 +37,11 @@ class _Patterns:
 def _read_part(part: str, p: _Patterns) -> str:
     found_state = p.state_names.search(part) is not None
     rest = p.state_names.sub(" ", part)  # a state name is set aside before any country is read
+    if p.us_marks.search(rest) or p.us_bare.search(rest):
+        return "yes"  # "Remote - US & Canada": naming the US beats a non-US country in the same part
     if p.non_us.search(rest):
-        return "no"
-    if found_state or p.us_marks.search(rest) or p.state_code.search(rest) or p.us_cities.search(rest):
+        return "no"  # a state code, state name or US city does not beat one ("Toronto, CA", "Tbilisi, Georgia")
+    if found_state or p.state_code.search(rest) or p.us_cities.search(rest):
         return "yes"
     if p.shared.search(rest):
         return "no"

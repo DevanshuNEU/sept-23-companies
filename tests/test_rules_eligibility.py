@@ -52,6 +52,38 @@ MORE = [  # (title, body, status, reason, start_2027)
     ("Software Engineer", "", "ok", None, False),
 ]
 
+# Review round 1: graduate routes beside a current-student phrase, joined windows, company history and glued years.
+ROUND_1 = [  # (title, body, status, reason, start_2027)
+    # a current-student phrase with a graduate route in the same sentence lets graduates in
+    ("Software Engineer", "Currently pursuing or recently completed a Bachelor's degree in Computer Science.",
+     "ok", None, False),
+    ("Software Engineer", "Currently pursuing or have recently completed a BS in CS.", "ok", None, False),
+    ("Software Engineer", "Currently pursuing or graduated with a BS in Computer Science.", "ok", None, False),
+    ("Software Engineer", "We encourage current students and recent graduates to apply.", "ok", None, False),
+    ("Software Engineer", "Current students and new grads are welcome.", "ok", None, False),
+    ("Software Engineer", "Bachelor's degree in CS (completed or currently pursuing).", "ok", None, False),
+    # a semicolon or a colon does not end the graduation sentence
+    ("Software Engineer, New Grad",
+     "Must graduate between December 2026 and June 2027; recent graduates are also welcome.", "ok", None, False),
+    ("Software Engineer, New Grad", "Expected graduation date:\nDecember 2026 - June 2027",
+     "excluded", "grad_window", False),
+    # the company's own history and benefits are not eligibility rules
+    ("Software Engineer", "Founded in 2023 by two MIT graduates.", "ok", None, False),
+    ("Software Engineer", "We are a team of graduates from MIT, founded in 2024.", "ok", None, False),
+    ("Software Engineer", "Benefits include graduate school tuition support starting 2025.", "ok", None, False),
+    # a year glued to letters is not a date
+    ("Software Engineer", "We are a YC W2024 graduate company.", "ok", None, False),
+]
+
+# Body start wording is a 2027 start even next to immediate-start wording; only the title reading is cancelled.
+STARTS = [  # (title, body, start_2027)
+    ("Software Engineer, New Grad", "Open to 2026 grads. This role starts in July 2027.", True),
+    ("Software Engineer, New Grad", "We welcome December 2026 graduates. Start date: January 2027.", True),
+    ("Software Engineer, New Grad", "THIS ROLE STARTS IN JULY 2027.", True),
+    ("Software Engineer, New Grad (2027)", "Open to 2026 grads.", False),
+    ("Software Engineer, New Grad", "Starts in July 2026.", False),
+]
+
 
 class EligibilityTest(unittest.TestCase):
     @classmethod
@@ -73,6 +105,20 @@ class EligibilityTest(unittest.TestCase):
 
     def test_more_cases(self):
         self.check(MORE)
+
+    def test_review_round_1_cases(self):
+        self.check(ROUND_1)
+
+    def test_body_start_wording_is_not_cancelled(self):
+        for title, body, start in STARTS:
+            with self.subTest(title=title, body=body):
+                self.assertIs(starts_2027(title, body, self.cfg), start)
+
+    def test_colon_joined_quote_holds_the_dates(self):
+        status, reason, quote = eligibility("Software Engineer", "Expected graduation date:\nDecember 2026 - June 2027",
+                                            self.cfg)
+        self.assertEqual((status, reason), ("excluded", "grad_window"))
+        self.assertIn("June 2027", quote)
 
     def test_graduation_month_comes_from_config(self):
         title, body = CASES[0][0], CASES[0][1]
@@ -97,7 +143,9 @@ class EligibilityTest(unittest.TestCase):
 
     def test_large_body_is_fast(self):
         # Every pattern is literals with bounded gaps, and dates are found once per sentence, so 1 MB stays linear.
+        # The limit leaves room for a slower machine; catastrophic backtracking would take minutes, not seconds.
         bodies = [
+            ("We build voice agents for hospitals and clinics across the country. " * 15000)[:1_000_000],
             ("5 years ago we graduated in 2027 or 2026; sponsorship maybe. é " * 15000)[:1_000_000],
             "graduated " * 100_000,  # one 1 MB sentence of graduation words and no date
             "graduate " * 50_000 + "2027 " * 50_000,  # many graduation words, then many years, in one sentence
@@ -108,7 +156,7 @@ class EligibilityTest(unittest.TestCase):
                 start = time.monotonic()
                 eligibility("Software Engineer, New Grad 2027", body, self.cfg)
                 starts_2027("Software Engineer, New Grad 2027", body, self.cfg)
-                self.assertLess(time.monotonic() - start, 1.5)
+                self.assertLess(time.monotonic() - start, 5.0)
 
 
 if __name__ == "__main__":

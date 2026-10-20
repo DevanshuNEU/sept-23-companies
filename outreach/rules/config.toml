@@ -372,7 +372,8 @@ current_student = [
   "must be a currently student", "must be a currently students", "final year undergrads",
   "final year undergraduates",
 ]
-# refresh/eligibility.py:41-43 ALTGRAD
+# refresh/eligibility.py:41-43 ALTGRAD, plus the graduate routes written beside a current-student phrase (Task 12
+# review: "currently pursuing or recently completed", "current students and new grads", "completed or currently pursuing")
 graduates_welcome = [
   "or a recent grad", "or a recent graduate", "or recent grad", "or recent grads", "or recent graduate",
   "or recent graduates", "recently graduated or", "recently graduated and", "recent graduates welcome",
@@ -423,18 +424,27 @@ graduates_welcome = [
   "recent university graduates are also welcome", "recent university graduates are also encouraged",
   "recent university graduates are also eligible", "recent university graduates are also considered",
   "or have completed a degree", "or have completed the degree", "recent grad welcome",
+  "or recently completed", "or have recently completed", "or have completed", "or completed a", "or completed an",
+  "or graduated", "and recent graduates", "and recent graduate", "and recent grads", "and recent grad",
+  "and new grads", "and new grad", "and new graduates", "and new graduate", "or new grads", "or new graduates",
+  "or a new grad", "or a new graduate", "completed or currently pursuing", "completed or pursuing",
+  "completed or in progress", "completed or expected", "completed or currently enrolled",
 ]
 # refresh/eligibility.py:52 SOFT
 soft = [
   "preferred", "prioritized", "prioritised", "also considered", "also be considered", "ideal", "ideally", "a plus",
   "nice to have", "bonus", "welcome to apply",
 ]
-# refresh/eligibility.py:67-68 (the company's own history is not an eligibility rule)
+# refresh/eligibility.py:67-68 (the company's own history is not an eligibility rule), plus founding lines and the
+# noun or adjective "graduate" in benefits and team lines ("founded in 2023 by two MIT graduates", "graduate school
+# tuition support"), from the Task 12 review
 # Not expressible as a word list: the old pattern allowed up to 30 characters between we or our team and graduated, and matched 'YC Winter 2024 batch' wording.
 company_history = [
   "we graduated", "our company graduated", "our team graduated", "our founders graduated", "the company graduated",
   "graduated from y combinator", "graduated from yc", "graduated from techstars", "graduated from a16z",
   "we recently graduated", "we have graduated", "we just graduated", "our company recently graduated",
+  "founded by", "founded in", "graduate school", "graduate schools", "graduate degree", "graduate degrees",
+  "team of graduates",
 ]
 # refresh/eligibility.py:76 ('by Summer 2027' is an upper bound: anyone already graduated qualifies)
 upper_bound = [

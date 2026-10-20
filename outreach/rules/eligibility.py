@@ -4,7 +4,11 @@ Ported from refresh/eligibility.py:32-91 in the same order, with the 2027-start 
 and refresh/final_merge.py:17, 62. A dated graduation sentence decides first; then wording that lets graduates in;
 then a current-student requirement; then a title naming a graduating cohort. Per the #9 ruling a cohort title names
 graduates ("2027 University Graduate"), while "New Grad 2027" names a start date: that is a flag for the list, never
-a reason to hide. The graduation month is [candidate].graduated. Dates are found once per sentence and every
+a reason to hide. The graduation month is [candidate].graduated.
+
+The old code read a graduation sentence up to the next period over HTML flattened to one line. Here sentences() also
+ends a sentence at a semicolon or a line break, so step 1 joins a sentence ending in ";" or ":" with the next one
+("Expected graduation date:" then "December 2026 - June 2027"). Dates are found once per joined sentence and every
 pattern has bounded gaps, so reading stays linear in the body.
 """
 import bisect
@@ -16,6 +20,7 @@ from .text import quote_around, sentences
 DATE_BEFORE = 40  # a date counts when it sits this many characters before a graduation word
 DATE_AFTER = 140  # or this many after it, so a year elsewhere in a run-on paragraph does not (eligibility.py:56-62)
 START_YEAR = "2027"  # the year starts_2027 flags in a title
+QUOTE_LIMIT = 260  # the longest quote, as every rule uses
 
 _DASHES = "\\-" + chr(0x2010) + chr(0x2011) + chr(0x2013)  # hyphen, Unicode hyphens, en dash (see config.py)
 _MONTH = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|"
@@ -23,13 +28,14 @@ _MONTH = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug
 # A year from 2023 to 2029, with an optional month or season before it ("May 2027", "Summer, 2027", "May/June 2027").
 _DATE = re.compile(
     r"(?:(?<!\w)(?P<month>" + _MONTH + r")(?!\w)(?:\s{0,2}[/&" + _DASHES + r"]\s{0,2}[a-z]{1,9})?\s{0,3},?\s{0,3})?"
-    r"(?<!\d)(?P<year>202[3-9])(?!\d)",
+    r"(?<!\w)(?P<year>202[3-9])(?!\w)",  # a year glued to letters ("W2024") is not a date
     re.IGNORECASE,
 )
 # What follows an upper_bound word for it to bound a date: "by Summer 2027", "no later than the end of 2027".
 # The years are the old range (eligibility.py:76).
 _BOUND_TAIL = r"\s{1,3}(?:the\s{1,3})?(?:end\s{1,3}of\s{1,3})?(?:[a-z]{1,9},?\s{1,3})?202[5-8](?!\d)"
-_TITLE_YEAR = re.compile(r"(?<!\d)" + START_YEAR + r"(?!\d)")
+_TITLE_YEAR = re.compile(r"(?<!\w)" + START_YEAR + r"(?!\w)")
+_JOINS_NEXT = ";:"  # a sentence ending in one of these runs on into the next for step 1
 _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10,
            "nov": 11, "dec": 12}
 # A season as a month, as the old system read it (eligibility.py:33-35): a spring graduation is May, summer is
@@ -49,8 +55,37 @@ class _Patterns:
         self.company_history = phrases(e["company_history"])
         self.upper_bound = re.compile(phrases(e["upper_bound"]).pattern + _BOUND_TAIL, re.IGNORECASE)
         self.cohort_title = phrases(e["cohort_title"])
-        self.start_2027 = phrases(e["start_2027"])
+        # Lowercase words matched case-sensitively against a lowercased text: the same matches, about three times
+        # faster than IGNORECASE over this long list. Every phrase holds the words in start_2027_needs, so a text
+        # without them is not searched at all.
+        self.start_2027 = phrases([w.lower() for w in e["start_2027"]], case=True)
+        self.start_2027_needs = _shared_words(e["start_2027"])
         self.immediate_start = phrases(e["immediate_start"])
+
+
+def _shared_words(words: list[str]) -> frozenset[str]:
+    """The lowercased words every phrase in the list contains (hyphenated words left out), e.g. {"2027"}."""
+    shared = set.intersection(*(set(w.lower().split()) for w in words)) if words else set()
+    return frozenset(w for w in shared if "-" not in w)
+
+
+def _says_start(text: str, p: "_Patterns") -> bool:
+    lowered = text.lower()
+    return all(w in lowered for w in p.start_2027_needs) and p.start_2027.search(lowered) is not None
+
+
+def _units(body: str) -> list[tuple[int, int]]:
+    """[start, end) in body of each sentence, with a sentence ending in ";" or ":" joined to the next."""
+    units: list[tuple[int, int]] = []
+    pos = 0
+    for sentence in sentences(body):
+        start = body.find(sentence, pos)
+        pos = start + len(sentence)
+        if units and body[units[-1][1] - 1] in _JOINS_NEXT:
+            units[-1] = (units[-1][0], pos)
+        else:
+            units.append((start, pos))
+    return units
 
 
 def _month_number(cfg: Config) -> int:
@@ -94,7 +129,14 @@ def _window_holds(sentence: str, dates: list[tuple[int, int | None]], graduated:
 
 def _quote(body: str, m: re.Match, offset: int = 0) -> str:
     start, end = offset + m.start(), offset + m.end()
-    return quote_around(body, start, end) or body[start:end]
+    return quote_around(body, start, end, QUOTE_LIMIT) or body[start:end]
+
+
+def _unit_quote(body: str, start: int, end: int, m: re.Match) -> str:
+    """The whole joined sentence when it fits the quote limit, so a colon line keeps its dates; else the sentence."""
+    if end - start <= QUOTE_LIMIT:
+        return body[start:end]
+    return _quote(body, m, start)
 
 
 def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, str]:
@@ -105,18 +147,16 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
     p = _Patterns(cfg)
     body = body or ""
     graduated = _month_number(cfg)
-    # 1) a graduation sentence with dates decides
-    pos = 0
-    for sentence in sentences(body):
-        offset = body.find(sentence, pos)
-        pos = offset + len(sentence)
+    # 1) a graduation sentence with dates decides (a sentence ending in ";" or ":" runs on into the next)
+    for start, end in _units(body):
+        sentence = body[start:end]
         grads = list(p.grad.finditer(sentence))
         if not grads or p.company_history.search(sentence):
             continue  # no graduation word, or the company's own history ("our founders graduated from YC")
         dates = _dates_near_grad_words(sentence, grads)
         if not dates:
             continue
-        quote = _quote(body, grads[0], offset)
+        quote = _unit_quote(body, start, end, grads[0])
         if p.graduates_welcome.search(sentence) or p.soft.search(sentence):
             return "ok", None, quote
         if _window_holds(sentence, dates, graduated, p):
@@ -137,12 +177,13 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
 def starts_2027(title: str, body: str, cfg: Config) -> bool:
     """True for start wording ("2027 start", "starts in July 2027") or a 2027 title that does not name graduates.
 
-    An immediate-start phrase anywhere cancels it. Graduation wording ("class of 2027") is not a start date.
+    Start wording always counts (refresh/finalcheck.py:124). An immediate-start phrase cancels only the title reading
+    (refresh/final_merge.py:62). Graduation wording ("class of 2027") is not a start date.
     """
     p = _Patterns(cfg)
     title, body = title or "", body or ""
-    if p.immediate_start.search(title) or p.immediate_start.search(body):
-        return False
-    if p.start_2027.search(title) or p.start_2027.search(body):
+    if _says_start(title, p) or _says_start(body, p):
         return True
-    return bool(_TITLE_YEAR.search(title)) and not p.cohort_title.search(title)
+    if not _TITLE_YEAR.search(title) or p.cohort_title.search(title):
+        return False
+    return not (p.immediate_start.search(title) or p.immediate_start.search(body))

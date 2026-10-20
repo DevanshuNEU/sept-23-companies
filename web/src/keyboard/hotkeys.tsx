@@ -72,7 +72,9 @@ function parseKeys(keys: string): Combo[] {
   return steps;
 }
 
-function isMac(): boolean {
+/** True on a Mac or iOS device, where `mod` is Cmd. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function isMac(): boolean {
   const data = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData;
   const platform = data?.platform || navigator.platform || navigator.userAgent;
   return /mac|iphone|ipad|ipod/i.test(platform);

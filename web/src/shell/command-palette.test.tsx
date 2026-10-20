@@ -1,8 +1,9 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
 import type { SearchIndex } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
+import { buildFixture } from '@/api/fixture/data';
 import { useHotkeys } from '@/keyboard/hotkeys';
 import { AppShell } from '@/shell/app-shell';
 import { rankSearch } from '@/shell/command-palette';
@@ -138,21 +139,98 @@ describe('CommandPalette', () => {
   it("mts shows Cerebrium's posting after 120 ms", async () => {
     const user = userEvent.setup();
     const client = new FixtureClient();
-    const postings = vi.spyOn(client, 'searchPostings');
+    const calls: number[] = [];
+    const real = client.searchPostings.bind(client);
+    vi.spyOn(client, 'searchPostings').mockImplementation((q) => {
+      calls.push(performance.now());
+      return real(q);
+    });
     await shell({ client });
     press('/');
     await palette();
     await user.type(search(), 'mts');
-    expect(postings).not.toHaveBeenCalled();
+    const typed = performance.now();
+    expect(calls).toHaveLength(0);
+    await act(() => new Promise((r) => setTimeout(r, 60)));
+    expect(calls).toHaveLength(0);
+
     const hit = await screen.findByRole('option', { name: /Member of Technical Staff/ });
     expect(within(hit).getByText('Cerebrium')).toBeInTheDocument();
-    expect(postings).toHaveBeenCalled();
+    expect(calls.length).toBeGreaterThan(0);
+    expect((calls[0] ?? 0) - typed).toBeGreaterThanOrEqual(40); // 120 ms after the last key, less the time typing took
+    expect((calls[0] ?? 0) - typed).toBeLessThan(300);
+
     // Two letters is too short to search postings.
-    postings.mockClear();
+    calls.length = 0;
     await user.clear(search());
     await user.type(search(), 'mt');
     await act(() => new Promise((r) => setTimeout(r, 200)));
-    expect(postings).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('puts postings under Go to and Actions, and keeps them on screen while the next ones load', async () => {
+    const user = userEvent.setup();
+    const client = new FixtureClient();
+    const real = client.searchPostings.bind(client);
+    let release: (() => void) | undefined;
+    const spy = vi.spyOn(client, 'searchPostings');
+    await shell({ client });
+    press('/');
+    const dialog = await palette();
+    await user.type(search(), 'mts');
+    await screen.findByRole('option', { name: /Member of Technical Staff/ });
+    const headings = [...dialog.querySelectorAll('[cmdk-group-heading]')].map((h) => h.textContent);
+    expect(headings.slice(-1)).toEqual(['Postings']);
+    expect(headings.indexOf('Actions')).toBeLessThan(headings.indexOf('Postings'));
+
+    // The next search is slow: the old rows stay until it lands.
+    spy.mockImplementation(async (q) => {
+      await new Promise<void>((r) => (release = r));
+      return real(q);
+    });
+    await user.type(search(), ' ');
+    await user.type(search(), 'e');
+    await waitFor(() => expect(release).toBeDefined());
+    expect(screen.getByRole('option', { name: /Member of Technical Staff/ })).toBeInTheDocument();
+    await act(async () => release?.());
+  });
+
+  it('shows the status of a person after the title and company', async () => {
+    const user = userEvent.setup();
+    await shell();
+    press('/');
+    await palette();
+    await user.type(search(), 'priya');
+    const row = await screen.findByRole('option', { name: /Priya Natarajan/ });
+    const person = index.people.find((p) => p.name === 'Priya Natarajan');
+    expect(within(row).getByText(`${person?.title}, ${person?.companyName}`)).toBeInTheDocument();
+    expect(person?.statusLine).toBeTruthy();
+    expect(within(row).getByText(person?.statusLine ?? '')).toHaveClass('text-muted-foreground');
+  });
+
+  it('says the index could not load instead of saying nothing matches', async () => {
+    const user = userEvent.setup();
+    const client = new FixtureClient();
+    vi.spyOn(client, 'searchIndex').mockRejectedValue(new Error('down'));
+    await shell({ client });
+    press('/');
+    await palette();
+    expect(await screen.findByText('Search could not load. Nothing was changed. Try again.')).toBeInTheDocument();
+    await user.type(search(), 'zzzzqqqq');
+    expect(screen.queryByText(/Nothing matches/)).toBeNull();
+    expect(screen.getByText('Search could not load. Nothing was changed. Try again.')).toBeInTheDocument();
+  });
+
+  it('says the posting search could not load', async () => {
+    const user = userEvent.setup();
+    const client = new FixtureClient();
+    vi.spyOn(client, 'searchPostings').mockRejectedValue(new Error('down'));
+    await shell({ client });
+    press('/');
+    await palette();
+    await user.type(search(), 'mts');
+    expect(await screen.findByText('Posting search could not load. Nothing was changed. Try again.')).toBeInTheDocument();
+    expect(screen.queryByText('Search could not load. Nothing was changed. Try again.')).toBeNull();
   });
 
   it('Enter on a company goes to its page', async () => {
@@ -231,6 +309,25 @@ describe('CommandPalette', () => {
     await user.type(search(), 'resume');
     await user.click(await screen.findByRole('option', { name: /Resume sending/ }));
     await waitFor(() => expect(resume).toHaveBeenCalledWith(false, expect.anything()));
+  });
+
+  it('offers Pause only while running and Resume only while paused by you', async () => {
+    const user = userEvent.setup();
+    const client = new FixtureClient();
+    await shell({ client });
+    press('/');
+    await palette();
+    expect(screen.getByRole('option', { name: /Pause sending/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Resume sending/ })).toBeNull();
+    await user.click(screen.getByRole('option', { name: /Pause sending/ }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    const hard = new FixtureClient(buildFixture('hard_block'));
+    cleanup();
+    await shell({ client: hard });
+    press('/');
+    await palette();
+    expect(screen.queryByRole('option', { name: /(Pause|Resume) sending/ })).toBeNull();
   });
 
   it('copies the picks for Claude', async () => {

@@ -140,6 +140,7 @@ const VIEWS: { name: string; path: string; icon: LucideIcon; keys: string }[] = 
 type Action = { id: string; label: string; sub: string; icon: LucideIcon; run: () => void };
 
 const sub = 'text-xs font-normal text-muted-foreground';
+const ERROR_LINE = 'px-3 py-2 text-[13px] text-bad';
 
 /** Posting titles go to the API: as typed, and with synonyms spelled out when that differs. */
 async function findPostings(client: OutreachClient, q: string): Promise<PostingHit[]> {
@@ -156,6 +157,12 @@ function sendingPatches(state: SenderState, pausedReason: string): Patch[] {
     { key: queryKeys.outbox, apply: (d: OutboxView) => ({ ...d, sending: { ...d.sending, state, pausedReason } }) },
   ];
 }
+
+/** Changes nothing on screen, but names the queries the write refetches once it commits. */
+const refetchSending: Patch[] = [
+  { key: queryKeys.shell, apply: (d: ShellSummary) => d },
+  { key: queryKeys.outbox, apply: (d: OutboxView) => d },
+];
 
 function PaletteKeys({ close }: { close: () => void }) {
   // The shell's own `mod+k` opens the palette and cannot run behind a dialog, so this one closes it.
@@ -190,7 +197,11 @@ function PaletteBody({ close, showKeys }: { close: () => void; showKeys: () => v
   );
   const companies = ranked.companies.slice(0, SHOWN.companies);
   const people = ranked.people.slice(0, SHOWN.people);
-  const hits = q.length >= POSTING_MIN_CHARS && debounced === q ? (postings.data ?? []).slice(0, SHOWN.postings) : [];
+  // The last posting results stay on screen until the next ones land, so rows below do not jump on each key.
+  const [held, setHeld] = useState<PostingHit[]>([]);
+  if (postings.data && postings.data !== held && debounced.length >= POSTING_MIN_CHARS) setHeld(postings.data);
+  const hits = q.length >= POSTING_MIN_CHARS ? (postings.data ?? held).slice(0, SHOWN.postings) : [];
+  const postingsFailed = q.length >= POSTING_MIN_CHARS && postings.isError;
 
   const needles = needlesOf(q);
   const wanted = (text: string) => needles.length === 0 || needles.some((n) => text.toLowerCase().includes(n));
@@ -209,12 +220,13 @@ function PaletteBody({ close, showKeys }: { close: () => void; showKeys: () => v
           id: 'sending',
           label: 'Sending resumed.',
           afterCommit: 'Sending resumed.',
-          patches: sendingPatches('running', ''),
+          // No guess at the new state: it is "running" only inside the window on a weekday. The refetch shows it.
+          patches: refetchSending,
           commit: (o) => client.resumeSending(false, o),
           immediate: true,
         }),
     });
-  } else if (sendingState === 'running' || sendingState === 'outside_window' || sendingState === 'weekend') {
+  } else if (sendingState === 'running') {
     actions.push({
       id: 'pause',
       label: 'Pause sending',
@@ -307,9 +319,15 @@ function PaletteBody({ close, showKeys }: { close: () => void; showKeys: () => v
         aria-label="Search"
       />
       <CommandList className="max-h-[380px]">
-        <CommandEmpty className="py-6 text-center text-[13px] text-muted-foreground">
-          Nothing matches. Try a company, a person or a view name.
-        </CommandEmpty>
+        {index.isError ? (
+          <div role="alert" className={ERROR_LINE}>
+            Search could not load. Nothing was changed. Try again.
+          </div>
+        ) : (
+          <CommandEmpty className="py-6 text-center text-[13px] text-muted-foreground">
+            Nothing matches. Try a company, a person or a view name.
+          </CommandEmpty>
+        )}
         {companies.length > 0 ? (
           <CommandGroup heading="Companies">
             {companies.map((c) => (
@@ -327,21 +345,10 @@ function PaletteBody({ close, showKeys }: { close: () => void; showKeys: () => v
               <CommandItem key={p.id} value={`person:${p.id}`} onSelect={() => go(companyPath(p.companyId, 'people'))}>
                 <User aria-hidden />
                 <span>{p.name}</span>
-                <span className={sub}>
+                <span className={`${sub} min-w-0 truncate`}>
                   {p.title}, {p.companyName}
                 </span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        ) : null}
-        {hits.length > 0 ? (
-          <CommandGroup heading="Postings">
-            {hits.map((p) => (
-              <CommandItem key={p.postingId} value={`posting:${p.postingId}`} onSelect={() => go(companyPath(p.companyId, 'roles'))}>
-                <Briefcase aria-hidden />
-                <span>{p.title}</span>
-                <span className={sub}>{p.companyName}</span>
-                {p.open ? null : <span className={`${sub} ml-auto`}>Closed</span>}
+                <span className={`${sub} ml-auto shrink-0`}>{p.statusLine}</span>
               </CommandItem>
             ))}
           </CommandGroup>
@@ -378,6 +385,23 @@ function PaletteBody({ close, showKeys }: { close: () => void; showKeys: () => v
               </CommandItem>
             ))}
           </CommandGroup>
+        ) : null}
+        {hits.length > 0 ? (
+          <CommandGroup heading="Postings">
+            {hits.map((p) => (
+              <CommandItem key={p.postingId} value={`posting:${p.postingId}`} onSelect={() => go(companyPath(p.companyId, 'roles'))}>
+                <Briefcase aria-hidden />
+                <span>{p.title}</span>
+                <span className={sub}>{p.companyName}</span>
+                {p.open ? null : <span className={`${sub} ml-auto`}>Closed</span>}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
+        {postingsFailed ? (
+          <div role="alert" className={ERROR_LINE}>
+            Posting search could not load. Nothing was changed. Try again.
+          </div>
         ) : null}
       </CommandList>
       <div className="flex gap-4 border-t px-3.5 py-2 text-xs text-muted-foreground">

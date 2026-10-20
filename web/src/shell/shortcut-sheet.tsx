@@ -1,8 +1,6 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
-import { useHotkeyRegistry, type Binding } from '@/keyboard/hotkeys';
-
-const isMac = () => /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent);
+import { isMac, useHotkeyRegistry, type Binding } from '@/keyboard/hotkeys';
 
 const NAMED: Record<string, string> = {
   escape: 'Esc',

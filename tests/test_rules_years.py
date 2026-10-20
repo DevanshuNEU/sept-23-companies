@@ -150,10 +150,11 @@ class YearsAskedTest(unittest.TestCase):
             ("between " * 120_000) + "2 and 5 years",
         ]
         for body in bodies:
-            start = time.monotonic()
+            # CPU time, not wall time: scheduler wait on a loaded machine is not the code's cost.
+            start = time.process_time()
             years_asked(body, self.cfg)
             entry_wording(body, self.cfg)
-            self.assertLess(time.monotonic() - start, 2.0)
+            self.assertLess(time.process_time() - start, 2.0)
 
 
 class EntryWordingTest(unittest.TestCase):

@@ -75,9 +75,10 @@ class UsStatusTest(unittest.TestCase):
 
     def test_long_location_is_fast(self):
         loc = ("Paris, " * 20000) + "New " * 20000 + "x" + " " * 50000 + "CA" + " " * 50000 + "y"
-        start = time.perf_counter()
+        # CPU time, not wall time: scheduler wait on a loaded machine is not the code's cost.
+        start = time.process_time()
         us_status(loc, None, self.cfg)
-        self.assertLess(time.perf_counter() - start, 2.0)
+        self.assertLess(time.process_time() - start, 2.0)
 
 
 if __name__ == "__main__":

@@ -113,9 +113,10 @@ class DecideTests(unittest.TestCase):
 
     def test_pathological_body_is_fast(self):
         body = ("5 years ago we graduated in 2027 or 2026; sponsorship maybe. é " * 15000)[:1_000_000]
-        start = time.monotonic()
+        # CPU time, not wall time: scheduler wait on a loaded machine is not the code's cost.
+        start = time.process_time()
         decide(PostingInput("Software Engineer, New Grad", body, "Boston, MA"))
-        self.assertLess(time.monotonic() - start, 2.0)
+        self.assertLess(time.process_time() - start, 2.0)
 
     def test_as_row_matches_the_decision_table(self):
         db = fresh_store()

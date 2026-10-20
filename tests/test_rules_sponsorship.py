@@ -344,10 +344,11 @@ class SponsorshipStanceTest(unittest.TestCase):
         ]
         for body in bodies:
             with self.subTest(body=body[:30]):
-                start = time.monotonic()
+                # CPU time, not wall time: scheduler wait on a loaded machine is not the code's cost.
+                start = time.process_time()
                 sponsorship_stance(body, self.cfg)
                 citizenship_required(body, self.cfg)
-                self.assertLess(time.monotonic() - start, 1.5)
+                self.assertLess(time.process_time() - start, 1.5)
 
 
 class CitizenshipTest(unittest.TestCase):

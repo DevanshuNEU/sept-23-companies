@@ -246,10 +246,11 @@ class EligibilityTest(unittest.TestCase):
         ]
         for body in bodies:
             with self.subTest(body=body[:30]):
-                start = time.monotonic()
+                # CPU time, not wall time: scheduler wait on a loaded machine is not the code's cost.
+                start = time.process_time()
                 eligibility("Software Engineer, New Grad 2027", body, self.cfg)
                 starts_2027("Software Engineer, New Grad 2027", body, self.cfg)
-                self.assertLess(time.monotonic() - start, 5.0)
+                self.assertLess(time.process_time() - start, 5.0)
 
 
 if __name__ == "__main__":

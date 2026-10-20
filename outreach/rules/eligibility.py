@@ -23,6 +23,7 @@ ends a sentence at a semicolon or a line break, so step 1 joins a sentence endin
 pattern has bounded gaps, so reading stays linear in the body.
 """
 import bisect
+import functools
 import re
 
 from .config import Config, phrases
@@ -59,7 +60,7 @@ _SEASONS = {"spring": 5, "summer": 8, "fall": 12, "autumn": 12, "winter": 12}
 
 
 class _Patterns:
-    """The [eligibility] word lists, compiled once per call."""
+    """The [eligibility] word lists, compiled once per Config (see _patterns)."""
 
     def __init__(self, cfg: Config):
         e = cfg.eligibility
@@ -86,6 +87,12 @@ def _shared_words(words: list[str]) -> frozenset[str]:
     """The lowercased words every phrase in the list contains (hyphenated words left out), e.g. {"2027"}."""
     shared = set.intersection(*(set(w.lower().split()) for w in words)) if words else set()
     return frozenset(w for w in shared if "-" not in w)
+
+
+@functools.lru_cache(maxsize=8)
+def _patterns(cfg: Config) -> _Patterns:
+    """One compiled set per Config (a Config hashes by identity): decide() over thousands of postings compiles once."""
+    return _Patterns(cfg)
 
 
 def _says_start(text: str, p: _Patterns) -> bool:
@@ -244,7 +251,7 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
 
     The quote is the deciding sentence, or the title for a cohort title, and "" when nothing decided.
     """
-    p = _Patterns(cfg)
+    p = _patterns(cfg)
     body = body or ""
     graduated = _month_number(cfg)
     spans = _spans(body)
@@ -290,7 +297,7 @@ def starts_2027(title: str, body: str, cfg: Config) -> bool:
     Start wording always counts (refresh/finalcheck.py:124). An immediate-start phrase cancels only the title reading
     (refresh/final_merge.py:62). Graduation wording ("class of 2027") is not a start date.
     """
-    p = _Patterns(cfg)
+    p = _patterns(cfg)
     title, body = title or "", body or ""
     if _says_start(title, p) or _says_start(body, p):
         return True

@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { useSearchParams } from 'react-router';
+import { useUrlState } from '@/lib/url-state';
 import { useAnnounce, useHotkeys } from './hotkeys';
 
 export type ListNavOptions<T extends string | number> = {
@@ -28,22 +28,15 @@ export function useListNav<T extends string | number>({
   onOpen,
   announce,
 }: ListNavOptions<T>): { selected: T | null; select: (id: T) => void; rowProps: (id: T) => RowProps } {
-  const [params, setParams] = useSearchParams();
+  // No param means nothing selected; useUrlState writes with replace.
+  const [raw, setRaw] = useUrlState(param, '');
   const say = useAnnounce();
   const rows = useRef(new Map<T, HTMLElement>());
 
-  const raw = params.get(param);
   const selected = ids.find((id) => String(id) === raw) ?? null;
 
   const select = (id: T) => {
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set(param, String(id));
-        return next;
-      },
-      { replace: true },
-    );
+    setRaw(String(id));
     if (announce) say(announce(id));
   };
 

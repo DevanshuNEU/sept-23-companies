@@ -1,4 +1,4 @@
-import { ageDays, formatAge, formatDay, formatDue, formatDueDay, formatLocalTime, formatRecipientTime, parseIsoDate } from '@/lib/format';
+import { ageDays, formatAge, formatDay, formatDayTime, formatDue, formatDueDay, formatLocalTime, formatMonth, formatRecipientTime, formatWeekdayTime, parseIsoDate } from '@/lib/format';
 
 const ASOF = '2026-11-10T15:14:00Z'; // Tuesday 10:14 in Boston
 
@@ -109,5 +109,23 @@ describe('formatDueDay', () => {
   });
   it('rejects a bad date', () => {
     expect(() => formatDueDay('2026-02-30')).toThrow();
+  });
+});
+
+describe('formatWeekdayTime and formatDayTime', () => {
+  it('reads "Mon 08:04" and "Mon Nov 9, 08:04" in the app zone', () => {
+    expect(formatWeekdayTime('2026-11-09T13:04:00Z')).toBe('Mon 08:04');
+    expect(formatDayTime('2026-11-09T13:04:00Z')).toBe('Mon Nov 9, 08:04');
+  });
+  it('uses the Boston day, not the UTC day', () => {
+    expect(formatWeekdayTime('2026-11-10T03:30:00Z')).toBe('Mon 22:30');
+    expect(formatDayTime('2026-11-01T05:30:00Z')).toBe('Sun Nov 1, 01:30'); // EDT, before the clocks go back
+  });
+});
+
+describe('formatMonth', () => {
+  it('names the month of an instant in the app zone', () => {
+    expect(formatMonth('2026-11-10T15:14:00Z')).toBe('November');
+    expect(formatMonth('2026-11-01T03:30:00Z')).toBe('October'); // 23:30 EDT on Oct 31
   });
 });

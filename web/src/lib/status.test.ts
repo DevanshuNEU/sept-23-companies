@@ -1,6 +1,8 @@
 import type { CompanyRef } from '@/api';
 import {
   companyStatus,
+  jobKindLabel,
+  jobStatus,
   linkedinStepStatus,
   messageStatus,
   noGoReasonStatus,
@@ -42,10 +44,21 @@ describe('status vocabulary', () => {
     expect(linkedinStepStatus.replied).toMatchObject({ tone: 'ok' });
   });
 
+  it('names every job and its last result', () => {
+    expect(jobKindLabel).toEqual({
+      install: 'Install', rebuild: 'Rebuild', crawl: 'Board read', daily_list: 'Daily list', sender: 'Sender', import: 'Import',
+    });
+    expect(jobStatus.running).toMatchObject({ label: 'Running', tone: 'info' });
+    expect(jobStatus.ok).toMatchObject({ label: 'Finished', tone: 'idle' });
+    expect(jobStatus.partial).toMatchObject({ label: 'Partial', tone: 'warn' });
+    expect(jobStatus.failed).toMatchObject({ label: 'Failed', tone: 'bad' });
+    expect(jobStatus.late).toMatchObject({ label: 'Late', tone: 'warn' });
+  });
+
   it('gives every status a label and a tone', () => {
     const maps = [
       messageStatus, touchStatus, replyKindStatus, sponsorshipStatus,
-      reviewKindStatus, noGoReasonStatus, readResultStatus, linkedinStepStatus,
+      reviewKindStatus, noGoReasonStatus, readResultStatus, linkedinStepStatus, jobStatus,
     ];
     for (const map of maps) {
       for (const s of Object.values(map)) {
@@ -58,7 +71,7 @@ describe('status vocabulary', () => {
   it('writes no em or en dashes', () => {
     const all = JSON.stringify([
       messageStatus, touchStatus, replyKindStatus, sponsorshipStatus,
-      reviewKindStatus, noGoReasonStatus, readResultStatus, linkedinStepStatus,
+      reviewKindStatus, noGoReasonStatus, readResultStatus, linkedinStepStatus, jobStatus, jobKindLabel,
     ]);
     expect(all).not.toMatch(new RegExp(`[${String.fromCharCode(0x2013)}${String.fromCharCode(0x2014)}]`));
   });

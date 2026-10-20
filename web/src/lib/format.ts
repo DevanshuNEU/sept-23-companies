@@ -88,6 +88,22 @@ export function formatDay(at: IsoTime): string {
   return `${p.weekday} ${p.month} ${p.day}`;
 }
 
+/** "Mon 08:04": the weekday and time of an instant in the app's zone. */
+export function formatWeekdayTime(at: IsoTime): string {
+  const p = partsOf(at, { timeZone: APP_ZONE, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  return `${p.weekday} ${p.hour}:${p.minute}`;
+}
+
+/** "Mon Nov 9, 08:04": the day and time of an instant in the app's zone. */
+export function formatDayTime(at: IsoTime): string {
+  return `${formatDay(at)}, ${formatLocalTime(at)}`;
+}
+
+/** "November": the month of an instant in the app's zone. */
+export function formatMonth(at: IsoTime): string {
+  return partsOf(at, { timeZone: APP_ZONE, month: 'long' }).month ?? '';
+}
+
 /** Calendar days between two instants, counted in the app's zone. */
 export function ageDays(at: IsoTime, asOf: IsoTime): number {
   return dayNumber(appDate(asOf)) - dayNumber(appDate(at));

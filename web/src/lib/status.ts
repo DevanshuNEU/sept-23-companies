@@ -1,5 +1,7 @@
 import type {
   CompanyRef,
+  JobKind,
+  JobRunSummary,
   LinkedInStep,
   MessageState,
   NoGoReason,
@@ -86,6 +88,24 @@ export const linkedinStepStatus = {
   message_sent: { label: 'Message sent', tone: 'idle' },
   replied: { label: 'Replied', tone: 'ok', icon: 'reply' },
 } satisfies Record<LinkedInStep, Status>;
+
+export const jobKindLabel = {
+  install: 'Install',
+  rebuild: 'Rebuild',
+  crawl: 'Board read',
+  daily_list: 'Daily list',
+  sender: 'Sender',
+  import: 'Import',
+} satisfies Record<JobKind, string>;
+
+/** The last run of a job. `late` is derived by the API (`expectedNextAt` passed with no new run). */
+export const jobStatus = {
+  running: { label: 'Running', tone: 'info', icon: 'clock' },
+  ok: { label: 'Finished', tone: 'idle', icon: 'check' },
+  partial: { label: 'Partial', tone: 'warn', icon: 'warn' },
+  failed: { label: 'Failed', tone: 'bad', icon: 'warn' },
+  late: { label: 'Late', tone: 'warn', icon: 'clock' },
+} satisfies Record<JobRunSummary['status'] | 'late', Status>;
 
 const byCompanyStatus = {
   candidate: { label: 'Proposed', tone: 'idle' },

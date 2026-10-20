@@ -239,6 +239,48 @@ describe('No-go list', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('Clear the filter clears the text and the reason together', async () => {
+    const user = userEvent.setup();
+    renderWithApp(
+      <>
+        <NoGoPage />
+        <Where />
+      </>,
+      { route: '/no-go?reason=no_sponsorship&q=zzz' },
+    );
+    expect(await screen.findByText('Nothing matches this filter.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Clear the filter' }));
+    expect(where()).toBe('/no-go');
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+    expect(bodyRows()).toHaveLength(24);
+  });
+
+  it('an unknown reason in the URL reads as All reasons', async () => {
+    await page('/no-go?reason=bogus');
+    expect(screen.getByRole('radio', { name: 'All reasons' })).toHaveAttribute('aria-checked', 'true');
+    expect(bodyRows()).toHaveLength(24);
+  });
+
+  it('a dialog opened again right after one closed starts empty and submits', async () => {
+    const user = userEvent.setup();
+    const { client } = await page();
+    const lift = vi.spyOn(client, 'liftNoGo');
+    press('j');
+    press('Backspace');
+    let dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByRole('textbox', { name: 'Why' }), 'First reason');
+    await user.click(within(dialog).getByRole('button', { name: 'Take it off' }));
+    expect(lift).toHaveBeenCalledTimes(1);
+    press('j');
+    press('Backspace');
+    dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('textbox', { name: 'Why' })).toHaveValue('');
+    await user.type(within(dialog).getByRole('textbox', { name: 'Why' }), 'Second reason');
+    await user.click(within(dialog).getByRole('button', { name: 'Take it off' }));
+    expect(lift).toHaveBeenCalledTimes(2);
+    expect(lift).toHaveBeenLastCalledWith(expect.any(Number), 'Second reason', { requestId: expect.any(String) });
+  });
+
   it('shows the empty state when nothing is kept out', async () => {
     renderWithApp(<NoGoPage />, { route: '/no-go', client: new FixtureClient(buildFixture('empty')) });
     expect(await screen.findByText('Nothing is on the no-go list.')).toBeInTheDocument();

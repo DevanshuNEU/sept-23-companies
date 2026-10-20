@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { Ban, Search } from 'lucide-react';
 import { pollMs, queryKeys, useClient, type NoGoReason, type NoGoView, type ShellSummary } from '@/api';
 import { EmptyState, QueryState } from '@/components/state-views';
@@ -53,6 +53,10 @@ function withoutEntry(view: NoGoView, row: CompanyEntry): NoGoView {
   };
 }
 
+function knownReasons(view: NoGoView | undefined): Set<string> {
+  return new Set(['all', ...(view?.countsByReason.map((c) => c.reason) ?? [])]);
+}
+
 function TableSkeleton() {
   return (
     <div className="grid gap-2" aria-hidden>
@@ -71,13 +75,17 @@ export default function NoGoPage() {
   const write = usePendingWrite();
 
   const tab: Tab = pathname.startsWith(PATH.people) ? 'people' : 'companies';
+  const [, setParams] = useSearchParams();
   const [reasonParam, setReason] = useUrlState('reason', 'all');
   const [q, setQ] = useUrlState('q', '');
   const [lifting, setLifting] = useState<CompanyEntry | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Each open gets a fresh dialog, so one landing during the last one's exit animation starts empty and can submit.
+  const [opens, setOpens] = useState(0);
 
   const view = query.data;
-  const reason = reasonParam as ReasonFilter;
+  // A reason the list does not know (a hand-edited URL) reads as All reasons.
+  const reason: ReasonFilter = knownReasons(view).has(reasonParam) ? (reasonParam as ReasonFilter) : 'all';
   const needle = q.trim().toLowerCase();
   const byText = (row: CompanyEntry) => needle === '' || textOf(row).toLowerCase().includes(needle);
   const companies = (view?.companies ?? []).filter((r) => reasonMatches(r, reason) && byText(r));
@@ -124,6 +132,7 @@ export default function NoGoPage() {
 
   const takeOff = (row: CompanyEntry) => {
     setLifting(row);
+    setOpens((n) => n + 1);
     setDialogOpen(true);
   };
 
@@ -181,8 +190,16 @@ export default function NoGoPage() {
 
   const filtered = needle !== '' || (tab === 'companies' && reason !== 'all');
   const clearFilters = () => {
-    setQ('');
-    setReason('all');
+    // One update for both: each url-state setter builds from the params of this render, so two calls would overwrite each other.
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('q');
+        next.delete('reason');
+        return next;
+      },
+      { replace: true },
+    );
   };
   const noMatch = (
     <EmptyState
@@ -279,7 +296,7 @@ export default function NoGoPage() {
         )}
       </QueryState>
 
-      <LiftDialog row={lifting} open={dialogOpen} onOpenChange={setDialogOpen} onConfirm={confirm} />
+      <LiftDialog key={opens} row={lifting} open={dialogOpen} onOpenChange={setDialogOpen} onConfirm={confirm} />
     </div>
   );
 }

@@ -119,14 +119,19 @@ degree_alternative = [
 company_age = [
   "founded", "ago", "in business", "history",
 ]
-# new in #4, ruling R10 (the company's own years are not a requirement): one of these before the number in its
-# sentence rules the number out, unless a candidate_voice phrase is in the number's own clause. Not bare "founders"
-# ("experience working with founders" is a requirement) and not "combined" ("5+ years of combined experience" is
-# one too); the team forms below catch "our team has 50 years of combined experience".
+# new in #4, ruling R10 (the company's own years are not a requirement). Each entry carries its verb, so it names
+# the company owning the years ("our team has 20 years"); a bare "our team" or "we have" also opens sentences that
+# ask for years ("our team is looking for engineers with 5+ years"). Read in code only in the number's own clause,
+# ending at most 3 words before it, and a candidate_voice phrase in that clause overrides it. Curly apostrophes are
+# read as straight ones.
 company_voice = [
-  "our team", "our founders", "our founder", "the founders", "founding team", "founders have", "founders bring",
-  "our company", "our engineers", "our engineering team", "our leadership", "leadership team", "team with",
-  "team has", "team brings", "we have", "we've", "we bring", "collectively", "for over",
+  "our team has", "our team have", "our team brings", "our team bring", "founding team has", "founding team have",
+  "founding team brings", "founding team bring", "our founders have", "our founders bring", "our founder has",
+  "our founder brings", "the founders have", "the founders bring", "our engineers have", "our engineers bring",
+  "our engineering team has", "our engineering team brings", "our leadership team has", "our leadership has",
+  "our company has", "collectively have", "collectively bring", "collectively has", "we have over",
+  "we have more than", "we've helped", "we have helped", "we have been", "we've been", "for over", "for more than",
+  "join a team with", "joining a team with",
 ]
 # new in #4, ruling R10: the candidate's voice, read in the number's own clause. Not a bare "you" or "your" ("our
 # team has 20 years of experience to support your growth" is still the company speaking).

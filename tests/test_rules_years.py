@@ -6,6 +6,7 @@ from outreach.rules.config import load_config
 from outreach.rules.years import entry_wording, years_asked
 
 EN = chr(0x2013)  # an en dash, built from its code point so this file has no literal one
+RQ = chr(0x2019)  # a curly apostrophe
 
 CASES = [  # (body, years)
     ("Bachelor's degree or 4 years of equivalent experience.", None),
@@ -61,6 +62,20 @@ FIX_CASES = [  # (body, years)
     # company voice after the number does not touch it
     ("3+ years of experience leading a team with strong opinions.", 3),
     ("5+ years of combined professional experience in backend and data work.", 5),
+    # round 2: company words that do not own the years leave a requirement standing
+    ("Our company is hiring a Staff Engineer with 8+ years of experience.", 8),
+    ("Our team is looking for engineers with 5+ years of experience.", 5),
+    ("Our team needs someone with 5+ years of experience in Go.", 5),
+    ("We have openings for engineers with 5+ years of experience.", 5),
+    ("We have a small team and want 5+ years of experience with Go.", 5),
+    ("We have high standards: 5+ years of professional experience.", 5),
+    ("Our team has openings for engineers with 5+ years of experience.", 5),  # voice too far from the number
+    # round 2: the company owning the years, close before the number
+    ("Our team has a combined 50 years of experience. You have 3+ years of experience.", 3),
+    ("We have been building for 10 years. 2+ years of professional experience.", 2),
+    ("Our founders" + RQ + " team collectively bring 25 years of industry experience. 1+ years of experience.", 1),
+    ("We" + RQ + "ve been building developer tools for 12 years. 2+ years of experience.", 2),
+    ("You" + RQ + "ve worked for over 4 years in professional software roles.", 4),  # candidate voice, curly
     # ranges with "and" count their low end only after "between"
     ("Between 2 and 5 years of experience.", 2),
     ("between 1 and 3 years of professional experience.", 1),

@@ -34,6 +34,9 @@ _DEGREE_CLAUSE_END = re.compile(r"[,;:]")
 _CLAUSE_BREAK = re.compile(r"[,()\[\]]|\s(?:while|but)\s", re.IGNORECASE)
 _WORD = re.compile(r"\w")
 _LOOK = 80  # characters read either side of a number when counting words around it
+VOICE_WORDS = 3  # a company_voice phrase must end at most this many words before the number
+_VOICE_CHARS = 60  # and this many characters, so a far phrase is rejected without splitting a long stretch
+_CURLY = chr(0x2019)  # a curly apostrophe, read as a straight one in voice phrases
 
 
 class _Patterns:
@@ -67,8 +70,11 @@ class _Sentence:
         self.p = p
         self.experience = _starts(p.experience, sentence)
         self.preferred = _starts(p.preferred, sentence)
-        self.company_voice = _starts(p.company_voice, sentence)
-        self.candidate_voice = _starts(p.candidate_voice, sentence)
+        straight = sentence.replace(_CURLY, "'")  # same length, so positions carry over
+        company = list(p.company_voice.finditer(straight))
+        self.company_starts = [m.start() for m in company]
+        self.company_ends = [m.end() for m in company]
+        self.candidate_voice = _starts(p.candidate_voice, straight)
         breaks = list(_CLAUSE_BREAK.finditer(sentence))
         self.break_starts = [b.start() for b in breaks]
         self.break_ends = [b.end() for b in breaks]
@@ -83,6 +89,13 @@ class _Sentence:
         b = self.break_starts[j] if j < len(self.break_starts) else len(self.text)
         return a, b
 
+    def company_owns(self, start: int, clause_start: int) -> bool:
+        """True when a company_voice phrase in the number's clause ends at most VOICE_WORDS words before it."""
+        i = bisect.bisect_right(self.company_ends, start) - 1  # the last phrase ending at or before the number
+        if i < 0 or self.company_starts[i] < clause_start or start - self.company_ends[i] > _VOICE_CHARS:
+            return False
+        return len(self.text[self.company_ends[i]:start].split()) <= VOICE_WORDS
+
     def counts(self, start: int, end: int) -> bool:
         """True when the number at text[start:end] (its first digit through "years") is a requirement."""
         s, p = self.text, self.p
@@ -92,7 +105,7 @@ class _Sentence:
         a, b = self.clause(start, end)
         if self.opens_with_preference or _any_in(self.preferred, a, b):
             return False
-        if self.company_voice and self.company_voice[0] < start and not _any_in(self.candidate_voice, a, b):
+        if self.company_owns(start, a) and not _any_in(self.candidate_voice, a, b):
             return False
         if _OR_BEFORE.search(s[max(0, start - 8):start]):
             return False

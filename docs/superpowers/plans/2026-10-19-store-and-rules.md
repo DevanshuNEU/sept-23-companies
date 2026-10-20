@@ -1359,7 +1359,7 @@ def test_citizenship(self): flag per case; quote non-empty when True
   - `cohort_title` names graduates, not start dates: "2027 graduate(s)", "class of 2027", "2027 university or college or campus grad or hire", "(college grad 2027)". "New Grad 2027" and "New Grad (2027)" are a 2027 start: ok, `starts_2027` True (#9 ruling; open question 3).
   - `starts_2027`: start wording (`start_2027` phrases such as "2027 start", "starts in July 2027", "summer 2027 start", "join our team in 2027") or a title that names 2027 without naming graduates ("New Grad 2027", "New Grad (2027)"), and no `immediate_start` phrase (`refresh/finalcheck.py:48-56`, `refresh/final_merge.py:17, 62`). Graduation wording ("class of 2027", "graduate in 2027") is not a start date.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 CASES = [  # (title, body, status, reason, start_2027)
@@ -1380,10 +1380,10 @@ def test_graduation_month_comes_from_config(self):
     # cfg with graduated "2027-05" -> CASES[0] becomes ok (the window now contains the month)
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_eligibility -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: one graduation-eligibility rule; a 2027 start is a flag, not a hide (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_eligibility -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: one graduation-eligibility rule; a 2027 start is a flag, not a hide (#4)"`
 
 ---
 
@@ -1405,7 +1405,7 @@ def test_graduation_month_comes_from_config(self):
   - `OldSignal` (frozen): `kind` (`over_500`, `big_by_filings`, `sec_filings`, `defence_contractor`, `agency`), `quote`.
   - `old_dashboard_signals(company: dict) -> list[OldSignal]`: the old dashboard's hide verdicts that are not headcount: "known to be well over 500 people" (233) -> `over_500`; "N lifetime visa filings; every known under-500 company has 26 or fewer" (9) -> `big_by_filings`; "decades of SEC filings, an established company" (1) -> `sec_filings`; `sizeClass` `cleared` (41, whatever the `sizeWhy` wording) -> `defence_contractor`; `sizeClass` `agency` (1) -> `agency`. This is the only place `sizeClass` is read. #17 records them: `defence_contractor` and `agency` as `no_go` rows (`source 'import'`, `quote` = the `sizeWhy`), the three size signals as a `review_item` (`kind 'flagged'`, `raised_by 'import'`) unless open question 1 makes them size evidence.
 
-- [ ] **Step 1: Write the failing tests** (strings are real `sizeWhy`, `head` and `funding` values from `dashboard/data.js`)
+- [x] **Step 1: Write the failing tests** (strings are real `sizeWhy`, `head` and `funding` values from `dashboard/data.js`)
 
 ```python
 def test_small_default_is_not_evidence(self):
@@ -1447,10 +1447,10 @@ def test_retell_record(self):
     # everify enrolled, checked 2026-09-27) -> 3 size drafts, 1 stage draft (series_b), 1 everify draft
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_facts -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: size, stage and E-Verify evidence; 'small' is never a size (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_facts -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: size, stage and E-Verify evidence; 'small' is never a size (#4)"`
 
 ---
 
@@ -1485,7 +1485,7 @@ t == "open"                  -> "open", ok
 otherwise                    -> "not_stated", ok = False, basis "Posting does not state a level"
 ```
 
-- [ ] **Step 1: Write the failing tests.** `tests/test_rules_misfires.py` has one class per audit misfire (section 2) plus the "small" default, each with its corpus count in the docstring, positives and a negative control, all through `decide()`. Default location "Boston, MA" unless the case is about location.
+- [x] **Step 1: Write the failing tests.** `tests/test_rules_misfires.py` has one class per audit misfire (section 2) plus the "small" default, each with its corpus count in the docstring, positives and a negative control, all through `decide()`. Default location "Boston, MA" unless the case is about location.
 
 ```python
 class Misfire1MTSDroppedByStaffRule(unittest.TestCase):          # 27 of 32 MTS titles dropped (crawl_boards.py:59)
@@ -1545,10 +1545,10 @@ def test_only_rules_classify(self):                # Done-when line 2
     # "entry", "intern", "remote" or a US state code list; a test file listing an allowed exception names its reason
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_decide tests.test_rules_misfires -v` -> ImportError for `decide`.
-- [ ] **Step 3: Implement** `decide.py`. If a misfire case fails because of a vocabulary, fix the list in the owning section of `config.toml`, not with a special case in code.
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: one decide() for every posting, with the 8 audit misfires as regression tests (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_decide tests.test_rules_misfires -v` -> ImportError for `decide`.
+- [x] **Step 3: Implement** `decide.py`. If a misfire case fails because of a vocabulary, fix the list in the owning section of `config.toml`, not with a special case in code.
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: one decide() for every posting, with the 8 audit misfires as regression tests (#4)"`
 
 ---
 
@@ -1580,7 +1580,7 @@ def test_only_rules_classify(self):                # Done-when line 2
   - `main(argv=None) -> int` for `uv run python -m outreach.rules.rebuild`: `connect()`, `rebuild`, print `lines()`, return 0.
   - `install.install` now ends with `rebuild(conn)` when the store has no current ruleset or a different one; `install.main` prints the report's `lines()`.
 
-- [ ] **Step 1: Write the failing tests** (all on `storetest.fresh_store()`)
+- [x] **Step 1: Write the failing tests** (all on `storetest.fresh_store()`)
 
 ```python
 def test_install_registers_the_current_ruleset(self):   # current ruleset == ruleset_version(); its config_toml == config.toml text
@@ -1613,10 +1613,10 @@ def test_record_evidence_raises_on_a_bad_draft(self):   # an EvidenceDraft with 
 def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>; main([]) == 0; output contains "shown to hidden"
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_rebuild -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules rebuild with a shown-to-hidden flip report; install registers the ruleset (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_rebuild -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules rebuild with a shown-to-hidden flip report; install registers the ruleset (#4)"`
 
 ---
 
@@ -1629,7 +1629,7 @@ def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>;
 - Consumes: everything.
 - Produces: `uv run python tests/mutation_check.py [--list]`, exit 0 only when every mutation is caught. Port of Radar `tests/mutation_check.py:45-60, 250-290`: baseline suite must be green; each mutation is `(path, guarantee, find, replace)`; a missing anchor is SKIP and fails the run; each file is restored in `finally` and the restore is verified by re-reading. It refuses to run when `live_checkout.is_live()` (it edits source files in place, and after #21 launchd runs the rules from the live checkout).
 
-- [ ] **Step 1: Write the mutation list.** One entry per guarantee below; the `find` anchors are exact strings from the code as implemented in Tasks 1 to 15.
+- [x] **Step 1: Write the mutation list.** One entry per guarantee below; the `find` anchors are exact strings from the code as implemented in Tasks 1 to 15.
 
 | # | File | Guarantee broken | Test that must fail |
 |---|---|---|---|
@@ -1660,16 +1660,16 @@ def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>;
 | 25 | `rules/rebuild.py` | `record_evidence` uses `INSERT OR IGNORE` | `test_record_evidence_raises_on_a_bad_draft` |
 | 26 | `rules/location.py` | non-US-only cities lose to a two-letter code | "Toronto, CA" case |
 
-- [ ] **Step 2: Run it.** `uv run python tests/mutation_check.py`
+- [x] **Step 2: Run it.** `uv run python tests/mutation_check.py`
   Expected: `baseline green (26 mutations to apply)`, 26 `CAUGHT` lines, `caught 26  missed 0  skipped 0`, exit 0. A MISSED line means a test is missing: add it to the owning task's test file and rerun.
-- [ ] **Step 3: Final checks, each with its expected output.**
+- [x] **Step 3: Final checks, each with its expected output.**
   - `uv run python -m unittest discover -s tests -t .` -> `OK`, old and new tests together.
   - `OUTREACH_DB=$(mktemp -d)/outreach.db uv run python -m outreach.install` -> prints `store at version 1` and an empty flip report; running it again changes nothing.
   - `H=$(mktemp -d); env -u OUTREACH_DB HOME="$H" .venv/bin/python -m outreach.install` from this worktree -> exits non-zero naming the live checkout, and `find "$H" -type f` prints nothing. HOME points at a fresh temp folder so that even a broken guard could only touch a temp file, never the real store.
   - `uv run python -c "import pathlib,sys; bad=[str(p) for g in ('outreach/**/*','tests/*.py','CLAUDE.md') for p in pathlib.Path('.').glob(g) if p.is_file() and any(c in p.read_text(errors='ignore') for c in chr(0x2013)+chr(0x2014))]; print(bad); sys.exit(bool(bad))"` -> prints `[]` (macOS grep has no `-P`).
   - `git diff --stat origin/master -- dashboard mail refresh` -> no output.
-- [ ] **Step 4: Check every "Done when" line of #4:** store created by one command (step 3 second bullet); rules suite and mutation check pass (steps 2 and 3); nothing in the new platform classifies titles except the rules module (`test_only_rules_classify`); `dashboard/app.js` untouched (last bullet).
-- [ ] **Step 5: Commit** `git commit -m "Mutation check: every rules and store guarantee has a test that notices (#4)"`
+- [x] **Step 4: Check every "Done when" line of #4:** store created by one command (step 3 second bullet); rules suite and mutation check pass (steps 2 and 3); nothing in the new platform classifies titles except the rules module (`test_only_rules_classify`); `dashboard/app.js` untouched (last bullet).
+- [x] **Step 5: Commit** `git commit -m "Mutation check: every rules and store guarantee has a test that notices (#4)"`
 
 ---
 

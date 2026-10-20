@@ -10,7 +10,7 @@ import { useSelectionSync } from '@/keyboard/hotkeys';
 import { useUrlState } from '@/lib/url-state';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { OutboxList, OutboxListSkeleton } from './outbox-list';
-import { OutboxDetailPane, type Edit } from './outbox-detail';
+import { OutboxDetailPane } from './outbox-detail';
 import { forCompany } from './outbox-patches';
 import { SendingStrip, SendingStripSkeleton } from './sending-strip';
 
@@ -90,8 +90,6 @@ export default function OutboxPage() {
   const [companyParam, setCompanyParam] = useUrlState('company', '');
   const company = idOf(companyParam);
   const [listPx] = useState(savedListWidth);
-  // Unsaved text per email, so J, K and a click on another row never throw it away.
-  const [edits] = useState(() => new Map<Id, Edit>());
   const listPanel = usePanelRef();
 
   // Reports the selection the URL shows; the list records each move at once, so keys follow it (see useHotkeys).
@@ -190,7 +188,7 @@ export default function OutboxPage() {
                         <DetailPlaceholder />
                       </div>
                     ) : (
-                      <OutboxDetailPane key={selected} touchId={selected} items={view.items} edits={edits} />
+                      <OutboxDetailPane key={selected} touchId={selected} items={view.items} />
                     )}
                   </ResizablePanel>
                 </ResizablePanelGroup>

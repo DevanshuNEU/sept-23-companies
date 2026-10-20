@@ -31,15 +31,13 @@ import { Kbd } from '@/components/ui/kbd';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useHotkeys } from '@/keyboard/hotkeys';
 import { ageDays, formatAge, formatDueDay } from '@/lib/format';
+import { useEdits, type Edit } from '@/pending/edits';
 import { usePendingControls, usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { CompareDialog } from './compare-dialog';
 import { heldLine, useCompanyActions } from './company-actions';
 import { rowStatus } from './outbox-list';
 import { fewerDrafts, patchDetailItem, patchRow } from './outbox-patches';
 import { ReplyDetail, Thread, type ReplyChoice } from './reply-detail';
-
-/** What he has typed and not saved, kept per email so moving away and back loses nothing. `base` is the revision he started from. */
-export type Edit = { subject: string; body: string; base: Revision };
 
 const SAVE_FIRST = 'Save your edits first (Cmd S)';
 
@@ -218,13 +216,13 @@ function StateLine({ detail }: { detail: OutboxDetail }) {
 function DetailBody({
   detail,
   items,
-  edits,
 }: {
   detail: OutboxDetail;
   items: OutboxItem[];
-  edits: Map<Id, Edit>;
 }) {
   const client = useClient();
+  // Unsaved text per email, so J, K, another view and back never throw it away.
+  const edits = useEdits();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const write = usePendingWrite();
@@ -242,10 +240,12 @@ function DetailBody({
   const [editing, setEditing] = useState(false);
   const [comparing, setComparing] = useState<Id | null>(null);
 
-  const setEdit = (next: Edit | null) => {
-    if (next) edits.set(messageId, next);
+  const setEdit = (next: Edit | null, saved: OutboxDetail = detail) => {
+    // Typing back to the saved text leaves nothing unsaved, so it is not kept (and the page stops asking before it closes).
+    const same = next !== null && next.subject === saved.item.subject && next.body === saved.body;
+    if (next && !same) edits.set(messageId, next);
     else edits.delete(messageId);
-    setEditState(next);
+    setEditState(same ? null : next);
   };
 
   const subject = edit?.subject ?? item.subject;
@@ -284,7 +284,7 @@ function DetailBody({
       // He may have typed while the save was in flight: clear the edit only if it is still what was sent,
       // else keep it and start it from the revision this save made.
       const now = edits.get(messageId);
-      if (now && (now.subject !== sent.subject || now.body !== sent.body)) setEdit({ ...now, base: saved.item.revision });
+      if (now && (now.subject !== sent.subject || now.body !== sent.body)) setEdit({ ...now, base: saved.item.revision }, saved);
       else setEdit(null);
       setServerConflict(false);
       refreshList();
@@ -657,12 +657,12 @@ function DetailBody({
 }
 
 /** Spec 5.3, the detail pane: the selected email, its checks and its actions. */
-export function OutboxDetailPane({ touchId, items, edits }: { touchId: Id; items: OutboxItem[]; edits: Map<Id, Edit> }) {
+export function OutboxDetailPane({ touchId, items }: { touchId: Id; items: OutboxItem[] }) {
   const client = useClient();
   const query = useViewQuery(queryKeys.outboxDetail(touchId), () => client.outboxDetail(touchId), { pollMs: pollMs.outbox });
   return (
     <QueryState query={query} skeleton={<DetailSkeleton />} empty={null}>
-      {(detail) => <DetailBody key={detail.item.messageId} detail={detail} items={items} edits={edits} />}
+      {(detail) => <DetailBody key={detail.item.messageId} detail={detail} items={items} />}
     </QueryState>
   );
 }

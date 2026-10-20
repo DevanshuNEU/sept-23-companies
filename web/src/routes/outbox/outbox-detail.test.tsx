@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture, companyId, ids, messageOf } from '@/api/fixture/data';
 import { usePendingWrite } from '@/pending/pending';
+import { useLocation } from 'react-router';
 import { AppShell } from '@/shell/app-shell';
 import { renderWithApp } from '@/test/render';
 import OutboxPage from './index';
@@ -375,6 +376,64 @@ describe('save and conflict', () => {
     await screen.findByRole('textbox', { name: 'Email body' });
     expect((bodyBox() as HTMLTextAreaElement).value).toBe(edited);
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  });
+});
+
+describe('unsaved edits outlive the Outbox', () => {
+  /** The Outbox only while the URL is under /outbox, so leaving it unmounts the page like the real router does. */
+  function OutboxOnly() {
+    const { pathname } = useLocation();
+    return pathname.startsWith('/outbox') ? <OutboxPage /> : <p>Elsewhere</p>;
+  }
+  const beforeUnloadPrevented = () => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  it('an edit is still there after g t and g o', async () => {
+    const client = new FixtureClient(buildFixture());
+    renderWithApp(
+      <>
+        <AppShell />
+        <OutboxOnly />
+      </>,
+      { route: `/outbox/${T.kenji}`, client },
+    );
+    await screen.findByRole('heading', { level: 2, name: 'Kenji Watanabe' });
+    const edited = `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. Kept across views.`;
+    fireEvent.change(bodyBox(), { target: { value: edited } });
+
+    press('g');
+    press('t');
+    await screen.findByText('Elsewhere');
+    press('g');
+    press('o');
+    fireEvent.click(await waitFor(() => row('Kenji Watanabe')));
+    await screen.findByRole('textbox', { name: 'Email body' });
+    expect((bodyBox() as HTMLTextAreaElement).value).toBe(edited);
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  });
+
+  it('the page asks before it closes while an edit is unsaved, and stops once it is saved', async () => {
+    await open(T.kenji, 'Kenji Watanabe');
+    expect(beforeUnloadPrevented()).toBe(false);
+    const edited = `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. Not saved yet.`;
+    fireEvent.change(bodyBox(), { target: { value: edited } });
+    expect(beforeUnloadPrevented()).toBe(true);
+
+    press('s', { ctrlKey: true }, bodyBox());
+    await waitFor(() => expect(screen.queryByText('Unsaved changes')).toBeNull());
+    expect(beforeUnloadPrevented()).toBe(false);
+  });
+
+  it('typing the text back to what is saved is not an unsaved edit', async () => {
+    await open(T.kenji, 'Kenji Watanabe');
+    const saved = (bodyBox() as HTMLTextAreaElement).value;
+    fireEvent.change(bodyBox(), { target: { value: `${saved}x` } });
+    expect(beforeUnloadPrevented()).toBe(true);
+    fireEvent.change(bodyBox(), { target: { value: saved } });
+    expect(beforeUnloadPrevented()).toBe(false);
   });
 });
 

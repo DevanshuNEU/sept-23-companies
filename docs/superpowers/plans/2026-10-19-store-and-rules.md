@@ -798,7 +798,7 @@ The lanes share no file: the store lane writes `outreach/store/`, `outreach/inst
 **Interfaces:**
 - Produces: an importable `outreach` package; the rule that every dependency is an exact pin.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 class Project(unittest.TestCase):
@@ -813,21 +813,21 @@ class Project(unittest.TestCase):
         # no file under mail/, refresh/, dashboard/ contains "import outreach" or "from outreach"
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 Run: `/opt/homebrew/bin/python3 -m unittest tests.test_project -v`
 Expected: FAIL / ERROR (`No module named 'outreach'`, no `pyproject.toml`).
 
-- [ ] **Step 3: Create the files.** `uv venv --python /opt/homebrew/bin/python3 && uv lock && uv sync`.
+- [x] **Step 3: Create the files.** `uv venv --python /opt/homebrew/bin/python3 && uv lock && uv sync`.
 
-- [ ] **Step 4: Run the whole suite under uv**
+- [x] **Step 4: Run the whole suite under uv**
 
 Run: `uv run python -m unittest discover -s tests -t .` then `.venv/bin/python -c "import sys; print(sys.base_prefix)"`
 Expected: all PASS (old and new tests); the prefix starts with `/opt/homebrew`.
 
-- [ ] **Step 5: Update `CLAUDE.md` "Building".** Replace "Once #4 adds `pyproject.toml`, run them with ..." with: tests run with `uv run python -m unittest discover -s tests -t .`; a new checkout runs `uv venv --python /opt/homebrew/bin/python3 && uv sync` once; the live checkout needs the same once before the deploy test run.
+- [x] **Step 5: Update `CLAUDE.md` "Building".** Replace "Once #4 adds `pyproject.toml`, run them with ..." with: tests run with `uv run python -m unittest discover -s tests -t .`; a new checkout runs `uv venv --python /opt/homebrew/bin/python3 && uv sync` once; the live checkout needs the same once before the deploy test run.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml uv.lock .gitignore outreach/__init__.py tests/test_project.py CLAUDE.md
@@ -845,7 +845,7 @@ git commit -m "Add the outreach package and a uv project on Homebrew Python 3.14
 **Interfaces:**
 - Produces: `utcnow() -> str` (`%Y-%m-%dT%H:%M:%SZ`); `iso_utc(s: str | None) -> str | None` (None for None or ""; raises `ValueError` on unparseable); `iso_date(v: str | int | float | None) -> str | None` (ISO prefix, or epoch seconds or milliseconds, port of `refresh/finalcheck.py:14-22`; None when unreadable).
 
-- [ ] **Step 1: Write the failing tests** (cases from Radar `tests/test_store.py:40-90`)
+- [x] **Step 1: Write the failing tests** (cases from Radar `tests/test_store.py:40-90`)
 
 ```python
 def test_the_four_wire_formats(self):
@@ -865,10 +865,10 @@ def test_iso_date_forms(self):
     iso_date("1756200000") == "2025-08-26"; iso_date("soon") is None; iso_date(None) is None
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_time -v` -> ImportError.
-- [ ] **Step 3: Implement** `timefmt.py` by porting Radar `store.py:92-133` with the one change above. `iso_date` uses `datetime.timezone.utc`, not the deprecated `utcfromtimestamp`.
-- [ ] **Step 4: Run and see them pass.** Same command, all PASS; then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Store time helpers: canonical UTC timestamps and dates (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_time -v` -> ImportError.
+- [x] **Step 3: Implement** `timefmt.py` by porting Radar `store.py:92-133` with the one change above. `iso_date` uses `datetime.timezone.utc`, not the deprecated `utcfromtimestamp`.
+- [x] **Step 4: Run and see them pass.** Same command, all PASS; then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Store time helpers: canonical UTC timestamps and dates (#4)"`
 
 ---
 
@@ -882,7 +882,7 @@ def test_iso_date_forms(self):
 - Consumes: `timefmt.utcnow`.
 - Produces: `MIGRATIONS_DIR: pathlib.Path`; `split_sql(sql: str) -> list[str]`; `migration_files(directory: Path = MIGRATIONS_DIR) -> list[tuple[int, str, Path]]` (sorted; ignores names starting with `.`, such as `.gitkeep`; raises `ValueError` on a gap, a duplicate number or any other file not named `NNNN_name.sql`); `latest_version(directory=MIGRATIONS_DIR) -> int`; `migrate(conn: sqlite3.Connection, directory=MIGRATIONS_DIR) -> int` (applies pending files, each in `BEGIN IMMEDIATE`, records `schema_migration`, sets `PRAGMA user_version`, returns the new version; raises `RuntimeError` when the database is newer than the files). `conn` must have `isolation_level=None`.
 
-- [ ] **Step 1: Write the failing tests** against temp migration directories (each test writes its own `0001_*.sql`, `0002_*.sql`; the first always creates `schema_migration` with the Task 4 definition).
+- [x] **Step 1: Write the failing tests** against temp migration directories (each test writes its own `0001_*.sql`, `0002_*.sql`; the first always creates `schema_migration` with the Task 4 definition).
 
 ```python
 def test_applies_in_order_and_sets_user_version(self):   # 0001, 0002 -> returns 2; PRAGMA user_version == 2; schema_migration has 2 rows
@@ -895,10 +895,10 @@ def test_bad_file_name_is_refused(self):                  # "1_init.sql" -> Valu
 def test_dotfiles_are_ignored(self):                       # a .gitkeep next to 0001_init.sql -> one migration, no error
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_migrate -v` -> ImportError.
-- [ ] **Step 3: Implement** by porting Radar `store.py:524-582` (statements executed one by one, never `executescript`, which commits implicitly).
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Store migration runner: ordered files, one transaction each (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_migrate -v` -> ImportError.
+- [x] **Step 3: Implement** by porting Radar `store.py:524-582` (statements executed one by one, never `executescript`, which commits implicitly).
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Store migration runner: ordered files, one transaction each (#4)"`
 
 ---
 
@@ -913,7 +913,7 @@ def test_dotfiles_are_ignored(self):                       # a .gitkeep next to 
 - Consumes: `migrate.migrate`.
 - Produces: the schema; `tests/storetest.py: fresh_store() -> sqlite3.Connection` (a migrated store in a new temp directory, `isolation_level=None`, `row_factory=sqlite3.Row`, `foreign_keys=ON`). In this task it opens with `sqlite3.connect` and calls `migrate`; Task 5 changes it to `install` plus `connect` without changing its signature. Also `storetest.seed_company(conn, name="Acme") -> int`, `storetest.seed_posting(conn, company_id, title, body="", location="") -> int` and `storetest.seed_touch(conn, company_id, email) -> int`. Test modules import it as `from tests.storetest import fresh_store, seed_company, seed_posting, seed_touch`.
 
-- [ ] **Step 1: Write the failing tests.** Generic checks first, then one test per invariant.
+- [x] **Step 1: Write the failing tests.** Generic checks first, then one test per invariant.
 
 ```python
 def test_every_table_is_strict(self):
@@ -973,10 +973,10 @@ def test_current_decision_view_follows_the_current_ruleset(self):
 def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserting sender_id 2 -> IntegrityError
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_schema -v` -> no tables.
-- [ ] **Step 3: Write `0001_initial.sql`** exactly as specified, and `tests/storetest.py`.
-- [ ] **Step 4: Run and see them pass**, then the whole suite. Also: `sqlite3 <fresh file> "PRAGMA integrity_check; PRAGMA foreign_key_check;"` prints `ok` and nothing else.
-- [ ] **Step 5: Commit** `git commit -m "Store schema 0001: STRICT tables, CHECKed states, append-only history (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_schema -v` -> no tables.
+- [x] **Step 3: Write `0001_initial.sql`** exactly as specified, and `tests/storetest.py`.
+- [x] **Step 4: Run and see them pass**, then the whole suite. Also: `sqlite3 <fresh file> "PRAGMA integrity_check; PRAGMA foreign_key_check;"` prints `ok` and nothing else.
+- [x] **Step 5: Commit** `git commit -m "Store schema 0001: STRICT tables, CHECKed states, append-only history (#4)"`
 
 ---
 
@@ -999,7 +999,7 @@ def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserti
   - `install.install(path: str) -> int`: guard; create the parent folder; on a new file set `PRAGMA auto_vacuum=INCREMENTAL` then `PRAGMA journal_mode=WAL` before any table; `migrate`; return the version. (Task 15 adds the ruleset registration.)
   - `install.main(argv: list[str] | None = None) -> int`: `install(db_path())`, prints `"<path>: store at version N"` and the applied migrations, returns 0.
 
-- [ ] **Step 1: Write the failing tests.** Tests that need a fake live path patch `outreach.store.db.DEFAULT_PATH` to a temp file and patch `live_checkout.is_live`.
+- [x] **Step 1: Write the failing tests.** Tests that need a fake live path patch `outreach.store.db.DEFAULT_PATH` to a temp file and patch `live_checkout.is_live`.
 
 ```python
 def test_tests_never_use_the_live_path(self):        # db_path() != realpath(DEFAULT_PATH)  (tests/__init__.py)
@@ -1026,11 +1026,11 @@ def test_transaction_rolls_back(self):                 # insert company then rai
 def test_install_main_prints_version(self):            # OUTREACH_DB=<tmp>; main([]) == 0 and output contains "version 1"
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_connect -v`.
-- [ ] **Step 3: Implement** `db.py` and `install.py`; switch `tests/storetest.py` to `install.install` plus `connect`.
-- [ ] **Step 4: Run and see them pass**, then the whole suite (Task 4's schema tests now run through `connect`).
-- [ ] **Step 5: Update `CLAUDE.md`** "Only in the live checkout": add that `python -m outreach.install` and anything that opens the default store path refuse to run outside it.
-- [ ] **Step 6: Commit** `git commit -m "Store connect refuses the live path outside the live checkout; install is the only migrator (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_connect -v`.
+- [x] **Step 3: Implement** `db.py` and `install.py`; switch `tests/storetest.py` to `install.install` plus `connect`.
+- [x] **Step 4: Run and see them pass**, then the whole suite (Task 4's schema tests now run through `connect`).
+- [x] **Step 5: Update `CLAUDE.md`** "Only in the live checkout": add that `python -m outreach.install` and anything that opens the default store path refuse to run outside it.
+- [x] **Step 6: Commit** `git commit -m "Store connect refuses the live path outside the live checkout; install is the only migrator (#4)"`
 
 ---
 
@@ -1048,7 +1048,7 @@ def test_install_main_prints_version(self):            # OUTREACH_DB=<tmp>; main
   - `append_event(conn, *, entity: str, kind: str, actor: str, entity_id: int | None = None, company_id: int | None = None, detail: dict | None = None, at: str | None = None, idempotency_key: str | None = None) -> int | None`: inserts one event (`at` canonicalised with `iso_utc`, default now; `recorded_at` now; `detail` as JSON); returns the new id, or None when `idempotency_key` was already used (`INSERT ... ON CONFLICT(idempotency_key) DO NOTHING`, never an update).
   - `start_job(conn, job: str, ruleset_version: str | None = None) -> int` and `finish_job(conn, run_id: int, status: str, summary: dict | None = None, error: str = "") -> None`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_name_key(self):
@@ -1060,10 +1060,10 @@ def test_unknown_actor_is_refused(self):               # actor="robot" -> sqlite
 def test_job_run_round_trip(self):                     # start_job -> status running; finish_job(ok, {"n": 3}) -> finished_at set, summary {"n": 3}
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_writes -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Store write helpers: events with idempotency keys, job runs, name keys (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_writes -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Store write helpers: events with idempotency keys, job runs, name keys (#4)"`
 
 ---
 
@@ -1094,7 +1094,7 @@ def test_job_run_round_trip(self):                     # start_job -> status run
 
   Word list changes from the old code, decided here: `senior` drops `fellow` and keeps `distinguished`; `strong_entry` includes `fellow` and `fellowship`; `open_level` is `member of technical staff`, `member of product staff`, `member of engineering staff`, `mts`, `forward deployed`, `fde` (not `founding`: the design names MTS and FDE only).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_config_loads_and_pins_the_decided_numbers(self):
@@ -1114,10 +1114,10 @@ def test_every_rules_file_is_classified(self):
     # every *.py and *.toml in outreach/rules is in RULE_FILES or NOT_RULES, and none is in both
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_config -v`.
-- [ ] **Step 3: Implement** the three modules and write the full `config.toml`, every section, with a one-line comment per key citing its source line.
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules config, text helpers and the ruleset version hash (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_config -v`.
+- [x] **Step 3: Implement** the three modules and write the full `config.toml`, every section, with a one-line comment per key citing its source line.
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules config, text helpers and the ruleset version hash (#4)"`
 
 ---
 
@@ -1143,7 +1143,7 @@ def test_every_rules_file_is_classified(self):
     8. otherwise None.
   - `basis` is a short sentence for the UI, for example "Title says new grad", "Title says Engineer II", "MTS role, no level in the title" (ported from `refresh/final_merge.py:28-37`).
 
-- [ ] **Step 1: Write the failing tests** (lane and tier per title; the misfire titles are repeated end to end in Task 14)
+- [x] **Step 1: Write the failing tests** (lane and tier per title; the misfire titles are repeated end to end in Task 14)
 
 ```python
 CASES = [  # (title, lane, tier)
@@ -1186,10 +1186,10 @@ def test_cases(self): for each case, classify_title(t, cfg) has that lane and (f
 def test_basis_is_never_empty(self): every case has a non-empty basis
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_title -v`.
-- [ ] **Step 3: Implement** `classify_title`; adjust only `[title]` lists if a case needs it.
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: title lane and level, MTS kept, staff always senior (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_title -v`.
+- [x] **Step 3: Implement** `classify_title`; adjust only `[title]` lists if a case needs it.
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: title lane and level, MTS kept, staff always senior (#4)"`
 
 ---
 
@@ -1209,7 +1209,7 @@ def test_basis_is_never_empty(self): every case has a non-empty basis
     - a `company_age` word sits within 3 words of the number ("founded", "ago", "in business", "history").
   - Ranges count their low end ("1-3 years", "1\u20133 years" with an en dash, "1 to 3 years" are all 1). Numbers above 30 are ignored.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 CASES = [  # (body, years)
@@ -1234,10 +1234,10 @@ def test_entry_wording(self):
     entry_wording("We hire great engineers.", cfg) == ""
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_years -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: years asked takes the largest requirement; ignores preferences, degree alternatives and company age (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_years -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: years asked takes the largest requirement; ignores preferences, degree alternatives and company age (#4)"`
 
 ---
 
@@ -1260,7 +1260,7 @@ def test_entry_wording(self):
   3. any part `yes` -> `yes`; else any part `no` -> `no`; else `unknown` (a bare "Remote" and an empty location).
   A shared city name gives way to a US state code ("Paris, TX", "Athens, GA", "Lima, OH"); a non-US country or a non-US-only city beats one.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 CASES = [  # (location, country, expected)
@@ -1280,10 +1280,10 @@ def test_cases(self): us_status(loc, country, cfg) == expected for each
 def test_lowercase_state_words_are_not_codes(self): us_status("Remote in Berlin", None, cfg) == "no"
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_location -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: US location checks the country, then states, then a bounded non-US list (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_location -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: US location checks the country, then states, then a bounded non-US list (#4)"`
 
 ---
 
@@ -1302,7 +1302,7 @@ def test_lowercase_state_words_are_not_codes(self): us_status("Remote in Berlin"
   - Across sentences: any `opt_only` -> `opt_only`; `no` with no `yes` -> `no`; `yes` with no `no` -> `yes`; both, or any `unclear` with no clear answer -> `unclear`; no topic sentence -> `silent`. The quote is the deciding sentence (for `unclear`, the first unclear or conflicting one).
   - Citizenship: a `citizenship` phrase in a sentence that has no `citizenship_negation` ("No security clearance required." is not a requirement).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 STANCE = [  # (body, stance)
@@ -1338,10 +1338,10 @@ def test_work_authorization_alone_is_never_yes(self): sponsorship_stance("Must b
 def test_citizenship(self): flag per case; quote non-empty when True
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_sponsorship -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: sponsorship stance reads negation first; citizenship ignores 'not required' (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_sponsorship -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: sponsorship stance reads negation first; citizenship ignores 'not required' (#4)"`
 
 ---
 

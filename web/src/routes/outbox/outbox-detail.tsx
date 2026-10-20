@@ -461,19 +461,23 @@ function DetailBody({
   };
   const togglePause = () => (companyActions.held ? companyActions.askResume() : companyActions.pause());
 
-  useHotkeys([
-    { keys: 'a', label: 'Approve the selected draft', group: 'Outbox', enabled: kind === 'draft', run: tryApprove },
-    { keys: 'e', label: 'Edit the body', group: 'Outbox', enabled: kind === 'draft', run: focusEditor },
-    // Always taken, so the browser's own save dialog never opens on this view.
-    { keys: 'mod+s', label: 'Save edits', group: 'Outbox', run: () => void save() },
-    { keys: 'mod+enter', label: 'Save and approve', group: 'Outbox', enabled: kind === 'draft', run: () => void saveThenApprove() },
-    { keys: 's', label: 'Skip (undo with Z)', group: 'Outbox', enabled: kind === 'draft' || kind === 'approved', run: skip },
-    { keys: 'u', label: 'Withdraw approval', group: 'Outbox', enabled: kind === 'approved', run: () => void withdraw() },
-    { keys: 'p', label: 'Pause or resume the company', group: 'Outbox', enabled: hasCompanyActions, run: togglePause },
-    { keys: 'c', label: 'Close the company', group: 'Outbox', enabled: hasCompanyActions, run: companyActions.askClose },
-    { keys: 'o', label: 'Open the company page', group: 'Outbox', run: () => navigate(`/companies/${company.id}`) },
-    { keys: 'escape', label: 'Leave the editor', group: 'Outbox', enabled: editing, run: leaveEditor },
-  ]);
+  // Every key but escape acts on this email, so one that follows j, k or a click waits for that move to render.
+  useHotkeys(
+    [
+      { keys: 'a', label: 'Approve the selected draft', group: 'Outbox', enabled: kind === 'draft', run: tryApprove },
+      { keys: 'e', label: 'Edit the body', group: 'Outbox', enabled: kind === 'draft', run: focusEditor },
+      // Always taken, so the browser's own save dialog never opens on this view.
+      { keys: 'mod+s', label: 'Save edits', group: 'Outbox', run: () => void save() },
+      { keys: 'mod+enter', label: 'Save and approve', group: 'Outbox', enabled: kind === 'draft', run: () => void saveThenApprove() },
+      { keys: 's', label: 'Skip (undo with Z)', group: 'Outbox', enabled: kind === 'draft' || kind === 'approved', run: skip },
+      { keys: 'u', label: 'Withdraw approval', group: 'Outbox', enabled: kind === 'approved', run: () => void withdraw() },
+      { keys: 'p', label: 'Pause or resume the company', group: 'Outbox', enabled: hasCompanyActions, run: togglePause },
+      { keys: 'c', label: 'Close the company', group: 'Outbox', enabled: hasCompanyActions, run: companyActions.askClose },
+      { keys: 'o', label: 'Open the company page', group: 'Outbox', run: () => navigate(`/companies/${company.id}`) },
+    ],
+    { selection: touchId },
+  );
+  useHotkeys([{ keys: 'escape', label: 'Leave the editor', group: 'Outbox', enabled: editing, run: leaveEditor }]);
 
   const onFix = (fix: CheckFix) => {
     if (fix.kind === 'compare') setComparing(fix.otherMessageId);

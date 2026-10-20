@@ -6,6 +6,7 @@ import { pollMs, queryKeys, useClient, type Id, type OutboxView, type SendingSta
 import { EmptyState, QueryState, StateBanner } from '@/components/state-views';
 import { Button } from '@/components/ui/button';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { useSelectionSync } from '@/keyboard/hotkeys';
 import { useUrlState } from '@/lib/url-state';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { OutboxList, OutboxListSkeleton } from './outbox-list';
@@ -93,6 +94,8 @@ export default function OutboxPage() {
   const [edits] = useState(() => new Map<Id, Edit>());
   const listPanel = usePanelRef();
 
+  // Reports the selection the URL shows; the list records each move at once, so keys follow it (see useHotkeys).
+  useSelectionSync(selected);
   const select = (touchId: Id) => navigate({ pathname: `/outbox/${touchId}`, search }, { replace: true });
 
   // Pausing and resuming commit at once: a pause that waited 8 seconds could let an email out.

@@ -201,7 +201,7 @@ function TodayContent({ t, limitToday }: { t: TodayView; limitToday: number | un
   };
 
   const group = 'Today';
-  const bindings: Binding[] = [
+  const onRow: Binding[] = [
     { keys: 'x', label: 'Pick or unpick', group, enabled: current !== null, run: () => current && toggle(current) },
     {
       keys: 'b',
@@ -213,11 +213,14 @@ function TodayContent({ t, limitToday }: { t: TodayView; limitToday: number | un
     { keys: 'r', label: 'Remove with a reason', group, enabled: current !== null, run: () => setRemoving(current) },
     { keys: 'c', label: 'Copy role title', group, enabled: current?.role != null, run: () => current && copyTitle(current) },
     { keys: 'o', label: 'Open the posting', group, enabled: current?.role != null, run: () => current && openPosting(current) },
+  ];
+  // These act on the selected company, so a key right after j, k or a click waits for that move to render.
+  useHotkeys(onRow, { selection: selected });
+  useHotkeys([
     { keys: 'shift+c', label: 'Copy picks for Claude', group, run: copyPicks },
     { keys: '1', label: 'Proposed tab', group, run: () => setTab('proposed') },
     { keys: '2', label: 'Backlog tab', group, run: () => setTab('backlog') },
-  ];
-  useHotkeys(bindings);
+  ]);
 
   const tableActions = { onToggle: toggle, onBacklog: toBacklog, onRemove: (e: DailyEntry) => setRemoving(e) };
   const lede = `Pick up to ${t.capacity} companies.${

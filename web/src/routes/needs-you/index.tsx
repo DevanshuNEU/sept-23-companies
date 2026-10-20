@@ -228,19 +228,23 @@ function OpenItems({ data }: { data: NeedsYouView }) {
     setNoGo((prev) => ({ item: r, start: { reason: 'no_sponsorship', source }, n: (prev?.n ?? 0) + 1, open: true }));
 
   const group = 'Needs you';
-  useHotkeys([
-    {
-      keys: 'e',
-      label: 'Edit the field, with a source',
-      group,
-      enabled: current !== undefined && EDIT_FIELD[current.kind] !== null && editing !== current.id,
-      run: () => {
-        if (current) setEditing(current.id);
+  // These act on the selected item, so a key right after j, k or a click waits for that move to render.
+  useHotkeys(
+    [
+      {
+        keys: 'e',
+        label: 'Edit the field, with a source',
+        group,
+        enabled: current !== undefined && EDIT_FIELD[current.kind] !== null && editing !== current.id,
+        run: () => {
+          if (current) setEditing(current.id);
+        },
       },
-    },
-    { keys: 'o', label: 'Mark ok', group, enabled: current !== undefined, run: () => current && markOk(current) },
-    { keys: 'n', label: 'Mark no-go, with a reason', group, enabled: current !== undefined, run: () => current && openNoGo(current) },
-  ]);
+      { keys: 'o', label: 'Mark ok', group, enabled: current !== undefined, run: () => current && markOk(current) },
+      { keys: 'n', label: 'Mark no-go, with a reason', group, enabled: current !== undefined, run: () => current && openNoGo(current) },
+    ],
+    { selection: selected },
+  );
 
   if (ordered.length === 0) {
     return (

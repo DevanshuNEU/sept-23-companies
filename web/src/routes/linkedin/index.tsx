@@ -257,16 +257,17 @@ export default function LinkedInPage() {
   const onSelected = (fn: (hit: { group: LinkedInGroup; person: LinkedInPerson }) => void) => () => {
     if (current) fn(current);
   };
-  const bindings: Binding[] = [
+  const onRow: Binding[] = [
     { keys: 'c', label: 'Copy role title', group, enabled: on, run: onSelected((h) => copyRole(h.group)) },
     { keys: 'l', label: 'Open their profile', group, enabled: on, run: onSelected((h) => openProfile(h.person)) },
     { keys: 'r', label: 'Log request sent', group, enabled: on, run: onSelected((h) => log(h.person, 'request_sent')) },
     { keys: 'a', label: 'Log accepted', group, enabled: on, run: onSelected((h) => log(h.person, 'accepted')) },
     { keys: 'm', label: 'Log message sent', group, enabled: on, run: onSelected((h) => log(h.person, 'message_sent')) },
     { keys: 'y', label: 'Log reply', group, enabled: on, run: onSelected((h) => askReply(h.person)) },
-    ...TABS.map((t, i): Binding => ({ keys: String(i + 1), label: `${t.label} tab`, group, run: () => setTab(t.value) })),
   ];
-  useHotkeys(bindings);
+  // These act on the selected person, so a key right after j, k or a click waits for that move to render.
+  useHotkeys(onRow, { selection: selected });
+  useHotkeys(TABS.map((t, i): Binding => ({ keys: String(i + 1), label: `${t.label} tab`, group, run: () => setTab(t.value) })));
 
   const replyPerson = find(replyFor)?.person ?? null;
 

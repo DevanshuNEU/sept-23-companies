@@ -32,7 +32,13 @@ const CHORD_MS = 1000;
 
 type Combo = { key: string; mod: boolean; shift: boolean; alt: boolean };
 type Pressed = Combo & { other: boolean };
-type Entry = { binding: Binding; steps: Combo[] };
+
+/** What a list view has selected: a row id, or null for nothing. */
+export type Selection = string | number | null;
+/** Bindings registered with a selection act on that row; see `useHotkeys` and `useSelectionSync`. */
+type Tag = { value: Selection };
+type Reg = { bindings: Binding[]; tag: Tag | undefined };
+type Entry = { binding: Binding; steps: Combo[]; tag: Tag | undefined };
 
 const MODIFIER_KEYS = new Set(['shift', 'control', 'meta', 'alt', 'altgraph', 'capslock', 'fn', 'os']);
 const KEY_NAMES: Record<string, string> = { ' ': 'space', esc: 'escape', spacebar: 'space' };
@@ -119,20 +125,49 @@ function allowed(binding: Binding, combo: Combo, g: Guard): boolean {
   return true;
 }
 
+/** The most keys that can wait for a selection to commit. A person cannot type faster than a render. */
+const MAX_WAITING = 16;
+
+/** A key that arrived while the selection it follows was still committing. */
+type Waiting = { prefix: Pressed[]; pressed: Pressed; guard: Guard; event: KeyboardEvent; target: Selection };
+
+/** The bindings for one key press: those whose steps so far match, are allowed, and (unless asked) are enabled. */
+function matching(entries: Entry[], prefix: Pressed[], pressed: Pressed, guard: Guard, ignoreEnabled = false): Entry[] {
+  const index = prefix.length;
+  return entries.filter(
+    ({ binding, steps }) =>
+      steps.length > index &&
+      prefix.every((p, i) => comboMatches(steps[i] as Combo, p)) &&
+      comboMatches(steps[index] as Combo, pressed) &&
+      allowed(ignoreEnabled ? { ...binding, enabled: undefined } : binding, steps[index] as Combo, guard),
+  );
+}
+
+/** The binding that ends the key sequence, last mounted first. */
+function finishing(found: Entry[], index: number): Entry | undefined {
+  return found.filter(({ steps }) => steps.length === index + 1).pop();
+}
+
 class HotkeyStore {
   private seq = 0;
-  private regs = new Map<number, Binding[]>();
+  private regs = new Map<number, Reg>();
   private listeners = new Set<() => void>();
   private signature = '';
   private snapshot: Binding[] = [];
+
+  /** The selection the last render committed, or undefined while no view has reported one. */
+  private committed: Selection | undefined;
+  /** Moves made since then that no render has committed yet, oldest first. */
+  private moves: Selection[] = [];
+  private waiting: Waiting[] = [];
 
   nextSeq(): number {
     this.seq += 1;
     return this.seq;
   }
 
-  set(seq: number, bindings: Binding[]) {
-    this.regs.set(seq, bindings);
+  set(seq: number, bindings: Binding[], tag?: Tag) {
+    this.regs.set(seq, { bindings, tag });
     this.changed();
   }
 
@@ -144,7 +179,7 @@ class HotkeyStore {
   entries(): Entry[] {
     return [...this.regs.keys()]
       .sort((a, b) => a - b)
-      .flatMap((seq) => (this.regs.get(seq) ?? []).map((binding) => ({ binding, steps: parseKeys(binding.keys) })));
+      .flatMap((seq) => (this.regs.get(seq)?.bindings ?? []).map((binding) => ({ binding, steps: parseKeys(binding.keys), tag: this.regs.get(seq)?.tag })));
   }
 
   subscribe = (listener: () => void) => {
@@ -156,6 +191,73 @@ class HotkeyStore {
 
   getSnapshot = () => this.snapshot;
 
+  /* ---------------------------------------------------------------- the selection he sees */
+
+  /** The row he sees selected right now: the last move, committed or not. Null before any view reports. */
+  latest(): Selection {
+    return this.moves.length > 0 ? (this.moves[this.moves.length - 1] as Selection) : (this.committed ?? null);
+  }
+
+  /** True while a move waits for its render. */
+  get moving(): boolean {
+    return this.moves.length > 0 && this.latest() !== this.committed;
+  }
+
+  /** Records a move the moment he makes it, before the URL write has rendered. */
+  move(id: Selection) {
+    this.moves.push(id);
+  }
+
+  /**
+   * A render committed with this selection. It settles the moves up to it (a render may skip some). A render
+   * of the old selection while a move still waits (the URL write runs as a transition) settles nothing.
+   */
+  commit(id: Selection) {
+    const at = this.moves.lastIndexOf(id);
+    if (at !== -1) this.moves = this.moves.slice(at + 1);
+    this.committed = id;
+    this.settle();
+  }
+
+  /** The view that reported selections is gone. */
+  release() {
+    this.committed = undefined;
+    this.moves = [];
+    this.waiting = [];
+  }
+
+  /** True when `entry` was registered for a row other than the one he sees now. */
+  stale(entry: Entry): boolean {
+    return entry.tag !== undefined && this.committed !== undefined && entry.tag.value !== this.latest();
+  }
+
+  /** Holds a key until the render of the selection it follows has committed. */
+  wait(w: Waiting) {
+    this.waiting = [...this.waiting, w].slice(-MAX_WAITING);
+  }
+
+  /**
+   * Runs the keys that waited, once their selection has committed. `commit` runs in a passive effect, after
+   * every layout effect of that render has registered its bindings, so the bindings for the new row are in.
+   * A key whose selection was skipped, or whose row has no such binding (still loading, or it does not apply),
+   * is dropped.
+   */
+  private settle() {
+    if (this.waiting.length === 0) return;
+    const queue = this.waiting;
+    this.waiting = [];
+    const keep: Waiting[] = [];
+    for (const w of queue) {
+      if (w.target !== this.committed) {
+        if (this.moves.includes(w.target)) keep.push(w);
+        continue;
+      }
+      const found = finishing(matching(this.entries(), w.prefix, w.pressed, w.guard), w.prefix.length);
+      if (found?.tag?.value === w.target) found.binding.run(w.event);
+    }
+    this.waiting = [...keep, ...this.waiting];
+  }
+
   /** Rebuilds the registry only when what it lists changes, so a new `run` each render costs nothing. */
   private changed() {
     const list = this.listed();
@@ -164,7 +266,7 @@ class HotkeyStore {
     this.signature = signature;
     this.snapshot = list.map(({ binding, seq }) => ({
       ...binding,
-      run: (e: KeyboardEvent) => this.regs.get(seq)?.find((b) => b.keys === binding.keys)?.run(e),
+      run: (e: KeyboardEvent) => this.regs.get(seq)?.bindings.find((b) => b.keys === binding.keys)?.run(e),
     }));
     for (const listener of this.listeners) listener();
   }
@@ -173,7 +275,7 @@ class HotkeyStore {
   private listed(): { binding: Binding; seq: number }[] {
     const byKeys = new Map<string, { binding: Binding; seq: number }>();
     for (const seq of [...this.regs.keys()].sort((a, b) => a - b)) {
-      for (const binding of this.regs.get(seq) ?? []) {
+      for (const binding of this.regs.get(seq)?.bindings ?? []) {
         const held = byKeys.get(binding.keys);
         if (!held || binding.enabled !== false || held.binding.enabled === false) {
           byKeys.set(binding.keys, { binding, seq });
@@ -226,15 +328,7 @@ export function HotkeysProvider({ children }: { children: ReactNode }) {
 
       // Bindings whose steps so far match the keys of the pending chord plus this one.
       const index = prefix.length;
-      const live = store
-        .entries()
-        .filter(
-          ({ binding, steps }) =>
-            steps.length > index &&
-            prefix.every((p, i) => comboMatches(steps[i] as Combo, p)) &&
-            comboMatches(steps[index] as Combo, pressed) &&
-            allowed(binding, steps[index] as Combo, guard),
-        );
+      const live = matching(store.entries(), prefix, pressed, guard);
 
       if (live.some(({ steps }) => steps.length > index + 1)) {
         // The start of a chord: wait for the next key, and do not also run a shorter binding.
@@ -243,9 +337,20 @@ export function HotkeysProvider({ children }: { children: ReactNode }) {
         return;
       }
       // Inside a chord, a key that completes nothing just cancels it.
-      const winner = live.filter(({ steps }) => steps.length === index + 1).pop();
+      let winner = finishing(live, index);
+      // While a move waits to render, the binding on screen may be switched off for the row he moved to (and on
+      // for the one he left). Look for bindings for the new row among all of them, enabled or not.
+      if (!winner && store.moving) {
+        const any = finishing(matching(store.entries(), prefix, pressed, guard, true), index);
+        if (any && store.stale(any)) winner = any;
+      }
       if (!winner) return;
       e.preventDefault();
+      if (store.stale(winner)) {
+        // Registered for the row he just left. Hold the key for the row he moved to; with no move on the way, drop it.
+        if (store.moving) store.wait({ prefix, pressed, guard, event: e, target: store.latest() });
+        return;
+      }
       winner.binding.run(e);
     };
 
@@ -268,16 +373,55 @@ export function HotkeysProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** Registers `bindings` while the calling component is mounted. The last mounted wins a clash. */
+/**
+ * Registers `bindings` while the calling component is mounted. The last mounted wins a clash.
+ *
+ * Pass `selection` for bindings that act on the selected row (approve, pick, log): the id of the row this
+ * render was built for. A key pressed after he moved to another row, before that move has rendered, waits for
+ * the render and then acts on the row he moved to. It never acts on the row he left. Leave `selection` out for
+ * keys that do not depend on the row (j, k, tabs, search).
+ */
 // eslint-disable-next-line react-refresh/only-export-components
-export function useHotkeys(bindings: Binding[]): void {
+export function useHotkeys(bindings: Binding[], opts?: { selection: Selection }): void {
   const { store } = useHotkeysContext('useHotkeys');
   // Taken during the first render, so a parent ranks before its children and an earlier page before a later one.
   const [seq] = useState(() => store.nextSeq());
+  const tag = opts ? { value: opts.selection } : undefined;
   useLayoutEffect(() => {
-    store.set(seq, bindings);
+    store.set(seq, bindings, tag);
   });
   useLayoutEffect(() => () => store.delete(seq), [store, seq]);
+}
+
+/** The row he sees selected, which can be ahead of the render, and a way to record a move the moment he makes it. */
+export type LiveSelection<T extends string | number> = {
+  /** The row he moved to last, committed or not; the selection of the last render if he has not moved. */
+  latest: () => T | null;
+  /** Call before writing the move to the URL. */
+  move: (id: T | null) => void;
+};
+
+/** `LiveSelection` without reporting a selection, for components under the one view that calls `useSelectionSync`. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useLiveSelection<T extends string | number>(): LiveSelection<T> {
+  const { store } = useHotkeysContext('useLiveSelection');
+  return useMemo(() => ({ latest: () => store.latest() as T | null, move: (id) => store.move(id) }), [store]);
+}
+
+/**
+ * Call once in a list view with the selection its render shows (read from the URL). The selection lives in the
+ * URL and that write renders late, so the view also records each move at once (`move`) and reads the row he
+ * moved to (`latest`) when a key arrives. See `useHotkeys`.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useSelectionSync<T extends string | number>(committed: T | null): LiveSelection<T> {
+  const { store } = useHotkeysContext('useSelectionSync');
+  // Passive, so it runs after every layout effect of the render has registered its bindings.
+  useEffect(() => {
+    store.commit(committed);
+  });
+  useEffect(() => () => store.release(), [store]);
+  return useLiveSelection<T>();
 }
 
 /** Every mounted binding, one per key (the one that would run), disabled ones included. */

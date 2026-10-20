@@ -78,9 +78,10 @@ MUTATIONS = [
 
     # ---- rules/sponsorship.py and its topic words -------------------------------------------------------------
     (RULES / "sponsorship.py", "the negation check removed",
-     "    if m := p.negation.search(clause):\n        return NO, m\n", "", "Misfire7"),
+     "    if topics and (m := p.negation.search(clause)):\n        return NO, m\n", "", "Misfire7"),
     (RULES / "config.toml", "'immigration' added to the topic words",
-     '"sponsorship", "visa", "visas", "h-1b", "h1b",\n]', '"sponsorship", "visa", "visas", "h-1b", "h1b", "immigration",\n]',
+     '"sponsorship", "sponsorships", "visa", "visas", "h-1b", "h1b",\n]',
+     '"sponsorship", "sponsorships", "visa", "visas", "h-1b", "h1b", "immigration",\n]',
      "sponsorship"),
 
     # ---- rules/facts.py ---------------------------------------------------------------------------------------

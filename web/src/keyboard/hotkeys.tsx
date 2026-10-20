@@ -19,8 +19,10 @@ export type Binding = {
   label: string;
   group: string;
   run: (e: KeyboardEvent) => void;
-  /** Also run while focus is in a text field. Off by default, for every binding, mod or not. */
+  /** Single keys only: also run while focus is in a text field. Mod combos and `escape` always do. */
   inInputs?: boolean;
+  /** Also run while a dialog is open. Off by default for everything except `escape`, mod combos included. */
+  inDialogs?: boolean;
   /** `false`: never runs, still listed by `useHotkeyRegistry`. */
   enabled?: boolean;
 };
@@ -106,8 +108,10 @@ type Guard = { typing: boolean; dialog: boolean; pressable: boolean };
 
 function allowed(binding: Binding, combo: Combo, g: Guard): boolean {
   if (binding.enabled === false) return false;
-  if (g.typing && !binding.inInputs) return false;
-  if (g.dialog && !combo.mod && combo.key !== 'escape') return false;
+  const single = !combo.mod && combo.key !== 'escape';
+  if (g.typing && single && !binding.inInputs) return false;
+  // Behind a dialog nothing acts, not even mod+enter (save, then approve), unless the binding opts in.
+  if (g.dialog && combo.key !== 'escape' && !binding.inDialogs) return false;
   // Enter or Space on a focused button or link presses it; a binding must not steal that.
   if (g.pressable && !combo.mod && (combo.key === 'enter' || combo.key === 'space')) return false;
   return true;
@@ -153,7 +157,7 @@ class HotkeyStore {
   /** Rebuilds the registry only when what it lists changes, so a new `run` each render costs nothing. */
   private changed() {
     const list = this.listed();
-    const signature = JSON.stringify(list.map(({ binding: b }) => [b.keys, b.label, b.group, b.inInputs, b.enabled]));
+    const signature = JSON.stringify(list.map(({ binding: b }) => [b.keys, b.label, b.group, b.inInputs, b.inDialogs, b.enabled]));
     if (signature === this.signature) return;
     this.signature = signature;
     this.snapshot = list.map(({ binding, seq }) => ({
@@ -190,8 +194,8 @@ function useHotkeysContext(hook: string): HotkeysContextValue {
 
 /**
  * Owns the one `keydown` listener on `document` and a polite live region for `useAnnounce`.
- * A held key acts once (repeats are ignored); single keys never act while focus is in a text field or a
- * dialog is open.
+ * A held key acts once (repeats are ignored). Single keys never act while focus is in a text field, and only
+ * `escape` and `inDialogs` bindings act while a dialog is open.
  */
 export function HotkeysProvider({ children }: { children: ReactNode }) {
   const [store] = useState(() => new HotkeyStore());

@@ -59,10 +59,9 @@ describe('useHotkeys', () => {
   it('single keys are suspended while a dialog is open', () => {
     const a = bind('a');
     const escape = bind('escape');
-    const save = bind('mod+s');
     const { rerender } = render(
       <HotkeysProvider>
-        <Keys bindings={[a, escape, save]}>
+        <Keys bindings={[a, escape]}>
           <div role="dialog">Close company</div>
         </Keys>
       </HotkeysProvider>,
@@ -71,12 +70,10 @@ describe('useHotkeys', () => {
     expect(a.run).not.toHaveBeenCalled();
     press(document.body, 'Escape');
     expect(escape.run).toHaveBeenCalledTimes(1);
-    press(document.body, 's', { ctrlKey: true });
-    expect(save.run).toHaveBeenCalledTimes(1);
 
     rerender(
       <HotkeysProvider>
-        <Keys bindings={[a, escape, save]}>
+        <Keys bindings={[a, escape]}>
           <div role="alertdialog">Resume sending</div>
         </Keys>
       </HotkeysProvider>,
@@ -88,11 +85,56 @@ describe('useHotkeys', () => {
 
     rerender(
       <HotkeysProvider>
-        <Keys bindings={[a, escape, save]} />
+        <Keys bindings={[a, escape]} />
       </HotkeysProvider>,
     );
     press(document.body, 'a');
     expect(a.run).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['dialog', 'alertdialog'])('mod keys are suspended under role=%s', (role) => {
+    setPlatform('MacIntel');
+    const saveApprove = bind('mod+enter', { label: 'Save, then approve' });
+    const save = bind('mod+s');
+    function CloseDialog() {
+      return (
+        <div role={role}>
+          <textarea aria-label="Reason" />
+        </div>
+      );
+    }
+    render(
+      <HotkeysProvider>
+        <Keys bindings={[saveApprove, save]}>
+          <CloseDialog />
+        </Keys>
+      </HotkeysProvider>,
+    );
+    const reason = screen.getByLabelText('Reason');
+    expect(press(reason, 'Enter', { metaKey: true })).toBe(true);
+    press(reason, 's', { metaKey: true });
+    press(document.body, 'Enter', { metaKey: true });
+    expect(saveApprove.run).not.toHaveBeenCalled();
+    expect(save.run).not.toHaveBeenCalled();
+  });
+
+  it('a binding with inDialogs runs while a dialog is open', () => {
+    setPlatform('MacIntel');
+    const confirm = bind('mod+enter', { label: 'Close company', inDialogs: true });
+    const pick = bind('x', { inDialogs: true });
+    render(
+      <HotkeysProvider>
+        <Keys bindings={[confirm, pick]}>
+          <div role="dialog">
+            <textarea aria-label="Reason" />
+          </div>
+        </Keys>
+      </HotkeysProvider>,
+    );
+    press(screen.getByLabelText('Reason'), 'Enter', { metaKey: true });
+    expect(confirm.run).toHaveBeenCalledTimes(1);
+    press(document.body, 'x');
+    expect(pick.run).toHaveBeenCalledTimes(1);
   });
 
   it('caps lock still matches', () => {
@@ -129,11 +171,13 @@ describe('useHotkeys', () => {
   });
 
   it('mod keys work while typing', () => {
-    const save = bind('mod+s', { inInputs: true });
-    const toggle = bind('mod+b');
+    const save = bind('mod+s');
+    const escape = bind('escape');
+    const a = bind('a');
+    const pick = bind('x', { inInputs: true });
     render(
       <HotkeysProvider>
-        <Keys bindings={[save, toggle]}>
+        <Keys bindings={[save, escape, a, pick]}>
           <textarea aria-label="body" />
         </Keys>
       </HotkeysProvider>,
@@ -142,10 +186,14 @@ describe('useHotkeys', () => {
     const notPrevented = press(body, 's', { ctrlKey: true });
     expect(save.run).toHaveBeenCalledTimes(1);
     expect(notPrevented).toBe(false);
+    press(body, 'Escape');
+    expect(escape.run).toHaveBeenCalledTimes(1);
 
-    // Without inInputs a binding stays off in a text field, mod or not.
-    expect(press(body, 'b', { ctrlKey: true })).toBe(true);
-    expect(toggle.run).not.toHaveBeenCalled();
+    // Single keys stay off in a text field unless the binding sets inInputs.
+    expect(press(body, 'a')).toBe(true);
+    expect(a.run).not.toHaveBeenCalled();
+    press(body, 'x');
+    expect(pick.run).toHaveBeenCalledTimes(1);
   });
 
   it('mod is Cmd on a Mac and Ctrl elsewhere', () => {
@@ -175,7 +223,7 @@ describe('useHotkeys', () => {
   it('mod+enter matches Enter with the platform modifier', () => {
     setPlatform('MacIntel');
     const enter = bind('enter');
-    const saveApprove = bind('mod+enter', { inInputs: true });
+    const saveApprove = bind('mod+enter');
     render(
       <HotkeysProvider>
         <Keys bindings={[enter, saveApprove]}>

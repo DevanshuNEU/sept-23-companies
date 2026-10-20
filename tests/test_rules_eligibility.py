@@ -150,6 +150,42 @@ ROUND_3 = [  # (title, body, status, reason, start_2027)
      "2026 and June 2027.", "excluded", "grad_window", False),
 ]
 
+# Final fix wave, item 5 (#4): dated graduation sentences.
+NG = "Software Engineer, New Grad"
+FINAL_5 = [  # (title, body, status, reason, start_2027)
+    # (a) a date inside a start phrase is a start date, never a graduation date
+    (NG, "New graduates start in September 2027.", "ok", None, True),
+    (NG, "Full-time role for recent graduates with a start date of June 2027.", "ok", None, True),
+    (NG, "Graduates start date is September 2027.", "ok", None, True),
+    # (b) lower bounds open the window upward; "or earlier" is an upper bound
+    (NG, "Candidates must have graduated on or after January 2025.", "ok", None, False),
+    (NG, "Candidates must have graduated after December 2024.", "ok", None, False),
+    (NG, "Candidates must have graduated in June 2025 or later.", "ok", None, False),
+    (NG, "Candidates must have graduated in or after 2025.", "ok", None, False),
+    (NG, "Candidates must have graduated (since 2024).", "ok", None, False),
+    (NG, "Candidates must graduate in 2027 or earlier.", "ok", None, False),
+    (NG, "Candidates must have graduated in 2024 or earlier.", "excluded", "grad_window", False),
+    (NG, "Candidates must be graduating after June 2027.", "excluded", "grad_window", False),
+    # (c) a graduate route in the dated sentence lets graduates in
+    (NG, "Recent graduates and students graduating in 2027 are encouraged to apply.", "ok", None, False),
+    (NG, "New grads from the class of 2027 as well as earlier classes.", "ok", None, False),
+    (NG, "Open to students graduating in 2027 as well as recent graduates.", "ok", None, False),
+    (NG, "New graduates must graduate between December 2026 and June 2027.", "excluded", "grad_window", False),
+    # (d) a refused cohort is not a rule
+    (NG, "This role is not open to students graduating in 2027.", "ok", None, False),
+    (NG, "We are unable to consider 2027 graduates.", "ok", None, False),
+    # (e) a date acts as a rule only with a candidate cue next to the graduation word
+    (NG, "Graduates apply by January 15, 2027.", "ok", None, False),
+    (NG, "Help us hit our 2027 revenue targets with our graduates program.", "ok", None, False),
+    (NG, "We're a team of MIT graduates who started the company in 2025.", "ok", None, False),
+    (NG, "Founded in 2023 by two CMU graduates, we raised our Series A in 2025.", "ok", None, False),
+    # and the windows that must stay windows
+    (NG, "Expected graduation date: December 2026 - June 2027.", "excluded", "grad_window", False),
+    (NG, "Applicants must be graduating between December 2026 and June 2027.", "excluded", "grad_window", False),
+    (NG, "We are hiring candidates who will graduate in 2027.", "excluded", "grad_window", False),
+    (NG, "Graduation expected in Spring 2027.", "excluded", "grad_window", False),
+]
+
 # Final fix wave, item 4 (#4): a current-student phrase excludes only in a sentence that names a degree, program, school
 # or enrollment, with no negation and no preference wording.
 FINAL_4 = [  # (title, body, status, reason, start_2027)
@@ -215,6 +251,9 @@ class EligibilityTest(unittest.TestCase):
     def test_review_round_3_cases(self):
         self.check(ROUND_3)
 
+    def test_final_5_dated_graduation_sentences(self):
+        self.check(FINAL_5)
+
     def test_final_4_current_student_needs_a_program_cue(self):
         self.check(FINAL_4)
 
@@ -271,6 +310,10 @@ class EligibilityTest(unittest.TestCase):
             "graduated " * 100_000,  # one 1 MB sentence of graduation words and no date
             "graduate " * 50_000 + "2027 " * 50_000,  # many graduation words, then many years, in one sentence
             "currently " * 100_000 + "start 2026 " * 10_000,  # near misses for the current-student and start lists
+            "graduate 2027 " * 70_000,  # every graduation word has a date, and none has a cue
+            "must graduate 2027 not open to " * 30_000,  # a cue and a refusal at every graduation word
+            "start in 2027 graduate " * 40_000,  # start wording and graduation words interleaved
+            "currently enrolled students " * 35_000,  # a current-student phrase, a cue and no negation, one sentence
         ]
         for body in bodies:
             with self.subTest(body=body[:30]):

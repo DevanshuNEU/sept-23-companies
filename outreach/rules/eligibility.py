@@ -49,6 +49,9 @@ _DATE = re.compile(
 # What follows an upper_bound word for it to bound a date: "by Summer 2027", "no later than the end of 2027".
 # The years are the old range (eligibility.py:76).
 _BOUND_TAIL = r"\s{1,3}(?:the\s{1,3})?(?:end\s{1,3}of\s{1,3})?(?:[a-z]{1,9},?\s{1,3})?202[5-8](?!\d)"
+# The same for a lower bound: "after December 2024", "since 2024", "on or after January 2025" (years 2023 to 2029)
+_LOWER_TAIL = r"\s{1,3}(?:the\s{1,3})?(?:end\s{1,3}of\s{1,3})?(?:[a-z]{1,9},?\s{1,3})?202[3-9](?!\d)"
+CUE_REACH = 60  # a candidate cue or a refusal this close to a graduation word belongs to it
 _TITLE_YEAR = re.compile(r"(?<!\w)" + START_YEAR + r"(?!\w)")
 _CLAUSE_BREAK = re.compile(r"[,;:.!?\n]")  # where a clause ends, for the company-history phrases
 _JOINS_NEXT = ";:"  # a sentence ending in one of these runs on into the next for step 1
@@ -78,6 +81,13 @@ class _Patterns:
         self.history_date_lead = re.compile(r"\s{0,2}(?:" + phrases(e["history_date_lead"]).pattern + r")\s{1,3}",
                                             re.IGNORECASE)
         self.upper_bound = re.compile(phrases(e["upper_bound"]).pattern + _BOUND_TAIL, re.IGNORECASE)
+        self.lower_bound = re.compile(phrases(e["lower_bound"]).pattern + _LOWER_TAIL, re.IGNORECASE)
+        # "June 2025 or later", "2024 or earlier": a year, then the suffix
+        self.lower_suffix = re.compile(r"(?<!\w)202[3-9]\s{0,3}" + phrases(e["lower_bound_suffix"]).pattern, re.IGNORECASE)
+        self.upper_suffix = re.compile(r"(?<!\w)202[3-9]\s{0,3}" + phrases(e["upper_bound_suffix"]).pattern, re.IGNORECASE)
+        self.candidate_cue = phrases(e["candidate_cue"])
+        self.grad_refusal = phrases(e["grad_refusal"])
+        self.route_join = phrases(e["route_join"])
         self.cohort_title = phrases(e["cohort_title"])
         # Lowercase words matched case-sensitively against a lowercased text: the same matches, about three times
         # faster than IGNORECASE over this long list. Every phrase holds the words in start_2027_needs, so a text
@@ -205,36 +215,76 @@ def _month_of(name: str | None) -> int | None:
     return _SEASONS.get(name) or _MONTHS[name[:3]]
 
 
-def _dates_near_grad_words(sentence: str, grads: list[re.Match],
-                           blocks: list[tuple[int, int]]) -> list[tuple[int, int | None]]:
-    """(year, month or None) of each date within DATE_BEFORE or DATE_AFTER characters of a graduation word.
+def _lowered(text: str) -> str:
+    """The text in lower case, always the same length (a few characters lower-case to two, so those stay as they are)."""
+    lowered = text.lower()
+    if len(lowered) == len(text):
+        return lowered
+    return "".join(c.lower() if len(c.lower()) == 1 else c for c in text)
 
-    A date overlapping a block (the company's own history) does not count.
+
+def _start_spans(sentence: str, p: _Patterns) -> list[tuple[int, int]]:
+    """Where start_2027 wording sits in the sentence: a date inside it is a start date, never a graduation date."""
+    if "2027" not in sentence:
+        return []
+    lowered = _lowered(sentence)
+    if not all(w in lowered for w in p.start_2027_needs):
+        return []
+    return [m.span() for m in p.start_2027.finditer(lowered)]
+
+
+def _dates_near_grad_words(sentence: str, grads: list[re.Match],
+                           blocks: list[tuple[int, int]]) -> tuple[list[tuple[int, int | None]], list[re.Match]]:
+    """(year, month or None) of each date within DATE_BEFORE or DATE_AFTER characters of a graduation word, and the
+    graduation words that have one.
+
+    A date overlapping a block (the company's own history, or a start date) does not count.
     """
     dates = list(_DATE.finditer(sentence))
     if blocks:
         block_starts = [a for a, _ in blocks]
         dates = [d for d in dates if not _covered(blocks, block_starts, d.start(), d.end())]
     if not dates:
-        return []
+        return [], []
     starts = [d.start() for d in dates]
     near: set[int] = set()
+    used: list[re.Match] = []
     for g in grads:
         lo, hi = g.start() - DATE_BEFORE, g.end() + DATE_AFTER
         i = bisect.bisect_left(starts, lo)
+        found = False
         while i < len(dates) and starts[i] < hi:
             if dates[i].end() <= hi:
                 near.add(i)
+                found = True
             i += 1
-    return [(int(dates[i].group("year")), _month_of(dates[i].group("month"))) for i in sorted(near)]
+        if found:
+            used.append(g)
+    return [(int(dates[i].group("year")), _month_of(dates[i].group("month"))) for i in sorted(near)], used
+
+
+def _is_rule(sentence: str, used: list[re.Match], p: _Patterns) -> bool:
+    """Whether a dated graduation sentence says something about candidates: a cue word (must, eligible, class of)
+    sits within CUE_REACH of a graduation word that has a date, and none of those graduation words was refused just
+    before ("not open to students graduating in 2027")."""
+    cued = False
+    for g in used:
+        lo = max(0, g.start() - CUE_REACH)
+        if p.grad_refusal.search(sentence, lo, g.start()):
+            return False
+        if not cued and p.candidate_cue.search(sentence, lo, g.end() + CUE_REACH):
+            cued = True
+    return cued
 
 
 def _window_holds(sentence: str, dates: list[tuple[int, int | None]], graduated: int, p: _Patterns) -> bool:
     """True when the graduation month falls in the window the dates draw (a year alone spans January to December)."""
     lo = min(year * 12 + (month or 1) for year, month in dates)
     hi = max(year * 12 + (month or 12) for year, month in dates)
-    if p.upper_bound.search(sentence):
-        lo = 0  # "by Summer 2027" bounds the window above only: anyone who already graduated qualifies
+    if p.upper_bound.search(sentence) or p.upper_suffix.search(sentence):
+        lo = 0  # "by Summer 2027", "2027 or earlier" bound the window above only: anyone who already graduated qualifies
+    if p.lower_bound.search(sentence) or p.lower_suffix.search(sentence):
+        hi = 1 << 30  # "on or after January 2025", "June 2025 or later" bound it below only
     return lo <= graduated <= hi
 
 
@@ -265,12 +315,16 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
         grads, blocks = _anchors_and_blocks(sentence, p)
         if not grads:
             continue  # no graduation word, or only ones inside company history ("our founders graduated from YC")
-        dates = _dates_near_grad_words(sentence, grads, blocks)
-        if not dates:
+        if starts := _start_spans(sentence, p):
+            blocks = _merged(blocks + starts)  # "New graduates start in September 2027" has no graduation date
+        dates, used = _dates_near_grad_words(sentence, grads, blocks)
+        if not dates or not _is_rule(sentence, used, p):
             continue
         quote = _unit_quote(body, start, end, grads[0])
         if p.graduates_welcome.search(sentence) or p.soft.search(sentence):
             return "ok", None, quote
+        if p.graduate_route.search(sentence) and p.route_join.search(sentence):
+            return "ok", None, quote  # "Recent graduates and students graduating in 2027 are encouraged to apply"
         if _window_holds(sentence, dates, graduated, p):
             return "ok", None, quote
         return "excluded", "grad_window", quote

@@ -608,6 +608,43 @@ history_date_lead = ["in", "since", "during", "back in"]
 upper_bound = [
   "by", "no later than", "before", "prior to",
 ]
+# new in #4 (final fix wave, item 5): "graduated on or after January 2025", "in or after 2025", "(since 2024)" open the
+# window upward; the date after one of them is a lower bound, not a window
+lower_bound = [
+  "after", "on or after", "in or after", "since",
+]
+# and the same after the date: "June 2025 or later"; "June 2027 or earlier" bounds the window above like "by"
+lower_bound_suffix = [
+  "or later", "or after", "and later", "and after", "and beyond", "onward", "onwards", "or newer",
+]
+upper_bound_suffix = [
+  "or earlier", "or before", "and earlier", "and before", "or prior",
+]
+# new in #4 (final fix wave, item 5): a dated graduation sentence is a rule only when one of these sits within 60
+# characters of the graduation word that has the date: "Graduates apply by January 15, 2027" and "a team of MIT
+# graduates who started the company in 2025" name no candidate
+candidate_cue = [
+  "must", "should", "eligible", "eligibility", "required", "requirement", "requirements", "graduating",
+  "graduate in", "graduate by", "graduate between", "graduates in", "graduates between", "graduated in",
+  "graduated between", "graduated on", "graduated by", "graduated after", "expected", "class of", "hiring", "hire",
+  "hires", "candidates", "candidate", "applicants", "applicant", "students", "welcome", "open to", "seeking",
+  "looking for", "who will graduate", "who graduate", "who have graduated", "will graduate", "have graduated",
+]
+# new in #4 (final fix wave, item 5): a graduation word within 60 characters after one of these is refused, not
+# required ("This role is not open to students graduating in 2027"), so its date is no window
+grad_refusal = [
+  "not open to", "not eligible", "unable to consider", "cannot consider", "can not consider", "will not consider",
+  "do not consider", "does not consider", "don't consider", "not considering", "not accepting", "not hiring",
+  "no longer accepting", "not available to", "ineligible", "not looking for", "not seeking",
+]
+# new in #4 (final fix wave, item 5): wording that joins a graduate route to a dated cohort in one sentence ("Recent
+# graduates and students graduating in 2027", "the class of 2027 as well as earlier classes"). A route word in the
+# dated sentence lets graduates in only with one of these; "New graduates must graduate between X and Y" is a window.
+route_join = [
+  "and students", "or students", "and those", "or those", "and also", "as well as", "along with", "alongside",
+  "in addition to", "plus", "also", "earlier classes", "earlier cohorts", "earlier graduates", "previous classes",
+  "other classes",
+]
 # refresh/eligibility.py:53-55 COHORT_T, per the #9 ruling: cohort titles name graduates, not start dates
 # Not expressible as a word list: the old pattern allowed any text before 2027 after 'graduate developer' or 'graduate software engineer'.
 cohort_title = [
@@ -679,6 +716,18 @@ start_2027 = [
   "starting on winter 2027", "start early 2027", "start on early 2027", "starts on early 2027",
   "starting on early 2027", "start mid 2027", "start on mid 2027", "starts on mid 2027", "starting on mid 2027",
   "start late 2027", "start on late 2027", "starts on late 2027", "starting on late 2027",
+  # new in #4 (final fix wave, item 5): "with a start date of June 2027", "start date is September 2027"
+  "start date of 2027", "start date of january 2027", "start date of february 2027", "start date of march 2027",
+  "start date of april 2027", "start date of may 2027", "start date of june 2027", "start date of july 2027",
+  "start date of august 2027", "start date of september 2027", "start date of october 2027",
+  "start date of november 2027", "start date of december 2027", "start date of spring 2027",
+  "start date of summer 2027", "start date of fall 2027", "start date of winter 2027", "start date of early 2027",
+  "start date of mid 2027", "start date of late 2027", "start date is 2027", "start date is january 2027",
+  "start date is february 2027", "start date is march 2027", "start date is april 2027", "start date is may 2027",
+  "start date is june 2027", "start date is july 2027", "start date is august 2027", "start date is september 2027",
+  "start date is october 2027", "start date is november 2027", "start date is december 2027",
+  "start date is spring 2027", "start date is summer 2027", "start date is fall 2027", "start date is winter 2027",
+  "start date is early 2027", "start date is mid 2027", "start date is late 2027",
 ]
 # refresh/finalcheck.py:56-57 IMMED
 immediate_start = [

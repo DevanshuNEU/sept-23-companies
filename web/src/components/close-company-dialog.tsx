@@ -67,7 +67,7 @@ function CloseForm({
   );
 }
 
-/** Close a company with a reason (design 5.3 and section 7). Confirming calls onClose once and commits at once: this dialog has no undo and the caller adds none. */
+/** Close a company with a reason (design 5.3 and section 7). Confirming calls onClose once with the reason and note. The dialog only reports them: the caller decides how the write commits (an undoable 8-second pending write, per design line 379). */
 export function CloseCompanyDialog({
   company,
   open,

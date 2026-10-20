@@ -1,9 +1,13 @@
 """Graduation eligibility and the 2027 start flag (issue #4, Task 12)."""
 import dataclasses
+import re
+import tempfile
 import time
 import unittest
+from pathlib import Path
 
-from outreach.rules.config import load_config
+from outreach.rules import config as config_mod
+from outreach.rules.config import CONFIG_PATH, load_config
 from outreach.rules.eligibility import eligibility, starts_2027
 
 CASES = [  # (title, body, status, reason, start_2027)
@@ -144,11 +148,17 @@ class EligibilityTest(unittest.TestCase):
     def test_review_round_2_cases(self):
         self.check(ROUND_2)
 
-    def test_a_missing_route_list_fails_loudly(self):
-        # graduate_route is read on every call, so a config without it raises at once and names the key.
-        e = {k: v for k, v in self.cfg.eligibility.items() if k != "graduate_route"}
-        with self.assertRaisesRegex(KeyError, "graduate_route"):
-            eligibility("Software Engineer", "", dataclasses.replace(self.cfg, eligibility=e))
+    def test_a_missing_route_list_fails_at_load(self):
+        # graduate_route is a required key, so a config without it is refused at load and the error names it.
+        self.assertIn("graduate_route", config_mod.REQUIRED["eligibility"])
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        broken = re.sub(r"(?ms)^graduate_route = \[.*?^\]\n", "", text)
+        self.assertNotEqual(broken, text)
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "config.toml"
+            path.write_text(broken, encoding="utf-8")
+            with self.assertRaisesRegex(KeyError, "graduate_route"):
+                load_config(path)
 
     def test_body_start_wording_is_not_cancelled(self):
         for title, body, start in STARTS:

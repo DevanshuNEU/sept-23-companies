@@ -23,8 +23,8 @@ REQUIRED = {
     "sponsorship": ("topic", "context", "self_context", "benefit", "non_discrimination", "negation", "negation_near",
                     "clause_verbs", "field_no", "hedge", "opt", "opt_acronyms", "opt_support", "citizenship",
                     "citizenship_negation", "citizenship_preference"),
-    "eligibility": ("grad_words", "current_student", "graduates_welcome", "soft", "company_history", "upper_bound",
-                    "cohort_title", "start_2027", "immediate_start"),
+    "eligibility": ("grad_words", "current_student", "graduates_welcome", "graduate_route", "soft", "company_history",
+                    "upper_bound", "cohort_title", "start_2027", "immediate_start"),
     "facts": ("stage", "size_guess_words", "not_size", "source_estimate", "stage_guess", "size_source"),
 }
 

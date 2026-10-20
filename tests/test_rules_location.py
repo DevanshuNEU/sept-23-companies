@@ -20,6 +20,21 @@ CASES = [  # (location, country, expected)
 ]
 
 
+# Final fix wave, item 7 (#4): a structured country that is neither a US mark nor a known non-US country is not a "no";
+# the location text decides.
+COUNTRY_CASES = [  # (location, country, expected)
+    ("Remote", "United States (Remote)", "yes"), ("", "US-Remote", "yes"), ("Remote", "Puerto Rico", "yes"),
+    ("San Juan", "Puerto Rico", "yes"), ("", "Guam", "yes"),
+    ("Boston, MA", "North America", "yes"), ("", "North America", "unknown"), ("Remote", "North America", "unknown"),
+    ("Toronto, Canada", "North America", "no"),
+    ("Moscow", "Russia", "unknown"), ("Atlanta, Georgia", "Georgia", "yes"), ("Tbilisi, Georgia", "Georgia", "no"),
+    ("Austin, TX", "Remote", "yes"),
+    ("Remote", "Canada", "no"), ("Remote", "Germany", "no"), ("Boston, MA", "Germany", "no"),
+    ("Remote", "Canada (Remote)", "no"), ("Remote", "United Kingdom", "no"),
+    ("Remote", "us", "yes"), ("Toronto", "United States", "yes"),
+]
+
+
 class UsStatusTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -27,6 +42,11 @@ class UsStatusTest(unittest.TestCase):
 
     def test_cases(self):
         for loc, country, expected in CASES:
+            with self.subTest(location=loc, country=country):
+                self.assertEqual(us_status(loc, country, self.cfg), expected)
+
+    def test_an_unrecognised_country_falls_back_to_the_location(self):
+        for loc, country, expected in COUNTRY_CASES:
             with self.subTest(location=loc, country=country):
                 self.assertEqual(us_status(loc, country, self.cfg), expected)
 

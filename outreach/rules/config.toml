@@ -169,6 +169,8 @@ body_entry = [
 # refresh/crawl_boards.py:37 _US_MARK and refresh/finalcheck.py:81 USOK
 us_marks = [
   "us", "usa", "u.s.", "u.s.a.", "united states", "united states of america",
+  # new in #4 (final fix wave, item 7): US territories, which a structured country may name on its own
+  "puerto rico", "guam", "u.s. virgin islands", "us virgin islands", "american samoa", "northern mariana islands",
 ]
 # refresh/crawl_boards.py:34 _STATES (51 codes with DC); matched case-sensitively
 us_state_codes = [

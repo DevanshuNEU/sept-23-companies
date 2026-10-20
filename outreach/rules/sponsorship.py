@@ -93,7 +93,11 @@ class _Patterns:
         self.opt_acronyms = phrases(s["opt_acronyms"], case=True)  # "OPT", never "opt in" or "opt out"
         self.opt_support = phrases(s["opt_support"])
         self.non_us = phrases(cfg.location["non_us_countries"])
-        self.citizenship = phrases(s["citizenship"])
+        forms = s["citizenship_us_forms"]
+        templates = [t.replace("{us}", form) for t in s["citizenship_templates"] for form in forms]
+        self.citizenship = phrases(s["citizenship"] + templates)
+        self.itar = phrases(s["itar"])
+        self.itar_cue = phrases(s["itar_cue"])
         self.citizenship_negation = phrases(s["citizenship_negation"])
         self.citizenship_preference = phrases(s["citizenship_preference"])
 
@@ -423,11 +427,21 @@ def citizenship_required(body: str, cfg: Config) -> tuple[bool, str]:
         clauses: list[tuple[int, int]] = []
         starts: list[int] = []
         negated: dict[int, bool] = {}  # clause index -> has a citizenship_negation, read once per clause
-        for m in p.citizenship.finditer(text):
+        cued: dict[int, bool] = {}  # clause index -> has an itar_cue, read once per clause
+        hits = [(m, False) for m in p.citizenship.finditer(text)] + [(m, True) for m in p.itar.finditer(text)]
+        if hits and len(hits) > 1:
+            hits.sort(key=lambda hit: hit[0].start())
+        for m, bare_itar in hits:
             if not clauses:
                 clauses = _clauses(text, p, any_right=True)
                 starts = [a for a, _ in clauses]
             i = bisect.bisect_right(starts, m.start()) - 1
+            if bare_itar:
+                if i not in cued:
+                    a, b = clauses[i]
+                    cued[i] = p.itar_cue.search(text, a, b) is not None
+                if not cued[i]:
+                    continue  # "ITAR compliant", "no ITAR restrictions": no cue, no requirement
             if i not in negated:
                 a, b = clauses[i]
                 negated[i] = p.citizenship_negation.search(text[a:b]) is not None

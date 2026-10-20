@@ -410,7 +410,7 @@ citizenship = [
   "active clearance", "clearance is required", "clearance required", "ts/sci", "secret clearance", "top secret",
   "green card holders only", "green card holder only", "permanent residents only", "permanent resident only",
   "must be a u.s. person", "must be u.s. persons", "must be a us person", "must be us persons", "u.s. persons only",
-  "u.s. persons required", "us persons only", "us persons required", "itar", "export control laws require",
+  "u.s. persons required", "us persons only", "us persons required", "export control laws require",
   "u.s. citizen required", "u.s. citizen is required", "u.s. citizen is only", "u.s. citizen are required",
   "u.s. citizen are only", "u.s. citizens required", "u.s. citizens is required", "u.s. citizens is only",
   "u.s. citizens are required", "u.s. citizens are only", "u.s. citizenship only", "u.s. citizenship is only",
@@ -434,11 +434,37 @@ citizenship = [
   "must be u.s. citizens", "must be u.s citizens", "must be us citizens", "must be united states citizens",
   "must be citizens of the united states",
 ]
+# new in #4 (final fix wave, item 3): the ways a posting says citizenship is required, one template per wording, with
+# {us} replaced by each of the forms below. Joined to the citizenship list.
+citizenship_us_forms = [
+  "u.s.", "u.s", "us", "united states",
+]
+citizenship_templates = [
+  "requires {us} citizenship", "require {us} citizenship", "requires {us} citizen", "{us} citizenship is a requirement",
+  "{us} citizenship is a must", "{us} citizenship is mandatory", "{us} citizenship is necessary",
+  "must have {us} citizenship", "must hold {us} citizenship", "must possess {us} citizenship",
+  "only {us} citizens", "only {us} citizen", "{us} citizenship or permanent residency required",
+  "{us} citizenship or permanent residency is required", "{us} citizenship or green card required",
+  "{us} citizenship or green card is required", "{us} citizens or permanent residents only",
+  "{us} citizens or permanent residents required",
+]
+# new in #4 (final fix wave, item 3): bare "ITAR" is a requirement only in a clause that also has one of the cue words
+# ("ITAR compliant" and "not subject to ITAR" are not)
+itar = [
+  "itar",
+]
+itar_cue = [
+  "requires", "require", "required", "must", "only", "eligible", "eligibility", "restricted to", "u.s. persons",
+  "us persons", "u.s. person", "us person",
+]
 # new in #4 ('No security clearance required' is not a requirement). Read anywhere in the clause.
 citizenship_negation = [
   "no security clearance", "no clearance", "no u.s. citizenship", "no citizenship", "not required", "isn't required",
   "not a requirement", "not necessary", "not needed", "does not require", "do not require", "doesn't require",
   "regardless of", "without regard to",
+  # new in #4 (final fix wave, item 3)
+  "do not need", "don't need", "does not need", "doesn't need", "need not", "no need", "not mandatory",
+  "isn't mandatory", "not a must", "isn't a must", "not subject to", "not a prerequisite", "no itar",
 ]
 # new in #4 (review rounds 1 and 2): 'clearance is a plus' is a preference, not a requirement. One cancels only a
 # requirement within sponsorship.py NEAR_CHARS of it with no comma between, so "Clearance required, TS/SCI

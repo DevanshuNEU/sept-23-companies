@@ -294,6 +294,38 @@ FINAL_2_STANCE = [  # (body, stances accepted)
 ]
 
 
+# Final fix wave, item 3 (#4): citizenship phrasings the lists missed, and wrong hides.
+FINAL_3_CITIZEN = [  # (body, required)
+    ("Position requires US citizenship.", True),
+    ("This role requires U.S. citizenship.", True),
+    ("This role requires United States citizenship.", True),
+    ("U.S. citizenship is a requirement.", True),
+    ("You must have U.S. citizenship.", True),
+    ("Applicants must hold US citizenship.", True),
+    ("Only U.S. citizens will be considered.", True),
+    ("Only US citizens may apply.", True),
+    ("U.S. citizenship or permanent residency required.", True),
+    ("US citizenship or permanent residency is required.", True),
+    ("This role requires access to ITAR-controlled data.", True),
+    ("ITAR compliance is required.", True),
+    ("Must be eligible to work on ITAR programs.", True),
+    ("Only ITAR eligible candidates will be considered.", True),
+    ("You do not need a security clearance.", False),
+    ("You don" + RQ + "t need a security clearance.", False),
+    ("You don't need a security clearance.", False),
+    ("A security clearance is not mandatory.", False),
+    ("No need for a security clearance.", False),
+    ("U.S. citizenship is not a must.", False),
+    ("No ITAR restrictions on this role.", False),
+    ("This role is not subject to ITAR.", False),
+    ("Our product is ITAR compliant.", False),
+    ("We build ITAR compliant software.", False),
+    ("ITAR is not required for this role.", False),
+    # a requirement next to a negation about something else stays a requirement
+    ("A degree is not required, but this role requires U.S. citizenship.", True),
+]
+
+
 class SponsorshipStanceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -400,7 +432,8 @@ class SponsorshipStanceTest(unittest.TestCase):
     def test_new_keys_are_required(self):
         for key in ("opt_support", "opt_acronyms", "negation_near", "context", "self_context", "benefit",
                     "non_discrimination", "field_no", "clause_verbs", "citizenship_preference", "negators", "negation_elided", "not_subject", "continuation",
-                    "elided_complete", "negation_cued", "negation_cue"):
+                    "elided_complete", "negation_cued", "negation_cue", "citizenship_us_forms",
+                    "citizenship_templates", "itar", "itar_cue"):
             with self.subTest(key=key):
                 self.assertIn(key, config_mod.REQUIRED["sponsorship"])
 
@@ -426,6 +459,8 @@ class SponsorshipStanceTest(unittest.TestCase):
             "visa sponsorship (we do not provide relocation), " * 10_000,  # half a MB: each clause is read twice
             ("(" + "a" * 299) * 3_300,  # parentheses that never close
             "we cannot hire people who need visas, except for OPT " * 19_000,
+            "itar " * 200_000,  # bare ITAR with no cue anywhere: one cue search, not one per word
+            "itar, " * 160_000,
         ]
         for body in bodies:
             with self.subTest(body=body[:30]):
@@ -442,7 +477,7 @@ class CitizenshipTest(unittest.TestCase):
         cls.cfg = load_config()
 
     def test_citizenship(self):
-        for body, expected in CITIZEN + REVIEW_CITIZEN + REVIEW_2_CITIZEN + REVIEW_3_CITIZEN:
+        for body, expected in CITIZEN + REVIEW_CITIZEN + REVIEW_2_CITIZEN + REVIEW_3_CITIZEN + FINAL_3_CITIZEN:
             with self.subTest(body=body):
                 required, quote = citizenship_required(body, self.cfg)
                 self.assertIs(required, expected)

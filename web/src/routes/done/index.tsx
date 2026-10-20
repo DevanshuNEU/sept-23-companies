@@ -66,14 +66,9 @@ function percent(part: number, whole: number): string {
   return whole > 0 ? `${Number(((part / whole) * 100).toFixed(1))}%` : '0%';
 }
 
-function names(list: string[]): string {
-  return list.length <= 1 ? (list[0] ?? '') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1] ?? ''}`;
-}
-
 function Metrics({ view }: { view: DoneView }) {
   const { metrics } = view;
   const { replies, firstEmails } = metrics.replyRate;
-  const inProcess = view.companies.filter((d) => d.outcomeLabel === 'Interviewing').map((d) => d.company.name);
   return (
     <div className="mb-5 grid grid-cols-4 gap-3">
       <Metric label={`Replies in ${formatMonth(view.asOf)}`} value={String(metrics.repliesThisMonth)} sub={`Per week, last ${metrics.repliesPerWeek.length} weeks`}>
@@ -85,7 +80,7 @@ function Metrics({ view }: { view: DoneView }) {
         sub={firstEmails > 0 ? `${replies} ${replies === 1 ? 'reply' : 'replies'} from ${firstEmails} first emails this month` : 'No first emails this month'}
       />
       <Metric label="Referrals" value={String(metrics.referrals)} />
-      <Metric label="Interviews" value={String(metrics.interviews)} sub={inProcess.length > 0 ? `${names(inProcess)} still in process` : undefined} />
+      <Metric label="Interviews" value={String(metrics.interviews)} />
     </div>
   );
 }

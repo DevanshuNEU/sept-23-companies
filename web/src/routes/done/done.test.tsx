@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
+import type { DoneView } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
 import { renderWithApp } from '@/test/render';
@@ -23,6 +24,17 @@ async function done(client = new FixtureClient()) {
   return view;
 }
 
+/** A fixture client whose Done metrics are changed by the test. */
+function withMetrics(change: (m: DoneView['metrics']) => DoneView['metrics']) {
+  class Changed extends FixtureClient {
+    override async done(): Promise<DoneView> {
+      const view = await super.done();
+      return { ...view, metrics: change(view.metrics) };
+    }
+  }
+  return new Changed();
+}
+
 const metric = (name: string) => screen.findByRole('group', { name });
 const chart = () => screen.findByRole('img', { name: /^Replies per week/ });
 const bars = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLElement>('[data-slot="reply-bar"]'));
@@ -36,7 +48,21 @@ describe('Done companies', () => {
     expect(within(await metric('Reply rate')).getByText('9 replies from 140 first emails this month')).toBeInTheDocument();
     expect(within(await metric('Referrals')).getByText('2')).toBeInTheDocument();
     expect(within(await metric('Interviews')).getByText('3')).toBeInTheDocument();
-    expect(within(await metric('Interviews')).getByText('Crusoe still in process')).toBeInTheDocument();
+    expect(within(await metric('Interviews')).queryByText(/still in process/)).toBeNull();
+  });
+
+  it('says "1 reply" when there is exactly one', async () => {
+    await done(withMetrics((m) => ({ ...m, replyRate: { replies: 1, firstEmails: 20 } })));
+    const rate = await metric('Reply rate');
+    expect(within(rate).getByText('5%')).toBeInTheDocument();
+    expect(within(rate).getByText('1 reply from 20 first emails this month')).toBeInTheDocument();
+  });
+
+  it('shows 0% and a plain note when there were no first emails', async () => {
+    await done(withMetrics((m) => ({ ...m, replyRate: { replies: 0, firstEmails: 0 } })));
+    const rate = await metric('Reply rate');
+    expect(within(rate).getByText('0%')).toBeInTheDocument();
+    expect(within(rate).getByText('No first emails this month')).toBeInTheDocument();
   });
 
   it('draws eight bars in one foreground series, the current week solid, labelled with every count', async () => {
@@ -65,7 +91,10 @@ describe('Done companies', () => {
     for (const [i, tip] of tips.entries()) {
       const bar = all[i];
       if (!bar) throw new Error(`no bar ${i}`);
-      await user.hover(bar);
+      // The hover target is the full-height column around the bar, so a 2px zero week can be reached.
+      const column = bar.parentElement;
+      if (!column) throw new Error(`no column ${i}`);
+      await user.hover(column);
       expect(await screen.findByRole('tooltip')).toHaveTextContent(tip);
       await user.keyboard('{Escape}');
       await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());

@@ -33,15 +33,17 @@ export function RepliesChart({ weeks }: { weeks: Week[] }) {
         return (
           <Tooltip key={w.weekOf}>
             <TooltipTrigger asChild>
-              <span
-                data-slot="reply-bar"
-                data-current={current}
-                style={{ height: w.count > 0 && max > 0 ? `${Math.round((w.count / max) * 100)}%` : '2px' }}
-                className={cn(
-                  'min-h-0.5 flex-1 rounded-t-[2px] transition-opacity hover:opacity-70',
-                  current ? 'bg-foreground' : 'bg-foreground/[0.22]',
-                )}
-              />
+              <span className="group flex h-full flex-1 items-end">
+                <span
+                  data-slot="reply-bar"
+                  data-current={current}
+                  style={{ height: w.count > 0 && max > 0 ? `${Math.round((w.count / max) * 100)}%` : '2px' }}
+                  className={cn(
+                    'min-h-0.5 w-full rounded-t-[2px] transition-opacity group-hover:opacity-70',
+                    current ? 'bg-foreground' : 'bg-foreground/[0.22]',
+                  )}
+                />
+              </span>
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={6}>
               {tip}

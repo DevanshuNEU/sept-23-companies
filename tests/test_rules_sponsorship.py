@@ -56,9 +56,8 @@ MORE_STANCE = [  # (body, stance)
     # a clause with no topic word and no signal adds nothing
     ("We are a fast-growing team, but we do not sponsor visas.", "no"),
     ("We sponsor H-1B visas, but you must apply by June 1.", "yes"),
-    # a negation in a clause without the topic word still counts: the sentence is about sponsorship. Review round
-    # 1 (R1) made "sponsor you" alone neutral (no context word), so this reads no, not the yes-and-no unclear of before.
-    ("We would love to sponsor you, but we are unable at this time.", "no"),
+    # a negation in a clause without the topic word still counts: the sentence is about sponsorship
+    ("We would love to sponsor you, but we are unable at this time.", "unclear"),  # yes and no in one sentence
     # a hedge or a non-US country in another clause makes the sentence unclear
     ("We sponsor H-1B visas, but only in limited cases.", "unclear"),
     ("We do not sponsor visas, but exceptions may be made for senior hires.", "unclear"),
@@ -135,6 +134,44 @@ REVIEW_STANCE = [  # (body, stance)
     ("We sponsor visas for strong candidates who need them now or in the future.", "yes"),
 ]
 
+# Review round 2 (#4, Task 11): what the round 1 fix broke.
+REVIEW_2_STANCE = [  # (body, stance)
+    # a refusal shared by both sides of "and" stays a refusal
+    ("Visa sponsorship and relocation are not available.", "no"),
+    ("Sponsorship and relocation are not available for this role.", "no"),
+    ("We do not offer relocation and visa sponsorship.", "no"),
+    ("We cannot provide relocation assistance and visa sponsorship for this role.", "no"),
+    ("We do not provide relocation and visa sponsorship.", "no"),
+    ("We are unable to sponsor and transfer H-1B visas.", "no"),
+    ("We do not sponsor and will not transfer H-1B visas.", "no"),
+    # sponsorship, visas, H-1B and the verb sponsor are their own context; sponsors and sponsored are not
+    ("Sponsorship is available for this role.", "yes"),
+    ("Sponsorship is available.", "yes"),
+    ("Sponsorship: Yes", "yes"),
+    ("Sponsorship Available: Yes", "yes"),
+    ("H-1B transfers welcome.", "yes"),
+    ("Sponsorship provided for the right candidate.", "yes"),
+    ("We can sponsor.", "yes"),
+    ("You will report to the executive sponsor of the program.", "silent"),  # the business sense of "sponsor"
+    # "employer-sponsored work authorization" is about sponsorship
+    ("Candidates must not require employer-sponsored work authorization now or in the future.", "no"),
+    ("This position is not eligible for employer-sponsored work authorization.", "no"),
+    # a refusal is read before the equal opportunity marker
+    ("We do not sponsor visas, regardless of seniority.", "no"),
+    ("We are unable to sponsor visas regardless of experience level.", "no"),
+]
+
+REVIEW_2_CITIZEN = [  # (body, required): a preference word cancels only the requirement it sits next to
+    ("Active Secret clearance required, TS/SCI preferred.", True),
+    ("Must hold an active TS/SCI clearance, Kubernetes experience is a plus.", True),
+    ("U.S. citizenship required, experience with Python preferred.", True),
+    ("Active security clearance required, Python a plus.", True),
+    ("Must be a U.S. citizen with 3+ years of experience, plus strong Python skills.", True),
+    ("Must be a US citizen, bonus eligible.", True),
+    ("TS/SCI preferred, active Secret clearance required.", True),
+    ("Nice to have: an active security clearance.", False),
+]
+
 REVIEW_CITIZEN = [  # (body, required)
     ("Candidates must be U.S. citizens.", True),
     ("Applicants must be U.S. citizens due to government contract requirements.", True),
@@ -168,6 +205,9 @@ class SponsorshipStanceTest(unittest.TestCase):
 
     def test_review_stances(self):
         self.check(REVIEW_STANCE)
+
+    def test_review_2_stances(self):
+        self.check(REVIEW_2_STANCE)
 
     def test_a_field_answer_counts_only_after_the_topic(self):
         # "Relocation: No" before a sponsorship field on the same line is not a refusal of sponsorship.
@@ -218,8 +258,8 @@ class SponsorshipStanceTest(unittest.TestCase):
         self.assertEqual(sponsorship_stance(EEO + " We do not sponsor visas.", self.cfg)[0], "no")
 
     def test_new_keys_are_required(self):
-        for key in ("opt_support", "opt_acronyms", "negation_near", "context", "benefit", "non_discrimination",
-                    "field_no"):
+        for key in ("opt_support", "opt_acronyms", "negation_near", "context", "self_context", "benefit",
+                    "non_discrimination", "field_no", "clause_verbs", "citizenship_preference"):
             with self.subTest(key=key):
                 self.assertIn(key, config_mod.REQUIRED["sponsorship"])
 
@@ -236,6 +276,8 @@ class SponsorshipStanceTest(unittest.TestCase):
             ("5 years ago we graduated in 2027 or 2026; sponsorship maybe. \u00e9 " * 15000)[:1_000_000],
             "not available " * 72_000,  # one 1 MB sentence of window negations with no topic word near
             "visa sponsorship not available " * 33_000,  # window negations, each next to a topic word
+            "sponsorship and relocation are " * 33_000,  # one 1 MB sentence of "and" cuts to weigh
+            "security clearance is a plus " * 35_000,  # one 1 MB sentence of requirements, each with a preference
         ]
         for body in bodies:
             with self.subTest(body=body[:30]):
@@ -251,7 +293,7 @@ class CitizenshipTest(unittest.TestCase):
         cls.cfg = load_config()
 
     def test_citizenship(self):
-        for body, expected in CITIZEN + REVIEW_CITIZEN:
+        for body, expected in CITIZEN + REVIEW_CITIZEN + REVIEW_2_CITIZEN:
             with self.subTest(body=body):
                 required, quote = citizenship_required(body, self.cfg)
                 self.assertIs(required, expected)

@@ -230,17 +230,29 @@ topic = [
   "sponsor", "sponsors", "sponsored", "sponsoring", "sponsorship", "visa", "visas", "h-1b", "h1b",
 ]
 # new in #4 (review round 1): a topic word reads yes only next to one of these, in its clause, other than the topic
-# word itself; so "executive sponsors" and "Visa and Mastercard" say nothing, and "We sponsor H-1B visas" says yes
+# word itself, or when it is a self_context word; so "executive sponsors" and "Visa and Mastercard" say nothing, and
+# "We sponsor H-1B visas" says yes
 context = [
   "visa", "visas", "h-1b", "h1b", "sponsorship", "immigration", "work authorization", "employment authorization",
   "green card", "work permit", "work permits", "tn", "o-1", "l-1", "e-3",
 ]
-# new in #4 (review round 1): benefit wording; a topic word inside one of these is not a topic word
+# new in #4 (review round 2): topic words that are their own context ("Sponsorship is available.", "We can
+# sponsor.", "H-1B transfers welcome."). Not "sponsors" or "sponsored" (executive sponsors, sponsored events), and
+# "visa" only in these forms, so "Visa and Mastercard" says nothing.
+self_context = [
+  "sponsorship", "sponsor", "sponsoring", "h-1b", "h1b", "visas", "work visa", "work visas", "visa sponsorship",
+  "visa transfer", "visa transfers",
+]
+# new in #4 (review round 1): benefit and business wording; a topic word inside one of these is not a topic word.
+# Not bare "employer sponsored": "employer-sponsored work authorization" is about sponsorship.
 benefit = [
-  "employer sponsored", "company sponsored", "sponsored health", "sponsored healthcare", "sponsored insurance",
+  "sponsored health", "sponsored healthcare", "sponsored insurance",
   "sponsored medical", "sponsored dental", "sponsored vision", "sponsored benefit", "sponsored benefits",
   "sponsored plan", "sponsored plans", "sponsored 401k", "sponsored 401(k)", "sponsored retirement",
   "sponsored life insurance", "sponsored coverage", "sponsored wellness",
+  # new in #4 (review round 2): the business sense of "sponsor", now that "sponsor" is its own context
+  "executive sponsor", "project sponsor", "program sponsor", "business sponsor", "corporate sponsor",
+  "event sponsor", "title sponsor",
 ]
 # new in #4 (review round 1): a clause with one of these is an equal opportunity line and says nothing
 non_discrimination = [
@@ -282,6 +294,16 @@ negation_near = [
   "not supported", "not eligible", "not eligible for", "ineligible", "not possible", "not qualify", "not open to",
   "not in a position", "not have the ability", "no ability", "not consider", "not be considered",
   "without the need", "now or in the future", "now or in future", "current or future",
+]
+# new in #4 (review round 2): finite verbs and auxiliaries. A sentence is cut at " and " only when both sides are
+# whole clauses: the left side holds one of these and the right side is one to three words and then one of these
+# ("We offer visa sponsorship and relocation is not provided"). Otherwise a refusal is shared across the "and"
+# ("Visa sponsorship and relocation are not available", "We do not offer relocation and visa sponsorship").
+clause_verbs = [
+  "is", "are", "was", "were", "be", "will", "won't", "would", "can", "cannot", "can't", "could", "may", "might",
+  "must", "should", "shall", "do", "does", "did", "don't", "doesn't", "has", "have", "had", "isn't", "aren't",
+  "offer", "offers", "provide", "provides", "sponsor", "sponsors", "support", "supports", "accept", "accepts",
+  "welcome", "welcomes", "need", "needs", "require", "requires", "include", "includes", "pay", "pays", "get", "gets",
 ]
 # new in #4 (review round 1): an ATS field answer, read only as ": <answer>" right after a topic word
 # ("Visa sponsorship: No", "Sponsorship Available: No")
@@ -340,13 +362,18 @@ citizenship = [
   "must be u.s. citizens", "must be u.s citizens", "must be us citizens", "must be united states citizens",
   "must be citizens of the united states",
 ]
-# new in #4 ('No security clearance required' is not a requirement; 'clearance is a plus' is a preference)
+# new in #4 ('No security clearance required' is not a requirement). Read anywhere in the clause.
 citizenship_negation = [
   "no security clearance", "no clearance", "no u.s. citizenship", "no citizenship", "not required", "isn't required",
   "not a requirement", "not necessary", "not needed", "does not require", "do not require", "doesn't require",
   "regardless of", "without regard to",
-  # new in #4 (review round 1)
-  "plus", "a plus", "preferred", "nice to have", "a bonus", "bonus",
+]
+# new in #4 (review rounds 1 and 2): 'clearance is a plus' is a preference, not a requirement. One cancels only a
+# requirement within sponsorship.py NEAR_CHARS of it with no comma between, so "Clearance required, TS/SCI
+# preferred." still requires a clearance. Bare "plus" and "bonus" are left out ("plus strong Python skills",
+# "bonus eligible").
+citizenship_preference = [
+  "a plus", "is a plus", "nice to have", "a bonus", "is a bonus", "preferred",
 ]
 
 [eligibility]

@@ -17,16 +17,19 @@ import re
 from .config import Config, phrases
 from .text import quote_around, sentences
 
-# Where a sentence is cut into clauses: ", but", " but ", "; however", "however,", " and ", " though ", " while "
-# and ", which". (sentences() already ends a sentence at a semicolon, so "; however" only shows up as "however," at
-# the start of the next one.) "and", "though", "while" and "which" start a new subject often enough
-# ("We offer visa sponsorship and relocation is not provided") that a generic negation after them is about
-# something else.
+# Where a sentence is cut into clauses: ", but", " but ", "; however", "however,", " though ", " while ", ", which"
+# and, between two whole clauses only, " and " (see _and_joins_clauses). (sentences() already ends a sentence at a
+# semicolon, so "; however" only shows up as "however," at the start of the next one.) "though", "while", "which"
+# and a clause-joining "and" start a new subject often enough ("We offer visa sponsorship and relocation is not
+# provided") that a generic negation after them is about something else.
 _CLAUSE_BREAK = re.compile(
-    r",\s{0,3}but(?!\w)|\sbut\s|;\s{0,3}however(?!\w)|(?<!\w)however,|\sand\s|\sthough\s|\swhile\s"
+    r",\s{0,3}but(?!\w)|\sbut\s|;\s{0,3}however(?!\w)|(?<!\w)however,|(?P<and>\sand\s)|\sthough\s|\swhile\s"
     r"|,\s{0,3}which(?!\w)",
     re.IGNORECASE,
 )
+# The right side of an " and " is read this far, enough for a subject of three words and its verb.
+_AND_LOOKAHEAD = 80
+_PLAIN_WORD = re.compile(r"\w[\w'-]*")  # a word with no punctuation after it, so a subject never runs past a comma
 _CURLY = chr(0x2019)  # a curly apostrophe, read as a straight one so "don't" in the lists matches "don" + curly + "t"
 
 # A `negation_near` phrase ("not available", "now or in the future") is a refusal only when a topic word in the
@@ -35,6 +38,9 @@ _CURLY = chr(0x2019)  # a curly apostrophe, read as a straight one so "don't" in
 # "will not consider candidates who need visa" (21), and leaves out "visas for strong candidates who need them now
 # or in the future" (37).
 NEAR_CHARS = 30
+# Read past either end of a window, so a phrase that starts inside it is never cut by the search bounds. Longer
+# than any citizenship_preference entry.
+_SLACK = 20
 
 # A clause's reading. NEUTRAL is a clause with nothing to say ("We are a growing team, but ...", "executive
 # sponsors", an EEO line).
@@ -48,10 +54,12 @@ class _Patterns:
         s = cfg.sponsorship
         self.topic = phrases(s["topic"])
         self.context = phrases(s["context"])
+        self.self_context = phrases(s["self_context"])
         self.benefit = phrases(s["benefit"])
         self.non_discrimination = phrases(s["non_discrimination"])
         self.negation = phrases(s["negation"])
         self.negation_near = phrases(s["negation_near"])
+        self.clause_verbs = phrases(s["clause_verbs"])
         # ": No" as an ATS field value; the answer list goes through phrases() like every other list
         self.field_no = re.compile(r":\s{0,3}(?:" + phrases(s["field_no"]).pattern + ")", re.IGNORECASE)
         self.hedge = phrases(s["hedge"])
@@ -61,6 +69,7 @@ class _Patterns:
         self.non_us = phrases(cfg.location["non_us_countries"])
         self.citizenship = phrases(s["citizenship"])
         self.citizenship_negation = phrases(s["citizenship_negation"])
+        self.citizenship_preference = phrases(s["citizenship_preference"])
 
 
 @functools.lru_cache(maxsize=8)
@@ -73,12 +82,33 @@ def _blank(m: re.Match) -> str:
     return " " * len(m.group(0))  # same length, so offsets still point into the body
 
 
-def _clauses(sentence: str) -> list[tuple[int, int]]:
-    """[start, end) of each clause of a sentence."""
+def _starts_clause(sentence: str, at: int, p: _Patterns) -> bool:
+    """Whether the text at `at` is one to three plain words and then a verb: "relocation is", "we sponsor"."""
+    for i, token in enumerate(sentence[at:at + _AND_LOOKAHEAD].split(None, 4)[:4]):
+        if p.clause_verbs.fullmatch(token):
+            return 1 <= i <= 3  # a verb first ("and will not transfer") shares the left side's subject
+        if not _PLAIN_WORD.fullmatch(token):
+            return False  # punctuation ends the subject: "and visa sponsorship." has no verb of its own
+    return False
+
+
+def _clauses(sentence: str, p: _Patterns) -> list[tuple[int, int]]:
+    """[start, end) of each clause of a sentence. " and " cuts only between two whole clauses, so a refusal on one
+    side ("Visa sponsorship and relocation are not available") still covers the other."""
     spans, pos = [], 0
+    left_verb, scanned = False, 0  # whether [pos, scanned) holds a verb; scanned only grows, so this stays linear
     for cut in _CLAUSE_BREAK.finditer(sentence):
+        if cut.lastgroup == "and":
+            if not _starts_clause(sentence, cut.end(), p):
+                continue
+            if not left_verb:
+                left_verb = p.clause_verbs.search(sentence, max(scanned, pos), cut.start()) is not None
+                scanned = cut.start()  # a space, so endpos never cuts a word in two
+            if not left_verb:
+                continue
         spans.append((pos, cut.start()))
-        pos = cut.end()
+        pos = scanned = cut.end()
+        left_verb = False
     spans.append((pos, len(sentence)))
     return spans
 
@@ -110,7 +140,10 @@ def _after_topic(ends: list[int], start: int) -> bool:
 
 
 def _has_context(clause: str, topics: list[tuple[int, int]], p: _Patterns) -> bool:
-    """Whether a context word sits in the clause apart from a topic word ("Visa" alone is its own topic word)."""
+    """Whether the clause names a self_context word ("Sponsorship is available"), or a context word apart from a
+    topic word ("Visa" alone is its own topic word, not its own context)."""
+    if p.self_context.search(clause):
+        return True
     for c in p.context.finditer(clause):
         if len(topics) > 1 or c.end() <= topics[0][0] or c.start() >= topics[0][1]:
             return True  # with two topic words, any context word is apart from one of them; so this loop ends fast
@@ -118,9 +151,8 @@ def _has_context(clause: str, topics: list[tuple[int, int]], p: _Patterns) -> bo
 
 
 def _read_clause(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
-    """no, unclear, yes or neutral, and the match that decided it. Negation first, then hedges and countries."""
-    if p.non_discrimination.search(clause):
-        return NEUTRAL, None  # "We do not discriminate based on immigration or visa status."
+    """no, unclear, yes or neutral, and the match that decided it. A refusal first, then the equal opportunity
+    marker ("We do not sponsor visas, regardless of seniority" is a refusal), then hedges and countries."""
     if m := p.negation.search(clause):
         return NO, m
     topics = [t.span() for t in p.topic.finditer(clause)]
@@ -132,6 +164,8 @@ def _read_clause(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
         for m in p.field_no.finditer(clause) if ":" in clause else ():
             if _after_topic(ends, m.start()):
                 return NO, m  # "Sponsorship Available: No"
+    if p.non_discrimination.search(clause):
+        return NEUTRAL, None  # "We do not discriminate based on immigration or visa status."
     if m := p.hedge.search(clause):
         return UNCLEAR, m
     if m := p.non_us.search(clause):
@@ -139,6 +173,22 @@ def _read_clause(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
     if topics and _has_context(clause, topics, p):
         return YES, p.topic.search(clause)
     return NEUTRAL, None  # no topic word, or one with no sponsorship context ("executive sponsors")
+
+
+def _preferred(text: str, a: int, b: int, m: re.Match, p: _Patterns) -> bool:
+    """Whether a citizenship_preference sits within NEAR_CHARS of the requirement m, in clause [a, b), with no comma
+    between ("Security clearance is a plus." yes; "Clearance required, TS/SCI preferred." no, for the first one)."""
+    lo, hi = max(a, m.start() - NEAR_CHARS - _SLACK), min(b, m.end() + NEAR_CHARS + _SLACK)
+    for w in p.citizenship_preference.finditer(text, lo, hi):
+        if w.end() <= m.start():
+            gap = text[w.end():m.start()]
+        elif w.start() >= m.end():
+            gap = text[m.end():w.start()]
+        else:
+            gap = ""  # the two overlap
+        if len(gap) <= NEAR_CHARS and "," not in gap:
+            return True
+    return False
 
 
 class _Reading:
@@ -160,13 +210,13 @@ def _read_sentence(sentence: str, offset: int, p: _Patterns) -> _Reading | None:
     names_opt = _opt_word(text, p) is not None  # read per clause only when the sentence names OPT at all
     if not topic:
         if names_opt:
-            for a, b in _clauses(text):  # "We support OPT and CPT." counts only next to a "no" elsewhere
+            for a, b in _clauses(text, p):  # "We support OPT and CPT." counts only next to a "no" elsewhere
                 if m := _supports_opt(text[a:b], p):
                     return _Reading(None, offset + a + m.start(), offset + a + m.end(), True)
         return None
     found: dict[str, tuple[int, int]] = {}  # reading -> the first match that gave it, as body offsets
     opt = False
-    for a, b in _clauses(text):
+    for a, b in _clauses(text, p):
         clause = text[a:b]
         if names_opt and (m := _supports_opt(clause, p)):
             opt = True
@@ -226,7 +276,8 @@ def citizenship_required(body: str, cfg: Config) -> tuple[bool, str]:
     """(True, quote) for the first clause that requires citizenship or a clearance; (False, "") otherwise.
 
     A clause that also says "not required", "no clearance" or "regardless of" is not a requirement, so "No security
-    clearance required." and an EEO line naming citizenship never count.
+    clearance required." and an EEO line naming citizenship never count. A preference ("a plus", "preferred")
+    cancels only the requirement next to it (see _preferred).
     """
     p = _patterns(cfg)
     pos = 0
@@ -239,13 +290,13 @@ def citizenship_required(body: str, cfg: Config) -> tuple[bool, str]:
         negated: dict[int, bool] = {}  # clause index -> has a citizenship_negation, read once per clause
         for m in p.citizenship.finditer(text):
             if not clauses:
-                clauses = _clauses(text)
+                clauses = _clauses(text, p)
                 starts = [a for a, _ in clauses]
             i = bisect.bisect_right(starts, m.start()) - 1
             if i not in negated:
                 a, b = clauses[i]
                 negated[i] = p.citizenship_negation.search(text[a:b]) is not None
-            if not negated[i]:
+            if not negated[i] and not _preferred(text, *clauses[i], m, p):
                 start, end = offset + m.start(), offset + m.end()
                 return True, quote_around(body, start, end) or body[start:end]
     return False, ""

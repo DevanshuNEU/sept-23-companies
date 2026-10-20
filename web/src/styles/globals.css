@@ -1,0 +1,193 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Tokens follow docs/design/mockup.css and section 10 of docs/design/README.md.
+   Status colors are the only hues in the app; each always comes with a word or icon. */
+:root {
+  --radius: 0.5rem;
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
+  --popover-foreground: #09090b;
+  --muted: #f4f4f5;
+  --muted-foreground: #6b6b75; /* zinc-500 darkened one step so it passes 4.5:1 on --muted */
+  --subtle: #fafafa;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #a1a1aa;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #09090b;
+  --sidebar-primary: #18181b;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #f4f4f5;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: #e4e4e7;
+  --sidebar-ring: #a1a1aa;
+
+  /* status: text, soft background, border, dot */
+  --ok: #15803d;
+  --ok-bg: #f0fdf4;
+  --ok-bd: #bbf7d0;
+  --ok-dot: #16a34a;
+  --warn: #a16207;
+  --warn-bg: #fefce8;
+  --warn-bd: #fde68a;
+  --warn-dot: #eab308;
+  --bad: #b91c1c;
+  --bad-bg: #fef2f2;
+  --bad-bd: #fecaca;
+  --bad-dot: #ef4444;
+  --info: #1d4ed8;
+  --info-bg: #eff6ff;
+  --info-bd: #bfdbfe;
+  --info-dot: #3b82f6;
+  --idle: #52525b;
+  --idle-bg: #f4f4f5;
+  --idle-bd: #e4e4e7;
+  --idle-dot: #a1a1aa;
+
+  color-scheme: light;
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #0c0c0e;
+  --card-foreground: #fafafa;
+  --popover: #18181b;
+  --popover-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --subtle: #111113;
+  --border: #27272a;
+  --input: #3f3f46;
+  --ring: #71717a;
+  --primary: #fafafa;
+  --primary-foreground: #18181b;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --accent: #1f1f23;
+  --accent-foreground: #fafafa;
+  --destructive: #ef4444;
+  --sidebar: #0c0c0e;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #fafafa;
+  --sidebar-primary-foreground: #18181b;
+  --sidebar-accent: #27272a;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: #1f1f23;
+  --sidebar-ring: #71717a;
+
+  --ok: #4ade80;
+  --ok-bg: rgb(34 197 94 / 0.12);
+  --ok-bd: rgb(34 197 94 / 0.3);
+  --ok-dot: #22c55e;
+  --warn: #facc15;
+  --warn-bg: rgb(234 179 8 / 0.12);
+  --warn-bd: rgb(234 179 8 / 0.3);
+  --warn-dot: #eab308;
+  --bad: #f87171;
+  --bad-bg: rgb(239 68 68 / 0.12);
+  --bad-bd: rgb(239 68 68 / 0.32);
+  --bad-dot: #ef4444;
+  --info: #60a5fa;
+  --info-bg: rgb(59 130 246 / 0.13);
+  --info-bd: rgb(59 130 246 / 0.32);
+  --info-dot: #3b82f6;
+  --idle: #d4d4d8;
+  --idle-bg: #27272a;
+  --idle-bd: #3f3f46;
+  --idle-dot: #71717a;
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle: var(--subtle);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok-bd: var(--ok-bd);
+  --color-ok-dot: var(--ok-dot);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn-bd: var(--warn-bd);
+  --color-warn-dot: var(--warn-dot);
+  --color-bad: var(--bad);
+  --color-bad-bg: var(--bad-bg);
+  --color-bad-bd: var(--bad-bd);
+  --color-bad-dot: var(--bad-dot);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-info-bd: var(--info-bd);
+  --color-info-dot: var(--info-dot);
+  --color-idle: var(--idle);
+  --color-idle-bg: var(--idle-bg);
+  --color-idle-bd: var(--idle-bd);
+  --color-idle-dot: var(--idle-dot);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans text-sm antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -211,10 +211,17 @@ class HotkeyStore {
   /**
    * A render committed with this selection. It settles the moves up to it (a render may skip some). A render
    * of the old selection while a move still waits (the URL write runs as a transition) settles nothing.
+   * A different selection that is not one of the moves is an outside change and ends the moves in flight.
    */
   commit(id: Selection) {
     const at = this.moves.lastIndexOf(id);
     if (at !== -1) this.moves = this.moves.slice(at + 1);
+    else if (this.committed !== undefined && id !== this.committed) {
+      // A selection nobody moved to (the row vanished in a refresh, or navigation came from elsewhere): the
+      // moves in flight will never render, so none of them is "the row he sees" any more.
+      this.moves = [];
+      this.waiting = [];
+    }
     this.committed = id;
     this.settle();
   }
@@ -241,21 +248,33 @@ class HotkeyStore {
    * every layout effect of that render has registered its bindings, so the bindings for the new row are in.
    * A key whose selection was skipped, or whose row has no such binding (still loading, or it does not apply),
    * is dropped.
+   *
+   * Dialogs are read again now, not at keydown: one may have opened since. Once a held key has run, the rest
+   * for the same row are dropped: the run may have opened a dialog or changed the screen in a way that cannot
+   * be seen until React renders, and those keys were pressed against a screen that no longer exists.
    */
   private settle() {
     if (this.waiting.length === 0) return;
     const queue = this.waiting;
     this.waiting = [];
     const keep: Waiting[] = [];
-    for (const w of queue) {
-      if (w.target !== this.committed) {
-        if (this.moves.includes(w.target)) keep.push(w);
-        continue;
+    let ran = false;
+    try {
+      for (const w of queue) {
+        if (w.target !== this.committed) {
+          if (this.moves.includes(w.target)) keep.push(w);
+          continue;
+        }
+        if (ran) continue;
+        const guard: Guard = { ...w.guard, dialog: document.querySelector(DIALOGS) !== null };
+        const found = finishing(matching(this.entries(), w.prefix, w.pressed, guard), w.prefix.length);
+        if (found?.tag?.value !== w.target) continue;
+        ran = true;
+        found.binding.run(w.event);
       }
-      const found = finishing(matching(this.entries(), w.prefix, w.pressed, w.guard), w.prefix.length);
-      if (found?.tag?.value === w.target) found.binding.run(w.event);
+    } finally {
+      this.waiting = [...keep, ...this.waiting];
     }
-    this.waiting = [...keep, ...this.waiting];
   }
 
   /** Rebuilds the registry only when what it lists changes, so a new `run` each render costs nothing. */

@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState } from 'react';
+import userEvent from '@testing-library/user-event';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture, ids, messageOf } from '@/api/fixture/data';
 import { SidebarProvider } from '@/components/ui/sidebar';
@@ -8,7 +10,7 @@ import OutboxPage from '@/routes/outbox';
 import TodayPage from '@/routes/today';
 import { AppSidebar } from '@/shell/app-sidebar';
 import { renderWithApp } from '@/test/render';
-import { HotkeysProvider, useHotkeys, useSelectionSync } from './hotkeys';
+import { HotkeysProvider, useHotkeys, useSelectionSync, type LiveSelection } from './hotkeys';
 
 /**
  * A key that lands before the selection it follows has committed must still act on the row he moved to.
@@ -28,6 +30,7 @@ describe('a key right after a selection change acts on the new row', () => {
       vi.useRealTimers();
     }
     vi.restoreAllMocks();
+    toast.dismiss();
     window.localStorage.clear();
   });
 
@@ -125,6 +128,111 @@ describe('a key right after a selection change acts on the new row', () => {
   });
 });
 
+const BLOCKED = "Blocked: near-identical to Ava Moreno's draft. Edit, then approve.";
+const SAVE_FIRST = 'Save your edits first (Cmd S)';
+const toastText = () => [...document.querySelectorAll('[data-sonner-toast]')].map((t) => t.textContent ?? '').join('|');
+const startClock = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+
+/** The touch and name of the Outbox row next to `touch` (below it, or above it with `step` -1). */
+function neighbour(touch: number, step: 1 | -1) {
+  const options = [...document.querySelectorAll<HTMLElement>('[role="option"][data-touch]')];
+  const at = options.findIndex((o) => o.dataset.touch === String(touch));
+  const row = options[at + step];
+  if (!row) throw new Error(`no row next to ${touch}`);
+  return { touch: Number(row.dataset.touch), name: row.querySelector('b')?.textContent ?? '' };
+}
+
+describe('the Outbox: keys after a move never reach the row he left or an unsafe row', () => {
+  afterEach(async () => {
+    if (vi.isFakeTimers()) {
+      await act(() => vi.runOnlyPendingTimersAsync());
+      vi.useRealTimers();
+    }
+    vi.restoreAllMocks();
+    toast.dismiss();
+    window.localStorage.clear();
+  });
+
+  it('j, c, a in one tick opens Close company and approves nothing', async () => {
+    const client = new FixtureClient(buildFixture());
+    renderWithApp(<OutboxPage />, { route: `/outbox/${ids.touch.omar}`, client });
+    await screen.findByRole('heading', { level: 2, name: 'Omar Haddad' });
+    const below = neighbour(ids.touch.omar, 1);
+    press('j');
+    await screen.findByRole('heading', { level: 2, name: below.name });
+    press('k');
+    await screen.findByRole('heading', { level: 2, name: 'Omar Haddad' });
+
+    const approve = vi.spyOn(client, 'approve');
+    startClock();
+    sameTick(
+      () => press('j'),
+      () => press('c'),
+      () => press('a'),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(8000));
+    expect(approve).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+  });
+
+  it('j then a onto Kenji (blocked) approves nothing and shows the block', async () => {
+    const client = new FixtureClient(buildFixture());
+    renderWithApp(<OutboxPage />, { route: `/outbox/${ids.touch.kenji}`, client });
+    await screen.findByRole('heading', { level: 2, name: 'Kenji Watanabe' });
+    const above = neighbour(ids.touch.kenji, -1);
+    press('k');
+    await screen.findByRole('heading', { level: 2, name: above.name });
+
+    const approve = vi.spyOn(client, 'approve');
+    startClock();
+    sameTick(
+      () => press('j'),
+      () => press('a'),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole('heading', { level: 2, name: 'Kenji Watanabe' })).toBeInTheDocument();
+    expect(toastText()).toContain(BLOCKED);
+    await act(() => vi.advanceTimersByTimeAsync(8000));
+    expect(approve).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+  });
+
+  it('j then a onto a draft with unsaved edits approves nothing', async () => {
+    const client = new FixtureClient(buildFixture());
+    renderWithApp(<OutboxPage />, { route: `/outbox/${ids.touch.omar}`, client });
+    await screen.findByRole('heading', { level: 2, name: 'Omar Haddad' });
+    const below = neighbour(ids.touch.omar, 1);
+    press('j');
+    await screen.findByRole('heading', { level: 2, name: below.name });
+    // Unsaved text in the row below, then back to Omar.
+    act(() => {
+      const box = screen.getByRole('textbox', { name: 'Email body' }) as HTMLTextAreaElement;
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+    });
+    await userEvent.setup().keyboard(' Thanks again.');
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    act(() => (document.activeElement as HTMLElement).blur());
+    press('k');
+    await screen.findByRole('heading', { level: 2, name: 'Omar Haddad' });
+
+    const approve = vi.spyOn(client, 'approve');
+    startClock();
+    sameTick(
+      () => press('j'),
+      () => press('a'),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole('heading', { level: 2, name: below.name })).toBeInTheDocument();
+    expect(toastText()).toContain(SAVE_FIRST);
+    await act(() => vi.advanceTimersByTimeAsync(8000));
+    expect(approve).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+  });
+});
+
 /** The rule itself, on a bare list: rows 1 to 3, and `a` is switched off for row 2. */
 function Rows({ log }: { log: (what: string) => void }) {
   const [selected, setSelected] = useState(1);
@@ -203,5 +311,59 @@ describe('the hotkey layer', () => {
     );
     expect(screen.getByTestId('selected')).toHaveTextContent('3');
     expect(log.mock.calls.map((c) => c[0]).filter((x) => x.startsWith('b'))).toEqual(['b on 3']);
+  });
+});
+
+describe('the hotkey layer: dialogs and moves that never render', () => {
+  type Handles = { sync?: LiveSelection<number>; set?: (n: number) => void };
+  function Probe({ log, expose }: { log: (what: string) => void; expose: (h: Handles) => void }) {
+    const [selected, setSelected] = useState(1);
+    const [open, setOpen] = useState(false);
+    const sync = useSelectionSync(selected);
+    useEffect(() => {
+      expose({ sync, set: setSelected });
+    }, [expose, sync]);
+    useHotkeys([{ keys: 'd', label: 'Open a dialog', group: 'Test', run: () => setOpen(true) }]);
+    useHotkeys([{ keys: 'b', label: 'Act', group: 'Test', run: () => log(`b on ${selected}`) }], { selection: selected });
+    return open ? <div role="dialog">Open</div> : <p data-testid="selected">{selected}</p>;
+  }
+
+  function mount() {
+    const log = vi.fn();
+    const handles: Handles = {};
+    render(
+      <HotkeysProvider>
+        <Probe log={log} expose={(h) => Object.assign(handles, h)} />
+      </HotkeysProvider>,
+    );
+    return { log, handles };
+  }
+
+  it('a held key does not run if a dialog opened after the key went down', () => {
+    const { log, handles } = mount();
+    sameTick(
+      () => handles.sync?.move(2),
+      () => handles.set?.(2),
+      () => press('b'),
+      () => press('d'),
+    );
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('a move whose row never renders does not hold latest() on that row once the selection changes elsewhere', () => {
+    const { log, handles } = mount();
+    sameTick(
+      () => handles.sync?.move(9),
+      () => press('b'),
+    );
+    expect(handles.sync?.latest()).toBe(9);
+    // The selection changes to a row nobody moved to (a refresh, or other navigation).
+    sameTick(() => handles.set?.(3));
+    expect(handles.sync?.latest()).toBe(3);
+    expect(log).not.toHaveBeenCalled();
+    // And a key now acts on the row on screen, at once.
+    press('b');
+    expect(log.mock.calls).toEqual([['b on 3']]);
   });
 });

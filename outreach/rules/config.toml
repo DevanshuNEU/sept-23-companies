@@ -499,6 +499,22 @@ current_student = [
   "must be a currently student", "must be a currently students", "final year undergrads",
   "final year undergraduates",
 ]
+# new in #4 (final fix wave, item 4): a current_student phrase excludes only when its sentence names one of these (a
+# degree, a program, a school, enrollment); "CPA or actively pursuing" and "We are currently pursuing Series B funding"
+# name none. Every phrase of current_student that holds "student" or "enrolled" cues itself.
+student_cue = [
+  "degree", "degrees", "bachelor", "bachelor's", "bachelors", "master", "master's", "masters", "phd", "ph.d",
+  "doctorate", "doctoral", "undergraduate", "undergraduates", "undergrad", "undergrads", "program", "programs",
+  "school", "schools", "university", "universities", "college", "colleges", "enrolled", "enrollment", "student",
+  "students", "major", "majoring", "studying", "study", "studies", "coursework", "semester", "semesters", "bs", "ms",
+  "b.s.", "m.s.", "mba", "curriculum",
+]
+# new in #4 (final fix wave, item 4): a negation in the sentence makes a current_student phrase no requirement ("This
+# position is not open to current students", "do not need to be currently enrolled"). Contractions ending in n't
+# count as well (eligibility.py reads them).
+student_negation = [
+  "not", "no", "never", "without", "cannot", "neither", "nor", "need not", "rather than", "instead of",
+]
 # refresh/eligibility.py:41-43 ALTGRAD: wording that lets graduates in, read in a graduation sentence and anywhere in
 # the body. Route words that only make sense beside a current-student phrase ("new grads") are in graduate_route.
 graduates_welcome = [

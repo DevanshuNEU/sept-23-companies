@@ -150,6 +150,31 @@ ROUND_3 = [  # (title, body, status, reason, start_2027)
      "2026 and June 2027.", "excluded", "grad_window", False),
 ]
 
+# Final fix wave, item 4 (#4): a current-student phrase excludes only in a sentence that names a degree, program, school
+# or enrollment, with no negation and no preference wording.
+FINAL_4 = [  # (title, body, status, reason, start_2027)
+    ("Software Engineer II", "Preferred Qualifications: Bachelor's Degree (or currently pursuing).", "ok", None, False),
+    ("Software Engineer", "The ideal candidate is not a current student.", "ok", None, False),
+    ("Software Engineer", "CPA or actively pursuing.", "ok", None, False),
+    ("Software Engineer", "Start actively pursuing new business opportunities.", "ok", None, False),
+    ("Software Engineer", "We're currently working toward our public launch.", "ok", None, False),
+    ("Software Engineer", "We are currently pursuing Series B funding.", "ok", None, False),
+    ("Software Engineer", "Learn from current senior engineers.", "ok", None, False),
+    ("Software Engineer", "This position is not open to current students.", "ok", None, False),
+    ("Software Engineer", "Applicants do not need to be currently enrolled.", "ok", None, False),
+    ("Software Engineer", "Applicants don" + chr(0x2019) + "t need to be currently enrolled in a degree program.", "ok", None,
+     False),
+    ("Software Engineer", "Currently enrolled in a degree program is a plus.", "ok", None, False),
+    ("Software Engineer", "Nice to have: currently pursuing a Master's degree.", "ok", None, False),
+    # still excluded
+    ("Software Engineer", "You must be currently enrolled in a Bachelor's or Master's program in Computer Science.",
+     "excluded", "current_student", False),
+    ("Software Engineer", "You are actively pursuing a Bachelor's degree in Computer Science.", "excluded",
+     "current_student", False),
+    ("Software Engineer", "Current seniors at a university are eligible to apply.", "excluded", "current_student", False),
+    ("Software Engineer", "You must be a current student.", "excluded", "current_student", False),
+]
+
 # Body start wording is a 2027 start even next to immediate-start wording; only the title reading is cancelled.
 STARTS = [  # (title, body, start_2027)
     ("Software Engineer, New Grad", "Open to 2026 grads. This role starts in July 2027.", True),
@@ -189,6 +214,9 @@ class EligibilityTest(unittest.TestCase):
 
     def test_review_round_3_cases(self):
         self.check(ROUND_3)
+
+    def test_final_4_current_student_needs_a_program_cue(self):
+        self.check(FINAL_4)
 
     def test_a_missing_route_list_fails_at_load(self):
         # graduate_route is a required key, so a config without it is refused at load and the error names it.

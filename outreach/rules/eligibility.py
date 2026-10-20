@@ -66,6 +66,10 @@ class _Patterns:
         e = cfg.eligibility
         self.grad = phrases(e["grad_words"])
         self.current_student = phrases(e["current_student"])
+        self.student_cue = phrases(e["student_cue"])
+        # "not", "no", ...; and any contraction ending in n't, with a straight or a curly apostrophe
+        self.student_negation = re.compile(phrases(e["student_negation"]).pattern + r"|(?<!\w)\w+n['" + chr(0x2019)
+                                           + r"]t(?!\w)", re.IGNORECASE)
         self.graduates_welcome = phrases(e["graduates_welcome"])
         self.graduate_route = phrases(e["graduate_route"])
         self.soft = phrases(e["soft"])
@@ -274,17 +278,25 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
     #    a BS.\nRecent grads welcome.")
     if m := p.graduates_welcome.search(body):
         return "ok", None, _quote(body, m)
-    # 3) a current-student requirement, unless its own sentence offers a graduate route
+    # 3) a current-student requirement, unless its own sentence offers a graduate route, names no degree, program,
+    #    school or enrollment ("We are currently pursuing Series B funding"), is negated ("not open to current
+    #    students") or only prefers it ("Preferred Qualifications:" on the line before counts)
     starts = [a for a, _ in spans]
-    read: set[int] = set()  # sentences already checked for a route
+    read: set[int] = set()  # sentences already checked
     for m in p.current_student.finditer(body):
         i = max(bisect.bisect_right(starts, m.start()) - 1, 0)
         if i in read:
             continue
         read.add(i)
         a, b = spans[i] if spans else (0, len(body))
-        if p.graduate_route.search(body, a, b) is None:
-            return "excluded", "current_student", _quote(body, m)
+        if p.graduate_route.search(body, a, b) is not None:
+            continue
+        if p.student_cue.search(body, a, b) is None or p.student_negation.search(body, a, b) is not None:
+            continue
+        header = spans[i - 1][0] if i and body[spans[i - 1][1] - 1] in _JOINS_NEXT else a
+        if p.soft.search(body, header, b) is not None:
+            continue
+        return "excluded", "current_student", _quote(body, m)
     # 4) a title that names a graduating cohort
     if p.cohort_title.search(title or ""):
         return "excluded", "cohort_title", title

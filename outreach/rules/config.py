@@ -28,7 +28,7 @@ REQUIRED = {
                     "itar", "itar_cue"),
     "eligibility": ("grad_words", "current_student", "graduates_welcome", "graduate_route", "soft", "company_history",
                     "upper_bound", "cohort_title", "start_2027", "immediate_start",
-                    "history_date_lead"),
+                    "history_date_lead", "student_cue", "student_negation"),
     "facts": ("stage", "size_guess_words", "not_size", "source_estimate", "stage_guess", "size_source", "size_cues",
               "headcount_nouns"),
 }

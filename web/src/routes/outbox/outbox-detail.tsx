@@ -338,7 +338,11 @@ function DetailBody({
       afterCommit: 'Approved. Press U to withdraw.',
       patches: [list, det, shell],
       // The revision he read: if Claude saved a newer version since, the API refuses and says so.
-      commit: (o) => client.approve(it.messageId, it.revision, o),
+      commit: async (o) => {
+        const done = await client.approve(it.messageId, it.revision, o);
+        edits.delete(it.messageId); // what was approved is the saved text; nothing typed after it can go out
+        return done;
+      },
     });
   }
 
@@ -381,7 +385,11 @@ function DetailBody({
       afterCommit: `Skipped ${person.name}.`,
       patches: [list, det, shell],
       // An approval may land first and move the revision, so the skip reads it when it commits.
-      commit: async (o) => client.skip(messageId, (await client.outboxDetail(touchId)).item.revision, o),
+      commit: async (o) => {
+        const done = await client.skip(messageId, (await client.outboxDetail(touchId)).item.revision, o);
+        edits.delete(messageId); // a skipped email has no editor, so its unsaved text would linger
+        return done;
+      },
     });
   };
 

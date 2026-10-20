@@ -34,6 +34,16 @@ class EditsStore {
     if (this.map.delete(id)) this.changed();
   }
 
+  /** Drops the text of every email the server no longer has as a draft (sent, skipped or approved elsewhere). */
+  prune(stateOf: (id: Id) => string | undefined): void {
+    let dropped = false;
+    for (const id of [...this.map.keys()]) {
+      const state = stateOf(id);
+      if (state !== undefined && state !== 'drafted') dropped = this.map.delete(id) || dropped;
+    }
+    if (dropped) this.changed();
+  }
+
   private changed(): void {
     this.count = this.map.size;
     for (const l of this.listeners) l();

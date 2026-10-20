@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { usePanelRef } from 'react-resizable-panels';
 import { Mail, X } from 'lucide-react';
@@ -8,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useSelectionSync } from '@/keyboard/hotkeys';
 import { useUrlState } from '@/lib/url-state';
+import { useEdits } from '@/pending/edits';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { OutboxList, OutboxListSkeleton } from './outbox-list';
 import { OutboxDetailPane } from './outbox-detail';
@@ -83,6 +85,16 @@ function DetailPlaceholder() {
 export default function OutboxPage() {
   const client = useClient();
   const outbox = useViewQuery(queryKeys.outbox, () => client.outbox(), { pollMs: pollMs.outbox });
+  const edits = useEdits();
+  const queryClient = useQueryClient();
+  // An email that left drafted on the server (sent, skipped, approved elsewhere) drops its unsaved text; the raw
+  // cache is read, not the view, so an optimistic skip still inside its undo window keeps the text for Undo.
+  useEffect(() => {
+    const raw = queryClient.getQueryData<OutboxView>(queryKeys.outbox);
+    if (!raw) return;
+    const states = new Map(raw.items.map((i) => [i.messageId, i.state] as const));
+    edits.prune((id) => states.get(id));
+  }, [outbox.dataUpdatedAt, queryClient, edits]);
   const write = usePendingWrite();
   const navigate = useNavigate();
   const { search } = useLocation();

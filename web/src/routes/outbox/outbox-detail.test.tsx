@@ -427,6 +427,48 @@ describe('unsaved edits outlive the Outbox', () => {
     expect(beforeUnloadPrevented()).toBe(false);
   });
 
+  it('skipping a draft with unsaved text drops the text once the skip commits', async () => {
+    await open(T.kenji, 'Kenji Watanabe');
+    const edited = `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. Never sent.`;
+    fireEvent.change(bodyBox(), { target: { value: edited } });
+    expect(beforeUnloadPrevented()).toBe(true);
+    (bodyBox() as HTMLTextAreaElement).blur();
+    press('s');
+    window.dispatchEvent(new Event('pagehide'));
+    await waitFor(() => expect(beforeUnloadPrevented()).toBe(false));
+  });
+
+  it('Undo on a skip keeps the unsaved text', async () => {
+    await open(T.kenji, 'Kenji Watanabe');
+    fireEvent.change(bodyBox(), { target: { value: `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. Keep me.` } });
+    (bodyBox() as HTMLTextAreaElement).blur();
+    press('s');
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    expect(beforeUnloadPrevented()).toBe(true);
+  });
+
+  it('a draft that leaves drafted elsewhere drops its unsaved text when the Outbox sees it', async () => {
+    const client = new FixtureClient(buildFixture());
+    renderWithApp(
+      <>
+        <AppShell />
+        <OutboxOnly />
+      </>,
+      { route: `/outbox/${T.kenji}`, client },
+    );
+    await screen.findByRole('heading', { level: 2, name: 'Kenji Watanabe' });
+    fireEvent.change(bodyBox(), { target: { value: `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. Stale.` } });
+    (bodyBox() as HTMLTextAreaElement).blur();
+    press('g');
+    press('t');
+    await screen.findByText('Elsewhere');
+    const { item } = await client.outboxDetail(T.kenji);
+    await client.skip(item.messageId, item.revision, { requestId: 'elsewhere-skip' });
+    press('g');
+    press('o');
+    await waitFor(() => expect(beforeUnloadPrevented()).toBe(false));
+  });
+
   it('typing the text back to what is saved is not an unsaved edit', async () => {
     await open(T.kenji, 'Kenji Watanabe');
     const saved = (bodyBox() as HTMLTextAreaElement).value;

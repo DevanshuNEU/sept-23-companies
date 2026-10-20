@@ -86,7 +86,7 @@ class OldSignal:
     quote: str
 
 
-# Size wording: under N, over N, N-M or N to M, N+ and N, the first one in the text.
+# Size wording: under N, over N, N-M or N to M, N+ and N, the first one in the text that counts (see _counts).
 _DASH = "[\\-" + chr(0x2010) + chr(0x2011) + chr(0x2013) + "]"  # built from code points: no literal en dash here
 
 
@@ -104,6 +104,8 @@ _SIZE = re.compile(
     re.IGNORECASE,
 )
 _PARENS = re.compile(r"\([^()]{0,200}\)")  # "(Built In)", "(guess)", "(6-month-old startup)"
+_YEAR = re.compile(r"(?:19|20)\d\d")  # "founded in 2015", "Est. 2015": a year is no headcount on its own
+_CUE_CHARS = 40  # how far back a size cue is looked for; the cue must end right where the number starts
 
 
 class _Patterns:
@@ -115,6 +117,9 @@ class _Patterns:
         self.not_size = phrases(f["not_size"])
         self.source_estimate = phrases(f["source_estimate"])
         self.stage_guess = phrases(f["stage_guess"])
+        # a cue that ends the text before a number ("about", "~"), and a noun that starts the text after one
+        self.cue_before = re.compile("(?:" + phrases(f["size_cues"]).pattern + r")$", re.IGNORECASE)
+        self.noun_after = re.compile(r"\s{0,3}(?:" + phrases(f["headcount_nouns"]).pattern + ")", re.IGNORECASE)
         for table, allowed in ((f["stage"], STAGES), (f["size_source"], SOURCE_KINDS)):
             if unknown := sorted(set(table) - set(allowed)):
                 raise ValueError(f"[facts] names values the evidence table does not allow: {unknown}")
@@ -163,12 +168,29 @@ def _size_numbers(m: re.Match) -> tuple[str, int, int | None] | None:
     return (str(n), n, n) if n >= 1 else None
 
 
+def _counts(m: re.Match, bare: str, first_after_marker: bool, p: _Patterns) -> bool:
+    """Whether a size match is a headcount. Under, over and ranges always are. A bare N or N+ is one only right
+    after a size cue ("about 50", "~1,000+"), right before a headcount noun ("40 engineers"), or as the first thing
+    after "source estimate" ("source estimate 7"); a year ("founded in 2015") only before a headcount noun."""
+    digits = m["plus"] or m["one"]
+    if digits is None:
+        return True
+    if p.noun_after.match(bare, m.end()):
+        return True
+    if _YEAR.fullmatch(digits):
+        return False
+    if first_after_marker and not bare[:m.start()].strip():
+        return True
+    return p.cue_before.search(bare[max(0, m.start() - _CUE_CHARS):m.start()].rstrip()) is not None
+
+
 def parse_size(text: str, source_kind: str, cfg: Config | None = None) -> EvidenceDraft | None:
     """A size draft from one sizeWhy or head string, or None when it gives no headcount.
 
     Reads "about N", "around N to M", "N-M employees", "~N", "~N-M", "under N", "est. <N", "well over N" and "N+".
     Visa filing wording never gives a size; when a "source estimate" part is present only it is read, and a source
-    in parentheses there ("(Built In)") is the draft's source_kind. Words in parentheses are never read as a size.
+    in parentheses there ("(Built In)") is the draft's source_kind. Words in parentheses are never read as a size,
+    and a bare number needs a cue or a headcount noun (see _counts), so "500 companies use us" is no size.
     The confidence is guess when the read part says guess, uncertain or est., else estimate.
     """
     if not isinstance(text, str) or not text.strip():
@@ -180,7 +202,7 @@ def parse_size(text: str, source_kind: str, cfg: Config | None = None) -> Eviden
         return None
     asides = [m.group(0) for m in _PARENS.finditer(read)]
     bare = _PARENS.sub(lambda m: " " * len(m.group(0)), read)
-    m = _SIZE.search(bare)
+    m = next((m for m in _SIZE.finditer(bare) if _counts(m, bare, marker is not None, p)), None)
     numbers = _size_numbers(m) if m else None
     if numbers is None:
         return None

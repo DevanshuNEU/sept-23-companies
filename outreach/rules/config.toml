@@ -597,6 +597,10 @@ not_size = ["no filing record", "lifetime visa filings", "visa-data name match"]
 source_estimate = ["source estimate"]
 # data.js funding wording that names two stages: the first one named is the value, as a guess
 stage_guess = ["series a/b", "seed / series a"]
+# A bare number ("50", "400+") is a size only right after a cue, right before a headcount noun, or as the first
+# thing after source_estimate; "500 companies", "10 years old" and "founded in 2015" are not sizes
+size_cues = ["~", "about", "around", "near", "nearly", "approximately", "roughly", "est."]
+headcount_nouns = ["people", "employees", "staff", "engineers", "eng", "team members"]
 [facts.size_source]
 # a source named in parentheses after a size ("(Built In)"), one list per evidence source_kind
 builtin = ["built in"]

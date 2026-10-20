@@ -52,6 +52,22 @@ MORE_SIZE = [
     ("1430 lifetime visa filings; every known under-500 company has 26 or fewer", None, None, None, None),
     ("the visa-data name match pointed at an unrelated employer, so size is unknown", None, None, None, None),
     ("a Constellation Software group, size unclear", None, None, None, None),
+    # A bare number (or N+) is a size only after a cue, before a headcount noun, or first after "source estimate";
+    # a year never counts without a headcount noun.
+    ("founded in 2015, about 50 people", "50", 50, 50, "estimate"),
+    ("Est. 2015, about 40 people", "40", 40, 40, "guess"),  # "est." is a guess word wherever it sits
+    ("source estimate 2024 headcount ~60", "60", 60, 60, "estimate"),
+    ("500 companies use us", None, None, None, None),
+    ("Series A, 400+ practices served", None, None, None, None),
+    ("10 years old", None, None, None, None),
+    ("raised 20 million", None, None, None, None),
+    ("2 offices, 40 engineers", "40", 40, 40, "estimate"),
+    ("12/2025 about 30", "30", 30, 30, "estimate"),
+    ("no filing record: most likely an early startup; source estimate 7", "7", 7, 7, "estimate"),
+    ("no filing record: most likely an early startup; source estimate 78 per Consider board", "78", 78, 78,
+     "estimate"),
+    ("~500+", "500+", 500, None, "estimate"),
+    ("2000 employees", "2000", 2000, 2000, "estimate"),
     ("government or defence contractor, clearance-heavy", None, None, None, None),
 ]
 

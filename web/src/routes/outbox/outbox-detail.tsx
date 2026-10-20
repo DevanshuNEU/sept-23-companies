@@ -33,6 +33,7 @@ import { useHotkeys } from '@/keyboard/hotkeys';
 import { ageDays, formatAge, formatDueDay } from '@/lib/format';
 import { useEdits, type Edit } from '@/pending/edits';
 import { usePendingControls, usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
+import { safeHref } from '@/lib/safe-href';
 import { CompareDialog } from './compare-dialog';
 import { heldLine, useCompanyActions } from './company-actions';
 import { rowStatus } from './outbox-list';
@@ -124,8 +125,8 @@ function DetailHeader({ detail }: { detail: OutboxDetail }) {
             </Link>
           </span>
           {person.email ? <span className="font-mono text-xs">{person.email}</span> : null}
-          {person.linkedinUrl ? (
-            <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="underline decoration-border underline-offset-3 hover:decoration-current">
+          {safeHref(person.linkedinUrl) ? (
+            <a href={safeHref(person.linkedinUrl)} target="_blank" rel="noreferrer" className="underline decoration-border underline-offset-3 hover:decoration-current">
               LinkedIn
             </a>
           ) : null}

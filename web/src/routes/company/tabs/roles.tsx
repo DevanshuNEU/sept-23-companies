@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDay } from '@/lib/format';
 import type { Tone } from '@/lib/status';
+import { safeHref } from '@/lib/safe-href';
 
 const LEVEL: Record<LevelTier, string> = {
   new_grad: 'New grad',
@@ -62,9 +63,13 @@ export function Roles({ view }: { view: CompanyView }) {
             {view.postings.map((p) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">
-                  <a href={p.url} target="_blank" rel="noreferrer" className="underline decoration-border underline-offset-3 hover:decoration-current">
-                    {p.title}
-                  </a>
+                  {safeHref(p.url) ? (
+                    <a href={safeHref(p.url)} target="_blank" rel="noreferrer" className="underline decoration-border underline-offset-3 hover:decoration-current">
+                      {p.title}
+                    </a>
+                  ) : (
+                    p.title
+                  )}
                 </TableCell>
                 <TableCell>
                   <Badge variant="outline">{LEVEL[p.levelTier]}</Badge>

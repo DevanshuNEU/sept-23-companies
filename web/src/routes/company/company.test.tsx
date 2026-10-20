@@ -117,6 +117,19 @@ describe('Company page', () => {
     }
   });
 
+  it('a posting address that is not http or https shows the title as plain text', async () => {
+    class Unsafe extends FixtureClient {
+      override async company(id: Id): Promise<CompanyView> {
+        const v = await super.company(id);
+        return { ...v, postings: v.postings.map((p, i) => (i === 0 ? { ...p, url: 'javascript:alert(1)' } : p)) };
+      }
+    }
+    await open(`/companies/${BROWSERBASE}?tab=roles`, new Unsafe());
+    const title = (await screen.findByText('Software Engineer, New Grad', { selector: 'td *, td' }));
+    expect(title.closest('a')).toBeNull();
+    expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+  });
+
   it('C closes with a reason as an undoable write', async () => {
     const { client } = await open();
     const close = vi.spyOn(client, 'closeCompany');

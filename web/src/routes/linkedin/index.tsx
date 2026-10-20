@@ -25,6 +25,7 @@ import { useListNav } from '@/keyboard/list-nav';
 import { replyKindStatus } from '@/lib/status';
 import { useUrlState } from '@/lib/url-state';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
+import { openExternal } from '@/lib/safe-href';
 import { LinkedInTable, type ShownGroup } from './linkedin-table';
 
 type PersonTab = LinkedInPerson['tab'];
@@ -248,8 +249,7 @@ export default function LinkedInPage() {
   };
 
   const openProfile = (p: LinkedInPerson) => {
-    if (p.person.linkedinUrl) window.open(p.person.linkedinUrl, '_blank', 'noopener,noreferrer');
-    else toast(`No LinkedIn profile saved for ${p.person.name}.`);
+    if (!openExternal(p.person.linkedinUrl)) toast(`No LinkedIn profile saved for ${p.person.name}.`);
   };
 
   const group = 'LinkedIn list';

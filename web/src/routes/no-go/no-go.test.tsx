@@ -217,7 +217,7 @@ describe('No-go list', () => {
     await page();
     press('j');
     press('o');
-    expect(open).toHaveBeenCalledWith('https://careers.example/halberdsystems/backendengineer', '_blank', 'noopener');
+    expect(open).toHaveBeenCalledWith('https://careers.example/halberdsystems/backendengineer', '_blank', 'noopener,noreferrer');
     open.mockRestore();
   });
 

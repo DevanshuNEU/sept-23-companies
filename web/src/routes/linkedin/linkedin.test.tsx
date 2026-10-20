@@ -203,6 +203,29 @@ describe('LinkedIn list', () => {
     open.mockRestore();
   });
 
+  it('l opens nothing when the saved profile address is not a web address', async () => {
+    class Unsafe extends FixtureClient {
+      override async linkedin() {
+        const v = await super.linkedin();
+        return {
+          ...v,
+          groups: v.groups.map((g) => ({
+            ...g,
+            people: g.people.map((p) => (p.person.name === 'Ethan Wu' ? { ...p, person: { ...p.person, linkedinUrl: 'javascript:alert(1)' } } : p)),
+          })),
+        };
+      }
+    }
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    await setup(new Unsafe());
+    fireEvent.click(screen.getByText('Ethan Wu'));
+    press('l');
+    expect(await screen.findByText('No LinkedIn profile saved for Ethan Wu.')).toBeInTheDocument();
+    expect(open).not.toHaveBeenCalled();
+    expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+    open.mockRestore();
+  });
+
   it('filters people or companies', async () => {
     await setup();
     fireEvent.change(screen.getByRole('textbox', { name: 'Filter' }), { target: { value: 'graphite' } });

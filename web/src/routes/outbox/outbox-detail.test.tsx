@@ -437,6 +437,27 @@ describe('unsaved edits outlive the Outbox', () => {
   });
 });
 
+describe('external links', () => {
+  it('a LinkedIn address that is not http or https is not a link', async () => {
+    class Unsafe extends FixtureClient {
+      override async outboxDetail(touchId: number) {
+        const d = await super.outboxDetail(touchId);
+        return { ...d, item: { ...d.item, person: { ...d.item.person, linkedinUrl: 'javascript:alert(1)' } } };
+      }
+    }
+    const client = new Unsafe(buildFixture());
+    renderWithApp(<OutboxPage />, { route: `/outbox/${T.kenji}`, client });
+    await screen.findByRole('heading', { level: 2, name: 'Kenji Watanabe' });
+    expect(screen.queryByRole('link', { name: 'LinkedIn' })).toBeNull();
+    expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+  });
+
+  it('a web address stays a link', async () => {
+    await open(T.kenji, 'Kenji Watanabe');
+    expect(screen.getByRole('link', { name: 'LinkedIn' })).toHaveAttribute('href', expect.stringMatching(/^https:\/\//));
+  });
+});
+
 describe('checks', () => {
   it('Dana: the role kind select calls setRoleKind with the person and revision', async () => {
     const { client } = await open(T.dana, 'Dana Whitcomb');

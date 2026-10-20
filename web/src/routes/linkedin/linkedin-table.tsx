@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { RowProps } from '@/keyboard/list-nav';
 import { replyKindStatus } from '@/lib/status';
+import { safeHref } from '@/lib/safe-href';
 
 /** One company and the people of it that the current tab and filter show. */
 export interface ShownGroup {
@@ -145,9 +146,9 @@ function PersonRow({
                     {`A reply holds email, not LinkedIn. Usually worth waiting until the conversation with ${firstName(held.personName)} settles.`}
                   </TooltipContent>
                 </Tooltip>
-              ) : p.person.linkedinUrl ? (
+              ) : safeHref(p.person.linkedinUrl) ? (
                 <Button asChild variant="ghost" size="icon-sm" className="size-7">
-                  <a href={p.person.linkedinUrl} target="_blank" rel="noopener noreferrer" aria-label="Open LinkedIn profile">
+                  <a href={safeHref(p.person.linkedinUrl)} target="_blank" rel="noopener noreferrer" aria-label="Open LinkedIn profile">
                     <ExternalLink aria-hidden />
                   </a>
                 </Button>

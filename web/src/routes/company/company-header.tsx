@@ -10,6 +10,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { formatDayTime, formatDueDay } from '@/lib/format';
 import { readResultStatus, sponsorshipStatus, type Tone } from '@/lib/status';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 import { companyActions, headerStatuses } from './company-status';
 
 const DOT: Record<Tone, string> = {
@@ -25,7 +26,7 @@ export type CompanyHandlers = { onPause: () => void; onResume: () => void; onClo
 export function CompanyHeader({ view, handlers }: { view: CompanyView; handlers: CompanyHandlers }) {
   const c = view.company;
   const can = companyActions(c);
-  const boardUrl = view.board?.url;
+  const boardUrl = safeHref(view.board?.url);
   return (
     <header className="mb-4 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-6 gap-y-3">
       <div>

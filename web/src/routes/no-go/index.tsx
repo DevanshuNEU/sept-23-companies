@@ -12,6 +12,7 @@ import { useHotkeys } from '@/keyboard/hotkeys';
 import { useListNav } from '@/keyboard/list-nav';
 import { useUrlState } from '@/lib/url-state';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
+import { openExternal, safeHref } from '@/lib/safe-href';
 import { LiftDialog } from './lift-dialog';
 import {
   CompaniesTable,
@@ -122,9 +123,9 @@ export default function NoGoPage() {
 
   /** The posting, the reply or the page the reason came from; else the company page. */
   const sourceOf = (row: CompanyEntry): (() => void) | null => {
-    if (row.kind === 'no_go' && row.sourceUrl) {
+    if (row.kind === 'no_go' && safeHref(row.sourceUrl)) {
       const url = row.sourceUrl;
-      return () => window.open(url, '_blank', 'noopener');
+      return () => openExternal(url);
     }
     const companyId = row.kind === 'no_go' && row.target.kind === 'person' ? null : entryCompanyId(row);
     return companyId === null ? null : () => openCompany(companyId);

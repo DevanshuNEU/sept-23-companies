@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { ageDays, formatDayTime, formatLocalTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 import { heldLine } from './company-actions';
 
 export type ReplyChoice = Exclude<ReplyKind, 'unsorted'>;
@@ -62,9 +63,9 @@ function HoldAlert({ detail }: { detail: OutboxDetail }) {
         <p>
           {`${first} replied, so nothing else goes to ${company}${lines.length > 0 ? `: ${who} ${lines.length === 1 ? 'is' : 'are'} held` : ''}. Answer in Gmail. This app never sends a reply.`}
         </p>
-        {gmailThreadUrl ? (
+        {safeHref(gmailThreadUrl) ? (
           <Button asChild variant="outline" size="sm" className="mt-1 text-foreground">
-            <a href={gmailThreadUrl} target="_blank" rel="noreferrer">
+            <a href={safeHref(gmailThreadUrl)} target="_blank" rel="noreferrer">
               <ExternalLink aria-hidden />
               Open in Gmail
             </a>

@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { ageDays, formatDay, formatDueDay } from '@/lib/format';
 import { sponsorshipStatus, type Status } from '@/lib/status';
+import { safeHref } from '@/lib/safe-href';
 import { RoleMeta } from './proposals-table';
 
 const STATE: Record<DailyEntry['state'], Status> = {
@@ -144,13 +145,15 @@ export function PreviewPanel({
               Copy title
               <Kbd aria-hidden>C</Kbd>
             </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <a href={e.role.url} target="_blank" rel="noreferrer">
-                <ExternalLink aria-hidden />
-                Open posting
-                <Kbd aria-hidden>O</Kbd>
-              </a>
-            </Button>
+            {safeHref(e.role.url) ? (
+              <Button variant="ghost" size="sm" asChild>
+                <a href={safeHref(e.role.url)} target="_blank" rel="noreferrer">
+                  <ExternalLink aria-hidden />
+                  Open posting
+                  <Kbd aria-hidden>O</Kbd>
+                </a>
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : (

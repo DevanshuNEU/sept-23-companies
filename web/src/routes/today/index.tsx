@@ -20,6 +20,7 @@ import { useListNav } from '@/keyboard/list-nav';
 import { formatDayTime } from '@/lib/format';
 import { useUrlState } from '@/lib/url-state';
 import { useViewQuery } from '@/pending/pending';
+import { openExternal } from '@/lib/safe-href';
 import { useTodayActions } from './actions';
 import { groupInOrder } from './grouping';
 import { PreviewPanel } from './preview-panel';
@@ -197,7 +198,7 @@ function TodayContent({ t, limitToday }: { t: TodayView; limitToday: number | un
     if (e.role) void copy(e.role.title, `Copied: ${e.role.title}`);
   };
   const openPosting = (e: DailyEntry) => {
-    if (e.role) window.open(e.role.url, '_blank', 'noopener,noreferrer');
+    if (e.role) openExternal(e.role.url);
   };
 
   const group = 'Today';

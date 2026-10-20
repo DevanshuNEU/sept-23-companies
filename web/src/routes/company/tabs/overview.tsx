@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatAge, formatDay } from '@/lib/format';
+import { safeHref } from '@/lib/safe-href';
 import { eventTone } from '../events';
 
 const STANDS_COUNT = 8;
@@ -57,12 +58,14 @@ export function Overview({ view, onCopyRole, onOpenHistory }: { view: CompanyVie
                   <Copy aria-hidden />
                   Copy title
                 </Button>
-                <Button variant="ghost" size="sm" asChild>
-                  <a href={role.url} target="_blank" rel="noreferrer">
-                    <ExternalLink aria-hidden />
-                    Open posting
-                  </a>
-                </Button>
+                {safeHref(role.url) ? (
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href={safeHref(role.url)} target="_blank" rel="noreferrer">
+                      <ExternalLink aria-hidden />
+                      Open posting
+                    </a>
+                  </Button>
+                ) : null}
               </div>
             </>
           ) : (

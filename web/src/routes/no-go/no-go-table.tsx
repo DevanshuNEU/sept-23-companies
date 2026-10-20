@@ -14,6 +14,7 @@ import type { RowProps } from '@/keyboard/list-nav';
 import { formatDay } from '@/lib/format';
 import { noGoReasonStatus, type Status } from '@/lib/status';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 export type CompanyEntry = NoGoRow | RemovedRow;
 
@@ -76,9 +77,10 @@ function removeReasonLabel(reason: string): string {
 }
 
 function SourceLink({ row }: { row: NoGoRow }) {
-  if (!row.sourceUrl) return <span>{row.sourceRef}</span>;
+  const href = safeHref(row.sourceUrl);
+  if (!href) return <span>{row.sourceRef}</span>;
   return (
-    <a className="underline-offset-4 hover:underline" href={row.sourceUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+    <a className="underline-offset-4 hover:underline" href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
       {row.sourceRef}
     </a>
   );

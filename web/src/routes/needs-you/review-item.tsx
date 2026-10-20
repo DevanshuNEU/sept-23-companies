@@ -14,6 +14,7 @@ import type { RowProps } from '@/keyboard/list-nav';
 import { formatDay, formatLocalTime } from '@/lib/format';
 import type { Status } from '@/lib/status';
 import { cn } from '@/lib/utils';
+import { safeHref } from '@/lib/safe-href';
 
 export type EditField = Extract<ReviewFix, { kind: 'edit' }>['field'];
 
@@ -103,9 +104,11 @@ function Evidence({ item }: { item: ReviewItem }) {
       <p key="quote" className="border-l-2 pl-2.5 text-muted-foreground">{`"${q.text}"`}</p>,
       <p key="posting" className="text-xs text-muted-foreground">
         {`${q.postingTitle} posting, first seen ${formatDay(q.firstSeenAt)}. `}
-        <a className="text-foreground underline underline-offset-2" href={q.url} target="_blank" rel="noreferrer">
-          Open the posting
-        </a>
+        {safeHref(q.url) ? (
+          <a className="text-foreground underline underline-offset-2" href={safeHref(q.url)} target="_blank" rel="noreferrer">
+            Open the posting
+          </a>
+        ) : null}
       </p>,
     );
   }

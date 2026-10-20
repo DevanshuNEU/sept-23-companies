@@ -177,6 +177,69 @@ describe('the Outbox: keys after a move never reach the row he left or an unsafe
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
   });
 
+  it('j, c, j, a in one tick: the skipped row opens no dialog and a approves only the row that rendered', async () => {
+    const client = new FixtureClient(buildFixture());
+    renderWithApp(<OutboxPage />, { route: `/outbox/${ids.touch.omar}`, client });
+    await screen.findByRole('heading', { level: 2, name: 'Omar Haddad' });
+    const one = neighbour(ids.touch.omar, 1);
+    press('j');
+    await screen.findByRole('heading', { level: 2, name: one.name });
+    const two = neighbour(one.touch, 1);
+    press('j');
+    await screen.findByRole('heading', { level: 2, name: two.name });
+    press('k');
+    press('k');
+    await screen.findByRole('heading', { level: 2, name: 'Omar Haddad' });
+
+    const approve = vi.spyOn(client, 'approve');
+    startClock();
+    sameTick(
+      () => press('j'),
+      () => press('c'),
+      () => press('j'),
+      () => press('a'),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    // The first row never rendered, so its c is dropped: no dialog. The second row is on screen and a acts on it alone.
+    expect(screen.getByRole('heading', { level: 2, name: two.name })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(8000));
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(approve.mock.calls[0]?.[0]).toBe(messageOf(two.touch));
+  });
+
+  it('j, c then j, a: with Close open on the first row, nothing is approved behind it', async () => {
+    const client = new FixtureClient(buildFixture());
+    renderWithApp(<OutboxPage />, { route: `/outbox/${ids.touch.omar}`, client });
+    await screen.findByRole('heading', { level: 2, name: 'Omar Haddad' });
+    const one = neighbour(ids.touch.omar, 1);
+    press('j');
+    await screen.findByRole('heading', { level: 2, name: one.name });
+    const two = neighbour(one.touch, 1);
+    press('j');
+    await screen.findByRole('heading', { level: 2, name: two.name });
+    press('k');
+    press('k');
+    await screen.findByRole('heading', { level: 2, name: 'Omar Haddad' });
+
+    const approve = vi.spyOn(client, 'approve');
+    startClock();
+    sameTick(
+      () => press('j'),
+      () => press('c'),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    sameTick(
+      () => press('j'),
+      () => press('a'),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(8000));
+    // Behind the dialog the selection did not move either.
+    expect(screen.getByRole('heading', { level: 2, name: one.name, hidden: true })).toBeInTheDocument();
+    expect(approve).not.toHaveBeenCalled();
+  });
+
   it('j then a onto Kenji (blocked) approves nothing and shows the block', async () => {
     const client = new FixtureClient(buildFixture());
     renderWithApp(<OutboxPage />, { route: `/outbox/${ids.touch.kenji}`, client });
@@ -365,5 +428,55 @@ describe('the hotkey layer: dialogs and moves that never render', () => {
     // And a key now acts on the row on screen, at once.
     press('b');
     expect(log.mock.calls).toEqual([['b on 3']]);
+  });
+
+  it('a held key whose run throws is reported, and a key held for a later row still runs when that row commits', () => {
+    const report = vi.fn();
+    vi.stubGlobal('reportError', report);
+    const log = vi.fn();
+    const handles: Handles = {};
+    function Boom() {
+      const [selected, setSelected] = useState(1);
+      const sync = useSelectionSync(selected);
+      useEffect(() => {
+        Object.assign(handles, { sync, set: setSelected });
+      }, [sync]);
+      useHotkeys(
+        [
+          {
+            keys: 'b',
+            label: 'Act',
+            group: 'Test',
+            run: () => {
+              if (selected === 2) throw new Error('boom');
+              log(`b on ${selected}`);
+            },
+          },
+          { keys: 'x', label: 'Other', group: 'Test', run: () => log(`x on ${selected}`) },
+        ],
+        { selection: selected },
+      );
+      return <p data-testid="selected">{selected}</p>;
+    }
+    render(
+      <HotkeysProvider>
+        <Boom />
+      </HotkeysProvider>,
+    );
+    // Both keys wait in one queue: b for row 2, x for row 3. Row 2 renders first, and its key throws.
+    act(() => {
+      handles.sync?.move(2);
+      press('b');
+      handles.sync?.move(3);
+      press('x');
+      handles.set?.(2);
+    });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('selected')).toHaveTextContent('2');
+    expect(log).not.toHaveBeenCalled();
+    act(() => handles.set?.(3));
+    expect(screen.getByTestId('selected')).toHaveTextContent('3');
+    expect(log.mock.calls).toEqual([['x on 3']]);
+    vi.unstubAllGlobals();
   });
 });

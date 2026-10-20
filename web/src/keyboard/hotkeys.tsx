@@ -148,6 +148,11 @@ function finishing(found: Entry[], index: number): Entry | undefined {
   return found.filter(({ steps }) => steps.length === index + 1).pop();
 }
 
+function reportFailure(error: unknown) {
+  if (typeof reportError === 'function') reportError(error);
+  else console.error(error);
+}
+
 class HotkeyStore {
   private seq = 0;
   private regs = new Map<number, Reg>();
@@ -259,8 +264,11 @@ class HotkeyStore {
     this.waiting = [];
     const keep: Waiting[] = [];
     let ran = false;
+    let next = 0;
     try {
-      for (const w of queue) {
+      while (next < queue.length) {
+        const w = queue[next] as Waiting;
+        next += 1;
         if (w.target !== this.committed) {
           if (this.moves.includes(w.target)) keep.push(w);
           continue;
@@ -270,10 +278,17 @@ class HotkeyStore {
         const found = finishing(matching(this.entries(), w.prefix, w.pressed, guard), w.prefix.length);
         if (found?.tag?.value !== w.target) continue;
         ran = true;
-        found.binding.run(w.event);
+        try {
+          found.binding.run(w.event);
+        } catch (error) {
+          // Reported like a throw in a keydown listener, and kept out of React's commit so the view stays up.
+          reportFailure(error);
+        }
       }
     } finally {
-      this.waiting = [...keep, ...this.waiting];
+      // Whatever stopped the loop, keys held for rows still to come stay queued, in order.
+      const rest = queue.slice(next).filter((w) => this.moves.includes(w.target));
+      this.waiting = [...keep, ...rest, ...this.waiting];
     }
   }
 

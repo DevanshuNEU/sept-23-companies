@@ -31,7 +31,9 @@ const GROUP_LABEL: Record<DailyEntry['listGroup'], string> = {
 };
 
 const HEAD = 'h-9 bg-subtle px-3 text-[13px] text-muted-foreground';
-const CELL = 'h-9 px-3 py-1.5 text-[13px]';
+const CELL = 'h-9 px-3 py-1.5 text-[13px] whitespace-normal';
+/** Row actions float over the row's right edge, so they take no column width (the 1280 px layout has 610 px for this table). */
+const FLOAT = 'absolute top-1/2 right-2 z-10 -translate-y-1/2';
 const SUB = 'text-xs text-muted-foreground';
 
 /** "New grad", "Starts 2027" and "2 days ago, asks 2 years", from the stored role. */
@@ -39,7 +41,7 @@ export function RoleMeta({ role, asOf }: { role: RoleToName; asOf: IsoTime }) {
   const level = LEVEL[role.levelTier];
   const years = role.yearsAsked === null ? '' : `, asks ${role.yearsAsked} ${role.yearsAsked === 1 ? 'year' : 'years'}`;
   return (
-    <span className={cn(SUB, 'flex items-center gap-1.5')}>
+    <span className={cn(SUB, 'flex flex-wrap items-center gap-x-1.5')}>
       {level ? <Badge variant="idle">{level}</Badge> : null}
       {role.start2027 ? <Badge variant="warn">Starts 2027</Badge> : null}
       {`${formatAge(role.firstSeenAt, asOf)}${years}`}
@@ -111,10 +113,10 @@ function PickBox({ entry, blockedText, onToggle }: { entry: DailyEntry; blockedT
 
 function RowActions({ entry, list, actions }: { entry: DailyEntry; list: 'proposed' | 'backlog'; actions: ProposalActions }) {
   // Moved to the backlog inside the undo window: relabelled in place until the list refreshes.
-  if (list === 'proposed' && entry.state === 'backlog') return <Badge variant="idle">Backlog</Badge>;
+  if (list === 'proposed' && entry.state === 'backlog') return <Badge variant="idle" className={FLOAT}>Backlog</Badge>;
   const name = entry.company.name;
   return (
-    <div className="flex justify-end gap-1 opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-[active=true]/row:opacity-100">
+    <div className={cn(FLOAT, 'flex gap-1 bg-muted opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 min-[1400px]:group-data-[active=true]/row:opacity-100')}>
       {list === 'proposed' ? (
         <Button variant="ghost" size="icon-sm" className="size-7" aria-label={`Move ${name} to the backlog`} onClick={() => actions.onBacklog(entry)}>
           <Archive aria-hidden />
@@ -219,7 +221,7 @@ export function ProposalsTable({
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id} className="hover:bg-transparent">
                 {hg.headers.map((h) => (
-                  <TableHead key={h.id} className={cn(HEAD, (h.id === 'pick' || h.id === 'actions') && 'w-px')}>
+                  <TableHead key={h.id} className={cn(HEAD, (h.id === 'pick' || h.id === 'actions') && 'w-px', h.id === 'actions' && 'px-0')}>
                     {flexRender(h.column.columnDef.header, h.getContext())}
                   </TableHead>
                 ))}
@@ -240,7 +242,7 @@ export function ProposalsTable({
                   className="group/row cursor-default data-[active=true]:bg-muted data-[active=true]:shadow-[inset_2px_0_0_var(--foreground)]"
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className={cn(CELL, cell.column.id === 'pick' && 'w-px pr-0')}>
+                    <TableCell key={cell.id} className={cn(CELL, cell.column.id === 'pick' && 'w-px pr-0', cell.column.id === 'actions' && 'relative w-0 p-0')}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}

@@ -97,7 +97,7 @@ export function ReplyDetail({
   const hold = company.heldByTouchId !== null && reply?.kind !== 'auto_reply';
   return (
     <>
-      <div className="grid flex-1 content-start gap-4 overflow-y-auto px-5 py-4">
+      <div className="grid flex-1 auto-rows-min content-start gap-4 overflow-y-auto px-5 py-4">
         {hold ? <HoldAlert detail={detail} /> : null}
         {reply ? (
           <div className="rounded-md border border-ok-bd bg-ok-bg/40">

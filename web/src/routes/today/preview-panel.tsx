@@ -122,7 +122,7 @@ export function PreviewPanel({
   }
   const where = [e.company.domain, e.company.hq].filter(Boolean).join(', ');
   return (
-    <aside aria-label={`${e.company.name} preview`} className="grid min-h-0 content-start gap-4 overflow-y-auto border-l p-5">
+    <aside aria-label={`${e.company.name} preview`} className="grid min-h-0 auto-rows-min content-start gap-4 overflow-y-auto border-l p-5">
       <div className="flex items-start gap-2">
         <div className="min-w-0 grow">
           <h2 className="text-base font-semibold">{e.company.name}</h2>

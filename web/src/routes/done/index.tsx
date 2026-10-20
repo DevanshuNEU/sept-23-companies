@@ -94,7 +94,7 @@ function DoneTable({ companies }: { companies: DoneCompany[] }) {
     announce: (id) => companies.find((d) => d.company.id === id)?.company.name ?? '',
   });
   const head = 'h-9 bg-subtle px-3 text-muted-foreground';
-  const cell = 'px-3 py-1.5 text-[13px]';
+  const cell = 'px-3 py-1.5 text-[13px] whitespace-normal';
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
       <Table className="text-[13px]">

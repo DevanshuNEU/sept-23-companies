@@ -515,7 +515,7 @@ function DetailBody({
     const reviewable = kind === 'draft' || kind === 'approved';
     main = (
       <>
-        <div className="grid flex-1 content-start gap-4 overflow-y-auto px-5 py-4">
+        <div className="grid flex-1 auto-rows-min content-start gap-4 overflow-y-auto px-5 py-4">
           {reviewable && item.seq > 0 ? (
             <FollowupTrack firstSentAt={detail.firstSentAt} followups={detail.followups} asOf={asOf} />
           ) : reviewable ? (

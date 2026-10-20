@@ -140,3 +140,12 @@ test('every view loads clean: no foreign host, no console error, no Send button'
     await expectCleanPage(page, consoleErrors, foreign);
   }
 });
+
+test('a blocked draft shows its block in full on a 1280 by 800 screen (the detail scrolls, nothing is squeezed)', async ({ page, consoleErrors }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/outbox/2002');
+  await expect(page.getByRole('heading', { level: 2, name: 'Kenji Watanabe' })).toBeVisible();
+  await expect(page.getByText('Blocking:')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Compare drafts' })).toBeInViewport({ ratio: 1 });
+  expect(consoleErrors).toEqual([]);
+});

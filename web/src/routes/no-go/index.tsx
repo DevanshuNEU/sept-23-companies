@@ -258,11 +258,11 @@ export default function NoGoPage() {
                   }}
                   className="flex-wrap"
                 >
-                  <ToggleGroupItem value="all" className="data-[state=on]:bg-secondary">
+                  <ToggleGroupItem value="all" className="h-7 px-2.5 text-xs data-[state=on]:bg-secondary">
                     All reasons
                   </ToggleGroupItem>
                   {v.countsByReason.map((c) => (
-                    <ToggleGroupItem key={c.reason} value={c.reason} className="data-[state=on]:bg-secondary">
+                    <ToggleGroupItem key={c.reason} value={c.reason} className="h-7 px-2.5 text-xs data-[state=on]:bg-secondary">
                       {reasonLabel(c.reason)} <span className="text-muted-foreground tabular-nums">{c.count}</span>
                     </ToggleGroupItem>
                   ))}

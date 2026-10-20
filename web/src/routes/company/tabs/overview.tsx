@@ -20,13 +20,13 @@ export function Overview({ view, onCopyRole, onOpenHistory }: { view: CompanyVie
   return (
     <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       <Card className="gap-0 py-0">
-        <CardHeader className="flex-row items-center border-b py-3">
+        <CardHeader className="flex items-center border-b px-4 py-3 [.border-b]:pb-3">
           <CardTitle className="text-sm">Where it stands</CardTitle>
           <Button variant="link" size="sm" className="ml-auto h-auto p-0 text-xs text-muted-foreground" onClick={onOpenHistory}>
             Full history
           </Button>
         </CardHeader>
-        <CardContent className="py-3">
+        <CardContent className="px-4 py-3">
           {events.length === 0 ? (
             <p className="py-4 text-sm text-muted-foreground">Nothing has happened here yet.</p>
           ) : (
@@ -71,16 +71,16 @@ export function Overview({ view, onCopyRole, onOpenHistory }: { view: CompanyVie
         </section>
 
         <Card className="gap-0 py-0">
-          <CardHeader className="flex-row items-center border-b py-3">
+          <CardHeader className="flex items-center border-b px-4 py-3 [.border-b]:pb-3">
             <CardTitle className="text-sm">People</CardTitle>
             <span className="ml-auto text-xs text-muted-foreground">{`${byEmail} by email, ${onLinkedIn} on LinkedIn`}</span>
           </CardHeader>
           {view.people.length === 0 ? (
-            <p className="px-6 py-4 text-sm text-muted-foreground">No people yet. Paste them in the side terminal.</p>
+            <p className="px-4 py-4 text-sm text-muted-foreground">No people yet. Paste them in the side terminal.</p>
           ) : (
             <ul>
               {view.people.slice(0, PEOPLE_SHOWN).map((p) => (
-                <li key={p.person.id} className="flex items-center justify-between gap-3 border-b px-6 py-2 text-sm last:border-b-0">
+                <li key={p.person.id} className="flex items-center justify-between gap-3 border-b px-4 py-2 text-sm last:border-b-0">
                   <span className="min-w-0 truncate">
                     <span className="font-medium">{p.person.name}</span> <span className="text-muted-foreground">{p.person.title}</span>
                   </span>

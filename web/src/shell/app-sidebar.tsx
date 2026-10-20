@@ -215,7 +215,7 @@ function BoardsRead({ jobs }: { jobs: JobRunSummary[] }) {
         <button
           type="button"
           className={cn(
-            'flex h-7 items-center gap-2 rounded-md text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+            'flex h-5 items-center gap-2 rounded-md text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring',
             tone === 'warn' && 'text-warn',
             tone === 'bad' && 'text-bad',
           )}
@@ -240,13 +240,13 @@ function Footer({ s }: { s: ShellSummary | undefined }) {
   if (!s) return null;
   const sender = SENDER[s.sending.state];
   return (
-    <SidebarFooter className="gap-2.5 border-t border-sidebar-border p-2 text-xs text-muted-foreground">
-      <div className="flex items-center gap-2">
+    <SidebarFooter className="gap-2.5 border-t border-sidebar-border p-4 text-xs text-muted-foreground">
+      <div className="flex h-5 items-center gap-2">
         <span data-testid="sender-dot" aria-hidden className={cn('size-2 rounded-full', DOT[sender.tone])} />
         <span className="font-medium text-foreground">{sender.label}</span>
-        <span className="ml-auto tabular-nums">{`${s.sending.sentToday} of ${s.sending.limitToday} today`}</span>
+        <span className="ml-auto whitespace-nowrap tabular-nums">{`${s.sending.sentToday} of ${s.sending.limitToday} today`}</span>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex h-5 items-center gap-2">
         <span aria-hidden className={cn('size-2 rounded-full', DOT[s.repliesThisMonth > 0 ? 'ok' : 'idle'])} />
         <span className="font-medium text-foreground">{plural(s.repliesThisMonth, 'reply', 'replies')}</span>
         <span className="ml-auto">{`in ${formatMonth(s.asOf)}`}</span>

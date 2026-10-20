@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 export type CompanyEntry = NoGoRow | RemovedRow;
 
 const HEAD = 'h-9 bg-subtle px-3 text-[13px] text-muted-foreground';
-const CELL = 'h-9 px-3 py-1.5 text-[13px]';
+const CELL = 'h-9 px-3 py-1.5 text-[13px] whitespace-normal';
 const SUB = 'text-xs whitespace-nowrap text-muted-foreground';
 const QUOTE = 'border-l-2 pl-2.5 text-[13px] text-muted-foreground';
 
@@ -150,7 +150,7 @@ function RowMenu({ row, actions }: { row: CompanyEntry; actions: EntryActions })
 }
 
 const added = (row: CompanyEntry) => (
-  <span className="text-muted-foreground tabular-nums">{shortDay(row.kind === 'removed' ? row.removedAt : row.addedAt)}</span>
+  <span className="whitespace-nowrap text-muted-foreground tabular-nums">{shortDay(row.kind === 'removed' ? row.removedAt : row.addedAt)}</span>
 );
 
 function companyColumns(actions: EntryActions): ColumnDef<CompanyEntry>[] {

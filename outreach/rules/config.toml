@@ -227,7 +227,7 @@ shared_city_names = [
 # posting first), so each entry is written once, with a straight apostrophe.
 # refresh/finalcheck.py:64-68; exact topic words only, no bare 'immigration' (EEO lines say 'immigration status')
 topic = [
-  "sponsor", "sponsors", "sponsored", "sponsoring", "sponsorship", "visa", "visas", "h-1b", "h1b",
+  "sponsor", "sponsors", "sponsored", "sponsoring", "sponsorship", "sponsorships", "visa", "visas", "h-1b", "h1b",
 ]
 # new in #4 (review round 1): a topic word reads yes only next to one of these, in its clause, other than the topic
 # word itself, or when it is a self_context word; so "executive sponsors" and "Visa and Mastercard" say nothing, and
@@ -240,8 +240,8 @@ context = [
 # sponsor.", "H-1B transfers welcome."). Not "sponsors" or "sponsored" (executive sponsors, sponsored events), and
 # "visa" only in these forms, so "Visa and Mastercard" says nothing.
 self_context = [
-  "sponsorship", "sponsor", "sponsoring", "h-1b", "h1b", "visas", "work visa", "work visas", "visa sponsorship",
-  "visa transfer", "visa transfers",
+  "sponsorship", "sponsorships", "sponsor", "sponsoring", "h-1b", "h1b", "visas", "work visa", "work visas",
+  "visa sponsorship", "visa transfer", "visa transfers",
 ]
 # new in #4 (review round 1): benefit and business wording; a topic word inside one of these is not a topic word.
 # Not bare "employer sponsored": "employer-sponsored work authorization" is about sponsorship.
@@ -291,6 +291,16 @@ negation = [
   # new in #4 (review round 1)
   "won't be able to sponsor", "won't be able to offer", "won't be able to provide", "won't be able to support",
   "never sponsor", "never sponsors", "never offer", "never offers", "never provide", "never provides",
+  # new in #4 (final fix wave, item 1): refusals that read yes before, now that a negator never reads yes
+  "aren't able to sponsor", "aren't able to provide", "aren't able to offer", "aren't able to support",
+  "isn't able to sponsor", "isn't able to provide", "isn't able to offer", "isn't able to support",
+  "no plans to sponsor", "no plans to provide", "no plans to offer", "no plans for sponsorship",
+  "no plans for visa sponsorship", "not have visa sponsorship", "not have sponsorship", "don't have visa sponsorship",
+  "don't have sponsorship", "doesn't have visa sponsorship", "doesn't have sponsorship", "not sponsored",
+  "without requiring the company to sponsor", "without requiring the employer to sponsor",
+  "without requiring us to sponsor", "without requiring our company to sponsor", "without requiring a company to sponsor",
+  "without requiring the company to provide sponsorship", "without requiring the employer to provide sponsorship",
+  "without needing the company to sponsor", "without needing us to sponsor",
 ]
 # new in #4 (review round 1): generic refusals ("not available", "not eligible"). One counts only when a topic word
 # in the same clause sits within a few words of it (sponsorship.py NEAR_CHARS), so "relocation is not provided"
@@ -300,6 +310,10 @@ negation_near = [
   "not supported", "not eligible", "not eligible for", "ineligible", "not possible", "not qualify", "not open to",
   "not in a position", "not have the ability", "no ability", "not consider", "not be considered",
   "without the need", "now or in the future", "now or in future", "current or future",
+  # new in #4 (final fix wave, item 1): "will not be available", and "cannot hire candidates who need visas"
+  "not be available", "not be provided", "not be offered", "not be supported", "not be possible", "cannot hire",
+  "can't hire", "unable to hire", "not able to hire", "will not hire", "won't hire", "do not hire", "does not hire",
+  "don't hire", "doesn't hire",
 ]
 # new in #4 (review rounds 2 and 3): finite verbs and auxiliaries. A sentence is cut at " and " only when the left
 # side holds one of these and the right side is one to three words and then one of these ("We offer visa
@@ -326,6 +340,15 @@ field_no = [
 hedge = [
   "may", "might", "case by case", "depending", "depends", "exceptional", "in some cases", "in certain cases",
   "select candidates", "limited", "occasionally", "sometimes", "possibly", "potentially", "discretion",
+  # new in #4 (final fix wave, item 1): "we can't always guarantee success" is not a refusal and not a yes
+  "can't always guarantee", "cannot always guarantee", "can't guarantee", "cannot guarantee", "not guaranteed",
+  "not always guaranteed", "no guarantee",
+]
+# new in #4 (final fix wave, item 1): a clause with a topic word and one of these never reads yes. "yes" needs a
+# clause with none, so a refusal worded in a way the lists do not know reads unclear and goes to Needs you instead of
+# ranking as the best answer. Contractions ending in n't count as well (sponsorship.py reads them).
+negators = [
+  "not", "no", "never", "cannot", "none", "unable", "without",
 ]
 # new in #4 (the old code has no OPT wording; read with a support word by the sponsorship task). The spelled-out
 # forms match in any case; the acronyms only in capitals, so "opt in" and "opt out" are not OPT.

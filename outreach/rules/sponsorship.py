@@ -67,6 +67,8 @@ class _Patterns:
         # ": No" as an ATS field value; the answer list goes through phrases() like every other list
         self.field_no = re.compile(r":\s{0,3}(?:" + phrases(s["field_no"]).pattern + ")", re.IGNORECASE)
         self.hedge = phrases(s["hedge"])
+        # "not", "no", ...; and any contraction ending in n't ("isn't", "can't", "weren't"), apostrophes already straight
+        self.negator = re.compile(phrases(s["negators"]).pattern + r"|(?<!\w)\w+n't(?!\w)", re.IGNORECASE)
         self.opt = phrases(s["opt"])
         self.opt_acronyms = phrases(s["opt_acronyms"], case=True)  # "OPT", never "opt in" or "opt out"
         self.opt_support = phrases(s["opt_support"])
@@ -180,6 +182,16 @@ def _has_context(clause: str, topics: list[tuple[int, int]], p: _Patterns) -> bo
     return False
 
 
+def _negator(clause: str, p: _Patterns) -> re.Match | None:
+    """The first negator of the clause. A "no" or "none" right after a colon answers another field ("Relocation: No,
+    H-1B sponsorship: Yes") and is not one."""
+    for m in p.negator.finditer(clause):
+        if m.group(0).lower() in ("no", "none") and clause[max(0, m.start() - 4):m.start()].rstrip().endswith(":"):
+            continue
+        return m
+    return None
+
+
 def _read_clause(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
     """no, unclear, yes or neutral, and the match that decided it. A refusal first, then the equal opportunity
     marker ("We do not sponsor visas, regardless of seniority" is a refusal), then hedges and countries."""
@@ -201,6 +213,10 @@ def _read_clause(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
     if m := p.non_us.search(clause):
         return UNCLEAR, m
     if topics and _has_context(clause, topics, p):
+        # "yes" needs a clause with no negator at all: a refusal the lists do not know ("Sponsorship is not part of
+        # this role", "visa sponsorship for candidates with no gaps") reads unclear, never as the best answer.
+        if m := _negator(clause, p):
+            return UNCLEAR, m
         return YES, p.topic.search(clause)
     return NEUTRAL, None  # no topic word, or one with no sponsorship context ("executive sponsors")
 

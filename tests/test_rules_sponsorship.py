@@ -233,6 +233,35 @@ REVIEW_CITIZEN = [  # (body, required)
     ("Experience with ITAR compliance is nice to have.", False),
 ]
 
+# Final fix wave, item 1 (#4): a clause with a topic word and a negator the lists do not know reads unclear, never yes.
+FINAL_1_STANCE = [  # (body, stances accepted)
+    ("We aren" + RQ + "t able to sponsor visas.", ("no",)),
+    ("We aren't able to sponsor visas.", ("no",)),
+    ("Visa sponsorship will not be available.", ("no",)),
+    ("Visa sponsorship will not be provided.", ("no",)),
+    ("We have no plans to sponsor.", ("no",)),
+    ("We cannot hire candidates who require visa sponsorship.", ("no",)),
+    ("We do not have visa sponsorship available.", ("no",)),
+    ("Sponsorship is not part of this role.", ("no", "unclear")),
+    ("Visa sponsorship is dependent on many factors and we can't always guarantee success.", ("unclear",)),
+    ("Visa sponsorship is available, but we can't always guarantee it.", ("unclear",)),
+    ("We cannot guarantee visa sponsorship.", ("unclear", "no")),
+    ("Right to work in the US without requiring the company to sponsor an immigration case at any point in the "
+     "future is required.", ("no",)),
+    ("Sponsorship is not guaranteed.", ("unclear",)),
+    ("Visa: not sponsored", ("no",)),
+    # a plural topic word is a topic word
+    ("Visa sponsorships are available.", ("yes",)),
+    # a negator the lists do not name must not leave a yes
+    ("Visa sponsorship is available for candidates with no gaps in employment.", ("unclear",)),
+    ("Sponsorship is available, none of it guaranteed.", ("unclear", "no")),
+    ("Visa sponsorship is not part of the package.", ("no", "unclear")),
+    # yes rows that must stay yes
+    ("We sponsor H-1B visas.", ("yes",)),
+    ("Relocation: No, H-1B sponsorship: Yes", ("yes",)),
+]
+
+
 
 class SponsorshipStanceTest(unittest.TestCase):
     @classmethod
@@ -264,6 +293,11 @@ class SponsorshipStanceTest(unittest.TestCase):
 
     def test_review_3_stances(self):
         self.check(REVIEW_3_STANCE)
+
+    def test_final_1_a_refusal_is_never_yes(self):
+        for body, accepted in FINAL_1_STANCE:
+            with self.subTest(body=body):
+                self.assertIn(sponsorship_stance(body, self.cfg)[0], accepted)
 
     def test_relocation_refusal_next_to_a_yes_is_never_no(self):
         for body in REVIEW_3_RELOCATION:
@@ -329,7 +363,7 @@ class SponsorshipStanceTest(unittest.TestCase):
 
     def test_new_keys_are_required(self):
         for key in ("opt_support", "opt_acronyms", "negation_near", "context", "self_context", "benefit",
-                    "non_discrimination", "field_no", "clause_verbs", "citizenship_preference"):
+                    "non_discrimination", "field_no", "clause_verbs", "citizenship_preference", "negators"):
             with self.subTest(key=key):
                 self.assertIn(key, config_mod.REQUIRED["sponsorship"])
 

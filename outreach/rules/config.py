@@ -22,7 +22,7 @@ REQUIRED = {
     "location": ("us_marks", "us_state_codes", "us_state_names", "us_cities", "non_us_countries", "non_us_cities",
                  "shared_city_names"),
     "sponsorship": ("topic", "context", "self_context", "benefit", "non_discrimination", "negation", "negation_near",
-                    "clause_verbs", "field_no", "hedge", "opt", "opt_acronyms", "opt_support", "citizenship",
+                    "clause_verbs", "field_no", "hedge", "negators", "opt", "opt_acronyms", "opt_support", "citizenship",
                     "citizenship_negation", "citizenship_preference"),
     "eligibility": ("grad_words", "current_student", "graduates_welcome", "graduate_route", "soft", "company_history",
                     "upper_bound", "cohort_title", "start_2027", "immediate_start",

@@ -133,14 +133,71 @@ describe('Company page', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it('P pauses at once on screen, with Undo', async () => {
-    await open();
+  it('P pauses at once: the API is called with no wait and no Undo', async () => {
+    const { client } = await open();
+    const pause = vi.spyOn(client, 'pauseCompany');
     act(() => {
       press('p');
     });
     expect(await screen.findByText('Paused Browserbase. Nothing more sends there until you resume.')).toBeInTheDocument();
     expect(within(screen.getByRole('group', { name: 'Status' })).getByText('Paused')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    await waitFor(() => expect(pause).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+  });
+
+  it('Pause, then Close inside the window: the close reads the new revision and does not conflict', async () => {
+    const { client } = await open();
+    const pause = vi.spyOn(client, 'pauseCompany');
+    const close = vi.spyOn(client, 'closeCompany');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+    try {
+      act(() => {
+        press('p');
+      });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(pause).toHaveBeenCalledTimes(1);
+      act(() => {
+        press('c');
+      });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      const dialog = screen.getByRole('dialog', { name: 'Close Browserbase' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close company' }));
+      await act(() => vi.advanceTimersByTimeAsync(8000));
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(close.mock.calls[0]?.[3]).toBe(2);
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(screen.queryByText(/changed since you loaded it/)).toBeNull();
+      expect(within(screen.getByRole('group', { name: 'Status' })).getByText('Done')).toBeInTheDocument();
+    } finally {
+      await act(() => vi.runOnlyPendingTimersAsync());
+      vi.useRealTimers();
+    }
+  });
+
+  it('a close waiting in its window reads the revision when it commits, so another write in between does not conflict', async () => {
+    const { client } = await open();
+    const close = vi.spyOn(client, 'closeCompany');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+    try {
+      act(() => {
+        press('c');
+      });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      fireEvent.click(within(screen.getByRole('dialog', { name: 'Close Browserbase' })).getByRole('button', { name: 'Close company' }));
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      // Something else (Claude, another tab) moves the company's revision while the close waits.
+      await act(async () => {
+        await client.pauseCompany(BROWSERBASE, 1, { requestId: 'elsewhere' });
+      });
+      await act(() => vi.advanceTimersByTimeAsync(8000));
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(close.mock.calls[0]?.[3]).toBe(2);
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(screen.queryByText(/changed since you loaded it/)).toBeNull();
+    } finally {
+      await act(() => vi.runOnlyPendingTimersAsync());
+      vi.useRealTimers();
+    }
   });
 
   it('R asks first, listing the held emails, then resumes', async () => {

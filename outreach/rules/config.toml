@@ -301,6 +301,41 @@ negation = [
   "without requiring us to sponsor", "without requiring our company to sponsor", "without requiring a company to sponsor",
   "without requiring the company to provide sponsorship", "without requiring the employer to provide sponsorship",
   "without needing the company to sponsor", "without needing us to sponsor",
+  # new in #4 (final fix wave, item 2): "We cannot be the sponsor of your visa" (kept out of the benefit blanking)
+  "cannot be the sponsor", "can't be the sponsor", "not be the sponsor", "unable to be the sponsor",
+  "are not the sponsor", "won't be the sponsor", "cannot be your sponsor", "can't be your sponsor",
+  "not be your sponsor", "cannot act as sponsor", "cannot act as your sponsor",
+]
+# new in #4 (final fix wave, item 2): refusals with the verb left out ("We would love to sponsor you, but we are
+# unable at this time."). `negation` counts only in a clause with a topic word; one of these also counts in a clause
+# with none, because the topic is the one the sentence is about; but "we are unable to provide relocation" in such a clause is only unclear (see
+# elided_complete).
+negation_elided = [
+  "we're unable", "we are unable", "not currently able", "we're not able", "we are not able", "we aren't able",
+]
+# new in #4 (final fix wave, item 2): what may follow an elided refusal and still refuse the sentence's topic; any
+# other "to <verb>" after it ("we are unable to provide relocation") refuses something else
+elided_complete = [
+  "to do so", "to do that", "to help",
+]
+# new in #4 (final fix wave, item 2): the first words of a clause that has no subject of its own ("Visa sponsorship
+# is not provided for interns, but is for full-time hires"). After a refusal, such a clause makes the sentence unclear.
+continuation = [
+  "is", "are", "will be", "can be", "may be",
+]
+# new in #4 (final fix wave, item 2): a word that cannot start a new subject after a comma or a dash, so ", not
+# available" and ", they will not be considered" stay in the clause they refer back to
+not_subject = [
+  "not", "no", "never", "they", "them", "those", "these", "such", "it",
+]
+# new in #4 (final fix wave, item 2): wording that says "no" only after a refusal word ("must not require sponsorship
+# now or in the future") and says "yes" on its own ("sponsorship is available now or in the future"). One counts like a
+# negation_near phrase, and only when one of the cue words is in the clause up to 60 characters before it.
+negation_cued = [
+  "now or in the future", "now or in future", "current or future",
+]
+negation_cue = [
+  "without", "not", "authorized", "authorised", "unable", "cannot", "never",
 ]
 # new in #4 (review round 1): generic refusals ("not available", "not eligible"). One counts only when a topic word
 # in the same clause sits within a few words of it (sponsorship.py NEAR_CHARS), so "relocation is not provided"
@@ -309,7 +344,7 @@ negation_near = [
   "not available", "isn't available", "not currently available", "unavailable", "not offered", "not provided",
   "not supported", "not eligible", "not eligible for", "ineligible", "not possible", "not qualify", "not open to",
   "not in a position", "not have the ability", "no ability", "not consider", "not be considered",
-  "without the need", "now or in the future", "now or in future", "current or future",
+  "without the need",
   # new in #4 (final fix wave, item 1): "will not be available", and "cannot hire candidates who need visas"
   "not be available", "not be provided", "not be offered", "not be supported", "not be possible", "cannot hire",
   "can't hire", "unable to hire", "not able to hire", "will not hire", "won't hire", "do not hire", "does not hire",
@@ -362,6 +397,8 @@ opt_acronyms = [
 opt_support = [
   "support", "supports", "supported", "supporting", "accept", "accepts", "accepted", "accepting", "welcome",
   "welcomes", "welcomed", "welcoming", "open to",
+  # new in #4 (final fix wave, item 2): "unable to hire candidates who require sponsorship, except for OPT"
+  "except for", "except",
 ]
 # refresh/finalcheck.py:61-63 CITIZ and refresh/crawl_boards.py:127, one list
 # Not expressible as a word list: the old 'u.s. persons' pattern allowed up to 20 characters before only, required or as defined.

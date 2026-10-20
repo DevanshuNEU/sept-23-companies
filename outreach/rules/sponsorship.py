@@ -5,7 +5,10 @@ sentence that names a `topic` word (sponsor, visa, H-1B) is about sponsorship; "
 authorization" alone are not, because EEO lines say "without regard to ... immigration status". Benefit wording
 ("employer-sponsored health insurance") is blanked out first, and a clause with an equal opportunity marker says
 nothing. Each topic sentence is cut into clauses at "but", "however", "and", "though", "while" and ", which", and a
-negation is read before anything else, so a wrong "yes" from "will not sponsor ... OPT" cannot happen. A topic word
+negation is read before anything else, so a wrong "yes" from "will not sponsor ... OPT" cannot happen. A refusal counts only in a clause with a topic word, and
+a clause is also cut at a comma or spaced dash before a new subject, at ", except" and around a parenthetical that has a
+verb, so "Visa sponsorship is available, relocation is not provided" reads yes. A clause with a topic word and any
+negator reads unclear, never yes. A topic word
 reads yes only next to a sponsorship context word (visa, H-1B, work authorization), so "executive sponsors" and
 "Visa and Mastercard" say nothing. Every pattern is a list of literals with bounded gaps, and every window is
 bounded, so reading stays linear in the body.
@@ -22,11 +25,20 @@ from .text import quote_around, sentences
 # semicolon, so "; however" only shows up as "however," at the start of the next one.) "though", "while", "which"
 # and a clause-joining "and" start a new subject often enough ("We offer visa sponsorship and relocation is not
 # provided") that a generic negation after them is about something else.
+#
+# Three more cuts, for sponsorship only (citizenship keeps the cuts above): ", except", which is where an exception
+# starts ("unable to hire candidates who need sponsorship, except for OPT"); a comma or a spaced dash followed by a new
+# subject ("Visa sponsorship is available, relocation is not provided"), cut only when the left side holds a verb and
+# the right side is one to three plain words and a verb, like " and "; and a parenthesis (see _split_parens).
+_DASH_CHARS = "\\-" + chr(0x2010) + chr(0x2011) + chr(0x2013) + chr(0x2014)
 _CLAUSE_BREAK = re.compile(
     r",\s{0,3}but(?!\w)|\sbut\s|;\s{0,3}however(?!\w)|(?<!\w)however,|(?P<and>\sand\s)|\sthough\s|\swhile\s"
-    r"|,\s{0,3}which(?!\w)",
+    r"|,\s{0,3}which(?!\w)|(?P<except>,?\s(?=except\s))|(?P<comma>,\s{1,3})|(?P<dash>\s[" + _DASH_CHARS + r"]{1,2}\s)",
     re.IGNORECASE,
 )
+_FINE_CUTS = ("except", "comma", "dash")
+# A parenthetical that holds a verb of its own is read as a clause of its own: "(we do not provide relocation)".
+_PARENS = re.compile(r"\([^()]{0,300}\)")
 _CURLY = chr(0x2019)  # a curly apostrophe, read as a straight one so "don't" in the lists matches "don" + curly + "t"
 
 # A `negation_near` phrase ("not available", "now or in the future") is a refusal only when a topic word in the
@@ -35,6 +47,8 @@ _CURLY = chr(0x2019)  # a curly apostrophe, read as a straight one so "don't" in
 # "will not consider candidates who need visa" (21), and leaves out "visas for strong candidates who need them now
 # or in the future" (37).
 NEAR_CHARS = 30
+# How far before a `negation_cued` phrase ("now or in the future") its cue word ("not", "without") may sit.
+CUE_CHARS = 60
 # Read past either end of a window, so a phrase that starts inside it is never cut by the search bounds. Longer
 # than any citizenship_preference entry.
 _SLACK = 20
@@ -67,6 +81,12 @@ class _Patterns:
         # ": No" as an ATS field value; the answer list goes through phrases() like every other list
         self.field_no = re.compile(r":\s{0,3}(?:" + phrases(s["field_no"]).pattern + ")", re.IGNORECASE)
         self.hedge = phrases(s["hedge"])
+        self.negation_elided = phrases(s["negation_elided"])
+        self.elided_complete = phrases(s["elided_complete"])
+        self.continuation = phrases(s["continuation"])
+        self.not_subject = phrases(s["not_subject"])
+        self.negation_cued = phrases(s["negation_cued"])
+        self.negation_cue = phrases(s["negation_cue"])
         # "not", "no", ...; and any contraction ending in n't ("isn't", "can't", "weren't"), apostrophes already straight
         self.negator = re.compile(phrases(s["negators"]).pattern + r"|(?<!\w)\w+n't(?!\w)", re.IGNORECASE)
         self.opt = phrases(s["opt"])
@@ -86,6 +106,46 @@ def _patterns(cfg: Config) -> _Patterns:
 
 def _blank(m: re.Match) -> str:
     return " " * len(m.group(0))  # same length, so offsets still point into the body
+
+
+def _blank_benefits(text: str, p: _Patterns) -> tuple[str, int]:
+    """The text with every benefit phrase blanked, and how many were. One that overlaps a refusal stays: "We cannot be
+    the sponsor of your visa" is a refusal, and "the sponsor of" in it is not a business sponsor."""
+    benefits = list(p.benefit.finditer(text))
+    if not benefits:
+        return text, 0
+    refusals = [m.span() for m in p.negation.finditer(text)]
+    starts = [a for a, _ in refusals]
+    pieces, last, blanked = [], 0, 0
+    for m in benefits:
+        i = bisect.bisect_right(starts, m.start()) - 1
+        if (i >= 0 and refusals[i][1] > m.start()) or (i + 1 < len(starts) and starts[i + 1] < m.end()):
+            continue
+        pieces.append(text[last:m.start()])
+        pieces.append(_blank(m))
+        last = m.end()
+        blanked += 1
+    pieces.append(text[last:])
+    return "".join(pieces), blanked
+
+
+def _split_parens(text: str, p: _Patterns) -> tuple[str, list[tuple[int, int]]]:
+    """The text with each parenthetical that holds a verb blanked (same length, so offsets hold), and the span of
+    what was inside each. "We sponsor H-1B visas (we do not provide relocation)." reads as two clauses; one with no
+    verb ("(H-1B, TN)", "(OPT)") stays where it is, since it only glosses the words around it."""
+    spans = []
+    pieces, last = [], 0
+    for m in _PARENS.finditer(text):
+        if not p.clause_verbs.search(text, m.start() + 1, m.end() - 1):
+            continue
+        spans.append((m.start() + 1, m.end() - 1))
+        pieces.append(text[last:m.start()])
+        pieces.append(" " * len(m.group(0)))
+        last = m.end()
+    if not spans:
+        return text, spans
+    pieces.append(text[last:])
+    return "".join(pieces), spans
 
 
 def _right_side(sentence: str, at: int, p: _Patterns) -> str | None:
@@ -116,16 +176,21 @@ def _clauses(sentence: str, p: _Patterns, *, any_right: bool = False) -> list[tu
     opt_starts: list[int] | None = None
     neg_starts: list[int] = []
     for k, cut in enumerate(cuts):
-        if cut.lastgroup == "and":
+        group = cut.lastgroup
+        if group in _FINE_CUTS and any_right:
+            continue  # citizenship reads "Security clearance (not required)" and "required, TS/SCI preferred" whole
+        if group in ("and", "comma", "dash"):
             right = _right_side(sentence, cut.end(), p)
             if right is None:
                 continue
+            if group != "and" and (right != "clause" or p.not_subject.match(sentence, cut.end())):
+                continue  # a comma or dash cuts only before a new subject, never before ", not available"
             if not left_verb:
                 left_verb = p.clause_verbs.search(sentence, max(scanned, pos), cut.start()) is not None
                 scanned = cut.start()  # a space, so endpos never cuts a word in two
             if not left_verb:
                 continue
-            if right == "verb" and not any_right:
+            if group == "and" and right == "verb" and not any_right:
                 if opt_starts is None:
                     opt_starts = sorted(m.start() for pat in (p.opt, p.opt_acronyms) for m in pat.finditer(sentence))
                     neg_starts = [m.start() for m in p.negation.finditer(sentence)]
@@ -194,15 +259,29 @@ def _negator(clause: str, p: _Patterns) -> re.Match | None:
 
 def _read_clause(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
     """no, unclear, yes or neutral, and the match that decided it. A refusal first, then the equal opportunity
-    marker ("We do not sponsor visas, regardless of seniority" is a refusal), then hedges and countries."""
-    if m := p.negation.search(clause):
-        return NO, m
+    marker ("We do not sponsor visas, regardless of seniority" is a refusal), then hedges and countries. A refusal
+    counts only in a clause with a topic word: "we do not provide relocation" is about relocation."""
     topics = [t.span() for t in p.topic.finditer(clause)]
+    if topics and (m := p.negation.search(clause)):
+        return NO, m
+    if m := p.negation_elided.search(clause):
+        if topics:
+            return NO, m
+        # "we are unable at this time" refuses the sentence's topic; "we are unable to provide relocation" only
+        # tells us something is unclear.
+        tail = clause[m.end():].lstrip()
+        if re.match(r"to\s", tail, re.IGNORECASE) and not p.elided_complete.match(tail):
+            return UNCLEAR, m
+        return NO, m
     if topics:
         starts, ends = [a for a, _ in topics], [b for _, b in topics]
         for m in p.negation_near.finditer(clause):
             if _near_topic(ends, starts, m.start(), m.end()):
                 return NO, m
+        for m in p.negation_cued.finditer(clause):
+            if _near_topic(ends, starts, m.start(), m.end()) and p.negation_cue.search(
+                    clause, max(0, m.start() - CUE_CHARS), m.start()):
+                return NO, m  # "must not require sponsorship now or in the future"; not "available now or in the future"
         for m in p.field_no.finditer(clause) if ":" in clause else ():
             if _after_topic(ends, m.start()):
                 return NO, m  # "Sponsorship Available: No"
@@ -251,7 +330,7 @@ def _read_sentence(sentence: str, offset: int, p: _Patterns) -> _Reading | None:
     text = sentence.replace(_CURLY, "'") if _CURLY in sentence else sentence  # same length: offsets still hold
     topic = p.topic.search(text) is not None
     if topic:
-        text, blanked = p.benefit.subn(_blank, text)  # "employer-sponsored health insurance" is not about visas
+        text, blanked = _blank_benefits(text, p)  # "employer-sponsored health insurance" is not about visas
         topic = not blanked or p.topic.search(text) is not None
     names_opt = _opt_word(text, p) is not None  # read per clause only when the sentence names OPT at all
     if not topic:
@@ -262,12 +341,22 @@ def _read_sentence(sentence: str, offset: int, p: _Patterns) -> _Reading | None:
         return None
     found: dict[str, tuple[int, int]] = {}  # reading -> the first match that gave it, as body offsets
     opt = False
-    for a, b in _clauses(text, p):
-        clause = text[a:b]
-        if names_opt and (m := _supports_opt(clause, p)):
+    outer, parens = _split_parens(text, p)
+    spans = [(a, b, outer) for a, b in _clauses(outer, p)] + [(a, b, text) for a, b in parens]
+    for a, b, source in spans:
+        clause = source[a:b]
+        if names_opt and source is outer and (m := _supports_opt(clause, p)):
             opt = True
             found.setdefault("opt", (offset + a + m.start(), offset + a + m.end()))
         reading, m = _read_clause(clause, p)
+        if reading == NEUTRAL and a > 0 and NO in found and not p.topic.search(clause):
+            # "not provided for interns, but is for full-time hires": a clause with no subject of its own, after a
+            # refusal, says the refusal is not the whole story
+            lead = len(clause) - len(clause.lstrip())
+            if m := p.continuation.match(clause, lead):
+                reading = UNCLEAR
+        if reading == YES and source is not outer:
+            reading = NEUTRAL  # a parenthetical only qualifies: "(i.e. H1B, F-1 OPT, TN)" is not a yes
         if reading != NEUTRAL:
             found.setdefault(reading, (offset + a + m.start(), offset + a + m.end()))
     if not found:

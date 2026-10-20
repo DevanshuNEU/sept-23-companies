@@ -263,6 +263,37 @@ FINAL_1_STANCE = [  # (body, stances accepted)
 
 
 
+# Final fix wave, item 2 (#4): a negation counts only in a clause that is about sponsorship, and clauses also end at a
+# comma before a new subject, a spaced dash and a parenthesis.
+FINAL_2_STANCE = [  # (body, stances accepted)
+    ("Visa sponsorship is available, relocation is not provided.", ("yes",)),
+    ("We offer visa sponsorship, we do not provide relocation.", ("yes",)),
+    ("We sponsor H-1B visas (we do not provide relocation assistance).", ("yes",)),
+    ("Visa sponsorship is available - relocation is not provided.", ("yes",)),
+    ("Visa sponsorship is available " + EN + " relocation is not provided.", ("yes",)),
+    ("Visa sponsorship is available " + chr(0x2014) + " relocation is not provided.", ("yes",)),
+    ("Sponsorship for this role is available now or in the future.", ("yes",)),
+    ("We will provide visa sponsorship now or in the future.", ("yes",)),
+    ("Visa sponsorship is not provided for interns, but is for full-time hires.", ("unclear", "yes")),
+    ("We offer visa sponsorship, but we are unable to provide relocation.", ("unclear", "yes")),
+    ("We sponsor visas; we do not provide relocation.", ("yes",)),
+    ("We sponsor visas (e.g. H-1B, TN).", ("yes",)),
+    # a refusal that must stay a refusal across the new cuts
+    ("Candidates must be authorized to work in the United States without sponsorship now or in the future.", ("no",)),
+    ("We cannot be the sponsor of your visa.", ("no",)),
+    ("We can" + RQ + "t be the sponsor of your visa.", ("no",)),
+    ("Sponsorship (H-1B, TN) is not available for this role.", ("no",)),
+    ("Visa sponsorship - not available for this role.", ("no",)),
+    ("Visa sponsorship, not available for this role.", ("no",)),
+    ("Candidates requiring sponsorship, now or in the future, will not be considered.", ("no",)),
+    ("Applicants who need visa sponsorship, they will not be considered.", ("no", "unclear")),
+    ("We would love to sponsor you, but we are unable at this time.", ("unclear",)),
+    ("We cannot sponsor visas (relocation is available).", ("no", "unclear")),
+    ("We are unable to hire candidates who require sponsorship, except for OPT.", ("opt_only",)),
+    ("We do not sponsor visas, except for OPT students.", ("opt_only", "no")),
+]
+
+
 class SponsorshipStanceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -296,6 +327,11 @@ class SponsorshipStanceTest(unittest.TestCase):
 
     def test_final_1_a_refusal_is_never_yes(self):
         for body, accepted in FINAL_1_STANCE:
+            with self.subTest(body=body):
+                self.assertIn(sponsorship_stance(body, self.cfg)[0], accepted)
+
+    def test_final_2_a_negation_about_something_else_is_not_a_refusal(self):
+        for body, accepted in FINAL_2_STANCE:
             with self.subTest(body=body):
                 self.assertIn(sponsorship_stance(body, self.cfg)[0], accepted)
 
@@ -363,7 +399,8 @@ class SponsorshipStanceTest(unittest.TestCase):
 
     def test_new_keys_are_required(self):
         for key in ("opt_support", "opt_acronyms", "negation_near", "context", "self_context", "benefit",
-                    "non_discrimination", "field_no", "clause_verbs", "citizenship_preference", "negators"):
+                    "non_discrimination", "field_no", "clause_verbs", "citizenship_preference", "negators", "negation_elided", "not_subject", "continuation",
+                    "elided_complete", "negation_cued", "negation_cue"):
             with self.subTest(key=key):
                 self.assertIn(key, config_mod.REQUIRED["sponsorship"])
 
@@ -384,6 +421,11 @@ class SponsorshipStanceTest(unittest.TestCase):
             "security clearance is a plus " * 35_000,  # one 1 MB sentence of requirements, each with a preference
             ("visa and " * 111_112)[:1_000_000],  # one 1 MB sentence of "and" joins with no verb anywhere
             "we do not sponsor visas and welcome OPT " * 25_000,  # "and <verb>" joins, each with OPT and a refusal
+            # final fix wave: comma and dash cuts before a new subject, parentheticals with verbs, ", except" cuts
+            "visa sponsorship is available, relocation is not provided - " * 17_000,
+            "visa sponsorship (we do not provide relocation), " * 10_000,  # half a MB: each clause is read twice
+            ("(" + "a" * 299) * 3_300,  # parentheses that never close
+            "we cannot hire people who need visas, except for OPT " * 19_000,
         ]
         for body in bodies:
             with self.subTest(body=body[:30]):

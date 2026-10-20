@@ -93,6 +93,7 @@ launchd jobs) are written as part of #17.
   `uv venv --python /opt/homebrew/bin/python3 && uv sync` once first; the live checkout needs the same once
   before the deploy test run. `tests/__init__.py` points every test at scratch settings; new tests rely on that
   and never use the live paths.
+- Conductor workspaces: `.conductor/settings.toml` sets each new workspace up (uv env, web packages). The web app's run script serves on that workspace's `CONDUCTOR_PORT`; run e2e there with `WEB_PORT=$CONDUCTOR_PORT pnpm e2e` so workspaces never fight over 5173. Never use 3001, 3002, 3011 or 3013.
 - Test first: write the test, watch it go red for the right reason, then make it green. Every bug fix starts
   with a test that reproduces it. Tests never run a real refresh, a real send, or a crawl.
 - Current code (`mail/`, `refresh/`, `dashboard/`) is standard library only. The new platform lives in the

@@ -112,7 +112,8 @@ preferred = [
 ]
 # new in #4 (years that stand in for a degree are not a requirement; 'or' right before the number is read in code)
 degree_alternative = [
-  "in lieu of a degree", "equivalent experience", "equivalent practical experience", "equivalent work experience",
+  "in lieu of a degree", "in lieu of degree", "equivalent experience", "equivalent practical experience",
+  "equivalent work experience",
 ]
 # new in #4 (the company's age is not a requirement)
 company_age = [
@@ -137,6 +138,10 @@ body_entry = [
   "zero to 3+ year", "1-3+ years", "1 to 3+ years", "2-3+ years", "2 to 3+ years", "recent graduated",
   "recent graduating", "recently grad", "recently grads", "recently graduate", "recently graduates",
   "recently graduating",
+  # new in #4: the plural and short forms the title list has. Not the bare singular "university graduate", which
+  # also reads "a university graduate degree"; the singular counts only after "recent".
+  "university graduates", "university grads", "recent university graduate", "recent university graduates",
+  "recent university grad", "recent university grads", "recent graduation",
 ]
 
 [location]

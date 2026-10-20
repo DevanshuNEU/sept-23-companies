@@ -15,7 +15,7 @@ CONFIG_PATH = Path(__file__).with_name("config.toml")
 REQUIRED = {
     "candidate": ("graduated", "max_years_asked"),
     "title": ("engineering", "intern", "off_lane", "general_application", "senior", "manager", "strong_entry",
-              "new_grad", "early_career", "open_level", "level_nouns"),
+              "new_grad", "early_career", "open_level", "level_nouns", "level_qualifiers"),
     "years": ("experience_words", "preferred", "degree_alternative", "company_age", "body_entry"),
     "location": ("us_marks", "us_state_codes", "us_state_names", "us_cities", "non_us_countries", "non_us_cities",
                  "shared_city_names"),

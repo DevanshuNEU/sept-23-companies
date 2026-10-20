@@ -27,6 +27,7 @@ describe('status vocabulary', () => {
     expect(messageStatus.approved).toMatchObject({ label: 'Approved', tone: 'info' });
     expect(messageStatus.failed).toMatchObject({ label: 'Failed', tone: 'bad' });
     expect(messageStatus.drafted).toMatchObject({ label: 'Draft', tone: 'idle' });
+    expect(touchStatus.open).toMatchObject({ label: 'Waiting', tone: 'idle' });
     expect(touchStatus.replied).toMatchObject({ label: 'Replied', tone: 'ok' });
     expect(touchStatus.bounced).toMatchObject({ label: 'Bounced', tone: 'bad' });
     expect(sponsorshipStatus.says_no).toMatchObject({ label: 'Does not sponsor', tone: 'bad' });

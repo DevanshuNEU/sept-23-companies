@@ -28,7 +28,7 @@ export const messageStatus = {
 } satisfies Record<MessageState, Status>;
 
 export const touchStatus = {
-  open: { label: 'Open', tone: 'idle' },
+  open: { label: 'Waiting', tone: 'idle' },
   replied: { label: 'Replied', tone: 'ok', icon: 'reply' },
   bounced: { label: 'Bounced', tone: 'bad', icon: 'warn' },
   closed: { label: 'Closed', tone: 'idle' },

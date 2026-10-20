@@ -1,7 +1,8 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 
-const HOST = '127.0.0.1:5173';
+// The app's own host: 5173 by default, or the workspace port when WEB_PORT is set (see playwright.config.ts).
+const HOST = `127.0.0.1:${process.env.WEB_PORT ?? '5173'}`;
 
 /** Records every request host so the run can prove the app never left the dev server. */
 function watchRequests(page: Page): string[] {

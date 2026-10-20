@@ -242,6 +242,21 @@ describe('CloseCompanyDialog', () => {
     expect(onClose).toHaveBeenCalledExactlyOnceWith('no_sponsorship', 'Posting says no visas');
   });
 
+  it('a double click on Close company closes once', async () => {
+    const onClose = vi.fn();
+    render(<CloseCompanyDialog company={company} open onOpenChange={() => {}} onClose={onClose} />);
+    await userEvent.dblClick(screen.getByRole('button', { name: 'Close company' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Enter pressed twice in the note closes once', async () => {
+    const onClose = vi.fn();
+    render(<CloseCompanyDialog company={company} open onOpenChange={() => {}} onClose={onClose} />);
+    await userEvent.type(screen.getByLabelText('Note'), 'done{Enter}{Enter}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith('interview', 'done');
+  });
+
   it('Cancel closes without calling onClose, and renders nothing while closed', async () => {
     const onClose = vi.fn();
     const onOpenChange = vi.fn();

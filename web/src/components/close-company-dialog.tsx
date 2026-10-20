@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import type { CloseReason, CompanyRef } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -29,8 +29,12 @@ function CloseForm({
 }) {
   const [reason, setReason] = useState<CloseReason>('interview');
   const [note, setNote] = useState('');
+  // The dialog stays mounted through its exit animation, so a double click or a held Enter must not close twice.
+  const submitted = useRef(false);
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    if (submitted.current) return;
+    submitted.current = true;
     onSubmit(reason, note.trim());
   };
   return (
@@ -63,7 +67,7 @@ function CloseForm({
   );
 }
 
-/** Close a company with a reason (design 5.3 and section 7). The caller owns the undo toast. */
+/** Close a company with a reason (design 5.3 and section 7). Confirming calls onClose once and commits at once: this dialog has no undo and the caller adds none. */
 export function CloseCompanyDialog({
   company,
   open,

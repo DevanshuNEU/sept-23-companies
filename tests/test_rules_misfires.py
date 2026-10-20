@@ -153,6 +153,11 @@ class SmallDefaultIsUnknown(unittest.TestCase):
         company = {"sizeClass": "small", "sizeWhy": "no filing record: most likely an early startup"}
         self.assertEqual(from_old_dashboard(company), [])
 
+    def test_no_filing_record_text_never_gives_a_size(self):
+        # Visa filing wording measures filings, not headcount, even when a headcount-looking number sits beside it.
+        company = {"sizeClass": "small", "sizeWhy": "no filing record, 12 engineers on the team"}
+        self.assertEqual(from_old_dashboard(company), [])
+
 
 if __name__ == "__main__":
     unittest.main()

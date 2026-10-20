@@ -285,6 +285,15 @@ class SponsorshipStanceTest(unittest.TestCase):
                 with self.subTest(key=key, word=word):
                     self.assertNotIn(RQ, word)
 
+    def test_immigration_alone_is_not_a_topic_word(self):
+        # An EEO line that names immigration status is not about sponsorship, so a refusal about something else in
+        # the same sentence ("we do not provide relocation") must not read as a sponsorship refusal.
+        self.check([
+            ("All qualified applicants are considered regardless of immigration status, but we do not provide "
+             "relocation.", "silent"),
+            ("We do not discriminate on immigration status, and we are unable to offer relocation.", "silent"),
+        ])
+
     def test_work_authorization_alone_is_never_yes(self):
         self.assertNotEqual(sponsorship_stance("Must be authorized to work in the U.S.", self.cfg)[0], "yes")
         self.assertNotEqual(sponsorship_stance("Work authorization is required.", self.cfg)[0], "yes")

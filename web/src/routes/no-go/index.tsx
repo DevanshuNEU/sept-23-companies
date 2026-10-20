@@ -176,17 +176,23 @@ export default function NoGoPage() {
   useHotkeys([
     { keys: '1', label: 'Companies', group, run: () => goTab('companies') },
     { keys: '2', label: 'People', group, run: () => goTab('people') },
-    { keys: 'o', label: 'Open the source', group, enabled: openSource !== null, run: () => openSource?.() },
-    {
-      keys: 'backspace',
-      label: 'Take off the list',
-      group,
-      enabled: current !== null,
-      run: () => {
-        if (current) takeOff(current);
-      },
-    },
   ]);
+  // These act on the selected row, so a key right after j, k or a click waits for that move to render.
+  useHotkeys(
+    [
+      { keys: 'o', label: 'Open the source', group, enabled: openSource !== null, run: () => openSource?.() },
+      {
+        keys: 'backspace',
+        label: 'Take off the list',
+        group,
+        enabled: current !== null,
+        run: () => {
+          if (current) takeOff(current);
+        },
+      },
+    ],
+    { selection: selected },
+  );
 
   const filtered = needle !== '' || (tab === 'companies' && reason !== 'all');
   const clearFilters = () => {

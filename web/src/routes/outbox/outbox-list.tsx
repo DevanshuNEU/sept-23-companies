@@ -5,7 +5,7 @@ import type { Id, IsoTime, OutboxCounts, OutboxGroup, OutboxItem, OutboxView } f
 import { EmptyState } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
 import { Input } from '@/components/ui/input';
-import { useAnnounce, useHotkeys } from '@/keyboard/hotkeys';
+import { useAnnounce, useHotkeys, useLiveSelection } from '@/keyboard/hotkeys';
 import { ageDays, formatDay, formatLocalTime } from '@/lib/format';
 import { useStableOrder } from '@/lib/stable-order';
 import { messageStatus, touchStatus, type Status } from '@/lib/status';
@@ -196,7 +196,11 @@ export function OutboxList({
 
   const reveal = () => setSeen(new Set(items.map((i) => i.touchId)));
 
+  // The selection lives in the URL, which renders late: j and k step from the row he moved to last.
+  const live = useLiveSelection<Id>();
+
   const go = (id: Id) => {
+    live.move(id);
     onSelect(id);
     const item = items.find((i) => i.touchId === id);
     if (item) say(`${item.person.name}, ${item.company.name}, ${rowStatus(item).label.toLowerCase()}`);
@@ -210,9 +214,10 @@ export function OutboxList({
   const move = (step: 1 | -1) => {
     const order = visible.map((i) => i.touchId);
     if (order.length === 0) return;
-    const at = selected === null ? -1 : order.indexOf(selected);
+    const from = live.latest();
+    const at = from === null ? -1 : order.indexOf(from);
     const id = at === -1 ? order[0] : order[Math.min(Math.max(at + step, 0), order.length - 1)];
-    if (id !== undefined && id !== selected) go(id);
+    if (id !== undefined && id !== from) go(id);
   };
 
   const moveGroup = (step: 1 | -1) => {
@@ -222,10 +227,11 @@ export function OutboxList({
     }
     const groups = buckets.filter((b) => open(b.group) && b.rows.length > 0);
     if (groups.length === 0) return;
-    const at = selected === null ? -1 : groups.findIndex((b) => b.rows.some((i) => i.touchId === selected));
+    const from = live.latest();
+    const at = from === null ? -1 : groups.findIndex((b) => b.rows.some((i) => i.touchId === from));
     const target = groups[Math.min(Math.max(at + step, 0), groups.length - 1)];
     const id = target?.rows[0]?.touchId;
-    if (id !== undefined && id !== selected) go(id);
+    if (id !== undefined && id !== from) go(id);
   };
 
   useHotkeys([

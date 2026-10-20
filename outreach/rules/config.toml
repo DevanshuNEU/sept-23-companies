@@ -223,45 +223,83 @@ shared_city_names = [
 ]
 
 [sponsorship]
+# Every list here is read with curly apostrophes already turned into straight ones (sponsorship.py does that to the
+# posting first), so each entry is written once, with a straight apostrophe.
 # refresh/finalcheck.py:64-68; exact topic words only, no bare 'immigration' (EEO lines say 'immigration status')
 topic = [
   "sponsor", "sponsors", "sponsored", "sponsoring", "sponsorship", "visa", "visas", "h-1b", "h1b",
 ]
-# refresh/finalcheck.py:64-66 NOSPON, spelled out as phrases
+# new in #4 (review round 1): a topic word reads yes only next to one of these, in its clause, other than the topic
+# word itself; so "executive sponsors" and "Visa and Mastercard" say nothing, and "We sponsor H-1B visas" says yes
+context = [
+  "visa", "visas", "h-1b", "h1b", "sponsorship", "immigration", "work authorization", "employment authorization",
+  "green card", "work permit", "work permits", "tn", "o-1", "l-1", "e-3",
+]
+# new in #4 (review round 1): benefit wording; a topic word inside one of these is not a topic word
+benefit = [
+  "employer sponsored", "company sponsored", "sponsored health", "sponsored healthcare", "sponsored insurance",
+  "sponsored medical", "sponsored dental", "sponsored vision", "sponsored benefit", "sponsored benefits",
+  "sponsored plan", "sponsored plans", "sponsored 401k", "sponsored 401(k)", "sponsored retirement",
+  "sponsored life insurance", "sponsored coverage", "sponsored wellness",
+]
+# new in #4 (review round 1): a clause with one of these is an equal opportunity line and says nothing
+non_discrimination = [
+  "without regard to", "regardless of", "discriminate", "discriminates", "discriminating", "discrimination",
+  "equal opportunity", "equal employment opportunity",
+]
+# refresh/finalcheck.py:64-66 NOSPON, spelled out as phrases. Each one is a refusal anywhere in a clause of a
+# sentence that names a topic word.
 negation = [
   "unable to sponsor", "unable to provide", "unable to offer", "unable to support", "not able to sponsor",
   "not able to provide", "not able to offer", "cannot sponsor", "cannot provide", "cannot offer", "can not sponsor",
-  "can't sponsor", "can’t sponsor", "do not sponsor", "does not sponsor", "will not sponsor", "would not sponsor",
-  "won't sponsor", "won’t sponsor", "do not offer", "does not offer", "will not offer", "do not provide",
-  "does not provide", "will not provide", "not offering", "not providing", "not sponsoring", "no sponsorship",
-  "no visa sponsorship", "no visas", "not available", "isn't available", "isn’t available", "not offered",
-  "not provided", "not supported", "not eligible for", "without sponsorship", "without visa sponsorship",
-  "without the need for sponsorship", "without the need for visa sponsorship", "without requiring sponsorship",
-  "without needing sponsorship", "we're unable", "we’re unable", "we are unable", "don't sponsor", "don’t sponsor",
-  "doesn't sponsor", "doesn’t sponsor",
-  # new in #4: refusals the old regex missed. Read only in clauses of sentences that name a topic word, with a
-  # curly apostrophe read as a straight one.
+  "can't sponsor", "do not sponsor", "does not sponsor", "will not sponsor", "would not sponsor", "won't sponsor",
+  "do not offer", "does not offer", "will not offer", "do not provide", "does not provide", "will not provide",
+  "not offering", "not providing", "not sponsoring", "no sponsorship", "no visa sponsorship", "no visas",
+  "without sponsorship", "without visa sponsorship", "without the need for sponsorship",
+  "without the need for visa sponsorship", "without requiring sponsorship", "without needing sponsorship",
+  "we're unable", "we are unable", "don't sponsor", "doesn't sponsor",
+  # new in #4: refusals the old regex missed
   "do not support", "does not support", "will not support", "cannot support", "can't support", "don't support",
   "doesn't support", "won't support", "not able to support", "do not accept", "does not accept", "will not accept",
   "cannot accept", "can't accept", "don't accept", "doesn't accept", "not accepting", "don't offer", "doesn't offer",
-  "won't offer", "can't offer", "don't provide", "doesn't provide", "won't provide", "can't provide", "unavailable",
-  "not eligible", "not currently sponsor", "not currently sponsoring", "not currently offer", "not currently offering",
+  "won't offer", "can't offer", "don't provide", "doesn't provide", "won't provide", "can't provide",
+  "not currently sponsor", "not currently sponsoring", "not currently offer", "not currently offering",
   "not currently provide", "not currently providing", "not currently able", "not be able to sponsor",
   "not be able to offer", "not be able to provide", "not be able to support", "not be sponsoring", "not be offering",
-  "not be providing", "no h-1b", "no h1b", "no visa", "now or in the future", "now or in future", "current or future",
-  "not require sponsorship", "not require visa sponsorship", "not require employer sponsorship",
-  "not need sponsorship", "not need visa sponsorship", "not be considered", "without requiring visa sponsorship",
-  "without requiring employer sponsorship", "without needing visa sponsorship",
+  "not be providing", "no h-1b", "no h1b", "no visa", "not require sponsorship", "not require visa sponsorship",
+  "not require employer sponsorship", "not need sponsorship", "not need visa sponsorship",
+  "without requiring visa sponsorship", "without requiring employer sponsorship", "without needing visa sponsorship",
   "without the need for employer sponsorship", "without employer sponsorship",
+  # new in #4 (review round 1)
+  "won't be able to sponsor", "won't be able to offer", "won't be able to provide", "won't be able to support",
+  "never sponsor", "never sponsors", "never offer", "never offers", "never provide", "never provides",
+]
+# new in #4 (review round 1): generic refusals ("not available", "not eligible"). One counts only when a topic word
+# in the same clause sits within a few words of it (sponsorship.py NEAR_CHARS), so "relocation is not provided"
+# next to a real yes is not a refusal of sponsorship.
+negation_near = [
+  "not available", "isn't available", "not currently available", "unavailable", "not offered", "not provided",
+  "not supported", "not eligible", "not eligible for", "ineligible", "not possible", "not qualify", "not open to",
+  "not in a position", "not have the ability", "no ability", "not consider", "not be considered",
+  "without the need", "now or in the future", "now or in future", "current or future",
+]
+# new in #4 (review round 1): an ATS field answer, read only as ": <answer>" right after a topic word
+# ("Visa sponsorship: No", "Sponsorship Available: No")
+field_no = [
+  "no", "none",
 ]
 # new in #4 (a hedged clause reads as unclear, not yes)
 hedge = [
   "may", "might", "case by case", "depending", "depends", "exceptional", "in some cases", "in certain cases",
   "select candidates", "limited", "occasionally", "sometimes", "possibly", "potentially", "discretion",
 ]
-# new in #4 (the old code has no OPT wording; read with a support word by the sponsorship task)
+# new in #4 (the old code has no OPT wording; read with a support word by the sponsorship task). The spelled-out
+# forms match in any case; the acronyms only in capitals, so "opt in" and "opt out" are not OPT.
 opt = [
-  "opt", "stem opt", "cpt", "optional practical training", "curricular practical training",
+  "optional practical training", "curricular practical training",
+]
+opt_acronyms = [
+  "OPT", "STEM OPT", "CPT",
 ]
 # new in #4: a clause naming OPT with one of these, and no negation, supports OPT
 opt_support = [
@@ -298,12 +336,17 @@ citizenship = [
   "u.s person as defined", "u.s person, as defined", "u.s persons only", "u.s persons required",
   "u.s persons as defined", "u.s persons, as defined", "us person only", "us person required",
   "us person as defined", "us person, as defined", "us persons as defined", "us persons, as defined",
+  # new in #4 (review round 1): the plural forms
+  "must be u.s. citizens", "must be u.s citizens", "must be us citizens", "must be united states citizens",
+  "must be citizens of the united states",
 ]
-# new in #4 ('No security clearance required' is not a requirement)
+# new in #4 ('No security clearance required' is not a requirement; 'clearance is a plus' is a preference)
 citizenship_negation = [
   "no security clearance", "no clearance", "no u.s. citizenship", "no citizenship", "not required", "isn't required",
-  "isn’t required", "not a requirement", "not necessary", "not needed", "does not require", "do not require",
-  "doesn't require", "regardless of", "without regard to",
+  "not a requirement", "not necessary", "not needed", "does not require", "do not require", "doesn't require",
+  "regardless of", "without regard to",
+  # new in #4 (review round 1)
+  "plus", "a plus", "preferred", "nice to have", "a bonus", "bonus",
 ]
 
 [eligibility]

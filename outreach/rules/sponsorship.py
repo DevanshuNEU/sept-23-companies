@@ -2,39 +2,75 @@
 
 Ported from refresh/finalcheck.py:61-68 and refresh/crawl_boards.py:127, with the reading the #4 plan sets. Only a
 sentence that names a `topic` word (sponsor, visa, H-1B) is about sponsorship; "immigration" and "work
-authorization" alone are not, because EEO lines say "without regard to ... immigration status". Each such sentence
-is cut into clauses at "but" and "however", and a negation is read before anything else, so a wrong "yes" from
-"will not sponsor ... OPT" cannot happen. Every pattern is a list of literals with bounded gaps, so reading stays
-linear in the body.
+authorization" alone are not, because EEO lines say "without regard to ... immigration status". Benefit wording
+("employer-sponsored health insurance") is blanked out first, and a clause with an equal opportunity marker says
+nothing. Each topic sentence is cut into clauses at "but", "however", "and", "though", "while" and ", which", and a
+negation is read before anything else, so a wrong "yes" from "will not sponsor ... OPT" cannot happen. A topic word
+reads yes only next to a sponsorship context word (visa, H-1B, work authorization), so "executive sponsors" and
+"Visa and Mastercard" say nothing. Every pattern is a list of literals with bounded gaps, and every window is
+bounded, so reading stays linear in the body.
 """
 import bisect
+import functools
 import re
 
 from .config import Config, phrases
 from .text import quote_around, sentences
 
-# Where a sentence is cut into clauses: ", but", " but ", "; however" and "however,". (sentences() already ends a
-# sentence at a semicolon, so "; however" only shows up as "however," at the start of the next one.)
-_CLAUSE_BREAK = re.compile(r",\s{0,3}but(?!\w)|\sbut\s|;\s{0,3}however(?!\w)|(?<!\w)however,", re.IGNORECASE)
+# Where a sentence is cut into clauses: ", but", " but ", "; however", "however,", " and ", " though ", " while "
+# and ", which". (sentences() already ends a sentence at a semicolon, so "; however" only shows up as "however," at
+# the start of the next one.) "and", "though", "while" and "which" start a new subject often enough
+# ("We offer visa sponsorship and relocation is not provided") that a generic negation after them is about
+# something else.
+_CLAUSE_BREAK = re.compile(
+    r",\s{0,3}but(?!\w)|\sbut\s|;\s{0,3}however(?!\w)|(?<!\w)however,|\sand\s|\sthough\s|\swhile\s"
+    r"|,\s{0,3}which(?!\w)",
+    re.IGNORECASE,
+)
 _CURLY = chr(0x2019)  # a curly apostrophe, read as a straight one so "don't" in the lists matches "don" + curly + "t"
 
-# A clause's reading. NEUTRAL is a clause with no topic word and nothing to say ("We are a growing team, but ...").
+# A `negation_near` phrase ("not available", "now or in the future") is a refusal only when a topic word in the
+# same clause is at most this many characters from it, and a `field_no` answer (": No") only when a topic word ends
+# at most this many characters before it. 30 holds "Visa sponsorship for this role is not available" (18) and
+# "will not consider candidates who need visa" (21), and leaves out "visas for strong candidates who need them now
+# or in the future" (37).
+NEAR_CHARS = 30
+
+# A clause's reading. NEUTRAL is a clause with nothing to say ("We are a growing team, but ...", "executive
+# sponsors", an EEO line).
 NO, YES, UNCLEAR, NEUTRAL = "no", "yes", "unclear", "neutral"
 
 
 class _Patterns:
-    """The [sponsorship] word lists and the non-US countries, compiled once per call."""
+    """The [sponsorship] word lists and the non-US countries, compiled once per Config (see _patterns)."""
 
     def __init__(self, cfg: Config):
         s = cfg.sponsorship
         self.topic = phrases(s["topic"])
+        self.context = phrases(s["context"])
+        self.benefit = phrases(s["benefit"])
+        self.non_discrimination = phrases(s["non_discrimination"])
         self.negation = phrases(s["negation"])
+        self.negation_near = phrases(s["negation_near"])
+        # ": No" as an ATS field value; the answer list goes through phrases() like every other list
+        self.field_no = re.compile(r":\s{0,3}(?:" + phrases(s["field_no"]).pattern + ")", re.IGNORECASE)
         self.hedge = phrases(s["hedge"])
         self.opt = phrases(s["opt"])
+        self.opt_acronyms = phrases(s["opt_acronyms"], case=True)  # "OPT", never "opt in" or "opt out"
         self.opt_support = phrases(s["opt_support"])
         self.non_us = phrases(cfg.location["non_us_countries"])
         self.citizenship = phrases(s["citizenship"])
         self.citizenship_negation = phrases(s["citizenship_negation"])
+
+
+@functools.lru_cache(maxsize=8)
+def _patterns(cfg: Config) -> _Patterns:
+    """One compiled set per Config (a Config hashes by identity): decide() over thousands of postings compiles once."""
+    return _Patterns(cfg)
+
+
+def _blank(m: re.Match) -> str:
+    return " " * len(m.group(0))  # same length, so offsets still point into the body
 
 
 def _clauses(sentence: str) -> list[tuple[int, int]]:
@@ -47,25 +83,62 @@ def _clauses(sentence: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _opt_word(clause: str, p: _Patterns) -> re.Match | None:
+    """The first OPT word: a spelled-out form in any case, or an acronym in capitals."""
+    found = [m for m in (p.opt.search(clause), p.opt_acronyms.search(clause)) if m]
+    return min(found, key=lambda m: m.start()) if found else None
+
+
 def _supports_opt(clause: str, p: _Patterns) -> re.Match | None:
     """The OPT word of a clause that names OPT, STEM OPT or CPT with a support word and no negation."""
-    opt = p.opt.search(clause)
+    opt = _opt_word(clause, p)
     if opt and p.opt_support.search(clause) and not p.negation.search(clause):
         return opt
     return None
 
 
+def _near_topic(ends: list[int], starts: list[int], start: int, end: int) -> bool:
+    """Whether a topic word (given by its sorted starts and ends) is within NEAR_CHARS of [start, end)."""
+    i = bisect.bisect_left(ends, start - NEAR_CHARS)  # the first topic word that ends late enough
+    return i < len(starts) and starts[i] <= end + NEAR_CHARS
+
+
+def _after_topic(ends: list[int], start: int) -> bool:
+    """Whether a topic word ends at most NEAR_CHARS before `start`."""
+    i = bisect.bisect_right(ends, start) - 1
+    return i >= 0 and start - ends[i] <= NEAR_CHARS
+
+
+def _has_context(clause: str, topics: list[tuple[int, int]], p: _Patterns) -> bool:
+    """Whether a context word sits in the clause apart from a topic word ("Visa" alone is its own topic word)."""
+    for c in p.context.finditer(clause):
+        if len(topics) > 1 or c.end() <= topics[0][0] or c.start() >= topics[0][1]:
+            return True  # with two topic words, any context word is apart from one of them; so this loop ends fast
+    return False
+
+
 def _read_clause(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
     """no, unclear, yes or neutral, and the match that decided it. Negation first, then hedges and countries."""
+    if p.non_discrimination.search(clause):
+        return NEUTRAL, None  # "We do not discriminate based on immigration or visa status."
     if m := p.negation.search(clause):
         return NO, m
+    topics = [t.span() for t in p.topic.finditer(clause)]
+    if topics:
+        starts, ends = [a for a, _ in topics], [b for _, b in topics]
+        for m in p.negation_near.finditer(clause):
+            if _near_topic(ends, starts, m.start(), m.end()):
+                return NO, m
+        for m in p.field_no.finditer(clause) if ":" in clause else ():
+            if _after_topic(ends, m.start()):
+                return NO, m  # "Sponsorship Available: No"
     if m := p.hedge.search(clause):
         return UNCLEAR, m
     if m := p.non_us.search(clause):
         return UNCLEAR, m
-    if m := p.topic.search(clause):
-        return YES, m
-    return NEUTRAL, None
+    if topics and _has_context(clause, topics, p):
+        return YES, p.topic.search(clause)
+    return NEUTRAL, None  # no topic word, or one with no sponsorship context ("executive sponsors")
 
 
 class _Reading:
@@ -79,24 +152,30 @@ class _Reading:
 
 def _read_sentence(sentence: str, offset: int, p: _Patterns) -> _Reading | None:
     """A topic sentence's stance from its clauses; for a sentence without a topic word, OPT support or nothing."""
-    text = sentence.replace(_CURLY, "'")  # same length, so offsets still point into the body
-    if not p.topic.search(text):
-        for a, b in _clauses(text):  # "We support OPT and CPT." counts only next to a "no" elsewhere
-            if m := _supports_opt(text[a:b], p):
-                return _Reading(None, offset + a + m.start(), offset + a + m.end(), True)
+    text = sentence.replace(_CURLY, "'") if _CURLY in sentence else sentence  # same length: offsets still hold
+    topic = p.topic.search(text) is not None
+    if topic:
+        text, blanked = p.benefit.subn(_blank, text)  # "employer-sponsored health insurance" is not about visas
+        topic = not blanked or p.topic.search(text) is not None
+    names_opt = _opt_word(text, p) is not None  # read per clause only when the sentence names OPT at all
+    if not topic:
+        if names_opt:
+            for a, b in _clauses(text):  # "We support OPT and CPT." counts only next to a "no" elsewhere
+                if m := _supports_opt(text[a:b], p):
+                    return _Reading(None, offset + a + m.start(), offset + a + m.end(), True)
         return None
     found: dict[str, tuple[int, int]] = {}  # reading -> the first match that gave it, as body offsets
     opt = False
     for a, b in _clauses(text):
         clause = text[a:b]
-        if m := _supports_opt(clause, p):
+        if names_opt and (m := _supports_opt(clause, p)):
             opt = True
             found.setdefault("opt", (offset + a + m.start(), offset + a + m.end()))
         reading, m = _read_clause(clause, p)
         if reading != NEUTRAL:
             found.setdefault(reading, (offset + a + m.start(), offset + a + m.end()))
     if not found:
-        return None  # cannot happen while no topic word contains a clause break; kept so a list edit cannot crash
+        return None  # every clause is neutral: "executive sponsors", "Visa and Mastercard", an EEO line
     if NO in found and opt:
         stance = "opt_only"  # "We support OPT, but we are unable to sponsor H-1B visas."
     elif UNCLEAR in found or (NO in found and YES in found):
@@ -115,7 +194,7 @@ def _quote(body: str, reading: _Reading) -> str:
 
 def sponsorship_stance(body: str, cfg: Config) -> tuple[str, str]:
     """(yes | no | opt_only | unclear | silent, quote). The quote is the deciding sentence, and "" for silent."""
-    p = _Patterns(cfg)
+    p = _patterns(cfg)
     readings: list[_Reading] = []
     pos = 0
     for sentence in sentences(body or ""):
@@ -149,12 +228,12 @@ def citizenship_required(body: str, cfg: Config) -> tuple[bool, str]:
     A clause that also says "not required", "no clearance" or "regardless of" is not a requirement, so "No security
     clearance required." and an EEO line naming citizenship never count.
     """
-    p = _Patterns(cfg)
+    p = _patterns(cfg)
     pos = 0
     for sentence in sentences(body or ""):
         offset = body.find(sentence, pos)
         pos = offset + len(sentence)
-        text = sentence.replace(_CURLY, "'")
+        text = sentence.replace(_CURLY, "'") if _CURLY in sentence else sentence
         clauses: list[tuple[int, int]] = []
         starts: list[int] = []
         negated: dict[int, bool] = {}  # clause index -> has a citizenship_negation, read once per clause

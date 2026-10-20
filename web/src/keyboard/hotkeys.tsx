@@ -42,7 +42,7 @@ type Entry = { binding: Binding; steps: Combo[]; tag: Tag | undefined };
 
 const MODIFIER_KEYS = new Set(['shift', 'control', 'meta', 'alt', 'altgraph', 'capslock', 'fn', 'os']);
 const KEY_NAMES: Record<string, string> = { ' ': 'space', esc: 'escape', spacebar: 'space' };
-const DIALOGS = '[role="dialog"], [role="alertdialog"]';
+const DIALOGS = '[role="dialog"], [role="alertdialog"], [role="menu"]';
 const PRESSABLE =
   'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]';
 

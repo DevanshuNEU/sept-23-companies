@@ -92,6 +92,32 @@ describe('useHotkeys', () => {
     expect(a.run).toHaveBeenCalledTimes(1);
   });
 
+  it('single keys are suspended while a menu is open (the No-go More menu, the Company menu)', () => {
+    const a = bind('a');
+    const escape = bind('escape');
+    const { rerender } = render(
+      <HotkeysProvider>
+        <Keys bindings={[a, escape]}>
+          <div role="menu">
+            <div role="menuitem">Lift</div>
+          </div>
+        </Keys>
+      </HotkeysProvider>,
+    );
+    press(document.body, 'a');
+    expect(a.run).not.toHaveBeenCalled();
+    press(document.body, 'Escape');
+    expect(escape.run).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <HotkeysProvider>
+        <Keys bindings={[a, escape]} />
+      </HotkeysProvider>,
+    );
+    press(document.body, 'a');
+    expect(a.run).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['dialog', 'alertdialog'])('mod keys are suspended under role=%s', (role) => {
     setPlatform('MacIntel');
     const saveApprove = bind('mod+enter', { label: 'Save, then approve' });

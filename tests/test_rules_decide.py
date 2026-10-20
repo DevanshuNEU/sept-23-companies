@@ -122,7 +122,9 @@ class DecideTests(unittest.TestCase):
         # CPU time, not wall time: scheduler wait on a loaded machine is not the code's cost.
         start = time.process_time()
         decide(PostingInput("Software Engineer, New Grad", body, "Boston, MA"))
-        self.assertLess(time.process_time() - start, 2.0)
+        # Measured about 1.4 s CPU on a quiet machine; 3.0 s leaves room for a slower one. Catastrophic backtracking
+        # would take minutes, so the bound still catches it.
+        self.assertLess(time.process_time() - start, 3.0)
 
     def test_as_row_matches_the_decision_table(self):
         db = fresh_store()

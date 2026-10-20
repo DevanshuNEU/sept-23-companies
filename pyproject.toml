@@ -1,0 +1,9 @@
+[project]
+name = "outreach"
+version = "0.1.0"
+requires-python = "==3.14.*"
+dependencies = []
+
+[tool.uv]
+package = false
+python-preference = "only-system"

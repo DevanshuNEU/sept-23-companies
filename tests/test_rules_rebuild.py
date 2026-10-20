@@ -1,9 +1,11 @@
 """Rules rebuild, decide_and_store and record_evidence, all on a scratch store from storetest.fresh_store()."""
 import contextlib
+import dataclasses
 import importlib
 import io
 import json
 import os
+import random
 import sqlite3
 import unittest
 from unittest import mock
@@ -188,6 +190,65 @@ class RebuildTests(RebuildTestCase):
         self.assertEqual((run["status"], run["ruleset_version"]), ("partial", V2))
         self.assertIn("disk is full", run["error"])
         self.assertEqual(json.loads(run["summary"])["decided"], 1)
+
+    def test_a_posting_that_fails_the_checks_is_skipped_not_fatal(self):
+        first, bad, last = self.posting(), self.posting(title="Bad Posting"), self.posting()
+        real = decide
+
+        def broken(posting, cfg=None):  # one posting yields a decision the table refuses
+            decision = real(posting, cfg)
+            return dataclasses.replace(decision, lane="bogus") if posting.title == "Bad Posting" else decision
+
+        with mock.patch.object(rebuild_module, "decide", broken):
+            report = rebuild(self.conn, version=V1)  # does not raise
+        self.assertEqual(current(self.conn), V1)
+        self.assertEqual(versions_of(self.conn, first), {V1})
+        self.assertEqual(versions_of(self.conn, last), {V1})  # the rest of the batch committed
+        self.assertEqual(versions_of(self.conn, bad), set())
+        self.assertEqual([(pid, "CHECK" in err) for pid, err in report.skipped], [(bad, True)])
+        self.assertEqual(report.decided, 2)
+        run = self.conn.execute("SELECT * FROM job_run WHERE job = 'rebuild' ORDER BY run_id DESC").fetchone()
+        self.assertEqual(run["status"], "partial")
+        summary = json.loads(run["summary"])
+        self.assertEqual([s["posting_id"] for s in summary["skipped"]], [bad])
+        self.assertIn("CHECK", summary["skipped"][0]["error"])
+        self.assertEqual(summary["decided"], 2)
+        self.assertIn(f"#{bad}", "\n".join(report.lines()))
+
+    def test_a_nul_byte_never_reaches_a_decision_row(self):
+        body = "\x00We do not sponsor visas.\x00 Candidates must graduate between December 2026 and June 2027.\x00"
+        pid = self.posting(title="Software\x00 Engineer, New Grad", body=body, location="Boston,\x00 MA")
+        report = rebuild(self.conn, version=V1)
+        self.assertEqual(report.skipped, [])
+        row = self.conn.execute("SELECT * FROM decision WHERE posting_id = ?", (pid,)).fetchone()
+        self.assertEqual((row["sponsorship"], row["eligibility"]), ("no", "excluded"))
+        self.assertEqual(row["us"], "yes")
+        for column in ("sponsorship_quote", "eligibility_quote", "level_basis"):
+            self.assertNotIn("\x00", row[column])
+
+    def test_fuzzed_postings_all_get_a_decision_that_passes_the_checks(self):
+        rng = random.Random(4)
+        pieces = [
+            "We do not sponsor visas.", "Visa sponsorship is available.", "Candidates must graduate in 2027.",
+            "Class of 2027 graduates only.", "You must be currently enrolled in a degree program.",
+            "U.S. citizenship is required.", "5+ years of experience.", "Expected graduation date: June 2027.",
+            "\x00", "\x01\x02\x1f", "\x7f", "\r\n", "\t", "\u2028", "\ufeff", "\u0085", "\u00e9\u00e8", "\u4e2d\u6587",
+            "\U0001f600", "a" * 5000, "sponsor" * 800, "\x00We cannot sponsor.", "\x00Class of 2027 graduates only.",
+            "(", ")", " - ", ", ", ";", "?", "!", "...", "  ", "graduate 2027", "ITAR must",
+        ]
+        posts = []
+        for _ in range(500):
+            body = "".join(rng.choice(pieces) + rng.choice(["", " ", "\n", ". "]) for _ in range(rng.randint(1, 25)))
+            title = rng.choice(["Software Engineer, New Grad", "Software\x00 Engineer", "2027 University Graduate",
+                                "Engineer \u4e2d", "\x00", "Senior Software Engineer"])
+            posts.append(self.posting(title=title, body=body, location=rng.choice(["Boston, MA", "\x00", "Berlin\x00"])))
+        report = rebuild(self.conn, version=V1)
+        self.assertEqual(report.skipped, [])
+        self.assertEqual(report.decided, 500)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM decision WHERE ruleset_version = ?",
+                                           (V1,)).fetchone()[0], 500)
+        run = self.conn.execute("SELECT status FROM job_run WHERE job = 'rebuild' ORDER BY run_id DESC").fetchone()
+        self.assertEqual(run["status"], "ok")
 
     def test_a_failing_finish_job_does_not_mask_the_original_error(self):
         self.posting()

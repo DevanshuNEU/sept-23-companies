@@ -108,6 +108,12 @@ class DecideTests(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             decide(p).lane = "intern"
 
+    def test_nul_bytes_are_dropped_before_deciding(self):
+        r = decide(PostingInput("Software\x00 Engineer", "\x00We do not sponsor visas.\x00", "Boston,\x00 MA", "United\x00 States"))
+        self.assertEqual((r.lane, r.sponsorship, r.us), ("engineering", "no", "yes"))
+        self.assertEqual(r.sponsorship_quote, "We do not sponsor visas.")
+        self.assertEqual(r, decide(PostingInput("Software Engineer", "We do not sponsor visas.", "Boston, MA", "United States")))
+
     def test_ruleset_version_is_exported(self):
         self.assertRegex(ruleset_version(), r"^r-[0-9a-f]{12}$")
 

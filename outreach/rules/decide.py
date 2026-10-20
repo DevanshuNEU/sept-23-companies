@@ -14,6 +14,12 @@ from .title import classify_title
 from .years import entry_wording, years_asked
 
 
+def _clean(text: str | None) -> str:
+    """The text without NUL bytes. SQLite's length() stops at a NUL, so a quote that holds one fails the decision
+    table's CHECKs; a NUL is never part of a word, so dropping it changes no reading."""
+    return (text or "").replace("\x00", "")
+
+
 @dataclass(frozen=True)
 class PostingInput:
     title: str
@@ -81,7 +87,8 @@ def _level(lane: str, tier: str | None, title_basis: str, years: int | None, ent
 
 def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
     cfg = cfg if cfg is not None else default_config()
-    title, body = p.title or "", p.body or ""
+    title, body, location = _clean(p.title), _clean(p.body), _clean(p.location)
+    country = None if p.country is None else _clean(p.country)
     t = classify_title(title, cfg)
     years, years_quote = years_asked(body, cfg)
     tier, ok, basis = _level(t.lane, t.tier, t.basis, years, entry_wording(body, cfg),
@@ -91,7 +98,7 @@ def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
     status, reason, elig_quote = eligibility(title, body, cfg)
     return Decision(
         lane=t.lane, level_tier=tier, level_ok=ok, level_basis=basis, years_asked=years, years_quote=years_quote,
-        us=us_status(p.location or "", p.country, cfg), sponsorship=stance, sponsorship_quote=stance_quote,
+        us=us_status(location, country, cfg), sponsorship=stance, sponsorship_quote=stance_quote,
         citizenship=citizen, citizenship_quote=citizen_quote, eligibility=status, eligibility_reason=reason,
         eligibility_quote=elig_quote, start_2027=starts_2027(title, body, cfg),
     )

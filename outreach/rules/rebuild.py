@@ -14,7 +14,7 @@ checkout) and prints the flip report.
 import argparse
 import contextlib
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from outreach.store import append_event, connect, finish_job, start_job, transaction, utcnow
 
@@ -60,6 +60,7 @@ class FlipReport:
     to_hidden: list[Flip]
     to_shown: list[Flip]
     level_lost: list[Flip]
+    skipped: list[tuple[int, str]] = field(default_factory=list)  # (posting_id, error) the decision table refused
 
     def lines(self) -> list[str]:
         out = [f"Ruleset {self.version} (previous {self.previous or 'none'}): {self.decided} postings decided."]
@@ -70,6 +71,9 @@ class FlipReport:
             out.extend(f"  #{f.posting_id} {f.company}: {f.title} ({f.change})" for f in flips)
             if not flips:
                 out.append("None.")
+        if self.skipped:
+            out.append(f"Postings skipped, the decision table refused them ({len(self.skipped)}):")
+            out.extend(f"  #{posting_id}: {error}" for posting_id, error in self.skipped)
         return out
 
 
@@ -157,8 +161,10 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
 
     `cfg` and `version` default to the shipped config and the code's ruleset version; tests override them. Returns
     the flips against the ruleset that was current when the run started. A failed run leaves that ruleset current;
-    rows already written under the new version are overwritten by the next run. If only the prune after the switch
-    fails, the new ruleset is already current: the job is closed "partial" with the error, and nothing is raised.
+    rows already written under the new version are overwritten by the next run. A posting whose decision the table
+    refuses (sqlite3.IntegrityError) is skipped and listed in the report and the job summary, and the job is closed
+    "partial"; the rest of its batch still commits. If only the prune after the switch fails, the new ruleset is
+    already current: the job is closed "partial" with the error, and nothing is raised.
     """
     cfg = cfg if cfg is not None else load_config()
     version = version if version is not None else ruleset_version()
@@ -170,6 +176,7 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
             "ON CONFLICT(ruleset_version) DO NOTHING", (version, cfg.raw.decode("utf-8"), utcnow()))
         run_id = start_job(conn, "rebuild", version)
     flips = {"to_hidden": [], "to_shown": [], "level_lost": []}
+    skipped: list[tuple[int, str]] = []
     try:
         ids = [r[0] for r in conn.execute(
             "SELECT posting_id FROM posting p WHERE closed_at IS NULL OR NOT EXISTS "
@@ -178,7 +185,13 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
             decided = _decide_batch(conn, ids[start:start + batch_size], cfg, flips)
             with transaction(conn):
                 for posting_id, decision in decided:
-                    _upsert(conn, posting_id, version, decision)
+                    conn.execute("SAVEPOINT rebuild_row")  # one refused row undoes only itself
+                    try:
+                        _upsert(conn, posting_id, version, decision)
+                    except sqlite3.IntegrityError as err:
+                        conn.execute("ROLLBACK TO rebuild_row")
+                        skipped.append((posting_id, str(err)))
+                    conn.execute("RELEASE rebuild_row")
             if progress is not None:
                 progress(min(start + batch_size, len(ids)))
         with transaction(conn):
@@ -192,9 +205,16 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
             prune_error = f"prune failed: {type(err).__name__}: {err}"
-        summary = {"decided": len(ids), "previous": previous, "pruned": pruned,
+        refused = {posting_id for posting_id, _ in skipped}
+        flips = {name: [f for f in found if f.posting_id not in refused] for name, found in flips.items()}
+        decided = len(ids) - len(skipped)
+        summary = {"decided": decided, "previous": previous, "pruned": pruned,
                    **{name: [f.posting_id for f in found] for name, found in flips.items()}}
-        finish_job(conn, run_id, "partial" if prune_error else "ok", summary, error=prune_error)
+        error = "; ".join(filter(None, [
+            f"{len(skipped)} postings skipped, the decision table refused them" if skipped else "", prune_error]))
+        if skipped:
+            summary["skipped"] = [{"posting_id": posting_id, "error": text} for posting_id, text in skipped]
+        finish_job(conn, run_id, "partial" if error else "ok", summary, error=error)
     except BaseException as err:
         try:
             if conn.in_transaction:
@@ -203,7 +223,7 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
         except Exception as finish_err:  # keep the original error as the one that propagates
             err.add_note(f"could not record the failed run: {type(finish_err).__name__}: {finish_err}")
         raise
-    return FlipReport(version, previous, len(ids), **flips)
+    return FlipReport(version, previous, decided, **flips, skipped=skipped)
 
 
 @contextlib.contextmanager

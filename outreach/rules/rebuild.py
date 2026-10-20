@@ -112,8 +112,9 @@ def _decide_batch(conn, ids, cfg, report: dict) -> list[tuple[int, Decision]]:
     decided = []
     for posting_id in ids:
         posting = conn.execute(
-            "SELECT p.title, p.body, p.location, p.country, p.closed_at, c.name FROM posting p "
-            "JOIN company c ON c.company_id = p.company_id WHERE p.posting_id = ?", (posting_id,)).fetchone()
+            "SELECT p.title, coalesce(b.body, '') AS body, p.location, p.country, p.closed_at, c.name "
+            "FROM posting p JOIN company c ON c.company_id = p.company_id "
+            "LEFT JOIN posting_body b ON b.posting_id = p.posting_id WHERE p.posting_id = ?", (posting_id,)).fetchone()
         if posting is None:
             continue
         old_row = None
@@ -215,6 +216,7 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
         if skipped:
             summary["skipped"] = [{"posting_id": posting_id, "error": text} for posting_id, text in skipped]
         finish_job(conn, run_id, "partial" if error else "ok", summary, error=error)
+        conn.execute("PRAGMA optimize")  # refresh the planner's statistics after a bulk rewrite of decisions
     except BaseException as err:
         try:
             if conn.in_transaction:
@@ -253,8 +255,9 @@ def decide_and_store(conn: sqlite3.Connection, posting_id: int, *, cfg: Config |
         row = conn.execute("SELECT ruleset_version FROM ruleset WHERE is_current = 1").fetchone()
         if row is None or row[0] != ruleset_version():
             raise RulesetNotCurrent("ruleset changed; run: uv run python -m outreach.rules.rebuild")
-        posting = conn.execute("SELECT title, body, location, country FROM posting WHERE posting_id = ?",
-                               (posting_id,)).fetchone()
+        posting = conn.execute(
+            "SELECT p.title, coalesce(b.body, '') AS body, p.location, p.country FROM posting p "
+            "LEFT JOIN posting_body b ON b.posting_id = p.posting_id WHERE p.posting_id = ?", (posting_id,)).fetchone()
         if posting is None:
             raise LookupError(f"no posting {posting_id}")
         decision = decide(_posting_input(posting), cfg)

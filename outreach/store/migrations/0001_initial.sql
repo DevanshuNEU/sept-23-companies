@@ -30,6 +30,7 @@ CREATE TABLE company (
   CHECK (merged_into IS NULL OR (merged_into <> company_id AND status = 'removed'))
 ) STRICT;
 CREATE INDEX company_merged ON company(merged_into) WHERE merged_into IS NOT NULL;
+CREATE INDEX company_held ON company(held_by_touch) WHERE held_by_touch IS NOT NULL;
 
 CREATE TABLE company_alias (
   alias_key  TEXT PRIMARY KEY CHECK (length(alias_key) > 0 AND alias_key = lower(alias_key)),
@@ -89,7 +90,6 @@ CREATE TABLE posting (
   url           TEXT NOT NULL DEFAULT '',
   posted_on     TEXT CHECK (posted_on IS date(posted_on)),
   pay           TEXT NOT NULL DEFAULT '',
-  body          TEXT NOT NULL DEFAULT '',
   first_seen_at TEXT NOT NULL CHECK (first_seen_at IS strftime('%Y-%m-%dT%H:%M:%SZ', first_seen_at)),
   last_seen_at  TEXT NOT NULL CHECK (last_seen_at IS strftime('%Y-%m-%dT%H:%M:%SZ', last_seen_at)),
   closed_at     TEXT CHECK (closed_at IS strftime('%Y-%m-%dT%H:%M:%SZ', closed_at)),
@@ -100,7 +100,16 @@ CREATE TABLE posting (
   CHECK (board_id IS NOT NULL OR source_key LIKE 'url:%')
 ) STRICT;
 CREATE INDEX posting_company_open ON posting(company_id, closed_at);
-CREATE INDEX posting_board ON posting(board_id);
+-- Covers the crawler's per-board read of open postings by source_key.
+CREATE INDEX posting_board_open ON posting(board_id, closed_at, source_key);
+
+-- The posting text, apart from posting: a body is 95% of a posting's bytes and spills to overflow pages, so
+-- inline it made every read of a later column (closed_at, last_seen_at) walk the chain (store audit 2026-10-20:
+-- the #6 join took 2.5 s at 300,000 postings, 32 ms with the body apart). Rows may be deleted to save space.
+CREATE TABLE posting_body (
+  posting_id INTEGER PRIMARY KEY REFERENCES posting(posting_id),
+  body       TEXT NOT NULL
+) STRICT;
 
 CREATE TABLE ruleset (
   ruleset_version TEXT PRIMARY KEY CHECK (ruleset_version GLOB 'r-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
@@ -338,6 +347,9 @@ CREATE TABLE no_go (
 ) STRICT;
 CREATE UNIQUE INDEX no_go_company ON no_go(company_id) WHERE company_id IS NOT NULL AND lifted_at IS NULL;
 CREATE UNIQUE INDEX no_go_person  ON no_go(person_id)  WHERE person_id  IS NOT NULL AND lifted_at IS NULL;
+-- Every row, lifted or not: a lifted company is never re-added (#6), and that check must not scan.
+CREATE INDEX no_go_company_any ON no_go(company_id) WHERE company_id IS NOT NULL;
+CREATE INDEX no_go_person_any  ON no_go(person_id)  WHERE person_id  IS NOT NULL;
 
 CREATE TABLE review_item (
   review_id       INTEGER PRIMARY KEY,
@@ -367,6 +379,9 @@ CREATE TABLE review_item (
 CREATE UNIQUE INDEX review_item_once ON review_item(kind, company_id, ifnull(board_id, 0),
   ifnull(posting_id, 0), ifnull(person_id, 0), evidence_key);
 CREATE INDEX review_item_open ON review_item(state, created_at);
+CREATE INDEX review_item_company ON review_item(company_id, state);
+CREATE INDEX review_item_board   ON review_item(board_id)   WHERE board_id   IS NOT NULL;
+CREATE INDEX review_item_posting ON review_item(posting_id) WHERE posting_id IS NOT NULL;
 
 CREATE TABLE daily_list (
   list_date TEXT PRIMARY KEY CHECK (list_date IS date(list_date)),
@@ -389,6 +404,7 @@ CREATE TABLE daily_list_entry (
   UNIQUE (list_date, rank),
   CHECK ((state = 'proposed') = (decided_at IS NULL))
 ) STRICT;
+CREATE INDEX daily_entry_company ON daily_list_entry(company_id, list_date);
 
 CREATE TABLE event (
   event_id        INTEGER PRIMARY KEY,
@@ -488,26 +504,33 @@ CREATE TRIGGER message_followup_waits BEFORE UPDATE OF state ON message
   BEGIN SELECT RAISE(ABORT, 'a follow-up leaves planned only after the first email is sent'); END;
 
 -- Once claimed, the text and identity of a message are frozen.
+-- A claimed or sent message is the record of an email that may have gone out: never deleted, and with
+-- recursive_triggers ON (connect() and install set it) INSERT OR REPLACE cannot erase it either.
+CREATE TRIGGER message_no_delete_claimed BEFORE DELETE ON message
+  WHEN OLD.state IN ('sending','send_unknown','sent')
+  BEGIN SELECT RAISE(ABORT, 'a claimed or sent message is never deleted'); END;
+
 CREATE TRIGGER message_frozen_once_claimed BEFORE UPDATE OF subject, body, seq, touch_id ON message
   WHEN OLD.state IN ('sending','send_unknown','sent')
     AND (NEW.subject IS NOT OLD.subject OR NEW.body IS NOT OLD.body
          OR NEW.seq IS NOT OLD.seq OR NEW.touch_id IS NOT OLD.touch_id)
   BEGIN SELECT RAISE(ABORT, 'a message is frozen once it is claimed for sending'); END;
 
--- The value of each fact a company shows: a hand (locked) row wins, and among hand rows the newest wins
+-- The value of each fact a company shows (one row per company and fact, picked by a correlated subquery so a
+-- join reads only that company's evidence; a window function here sorted all evidence on every join): a hand (locked) row wins, and among hand rows the newest wins
 -- whatever its confidence; then confirmed over estimate over guess; then the newest.
 CREATE VIEW company_fact AS
-SELECT evidence_id, company_id, fact, value, num_low, num_high, confidence, locked,
-       source_kind, source_ref, quote, posting_id, observed_on, recorded_at
-FROM (
-  SELECT e.*, ROW_NUMBER() OVER (
-           PARTITION BY e.company_id, e.fact
-           ORDER BY e.locked DESC,
-                    CASE WHEN e.locked = 1 THEN e.recorded_at END DESC,
-                    CASE e.confidence WHEN 'confirmed' THEN 0 WHEN 'estimate' THEN 1 ELSE 2 END,
-                    e.recorded_at DESC, e.evidence_id DESC) AS rn
-  FROM evidence e
-) WHERE rn = 1;
+SELECT e.evidence_id, e.company_id, e.fact, e.value, e.num_low, e.num_high, e.confidence, e.locked,
+       e.source_kind, e.source_ref, e.quote, e.posting_id, e.observed_on, e.recorded_at
+FROM evidence e
+WHERE e.evidence_id = (
+  SELECT e2.evidence_id FROM evidence e2
+  WHERE e2.company_id = e.company_id AND e2.fact = e.fact
+  ORDER BY e2.locked DESC,
+           CASE WHEN e2.locked = 1 THEN e2.recorded_at END DESC,
+           CASE e2.confidence WHEN 'confirmed' THEN 0 WHEN 'estimate' THEN 1 ELSE 2 END,
+           e2.recorded_at DESC, e2.evidence_id DESC
+  LIMIT 1);
 
 -- Decisions under the current ruleset (every open posting has one after a rebuild).
 CREATE VIEW current_decision AS
@@ -516,12 +539,12 @@ JOIN ruleset r ON r.ruleset_version = d.ruleset_version AND r.is_current = 1;
 
 -- One decision per posting: the current one, else the newest kept (closed postings are not re-decided).
 CREATE VIEW posting_decision AS
-SELECT posting_id, ruleset_version, decided_at, lane, level_tier, level_ok, level_basis, years_asked,
-       years_quote, us, sponsorship, sponsorship_quote, citizenship, citizenship_quote, eligibility,
-       eligibility_reason, eligibility_quote, start_2027
-FROM (
-  SELECT d.*, ROW_NUMBER() OVER (
-           PARTITION BY d.posting_id
-           ORDER BY r.is_current DESC, d.decided_at DESC, d.ruleset_version DESC) AS rn
-  FROM decision d JOIN ruleset r ON r.ruleset_version = d.ruleset_version
-) WHERE rn = 1;
+SELECT d.posting_id, d.ruleset_version, d.decided_at, d.lane, d.level_tier, d.level_ok, d.level_basis,
+       d.years_asked, d.years_quote, d.us, d.sponsorship, d.sponsorship_quote, d.citizenship, d.citizenship_quote,
+       d.eligibility, d.eligibility_reason, d.eligibility_quote, d.start_2027
+FROM decision d
+WHERE d.rowid = (
+  SELECT d2.rowid FROM decision d2 JOIN ruleset r ON r.ruleset_version = d2.ruleset_version
+  WHERE d2.posting_id = d.posting_id
+  ORDER BY r.is_current DESC, d2.decided_at DESC, d2.ruleset_version DESC
+  LIMIT 1);

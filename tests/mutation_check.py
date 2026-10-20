@@ -123,6 +123,9 @@ MUTATIONS = [
      "test_open_never_migrates"),
     (STORE / "db.py", "is_live_path stops case-folding",
      'return unicodedata.normalize("NFD", path).casefold()', 'return unicodedata.normalize("NFD", path)', "live"),
+    (STORE / "db.py", "recursive_triggers left off, so INSERT OR REPLACE erases a sent message or an append-only row",
+     '        conn.execute("PRAGMA recursive_triggers = ON")\n', "",
+     "test_insert_or_replace_cannot_erase_protected_rows"),
     (STORE / "writes.py", "the event idempotency key upserts (DO UPDATE SET at) instead of doing nothing",
      "ON CONFLICT(idempotency_key) DO NOTHING", "ON CONFLICT(idempotency_key) DO UPDATE SET at = excluded.at",
      "idempot"),
@@ -135,11 +138,15 @@ MUTATIONS = [
     # sorts every hand row first, because SQLite puts NULLs last in DESC order. So the hand-first guarantee is
     # broken by removing both keys.
     (SCHEMA, "the locked keys removed from company_fact, so automation can outrank a hand value",
-     "           ORDER BY e.locked DESC,\n                    CASE WHEN e.locked = 1 THEN e.recorded_at END DESC,\n",
-     "           ORDER BY\n", "test_automation_never_outranks_a_hand_value"),
+     "  ORDER BY e2.locked DESC,\n           CASE WHEN e2.locked = 1 THEN e2.recorded_at END DESC,\n",
+     "  ORDER BY\n", "test_automation_never_outranks_a_hand_value"),
     (SCHEMA, "the newest hand row no longer wins: the hand rows' recorded_at ordering key removed",
-     "                    CASE WHEN e.locked = 1 THEN e.recorded_at END DESC,\n", "",
+     "           CASE WHEN e2.locked = 1 THEN e2.recorded_at END DESC,\n", "",
      "test_newest_hand_row_wins_whatever_its_confidence"),
+    (SCHEMA, "a claimed or sent message can be deleted: the message_no_delete_claimed trigger removed",
+     "  WHEN OLD.state IN ('sending','send_unknown','sent')\n  BEGIN SELECT RAISE(ABORT, 'a claimed or sent message is never deleted'); END;\n",
+     "  WHEN 0\n  BEGIN SELECT RAISE(ABORT, 'a claimed or sent message is never deleted'); END;\n",
+     "test_a_claimed_or_sent_message_is_never_deleted"),
     (SCHEMA, "the message_legal_transition trigger removed",
      "CREATE TRIGGER message_legal_transition BEFORE UPDATE OF state ON message\n"
      "  WHEN NEW.state <> OLD.state AND (OLD.state || '>' || NEW.state) NOT IN (\n"

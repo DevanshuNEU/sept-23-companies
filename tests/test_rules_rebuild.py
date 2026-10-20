@@ -49,7 +49,8 @@ class RebuildTestCase(unittest.TestCase):
         return seed_posting(self.conn, self.company, title, body, location)
 
     def set_body(self, posting_id, body):
-        self.conn.execute("UPDATE posting SET body = ? WHERE posting_id = ?", (body, posting_id))
+        self.conn.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, ?) "
+                          "ON CONFLICT(posting_id) DO UPDATE SET body = excluded.body", (posting_id, body))
 
     def path(self):
         return self.conn.execute("PRAGMA database_list").fetchone()["file"]

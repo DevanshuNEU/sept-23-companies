@@ -28,6 +28,7 @@ def _install(path: str) -> tuple[int, FlipReport | None]:
             conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
             conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA recursive_triggers = ON")  # so INSERT OR REPLACE fires the delete guards here too
         version = migrate(conn)
     finally:
         conn.close()

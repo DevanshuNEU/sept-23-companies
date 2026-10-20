@@ -59,8 +59,12 @@ def guard(path: str) -> None:
         live_checkout.require_live("opening the live store")
 
 
-def connect(path: str | None = None) -> sqlite3.Connection:
-    """Open an installed store, read-write. Raises StoreError if there is none or the version is wrong."""
+def connect(path: str | None = None, *, fullfsync: bool = False) -> sqlite3.Connection:
+    """Open an installed store, read-write. Raises StoreError if there is none or the version is wrong.
+
+    `fullfsync` is for the sender: on macOS synchronous=FULL alone does not flush the drive cache, so a send claim
+    could still be lost on power loss. fullfsync costs about 8 ms per commit, so batch writers leave it off.
+    """
     target = normalise(path) if path is not None else db_path()
     guard(target)
     try:
@@ -78,6 +82,13 @@ def connect(path: str | None = None) -> sqlite3.Connection:
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("PRAGMA temp_store = MEMORY")
         conn.execute("PRAGMA journal_size_limit = 67108864")
+        # Delete triggers also fire for INSERT OR REPLACE only with this on, so a replace cannot erase a sent
+        # message or an append-only row.
+        conn.execute("PRAGMA recursive_triggers = ON")
+        conn.execute("PRAGMA cache_size = -65536")  # 64 MB; the 2 MB default made cold company pages slow
+        if fullfsync:
+            conn.execute("PRAGMA fullfsync = ON")
+            conn.execute("PRAGMA checkpoint_fullfsync = ON")
         have = conn.execute("PRAGMA user_version").fetchone()[0]
         want = latest_version()
         if have < want:

@@ -157,9 +157,9 @@ class DecideTests(unittest.TestCase):
         ]
         for i, (title, body, loc) in enumerate(cases):
             posting = db.execute(
-                "INSERT INTO posting(company_id, source_key, title, location, body, first_seen_at, last_seen_at) "
-                "VALUES (?, ?, ?, ?, ?, '2026-10-20T00:00:00Z', '2026-10-20T00:00:00Z')",
-                (company, f"url:{i}", title, loc, body)).lastrowid
+                "INSERT INTO posting(company_id, source_key, title, location, first_seen_at, last_seen_at) "
+                "VALUES (?, ?, ?, ?, '2026-10-20T00:00:00Z', '2026-10-20T00:00:00Z')",
+                (company, f"url:{i}", title, loc)).lastrowid
             row = d(title, body, loc).as_row()
             row.update(posting_id=posting, ruleset_version=version, decided_at="2026-10-20T00:00:00Z")
             names = list(row)

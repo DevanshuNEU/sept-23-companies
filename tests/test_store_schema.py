@@ -119,6 +119,15 @@ class SchemaTest(unittest.TestCase):
         sets = ", ".join(f"{c} = ?" for c in values)
         self.db.execute(f"UPDATE message SET {sets} WHERE message_id = ?", [*values.values(), message_id])
 
+    def retire(self, message_id):
+        """Free the one 'sending' slot for the next test row. Claimed messages can no longer be deleted, so a
+        message still sending moves on to sent, a legal step."""
+        state = self.db.execute("SELECT state FROM message WHERE message_id = ?", (message_id,)).fetchone()[0]
+        if state == "sending":
+            self.transition(message_id, "sent")
+        elif state in ("planned", "drafted", "approved", "failed", "skipped"):
+            self.db.execute("DELETE FROM message WHERE message_id = ?", (message_id,))
+
     def message_in(self, state):
         """A message on its own touch, walked along legal steps to `state`."""
         touch_id = self.fresh_touch()
@@ -297,7 +306,7 @@ class SchemaTest(unittest.TestCase):
                 with self.subTest(state=state, column=column, value=bad):
                     self.assert_refused(f"UPDATE message SET {column} = ? WHERE message_id = ?",
                                         (bad, message_id), f"{column} IS strftime(")
-            self.db.execute("DELETE FROM message WHERE message_id = ?", (message_id,))
+            self.retire(message_id)
 
     def _has_base(self, table):
         try:
@@ -577,7 +586,7 @@ class SchemaTest(unittest.TestCase):
                 state = self.db.execute("SELECT state FROM message WHERE message_id = ?",
                                         (message_id,)).fetchone()[0]
                 self.assertEqual(state, new)
-                self.db.execute("DELETE FROM message WHERE message_id = ?", (message_id,))
+                self.retire(message_id)
 
     def test_every_other_transition_is_refused_by_the_trigger(self):
         for old, new in itertools.permutations(STATES, 2):
@@ -588,7 +597,7 @@ class SchemaTest(unittest.TestCase):
                 with self.assertRaises(sqlite3.IntegrityError) as cm:
                     self.transition(message_id, new)
                 self.assertIn("illegal message state change", str(cm.exception))
-                self.db.execute("DELETE FROM message WHERE message_id = ?", (message_id,))
+                self.retire(message_id)
 
     def test_a_claimed_message_is_frozen(self):
         for state in ("sending", "send_unknown", "sent"):
@@ -598,7 +607,7 @@ class SchemaTest(unittest.TestCase):
                                     (message_id,), "frozen")
                 self.assert_refused("UPDATE message SET body = 'Changed' WHERE message_id = ?",
                                     (message_id,), "frozen")
-                self.db.execute("DELETE FROM message WHERE message_id = ?", (message_id,))
+                self.retire(message_id)
         drafted = self.message_in("drafted")
         self.db.execute("UPDATE message SET subject = 'Changed' WHERE message_id = ?", (drafted,))
 
@@ -680,6 +689,71 @@ class SchemaTest(unittest.TestCase):
         rows = self.db.execute("SELECT sender_id FROM sender").fetchall()
         self.assertEqual([r[0] for r in rows], [1])
         self.assert_row_refused("sender", {"sender_id": 2, "updated_at": NOW}, "CHECK")
+
+    # ---- hardening from the 2026-10-20 store audit ------------------------
+
+    def test_posting_bodies_live_in_their_own_table(self):
+        # A body inline in posting pushed closed_at onto overflow pages: the #6 join took 2.5 s at 300k postings.
+        columns = {r["name"] for r in self.db.execute("PRAGMA table_info(posting)")}
+        self.assertNotIn("body", columns)
+        posting = seed_posting(self.db, self.company, "Software Engineer", body="We sponsor H-1B visas.")
+        body = self.db.execute("SELECT body FROM posting_body WHERE posting_id = ?", (posting,)).fetchone()[0]
+        self.assertEqual(body, "We sponsor H-1B visas.")
+        self.assert_refused("INSERT INTO posting_body(posting_id, body) VALUES (999999, 'x')", (), "FOREIGN KEY")
+
+    def test_a_claimed_or_sent_message_is_never_deleted(self):
+        for state in ("sent", "send_unknown", "sending"):  # "sending" last: only one row may be sending
+            message_id = self.message_in(state)
+            self.assert_refused("DELETE FROM message WHERE message_id = ?", (message_id,), "never deleted")
+        drafted = self.message_in("drafted")
+        self.db.execute("DELETE FROM message WHERE message_id = ?", (drafted,))
+
+    def test_insert_or_replace_cannot_erase_protected_rows(self):
+        sent = self.message_in("sent")
+        touch = self.db.execute("SELECT touch_id FROM message WHERE message_id = ?", (sent,)).fetchone()[0]
+        self.assert_refused(
+            "INSERT OR REPLACE INTO message(touch_id, seq, state, subject, body, created_at, updated_at) "
+            "VALUES (?, 0, 'drafted', 's', 'b', ?, ?)", (touch, NOW, NOW), "never deleted")
+        event = insert(self.db, "event", {"entity": "company", "entity_id": self.company, "kind": "note",
+                                          "actor": "devanshu", "at": NOW, "recorded_at": NOW})
+        self.assert_refused(
+            "INSERT OR REPLACE INTO event(event_id, entity, entity_id, kind, actor, at, recorded_at) "
+            "VALUES (?, 'company', ?, 'note', 'devanshu', ?, ?)", (event, self.company, NOW, NOW), "append-only")
+        self.assert_refused(
+            "INSERT OR REPLACE INTO posting(posting_id, company_id, source_key, title, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, 'url:x', 'T', ?, ?)", (self.posting, self.company, NOW, NOW))
+
+    def test_connect_sets_the_audit_pragmas(self):
+        self.assertEqual(self.db.execute("PRAGMA recursive_triggers").fetchone()[0], 1)
+        self.assertEqual(self.db.execute("PRAGMA cache_size").fetchone()[0], -65536)
+        self.assertEqual(self.db.execute("PRAGMA fullfsync").fetchone()[0], 0)
+
+    def test_the_sender_connection_can_ask_for_fullfsync(self):
+        from outreach.store import connect
+        path = self.db.execute("PRAGMA database_list").fetchone()["file"]
+        durable = connect(path, fullfsync=True)
+        self.addCleanup(durable.close)
+        self.assertEqual(durable.execute("PRAGMA fullfsync").fetchone()[0], 1)
+        self.assertEqual(durable.execute("PRAGMA checkpoint_fullfsync").fetchone()[0], 1)
+
+    def test_audit_indexes_exist(self):
+        names = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        for name in ("no_go_company_any", "no_go_person_any", "posting_board_open", "company_held",
+                     "review_item_company", "review_item_board", "review_item_posting", "daily_entry_company"):
+            self.assertIn(name, names)
+        self.assertNotIn("posting_board", names)
+
+    def plan(self, sql, params=()):
+        return " | ".join(r["detail"] for r in self.db.execute("EXPLAIN QUERY PLAN " + sql, params))
+
+    def test_joined_views_do_not_scan_whole_tables(self):
+        # The window-function views were materialised in full for every join (company page 1.1 s at 300k postings).
+        decisions = self.plan("SELECT * FROM posting p JOIN posting_decision pd ON pd.posting_id = p.posting_id "
+                              "WHERE p.company_id = ?", (self.company,))
+        self.assertNotRegex(decisions, r"SCAN (d|decision)\b")
+        facts = self.plan("SELECT * FROM company c JOIN company_fact f ON f.company_id = c.company_id "
+                          "AND f.fact = 'size' WHERE c.company_id = ?", (self.company,))
+        self.assertNotRegex(facts, r"SCAN (e|evidence)\b")
 
 
 if __name__ == "__main__":

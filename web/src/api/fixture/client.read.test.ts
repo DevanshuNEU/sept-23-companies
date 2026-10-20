@@ -413,10 +413,12 @@ describe('FixtureClient behavior', () => {
   });
 
   it('createClient reads ?scenario= and falls back to default', async () => {
-    const hard = createClient('?scenario=hard_block');
+    // A promise: the fixture client and its data load as their own chunk, not in the main bundle.
+    expect(createClient('')).toBeInstanceOf(Promise);
+    const hard = await createClient('?scenario=hard_block');
     expect(hard.source).toBe('sample');
     expect((await hard.shell()).sending.state).toBe('paused_hard_block');
-    expect((await createClient('?scenario=nope').shell()).sending.state).toBe('running');
-    expect((await createClient('').shell()).sending.state).toBe('running');
+    expect((await (await createClient('?scenario=nope')).shell()).sending.state).toBe('running');
+    expect((await (await createClient('')).shell()).sending.state).toBe('running');
   });
 });

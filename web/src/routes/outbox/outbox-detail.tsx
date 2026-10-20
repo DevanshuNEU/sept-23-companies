@@ -251,7 +251,8 @@ function DetailBody({
   const subject = edit?.subject ?? item.subject;
   const body = edit?.body ?? detail.body;
   const dirty = edit !== null && (edit.subject !== item.subject || edit.body !== detail.body);
-  const conflict = dirty && (serverConflict || edit.base !== item.revision);
+  // A base ahead of the cached revision is a save that just landed and a cache still catching up, not a conflict.
+  const conflict = dirty && (serverConflict || edit.base < item.revision);
   const blocks = detail.checks.filter((c) => c.severity === 'block');
   // Approve is refused, not hidden: unsaved edits make every check stale, a block is a hard no.
   const gateText = dirty ? SAVE_FIRST : blocks.length > 0 ? blockText(blocks) : '';
@@ -275,10 +276,16 @@ function DetailBody({
   async function save(base?: Revision): Promise<OutboxDetail | null> {
     if (!edit || !dirty || saving.current) return null;
     saving.current = true;
+    // The map is written the moment he types or a save rebases it, so it is never behind this render.
+    const sent = edits.get(messageId) ?? edit;
     try {
-      const saved = await client.saveMessage(messageId, { subject: edit.subject, body: edit.body, revision: base ?? edit.base }, { requestId: newRequestId() });
+      const saved = await client.saveMessage(messageId, { subject: sent.subject, body: sent.body, revision: base ?? sent.base }, { requestId: newRequestId() });
       queryClient.setQueryData(detailKey, saved);
-      setEdit(null);
+      // He may have typed while the save was in flight: clear the edit only if it is still what was sent,
+      // else keep it and start it from the revision this save made.
+      const now = edits.get(messageId);
+      if (now && (now.subject !== sent.subject || now.body !== sent.body)) setEdit({ ...now, base: saved.item.revision });
+      else setEdit(null);
       setServerConflict(false);
       refreshList();
       toast('Saved. Checks run again.', { id: 'saved' });

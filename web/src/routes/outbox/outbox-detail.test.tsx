@@ -300,6 +300,34 @@ describe('save and conflict', () => {
     expect(approveButton()).not.toHaveAttribute('aria-disabled', 'true');
   });
 
+  it('text typed while a save is in flight stays, and the draft is still dirty', async () => {
+    const { client } = await open(T.kenji, 'Kenji Watanabe');
+    const original = client.saveMessage.bind(client);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const save = vi.spyOn(client, 'saveMessage').mockImplementation(async (...args) => {
+      await gate;
+      return original(...args);
+    });
+    const first = `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. One.`;
+    fireEvent.change(bodyBox(), { target: { value: first } });
+    press('s', { ctrlKey: true }, bodyBox());
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    const more = `${first}\nP.S. Two, typed while saving.`;
+    fireEvent.change(bodyBox(), { target: { value: more } });
+    release();
+    await waitFor(() => expect(toastText()).toContain('Saved. Checks run again.'));
+    expect((bodyBox() as HTMLTextAreaElement).value).toBe(more);
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    expect(screen.queryByText('This email changed while you were editing')).toBeNull();
+    // A second save sends the extra text on top of the revision the first one made.
+    press('s', { ctrlKey: true }, bodyBox());
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1]?.[1]).toMatchObject({ body: more, revision: 2 });
+    await waitFor(() => expect(screen.queryByText('Unsaved changes')).toBeNull());
+    expect((bodyBox() as HTMLTextAreaElement).value).toBe(more);
+  });
+
   async function conflicted() {
     const view = await open(T.kenji, 'Kenji Watanabe');
     const mine = `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. Mine.`;

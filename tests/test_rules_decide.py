@@ -129,8 +129,7 @@ class DecideTests(unittest.TestCase):
     def test_as_row_satisfies_the_table_checks(self):
         db = fresh_store()
         version = ruleset_version()
-        db.execute("INSERT INTO ruleset(ruleset_version, config_toml, created_at) VALUES (?, '', '2026-10-20T00:00:00Z')",
-                   (version,))
+        # install registered this version
         company = db.execute("INSERT INTO company(name, status_at, created_at) VALUES "
                              "('Acme', '2026-10-20T00:00:00Z', '2026-10-20T00:00:00Z')").lastrowid
         cases = [

@@ -14,6 +14,8 @@ test('j moves the selection', async ({ page, consoleErrors }) => {
   await expect(page.getByText('Kenji Watanabe', { exact: true })).toBeVisible();
   await page.keyboard.press('j');
   await expect(page).toHaveURL(/\/outbox\/2001$/);
+  // The URL changes before React commits the new selection; the next key reads the committed one.
+  await expect(page.getByRole('option', { selected: true })).toContainText('Priya Natarajan');
   await page.keyboard.press('j');
   await expect(page).toHaveURL(/\/outbox\/2002$/);
   await expect(page.getByRole('option', { selected: true })).toContainText('Kenji Watanabe');
@@ -32,7 +34,7 @@ test('many sent emails: the Sent group renders only what is on screen', async ({
 
 test('a blocked draft explains itself on Approve', async ({ page, consoleErrors }) => {
   await page.goto('/outbox/2002');
-  const approve = page.getByRole('button', { name: 'Approve' });
+  const approve = page.getByRole('button', { name: 'Approve', exact: true });
   await expect(approve).toHaveAttribute('aria-disabled', 'true');
   await approve.hover();
   await expect(page.getByRole('tooltip')).toContainText("Blocked: near-identical to Ava Moreno's draft. Edit, then approve.");
@@ -47,7 +49,7 @@ test('a approves a clean draft with Undo, and z takes it back', async ({ page, c
   await expect(page.getByRole('option', { selected: true })).toContainText('Approved');
   await page.keyboard.press('z');
   await expect(page.getByRole('option', { selected: true })).toContainText('Draft');
-  await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
 
@@ -55,6 +57,6 @@ test('a reply shows the hold alert', async ({ page, consoleErrors }) => {
   await page.goto('/outbox/2001');
   await expect(page.getByText('Browserbase is on hold')).toBeVisible();
   await expect(page.getByRole('link', { name: /Open in Gmail/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
   expect(consoleErrors).toEqual([]);
 });

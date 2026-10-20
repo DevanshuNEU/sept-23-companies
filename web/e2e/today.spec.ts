@@ -25,6 +25,7 @@ test('j selects Pylon, x picks it, and the sidebar reads 4 of 5 at once', async 
 test('at capacity, hovering an unpicked checkbox shows the limit and x picks nothing', async ({ page, consoleErrors }) => {
   await openToday(page);
   await page.keyboard.press('j');
+  await expect(page.getByRole('complementary', { name: 'Pylon preview' })).toBeVisible();
   await page.keyboard.press('x');
   await expect(todayLink(page)).toContainText('4 of 5');
 
@@ -36,6 +37,8 @@ test('at capacity, hovering an unpicked checkbox shows the limit and x picks not
   const inngest = page.getByRole('checkbox', { name: 'Pick Inngest' });
   await expect(inngest).toHaveAttribute('aria-disabled', 'true');
   await inngest.locator('xpath=ancestor::tr').click();
+  // Wait for the selection to commit: an x pressed early lands on Baseten and unpicks it.
+  await expect(page.getByRole('complementary', { name: 'Inngest preview' })).toBeVisible();
   await page.keyboard.press('x');
   await expect(inngest).not.toBeChecked();
   await expect(todayLink(page)).toContainText('5 of 5');

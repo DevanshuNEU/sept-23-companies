@@ -3,7 +3,7 @@ import { focusManager } from '@tanstack/react-query';
 import { useLocation } from 'react-router';
 import type { OutboxItem } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
-import { buildFixture, ids, messageOf, type FixtureDb, type Scenario } from '@/api/fixture/data';
+import { buildFixture, companyId, ids, messageOf, type FixtureDb, type Scenario } from '@/api/fixture/data';
 import { renderWithApp } from '@/test/render';
 import OutboxPage from './index';
 
@@ -207,5 +207,32 @@ describe('OutboxList', () => {
     await outbox({ scenario: 'empty' });
     expect(screen.getByText('No drafts to review.')).toBeInTheDocument();
     expect(screen.getByText("Paste people for a picked company in the side terminal. Claude's drafts show up here.")).toBeInTheDocument();
+  });
+});
+
+describe('Outbox filtered to a company', () => {
+  it('?company= shows only that company, with a way to clear it', async () => {
+    await outbox({ route: `/outbox?company=${companyId('Mintlify')}` });
+    expect(screen.getByText('Showing only Mintlify')).toBeInTheDocument();
+    expect(row('Dana Whitcomb')).toBeInTheDocument();
+    expect(row('Jordan Price')).toBeInTheDocument();
+    expect(findRow('Kenji Watanabe')).toBeNull();
+    expect(findRow('Priya Natarajan')).toBeNull();
+    expect(headings()).not.toContain('Replied');
+    // The group counts follow the filter.
+    expect(document.querySelector('button[data-group-head="review"]')).toHaveTextContent('2');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all companies' }));
+    expect(screen.queryByText('Showing only Mintlify')).toBeNull();
+    expect(row('Kenji Watanabe')).toBeInTheDocument();
+    expect(row('Priya Natarajan')).toBeInTheDocument();
+  });
+
+  it('a company with nothing in the Outbox says so instead of showing the empty Outbox', async () => {
+    await outbox({ route: `/outbox?company=${companyId('Modal')}` });
+    expect(screen.getByText('Nothing in the Outbox for this company')).toBeInTheDocument();
+    expect(screen.queryByText('No drafts to review.')).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Show all companies' })[0] as HTMLElement);
+    expect(row('Kenji Watanabe')).toBeInTheDocument();
   });
 });

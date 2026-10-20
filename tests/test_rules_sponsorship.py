@@ -161,6 +161,59 @@ REVIEW_2_STANCE = [  # (body, stance)
     ("We are unable to sponsor visas regardless of experience level.", "no"),
 ]
 
+# Review round 3 (#4, Task 11).
+REVIEW_3_STANCE = [  # (body, stance)
+    # " and <verb>" with OPT on one side: the refusal does not cover the OPT support
+    ("We do not offer visa sponsorship and welcome OPT candidates.", "opt_only"),
+    ("We cannot sponsor H-1B visas and are happy to support OPT.", "opt_only"),
+    ("We don't sponsor visas and accept OPT and CPT candidates.", "opt_only"),
+    ("We are unable to sponsor H-1B and accept candidates on STEM OPT.", "opt_only"),
+    ("We do not sponsor H-1B visas and welcome candidates on OPT.", "opt_only"),
+    ("We support OPT and do not sponsor H-1B.", "opt_only"),
+    ("We welcome F-1 students on OPT and are unable to sponsor H-1B visas.", "opt_only"),
+    # a verbless side or a verb the list lacked no longer shares a generic negation about relocation
+    ("H-1B sponsorship available and relocation not provided.", "yes"),
+    ("We sponsor visas and relocation remains unavailable.", "yes"),
+    # business and perk uses of "sponsor" and "sponsorship"
+    ("Secure executive sponsorship for key initiatives.", "silent"),
+    ("Partner with the product sponsor.", "silent"),
+    ("Our sponsor, the Department of Energy, funds this work.", "silent"),
+    ("You will work with the sponsor of each clinical trial.", "silent"),
+    ("We sponsor professional development and certifications.", "silent"),
+    ("We offer tuition sponsorship.", "silent"),
+    ("We sponsor conferences like PyCon.", "silent"),
+    ("We sponsor hackathons and meetups.", "silent"),
+    ("Sponsorship of conference attendance is available.", "silent"),
+    ("We do not sponsor visas. We sponsor conference attendance and certifications.", "no"),
+    ("Unfortunately we cannot sponsor H-1B visas. Perks: tuition sponsorship, gym stipend.", "no"),
+]
+
+# A refusal of relocation joined to a real yes by " and <verb>": yes is best, unclear is accepted, no is wrong.
+REVIEW_3_RELOCATION = [
+    "We sponsor H-1B visas and do not offer relocation.",
+    "We sponsor visas and do not provide relocation assistance.",
+    "We offer visa sponsorship and do not offer relocation.",
+]
+
+REVIEW_3_CITIZEN = [  # (body, required)
+    # a negation about something else across " and " does not cancel the requirement
+    ("Active Secret clearance required and travel not required.", True),
+    ("US citizenship required and prior experience not necessary.", True),
+    ("Must be a U.S. citizen and degree not required.", True),
+    ("Active security clearance required and a degree is not necessary.", True),
+    # header and intensifier forms of a preference
+    ("Bonus points: active security clearance.", False),
+    ("Bonus: active TS/SCI clearance", False),
+    ("Plus: active security clearance.", False),
+    ("Security clearance a big plus.", False),
+    ("Having an active Secret security clearance would be a huge plus.", False),
+    # one negation shared by a list of nouns: the cut at " and " must not leave the first noun bare
+    ("Security clearance and travel are not required.", False),
+    ("U.S. citizenship and security clearance are not required.", False),
+    ("Security clearance and relocation are not necessary.", False),
+    ("We do not require clearance and citizenship.", False),
+]
+
 REVIEW_2_CITIZEN = [  # (body, required): a preference word cancels only the requirement it sits next to
     ("Active Secret clearance required, TS/SCI preferred.", True),
     ("Must hold an active TS/SCI clearance, Kubernetes experience is a plus.", True),
@@ -208,6 +261,14 @@ class SponsorshipStanceTest(unittest.TestCase):
 
     def test_review_2_stances(self):
         self.check(REVIEW_2_STANCE)
+
+    def test_review_3_stances(self):
+        self.check(REVIEW_3_STANCE)
+
+    def test_relocation_refusal_next_to_a_yes_is_never_no(self):
+        for body in REVIEW_3_RELOCATION:
+            with self.subTest(body=body):
+                self.assertIn(sponsorship_stance(body, self.cfg)[0], ("yes", "unclear"))
 
     def test_a_field_answer_counts_only_after_the_topic(self):
         # "Relocation: No" before a sponsorship field on the same line is not a refusal of sponsorship.
@@ -278,6 +339,8 @@ class SponsorshipStanceTest(unittest.TestCase):
             "visa sponsorship not available " * 33_000,  # window negations, each next to a topic word
             "sponsorship and relocation are " * 33_000,  # one 1 MB sentence of "and" cuts to weigh
             "security clearance is a plus " * 35_000,  # one 1 MB sentence of requirements, each with a preference
+            ("visa and " * 111_112)[:1_000_000],  # one 1 MB sentence of "and" joins with no verb anywhere
+            "we do not sponsor visas and welcome OPT " * 25_000,  # "and <verb>" joins, each with OPT and a refusal
         ]
         for body in bodies:
             with self.subTest(body=body[:30]):
@@ -293,7 +356,7 @@ class CitizenshipTest(unittest.TestCase):
         cls.cfg = load_config()
 
     def test_citizenship(self):
-        for body, expected in CITIZEN + REVIEW_CITIZEN + REVIEW_2_CITIZEN:
+        for body, expected in CITIZEN + REVIEW_CITIZEN + REVIEW_2_CITIZEN + REVIEW_3_CITIZEN:
             with self.subTest(body=body):
                 required, quote = citizenship_required(body, self.cfg)
                 self.assertIs(required, expected)

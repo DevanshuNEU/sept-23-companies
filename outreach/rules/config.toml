@@ -253,6 +253,12 @@ benefit = [
   # new in #4 (review round 2): the business sense of "sponsor", now that "sponsor" is its own context
   "executive sponsor", "project sponsor", "program sponsor", "business sponsor", "corporate sponsor",
   "event sponsor", "title sponsor",
+  # new in #4 (review round 3): more business uses, and perks a company sponsors
+  "product sponsor", "our sponsor", "the sponsor of", "executive sponsorship", "product sponsorship",
+  "project sponsorship", "program sponsorship", "tuition sponsorship", "conference sponsorship",
+  "event sponsorship", "sponsorship of conference", "sponsorship of conferences", "sponsor conference",
+  "sponsor conferences", "sponsor certification", "sponsor certifications", "sponsor events", "sponsor hackathons",
+  "sponsor meetups", "sponsor professional development",
 ]
 # new in #4 (review round 1): a clause with one of these is an equal opportunity line and says nothing
 non_discrimination = [
@@ -295,15 +301,21 @@ negation_near = [
   "not in a position", "not have the ability", "no ability", "not consider", "not be considered",
   "without the need", "now or in the future", "now or in future", "current or future",
 ]
-# new in #4 (review round 2): finite verbs and auxiliaries. A sentence is cut at " and " only when both sides are
-# whole clauses: the left side holds one of these and the right side is one to three words and then one of these
-# ("We offer visa sponsorship and relocation is not provided"). Otherwise a refusal is shared across the "and"
-# ("Visa sponsorship and relocation are not available", "We do not offer relocation and visa sponsorship").
+# new in #4 (review rounds 2 and 3): finite verbs and auxiliaries. A sentence is cut at " and " only when the left
+# side holds one of these and the right side is one to three words and then one of these ("We offer visa
+# sponsorship and relocation is not provided"), or starts with one of these and names OPT or holds its own
+# refusal ("and welcome OPT candidates", "and do not offer relocation"). Otherwise a refusal is shared across the
+# "and" ("Visa sponsorship and relocation are not available", "We are unable to sponsor and transfer H-1B visas").
 clause_verbs = [
   "is", "are", "was", "were", "be", "will", "won't", "would", "can", "cannot", "can't", "could", "may", "might",
   "must", "should", "shall", "do", "does", "did", "don't", "doesn't", "has", "have", "had", "isn't", "aren't",
   "offer", "offers", "provide", "provides", "sponsor", "sponsors", "support", "supports", "accept", "accepts",
   "welcome", "welcomes", "need", "needs", "require", "requires", "include", "includes", "pay", "pays", "get", "gets",
+  # new in #4 (review round 3): "relocation remains unavailable", and a predicate with no verb
+  # ("H-1B sponsorship available and relocation not provided")
+  "remain", "remains", "available", "provided", "offered",
+  # and a predicate word, so citizenship reads "clearance required and travel not required" as two clauses
+  "required", "necessary", "needed", "mandatory",
 ]
 # new in #4 (review round 1): an ATS field answer, read only as ": <answer>" right after a topic word
 # ("Visa sponsorship: No", "Sponsorship Available: No")
@@ -374,6 +386,8 @@ citizenship_negation = [
 # "bonus eligible").
 citizenship_preference = [
   "a plus", "is a plus", "nice to have", "a bonus", "is a bonus", "preferred",
+  # new in #4 (review round 3): intensifiers and headers ("Bonus points: active security clearance.")
+  "big plus", "huge plus", "strong plus", "bonus points", "bonus:", "plus:",
 ]
 
 [eligibility]

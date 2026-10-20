@@ -18,7 +18,7 @@ from .config import Config, phrases
 from .text import quote_around, sentences
 
 # Where a sentence is cut into clauses: ", but", " but ", "; however", "however,", " though ", " while ", ", which"
-# and, between two whole clauses only, " and " (see _and_joins_clauses). (sentences() already ends a sentence at a
+# and, only in the cases _clauses lists, " and ". (sentences() already ends a sentence at a
 # semicolon, so "; however" only shows up as "however," at the start of the next one.) "though", "while", "which"
 # and a clause-joining "and" start a new subject often enough ("We offer visa sponsorship and relocation is not
 # provided") that a generic negation after them is about something else.
@@ -27,9 +27,6 @@ _CLAUSE_BREAK = re.compile(
     r"|,\s{0,3}which(?!\w)",
     re.IGNORECASE,
 )
-# The right side of an " and " is read this far, enough for a subject of three words and its verb.
-_AND_LOOKAHEAD = 80
-_PLAIN_WORD = re.compile(r"\w[\w'-]*")  # a word with no punctuation after it, so a subject never runs past a comma
 _CURLY = chr(0x2019)  # a curly apostrophe, read as a straight one so "don't" in the lists matches "don" + curly + "t"
 
 # A `negation_near` phrase ("not available", "now or in the future") is a refusal only when a topic word in the
@@ -60,6 +57,13 @@ class _Patterns:
         self.negation = phrases(s["negation"])
         self.negation_near = phrases(s["negation_near"])
         self.clause_verbs = phrases(s["clause_verbs"])
+        # The right side of an " and ": up to three plain words that are neither verbs nor "and" or "or", then a verb
+        # (which may end the sentence: "and relocation not provided."). One match per "and", possessive so it never
+        # backtracks; the cheap "and"/"or" test first, so a run of "visa and visa and" fails fast.
+        verb = self.clause_verbs.pattern
+        self.right_side = re.compile(
+            r"((?:(?!(?:and|or)\s)(?!" + verb + r")\w[\w'-]*+\s{1,3}+){0,3}+)" + verb, self.clause_verbs.flags
+        )
         # ": No" as an ATS field value; the answer list goes through phrases() like every other list
         self.field_no = re.compile(r":\s{0,3}(?:" + phrases(s["field_no"]).pattern + ")", re.IGNORECASE)
         self.hedge = phrases(s["hedge"])
@@ -82,30 +86,56 @@ def _blank(m: re.Match) -> str:
     return " " * len(m.group(0))  # same length, so offsets still point into the body
 
 
-def _starts_clause(sentence: str, at: int, p: _Patterns) -> bool:
-    """Whether the text at `at` is one to three plain words and then a verb: "relocation is", "we sponsor"."""
-    for i, token in enumerate(sentence[at:at + _AND_LOOKAHEAD].split(None, 4)[:4]):
-        if p.clause_verbs.fullmatch(token):
-            return 1 <= i <= 3  # a verb first ("and will not transfer") shares the left side's subject
-        if not _PLAIN_WORD.fullmatch(token):
-            return False  # punctuation ends the subject: "and visa sponsorship." has no verb of its own
-    return False
+def _right_side(sentence: str, at: int, p: _Patterns) -> str | None:
+    """What follows an " and ": "clause" for one to three plain words and then a verb ("relocation is", "we
+    sponsor"), "verb" for a verb first ("welcome OPT", "do not offer relocation"), None otherwise (punctuation
+    ends a subject, so "and visa sponsorship." has no verb of its own)."""
+    m = p.right_side.match(sentence, at)
+    if m is None:
+        return None
+    return "clause" if m.group(1) else "verb"
 
 
-def _clauses(sentence: str, p: _Patterns) -> list[tuple[int, int]]:
-    """[start, end) of each clause of a sentence. " and " cuts only between two whole clauses, so a refusal on one
-    side ("Visa sponsorship and relocation are not available") still covers the other."""
+def _clauses(sentence: str, p: _Patterns, *, any_right: bool = False) -> list[tuple[int, int]]:
+    """[start, end) of each clause of a sentence.
+
+    " and " cuts only when the left side holds a verb and the right side is a whole clause ("and relocation is not
+    provided"), or starts with a verb and either names OPT ("and welcome OPT candidates") or holds its own refusal
+    ("and do not offer relocation"). Otherwise a refusal on one side ("Visa sponsorship and relocation are not
+    available", "We are unable to sponsor and transfer H-1B visas") still covers the other. `any_right` (citizenship)
+    cuts whenever the left side holds a verb and the right side has one too, whatever comes first ("clearance
+    required and travel not required", "a U.S. citizen and not require relocation"); a bare noun on either side
+    ("Security clearance and travel are not required") is still one clause.
+    """
+    cuts = list(_CLAUSE_BREAK.finditer(sentence))
     spans, pos = [], 0
     left_verb, scanned = False, 0  # whether [pos, scanned) holds a verb; scanned only grows, so this stays linear
-    for cut in _CLAUSE_BREAK.finditer(sentence):
+    # Where OPT words and refusals start, each found in one pass the first time a verb-first "and" needs them.
+    opt_starts: list[int] | None = None
+    neg_starts: list[int] = []
+    for k, cut in enumerate(cuts):
         if cut.lastgroup == "and":
-            if not _starts_clause(sentence, cut.end(), p):
+            right = _right_side(sentence, cut.end(), p)
+            if right is None:
                 continue
             if not left_verb:
                 left_verb = p.clause_verbs.search(sentence, max(scanned, pos), cut.start()) is not None
                 scanned = cut.start()  # a space, so endpos never cuts a word in two
             if not left_verb:
                 continue
+            if right == "verb" and not any_right:
+                if opt_starts is None:
+                    opt_starts = sorted(m.start() for pat in (p.opt, p.opt_acronyms) for m in pat.finditer(sentence))
+                    neg_starts = [m.start() for m in p.negation.finditer(sentence)]
+                if not opt_starts and not neg_starts:
+                    continue  # nothing in the sentence could make a verb-first "and" a cut
+                right_end = cuts[k + 1].start() if k + 1 < len(cuts) else len(sentence)  # never inside a word
+                i = bisect.bisect_left(opt_starts, pos)
+                names_opt = i < len(opt_starts) and opt_starts[i] < right_end  # on either side
+                j = bisect.bisect_left(neg_starts, cut.end())
+                own_refusal = j < len(neg_starts) and neg_starts[j] < right_end  # on the right side
+                if not names_opt and not own_refusal:
+                    continue  # "and transfer H-1B visas", "and will not transfer": one subject, one refusal
         spans.append((pos, cut.start()))
         pos = scanned = cut.end()
         left_verb = False
@@ -290,7 +320,7 @@ def citizenship_required(body: str, cfg: Config) -> tuple[bool, str]:
         negated: dict[int, bool] = {}  # clause index -> has a citizenship_negation, read once per clause
         for m in p.citizenship.finditer(text):
             if not clauses:
-                clauses = _clauses(text, p)
+                clauses = _clauses(text, p, any_right=True)
                 starts = [a for a, _ in clauses]
             i = bisect.bisect_right(starts, m.start()) - 1
             if i not in negated:

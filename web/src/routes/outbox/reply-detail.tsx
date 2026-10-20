@@ -82,12 +82,14 @@ export function ReplyDetail({
   onClose,
   onResume,
   canResume,
+  canClose,
 }: {
   detail: OutboxDetail;
   onReplyKind: (kind: ReplyChoice) => void;
   onClose: () => void;
   onResume: () => void;
   canResume: boolean;
+  canClose: boolean;
 }) {
   const { item, reply, thread, asOf } = detail;
   const first = item.person.name.split(' ')[0] ?? item.person.name;
@@ -137,10 +139,12 @@ export function ReplyDetail({
         <Thread messages={thread} asOf={asOf} skip={(m) => m.direction === 'in' && reply !== null && m.at === reply.at} />
       </div>
       <footer className="flex flex-none flex-wrap items-center gap-2 border-t bg-background px-5 py-3">
-        <Button type="button" onClick={onClose}>
-          {`Close ${company.name} with a reason`}
-          <Kbd aria-hidden>C</Kbd>
-        </Button>
+        {canClose ? (
+          <Button type="button" onClick={onClose}>
+            {`Close ${company.name} with a reason`}
+            <Kbd aria-hidden>C</Kbd>
+          </Button>
+        ) : null}
         {canResume ? (
           <Button type="button" variant="outline" onClick={onResume}>
             {`Resume ${company.name}`}

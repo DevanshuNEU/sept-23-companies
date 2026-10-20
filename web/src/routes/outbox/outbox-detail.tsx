@@ -228,7 +228,7 @@ function DetailBody({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const write = usePendingWrite();
-  const { flushPending } = usePendingControls();
+  const { flushPending, cancel } = usePendingControls();
   const articleRef = useRef<HTMLElement>(null);
   const saving = useRef(false);
 
@@ -379,7 +379,9 @@ function DetailBody({
 
   const withdraw = async () => {
     if (kind !== 'approved') return;
-    // An approval still inside its undo window has not reached the API: let it land, then withdraw it.
+    // An approval still inside its undo window never reached the API: dropping it is the same as Undo.
+    if (cancel(`approve:${messageId}`)) return;
+    // An approval whose commit already started: let it land, then withdraw it.
     if (queryClient.getQueryData<OutboxDetail>(detailKey)?.item.state === 'drafted') await flushPending();
     const revision = queryClient.getQueryData<OutboxDetail>(detailKey)?.item.revision ?? item.revision;
     const back = { state: 'drafted', group: 'review' } as const;
@@ -506,6 +508,7 @@ function DetailBody({
         onClose={companyActions.askClose}
         onResume={companyActions.askResume}
         canResume={companyActions.held}
+        canClose={hasCompanyActions}
       />
     );
   } else {

@@ -182,7 +182,7 @@ export default function OutboxPage() {
                   </ResizablePanel>
                   <ResizableHandle />
                   <ResizablePanel id="detail" minSize={360}>
-                    {selected === null ? (
+                    {selected === null || !view.items.some((i) => i.touchId === selected) ? (
                       <div className="h-full overflow-y-auto">
                         <DetailPlaceholder />
                       </div>

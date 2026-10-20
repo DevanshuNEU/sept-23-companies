@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture, companyId, ids, messageOf } from '@/api/fixture/data';
+import { usePendingWrite } from '@/pending/pending';
 import { AppShell } from '@/shell/app-shell';
 import { renderWithApp } from '@/test/render';
 import OutboxPage from './index';
@@ -42,6 +43,8 @@ async function typeInBody(text: string) {
   });
   await userEvent.setup().keyboard(text);
 }
+/** Undo buttons in toasts that are not on their way out (a dismissed toast lingers for its exit animation). */
+const liveUndos = () => screen.queryAllByRole('button', { name: 'Undo' }).filter((b) => b.closest('[data-sonner-toast]')?.getAttribute('data-removed') !== 'true');
 const toastText = () => [...document.querySelectorAll('[data-sonner-toast]')].map((t) => t.textContent ?? '').join('|');
 const checks = () => within(screen.getByRole('group', { name: 'Check results' }));
 const sidebarOutbox = () => within(document.querySelector<HTMLElement>('[data-slot="sidebar"]') ?? document.body).getByRole('link', { name: /^Outbox/ });
@@ -51,7 +54,7 @@ async function settle(ms = 0) {
   await act(() => vi.advanceTimersByTimeAsync(ms));
 }
 /** Only the undo window and Query's notifications are timed; the rest of a test runs on the real clock. */
-const startClock = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+const startClock = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
 
 afterEach(async () => {
   if (vi.isFakeTimers()) {
@@ -113,6 +116,38 @@ describe('approve', () => {
     press('a');
     press('a', { repeat: true });
     press('a', { repeat: true });
+    await settle();
+    // The first press already turned Approve into Withdraw approval: there is nothing left to click.
+    expect(button).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(1);
+    await settle(8000);
+    expect(approve).toHaveBeenCalledTimes(1);
+  });
+
+  it('the store ignores a second approve of the same message inside the window', async () => {
+    const client = new FixtureClient(buildFixture());
+    const approve = vi.spyOn(client, 'approve');
+    function Twice() {
+      const write = usePendingWrite();
+      const go = () =>
+        write({
+          id: `approve:${messageOf(T.omar)}`,
+          label: 'Approved Omar Haddad.',
+          afterCommit: 'Approved.',
+          patches: [],
+          commit: (o) => client.approve(messageOf(T.omar), 1, o),
+        });
+      return (
+        <button type="button" onClick={() => { go(); go(); }}>
+          approve twice
+        </button>
+      );
+    }
+    renderWithApp(<Twice />, { route: '/outbox', client });
+    const button = await screen.findByRole('button', { name: 'approve twice' });
+    startClock();
+    fireEvent.click(button);
     fireEvent.click(button);
     await settle();
     expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(1);
@@ -204,24 +239,45 @@ describe('approve', () => {
     expect(await screen.findByRole('button', { name: 'Approve' })).toBeInTheDocument();
   });
 
-  it('u inside the approve window withdraws it too: the approval commits, then the withdrawal', async () => {
-    const { client } = await open(T.omar, 'Omar Haddad');
-    const calls: string[] = [];
-    const approve = vi.spyOn(client, 'approve').mockImplementation(async (...a) => {
-      calls.push('approve');
-      return FixtureClient.prototype.approve.apply(client, a);
-    });
-    const unapprove = vi.spyOn(client, 'unapprove').mockImplementation(async (...a) => {
-      calls.push('unapprove');
-      return FixtureClient.prototype.unapprove.apply(client, a);
-    });
+  it('u inside the approve window cancels the approval: nothing reaches the API', async () => {
+    const { client } = await open(T.omar, 'Omar Haddad', { shell: true });
+    const approve = vi.spyOn(client, 'approve');
+    const unapprove = vi.spyOn(client, 'unapprove');
+    startClock();
     press('a');
-    await screen.findByRole('button', { name: 'Undo' });
+    await settle();
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
     press('u');
-    await waitFor(() => expect(unapprove).toHaveBeenCalledTimes(1));
+    press('u');
+    await settle(1000);
+    expect(within(row('Omar Haddad')).getByText('Draft')).toBeInTheDocument();
+    expect(sidebarOutbox()).toHaveAccessibleName('Outbox, 1 reply to handle, 7 drafts to review');
+    expect(liveUndos()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    await settle(9000);
+    expect(approve).not.toHaveBeenCalled();
+    expect(unapprove).not.toHaveBeenCalled();
+  });
+
+  it('u leaves another email\'s pending write alone', async () => {
+    const { client } = await open(T.sara, 'Sara Lindqvist');
+    const approve = vi.spyOn(client, 'approve');
+    startClock();
+    press('a');
+    await settle();
+    fireEvent.click(row('Omar Haddad'));
+    await settle();
+    press('a');
+    await settle();
+    expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(2);
+    press('u');
+    await settle(1000);
+    expect(within(row('Omar Haddad')).getByText('Draft')).toBeInTheDocument();
+    expect(within(row('Sara Lindqvist')).getByText('Approved')).toBeInTheDocument();
+    expect(liveUndos()).toHaveLength(1);
+    await settle(8000);
     expect(approve).toHaveBeenCalledTimes(1);
-    expect(calls).toEqual(['approve', 'unapprove']);
-    await waitFor(() => expect(within(row('Omar Haddad')).getByText('Draft')).toBeInTheDocument());
+    expect(approve.mock.calls[0]?.[0]).toBe(messageOf(T.sara));
   });
 });
 
@@ -359,6 +415,19 @@ describe('reply', () => {
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
   });
 
+  it('a closed company has no Close footer on its reply', async () => {
+    const db = buildFixture();
+    const priya = db.details[T.priya];
+    if (!priya) throw new Error('No Priya in the fixture');
+    priya.item.company.status = 'closed';
+    priya.item.company.heldByTouchId = null;
+    const client = new FixtureClient(db);
+    renderWithApp(<OutboxPage />, { route: `/outbox/${T.priya}`, client });
+    await screen.findByRole('heading', { level: 2, name: 'Priya Natarajan' });
+    expect(screen.queryByRole('button', { name: /^Close Browserbase/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Resume Browserbase' })).toBeNull();
+  });
+
   it('Not now is a pending write with Undo', async () => {
     const { client } = await open(T.priya, 'Priya Natarajan');
     const setReplyKind = vi.spyOn(client, 'setReplyKind');
@@ -423,6 +492,15 @@ describe('company actions', () => {
     await waitFor(() => expect(pause).toHaveBeenCalledTimes(1));
     expect(pause.mock.calls[0]?.[0]).toBe(companyId('Trigger.dev'));
     expect(await screen.findByRole('button', { name: 'Resume Trigger.dev' })).toBeInTheDocument();
+  });
+});
+
+describe('the company filter and the open email', () => {
+  it('an email from another company is not shown while ?company= filters the list', async () => {
+    renderWithApp(<OutboxPage />, { route: `/outbox/${T.kenji}?company=${companyId('Mintlify')}`, client: new FixtureClient(buildFixture()) });
+    await screen.findByText('Showing only Mintlify');
+    expect(screen.queryByRole('heading', { level: 2, name: 'Kenji Watanabe' })).toBeNull();
+    expect(screen.getByText('No email selected')).toBeInTheDocument();
   });
 });
 

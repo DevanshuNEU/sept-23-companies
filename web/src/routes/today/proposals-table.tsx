@@ -32,7 +32,10 @@ const GROUP_LABEL: Record<DailyEntry['listGroup'], string> = {
 
 const HEAD = 'h-9 bg-subtle px-3 text-[13px] text-muted-foreground';
 const CELL = 'h-9 px-3 py-1.5 text-[13px] whitespace-normal';
-/** Row actions float over the row's right edge, so they take no column width (the 1280 px layout has 610 px for this table). */
+/**
+ * Row actions float over the row's right edge, so they take no column width (the 1280 px layout has 610 px for this table).
+ * From 1400 px the Sponsorship cell reserves room for them; below that the badge is hidden while they show.
+ */
 const FLOAT = 'absolute top-1/2 right-2 z-10 -translate-y-1/2';
 const SUB = 'text-xs text-muted-foreground';
 
@@ -181,7 +184,16 @@ const COLUMNS: ColumnDef<DailyEntry>[] = [
   { id: 'company', header: 'Company', cell: CompanyCell },
   { id: 'role', header: 'Role to name', cell: RoleCell },
   { id: 'size', header: 'Size', cell: ({ row }) => <SizeCell entry={row.original} /> },
-  { id: 'sponsorship', header: 'Sponsorship', cell: ({ row }) => <StatusBadge status={sponsorshipStatus[row.original.sponsorship]} dot /> },
+  {
+    id: 'sponsorship',
+    header: 'Sponsorship',
+    // Under 1400 px the row actions float over this cell, so the badge steps aside while they show.
+    cell: ({ row }) => (
+      <span className="inline-flex max-[1399px]:group-hover/row:invisible max-[1399px]:group-focus-within/row:invisible">
+        <StatusBadge status={sponsorshipStatus[row.original.sponsorship]} dot />
+      </span>
+    ),
+  },
   { id: 'actions', header: () => <span className="sr-only">Actions</span>, cell: ActionsCell },
 ];
 
@@ -242,7 +254,7 @@ export function ProposalsTable({
                   className="group/row cursor-default data-[active=true]:bg-muted data-[active=true]:shadow-[inset_2px_0_0_var(--foreground)]"
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className={cn(CELL, cell.column.id === 'pick' && 'w-px pr-0', cell.column.id === 'actions' && 'relative w-0 p-0')}>
+                    <TableCell key={cell.id} className={cn(CELL, cell.column.id === 'pick' && 'w-px pr-0', cell.column.id === 'sponsorship' && 'min-[1400px]:pr-20', cell.column.id === 'actions' && 'relative w-0 p-0')}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}

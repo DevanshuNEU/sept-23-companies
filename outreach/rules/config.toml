@@ -119,6 +119,22 @@ degree_alternative = [
 company_age = [
   "founded", "ago", "in business", "history",
 ]
+# new in #4, ruling R10 (the company's own years are not a requirement): one of these before the number in its
+# sentence rules the number out, unless a candidate_voice phrase is in the number's own clause. Not bare "founders"
+# ("experience working with founders" is a requirement) and not "combined" ("5+ years of combined experience" is
+# one too); the team forms below catch "our team has 50 years of combined experience".
+company_voice = [
+  "our team", "our founders", "our founder", "the founders", "founding team", "founders have", "founders bring",
+  "our company", "our engineers", "our engineering team", "our leadership", "leadership team", "team with",
+  "team has", "team brings", "we have", "we've", "we bring", "collectively", "for over",
+]
+# new in #4, ruling R10: the candidate's voice, read in the number's own clause. Not a bare "you" or "your" ("our
+# team has 20 years of experience to support your growth" is still the company speaking).
+candidate_voice = [
+  "you have", "you've", "you bring", "you'll have", "you'll bring", "you will have", "you will bring",
+  "you should have", "you possess", "you need", "you'd have", "candidate", "candidates", "required", "requirement",
+  "requirements", "must", "minimum", "at least", "qualifications",
+]
 # refresh/finalcheck.py:42-44 STRONG and refresh/crawl_boards.py:29-31 BODY_ENTRY
 body_entry = [
   "new grad", "new grads", "new graduate", "new graduates", "recent grad", "recent grads", "recent graduate",

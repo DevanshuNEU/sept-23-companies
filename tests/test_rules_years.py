@@ -47,6 +47,34 @@ MORE_CASES = [  # (body, years)
     ("- 4+ years of experience with React", 4),
 ]
 
+# Review fix round 1 (rulings R10 and R11)
+FIX_CASES = [  # (body, years)
+    # R10: the company's own years, in the company's voice, are not a requirement
+    ("Our founding team has 20+ years of industry experience. You have 2+ years of experience with Python.", 2),
+    ("Our founders bring 15 years of experience building developer tools. 1+ years of professional experience.", 1),
+    ("For over 10 years, we have helped engineering teams ship faster.", None),
+    ("You will join a team with 20 years of combined experience; you have 2+ years of experience.", 2),
+    # control: both voices in one sentence, each number takes the voice of its own clause
+    ("Our founding team has 20+ years of industry experience, and you have 2+ years of experience with Go.", 2),
+    # control: candidate voice in its clause keeps the number even after company voice
+    ("We have high standards, and candidates must have 5+ years of professional experience.", 5),
+    # company voice after the number does not touch it
+    ("3+ years of experience leading a team with strong opinions.", 3),
+    ("5+ years of combined professional experience in backend and data work.", 5),
+    # ranges with "and" count their low end only after "between"
+    ("Between 2 and 5 years of experience.", 2),
+    ("between 1 and 3 years of professional experience.", 1),
+    ("Python 3 and 5+ years of experience.", 5),
+    # R11: a preference rules out only its own clause
+    ("3+ years of professional experience (5+ preferred).", 3),
+    ("3+ years of experience with Go, Python preferred.", 3),
+    ("3+ years of professional experience, but 5+ years of industry experience preferred.", 3),
+    ("2+ years of experience with Python. 5+ years of experience with Rust is a plus.", 2),
+    # a preference marker that opens the sentence covers all of it
+    ("Ideally, you have 5+ years of professional experience.", None),
+    ("Nice to have: 5+ years of experience with Rust.", None),
+]
+
 
 class YearsAskedTest(unittest.TestCase):
     @classmethod
@@ -63,6 +91,11 @@ class YearsAskedTest(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertEqual(years_asked(body, self.cfg)[0], years)
 
+    def test_review_fix_cases(self):
+        for body, years in FIX_CASES:
+            with self.subTest(body=body):
+                self.assertEqual(years_asked(body, self.cfg)[0], years)
+
     def test_quote_is_the_sentence(self):
         self.assertEqual(years_asked(CASES[2][0], self.cfg)[1], CASES[2][0])
 
@@ -76,7 +109,7 @@ class YearsAskedTest(unittest.TestCase):
                 self.assertEqual(years_asked(body, self.cfg), (None, ""))
 
     def test_every_number_has_a_quote(self):
-        for body, years in CASES + MORE_CASES:
+        for body, years in CASES + MORE_CASES + FIX_CASES:
             if years is None:
                 continue
             with self.subTest(body=body):
@@ -98,6 +131,8 @@ class YearsAskedTest(unittest.TestCase):
             "1" * 1_000_000 + " years of experience",
             ("or 4 years founded ago " * 40_000),
             ("5 years of experience " * 50_000),  # one huge sentence with no comma, every number a requirement
+            ("our team has 5 years of experience, you have 3 years (preferred) while " * 15_000),  # many clauses
+            ("between " * 120_000) + "2 and 5 years",
         ]
         for body in bodies:
             start = time.monotonic()

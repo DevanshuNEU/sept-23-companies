@@ -9,6 +9,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { useUrlState } from '@/lib/url-state';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { OutboxList, OutboxListSkeleton } from './outbox-list';
+import { OutboxDetailPane, type Edit } from './outbox-detail';
 import { forCompany } from './outbox-patches';
 import { SendingStrip, SendingStripSkeleton } from './sending-strip';
 
@@ -88,6 +89,8 @@ export default function OutboxPage() {
   const [companyParam, setCompanyParam] = useUrlState('company', '');
   const company = idOf(companyParam);
   const [listPx] = useState(savedListWidth);
+  // Unsaved text per email, so J, K and a click on another row never throw it away.
+  const [edits] = useState(() => new Map<Id, Edit>());
   const listPanel = usePanelRef();
 
   const select = (touchId: Id) => navigate({ pathname: `/outbox/${touchId}`, search }, { replace: true });
@@ -179,9 +182,13 @@ export default function OutboxPage() {
                   </ResizablePanel>
                   <ResizableHandle />
                   <ResizablePanel id="detail" minSize={360}>
-                    <div className="h-full overflow-y-auto">
-                      <DetailPlaceholder />
-                    </div>
+                    {selected === null ? (
+                      <div className="h-full overflow-y-auto">
+                        <DetailPlaceholder />
+                      </div>
+                    ) : (
+                      <OutboxDetailPane key={selected} touchId={selected} items={view.items} edits={edits} />
+                    )}
                   </ResizablePanel>
                 </ResizablePanelGroup>
               )}

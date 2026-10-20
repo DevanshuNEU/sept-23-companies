@@ -203,6 +203,8 @@ export function OutboxList({
     const sentAt = virtual ? sentRows.findIndex((i) => i.touchId === id) : -1;
     if (sentAt >= 0) virtualizer.scrollToIndex(sentAt, { align: 'auto' });
     else rowEls.current.get(id)?.scrollIntoView({ block: 'nearest' });
+    // Selection and focus move together (spec section 12), so a screen reader follows the row.
+    rowEls.current.get(id)?.focus({ preventScroll: true });
   };
 
   const move = (step: 1 | -1) => {

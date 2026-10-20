@@ -153,6 +153,16 @@ describe('OutboxList', () => {
     expect(where()).toBe(`/outbox/${ids.touch.priya}`);
   });
 
+  it('j and k move focus with the selection', async () => {
+    await outbox();
+    press('j');
+    expect(row('Priya Natarajan')).toHaveFocus();
+    press('j');
+    expect(row('Kenji Watanabe')).toHaveFocus();
+    press('k');
+    expect(row('Priya Natarajan')).toHaveFocus();
+  });
+
   it('selected row stays put after it is approved', async () => {
     const { client } = await outbox({ route: `/outbox/${ids.touch.omar}` });
     expect(row('Omar Haddad')).toHaveAttribute('aria-selected', 'true');

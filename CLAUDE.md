@@ -40,9 +40,10 @@ Live means real contacts and real sends.
 **Only in the live checkout:** `mail/sender.py` (with or without `--dry-run`: a dry run still reads Gmail and saves
 contacts), `mail/server.py` (it owns :3002), `refresh/refresh.py` and its individual steps (`finalcheck.py`,
 `final_merge.py`, `write_level.js` rewrite `dashboard/data.js`), `dashboard/publish.sh`, `mail/add.py` (writes the
-real contact list), `mail/gmail.py auth` (writes the real token), `python -m outreach.install` and anything else
-that opens the default store path (in any spelling: a symlink, a relative path, other letter case) refuse to run
-outside it, before touching any file. From a worktree, test against the scratch settings below.
+real contact list), `mail/gmail.py auth` (writes the real token). From a worktree, test against the scratch
+settings below. `python -m outreach.install`, and anything else that opens the default store path in any spelling
+(a symlink, a relative path, other letter case), refuses to run outside the live checkout before touching any file;
+with a scratch `OUTREACH_DB` it runs anywhere.
 
 **Scratch settings for tests and worktrees:**
 

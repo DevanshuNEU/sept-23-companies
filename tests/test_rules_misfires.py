@@ -82,6 +82,11 @@ class Misfire5YearsFromDegreeAlternative(unittest.TestCase):
         r = d("Software Engineer, New Grad", "Bachelor's degree or 4 years of equivalent experience.")
         self.assertEqual((r.years_asked, r.level_tier, r.level_ok), (None, "new_grad", True))
 
+    def test_degree_alternative_without_or_is_no_years(self):
+        # No "or" before the number, so only the degree-alternative exclusion can drop it.
+        r = d("Software Engineer, New Grad", "Bachelor's degree and 4 years of equivalent experience.")
+        self.assertEqual((r.years_asked, r.level_tier, r.level_ok), (None, "new_grad", True))
+
     def test_company_history_is_no_years(self):
         r = d("Software Engineer I",
               "We were founded 5 years ago, our engineering team now ships to 2,000 customers.")

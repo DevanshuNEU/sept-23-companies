@@ -13,14 +13,21 @@ The `expect` field names the test (or a part of its id) that should be among the
 other tests is still CAUGHT, but the run prints a note so a weak spot is not hidden.
 
 SAFETY. The run refuses to start in the live checkout (after #21 launchd runs the rules from there). The baseline
-suite must be green first. Each file is restored in a `finally` block and the restore is verified by re-reading
-the file; if a restore ever fails the run aborts at once and says which file to check. A missing anchor is SKIP and
-fails the run, so a refactor that moves the code cannot make a mutation pass silently.
+suite must be green first, and every file a mutation touches must be clean in git (a leftover from a killed run
+would otherwise be read as the original). Each file is restored in a `finally` block and the restore is verified
+by re-reading its bytes; SIGTERM and SIGHUP are turned into SystemExit so that block runs when the run is stopped.
+(SIGKILL cannot be caught: fix with `git checkout -- <path>`.) A missing anchor is SKIP and fails the run, so a
+refactor that moves the code cannot make a mutation pass silently. A mutation that does not compile or parse is a
+runner error, never CAUGHT.
 """
 import argparse
 import pathlib
+import signal
 import subprocess
 import sys
+import tomllib
+
+SUITE_TIMEOUT = 600  # seconds for one run of the whole suite
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -129,6 +136,9 @@ MUTATIONS = [
     (SCHEMA, "the locked keys removed from company_fact, so automation can outrank a hand value",
      "           ORDER BY e.locked DESC,\n                    CASE WHEN e.locked = 1 THEN e.recorded_at END DESC,\n",
      "           ORDER BY\n", "test_automation_never_outranks_a_hand_value"),
+    (SCHEMA, "the newest hand row no longer wins: the hand rows' recorded_at ordering key removed",
+     "                    CASE WHEN e.locked = 1 THEN e.recorded_at END DESC,\n", "",
+     "test_newest_hand_row_wins_whatever_its_confidence"),
     (SCHEMA, "the message_legal_transition trigger removed",
      "CREATE TRIGGER message_legal_transition BEFORE UPDATE OF state ON message\n"
      "  WHEN NEW.state <> OLD.state AND (OLD.state || '>' || NEW.state) NOT IN (\n"
@@ -144,11 +154,46 @@ MUTATIONS = [
 ]
 
 
+class RunnerError(Exception):
+    """The mutation itself is broken (it does not compile or parse). Never reported as CAUGHT."""
+
+
 def run_suite():
-    r = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-t", "."],
-                       capture_output=True, text=True, cwd=ROOT)
+    """(returncode, failure lines, timed_out). A timeout counts as CAUGHT: an infinite loop is a broken guarantee,
+    and the test that hangs is the one noticing it."""
+    try:
+        r = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-t", "."],
+                           capture_output=True, text=True, cwd=ROOT, timeout=SUITE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return 1, [f"TIMEOUT: suite did not finish in {SUITE_TIMEOUT} s"], True
     fails = [l for l in r.stderr.splitlines() if l.startswith(("FAIL:", "ERROR:"))]
-    return r.returncode, fails
+    return r.returncode, fails, False
+
+
+def check_syntax(path, data):
+    """Raise RunnerError when the mutated bytes are not valid Python (.py) or TOML (.toml). SQL is not checked here:
+    a bad statement fails the schema tests, which is a different failure from a guarantee being broken, so the
+    SQL mutations are kept to edits of whole clauses and triggers."""
+    try:
+        if path.suffix == ".py":
+            compile(data, str(path), "exec")
+        elif path.suffix == ".toml":
+            tomllib.loads(data.decode("utf-8"))
+    except (SyntaxError, ValueError, tomllib.TOMLDecodeError) as e:
+        raise RunnerError(f"mutation does not {'compile' if path.suffix == '.py' else 'parse'}: {e}") from e
+
+
+def dirty_files():
+    """The mutable files git reports as modified or untracked (empty when the tree is clean for them)."""
+    paths = sorted({str(p.relative_to(ROOT)) for p, *_ in MUTATIONS})
+    r = subprocess.run(["git", "status", "--porcelain", "--", *paths], capture_output=True, text=True, cwd=ROOT)
+    if r.returncode != 0:
+        raise RunnerError(f"git status failed: {r.stderr.strip()}")
+    return [line[3:] for line in r.stdout.splitlines()]
+
+
+def _stop(signum, frame):
+    raise SystemExit(128 + signum)  # unwinds through the `finally` that restores the file
 
 
 def main():
@@ -165,36 +210,58 @@ def main():
         print("refusing to run in the live checkout: this edits source files in place.")
         return 2
 
-    rc, fails = run_suite()
+    dirty = dirty_files()
+    if dirty:
+        print("refusing to run: these files are modified, and a mutated leftover would be read as the original.")
+        print("If a killed run left them mutated, restore each one:")
+        for f in dirty:
+            print(f"    git checkout -- {f}")
+        print("If the changes are yours, commit or stash them first.")
+        return 2
+
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGHUP, _stop)
+
+    rc, fails, _ = run_suite()
     if rc != 0:
         print("baseline suite is RED; fix that before mutation testing:")
         for f in fails[:10]:
             print("   ", f)
+        print("(mutable files are clean in git, so the failure is not a leftover mutation)")
         return 2
     print(f"baseline green ({len(MUTATIONS)} mutations to apply)\n", flush=True)
 
     caught = missed = skipped = 0
     for n, (path, name, old, new, expect) in enumerate(MUTATIONS, start=1):
-        original = path.read_text(encoding="utf-8")
+        original = path.read_bytes()
         label = f"{n:2} {path.name}: {name}"
-        if old not in original:
+        old_b, new_b = old.encode("utf-8"), new.encode("utf-8")
+        if old_b not in original:
             skipped += 1
             print(f"  SKIP    {label}\n            (anchor not found in {path.name}; "
                   f"the code moved, so this mutation needs updating)", flush=True)
             continue
+        mutated = original.replace(old_b, new_b, 1)
         try:
-            path.write_text(original.replace(old, new, 1), encoding="utf-8")
-            rc, fails = run_suite()
+            check_syntax(path, mutated)
+            path.write_bytes(mutated)
+            rc, fails, timed_out = run_suite()
+        except RunnerError as e:
+            print(f"\nRUNNER ERROR in mutation {label}\n            {e}")
+            return 4
         finally:
-            path.write_text(original, encoding="utf-8")
-            restored = path.read_text(encoding="utf-8") == original
-        if not restored:  # never leave the tree mutated
-            print(f"\nFATAL: could not restore {path}. Check it by hand.")
-            return 3
+            path.write_bytes(original)
+            restored = path.read_bytes() == original
+            if not restored:  # never leave the tree mutated
+                print(f"\nFATAL: could not restore {path}. Run: git checkout -- {path.relative_to(ROOT)}")
+                sys.stdout.flush()
+                raise SystemExit(3)
         if rc != 0:
             caught += 1
             print(f"  CAUGHT  {label}")
-            if fails:
+            if timed_out:
+                print(f"            {fails[0]}")
+            elif fails:
                 print(f"            {fails[0].split(' (')[0]}")
             if not any(expect in f for f in fails):
                 print(f"            note: no failure names {expect!r}; caught by other tests only")

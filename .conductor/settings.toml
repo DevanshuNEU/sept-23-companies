@@ -1,0 +1,28 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+# Every new workspace gets the Python env and the web app's packages. Toolchain paths are set here because
+# Conductor runs scripts in a non-interactive zsh (no nvm init).
+[scripts]
+setup = """
+export PATH="$HOME/.nvm/versions/node/v20.19.5/bin:$PATH"
+uv venv --python /opt/homebrew/bin/python3 && uv sync
+cd web && pnpm install --frozen-lockfile
+"""
+# Each workspace has its own ports (CONDUCTOR_PORT..+9), so workspaces can run side by side.
+run_mode = "concurrent"
+
+[scripts.run.web]
+available_in = [ "local" ]
+command = """
+export PATH="$HOME/.nvm/versions/node/v20.19.5/bin:$PATH"
+cd web && pnpm dev --host 127.0.0.1 --port "$CONDUCTOR_PORT" --strictPort
+"""
+default = true
+icon = "play"
+
+[scripts.run.tests]
+command = """
+export PATH="$HOME/.nvm/versions/node/v20.19.5/bin:$PATH"
+uv run python -m unittest discover -s tests -t . && cd web && pnpm test
+"""
+icon = "test-tube"

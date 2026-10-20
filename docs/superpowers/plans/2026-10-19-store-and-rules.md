@@ -704,7 +704,7 @@ FROM (
 | `evidence` | one fact (size, stage, sponsorship, domain, HQ, E-Verify enrollment) with source, quote, confidence, lock and the date the source was read (`observed_on`) | rules (Task 15 `record_evidence`), #16 hand edits (locked), #17 hand verdicts (locked) | `company_fact`, #6, #12 company page |
 | `board` | ATS and token, last read, empty and error streaks | #21 crawler, #17 (frozen history: `active = 0`) | #16 triggers 1 and 2, #11 health |
 | `board_read` | the last 10 reads per board with HTTP status or error | #21 | #16 and #12 Needs-you evidence |
-| `posting` | every posting ever seen, body for rebuilds, never deleted | #21, #17 | rules, #6, #15, #12 |
+| `posting` | every posting ever seen, never deleted; its text is in `posting_body` | #21, #17 | rules, #6, #15, #12 |
 | `ruleset` | each ruleset version with its config text, one current | rules rebuild | rules, #11 health |
 | `decision` | posting x ruleset: lane, level tier, level ok, years, US, sponsorship stance, citizenship, eligibility, 2027 start, with quotes; current and previous versions kept, plus the last decision of closed postings | rules only | #6, #15, #16 trigger 3, #12 |
 | `person` | who, at which company, role kind, email or LinkedIn channel with the reason, rank, time zone | #13 add_people, #11 edits, #17 | #13, #14, #12 LinkedIn list |
@@ -726,7 +726,7 @@ The CHECK lists on `board.ats`, `event.entity`, `evidence.source_kind` and simil
 ### Left out on purpose
 
 - **Per-run board fetch rows for every board.** At 36,000 boards they would cost about 33 GB a year (data-lifecycle research, Part A3). `board_read` keeps only the last 10 reads per board, for about 1,000 boards (#21's list), which is what the Needs-you view shows.
-- **Posting content history** (Radar's `posting_version`, 77% of radar.db). `posting.body` holds the latest body, which is all a rebuild needs.
+- **Posting content history** (Radar's `posting_version`, 77% of radar.db). `posting_body.body` holds the latest body, which is all a rebuild needs.
 - **Full-text search index.** Search over about 1,000 companies and their people is fast with `LIKE`; #11 can add FTS5 in its own migration if it is not.
 - **Hide and order columns.** #6 owns them, built on `current_decision`, `company_fact` and `no_go`.
 - **An application table.** Applications and pipeline stages are `event` rows (`entity = 'application'` or `'company'`), which is what the design's events row says.
@@ -1676,6 +1676,18 @@ def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>;
 ## For downstream issues
 
 What each issue reads (R) and writes (W). Column names are exact; anything not listed needs its own migration (`0002_...`), added by that issue and applied through `install`. Every read follows `company.merged_into`.
+
+**Store rules from the 2026-10-20 scale audit** (60,000 and 300,000 postings; report in `~/Desktop/outreach-scratch/db-audit/REPORT.md`). Every issue that touches the store follows these:
+- The posting text is `posting_body(posting_id, body)`, not a `posting` column. The crawler (#21) and import (#17) write it there; readers join it only when they need the text. A body is plain text: the crawler strips HTML first.
+- The sender (#14) opens its connection with `connect(fullfsync=True)`: on macOS `synchronous=FULL` alone does not survive a power loss, and a lost send claim could send twice. Batch writers leave it off (it costs about 8 ms per commit).
+- No connection holds a transaction open across requests (#11, #13): a pinned reader stops WAL checkpoints, and the WAL grew 74 MB per crawl pass under one. Run `PRAGMA wal_checkpoint(PASSIVE)` after each crawl (#21).
+- The crawler commits in batches of 2,000 to 5,000 rows: touching `last_seen_at` writes one 4 KB page per row.
+- `board_read` keeps the last 10 rows per board (#21); nothing else prunes it.
+- A monthly job runs `conn.execute("PRAGMA incremental_vacuum").fetchall()` then `wal_checkpoint(TRUNCATE)` (the fetch matters: without it Python frees one page).
+- Any later migration on a populated store outlasts the sender's 5 s busy timeout: run `install` with the sender and API stopped (#17 part B runbook).
+- A rebuild is CPU-bound (decide() about 5.5 ms per posting: about 100 s at 60,000 postings, 530 s at 300,000). #21 runs it before crawling, never during; skipping decide() for an unchanged (title, body, location, country) is the first speed-up if it gets slow.
+- #6 ranking picks the best posting per company first, then joins `company_fact`; the lifted-row check uses `no_go_company_any`.
+- `send_unknown -> failed -> approved` is the only path to a second send: #14 proves by Message-ID that nothing went out before it, with a test.
 
 **#6 Ranking and hide rules.** R `current_decision` (`lane`, `level_tier`, `level_ok`, `level_basis`, `us`, `sponsorship`, `citizenship`, `eligibility`, `start_2027`), `posting` (`posted_on`, `first_seen_at`, `closed_at`), `company_fact` (`size`: `num_low`, `num_high`, `confidence`, `locked`; `sponsorship`; `stage`; `everify`), `no_go` (including lifted rows: a lifted company is never re-added), `company.status`. W `no_go` (`reason 'no_sponsorship'`, `source 'rules'`, `quote`, `source_ref` = posting id) for a company with a `sponsorship = 'no'` posting; `review_item` (`kind 'size_guess'`). Calls `outreach.rules.passes()` for the posting-level hide and adds the company-level part. **E-Verify** (`company_fact` where `fact = 'everify'`, with `observed_on` and `source_ref`): a ranking input only, never a hide rule unless #9 says so (open question 4).
 

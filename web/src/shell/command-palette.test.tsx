@@ -330,6 +330,38 @@ describe('CommandPalette', () => {
     expect(screen.queryByRole('option', { name: /(Pause|Resume) sending/ })).toBeNull();
   });
 
+  it('offers Pause wherever the sending strip does: outside the window and on the weekend too', async () => {
+    const user = userEvent.setup();
+    class Outside extends FixtureClient {
+      override async shell() {
+        const v = await super.shell();
+        return { ...v, sending: { ...v.sending, state: 'outside_window' as const } };
+      }
+    }
+    for (const client of [new Outside(), new FixtureClient(buildFixture('weekend'))]) {
+      cleanup();
+      await shell({ client });
+      press('/');
+      await palette();
+      expect(screen.getByRole('option', { name: /Pause sending/ })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: /Resume sending/ })).toBeNull();
+      await user.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    }
+  });
+
+  it('never offers Pause when sending is paused by you, signed out or hard-blocked', async () => {
+    const paused = new FixtureClient();
+    await paused.pauseSending({ requestId: 'setup' });
+    for (const client of [paused, new FixtureClient(buildFixture('signed_out')), new FixtureClient(buildFixture('hard_block'))]) {
+      cleanup();
+      await shell({ client });
+      press('/');
+      await palette();
+      expect(screen.queryByRole('option', { name: /Pause sending/ })).toBeNull();
+    }
+  });
+
   it('copies the picks for Claude', async () => {
     const user = userEvent.setup();
     const client = new FixtureClient();

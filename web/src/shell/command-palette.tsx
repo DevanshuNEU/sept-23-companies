@@ -226,7 +226,8 @@ function PaletteBody({ close, showKeys }: { close: () => void; showKeys: () => v
           immediate: true,
         }),
     });
-  } else if (sendingState === 'running') {
+  } else if (sendingState === 'running' || sendingState === 'outside_window' || sendingState === 'weekend') {
+    // Where the sending strip offers Pause: it holds back what is approved for the next window too.
     actions.push({
       id: 'pause',
       label: 'Pause sending',

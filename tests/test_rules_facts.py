@@ -4,8 +4,7 @@ Every sizeWhy, head and funding string here is a real value from dashboard/data.
 """
 import unittest
 
-from outreach.rules import facts
-from outreach.rules.config import load_config
+from outreach.rules.config import default_config, load_config
 from outreach.rules.facts import (EvidenceDraft, OldSignal, everify_status, from_old_dashboard,
                                   old_dashboard_signals, parse_size, parse_stage)
 from outreach.store.timefmt import utcnow
@@ -141,7 +140,7 @@ class SizeTest(unittest.TestCase):
         self.assertEqual(from_old_dashboard({"yc": {"team": 0}}), [])
 
     def test_none_cfg_loads_once(self):
-        self.assertIs(facts._default_config(), facts._default_config())
+        self.assertIs(default_config(), default_config())
         cfg = load_config()
         self.assertEqual(parse_size("about 50 people", "old_dashboard", cfg),
                          parse_size("about 50 people", "old_dashboard"))

@@ -13,7 +13,7 @@ import functools
 import re
 from dataclasses import dataclass
 
-from .config import Config, load_config, phrases
+from .config import Config, default_config, phrases
 
 # The evidence table's CHECK vocabularies (outreach/store/migrations/0001_initial.sql).
 FACTS = ("size", "stage", "sponsorship", "domain", "hq", "everify")
@@ -132,14 +132,8 @@ def _patterns(cfg: Config) -> _Patterns:
     return _Patterns(cfg)
 
 
-@functools.lru_cache(maxsize=1)
-def _default_config() -> Config:
-    """The shipped config, loaded once: what a None cfg means."""
-    return load_config()
-
-
 def _p(cfg: Config | None) -> _Patterns:
-    return _patterns(cfg if cfg is not None else _default_config())
+    return _patterns(cfg if cfg is not None else default_config())
 
 
 def _int(digits: str) -> int:

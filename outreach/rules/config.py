@@ -3,6 +3,7 @@
 `config.py` is part of the ruleset hash (see version.py): `phrases()` decides how every word list matches, so
 changing it can change a decision just as much as changing a word.
 """
+import functools
 import re
 import tomllib
 from dataclasses import dataclass
@@ -53,6 +54,12 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             if key not in data[section]:
                 raise KeyError(f"[{section}] {key} is missing from {Path(path).name}")
     return Config(raw=raw, **{section: data[section] for section in REQUIRED})
+
+
+@functools.lru_cache(maxsize=1)
+def default_config() -> Config:
+    """The shipped config, loaded once: what a None cfg means everywhere in the rules."""
+    return load_config()
 
 
 # Dashes a posting may use where a phrase has a hyphen: hyphen, two Unicode hyphens and the en dash (built from

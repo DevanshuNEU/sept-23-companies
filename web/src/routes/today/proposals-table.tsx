@@ -13,6 +13,7 @@ import type { RowProps } from '@/keyboard/list-nav';
 import { formatAge, formatDueDay } from '@/lib/format';
 import { sponsorshipStatus } from '@/lib/status';
 import { cn } from '@/lib/utils';
+import { groupInOrder } from './grouping';
 
 const LEVEL: Record<LevelTier, string | null> = {
   new_grad: 'New grad',
@@ -208,13 +209,7 @@ export function ProposalsTable({
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({ data: entries, columns: COLUMNS, getCoreRowModel: getCoreRowModel(), getRowId });
 
-  const groups: { group: DailyEntry['listGroup']; rows: Row<DailyEntry>[] }[] = [];
-  for (const row of table.getRowModel().rows) {
-    const g = row.original.listGroup;
-    const found = groups.find((x) => x.group === g);
-    if (found) found.rows.push(row);
-    else groups.push({ group: g, rows: [row] });
-  }
+  const groups = groupInOrder(table.getRowModel().rows, (row) => row.original.listGroup);
 
   return (
     <Ctx.Provider value={{ list, asOf, blockedText, actions }}>
@@ -232,7 +227,7 @@ export function ProposalsTable({
             ))}
           </TableHeader>
           <TableBody>
-            {groups.map(({ group, rows }) => [
+            {groups.map(({ group, items: rows }) => [
               <TableRow key={`group-${group}`} className="hover:bg-transparent">
                 <TableCell colSpan={COLUMNS.length} className="h-8 bg-subtle px-3 text-xs font-medium text-muted-foreground">
                   {GROUP_LABEL[group]} <span className="ml-1 tabular-nums">{rows.length}</span>

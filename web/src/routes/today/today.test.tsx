@@ -221,4 +221,156 @@ describe('Today', () => {
     expect(banner).toHaveTextContent('Daily list failed');
     expect(banner).toHaveTextContent('Could not read the company store: database is locked');
   });
+
+  describe('opposite toggles inside the undo window', () => {
+    const flushPage = () =>
+      act(() => {
+        window.dispatchEvent(new Event('pagehide'));
+      });
+    const idle = (ms = 40) => act(() => new Promise<void>((r) => setTimeout(r, ms)));
+
+    it('pick then unpick sends nothing, even when the page flushes', async () => {
+      const { client } = await open();
+      const pick = vi.spyOn(client, 'pick');
+      const unpick = vi.spyOn(client, 'unpick');
+      const pylon = await entryOf(client as FixtureClient, 'Pylon');
+
+      select('Pylon');
+      press('x');
+      expect(box('Pylon')).toBeChecked();
+      expect(within(todayCount()).getByText('4 of 5')).toBeInTheDocument();
+      press('x');
+      expect(box('Pylon')).not.toBeChecked();
+      expect(within(todayCount()).getByText('3 of 5')).toBeInTheDocument();
+      expect(screen.queryByText('Picked Pylon')).not.toBeInTheDocument();
+
+      flushPage();
+      await idle();
+      expect(pick).not.toHaveBeenCalled();
+      expect(unpick).not.toHaveBeenCalled();
+      expect(screen.queryByText(/changed since you loaded it/)).not.toBeInTheDocument();
+      expect(await entryOf(client as FixtureClient, 'Pylon')).toMatchObject({ state: 'proposed', revision: pylon.revision });
+    });
+
+    it('unpick then pick again on a picked company sends nothing', async () => {
+      const { client } = await open();
+      const pick = vi.spyOn(client, 'pick');
+      const unpick = vi.spyOn(client, 'unpick');
+
+      select('Resend');
+      press('x');
+      expect(box('Resend')).not.toBeChecked();
+      press('x');
+      expect(box('Resend')).toBeChecked();
+      expect(within(todayCount()).getByText('3 of 5')).toBeInTheDocument();
+
+      flushPage();
+      await idle();
+      expect(pick).not.toHaveBeenCalled();
+      expect(unpick).not.toHaveBeenCalled();
+    });
+
+    it('pick, unpick, pick ends picked with one pick call after 8 seconds', async () => {
+      const { client } = await open();
+      const pick = vi.spyOn(client, 'pick');
+      const unpick = vi.spyOn(client, 'unpick');
+      const pylon = await entryOf(client as FixtureClient, 'Pylon');
+
+      vi.useFakeTimers();
+      try {
+        const settle = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+        select('Pylon');
+        press('x');
+        press('x');
+        press('x');
+        await settle(0);
+        expect(box('Pylon')).toBeChecked();
+        expect(within(todayCount()).getByText('4 of 5')).toBeInTheDocument();
+        // The toasts of the two cancelled writes are dismissed; one live "Picked Pylon" with Undo stays.
+        await settle(1000);
+        const live = screen.getAllByText('Picked Pylon').filter((el) => el.closest('[data-sonner-toast]')?.getAttribute('data-removed') !== 'true');
+        expect(live).toHaveLength(1);
+
+        await settle(6900);
+        expect(pick).not.toHaveBeenCalled();
+        await settle(200);
+        expect(pick).toHaveBeenCalledTimes(1);
+        expect(pick).toHaveBeenCalledWith(pylon.company.id, pylon.revision, expect.objectContaining({ requestId: expect.any(String) }));
+        expect(unpick).not.toHaveBeenCalled();
+        await settle(500);
+        expect(box('Pylon')).toBeChecked();
+        expect(await entryOf(client as FixtureClient, 'Pylon')).toMatchObject({ state: 'picked' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('an unpick after a committed pick uses the revision the pick returned, not the cached one', async () => {
+      const { client } = await open();
+      const pick = vi.spyOn(client, 'pick');
+      const unpick = vi.spyOn(client, 'unpick');
+      const pylon = await entryOf(client as FixtureClient, 'Pylon');
+      // The refetch after the pick never lands, so the cache keeps the old revision.
+      vi.spyOn(client, 'today').mockImplementation(() => new Promise(() => {}));
+
+      select('Pylon');
+      press('x');
+      flushPage();
+      await waitFor(() => expect(pick).toHaveBeenCalledTimes(1));
+      await pick.mock.results[0]?.value;
+      await idle();
+
+      press('x');
+      expect(box('Pylon')).not.toBeChecked();
+      flushPage();
+      await waitFor(() => expect(unpick).toHaveBeenCalledTimes(1));
+      expect(unpick.mock.calls[0]?.[1]).toBe(pylon.revision + 1);
+      await idle();
+      expect(screen.queryByText(/changed since you loaded it/)).not.toBeInTheDocument();
+    });
+
+    it('remove after a pending pick drops the pick and removes with the row revision', async () => {
+      const { client } = await open();
+      const pick = vi.spyOn(client, 'pick');
+      const remove = vi.spyOn(client, 'removeCompany');
+      const pylon = await entryOf(client as FixtureClient, 'Pylon');
+
+      select('Pylon');
+      press('x');
+      expect(within(todayCount()).getByText('4 of 5')).toBeInTheDocument();
+      press('r');
+      const dialog = await screen.findByRole('dialog', { name: 'Remove Pylon for good?' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+      expect(remove).toHaveBeenCalledWith(pylon.company.id, 'not_a_fit', '', pylon.revision, expect.objectContaining({ requestId: expect.any(String) }));
+      await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Pick Pylon' })).not.toBeInTheDocument());
+      expect(within(todayCount()).getByText('3 of 5')).toBeInTheDocument();
+
+      flushPage();
+      await idle();
+      expect(pick).not.toHaveBeenCalled();
+      expect(screen.queryByText(/changed since you loaded it/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('j and k walk the rows in the order the table shows them, group by group', async () => {
+    const data = buildFixture();
+    const at = data.today.proposed.findIndex((e) => e.company.name === 'Railway');
+    const [railway] = data.today.proposed.splice(at, 1);
+    if (!railway) throw new Error('No Railway in the fixture');
+    data.today.proposed.splice(1, 0, railway);
+    renderWithApp(<Page />, { route: '/today', client: new FixtureClient(data) });
+    await screen.findByRole('checkbox', { name: 'Pick Pylon' });
+
+    select('Pylon');
+    press('j');
+    // The API lists Railway second, but the table shows it with the open-role group, below Fly.io.
+    expect(await screen.findByRole('complementary', { name: 'Resend preview' })).toBeInTheDocument();
+    press('k');
+    expect(await screen.findByRole('complementary', { name: 'Pylon preview' })).toBeInTheDocument();
+    select('Fly.io');
+    press('j');
+    expect(await screen.findByRole('complementary', { name: 'Railway preview' })).toBeInTheDocument();
+  });
 });

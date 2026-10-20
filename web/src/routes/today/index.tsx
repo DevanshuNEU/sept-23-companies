@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Archive, CalendarX, Inbox, Terminal } from 'lucide-react';
 import {
@@ -10,9 +9,6 @@ import {
   type DailyEntry,
   type Id,
   type JobRunSummary,
-  type RemoveReason,
-  type Revision,
-  type ShellSummary,
   type TodayView,
 } from '@/api';
 import { EmptyState, QueryState, StateBanner } from '@/components/state-views';
@@ -23,7 +19,9 @@ import { useHotkeys, type Binding } from '@/keyboard/hotkeys';
 import { useListNav } from '@/keyboard/list-nav';
 import { formatDayTime } from '@/lib/format';
 import { useUrlState } from '@/lib/url-state';
-import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
+import { useViewQuery } from '@/pending/pending';
+import { useTodayActions } from './actions';
+import { groupInOrder } from './grouping';
 import { PreviewPanel } from './preview-panel';
 import { ProposalsTable } from './proposals-table';
 import { RemoveDialog } from './remove-dialog';
@@ -44,26 +42,6 @@ function handoffOf(e: DailyEntry): string {
   return `Add people for ${e.company.name} (company ${e.company.id}).\n${role}`;
 }
 
-const findEntry = (t: TodayView | undefined, id: Id) => (t ? [...t.proposed, ...t.backlog].find((e) => e.company.id === id) : undefined);
-
-/** An optimistic state change on one row, in place. Picked moves by one only when the row's state really changes. */
-function statePatch(id: Id, state: DailyEntry['state']): Patch<TodayView> {
-  return {
-    key: queryKeys.today,
-    apply: (t) => {
-      const before = findEntry(t, id);
-      if (!before || before.state === state) return t;
-      const delta = (state === 'picked' ? 1 : 0) - (before.state === 'picked' ? 1 : 0);
-      const set = (list: DailyEntry[]) => list.map((e) => (e.company.id === id ? { ...e, state } : e));
-      return { ...t, picked: t.picked + delta, proposed: set(t.proposed), backlog: set(t.backlog) };
-    },
-  };
-}
-
-function shellPatch(change: (s: ShellSummary) => ShellSummary): Patch<ShellSummary> {
-  return { key: queryKeys.shell, apply: change };
-}
-
 async function copy(text: string, done: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -71,73 +49,6 @@ async function copy(text: string, done: string) {
   } catch {
     toast.error('Copy failed. Nothing is on the clipboard. Try again, or select the text and copy it.');
   }
-}
-
-/** Pick, unpick, backlog and remove, each with its patches on Today and the sidebar counts. */
-function useTodayActions() {
-  const client = useClient();
-  const write = usePendingWrite();
-  const queryClient = useQueryClient();
-  // A write commits up to 8 s after he acts. Read the row's revision then, so picking and quickly unpicking
-  // the same company does not conflict with his own first write.
-  const revisionOf = (id: Id, seen: Revision) => findEntry(queryClient.getQueryData<TodayView>(queryKeys.today), id)?.revision ?? seen;
-
-  const pick = (e: DailyEntry) => {
-    const { id, name } = e.company;
-    write({
-      id: `pick:${id}`,
-      label: `Picked ${name}`,
-      afterCommit: `Picked ${name}. Press X to unpick.`,
-      patches: [statePatch(id, 'picked'), shellPatch((s) => ({ ...s, pickedToday: s.pickedToday + 1 }))],
-      commit: (o) => client.pick(id, revisionOf(id, e.revision), o),
-    });
-  };
-
-  const unpick = (e: DailyEntry) => {
-    const { id, name } = e.company;
-    write({
-      id: `unpick:${id}`,
-      label: `Unpicked ${name}`,
-      afterCommit: `Unpicked ${name}. Press X to pick it again.`,
-      patches: [statePatch(id, 'proposed'), shellPatch((s) => ({ ...s, pickedToday: s.pickedToday - 1 }))],
-      commit: (o) => client.unpick(id, revisionOf(id, e.revision), o),
-    });
-  };
-
-  const backlog = (e: DailyEntry) => {
-    const { id, name } = e.company;
-    const wasPicked = e.state === 'picked';
-    write({
-      id: `backlog:${id}`,
-      label: `Moved ${name} to the backlog`,
-      afterCommit: `Moved ${name} to the backlog.`,
-      patches: [statePatch(id, 'backlog'), ...(wasPicked ? [shellPatch((s) => ({ ...s, pickedToday: s.pickedToday - 1 }))] : [])],
-      commit: (o) => client.backlog(id, revisionOf(id, e.revision), o),
-    });
-  };
-
-  const remove = (e: DailyEntry, reason: RemoveReason, note: string) => {
-    const { id, name } = e.company;
-    const wasPicked = e.state === 'picked';
-    const off = (list: DailyEntry[]) => list.filter((x) => x.company.id !== id);
-    write({
-      id: `remove:${id}`,
-      label: `Removed ${name}. Find it on the No-go list.`,
-      afterCommit: `Removed ${name}. Find it on the No-go list.`,
-      immediate: true,
-      patches: [
-        {
-          key: queryKeys.today,
-          apply: (t: TodayView) =>
-            findEntry(t, id) ? { ...t, picked: t.picked - (wasPicked ? 1 : 0), proposed: off(t.proposed), backlog: off(t.backlog) } : t,
-        },
-        shellPatch((s) => ({ ...s, noGoCount: s.noGoCount + 1, pickedToday: s.pickedToday - (wasPicked ? 1 : 0) })),
-      ],
-      commit: (o) => client.removeCompany(id, reason, note, revisionOf(id, e.revision), o),
-    });
-  };
-
-  return { pick, unpick, backlog, remove };
 }
 
 function CapItem({ k, children, sub }: { k: string; children: ReactNode; sub?: ReactNode }) {
@@ -241,7 +152,8 @@ function TodayContent({ t, limitToday }: { t: TodayView; limitToday: number | un
   const [removing, setRemoving] = useState<DailyEntry | null>(null);
 
   const rows = tab === 'proposed' ? t.proposed : t.backlog;
-  const ids = rows.map((e) => e.company.id);
+  // The table lists rows group by group, so j and k walk that order, not the API's.
+  const ids = groupInOrder(rows, (e) => e.listGroup).flatMap((g) => g.items.map((e) => e.company.id));
   const byId = new Map(rows.map((e) => [e.company.id, e]));
   const { selected, select, rowProps } = useListNav<number>({
     ids,

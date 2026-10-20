@@ -75,6 +75,38 @@ ROUND_1 = [  # (title, body, status, reason, start_2027)
     ("Software Engineer", "We are a YC W2024 graduate company.", "ok", None, False),
 ]
 
+# Review round 2: the graduate route is read in the current-student sentence only, and company history rules out
+# only the words and dates it covers, never a whole graduation sentence.
+ROUND_2 = [  # (title, body, status, reason, start_2027)
+    # graduate wording in another sentence does not cancel an enrollment rule
+    ("Software Engineer", "You must be currently enrolled in a Bachelor's program. Interns and new grads join the same "
+     "onboarding.", "excluded", "current_student", False),
+    ("Software Engineer", "Must be currently enrolled in a university. Our interns and new graduates get mentorship.",
+     "excluded", "current_student", False),
+    ("Software Engineer", "You must be currently enrolled in a Bachelor's program and have taken or completed a course "
+     "in data structures.", "excluded", "current_student", False),
+    ("Software Engineer", "You must be currently enrolled in a degree program; students who have withdrawn or "
+     "graduated are not eligible.", "excluded", "current_student", False),
+    # a graduate route in the current-student sentence lets graduates in
+    ("Software Engineer", "Currently pursuing or who have completed a BS in CS.", "ok", None, False),
+    ("Software Engineer", "Current students or those who graduated in the last year are eligible.", "ok", None, False),
+    ("Software Engineer", "Currently enrolled in or recently graduated from a BS program.", "ok", None, False),
+    ("Software Engineer", "Currently pursuing (or completed) a BS in CS.", "ok", None, False),
+    ("Software Engineer", "Current students, recent graduates and career changers are welcome.", "ok", None, False),
+    ("Software Engineer", "Currently pursuing a BS, or a recent new grad.", "ok", None, False),
+    # "graduate degree", "graduate school" and founding lines do not hide a real window
+    ("Software Engineer", "Must graduate between December 2026 and June 2027 with a Bachelor's or graduate degree in "
+     "CS.", "excluded", "grad_window", False),
+    ("Software Engineer", "Candidates pursuing an undergraduate or graduate degree and graduating between December "
+     "2026 and June 2027.", "excluded", "grad_window", False),
+    ("Software Engineer", "Graduate degree holders who graduate between December 2026 and June 2027 are eligible.",
+     "excluded", "grad_window", False),
+    ("Software Engineer", "Founded in 2015, we hire engineers who graduate between December 2026 and June 2027.",
+     "excluded", "grad_window", False),
+    ("Software Engineer", "Founded by ex-Stripe engineers; we hire students who graduate between December 2026 and "
+     "June 2027.", "excluded", "grad_window", False),
+]
+
 # Body start wording is a 2027 start even next to immediate-start wording; only the title reading is cancelled.
 STARTS = [  # (title, body, start_2027)
     ("Software Engineer, New Grad", "Open to 2026 grads. This role starts in July 2027.", True),
@@ -108,6 +140,15 @@ class EligibilityTest(unittest.TestCase):
 
     def test_review_round_1_cases(self):
         self.check(ROUND_1)
+
+    def test_review_round_2_cases(self):
+        self.check(ROUND_2)
+
+    def test_a_missing_route_list_fails_loudly(self):
+        # graduate_route is read on every call, so a config without it raises at once and names the key.
+        e = {k: v for k, v in self.cfg.eligibility.items() if k != "graduate_route"}
+        with self.assertRaisesRegex(KeyError, "graduate_route"):
+            eligibility("Software Engineer", "", dataclasses.replace(self.cfg, eligibility=e))
 
     def test_body_start_wording_is_not_cancelled(self):
         for title, body, start in STARTS:

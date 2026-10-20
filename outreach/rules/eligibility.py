@@ -1,10 +1,18 @@
 """Graduation eligibility and the 2027 start flag, read from a posting's title and body.
 
-Ported from refresh/eligibility.py:32-91 in the same order, with the 2027-start reading of refresh/finalcheck.py:48-56
-and refresh/final_merge.py:17, 62. A dated graduation sentence decides first; then wording that lets graduates in;
-then a current-student requirement; then a title naming a graduating cohort. Per the #9 ruling a cohort title names
-graduates ("2027 University Graduate"), while "New Grad 2027" names a start date: that is a flag for the list, never
-a reason to hide. The graduation month is [candidate].graduated.
+Ported from refresh/eligibility.py:32-91, with the 2027-start reading of refresh/finalcheck.py:48-56 and
+refresh/final_merge.py:17, 62. A dated graduation sentence decides first; then a current-student requirement, unless
+its own sentence offers a graduate route ("currently pursuing or recently graduated"); then wording anywhere that lets
+graduates in; then a title naming a graduating cohort. The old code let graduate wording anywhere in the body cancel
+an enrollment rule, so "Interns and new grads join the same onboarding." undid "You must be currently enrolled"; here
+the route has to be in the same sentence. Per the #9 ruling a cohort title names graduates ("2027 University
+Graduate"), while "New Grad 2027" names a start date: that is a flag for the list, never a reason to hide. The
+graduation month is [candidate].graduated.
+
+Company history never skips a whole sentence. A company_history phrase that holds a graduation word ("graduate
+degree", "our founders graduated") stops that word from anchoring a date; one that does not ("founded in") rules out
+the dates within HISTORY_WINDOW characters of it. So "Founded in 2015, we hire engineers who graduate between December
+2026 and June 2027." still reads the window.
 
 The old code read a graduation sentence up to the next period over HTML flattened to one line. Here sentences() also
 ends a sentence at a semicolon or a line break, so step 1 joins a sentence ending in ";" or ":" with the next one
@@ -21,6 +29,7 @@ DATE_BEFORE = 40  # a date counts when it sits this many characters before a gra
 DATE_AFTER = 140  # or this many after it, so a year elsewhere in a run-on paragraph does not (eligibility.py:56-62)
 START_YEAR = "2027"  # the year starts_2027 flags in a title
 QUOTE_LIMIT = 260  # the longest quote, as every rule uses
+HISTORY_WINDOW = 20  # a date this close to a founding phrase ("Founded in 2023") is the company's, not a window
 
 _DASHES = "\\-" + chr(0x2010) + chr(0x2011) + chr(0x2013)  # hyphen, Unicode hyphens, en dash (see config.py)
 _MONTH = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|"
@@ -51,6 +60,7 @@ class _Patterns:
         self.grad = phrases(e["grad_words"])
         self.current_student = phrases(e["current_student"])
         self.graduates_welcome = phrases(e["graduates_welcome"])
+        self.graduate_route = phrases(e["graduate_route"])
         self.soft = phrases(e["soft"])
         self.company_history = phrases(e["company_history"])
         self.upper_bound = re.compile(phrases(e["upper_bound"]).pattern + _BOUND_TAIL, re.IGNORECASE)
@@ -69,23 +79,72 @@ def _shared_words(words: list[str]) -> frozenset[str]:
     return frozenset(w for w in shared if "-" not in w)
 
 
-def _says_start(text: str, p: "_Patterns") -> bool:
+def _says_start(text: str, p: _Patterns) -> bool:
     lowered = text.lower()
     return all(w in lowered for w in p.start_2027_needs) and p.start_2027.search(lowered) is not None
 
 
-def _units(body: str) -> list[tuple[int, int]]:
-    """[start, end) in body of each sentence, with a sentence ending in ";" or ":" joined to the next."""
-    units: list[tuple[int, int]] = []
+def _spans(body: str) -> list[tuple[int, int]]:
+    """[start, end) in body of each sentence."""
+    spans: list[tuple[int, int]] = []
     pos = 0
     for sentence in sentences(body):
         start = body.find(sentence, pos)
         pos = start + len(sentence)
+        spans.append((start, pos))
+    return spans
+
+
+def _units(body: str, spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """The sentence spans, with a sentence ending in ";" or ":" joined to the next."""
+    units: list[tuple[int, int]] = []
+    for start, end in spans:
         if units and body[units[-1][1] - 1] in _JOINS_NEXT:
-            units[-1] = (units[-1][0], pos)
+            units[-1] = (units[-1][0], end)
         else:
-            units.append((start, pos))
+            units.append((start, end))
     return units
+
+
+def _merged(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Sorted [start, end) intervals with overlapping ones merged."""
+    out: list[tuple[int, int]] = []
+    for a, b in sorted(intervals):
+        if out and a <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
+def _covered(intervals: list[tuple[int, int]], starts: list[int], a: int, b: int) -> bool:
+    """True when [a, b) overlaps one of the merged, sorted intervals (whose starts are `starts`)."""
+    i = bisect.bisect_right(starts, a) - 1
+    if i >= 0 and intervals[i][1] > a:
+        return True
+    return i + 1 < len(intervals) and intervals[i + 1][0] < b
+
+
+def _anchors_and_blocks(sentence: str, p: _Patterns) -> tuple[list[re.Match], list[tuple[int, int]]]:
+    """The graduation words that may anchor a date, and the merged spans where a date is the company's own.
+
+    A graduation word inside a company_history phrase ("graduate school", "team of graduates") is not an anchor. A
+    company_history phrase without a graduation word ("founded in") blocks dates within HISTORY_WINDOW of it.
+    """
+    grads = list(p.grad.finditer(sentence))
+    if not grads:
+        return [], []
+    holds, near = [], []
+    for h in p.company_history.finditer(sentence):
+        if p.grad.search(h.group(0)):
+            holds.append((h.start(), h.end()))
+        else:
+            near.append((h.start() - HISTORY_WINDOW, h.end() + HISTORY_WINDOW))
+    if holds:
+        holds = _merged(holds)
+        starts = [a for a, _ in holds]
+        grads = [g for g in grads if not _covered(holds, starts, g.start(), g.end())]
+    return grads, _merged(near)
 
 
 def _month_number(cfg: Config) -> int:
@@ -101,9 +160,16 @@ def _month_of(name: str | None) -> int | None:
     return _SEASONS.get(name) or _MONTHS[name[:3]]
 
 
-def _dates_near_grad_words(sentence: str, grads: list[re.Match]) -> list[tuple[int, int | None]]:
-    """(year, month or None) of each date within DATE_BEFORE or DATE_AFTER characters of a graduation word."""
+def _dates_near_grad_words(sentence: str, grads: list[re.Match],
+                           blocks: list[tuple[int, int]]) -> list[tuple[int, int | None]]:
+    """(year, month or None) of each date within DATE_BEFORE or DATE_AFTER characters of a graduation word.
+
+    A date overlapping a block (the company's own history) does not count.
+    """
     dates = list(_DATE.finditer(sentence))
+    if blocks:
+        block_starts = [a for a, _ in blocks]
+        dates = [d for d in dates if not _covered(blocks, block_starts, d.start(), d.end())]
     if not dates:
         return []
     starts = [d.start() for d in dates]
@@ -147,13 +213,14 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
     p = _Patterns(cfg)
     body = body or ""
     graduated = _month_number(cfg)
+    spans = _spans(body)
     # 1) a graduation sentence with dates decides (a sentence ending in ";" or ":" runs on into the next)
-    for start, end in _units(body):
+    for start, end in _units(body, spans):
         sentence = body[start:end]
-        grads = list(p.grad.finditer(sentence))
-        if not grads or p.company_history.search(sentence):
-            continue  # no graduation word, or the company's own history ("our founders graduated from YC")
-        dates = _dates_near_grad_words(sentence, grads)
+        grads, blocks = _anchors_and_blocks(sentence, p)
+        if not grads:
+            continue  # no graduation word, or only ones inside company history ("our founders graduated from YC")
+        dates = _dates_near_grad_words(sentence, grads, blocks)
         if not dates:
             continue
         quote = _unit_quote(body, start, end, grads[0])
@@ -162,12 +229,20 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
         if _window_holds(sentence, dates, graduated, p):
             return "ok", None, quote
         return "excluded", "grad_window", quote
-    # 2) wording that lets graduates in
+    # 2) a current-student requirement, unless its own sentence offers a graduate route
+    starts = [a for a, _ in spans]
+    read: set[int] = set()  # sentences already checked for a route
+    for m in p.current_student.finditer(body):
+        i = max(bisect.bisect_right(starts, m.start()) - 1, 0)
+        if i in read:
+            continue
+        read.add(i)
+        a, b = spans[i] if spans else (0, len(body))
+        if p.graduate_route.search(body, a, b) is None:
+            return "excluded", "current_student", _quote(body, m)
+    # 3) wording anywhere that lets graduates in
     if m := p.graduates_welcome.search(body):
         return "ok", None, _quote(body, m)
-    # 3) a current-student requirement
-    if m := p.current_student.search(body):
-        return "excluded", "current_student", _quote(body, m)
     # 4) a title that names a graduating cohort
     if p.cohort_title.search(title or ""):
         return "excluded", "cohort_title", title

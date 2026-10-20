@@ -399,8 +399,8 @@ current_student = [
   "must be a currently student", "must be a currently students", "final year undergrads",
   "final year undergraduates",
 ]
-# refresh/eligibility.py:41-43 ALTGRAD, plus the graduate routes written beside a current-student phrase (Task 12
-# review: "currently pursuing or recently completed", "current students and new grads", "completed or currently pursuing")
+# refresh/eligibility.py:41-43 ALTGRAD: wording that lets graduates in, read in a graduation sentence and anywhere in
+# the body. Route words that only make sense beside a current-student phrase ("new grads") are in graduate_route.
 graduates_welcome = [
   "or a recent grad", "or a recent graduate", "or recent grad", "or recent grads", "or recent graduate",
   "or recent graduates", "recently graduated or", "recently graduated and", "recent graduates welcome",
@@ -451,11 +451,22 @@ graduates_welcome = [
   "recent university graduates are also welcome", "recent university graduates are also encouraged",
   "recent university graduates are also eligible", "recent university graduates are also considered",
   "or have completed a degree", "or have completed the degree", "recent grad welcome",
-  "or recently completed", "or have recently completed", "or have completed", "or completed a", "or completed an",
-  "or graduated", "and recent graduates", "and recent graduate", "and recent grads", "and recent grad",
-  "and new grads", "and new grad", "and new graduates", "and new graduate", "or new grads", "or new graduates",
-  "or a new grad", "or a new graduate", "completed or currently pursuing", "completed or pursuing",
-  "completed or in progress", "completed or expected", "completed or currently enrolled",
+  "or recently completed", "or have recently completed", "or have completed", "completed or expected",
+]
+# Task 12 review: a graduate route in the same sentence as a current-student phrase ("Currently pursuing or recently
+# graduated", "Current students and new grads are welcome") means the sentence is not a current-student-only rule.
+# Read only in that sentence, so "Interns and new grads join the same onboarding." elsewhere does not cancel one.
+# A bare "completed" is not a route: "have taken or completed a course" is still an enrollment rule.
+graduate_route = [
+  "recent grad", "recent grads", "recent graduate", "recent graduates", "recent college graduate",
+  "recent college graduates", "recent university graduate", "recent university graduates", "recently graduated",
+  "or recently completed", "or have recently completed", "new grad", "new grads", "new graduate", "new graduates",
+  "or graduated", "who graduated", "who have graduated", "or have graduated", "already graduated",
+  "graduated in the last", "graduated in the past", "graduated within the last", "graduated within the past",
+  "who have completed", "or have completed", "pursuing or completed", "enrolled or completed", "(or completed)",
+  "or completed)",
+  "completed or currently pursuing", "completed or pursuing", "completed or currently enrolled",
+  "completed or enrolled", "completed or in progress", "completed or expected", "earned or expected",
 ]
 # refresh/eligibility.py:52 SOFT
 soft = [
@@ -464,7 +475,8 @@ soft = [
 ]
 # refresh/eligibility.py:67-68 (the company's own history is not an eligibility rule), plus founding lines and the
 # noun or adjective "graduate" in benefits and team lines ("founded in 2023 by two MIT graduates", "graduate school
-# tuition support"), from the Task 12 review
+# tuition support"), from the Task 12 review. A phrase that holds a graduation word stops that word from anchoring a
+# date; one that does not ("founded in") rules out only the dates right next to it. Neither skips the sentence.
 # Not expressible as a word list: the old pattern allowed up to 30 characters between we or our team and graduated, and matched 'YC Winter 2024 batch' wording.
 company_history = [
   "we graduated", "our company graduated", "our team graduated", "our founders graduated", "the company graduated",

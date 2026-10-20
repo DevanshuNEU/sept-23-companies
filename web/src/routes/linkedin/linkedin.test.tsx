@@ -112,6 +112,54 @@ describe('LinkedIn list', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  it('r, a, m and y log only the next step: a step already logged says so, a later one is not logged', async () => {
+    const { spy } = await setup();
+    // Toasts from earlier tests can still be on screen, so count against what is there now.
+    const logged = () => screen.queryAllByText(/^Logged:/).length;
+    const undos = () => screen.queryAllByRole('button', { name: 'Undo' }).length;
+    const [loggedBefore, undosBefore] = [logged(), undos()];
+    // Hannah Cole has nothing logged: only the request is next.
+    fireEvent.click(row('Hannah Cole'));
+    for (const key of ['a', 'm']) press(key);
+    expect(await screen.findByText('Next for Hannah Cole: log request (R).')).toBeInTheDocument();
+    press('y');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect([logged(), undos()]).toEqual([loggedBefore, undosBefore]);
+    expect(row('Hannah Cole')).toHaveTextContent('Not started');
+
+    // Grace Kim asked and was accepted: r and a are behind her, y is a step ahead.
+    press('2');
+    fireEvent.click(await screen.findByText('Grace Kim'));
+    press('r');
+    expect(await screen.findByText('Already logged: request sent')).toBeInTheDocument();
+    press('a');
+    expect(await screen.findByText('Already logged: accepted')).toBeInTheDocument();
+    press('y');
+    expect(await screen.findByText('Next for Grace Kim: log message (M).')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect([logged(), undos()]).toEqual([loggedBefore, undosBefore]);
+
+    pagehide();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(spy).not.toHaveBeenCalled();
+
+    press('m');
+    expect(await screen.findByText('Logged: message sent to Grace Kim.')).toBeInTheDocument();
+    pagehide();
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(spy.mock.calls[0]?.[1]).toBe('message_sent');
+  });
+
+  it('y on a person who already replied says so and opens no dialog', async () => {
+    const { spy } = await setup();
+    press('3');
+    fireEvent.click(await screen.findByText('Anneke Visser'));
+    press('y');
+    expect(await screen.findByText('Already logged: reply')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('y asks for the reply kind before logging', async () => {
     const { spy, idOf } = await setup();
     press('2');

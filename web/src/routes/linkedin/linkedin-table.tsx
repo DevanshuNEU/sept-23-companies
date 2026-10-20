@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { RowProps } from '@/keyboard/list-nav';
 import { replyKindStatus } from '@/lib/status';
+import { NEXT, nextStep } from './linkedin-steps';
 import { safeHref } from '@/lib/safe-href';
 
 /** One company and the people of it that the current tab and filter show. */
@@ -18,15 +19,6 @@ export interface ShownGroup {
   group: LinkedInGroup;
   people: LinkedInPerson[];
 }
-
-const ORDER: LinkedInStep[] = ['request_sent', 'accepted', 'message_sent', 'replied'];
-
-const NEXT: Record<LinkedInStep, { label: string; key: string }> = {
-  request_sent: { label: 'Log request', key: 'R' },
-  accepted: { label: 'Log accepted', key: 'A' },
-  message_sent: { label: 'Log message', key: 'M' },
-  replied: { label: 'Log reply', key: 'Y' },
-};
 
 const KIND: Record<RoleKind, string> = {
   engineer: 'Engineer',
@@ -41,12 +33,6 @@ function why(reason: LinkedInReason, emailed: number): string {
   if (reason === 'past_budget') return `Past the ${emailed} emailed`;
   if (reason === 'no_email') return 'No email found';
   return 'Alum: LinkedIn first';
-}
-
-/** The step after the furthest one logged, or null once they replied. */
-function nextStep(p: LinkedInPerson): LinkedInStep | null {
-  const reached = Math.max(-1, ...p.steps.map((s) => ORDER.indexOf(s.step)));
-  return ORDER[reached + 1] ?? null;
 }
 
 const initials = (name: string) => {

@@ -26,6 +26,7 @@ import { replyKindStatus } from '@/lib/status';
 import { useUrlState } from '@/lib/url-state';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { openExternal } from '@/lib/safe-href';
+import { NEXT, nextStep, ORDER, STEP_WORD } from './linkedin-steps';
 import { LinkedInTable, type ShownGroup } from './linkedin-table';
 
 type PersonTab = LinkedInPerson['tab'];
@@ -52,13 +53,6 @@ const EMPTY: Record<Tab, { title: string; text: string }> = {
 // The four reply kinds, as for email. Said no and Asked to stop commit at once (they add a no-go).
 const REPLY_KINDS: LoggedReply[] = ['interested', 'not_now', 'said_no', 'asked_to_stop'];
 const AT_ONCE = new Set<LoggedReply>(['said_no', 'asked_to_stop']);
-
-const STEP_NAME: Record<LinkedInStep, string> = {
-  request_sent: 'Request',
-  accepted: 'Accepted',
-  message_sent: 'Message',
-  replied: 'Reply',
-};
 
 function loggedText(name: string, step: LinkedInStep, kind?: LoggedReply): string {
   if (step === 'request_sent') return `Logged: request sent to ${name}.`;
@@ -203,12 +197,24 @@ export default function LinkedInPage() {
   });
   const current = find(selected);
 
-  const log = (p: LinkedInPerson, step: LinkedInStep, kind?: LoggedReply) => {
-    const name = p.person.name;
-    if (p.steps.some((s) => s.step === step)) {
-      toast(`${STEP_NAME[step]} already logged for ${name}.`);
-      return;
+  /**
+   * Only the person's next step can be logged. An earlier or the same step is already there; a later one would
+   * skip a step, so it says what comes next. False means nothing is logged and a toast said why.
+   */
+  const canLog = (p: LinkedInPerson, step: LinkedInStep): boolean => {
+    const next = nextStep(p);
+    if (next === step) return true;
+    if (next === null || p.steps.some((s) => s.step === step) || ORDER.indexOf(step) < ORDER.indexOf(next)) {
+      toast(`Already logged: ${STEP_WORD[step]}`);
+    } else {
+      toast(`Next for ${p.person.name}: ${NEXT[next].label.toLowerCase()} (${NEXT[next].key}).`);
     }
+    return false;
+  };
+
+  const log = (p: LinkedInPerson, step: LinkedInStep, kind?: LoggedReply) => {
+    if (!canLog(p, step)) return;
+    const name = p.person.name;
     const toReachDelta = p.tab === 'to_reach' && tabAfter(p.tab, step) !== 'to_reach' ? -1 : 0;
     const viewPatch: Patch<LinkedInView> = { key: queryKeys.linkedin, apply: (v) => withStep(v, p.person.id, step, kind) };
     // Also refetches the shell after the commit, so the sidebar and the no-go count catch up.
@@ -228,11 +234,7 @@ export default function LinkedInPage() {
   };
 
   const askReply = (p: LinkedInPerson) => {
-    if (p.steps.some((s) => s.step === 'replied')) {
-      toast(`${STEP_NAME.replied} already logged for ${p.person.name}.`);
-      return;
-    }
-    setReplyFor(p.person.id);
+    if (canLog(p, 'replied')) setReplyFor(p.person.id);
   };
 
   const onLog = (p: LinkedInPerson, step: LinkedInStep) => (step === 'replied' ? askReply(p) : log(p, step));

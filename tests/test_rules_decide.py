@@ -114,6 +114,11 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(r.sponsorship_quote, "We do not sponsor visas.")
         self.assertEqual(r, decide(PostingInput("Software Engineer", "We do not sponsor visas.", "Boston, MA", "United States")))
 
+    def test_posting_input_documents_its_plain_text_contract(self):
+        doc = PostingInput.__doc__
+        self.assertIn("body` is plain text", doc)
+        self.assertIn("crawler strips HTML", doc)
+
     def test_ruleset_version_is_exported(self):
         self.assertRegex(ruleset_version(), r"^r-[0-9a-f]{12}$")
 

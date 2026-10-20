@@ -22,6 +22,13 @@ def _clean(text: str | None) -> str:
 
 @dataclass(frozen=True)
 class PostingInput:
+    """What decide() reads from one posting.
+
+    `body` is plain text: the crawler strips HTML (tags, entities, scripts and styles) before a posting is stored, and
+    the rules never parse markup, so a tag left in the body is read as ordinary characters. `title` and `location` are
+    plain text too, and `country` is the structured country when the source gave one, else None. decide() drops NUL
+    bytes from all four before it reads them.
+    """
     title: str
     body: str = ""
     location: str = ""

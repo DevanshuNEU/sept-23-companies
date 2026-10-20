@@ -6,6 +6,8 @@ test('r then z leaves Hannah Cole at Not started', async ({ page, consoleErrors 
   await expect(hannah).toContainText('Not started');
 
   await hannah.click();
+  // The click writes ?sel= through a router transition; a key pressed before it commits finds nothing selected.
+  await expect(hannah).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('r');
   await expect(page.getByText('Logged: request sent to Hannah Cole.')).toBeVisible();
   await expect(hannah).toContainText('Requested today');

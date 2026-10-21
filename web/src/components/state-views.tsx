@@ -10,18 +10,21 @@ import { cn } from '@/lib/utils';
 export function EmptyState({
   icon: Icon,
   title,
+  titleAs: Title = 'p',
   children,
   action,
 }: {
   icon: LucideIcon;
   title: string;
+  /** Full-screen states (a view that failed to load) name themselves with a heading. */
+  titleAs?: 'p' | 'h1';
   children?: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
       <Icon aria-hidden className="size-8 text-muted-foreground" />
-      <p className="text-sm font-semibold">{title}</p>
+      <Title className="text-sm font-semibold">{title}</Title>
       {children ? <p className="max-w-sm text-sm text-muted-foreground">{children}</p> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>

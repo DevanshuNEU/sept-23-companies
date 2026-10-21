@@ -4,6 +4,7 @@ import { ConfidenceMeter } from '@/components/confidence-meter';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDueDay } from '@/lib/format';
+import { safeHref } from '@/lib/safe-href';
 
 const FACT_LABELS: Record<FactKind, string> = {
   size: 'Size',
@@ -32,12 +33,12 @@ const CONFIDENCE_WORDS: Record<Confidence, string> = { confirmed: 'High', estima
 
 function Source({ fact }: { fact: Fact }) {
   const text = fact.sourceKind === 'hand' ? SOURCE_LABELS.hand : fact.sourceRef || SOURCE_LABELS[fact.sourceKind];
-  const isUrl = /^https?:\/\//i.test(fact.sourceRef);
+  const href = safeHref(fact.sourceRef);
   return (
     <>
-      {isUrl ? (
+      {href ? (
         <a
-          href={fact.sourceRef}
+          href={href}
           target="_blank"
           rel="noreferrer"
           className="underline decoration-border underline-offset-3 hover:decoration-current"

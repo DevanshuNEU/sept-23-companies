@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigationType } from 'react-router';
 import { HotkeysProvider } from '@/keyboard/hotkeys';
 import { useListNav } from '@/keyboard/list-nav';
@@ -84,6 +84,17 @@ describe('useListNav', () => {
     press('k');
     expect(selected()).toBe('t1');
     expect(location()).toBe('/outbox?sel=t1 REPLACE');
+  });
+
+  it('j and k step from the row he moved to last, even before the URL has rendered', () => {
+    renderList({ ids: ['t1', 't2', 't3'] });
+    act(() => {
+      press('j');
+      press('j');
+      press('j');
+      press('k');
+    });
+    expect(selected()).toBe('t2');
   });
 
   it('arrow keys move too', () => {

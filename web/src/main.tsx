@@ -8,8 +8,15 @@ import { createClient } from '@/api';
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root element');
 
-createRoot(root).render(
-  <StrictMode>
-    <App client={createClient()} />
-  </StrictMode>,
+createClient().then(
+  (client) =>
+    createRoot(root).render(
+      <StrictMode>
+        <App client={client} />
+      </StrictMode>,
+    ),
+  () => {
+    // The sample data chunk did not load (server down, a deploy replaced it): reloading is the fix.
+    root.textContent = 'The app did not load. Reload the page to try again.';
+  },
 );

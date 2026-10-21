@@ -5,6 +5,7 @@ import { ClientProvider, type OutreachClient } from '@/api';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { HotkeysProvider } from '@/keyboard/hotkeys';
+import { EditsProvider } from '@/pending/edits';
 import { PendingWritesProvider } from '@/pending/pending';
 import { ThemeProvider, useTheme } from '@/theme/theme';
 import { createQueryClient } from './query-client';
@@ -31,10 +32,12 @@ export function AppProviders({
         <ThemeProvider>
           <HotkeysProvider>
             <PendingWritesProvider>
-              <TooltipProvider>
-                {children}
-                <ThemedToaster />
-              </TooltipProvider>
+              <EditsProvider>
+                <TooltipProvider>
+                  {children}
+                  <ThemedToaster />
+                </TooltipProvider>
+              </EditsProvider>
             </PendingWritesProvider>
           </HotkeysProvider>
         </ThemeProvider>

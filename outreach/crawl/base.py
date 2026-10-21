@@ -74,7 +74,7 @@ def ids_fingerprint(native_ids: Iterable[str]) -> str:
 
 
 _SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*")
-_WORKDAY = re.compile(r"[a-z0-9-]+\.wd\d+/[A-Za-z0-9_-]+")
+_WORKDAY = re.compile(r"[a-z0-9-]+\.wd[0-9]+/[A-Za-z0-9_-]+")
 _ORACLE = re.compile(r"[a-z0-9.-]+\.oraclecloud\.com/[A-Za-z0-9_-]+")
 _ICIMS = re.compile(r"[a-z0-9.-]+\.icims\.com")
 _GRAMMAR = {"workday": _WORKDAY, "oracle": _ORACLE, "icims": _ICIMS}

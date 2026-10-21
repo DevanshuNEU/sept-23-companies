@@ -87,6 +87,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _host(url: str) -> str:
+    return (urllib.parse.urlsplit(url).hostname or "").lower()
+
+
 def _is_timeout(e: BaseException) -> bool:
     return isinstance(e, (socket.timeout, TimeoutError)) or (
         isinstance(e, urllib.error.URLError) and isinstance(e.reason, (socket.timeout, TimeoutError)))
@@ -96,6 +100,7 @@ class UrllibClient:
     """The real client. `declared` sends USER_AGENT only; `browser` sends Chrome's header set and keeps cookies.
 
     A caller's explicit header, a User-Agent included, replaces the profile's value of the same name (case blind).
+    When a followed redirect changes host, the caller's headers other than User-Agent are not sent on to it.
     """
 
     def __init__(self, profile: Literal["declared", "browser"] = "declared", timeout_s: float = 30.0,
@@ -165,7 +170,11 @@ class UrllibClient:
                 return resp
             resp.close()
             hops += 1
-            req = self._request(urllib.parse.urljoin(req.full_url, location), headers)
+            target = urllib.parse.urljoin(req.full_url, location)
+            if _host(target) != _host(req.full_url):
+                # Do not hand a caller's token or cookie to another host; its User-Agent is only a name.
+                headers = {k: v for k, v in (headers or {}).items() if k.lower() == "user-agent"}
+            req = self._request(target, headers)
 
     def _do(self, req, follow: bool, headers=None) -> Response:
         resp = self._send(req, follow, headers)
@@ -226,21 +235,21 @@ _DEFAULT_PER_HOST = {"data.sec.gov": 0.15, "www.sec.gov": 0.15}
 class SpacedClient:
     """Waits so two requests to one host start at least the interval apart.
 
-    `per_host` maps a host to its own interval; when given it replaces the SEC defaults. Hosts it does not name use
-    `min_interval_s`.
+    `per_host` maps a host (any case) to its own interval and is merged over the SEC defaults, so a caller's entries
+    never loosen `data.sec.gov` or `www.sec.gov` unless it names them. Hosts not named use `min_interval_s`.
     """
 
     def __init__(self, inner: HttpClient, *, min_interval_s: float = 1.5, per_host: dict[str, float] | None = None,
                  clock=time.monotonic, sleep=time.sleep):
         self.inner = inner
         self.min_interval_s = min_interval_s
-        self.per_host = dict(_DEFAULT_PER_HOST if per_host is None else per_host)
+        self.per_host = {**_DEFAULT_PER_HOST, **{h.lower(): v for h, v in (per_host or {}).items()}}
         self._clock = clock
         self._sleep = sleep
         self._next_start: dict[str, float] = {}
 
     def _wait(self, url: str) -> None:
-        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+        host = _host(url)
         interval = self.per_host.get(host, self.min_interval_s)
         now = self._clock()
         due = self._next_start.get(host, now)

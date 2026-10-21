@@ -47,6 +47,15 @@ class _Handler(BaseHTTPRequestHandler):
                 pass
         elif self.path == "/echo-ua":
             self._send(200, (self.headers.get("User-Agent") or "").encode())
+        elif self.path == "/xhost":
+            port = self.server.server_address[1]
+            self._send(302, b"", [("Location", f"http://localhost:{port}/echo-x")])
+        elif self.path == "/samehost":
+            self._send(302, b"", [("Location", "/echo-x")])
+        elif self.path == "/to-file":
+            self._send(302, b"", [("Location", "file:///etc/hosts")])
+        elif self.path == "/echo-x":
+            self._send(200, f"{self.headers.get('X-Token') or ''}|{self.headers.get('User-Agent') or ''}".encode())
         elif self.path == "/cookie":
             self._send(200, b"", [("Set-Cookie", "k=v; Path=/")])
         elif self.path == "/needs-cookie":
@@ -112,6 +121,21 @@ class UrllibClientTests(unittest.TestCase):
             r = UrllibClient().get(s.base + "/redirect", follow_redirects=True)
             self.assertEqual((r.status, r.text()), (200, "arrived"))
             self.assertTrue(r.url.endswith("/final"))
+
+    def test_a_redirect_hop_to_a_file_url_raises_fetch_error(self):
+        with _Server() as s:
+            with self.assertRaises(FetchError):
+                UrllibClient().get(s.base + "/to-file", follow_redirects=True)
+
+    def test_a_redirect_to_another_host_drops_caller_headers_but_keeps_user_agent(self):
+        hdrs = {"X-Token": "secret", "User-Agent": "Custom/2"}
+        with _Server() as s:
+            same = UrllibClient().get(s.base + "/samehost", hdrs, follow_redirects=True)
+            other = UrllibClient().get(s.base + "/xhost", hdrs, follow_redirects=True)
+            default_ua = UrllibClient().get(s.base + "/xhost", {"X-Token": "secret"}, follow_redirects=True)
+        self.assertEqual(same.text(), "secret|Custom/2")
+        self.assertEqual(other.text(), "|Custom/2")
+        self.assertEqual(default_ua.text(), "|" + USER_AGENT)
 
     def test_urllib_client_stops_a_redirect_loop_at_max_redirects(self):
         with _Server() as s:
@@ -282,6 +306,18 @@ class SpacedClientTests(unittest.TestCase):
         c.get("https://a.com/2")
         self.assertAlmostEqual(sum(self.sleeps), 0.5)
 
+    def test_a_caller_per_host_keeps_the_sec_defaults(self):
+        _, c = self._spaced(per_host={"a.com": 0.5})
+        c.get("https://data.sec.gov/1")
+        c.get("https://data.sec.gov/2")
+        self.assertAlmostEqual(sum(self.sleeps), 0.15)
+
+    def test_an_explicit_sec_key_overrides_the_default_and_keys_are_case_blind(self):
+        _, c = self._spaced(per_host={"DATA.SEC.GOV": 0.4})
+        c.get("https://data.sec.gov/1")
+        c.get("https://data.sec.gov/2")
+        self.assertAlmostEqual(sum(self.sleeps), 0.4)
+
     def test_spaced_client_passes_download_through(self):
         inner, c = self._spaced()
         with tempfile.TemporaryDirectory() as d:
@@ -309,6 +345,16 @@ class FakeClientTests(unittest.TestCase):
         self.assertTrue(issubclass(UnexpectedRequest, AssertionError))
         with self.assertRaises(UnexpectedRequest):
             c.post("https://a.com/", b"")  # a GET route is not a POST route
+        self.assertEqual(c.unrouted, ["https://a.com/other", "https://a.com/"])
+
+    def test_fake_client_unrouted_survives_code_that_swallows_the_error(self):
+        c = FakeClient({})
+        try:
+            c.get("https://a.com/x")
+        except Exception:
+            pass  # code under test that catches Exception hides the failure; `unrouted` does not
+        self.assertEqual(c.unrouted, ["https://a.com/x"])
+        self.assertEqual(FakeClient({"https://a.com/": "x"}).unrouted, [])
 
     def test_fake_client_exception_route_raises(self):
         c = FakeClient({"https://a.com/": FetchError("network", "down"), "https://b.com/": RuntimeError("x")})

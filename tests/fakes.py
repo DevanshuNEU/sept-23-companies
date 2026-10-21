@@ -5,7 +5,9 @@
   - an `Exception` (raised; a `FetchError` stands for a transport failure),
   - a callable `(method, url, headers, body) -> Response`,
   - a list of the above, consumed in order (an exhausted list is an unrouted request).
-An unrouted request raises `UnexpectedRequest` (an AssertionError), so a test can never pass by accident.
+An unrouted request raises `UnexpectedRequest` (an AssertionError), so a test can never pass by accident. But code
+under test that catches `Exception` can swallow that error, so every unrouted URL is also recorded in
+`client.unrouted`: a test should assert `client.unrouted == []`.
 """
 from __future__ import annotations
 
@@ -47,6 +49,7 @@ class FakeClient:
         self.routes = {k: (list(v) if isinstance(v, list) else v) for k, v in routes.items()}
         self.calls: list[tuple[str, str, dict, bytes | None]] = []
         self.requests: list[str] = []
+        self.unrouted: list[str] = []
 
     def _answer(self, method: str, url: str, headers: Mapping[str, str] | None, body: bytes | None) -> Response:
         headers = dict(headers or {})
@@ -54,10 +57,12 @@ class FakeClient:
         self.requests.append(url)
         key = url if method == "GET" else (method, url)
         if key not in self.routes:
+            self.unrouted.append(url)
             raise UnexpectedRequest(f"{method} {url} is not routed; routes: {sorted(map(str, self.routes))}")
         value = self.routes[key]
         if isinstance(value, list):
             if not value:
+                self.unrouted.append(url)
                 raise UnexpectedRequest(f"{method} {url}: the route's list is used up")
             value = value.pop(0)
         return self._resolve(value, method, url, headers, body)

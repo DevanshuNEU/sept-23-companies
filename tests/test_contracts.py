@@ -126,6 +126,8 @@ class TokenTests(unittest.TestCase):
         self.assertFalse(valid_token("workday", "adobe/External"))
         self.assertFalse(valid_token("workday", "Adobe.wd5/External"))
         self.assertFalse(valid_token("workday", "adobe.wd5/"))
+        self.assertFalse(valid_token("workday", "adobe.wd\u0665/External"))  # an Arabic-Indic digit is not a digit here
+        self.assertFalse(valid_token("workday", "adobe.wd/External"))
         self.assertFalse(valid_token("oracle", "eeho.fa.us2.oraclecloud.com"))
         self.assertFalse(valid_token("oracle", "evil.example.com/CX_1"))
         self.assertFalse(valid_token("icims", "careers-acme.example.com"))

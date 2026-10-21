@@ -1,4 +1,5 @@
 import type { RouteObject } from 'react-router';
+import { RootError, RouteError } from '@/app/route-error';
 import { AppShell } from '@/shell/app-shell';
 import {
   CompanyPage,
@@ -31,10 +32,18 @@ export const routes: RouteObject[] = [
   {
     path: '/',
     element: <AppShell />,
+    // Last resort: the shell itself failed, so there is no sidebar to keep.
+    errorElement: <RootError />,
     children: [
-      { index: true, element: <ToToday /> },
-      ...viewRoutes,
-      { path: '*', element: <ToToday /> },
+      {
+        // A pathless layout: a failing view renders its error here, inside the shell's outlet.
+        errorElement: <RouteError />,
+        children: [
+          { index: true, element: <ToToday /> },
+          ...viewRoutes,
+          { path: '*', element: <ToToday /> },
+        ],
+      },
     ],
   },
 ];

@@ -32,17 +32,19 @@ const api: {
   write?: (w: PendingWrite) => void;
   undoLast?: () => boolean;
   flushPending?: () => Promise<void>;
+  cancel?: (id: string) => boolean;
 } = {};
 
 function View({ pollMs }: { pollMs?: number }) {
   const item = useViewQuery(ITEM, fetchItem, { pollMs });
   const shell = useViewQuery(SHELL, fetchShell);
   const write = usePendingWrite();
-  const { undoLast, flushPending } = usePendingControls();
+  const { undoLast, flushPending, cancel } = usePendingControls();
   useEffect(() => {
     api.write = write;
     api.undoLast = undoLast;
     api.flushPending = flushPending;
+    api.cancel = cancel;
   });
   return (
     <>
@@ -115,6 +117,7 @@ afterEach(async () => {
   delete api.write;
   delete api.undoLast;
   delete api.flushPending;
+  delete api.cancel;
 });
 
 describe('pending writes', () => {
@@ -223,6 +226,70 @@ describe('pending writes', () => {
     await settle(8000);
     expect(first).toHaveBeenCalledTimes(1);
     expect(second).not.toHaveBeenCalled();
+  });
+
+  it('cancel drops a pending write by id: no commit, overlay and toast gone', async () => {
+    await setup();
+    const commit = approveCommit();
+    approve(commit);
+    await settle();
+    expect(text('status')).toBe('approved');
+    expect(text('drafts')).toBe('6');
+
+    let cancelled = false;
+    act(() => {
+      cancelled = api.cancel!('approve:m12');
+    });
+    await settle();
+    expect(cancelled).toBe(true);
+    expect(text('status')).toBe('drafted');
+    expect(text('drafts')).toBe('7');
+    await settle(1000);
+    // Sonner marks a dismissed toast removed and unmounts it when its exit transition ends (jsdom has none).
+    expect(screen.queryByText('Approved Omar Haddad.')?.closest('[data-sonner-toast]')).toHaveAttribute('data-removed', 'true');
+
+    await settle(10000);
+    await act(() => api.flushPending!());
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('cancel leaves other writes alone, and the id can be queued again', async () => {
+    await setup();
+    const approveIt = approveCommit();
+    const starIt = vi.fn(async () => undefined);
+    approve(approveIt);
+    act(() =>
+      api.write!({ id: 'star:m12', label: 'Starred.', afterCommit: 'Starred.', patches: [starPatch], commit: starIt }),
+    );
+    await settle();
+
+    act(() => {
+      api.cancel!('approve:m12');
+    });
+    await settle();
+    expect(text('status')).toBe('drafted');
+    expect(text('starred')).toBe('true');
+
+    const again = approveCommit();
+    approve(again);
+    await settle(8000);
+    expect(starIt).toHaveBeenCalledTimes(1);
+    expect(again).toHaveBeenCalledTimes(1);
+    expect(approveIt).not.toHaveBeenCalled();
+  });
+
+  it('cancel does nothing for an unknown id or a write that already committed', async () => {
+    await setup();
+    const commit = approveCommit();
+    approve(commit);
+    await settle();
+    expect(api.cancel!('approve:other')).toBe(false);
+
+    await settle(8000);
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(api.cancel!('approve:m12')).toBe(false);
+    await settle();
+    expect(text('status')).toBe('approved');
   });
 
   it('flushes pending writes on pagehide', async () => {

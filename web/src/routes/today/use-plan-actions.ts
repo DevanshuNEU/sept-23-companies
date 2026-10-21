@@ -31,21 +31,23 @@ const ADD = (company: string) => `To change it, open ${company}'s page.`;
 /* ------------------------------------------------------------------ revisions */
 
 /**
- * Every logged step bumps the row's revision, so a write must carry the revision the last one returned. The
- * cached plan only catches up after its refetch, so each commit records the revision it got back (`noteRevision`)
- * and the next write for the same thing takes the newest of that, the cache and the row on screen.
+ * Skip, notes and outcomes are state-changing writes, so each carries the revision the last write on the same
+ * thing returned. The cached plan only catches up after its refetch, so each commit records the revision it
+ * gets back (`noteRevision`) and the next write takes the newest of that, the cache and the row on screen.
  *
  * Writes for one thing never overlap: each waits for the one before it, so it can use that one's result. A
- * keepalive flush (the tab is closing) cannot wait or read, so it sends at once and counts the writes still in
- * flight for that thing, each of which will bump the revision by one.
+ * keepalive flush (the tab is closing) cannot wait or read, so it sends at once with the newest revision known.
+ * Step logs are append-only and the API accepts them at any revision, so a flush that sends two of them lands
+ * both in whatever order they arrive. A skip or note save flushed beside another write on the same row can be
+ * rejected as stale, and says so.
  */
-type Lane = { tail: Promise<unknown>; inflight: number };
+type Lane = { tail: Promise<unknown> };
 const lanes = new WeakMap<QueryClient, Map<string, Lane>>();
 
 function laneOf(queryClient: QueryClient, key: string): Lane {
   const map = lanes.get(queryClient) ?? new Map<string, Lane>();
   lanes.set(queryClient, map);
-  const lane = map.get(key) ?? { tail: Promise.resolve(), inflight: 0 };
+  const lane = map.get(key) ?? { tail: Promise.resolve() };
   map.set(key, lane);
   return lane;
 }
@@ -65,19 +67,15 @@ function sendVersioned<T extends { revision: Revision }>(
     noteRevision(queryClient, key, result.revision);
     return result;
   };
-  const ahead = lane.inflight;
-  lane.inflight += 1;
-  const result = o.keepalive ? run(newest() + ahead) : lane.tail.then(() => run(newest()));
-  const settled = result.then(
+  const result = o.keepalive ? run(newest()) : lane.tail.then(() => run(newest()));
+  lane.tail = result.then(
     () => undefined,
     () => undefined,
   );
-  lane.tail = settled;
-  void settled.then(() => {
-    lane.inflight -= 1;
-  });
   return result;
 }
+
+let saves = 0;
 
 const cachedPlan = (queryClient: QueryClient) => queryClient.getQueryData<PlanView>(queryKeys.plan);
 const cachedRow = (queryClient: QueryClient, entryId: Id) => cachedPlan(queryClient)?.rows.find((r) => r.entryId === entryId);
@@ -141,20 +139,23 @@ export function usePlanActions() {
     const id = `log:${entryId}:${kind === 'request' ? 'request' : 'apply'}`;
     if (isPending(id)) return;
     const company = row.company.name;
+    let call: (revision: Revision, o: WriteOptions) => Promise<PlanRow>;
+    const key = `plan:${entryId}:${kind}`;
     if (kind === 'request') {
       if (row.channel === 'email') return void toast('Review this email in the Outbox.');
       if (!row.person) return void toast(`Find someone at ${company} first.`);
-    } else if (!row.role || !row.steps.some((s) => s.kind === 'apply')) {
-      return void toast('No role to apply for.');
+      const personId = row.person.person.id;
+      call = (revision, o) => client.logRequest(entryId, { personId, idempotencyKey: key }, revision, o);
+    } else {
+      if (!row.role || !row.steps.some((s) => s.kind === 'apply')) return void toast('No role to apply for.');
+      const postingId = row.role.postingId;
+      call = (revision, o) => client.logApplied(entryId, { postingId, idempotencyKey: key }, revision, o);
     }
     if (row.state === 'skipped') return void toast(`${company} is carried to tomorrow.`);
     if (row.state === 'done' || row.steps.find((s) => s.kind === kind)?.at) return void toast('Already logged.');
 
-    const key = `plan:${entryId}:${kind}`;
     const label = stepLabel(row, kind);
     const delta = finishes(row, kind) ? 1 : 0;
-    const personId = row.person?.person.id;
-    const postingId = row.role?.postingId;
     write({
       id,
       label,
@@ -165,9 +166,7 @@ export function usePlanActions() {
       ],
       commit: (o) =>
         sendVersioned(queryClient, `plan:${entryId}`, row.revision, () => cachedRow(queryClient, entryId)?.revision, o, (revision) =>
-          kind === 'request' && personId !== undefined
-            ? client.logRequest(entryId, { personId, idempotencyKey: key }, revision, o)
-            : client.logApplied(entryId, { postingId: postingId as Id, idempotencyKey: key }, revision, o),
+          call(revision, o),
         ),
     });
   };
@@ -201,8 +200,10 @@ export function usePlanActions() {
     const note = row.note;
     if (!note) return;
     const label = `Saved the note for ${row.person?.person.name ?? row.company.name}.`;
+    // One id per save: the store ignores a write whose id is still active, and a second save must not be dropped. The
+    // note's lane keeps the saves in order, and each sends the full text and reason line, so the later one supersedes.
     write({
-      id: `note:${note.noteId}`,
+      id: `note:${note.noteId}:${++saves}`,
       label,
       afterCommit: label,
       patches: [
@@ -270,6 +271,8 @@ export function usePlanActions() {
       id: 'wins:seen',
       label: 'Marked as seen.',
       afterCommit: 'Marked as seen.',
+      immediate: true,
+      silent: true,
       patches: [
         {
           key: queryKeys.wins,

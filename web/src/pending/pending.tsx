@@ -20,6 +20,8 @@ export interface PendingWrite {
   commit: (o: WriteOptions) => Promise<unknown>;
   /** Commit at once, with the patches and a toast but no Undo. */
   immediate?: boolean;
+  /** With `immediate`: no toast either, for a write that is not worth a word (marking wins seen). A failure still toasts. */
+  silent?: boolean;
 }
 
 interface Overlay {
@@ -71,7 +73,7 @@ class PendingStore {
     ]);
 
     if (write.immediate) {
-      toast(write.label, { id: toastId });
+      if (!write.silent) toast(write.label, { id: toastId });
       void this.run(write, requestId, toastId, { requestId });
       return;
     }

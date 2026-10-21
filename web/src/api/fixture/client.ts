@@ -757,11 +757,15 @@ export class FixtureClient implements OutreachClient {
     }
   }
 
-  /** Log one step of a row. The key is stored with the touch it made, so the same key later changes nothing. */
-  private logStep(entryId: Id, kind: StepKind, key: string, revision: Revision, check: (row: PlanRow) => void): PlanRow {
+  /**
+   * Log one step of a row. The key is stored with the touch it made, so the same key later changes nothing.
+   * Logging a step is append-only, so it takes no revision: a new key for a step that is still open lands
+   * whatever revision the caller last saw (two steps can arrive out of order). Skip, notes and every other
+   * state-changing write still reject a stale revision.
+   */
+  private logStep(entryId: Id, kind: StepKind, key: string, check: (row: PlanRow) => void): PlanRow {
     const row = this.planRow(entryId);
     if (this.keys.has(key)) return row;
-    if (row.revision !== revision) throw new ApiError('conflict', `${row.company.name} changed since you loaded it`);
     if (row.state === 'skipped') throw notAllowed(`${row.company.name} is carried to tomorrow`);
     const step = row.steps.find((st) => st.kind === kind);
     if (!step) throw notAllowed(kind === 'request' ? 'This row has no request to log' : 'This row has no role to apply to');
@@ -785,15 +789,15 @@ export class FixtureClient implements OutreachClient {
     return row;
   }
 
-  logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow> {
-    return this.write(o, () => this.logStep(entryId, 'request', input.idempotencyKey, revision, (row) => {
+  logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string }, _revision: Revision, o: WriteOptions): Promise<PlanRow> {
+    return this.write(o, () => this.logStep(entryId, 'request', input.idempotencyKey, (row) => {
       if (!row.person) throw notAllowed('Find someone at this company first');
       if (row.person.person.id !== input.personId) throw notAllowed('That person is not on this row');
     }));
   }
 
-  logApplied(entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow> {
-    return this.write(o, () => this.logStep(entryId, 'apply', input.idempotencyKey, revision, (row) => {
+  logApplied(entryId: Id, input: { postingId: Id; idempotencyKey: string }, _revision: Revision, o: WriteOptions): Promise<PlanRow> {
+    return this.write(o, () => this.logStep(entryId, 'apply', input.idempotencyKey, (row) => {
       if (!row.role) throw notAllowed('This row has no role to apply to');
       if (row.role.postingId !== input.postingId) throw notAllowed('That role is not on this row');
     }));

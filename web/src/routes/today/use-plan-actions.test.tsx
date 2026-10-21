@@ -191,13 +191,22 @@ describe('usePlanActions', () => {
     expect((await client.plan()).rows[2]?.state).toBe('done');
   });
 
-  it('a flush as the tab closes sends both steps at once, the second with the revision the first will make', async () => {
+  it('a flush as the tab closes sends both steps at once with the revision on screen, and both land in any order', async () => {
     const { client, rowOf, act: run } = await open();
     const request = vi.spyOn(client, 'logRequest');
-    const apply = vi.spyOn(client, 'logApplied');
+    const original = client.logApplied.bind(client);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The apply log is held back, so the request log reaches the server first and the apply log arrives second.
+    const apply = vi.spyOn(client, 'logApplied').mockImplementation(async (...args) => {
+      await gate;
+      return original(...args);
+    });
     const row = rowOf(3);
-    run((a) => a.logRequest(row));
     run((a) => a.logApplied(row));
+    run((a) => a.logRequest(row));
     await settle();
     act(() => {
       window.dispatchEvent(new Event('pagehide'));
@@ -205,7 +214,13 @@ describe('usePlanActions', () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(request.mock.calls[0]?.[3]).toMatchObject({ keepalive: true });
-    expect(apply.mock.calls[0]?.[2]).toBe(row.revision + 1);
+    expect(apply.mock.calls[0]?.[3]).toMatchObject({ keepalive: true });
+    // Step logs are append-only: neither carries a guessed revision, just the one the row had.
+    expect(request.mock.calls[0]?.[2]).toBe(row.revision);
+    expect(apply.mock.calls[0]?.[2]).toBe(row.revision);
+    await settle(50);
+    expect((await client.plan()).rows[2]?.steps.map((s) => s.at !== null)).toEqual([true, false]);
+    release();
     await settle(50);
     expect((await client.plan()).rows[2]?.state).toBe('done');
   });
@@ -339,6 +354,38 @@ describe('usePlanActions: notes and outcomes', () => {
     expect((await client.plan()).rows[2]?.note?.text).toBe('Hi Lena, a shorter note.');
   });
 
+  it('two saves inside the window both go out, in order, and the server ends with the second text', async () => {
+    const { client, rowOf, act: run } = await open();
+    const spy = vi.spyOn(client, 'saveNote');
+    const row = rowOf(3);
+    run((a) => a.saveNote(row, 'Hi Lena, first version.', row.note?.reasonLine ?? ''));
+    await settle(2000);
+    run((a) => a.saveNote(row, 'Hi Lena, second version.', row.note?.reasonLine ?? ''));
+    await settle();
+    expect(screen.getAllByText('Saved the note for Lena Ortiz.')).toHaveLength(2);
+    await settle(10000);
+    await settle(50);
+    expect(spy).toHaveBeenCalledTimes(2);
+    const first = (await spy.mock.results[0]?.value) as { revision: number };
+    expect(spy.mock.calls[0]?.[1].text).toBe('Hi Lena, first version.');
+    expect(spy.mock.calls[1]?.[1].text).toBe('Hi Lena, second version.');
+    expect(spy.mock.calls[1]?.[1].revision).toBe(first.revision);
+    expect((await client.plan()).rows[2]?.note?.text).toBe('Hi Lena, second version.');
+  });
+
+  it('a save while the first one is settling is not dropped', async () => {
+    const { client, rowOf, act: run } = await open();
+    const spy = vi.spyOn(client, 'saveNote');
+    const row = rowOf(3);
+    run((a) => a.saveNote(row, 'Hi Lena, one.', row.note?.reasonLine ?? ''));
+    await settle(8000);
+    run((a) => a.saveNote(row, 'Hi Lena, two.', row.note?.reasonLine ?? ''));
+    await settle(8000);
+    await settle(50);
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect((await client.plan()).rows[2]?.note?.text).toBe('Hi Lena, two.');
+  });
+
   it('confirmReason confirms the line with the note revision', async () => {
     const { client, rowOf, act: run } = await open();
     const spy = vi.spyOn(client, 'confirmReason');
@@ -409,7 +456,7 @@ describe('usePlanActions: notes and outcomes', () => {
     expect(text('prompt')).toBe('1');
   });
 
-  it('seeWins marks the given wins seen and counts them off, leaving the others unseen', async () => {
+  it('seeWins marks the given wins seen at once with no toast, and leaves the others unseen', async () => {
     const { client, act: run } = await open('win');
     const wins = await client.wins();
     const unseen = wins.wins.filter((w) => w.unseen);
@@ -420,8 +467,9 @@ describe('usePlanActions: notes and outcomes', () => {
     run((a) => a.seeWins(ids));
     await settle();
     expect(text('unseen')).toBe(String(before - ids.length));
-    await settle(8000);
     expect(spy).toHaveBeenCalledWith(ids, { requestId: expect.any(String) });
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Marked as seen.')).not.toBeInTheDocument();
     await settle(50);
     expect(text('unseen')).toBe('0');
   });

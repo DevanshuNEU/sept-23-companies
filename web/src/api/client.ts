@@ -55,6 +55,8 @@ export interface OutreachClient {
   score(companyId: Id): Promise<ScoreView>; // 'not_found' for an unknown company
 
   // Idempotency keys are `plan:<entryId>:request` and `plan:<entryId>:apply`: the same key twice returns the first result and writes nothing.
+  // Logging a step is append-only: a new key for a step that is still open lands whatever `revision` is sent (steps can arrive out of
+  // order), so `revision` is a hint here. Skip, notes and every other state-changing write reject a stale revision with 'conflict'.
   logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>;
   logApplied(entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>; // 'not_allowed' with no role
   logOutcome(touchId: Id, kind: OutcomeKind, revision: Revision, o: WriteOptions, replyKind?: Exclude<ReplyKind, 'unsorted' | 'auto_reply'>): Promise<{ revision: Revision }>;

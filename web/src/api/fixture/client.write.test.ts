@@ -771,21 +771,31 @@ describe('plan writes: logging', () => {
     expect(mintlify.role).toBeNull();
     const err = await rejection(c.logApplied(mintlify.entryId, { postingId: 1, idempotencyKey: applyKey(mintlify) }, mintlify.revision, opt()));
     expect(err.code).toBe('not_allowed');
-    const row = await rowAt(c, 3);
-    const stale = await rejection(c.logApplied(row.entryId, { postingId: postingOf(row), idempotencyKey: applyKey(row) }, row.revision + 5, opt()));
-    expect(stale.code).toBe('conflict');
-    expect((await c.progress()).today.applications).toBe(2);
   });
 
-  it('a stale revision on logRequest conflicts and logs nothing', async () => {
+  it('logging a step is append-only: a stale revision still logs it, once', async () => {
     const c = client();
     const row = await rowAt(c, 3);
-    const err = await rejection(c.logRequest(row.entryId, { personId: personOf(row), idempotencyKey: requestKey(row) }, 0, opt()));
-    expect(err.code).toBe('conflict');
-    expect((await c.progress()).today.requests).toBe(2);
-    // The key was not stored by the failed write, so it still works with the right revision.
     await logReq(c, row);
     expect((await c.progress()).today.requests).toBe(3);
+    // The second step, sent with the revision the row had before the first step bumped it (an out-of-order arrival).
+    const out = await c.logApplied(row.entryId, { postingId: postingOf(row), idempotencyKey: applyKey(row) }, row.revision, opt());
+    expect(out.state).toBe('done');
+    expect((await c.progress()).today.applications).toBe(3);
+    expect((await c.plan()).done).toBe(3);
+    // A wildly old revision on a new key for an open step also lands; the same key again still changes nothing.
+    const again = await c.logApplied(row.entryId, { postingId: postingOf(row), idempotencyKey: applyKey(row) }, 0, opt());
+    expect(again.steps[1]?.touchId).toBe(out.steps[1]?.touchId);
+    expect((await c.progress()).today.applications).toBe(3);
+    expect((await c.progress()).today.requests).toBe(3);
+  });
+
+  it('a stale revision still rejects skip, after a step log moved the row on', async () => {
+    const c = client();
+    const row = await rowAt(c, 3);
+    await logReq(c, row);
+    expect((await rejection(c.skipRow(row.entryId, row.revision, opt()))).code).toBe('conflict');
+    expect((await c.plan()).rows[2]?.state).toBe('todo');
   });
 
   it('a row with no person cannot log a request, and an unknown row is not_found', async () => {

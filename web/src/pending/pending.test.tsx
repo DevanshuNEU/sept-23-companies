@@ -231,6 +231,17 @@ describe('pending writes', () => {
     expect(second).not.toHaveBeenCalled();
   });
 
+  it('a silent immediate write commits at once with its patches and no toast', async () => {
+    await setup();
+    const commit = approveCommit();
+    approve(commit, { immediate: true, silent: true });
+    await settle();
+    expect(text('status')).toBe('approved');
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Approved Omar Haddad.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+  });
+
   it('isPending is true from the queue until the commit has settled, and false after an undo', async () => {
     await setup();
     expect(api.isPending!('approve:m12')).toBe(false);

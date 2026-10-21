@@ -188,8 +188,17 @@ MUTATIONS = [
      "  CHECK (undone_at IS NULL OR (accepted_at IS NULL AND replied_at IS NULL AND referred_at IS NULL\n"
      "                               AND interview_at IS NULL AND offer_at IS NULL AND quiet_at IS NULL))\n",
      "  CHECK (1)\n", "test_outreach_touch_undone_excludes_outcomes"),
-    (SCHEMA, "an lca key test uses = again, so a missing key reads NULL and the CHECK passes",
-     "AND json_type(value, '$.newemp_jr') IS 'integer'", "AND json_type(value, '$.newemp_jr') = 'integer'",
+    # The ifnull(..., -1) >= 0 test below the type tests also refuses a missing key, so this mutation breaks both.
+    (SCHEMA, "an lca key test uses = again and has no ifnull range test, so a missing key reads NULL and the CHECK passes",
+     "AND json_type(value, '$.newemp_jr') IS 'integer'\n"
+     "           AND ifnull(json_type(value, '$.median_jr_wage'), 'integer') IS 'integer'\n"
+     "           AND ifnull(json_extract(value, '$.fy'), -1) >= 0 AND ifnull(json_extract(value, '$.software'), -1) >= 0\n"
+     "           AND ifnull(json_extract(value, '$.jr'), -1) >= 0 AND ifnull(json_extract(value, '$.level1'), -1) >= 0\n"
+     "           AND ifnull(json_extract(value, '$.newemp_jr'), -1) >= 0\n",
+     "AND json_type(value, '$.newemp_jr') = 'integer'\n"
+     "           AND ifnull(json_type(value, '$.median_jr_wage'), 'integer') IS 'integer'\n"
+     "           AND ifnull(json_extract(value, '$.fy'), -1) >= 0 AND ifnull(json_extract(value, '$.software'), -1) >= 0\n"
+     "           AND ifnull(json_extract(value, '$.jr'), -1) >= 0 AND ifnull(json_extract(value, '$.level1'), -1) >= 0\n",
      "test_evidence_lca_value_must_be_json"),
     (SCHEMA, "an outreach_touch can be deleted: the outreach_touch_never_deleted trigger removed",
      "CREATE TRIGGER outreach_touch_never_deleted BEFORE DELETE ON outreach_touch\n  BEGIN SELECT",

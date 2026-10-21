@@ -1,11 +1,12 @@
 # Opportunity pipeline: design
 
-Date: 2026-10-20. Owner: Devanshu Chicholikar. Status: draft for Devanshu's approval.
+Date: 2026-10-20. Owner: Devanshu Chicholikar. Status: approved by Devanshu on 2026-10-21 ("lets implement
+this"), including the #9 changes in section 13 and the answers in section 18.
 
 This document designs how the platform finds every company Devanshu could reach, reads their postings, ranks
 them, and plans each day's outreach. It builds on `2026-10-18-outreach-platform-design.md` (store, rules,
 sending, MCP, app) and changes some decisions in issue #9; section 13 lists each change. Until Devanshu approves
-this document and #9 is edited to match, #9 stands.
+this document, #9 stood; #9 was edited on 2026-10-21 to match section 13.
 
 Research behind it (all in `docs/research/`, dated 2026-10-20):
 
@@ -449,7 +450,34 @@ LinkedIn requests this week.
 - Adapter internals and per-host rate limits, within the research's limits.
 - How the night job detects a session limit and stops cleanly.
 
-## 16. Calls I made (Devanshu to check)
+## 16. How it should feel
+
+Devanshu, 2026-10-21: the components look right; the whole experience must be smooth, precise and well made,
+and it should keep him going the way good work keeps a person going. The job search is long and mostly silent, so
+the app's job is to make each day's effort clear, quick, and visibly worth it. Rules for every view:
+
+1. **Always one next action.** Opening the app shows today's plan with the first person ready: role link,
+   reason, draft. Never a blank page, never an unsorted pile.
+2. **A day has a finish line.** The plan ends. When the last row is done, Today says so, shows what he did, and
+   previews tomorrow. No endless feed.
+3. **Real progress, shown plainly.** Today: sent, accepted, replied, applied, against the day's plan. This week
+   and this month: requests, accepts, replies, referrals and interviews as a funnel. Numbers are never inflated
+   and never padded with vanity counts.
+4. **Wins are loud and kept.** An accept or a reply goes to the top the moment it is known, with a short, quiet
+   moment of recognition. Every referral and interview stays in a win log he can open on a hard day.
+5. **Effort counts on quiet days.** A week with no replies still shows the work done, and the usual rates from
+   his own data ("about 1 in N requests gets a reply") once there are enough outcomes, so silence reads as
+   normal, not as failure.
+6. **The system visibly learns.** Each month, one or two plain findings from the outcome report ("requests to
+   engineers on the team were accepted twice as often as requests to founders") and what changed because of them.
+7. **Fast and exact.** Every main action is one key with instant feedback and undo. No spinner on the main
+   path. Copy is short and specific; an empty state says what to do next; an error says what failed and what
+   happens now.
+8. **Calm, never guilt.** No streaks to break, no red alarms for a missed day; unfinished rows roll forward
+   quietly.
+9. **Honest about why.** Every rank, flag and hide shows its reason and source, so he trusts what he acts on.
+
+## 17. Calls I made (Devanshu to check)
 
 - Cadence floor 6 hours, ceiling 7 days.
 - LinkedIn split about 80% lane 1, 20% lane 3.
@@ -466,14 +494,13 @@ LinkedIn requests this week.
 - Today is keyed on companies, with a night prepare step that finds people and drafts notes (section 10).
 - `message.seq` can keep allowing 0 to 3; a one-follow-up policy only uses fewer.
 
-## 17. Open questions for Devanshu
+## 18. Questions Devanshu answered (2026-10-21)
 
-1. **When:** does this reshape the switch-over (the platform switches later, but switches to this), or does the
-   switch-over go ahead as planned with this work right after it? Either way, the interim list in section 14
-   comes first. This also decides whether the #7 items this design needs (LCA wage levels, Form D, HN) leave
+1. **When:** this reshapes the switch-over: the platform switches later, but switches to this design. The
+   interim list came first (built 2026-10-21). The #7 items this design needs (LCA wage levels, Form D, HN) leave
    the parked list now.
-2. **Facts in LinkedIn notes:** today drafts may use only `mail/me.md` and what he supplies about the person.
-   May a note also use facts the side session found on public pages, each shown to him with its link before he
-   sends? Notes also need their own checks: length, and his voice, since two past contacts said his messages
-   read as AI-written.
-3. **Section 13:** which #9 changes he accepts.
+2. **Facts in LinkedIn notes:** yes. A note may also use facts the side session found on public pages, each
+   shown to him with its link before he sends. Notes get their own checks: length, banned phrases and his
+   voice, since two past contacts said his messages read as AI-written. He writes or rewrites the one line that
+   says why this person.
+3. **Section 13:** all #9 changes accepted.

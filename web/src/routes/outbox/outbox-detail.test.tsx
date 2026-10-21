@@ -604,6 +604,81 @@ describe('skip', () => {
   });
 });
 
+describe('writes flushed as the tab closes', () => {
+  // Once the page is gone a read never comes back, so a write that waits for one is never sent. Each test makes
+  // the read hang, then checks the keepalive write went out anyway.
+  const hang = () => new Promise<never>(() => {});
+  const closeTab = () => act(async () => void window.dispatchEvent(new Event('pagehide')));
+  const keepalive = { requestId: expect.any(String), keepalive: true };
+
+  it('a skip in its window goes out with keepalive and the revision on screen, without a read first', async () => {
+    const { client } = await open(T.omar, 'Omar Haddad');
+    const skip = vi.spyOn(client, 'skip');
+    press('s');
+    await waitFor(() => expect(within(row('Omar Haddad')).getByText('Skipped')).toBeInTheDocument());
+    vi.spyOn(client, 'outboxDetail').mockImplementation(hang);
+    await closeTab();
+    expect(skip).toHaveBeenCalledTimes(1);
+    expect(skip).toHaveBeenCalledWith(messageOf(T.omar), 1, keepalive);
+  });
+
+  it('a skip after an approve committed goes out with the revision the approve made', async () => {
+    const { client } = await open(T.omar, 'Omar Haddad');
+    const skip = vi.spyOn(client, 'skip');
+    startClock();
+    press('a');
+    await settle(8000);
+    await settle(100);
+    const { revision } = (await client.outboxDetail(T.omar)).item;
+    expect(revision).toBeGreaterThan(1);
+    press('s');
+    await settle();
+    vi.spyOn(client, 'outboxDetail').mockImplementation(hang);
+    await closeTab();
+    expect(skip).toHaveBeenCalledWith(messageOf(T.omar), revision, keepalive);
+  });
+
+  /** Felix Graham's approved email waits for a Graphite slot; closing Graphite stops it. */
+  async function closeGraphite(client: FixtureClient) {
+    press('c');
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'No referrals' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close company' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    return (await client.company(companyId('Graphite'))).company.revision;
+  }
+
+  it('an Outbox close in its window goes out with keepalive, without a read first', async () => {
+    const { client } = await open(T.felix, 'Felix Graham');
+    const read = vi.spyOn(client, 'company');
+    const close = vi.spyOn(client, 'closeCompany');
+    const revision = await closeGraphite(client);
+    await Promise.all(read.mock.results.map((r) => r.value));
+    read.mockImplementation(hang);
+    await closeTab();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledWith(companyId('Graphite'), 'no_referrals', '', revision, keepalive);
+  });
+
+  it('pause, then an Outbox close, then the tab closes: the close carries the revision the pause made', async () => {
+    const { client } = await open(T.felix, 'Felix Graham');
+    const read = vi.spyOn(client, 'company');
+    const pause = vi.spyOn(client, 'pauseCompany');
+    const close = vi.spyOn(client, 'closeCompany');
+    const before = (await client.company(companyId('Graphite'))).company.revision;
+    press('p');
+    await waitFor(() => expect(pause).toHaveBeenCalledTimes(1));
+    await screen.findByRole('button', { name: 'Resume Graphite' });
+    const revision = await closeGraphite(client);
+    expect(revision).toBeGreaterThan(before);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await Promise.all(read.mock.results.map((r) => r.value));
+    read.mockImplementation(hang);
+    await closeTab();
+    expect(close).toHaveBeenCalledWith(companyId('Graphite'), 'no_referrals', '', revision, keepalive);
+  });
+});
+
 describe('reply', () => {
   it('Priya: the hold alert names who is held and links to Gmail', async () => {
     await open(T.priya, 'Priya Natarajan');

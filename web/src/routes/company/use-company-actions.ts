@@ -1,7 +1,9 @@
 import { useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { queryKeys, useClient, type CloseReason, type CompanyView, type ShellSummary } from '@/api';
+import { queryKeys, useClient, type CloseReason, type CompanyView, type Revision, type ShellSummary, type WriteOptions } from '@/api';
 import { usePendingWrite, type Patch } from '@/pending/pending';
+import { newestRevision, noteRevision, withRevision } from '@/pending/revisions';
 import { CLOSE_WORD } from './company-status';
 
 type Company = CompanyView['company'];
@@ -22,10 +24,12 @@ const TAIL: Record<CloseReason, string> = {
  * pause that waited could let an email out), and so do resume and reopen (they ask first in a dialog, so they need
  * no Undo). Each patches the company, and names the lists whose counts move so they refetch when the write settles.
  * Every write reads the company's revision when it commits, not when it was asked for: another write on the same
- * company may land inside the window and move it.
+ * company may land inside the window and move it. A write flushed as the tab closes cannot read; it sends with the
+ * newest revision known: on screen when it was asked for, in the cache, or from a read.
  */
 export function useCompanyActions(view: CompanyView | undefined) {
   const client = useClient();
+  const queryClient = useQueryClient();
   const write = usePendingWrite();
 
   const patchCompany = useCallback(
@@ -35,40 +39,55 @@ export function useCompanyActions(view: CompanyView | undefined) {
     }),
     [view?.company.id],
   );
-  /** The revision now, read when a write commits. */
-  const revisionOf = useCallback(async (id: number) => (await client.company(id)).company.revision, [client]);
+  /** Sends `send` with the company's revision: read when it commits, or the newest known when the tab is closing. */
+  const withCompanyRevision = useCallback(
+    <T,>(o: WriteOptions, c: Company, send: (revision: Revision) => Promise<T>): Promise<T> => {
+      const key = `company:${c.id}`;
+      const known = () => newestRevision(queryClient, key, c.revision, queryClient.getQueryData<CompanyView>(queryKeys.company(c.id))?.company.revision);
+      const read = async () => {
+        const { revision } = (await client.company(c.id)).company;
+        noteRevision(queryClient, key, revision);
+        return revision;
+      };
+      return withRevision(o, known, read, send);
+    },
+    [client, queryClient],
+  );
   const refetch = (...keys: (readonly unknown[])[]): Patch[] => keys.map((key) => ({ key, apply: (d: unknown) => d }));
 
   const pause = useCallback(() => {
     if (!view) return;
     const { id, name } = view.company;
+    const c = view.company;
     write({
       id: `pause:${id}`,
       label: `Paused ${name}. Nothing more sends there until you resume.`,
       afterCommit: `Paused ${name}.`,
       immediate: true,
       patches: [patchCompany((c, asOf) => ({ ...c, pausedAt: asOf })), ...refetch(queryKeys.shell, queryKeys.outbox, queryKeys.today)],
-      commit: async (o) => client.pauseCompany(id, await revisionOf(id), o),
+      commit: (o) => withCompanyRevision(o, c, (r) => client.pauseCompany(id, r, o)),
     });
-  }, [view, write, client, patchCompany, revisionOf]);
+  }, [view, write, client, patchCompany, withCompanyRevision]);
 
   const resume = useCallback(() => {
     if (!view) return;
     const { id, name } = view.company;
+    const c = view.company;
     write({
       id: `resume:c${id}`,
       label: `Resumed ${name}.`,
       afterCommit: `Resumed ${name}.`,
       immediate: true,
       patches: [patchCompany((c) => ({ ...c, pausedAt: null, heldByTouchId: null })), ...refetch(queryKeys.shell, queryKeys.outbox, queryKeys.today)],
-      commit: async (o) => client.resumeCompany(id, await revisionOf(id), o),
+      commit: (o) => withCompanyRevision(o, c, (r) => client.resumeCompany(id, r, o)),
     });
-  }, [view, write, client, patchCompany, revisionOf]);
+  }, [view, write, client, patchCompany, withCompanyRevision]);
 
   const close = useCallback(
     (reason: CloseReason, note: string) => {
       if (!view) return;
       const { id, name } = view.company;
+      const c = view.company;
       const shell: Patch<ShellSummary> = {
         key: queryKeys.shell,
         apply: (s) => ({
@@ -86,24 +105,25 @@ export function useCompanyActions(view: CompanyView | undefined) {
           shell,
           ...refetch(queryKeys.outbox, queryKeys.today, queryKeys.noGo, queryKeys.done),
         ],
-        commit: async (o) => client.closeCompany(id, reason, note, await revisionOf(id), o),
+        commit: (o) => withCompanyRevision(o, c, (r) => client.closeCompany(id, reason, note, r, o)),
       });
     },
-    [view, write, client, patchCompany, revisionOf],
+    [view, write, client, patchCompany, withCompanyRevision],
   );
 
   const reopen = useCallback(() => {
     if (!view) return;
     const { id, name } = view.company;
+    const c = view.company;
     write({
       id: `reopen:c${id}`,
       label: `Reopened ${name}.`,
       afterCommit: `Reopened ${name}.`,
       immediate: true,
       patches: [patchCompany((c) => ({ ...c, status: 'working', closed: null })), ...refetch(queryKeys.shell, queryKeys.outbox, queryKeys.today, queryKeys.noGo, queryKeys.done)],
-      commit: async (o) => client.reopenCompany(id, await revisionOf(id), o),
+      commit: (o) => withCompanyRevision(o, c, (r) => client.reopenCompany(id, r, o)),
     });
-  }, [view, write, client, patchCompany, revisionOf]);
+  }, [view, write, client, patchCompany, withCompanyRevision]);
 
   const copyRole = useCallback(() => {
     const title = view?.role?.title;

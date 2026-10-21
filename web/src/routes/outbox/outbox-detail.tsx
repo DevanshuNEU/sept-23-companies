@@ -33,6 +33,7 @@ import { useHotkeys } from '@/keyboard/hotkeys';
 import { ageDays, formatAge, formatDueDay } from '@/lib/format';
 import { useEdits, type Edit } from '@/pending/edits';
 import { usePendingControls, usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
+import { newestRevision, noteRevision, withRevision } from '@/pending/revisions';
 import { safeHref } from '@/lib/safe-href';
 import { CompareDialog } from './compare-dialog';
 import { heldLine, useCompanyActions } from './company-actions';
@@ -235,6 +236,12 @@ function DetailBody({
   const { person, company, touchId, messageId } = item;
   const kind = kindOf(item);
   const detailKey = queryKeys.outboxDetail(touchId);
+  /** Every revision of this email the server hands back is noted, so a write sent as the tab closes can use it. */
+  const revisionKey = `message:${messageId}`;
+  const noted = (d: OutboxDetail): OutboxDetail => {
+    noteRevision(queryClient, revisionKey, d.item.revision);
+    return d;
+  };
 
   const [edit, setEditState] = useState<Edit | null>(() => edits.get(messageId) ?? null);
   const [serverConflict, setServerConflict] = useState(false);
@@ -281,7 +288,7 @@ function DetailBody({
     const sent = edits.get(messageId) ?? edit;
     try {
       const saved = await client.saveMessage(messageId, { subject: sent.subject, body: sent.body, revision: base ?? sent.base }, { requestId: newRequestId() });
-      queryClient.setQueryData(detailKey, saved);
+      queryClient.setQueryData(detailKey, noted(saved));
       // He may have typed while the save was in flight: clear the edit only if it is still what was sent,
       // else keep it and start it from the revision this save made.
       const now = edits.get(messageId);
@@ -303,7 +310,7 @@ function DetailBody({
   /** The newer version from the server, put in the cache. Null when it cannot be read. */
   async function loadFresh(): Promise<OutboxDetail | null> {
     try {
-      const fresh = await client.outboxDetail(touchId);
+      const fresh = noted(await client.outboxDetail(touchId));
       queryClient.setQueryData(detailKey, fresh);
       refreshList();
       return fresh;
@@ -339,7 +346,7 @@ function DetailBody({
       patches: [list, det, shell],
       // The revision he read: if Claude saved a newer version since, the API refuses and says so.
       commit: async (o) => {
-        const done = await client.approve(it.messageId, it.revision, o);
+        const done = noted(await client.approve(it.messageId, it.revision, o));
         edits.delete(it.messageId); // what was approved is the saved text; nothing typed after it can go out
         return done;
       },
@@ -382,14 +389,18 @@ function DetailBody({
     const list: Patch<OutboxView> = { key: queryKeys.outbox, apply: (v) => patchRow(v, touchId, (i) => ({ ...i, ...skipped })) };
     const det: Patch<OutboxDetail> = { key: detailKey, apply: (x) => patchDetailItem(x, skipped) };
     const shell: Patch<ShellSummary> = { key: queryKeys.shell, apply: (s) => (wasDraft ? fewerDrafts(s) : s) };
+    const onScreen = item.revision;
     write({
       id: `skip:${messageId}`,
       label: item.seq > 0 ? `Skipped follow-up ${item.seq} for ${person.name}. Nothing goes out.` : `Skipped ${person.name}. No email goes out.`,
       afterCommit: `Skipped ${person.name}.`,
       patches: [list, det, shell],
-      // An approval may land first and move the revision, so the skip reads it when it commits.
+      // An approval may land first and move the revision, so the skip reads it when it commits. As the tab
+      // closes it cannot read: it sends with the newest revision known (on screen, cached, or from a commit).
       commit: async (o) => {
-        const done = await client.skip(messageId, (await client.outboxDetail(touchId)).item.revision, o);
+        const known = () => newestRevision(queryClient, revisionKey, onScreen, queryClient.getQueryData<OutboxDetail>(detailKey)?.item.revision);
+        const read = async () => noted(await client.outboxDetail(touchId)).item.revision;
+        const done = await withRevision(o, known, read, (revision) => client.skip(messageId, revision, o));
         edits.delete(messageId); // a skipped email has no editor, so its unsaved text would linger
         return done;
       },
@@ -413,7 +424,7 @@ function DetailBody({
       afterCommit: `Approval withdrawn for ${person.name}.`,
       immediate: true,
       patches: [list, det, shell],
-      commit: (o) => client.unapprove(messageId, revision, o),
+      commit: async (o) => noted(await client.unapprove(messageId, revision, o)),
     });
   };
 

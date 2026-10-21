@@ -213,6 +213,41 @@ describe('Company page', () => {
     }
   });
 
+  it('a close in its window goes out with keepalive as the tab closes, without a read first', async () => {
+    const { client } = await open();
+    const close = vi.spyOn(client, 'closeCompany');
+    act(() => {
+      press('c');
+    });
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Close Browserbase' })).getByRole('button', { name: 'Close company' }));
+    await screen.findByText('Closed Browserbase: interview. It is on the Done list.');
+    // Once the page is gone a read never comes back.
+    vi.spyOn(client, 'company').mockImplementation(() => new Promise<never>(() => {}));
+    await act(async () => void window.dispatchEvent(new Event('pagehide')));
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledWith(BROWSERBASE, 'interview', '', 1, { requestId: expect.any(String), keepalive: true });
+  });
+
+  it('pause, then close, then the tab closes: the close carries the revision the pause made', async () => {
+    const { client } = await open();
+    const pause = vi.spyOn(client, 'pauseCompany');
+    const close = vi.spyOn(client, 'closeCompany');
+    act(() => {
+      press('p');
+    });
+    await waitFor(() => expect(pause).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(screen.getByRole('group', { name: 'Status' })).getByText('Paused')).toBeInTheDocument());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    act(() => {
+      press('c');
+    });
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Close Browserbase' })).getByRole('button', { name: 'Close company' }));
+    await screen.findByText('Closed Browserbase: interview. It is on the Done list.');
+    vi.spyOn(client, 'company').mockImplementation(() => new Promise<never>(() => {}));
+    await act(async () => void window.dispatchEvent(new Event('pagehide')));
+    expect(close).toHaveBeenCalledWith(BROWSERBASE, 'interview', '', 2, { requestId: expect.any(String), keepalive: true });
+  });
+
   it('R asks first, listing the held emails, then resumes', async () => {
     const { client } = await open();
     const resume = vi.spyOn(client, 'resumeCompany');

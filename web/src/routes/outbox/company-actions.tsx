@@ -1,9 +1,11 @@
 import { useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   queryKeys,
   useClient,
   type CloseReason,
   type CompanyRef,
+  type CompanyView,
   type Id,
   type IsoDate,
   type IsoTime,
@@ -25,6 +27,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { formatDue } from '@/lib/format';
 import { usePendingWrite, type Patch } from '@/pending/pending';
+import { newestRevision, noteRevision, withRevision } from '@/pending/revisions';
 import { closeCompanyRows, closedRow, fewerDrafts, isQueuedFor, patchCompany, patchDetailItem } from './outbox-patches';
 
 const REASON_WORDS: Record<CloseReason, string> = {
@@ -60,12 +63,28 @@ export function useCompanyActions({
   willResume: string[];
 }): { held: boolean; pause: () => void; askResume: () => void; askClose: () => void; dialogs: ReactNode } {
   const client = useClient();
+  const queryClient = useQueryClient();
   const write = usePendingWrite();
   const [resuming, setResuming] = useState(false);
   const [closing, setClosing] = useState(false);
 
-  // The Outbox rows do not carry the company's revision, so a write reads it when it commits.
-  const revision = async () => (await client.company(company.id)).company.revision;
+  // The Outbox rows do not carry the company's revision, so a write reads it when it commits. Every read is
+  // noted: a close flushed as the tab closes cannot read, and sends with the newest one known.
+  const revisionKey = `company:${company.id}`;
+  const read = async () => {
+    const { revision } = (await client.company(company.id)).company;
+    noteRevision(queryClient, revisionKey, revision);
+    return revision;
+  };
+  const known = () => newestRevision(queryClient, revisionKey, queryClient.getQueryData<CompanyView>(queryKeys.company(company.id))?.company.revision);
+  /** Reads the revision ahead of a write that may have to go out without a read. A failure is fine: the write reads again. */
+  const warm = () => void read().catch(() => undefined);
+  /** A write moves the revision and returns nothing to say so: read the new one for the next write. */
+  const thenWarm = <T,>(p: Promise<T>): Promise<T> =>
+    p.then((r) => {
+      warm();
+      return r;
+    });
 
   /** The company's new state, on every Outbox row of it and on the open detail. */
   const companyPatches = (change: (asOf: IsoTime) => Partial<CompanyRef>): Patch[] => {
@@ -85,7 +104,7 @@ export function useCompanyActions({
       afterCommit: `Paused ${company.name}.`,
       immediate: true,
       patches: companyPatches((asOf) => ({ pausedAt: asOf })),
-      commit: async (o) => client.pauseCompany(company.id, await revision(), o),
+      commit: (o) => thenWarm(withRevision(o, known, read, (r) => client.pauseCompany(company.id, r, o))),
     });
 
   const resume = () =>
@@ -95,7 +114,7 @@ export function useCompanyActions({
       afterCommit: `Resumed ${company.name}.`,
       immediate: true,
       patches: companyPatches(() => ({ pausedAt: null, heldByTouchId: null })),
-      commit: async (o) => client.resumeCompany(company.id, await revision(), o),
+      commit: (o) => thenWarm(withRevision(o, known, read, (r) => client.resumeCompany(company.id, r, o))),
     });
 
   const close = (reason: CloseReason, note: string) => {
@@ -111,12 +130,13 @@ export function useCompanyActions({
     };
     const shell: Patch<ShellSummary> = { key: queryKeys.shell, apply: (s) => fewerDrafts(s, queuedDrafts) };
     // Closing is an undoable 8-second write for every reason (design section 7, "Z for 8 seconds").
+    warm();
     write({
       id: `close:${company.id}`,
       label: `Closed ${company.name}: ${REASON_WORDS[reason]}. Its queued emails stop.`,
       afterCommit: `Closed ${company.name}.`,
       patches: [list, detail, shell],
-      commit: async (o) => client.closeCompany(company.id, reason, note, await revision(), o),
+      commit: (o) => withRevision(o, known, read, (r) => client.closeCompany(company.id, reason, note, r, o)),
     });
   };
 
@@ -151,7 +171,10 @@ export function useCompanyActions({
     held: company.pausedAt !== null || company.heldByTouchId !== null,
     pause,
     askResume: () => setResuming(true),
-    askClose: () => setClosing(true),
+    askClose: () => {
+      warm();
+      setClosing(true);
+    },
     dialogs,
   };
 }

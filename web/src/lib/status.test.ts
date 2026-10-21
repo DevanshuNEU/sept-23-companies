@@ -1,8 +1,10 @@
 import type { CompanyRef } from '@/api';
 import {
+  channelLabel,
   companyStatus,
   jobKindLabel,
   jobStatus,
+  laneLabel,
   linkedinStepStatus,
   messageStatus,
   noGoReasonStatus,
@@ -11,6 +13,8 @@ import {
   reviewKindStatus,
   sponsorshipStatus,
   touchStatus,
+  watchKindLabel,
+  winKindLabel,
 } from '@/lib/status';
 
 const company = (over: Partial<CompanyRef> = {}): CompanyRef => ({
@@ -91,5 +95,31 @@ describe('companyStatus', () => {
     expect(companyStatus(company({ status: 'candidate' }))).toMatchObject({ label: 'Proposed', tone: 'idle' });
     expect(companyStatus(company({ status: 'closed' }))).toMatchObject({ label: 'Closed', tone: 'idle' });
     expect(companyStatus(company({ status: 'removed' }))).toMatchObject({ label: 'Removed', tone: 'idle' });
+  });
+});
+
+describe('plan words', () => {
+  it('names every channel, lane, win and watch kind', () => {
+    expect(channelLabel).toEqual({
+      linkedin_request: 'LinkedIn request', linkedin_message: 'LinkedIn message', email: 'Email',
+      application: 'Application', hn_reply: 'HN reply', other: 'Other',
+    });
+    expect(laneLabel).toEqual({
+      level_role: 'Role at your level', intern_junior: 'Intern or junior work',
+      reason_no_role: 'Reason to reach out', any_us_role: 'Open US role',
+    });
+    expect(winKindLabel).toEqual({ accepted: 'Accepted', replied: 'Replied', referred: 'Referral', interview: 'Interview', offer: 'Offer' });
+    expect(watchKindLabel).toEqual({
+      careers_changed: 'Careers page changed', new_reason_no_role: 'New company to reach', merge_candidate: 'Possible duplicate',
+    });
+  });
+  it('gives every word a label and writes no dash', () => {
+    const dash = new RegExp(`[${String.fromCharCode(0x2013)}${String.fromCharCode(0x2014)}]`);
+    for (const map of [channelLabel, laneLabel, winKindLabel, watchKindLabel]) {
+      for (const label of Object.values(map)) {
+        expect(label.length).toBeGreaterThan(0);
+        expect(label).not.toMatch(dash);
+      }
+    }
   });
 });

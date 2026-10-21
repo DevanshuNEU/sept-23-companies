@@ -381,6 +381,34 @@ describe('save and conflict', () => {
     expect((bodyBox() as HTMLTextAreaElement).value).toBe(more);
   });
 
+  it('mod+enter while text is typed during its save keeps that text and does not approve', async () => {
+    const { client } = await open(T.omar, 'Omar Haddad');
+    const original = client.saveMessage.bind(client);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const save = vi.spyOn(client, 'saveMessage').mockImplementation(async (...args) => {
+      await gate;
+      return original(...args);
+    });
+    const approve = vi.spyOn(client, 'approve');
+    const first = `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. One.`;
+    fireEvent.change(bodyBox(), { target: { value: first } });
+    press('Enter', { ctrlKey: true }, bodyBox());
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    const more = `${first}\nP.S. Two, typed while saving.`;
+    fireEvent.change(bodyBox(), { target: { value: more } });
+    release();
+    await waitFor(() => expect(toastText()).toContain(SAVE_FIRST));
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    expect((bodyBox() as HTMLTextAreaElement).value).toBe(more);
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(approve).not.toHaveBeenCalled();
+  });
+
   async function conflicted() {
     const view = await open(T.kenji, 'Kenji Watanabe');
     const mine = `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. Mine.`;

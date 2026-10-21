@@ -371,6 +371,11 @@ function DetailBody({
     if (dirty) {
       const saved = await save();
       if (!saved) return;
+      // He typed while the save was in flight: that text is not saved, so approving now would drop it.
+      if (edits.get(messageId)) {
+        toast(SAVE_FIRST, { id: 'approve-refused' });
+        return;
+      }
       d = saved;
     }
     const stillBlocked = d.checks.filter((c) => c.severity === 'block');

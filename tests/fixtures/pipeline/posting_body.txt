@@ -1,0 +1,5 @@
+Software Engineer, New Grad
+
+Kestrel Robotics builds control software for warehouse robots. You will write C++ and Python, work with a small team in Boston, and ship to real customers in your first month.
+
+What we look for: a computer science degree or equivalent, and no professional experience required. We sponsor work visas for the right candidates.

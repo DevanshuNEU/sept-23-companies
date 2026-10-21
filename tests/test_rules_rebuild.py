@@ -401,6 +401,28 @@ class RecordEvidenceTests(RebuildTestCase):
         self.assertEqual((events[0]["kind"], events[0]["actor"], events[0]["company_id"]),
                          ("recorded", "rules", self.company))
 
+    def test_record_evidence_labels_the_event_with_its_actor(self):
+        # LCA, HN and Form D evidence is labeled by its source; the rules stay the default (#30 Task 1).
+        lca = EvidenceDraft("lca", '{"fy":2025,"jr":3,"level1":2,"newemp_jr":2,"software":5}', "confirmed", "lca")
+        self.assertEqual(record_evidence(self.conn, self.company, [lca], actor="source"), 1)
+        hq = EvidenceDraft("hq", "Boston, MA", "estimate", "posting")
+        self.assertEqual(record_evidence(self.conn, self.company, [hq]), 1)
+        actors = [r[0] for r in self.conn.execute(
+            "SELECT actor FROM event WHERE entity = 'evidence' ORDER BY event_id")]
+        self.assertEqual(actors, ["source", "rules"])
+        stage = EvidenceDraft("stage", "seed", "estimate", "posting")
+        with self.assertRaises(sqlite3.IntegrityError):
+            record_evidence(self.conn, self.company, [stage], actor="somebody")
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM evidence WHERE fact = 'stage'").fetchone()[0], 0)
+
+    def test_stored_decision_is_public_and_the_old_name_stays(self):
+        self.assertIs(rebuild_module._stored, rebuild_module.stored_decision)
+        self.assertIn("stored_decision", rebuild_module.__all__)
+        pid = self.posting()
+        decided = decide_and_store(self.conn, pid)
+        row = self.conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
+        self.assertEqual(rebuild_module.stored_decision(row), decided)
+
     def test_record_evidence_ignores_repeats(self):
         drafts = from_old_dashboard({"sizeWhy": "about 40 people"})
         self.assertEqual(record_evidence(self.conn, self.company, drafts), 1)

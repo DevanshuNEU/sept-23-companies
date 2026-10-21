@@ -367,6 +367,8 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
 
 - [ ] **Step 1: Edit both docs.** No em or en dashes.
 - [ ] **Step 2: Run** `grep -c -P "[\x{2014}\x{2013}]" docs/README.md docs/superpowers/plans/2026-10-19-store-and-rules.md`. Expected: `0` for each.
+- Hand-off sentence (final review): #14's reply reader records an email reply on the matching `outreach_touch` (found by `email_touch_id`) through `record_outcome`, and auto replies stay on the email touch only (`touch.auto_reply_at`; `outreach_touch.reply_kind` has no `auto_reply`); sorting a reply later is `set_reply_kind` in `outreach/store/writes.py`.
+- Hand-off notes (final review): One `@invariant` per stage and no manual `register(harness)` call: the harness imports each stream's stages module itself, so a manual call registers the stages twice. `daily_list_entry`, `application` and `outreach_touch` have `revision` but no `updated_at`, so #11's `bump()` must not set it on them.
 - [ ] **Step 3: Commit** `Docs: foundation hand-off for the pipeline streams (#30)`.
 
 ## Task 6: Contract checks and the pipeline flow test

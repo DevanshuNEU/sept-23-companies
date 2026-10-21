@@ -10,20 +10,30 @@ place `sizeClass` is read. Every pattern is a list of literals with bounded gaps
 """
 import datetime
 import functools
+import json
 import re
 from dataclasses import dataclass
 
 from .config import Config, default_config, phrases
 
 # The evidence table's CHECK vocabularies (outreach/store/migrations/0001_initial.sql).
-FACTS = ("size", "stage", "sponsorship", "domain", "hq", "everify")
+FACTS = ("size", "stage", "sponsorship", "domain", "hq", "everify", "lca", "cap_exempt", "staffing_risk", "funding",
+         "headcount")
 CONFIDENCES = ("confirmed", "estimate", "guess")
 SOURCE_KINDS = ("hand", "posting", "old_dashboard", "yc", "builtin", "linkedin", "website", "formd", "lca", "everify",
-                "other")
+                "other", "stapply", "commoncrawl", "hn", "simplify")
 STAGES = ("pre_seed", "seed", "series_a", "series_b", "series_c", "series_d", "series_e_plus", "late_private",
           "public", "yc", "early")
 SPONSORSHIP = ("yes", "no", "opt_only", "unclear")
 EVERIFY = ("enrolled", "not_enrolled")
+CAP_EXEMPT = ("likely", "confirmed", "no")
+STAFFING_RISK = ("low", "medium", "high")
+COUNTED = ("size", "headcount")  # the facts that carry num_low and num_high
+# The lca value (#31): one fiscal year of filings as JSON, these integer keys, plus median_jr_wage when known.
+LCA_KEYS = frozenset({"fy", "software", "jr", "level1", "newemp_jr"})
+LCA_OPTIONAL = frozenset({"median_jr_wage"})
+# The funding value (#31, Form D): filed_on a date, amount_usd an integer or null, kind a non-empty text.
+FUNDING_KEYS = frozenset({"filed_on", "amount_usd", "kind"})
 
 
 def _is_date(value) -> bool:
@@ -34,6 +44,45 @@ def _is_date(value) -> bool:
         return datetime.date.fromisoformat(value).isoformat() == value
     except ValueError:
         return False
+
+
+def _count(value) -> bool:
+    """A whole number of at least 0 (True and False are not counts)."""
+    return type(value) is int and value >= 0
+
+
+def _json_object(value) -> dict | None:
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _lca_problem(value) -> str | None:
+    obj = _json_object(value)
+    if obj is None:
+        return "an lca value that is not a JSON object"
+    if not LCA_KEYS <= obj.keys() <= LCA_KEYS | LCA_OPTIONAL:
+        return f"lca keys {sorted(obj)}"
+    if not all(_count(v) for v in obj.values()):
+        return "an lca count that is not a whole number"
+    return None
+
+
+def _funding_problem(value) -> str | None:
+    obj = _json_object(value)
+    if obj is None:
+        return "a funding value that is not a JSON object"
+    if obj.keys() != FUNDING_KEYS:
+        return f"funding keys {sorted(obj)}"
+    if not _is_date(obj["filed_on"]):
+        return f"funding filed_on {obj['filed_on']!r}"
+    if obj["amount_usd"] is not None and not _count(obj["amount_usd"]):
+        return f"funding amount_usd {obj['amount_usd']!r}"
+    if not isinstance(obj["kind"], str) or not obj["kind"]:
+        return f"funding kind {obj['kind']!r}"
+    return None
 
 
 @dataclass(frozen=True)
@@ -59,9 +108,9 @@ class EvidenceDraft:
             problems.append(f"confidence {self.confidence!r}")
         if self.source_kind not in SOURCE_KINDS:
             problems.append(f"source_kind {self.source_kind!r}")
-        if self.fact == "size":
+        if self.fact in COUNTED:
             if self.num_low is None or self.num_low < 0:
-                problems.append("a size without num_low >= 0")
+                problems.append(f"a {self.fact} without num_low >= 0")
             elif self.num_high is not None and self.num_high < self.num_low:
                 problems.append("num_high below num_low")
         elif self.num_low is not None or self.num_high is not None:
@@ -72,6 +121,14 @@ class EvidenceDraft:
             problems.append(f"sponsorship {self.value!r}")
         if self.fact == "everify" and (self.value not in EVERIFY or self.observed_on is None):
             problems.append("an everify fact needs enrolled or not_enrolled and observed_on")
+        if self.fact == "cap_exempt" and self.value not in CAP_EXEMPT:
+            problems.append(f"cap_exempt {self.value!r}")
+        if self.fact == "staffing_risk" and self.value not in STAFFING_RISK:
+            problems.append(f"staffing_risk {self.value!r}")
+        if self.fact == "lca" and (problem := _lca_problem(self.value)):
+            problems.append(problem)
+        if self.fact == "funding" and (problem := _funding_problem(self.value)):
+            problems.append(problem)
         if self.observed_on is not None and not _is_date(self.observed_on):
             problems.append(f"observed_on {self.observed_on!r}")
         if problems:

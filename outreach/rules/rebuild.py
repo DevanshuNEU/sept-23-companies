@@ -24,7 +24,7 @@ from .facts import EvidenceDraft
 from .version import ruleset_version
 
 __all__ = ["RulesetNotCurrent", "Flip", "FlipReport", "BATCH_SIZE", "rebuild", "decide_and_store",
-           "record_evidence", "main"]
+           "record_evidence", "stored_decision", "main"]
 
 BATCH_SIZE = 500
 
@@ -77,12 +77,16 @@ class FlipReport:
         return out
 
 
-def _stored(row: sqlite3.Row) -> Decision:
-    """A Decision from a decision-table row."""
+def stored_decision(row: sqlite3.Row) -> Decision:
+    """A Decision from a decision-table row (or a current_decision or posting_decision row). Ranking and the reader
+    read stored rows through this."""
     values = {c: row[c] for c in _COLUMNS}
     for flag in ("level_ok", "citizenship", "start_2027"):
         values[flag] = bool(values[flag])
     return Decision(**values)
+
+
+_stored = stored_decision  # the old private name, kept so nothing else breaks
 
 
 def _word(value) -> str:
@@ -122,7 +126,7 @@ def _decide_batch(conn, ids, cfg, report: dict) -> list[tuple[int, Decision]]:
             old_row = conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (posting_id,)).fetchone()
         new = decide(_posting_input(posting), cfg)
         if old_row is not None:
-            old = _stored(old_row)
+            old = stored_decision(old_row)
             was, now = passes(old), passes(new)
             if was and not now:
                 report["to_hidden"].append(
@@ -266,8 +270,10 @@ def decide_and_store(conn: sqlite3.Connection, posting_id: int, *, cfg: Config |
 
 
 def record_evidence(conn: sqlite3.Connection, company_id: int, drafts: list[EvidenceDraft], *,
-                    posting_id: int | None = None) -> int:
+                    posting_id: int | None = None, actor: str = "rules") -> int:
     """Insert rule-made evidence (never locked) and return how many rows were new.
+
+    `actor` labels the event: 'rules' by default, 'source' for LCA, HN and Form D evidence (an event.actor value).
 
     A repeat of an earlier unlocked row adds nothing (the `evidence_once` index). A hand draft is refused: hand values
     come from #16 edits and #17's locked import, which write `locked = 1` themselves. A draft the table rejects
@@ -287,7 +293,7 @@ def record_evidence(conn: sqlite3.Connection, company_id: int, drafts: list[Evid
             if cur.rowcount:
                 added.append(d.fact)
         if added:
-            append_event(conn, entity="evidence", kind="recorded", actor="rules", company_id=company_id,
+            append_event(conn, entity="evidence", kind="recorded", actor=actor, company_id=company_id,
                          detail={"added": len(added), "facts": added, "posting_id": posting_id})
     return len(added)
 

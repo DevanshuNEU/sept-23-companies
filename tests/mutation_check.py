@@ -38,6 +38,7 @@ RULES = ROOT / "outreach" / "rules"
 STORE = ROOT / "outreach" / "store"
 READER = ROOT / "outreach" / "reader"
 CRAWL = ROOT / "outreach" / "crawl"
+NET = ROOT / "outreach" / "net.py"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
 # (file, guarantee broken, find, replace, expect). `find` must be exact text from the code as it is now and appear
@@ -251,6 +252,11 @@ MUTATIONS = [
     (CRAWL / "base.py", "an ATS name outside board.ats falls back to the slug grammar again",
      "if not isinstance(token, str) or ats not in BOARD_ATS:", "if not isinstance(token, str):",
      "test_an_ats_name_outside_the_board_vocabulary_is_refused"),
+
+    (NET, "a cross-host redirect keeps the caller's User-Agent (the SEC contact address) again",
+     "                headers = {}\n",
+     "                headers = {k: v for k, v in (headers or {}).items() if k.lower() == \"user-agent\"}\n",
+     "test_a_caller_user_agent_with_an_address_does_not_reach_the_second_host"),
 
     # ---- store/writes.py helpers (#30) ------------------------------------------------------------------------
     (STORE / "writes.py", "body_sha256 folds case, so 'A b' and 'a b' are the same body",

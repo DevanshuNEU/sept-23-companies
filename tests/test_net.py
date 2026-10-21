@@ -50,6 +50,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/xhost":
             port = self.server.server_address[1]
             self._send(302, b"", [("Location", f"http://localhost:{port}/echo-x")])
+        elif self.path == "/xhost-ua":
+            port = self.server.server_address[1]
+            self._send(302, b"", [("Location", f"http://localhost:{port}/echo-ua")])
         elif self.path == "/samehost":
             self._send(302, b"", [("Location", "/echo-x")])
         elif self.path == "/to-file":
@@ -127,15 +130,28 @@ class UrllibClientTests(unittest.TestCase):
             with self.assertRaises(FetchError):
                 UrllibClient().get(s.base + "/to-file", follow_redirects=True)
 
-    def test_a_redirect_to_another_host_drops_caller_headers_but_keeps_user_agent(self):
+    def test_a_redirect_to_another_host_drops_every_caller_header_user_agent_included(self):
         hdrs = {"X-Token": "secret", "User-Agent": "Custom/2"}
         with _Server() as s:
             same = UrllibClient().get(s.base + "/samehost", hdrs, follow_redirects=True)
             other = UrllibClient().get(s.base + "/xhost", hdrs, follow_redirects=True)
             default_ua = UrllibClient().get(s.base + "/xhost", {"X-Token": "secret"}, follow_redirects=True)
         self.assertEqual(same.text(), "secret|Custom/2")
-        self.assertEqual(other.text(), "|Custom/2")
+        self.assertEqual(other.text(), "|" + USER_AGENT)
         self.assertEqual(default_ua.text(), "|" + USER_AGENT)
+
+    def test_a_caller_user_agent_with_an_address_does_not_reach_the_second_host(self):
+        contact = "outreach-research someone@example.edu"
+        with _Server() as s, tempfile.TemporaryDirectory() as d:
+            got = UrllibClient().get(s.base + "/xhost", {"User-Agent": contact}, follow_redirects=True)
+            path = Path(d) / "f.bin"
+            UrllibClient().download(s.base + "/xhost-ua", path, {"User-Agent": contact})
+            downloaded = path.read_bytes()
+        for seen in (got.text(), downloaded.decode()):
+            self.assertNotIn("@", seen)
+            self.assertNotIn("someone", seen)
+        self.assertEqual(got.text(), "|" + USER_AGENT)
+        self.assertEqual(downloaded.decode(), USER_AGENT)
 
     def test_urllib_client_stops_a_redirect_loop_at_max_redirects(self):
         with _Server() as s:

@@ -172,8 +172,9 @@ class UrllibClient:
             hops += 1
             target = urllib.parse.urljoin(req.full_url, location)
             if _host(target) != _host(req.full_url):
-                # Do not hand a caller's token or cookie to another host; its User-Agent is only a name.
-                headers = {k: v for k, v in (headers or {}).items() if k.lower() == "user-agent"}
+                # Do not hand any caller header to another host: a token, a cookie, or a User-Agent that carries a
+                # contact address (SEC's does). The profile's own User-Agent applies from here.
+                headers = {}
             req = self._request(target, headers)
 
     def _do(self, req, follow: bool, headers=None) -> Response:

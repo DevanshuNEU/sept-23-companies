@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-20-opportunity-pipeline-design.md` (sections 3, 4, 5.1, 5.2, 5.3, 5.4, 12, 14, 17). Foundation: `docs/superpowers/plans/2026-10-21-pipeline-foundation.md` (its tables, `Candidate`, `Source`, `add_alias`, `mark_shared_key`, `is_shared_key` are used exactly as named, never redefined). Evidence: `docs/research/2026-10-20-lca-small-junior-employers.md`, `docs/research/2026-10-20-company-discovery-and-job-data.md` (sections 3, 5, 7).
 
-**Shared formats and harness (foundation Tasks 1 and 6):** board tokens and aliases follow the foundation's "Shared formats" section exactly (see Task 10). Every `Source` here gets a `check_source` test from `tests/contracts.py`, and this stream registers the `discover`, `resolve` and `find_boards` stages in `tests/pipeline/` (Task 16).
+**Shared formats and harness (foundation Tasks 1 and 6):** board tokens and aliases follow the foundation's "Shared formats" section exactly (see Task 10). Every `Source` here gets a `check_source` test from `tests/contracts.py`, and this stream registers the `discover`, `resolve` and `find_boards` stages in `tests/pipeline/stages_sources.py` (Task 16, foundation Task 6 convention).
 
 **Branch and issue:** `DevanshuNEU/sources-and-identity`, from the foundation branch once #30 is merged. Issue #31. The PR body says it closes #31.
 
@@ -29,6 +29,24 @@
    postings for the live-role signal until he confirms. About 500 confirmations up front would cost him more.
 4. **Evidence from sources** is written with `record_evidence(..., actor='source')`.
 
+Integration review rulings (2026-10-21), each also edited into the task text where a name or signature changed:
+
+5. **One work-tier table, `work_tier`** (#30 Task 1, with `source_version`). Wherever this plan says `company_work_tier`,
+   read `work_tier`; its timestamp column is `set_at`.
+6. **Board provenance.** `add_board` takes `found_by` and writes `board.found_by` (#30 Task 1): `stapply_name` for a
+   stapply match on `name` or `slug`, `import` for a stapply match on `host` (the company's own domain confirms it),
+   `careers_page` for the careers step, `hand` for an `ats` alias of a by-hand company, `import` for any other alias,
+   `slug_probe` for #21's `probe_slugs`. #21 raises the "board match doubtful" item on the first read of a
+   `stapply_name` board, and ranking holds back every hide from that board until the first read has happened and the
+   item is resolved.
+7. **`company_post` has a writer: this plan** (HN posts, with `asks_email`). **`median_jr_wage` has a writer: this
+   plan** (the `lca` evidence key).
+8. **One HTTP layer, one fake, one User-Agent** live in #30 (`outreach/net.py`, `tests/fakes.py`). This plan imports
+   them. No request carries an email address or contact URL. SEC's access policy asks for contact details in the
+   User-Agent; if SEC refuses the shared one, that is Devanshu's decision, not a code change here.
+9. **Companies whose only boards have no crawler adapter** get a watched page (Task 15), so they are never silently
+   unread.
+
 ## Global Constraints
 
 - Standard library only in `outreach/`. No pandas, no calamine, no requests.
@@ -39,10 +57,10 @@
 - Writers use `INSERT ... ON CONFLICT DO NOTHING`, never `INSERT OR IGNORE` or `INSERT OR REPLACE`. A CHECK failure is counted and reported, never swallowed.
 - Timestamps are canonical UTC; every table is STRICT; every derived row names its version (source version in the `source` table and the job summary).
 - Error is not empty: a fetch or parse failure is never stored as "no board", "no careers page" or "no employers".
-- Board rows follow the foundation's Shared formats: `board.token` is the ATS slug lower case (Greenhouse, Lever, Ashby and the rest), Workday `<tenant>.wd<N>/<site>`, Oracle `<host>/<siteNumber>`, iCIMS the board host; the board's alias has `source='ats'` and key `<ats>:<token>`. `job_run.job` values written here: `discover`, `resolve`, `find_boards`. This plan never touches `read_queue`.
-- Requests: a declared User-Agent; DOL needs browser-like headers; SEC at most 10 requests a second; careers pages at most 2 requests per company, 1.5 seconds apart per host.
+- Board rows follow the foundation's Shared formats: `board.token` is the ATS slug lower case (Greenhouse, Lever, Ashby and the rest), Workday `<tenant>.wd<N>/<site>` and Oracle `<host>/<siteNumber>` with `site` and `siteNumber` kept as the ATS spells them, iCIMS the board host, one grammar (`valid_token`, foundation Task 2); the board's alias has `source='ats'` and key `<ats>:<token>`. `job_run.job` values written here: `discover`, `resolve`, `find_boards`. This plan never touches `read_queue`.
+- Requests: the one User-Agent of the foundation's Shared formats (no email, no contact address); DOL needs the `browser` profile of `UrllibClient`; SEC at most 10 requests a second; careers pages at most 2 requests per company, 1.5 seconds apart per host.
 - No em dashes or en dashes in code, comments, docs or commit messages.
-- Commit trailer: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+- Commit trailer: the one the executing session is given.
 
 ## Review Focus
 
@@ -58,13 +76,11 @@ Failure modes the spec implies that no single happy-path test covers. Each has a
 
 | File | Responsibility |
 |---|---|
-| `outreach/rules/facts.py` | Modify: widen `FACTS` and `SOURCE_KINDS` to the foundation schema, validate the new values (Task 1) |
-| `outreach/store/migrations/0002_work_tier.sql` | Create: `company_work_tier`, `evidence_domain` and `company_source_ref` indexes (Task 1) |
-| `outreach/net.py` | Create: `Response`, `FetchError`, `HttpClient`, `UrllibClient`, `PoliteClient` |
+| `tests/test_facts_vocab.py`, `tests/test_identity_indexes.py` | Create: the vocabulary drift test and the index-use tests (Task 1; #30 owns `facts.py` and the schema) |
 | `outreach/sources/paths.py` | Create: `sources_dir()`, the cache folder for downloaded files |
 | `outreach/sources/tabular.py` | Create: `read_rows` for CSV and xlsx |
 | `outreach/sources/keys.py` | Create: `normalize_fein`, `registrable_domain`, `classify_domain` |
-| `outreach/sources/capabilities.py` | Create: `SharedKey`, `SharedKeySource`, `TieredSource` protocols |
+| `outreach/sources/capabilities.py` | Create: `SharedKey`, `SharedKeySource`, `TieredSource`, `PostRecord`, `PostSource` protocols |
 | `outreach/sources/lca.py` | Create: LCA aggregation (`load_employers`) and `LcaSource` |
 | `outreach/sources/lca_rules.py`, `lca.toml` | Create: staffing filter, cap-exempt, tiers, `classify` |
 | `outreach/identity.py` | Create: `resolve_candidate`, `find_company`, `resolve_store`, merge items |
@@ -76,71 +92,56 @@ Failure modes the spec implies that no single happy-path test covers. Each has a
 | `outreach/sources/careers.py` | Create: `CareersChecker` (careers page to boards or a watched page) |
 | `outreach/sources/__main__.py` | Create: CLI (`fetch`, `discover`, `resolve`, `find-boards`, `add`) |
 | `tests/fixtures/{lca,formd,hn,stapply,careers}/` | Create: small fixture files |
-| `tests/fakes.py`, `tests/xlsxbuild.py` | Create: `FakeClient`, a tiny xlsx writer for tests |
-| `tests/pipeline/sources_stages.py`, `tests/pipeline/test_flow.py`, `tests/fixtures/pipeline/` | Modify/Create: register the `discover`, `resolve`, `find_boards` stages and their invariants in the foundation's harness (Task 16) |
+| `tests/xlsxbuild.py` | Create: a tiny xlsx writer for tests (`FakeClient` is #30's `tests/fakes.py`) |
+| `tests/pipeline/stages_sources.py`, `tests/pipeline/test_flow.py`, `tests/fixtures/pipeline/` | Modify/Create: register the `discover`, `resolve`, `find_boards` stages and their invariants in the foundation's harness (Task 16) |
 | `tests/test_*.py` | One test module per task, named in each task |
 
 ---
 
-## Task 1: Evidence vocabulary and migration 0002
+## Task 1: Vocabulary drift test and index checks (the schema and `facts.py` moved to #30)
 
 **Files:**
-- Modify: `outreach/rules/facts.py`
-- Create: `outreach/store/migrations/0002_work_tier.sql`
-- Test: `tests/test_facts_vocab.py`, `tests/test_store_schema.py`
+- Test: `tests/test_facts_vocab.py` (only if #30 has not already landed it), `tests/test_identity_indexes.py`
 
 **Interfaces:**
-- Consumes: the foundation's 0001 (new facts, source kinds, `company_source`).
-- Produces:
-  - `FACTS` gains `lca`, `cap_exempt`, `staffing_risk`, `funding`, `headcount`; `SOURCE_KINDS` gains `stapply`, `commoncrawl`, `hn`, `simplify`. `EvidenceDraft` validates the values the schema CHECKs: `lca` JSON with exactly the keys `fy, software, jr, level1, newemp_jr`; `cap_exempt` in `likely|confirmed|no`; `staffing_risk` in `low|medium|high`; `funding` JSON with keys `filed_on, amount_usd, kind`; `headcount` takes `num_low` like `size`.
-  - Table `company_work_tier(company_id PK REFERENCES company, tier INTEGER CHECK IN (1,2,3), reason TEXT NOT NULL, promoted INTEGER DEFAULT 0 CHECK IN (0,1), source_version TEXT NOT NULL, updated_at)`.
-  - `CREATE INDEX evidence_domain ON evidence(value) WHERE fact = 'domain'` and `CREATE INDEX company_source_ref ON company_source(source_name, source_ref)`.
+- Consumes (all from #30 Task 1; this plan writes no migration and edits no rule file): `FACTS` and `SOURCE_KINDS`
+  widened to `lca`, `cap_exempt`, `staffing_risk`, `funding`, `headcount` and `stapply`, `commoncrawl`, `hn`, `simplify`;
+  `EvidenceDraft` value checks (`lca` JSON with keys `fy, software, jr, level1, newemp_jr` and optional
+  `median_jr_wage`); the `work_tier` and `company_post` tables; the `evidence_domain` and `company_source_ref`
+  indexes; the `'source'` event actor and `record_evidence(..., actor=...)`.
+- Produces: tests only.
 
-Why a new migration: the foundation owns 0001 and has no home for the work tier or a promote flag, and identity looks domains up by value (18,000 candidates against 100,000 evidence rows needs the index). The number is the next free one at merge time; renumber on rebase.
+- [ ] **Step 1: Check the gap.** `grep -n "FACTS =" outreach/rules/facts.py` shows the widened tuples. If #30 has not
+  merged, stop: this stream depends on it.
+- [ ] **Step 2: Write the failing tests.** `test_vocab_matches_schema` in `test_facts_vocab.py` (reads the `evidence`
+  CREATE statement from `sqlite_master` of a fresh store and asserts every `FACTS` and `SOURCE_KINDS` value appears in
+  it; skip if #30 already added it). In `test_identity_indexes.py`: `test_domain_lookup_uses_evidence_domain_index` and
+  `test_company_source_lookup_uses_ref_index` (both assert the index name appears in `EXPLAIN QUERY PLAN` output; 18,000
+  candidates against 100,000 evidence rows needs the index).
+- [ ] **Step 3: Run** `uv run python -m unittest tests.test_facts_vocab tests.test_identity_indexes -v`. Expected: PASS
+  once #30 has landed (a failure means #30 is missing a definition: fix it there).
+- [ ] **Step 4: Commit** `Tests: vocabulary drift and identity index checks (#31)`.
 
-- [ ] **Step 1: Check the gap.** `grep -n "FACTS =" outreach/rules/facts.py`. The foundation plan re-exports `EvidenceDraft` but lists no change to `facts.py`, whose `FACTS` and `SOURCE_KINDS` tuples mirror the CHECKs and would reject `lca`. If the foundation branch already widened them, skip steps 3 and 4 for `facts.py`.
-- [ ] **Step 2: Write the failing tests.**
-  - `test_vocab_matches_schema` (in `test_facts_vocab.py`): reads the `evidence` CREATE statement from `sqlite_master` of a fresh store and asserts every `FACTS` and `SOURCE_KINDS` value appears in it, so the tuples cannot drift again.
-  - `test_draft_accepts_lca_json`: `EvidenceDraft("lca", '{"fy":2025,"software":5,"jr":3,"level1":2,"newemp_jr":2}', "confirmed", "lca")` constructs; the same with a missing key raises `ValueError`.
-  - `test_draft_rejects_bad_cap_exempt_and_staffing_values`: `cap_exempt` value `maybe` and `staffing_risk` value `none` raise.
-  - `test_draft_accepts_hn_and_stapply_source_kinds`.
-  - `test_headcount_needs_num_low`.
-  - In `test_store_schema.py`: `test_work_tier_rejects_tier_4`, `test_work_tier_is_one_row_per_company`, `test_domain_lookup_uses_evidence_domain_index` and `test_company_source_lookup_uses_ref_index` (both assert the index name appears in `EXPLAIN QUERY PLAN` output).
-- [ ] **Step 3: Run** `uv run python -m unittest tests.test_facts_vocab tests.test_store_schema -v`. Expected: the new tests FAIL.
-- [ ] **Step 4: Implement** the widened tuples and value checks in `facts.py` (keep the existing style: problems list, one `ValueError`), and write `0002_work_tier.sql` in the 0001 file's style (comments, STRICT, canonical timestamp CHECK).
-- [ ] **Step 5: Run** the full suite `uv run python -m unittest discover -s tests -t .` and `uv run python tests/mutation_check.py`. Expected: all OK. `facts.py` is in `RULE_FILES`, so `ruleset_version()` changes; the version tests derive it, so nothing else should need an edit. If a test pins a literal version, update it.
-- [ ] **Step 6: Commit** `Store and facts: evidence vocabulary and the work tier table for sources (#31)`.
-
-## Task 2: Network layer and fakes
+## Task 2: Sources directory and test settings (the HTTP layer moved to #30)
 
 **Files:**
-- Create: `outreach/net.py`, `outreach/sources/paths.py`, `tests/fakes.py`
+- Create: `outreach/sources/paths.py`
 - Modify: `tests/__init__.py` (scratch `OUTREACH_SOURCES_DIR`)
-- Test: `tests/test_net.py`
+- Test: `tests/test_sources_paths.py`
 
 **Interfaces:**
-- Produces:
-  - `@dataclass(frozen=True) class Response: status: int; url: str; body: bytes; headers: dict[str, str]`; `Response.text() -> str` (UTF-8, errors replaced); `Response.json() -> object`.
-  - `class FetchError(Exception)`: transport failure only (DNS, timeout, TLS, reset). Any HTTP status, including 404 and 503, is a `Response`.
-  - `class HttpClient(Protocol): def get(self, url: str, *, headers: dict[str, str] | None = None) -> Response; def download(self, url: str, dest: Path, *, headers: dict[str, str] | None = None) -> int`.
-  - `class UrllibClient(profile: Literal["declared", "browser"] = "declared", timeout: float = 30.0)`. `declared` sends `User-Agent: outreach-pipeline (personal job search; chicholikar.d@northeastern.edu)` unless `OUTREACH_USER_AGENT` is set. `browser` sends the Chrome header set from `recon/lca/dl.sh` (Accept, Accept-Language, `sec-ch-ua*`, `Sec-Fetch-*`, `Upgrade-Insecure-Requests`) and keeps cookies in a `http.cookiejar.CookieJar` (DOL returns 403 to bare clients). `download` streams to `dest.part`, then renames, so a failure leaves no `dest`.
-  - `class PoliteClient(inner: HttpClient, *, min_interval_s: float = 1.5, per_host: dict[str, float] | None = None, clock=time.monotonic, sleep=time.sleep)`: waits so two requests to one host are at least the interval apart (`data.sec.gov` and `www.sec.gov` get 0.15 from the default `per_host`, which keeps SEC under 10 a second).
-  - `sources_dir() -> Path`: `OUTREACH_SOURCES_DIR` or `~/Library/Application Support/outreach/sources`.
-  - `FakeClient(routes: dict[str, Response | bytes | str | Exception | Path])` in `tests/fakes.py`: a `bytes`, `str` or `Path` value is a 200 body; an unknown URL raises `UnexpectedRequest(AssertionError)` so a test can never pass by accident; `requests` records every URL asked.
+- Consumes (#30 Task 2; defined there, never here): `outreach/net.py` (`Response`, `FetchError`, `HttpClient`,
+  `UrllibClient`, `SpacedClient`, `USER_AGENT`) and `tests/fakes.py::FakeClient`. Callers build
+  `SpacedClient(UrllibClient())` for SEC and careers pages, `UrllibClient(profile="browser")` for DOL, and
+  `UrllibClient()` for everything else; every one sends the foundation's User-Agent and no contact address.
+- Produces: `sources_dir() -> Path`: `OUTREACH_SOURCES_DIR` or `~/Library/Application Support/outreach/sources`.
 
-- [ ] **Step 1: Write the failing tests.**
-  - `test_polite_client_spaces_requests_per_host`: fake clock and sleep; two gets to `a.com` sleep 1.5 in total, a get to `b.com` sleeps 0.
-  - `test_polite_client_sec_hosts_use_short_interval`: two gets to `data.sec.gov` sleep 0.15.
-  - `test_fake_client_unknown_url_fails_the_test`.
-  - `test_fake_client_exception_route_raises_fetch_error`.
-  - `test_response_text_replaces_bad_bytes`.
-  - `test_download_leaves_no_file_on_failure` (FakeClient that raises mid-download; `dest` does not exist, no `.part` left).
-  - `test_browser_profile_sends_sec_fetch_headers` (builds the `urllib.request.Request` without sending it; asserts `Sec-Fetch-Mode` and a Chrome `User-Agent`).
-  - `test_declared_profile_user_agent_has_contact`.
-- [ ] **Step 2: Run** `uv run python -m unittest tests.test_net -v`. Expected: FAIL (module not found).
-- [ ] **Step 3: Implement** the above. `UrllibClient` has a private `_request(url, headers) -> urllib.request.Request` the header tests call.
+- [ ] **Step 1: Write the failing tests.** `test_sources_dir_uses_the_env_override`,
+  `test_sources_dir_default_is_under_application_support`, `test_tests_init_points_sources_dir_at_scratch`.
+- [ ] **Step 2: Run** `uv run python -m unittest tests.test_sources_paths -v`. Expected: FAIL (module not found).
+- [ ] **Step 3: Implement** `paths.py` and the `tests/__init__.py` line.
 - [ ] **Step 4: Run** the same command. Expected: PASS.
-- [ ] **Step 5: Commit** `Net: injected HTTP client, polite wrapper and fakes (#31)`.
+- [ ] **Step 5: Commit** `Sources: the sources cache folder (#31)`.
 
 ## Task 3: Tabular reader (CSV and xlsx)
 
@@ -186,11 +187,11 @@ Why a new migration: the foundation owns 0001 and has no home for the work tier 
   - `fiscal_year_of(path: Path) -> int`: `FY(\d{4})` from the file name, `ValueError` without one.
   - `norm_employer(name: str) -> str`: the research's `norm_name` (lower case, `&` to `and`, parentheses and `dba` tails dropped, punctuation and the words incorporated, inc, llc, l l c, llp, lp, ltd, limited, corp, corporation, co, company, plc, pllc, pc, pbc, gmbh, ag, sa, bv, nv, pty, usa, us, america, the removed). It groups filings into employers exactly as `analyze.py` does, so counts reproduce.
   - `parse_decision_date(raw: str) -> str | None`: an Excel serial (`'45930'` gives `'2025-09-30'`, epoch 1899-12-30) or an ISO date or datetime prefix; else `None`.
-  - `@dataclass(frozen=True) class FyStats: fy: int; total: int; software: int; jr: int; level1: int; newemp_jr: int; last_decision: str; computer_share: float; jr_share_soft: float; newemp_share_soft: float; multi_worksite_share: float; n_worksite_states: int; h1b_dependent: bool; willful: bool; secondary: int`.
+  - `@dataclass(frozen=True) class FyStats: fy: int; total: int; software: int; jr: int; level1: int; newemp_jr: int; last_decision: str; computer_share: float; jr_share_soft: float; newemp_share_soft: float; multi_worksite_share: float; n_worksite_states: int; h1b_dependent: bool; willful: bool; secondary: int; median_jr_wage: int | None`. `median_jr_wage` is the median of the annualized `WAGE_RATE_OF_PAY_FROM` over the year's junior software filings (level I or II, software SOC): a `WAGE_UNIT_OF_PAY` of `Year` is used as is, `Hour` times 2080, any other unit skipped; `None` when no filing has a usable wage (an even count takes the mean of the middle two, rounded to a whole dollar).
   - `@dataclass(frozen=True) class Employer: key: str; legal_name: str; dba: str; fein: str | None; city: str; state: str; naics: str; domain: str | None; domain_kind: str; fy: dict[int, FyStats]` (legal name, city, state, NAICS, FEIN and domain are the most common value over all rows; ties break alphabetically).
   - `load_employers(paths: Sequence[Path]) -> dict[str, Employer]`: per fiscal year, keep H-1B rows with status `Certified` or `Certified - Withdrawn` (also `Certified-Withdrawn`), drop duplicate `CASE_NUMBER`s keeping the latest `DECISION_DATE`, count software rows by SOC (15-1252, 15-1253, 15-1211, 15-1221, 15-1242, 15-1243, 15-1244, 15-1299, 15-2051), `jr` is wage level I or II, `newemp_jr` is `NEW_EMPLOYMENT > 0` among those. The domain is the most common `EMPLOYER_POC_EMAIL` domain that classifies `company` and is not the row's `AGENT_ATTORNEY_EMAIL_ADDRESS` or `PREPARER_EMAIL` domain; `domain_kind` is `company`, `free`, `peo`, `attorney` or `none`. All employers are returned, large ones included (identity needs them to see shared keys).
 
-Fixture roster (rows are H-1B unless noted; columns are the 15 the loader reads plus identity columns; write the CSVs by hand, one row per filing):
+Fixture roster (rows are H-1B unless noted; columns are the 17 the loader reads (the original 15 plus `WAGE_RATE_OF_PAY_FROM` and `WAGE_UNIT_OF_PAY`) plus identity columns; write the CSVs by hand, one row per filing):
 
 | Employer (state, NAICS) | Filings | Purpose |
 |---|---|---|
@@ -208,14 +209,17 @@ Fixture roster (rows are H-1B unless noted; columns are the 15 the loader reads 
 
 Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level III.
 
+Wage columns in the fixtures (annual unless noted): Nimbus N1 120000, N2 130000, N3 140000 (Q2's repeat of N3, level III, 150000), N6 100000, all `Year`; Orchard's three filings are `Hour` at 50, 60 and 70; every other employer's wage is blank.
+
 - [ ] **Step 1: Write the failing tests.**
   - `test_keys.py`: `test_normalize_fein` (hyphenated, plain, `000000000`, 8 digits, `None`); `test_registrable_domain` (the two examples above, `www.x.com`, `a@mail.x.com`); `test_classify_domain` (one of each kind).
   - `test_lca_aggregate.py`:
-    - `test_nimbus_counts_with_q1_only`: `fy[2025]` has `total=6, software=5, jr=4, level1=2, newemp_jr=2` (N6 counts, N7 to N9 do not).
-    - `test_duplicate_case_keeps_latest_decision`: with Q1 and Q2, N3 is level III, so `jr=3, level1=2, software=5, last_decision='2025-04-02'`.
+    - `test_nimbus_counts_with_q1_only`: `fy[2025]` has `total=6, software=5, jr=4, level1=2, newemp_jr=2, median_jr_wage=125000` (N6 counts, N7 to N9 do not; the junior wages are 100000, 120000, 130000, 140000).
+    - `test_duplicate_case_keeps_latest_decision`: with Q1 and Q2, N3 is level III, so `jr=3, level1=2, software=5, median_jr_wage=120000, last_decision='2025-04-02'`.
     - `test_employers_group_by_normalized_name_and_keep_all_sizes`: Veltrix Corp is present with `fy[2025].total=30`.
     - `test_domain_choice`: Nimbus `nimbusrobotics.com`; Solo Dev `domain is None, domain_kind == 'free'`; a constructed row whose poc domain equals the attorney domain gives `'attorney'`.
     - `test_fein_is_none_when_all_zero`.
+    - `test_hourly_wage_is_annualized` (Orchard's `Hour` rows at 50, 60, 70 give `median_jr_wage == 124800`) and `test_median_wage_is_none_without_a_usable_wage` (a blank or `Month` unit gives `None`, never 0).
     - `test_renamed_header_variants_load` (a copy of Q1 with `H_1B_DEPENDENT` as the header gives Depco `h1b_dependent`).
     - `test_serial_and_iso_dates` (`'45930'` and `'2025-09-30 00:00:00'` give `'2025-09-30'`).
     - `test_missing_required_column_raises` and `test_empty_file_raises` (Review Focus 3: `MissingColumns` and `EmptyTable` propagate, never an empty dict).
@@ -266,12 +270,12 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
 - Consumes: Tasks 4 and 5; `Candidate`, `EvidenceDraft` (foundation).
 - Produces: `class LcaSource(paths: Sequence[Path], config: LcaConfig | None = None)` with `name = "lca"`, `schedule = "quarterly"`, `version = "lca-1-<first 8 hex of sha256(lca.toml)>"` (a config edit changes it), `discover(since=None)` (`since` is ignored: the files are the input), `shared_keys() -> list[SharedKey]` (sorted), `work_tier(source_ref) -> tuple[int, str] | None`.
   - One `Candidate` per employer with a qualifying fiscal year, including staffing-excluded ones. `name` is the DBA if any, else the legal name. `keys`: `legal_name`, `dba` (if any), `fein` (only when `normalize_fein` is valid and not in `shared_keys()`). `domain` only when `domain_kind == "company"`. `source_ref = "lca:" + employer.key`.
-  - Evidence per candidate: `lca` for every fiscal year where the employer had at least one software LCA (value `json.dumps({"fy","software","jr","level1","newemp_jr"}, sort_keys=True, separators=(",", ":"))`, confidence `confirmed`, `source_kind="lca"`, `source_ref="lca:FY<yy>"`, `observed_on` the year's `last_decision`); `staffing_risk` (confidence `estimate`, quote the reason); `cap_exempt="likely"` when tagged (quote the basis); `hq` as `"City, ST"` (city title-cased, confidence `estimate`); `domain` (confidence `estimate`, or `guess` when the domain is in `shared_keys()`). Classification uses `source_fy`.
+  - Evidence per candidate: `lca` for every fiscal year where the employer had at least one software LCA (value `json.dumps({"fy","software","jr","level1","newemp_jr"} plus "median_jr_wage" when it is not None, sort_keys=True, separators=(",", ":"))`, confidence `confirmed`, `source_kind="lca"`, `source_ref="lca:FY<yy>"`, `observed_on` the year's `last_decision`); `staffing_risk` (confidence `estimate`, quote the reason); `cap_exempt="likely"` when tagged (quote the basis); `hq` as `"City, ST"` (city title-cased, confidence `estimate`); `domain` (confidence `estimate`, or `guess` when the domain is in `shared_keys()`). Classification uses `source_fy`.
   - `shared_keys()`: every FEIN used by more than one employer group, and every company-kind domain used by more than one group, counted over all employers including large ones; reason `"<n> employers: <up to 5 legal names>"`.
 
 - [ ] **Step 1: Write the failing tests** (fixture CSVs from Task 4):
   - `test_yields_the_qualifying_employers`: 14 candidates (Veltrix Corp, with 30 filings, is not one); names include `Orchard` (DBA) and `Bridgeway Staffing Solutions LLC`.
-  - `test_nimbus_candidate_exactly`: `name == "Nimbus Robotics, Inc."`, `domain == "nimbusrobotics.com"`, `keys == {"legal_name": "Nimbus Robotics, Inc.", "fein": "111111111"}`, `source_ref == "lca:nimbus robotics"`, evidence facts `{lca, staffing_risk, hq, domain}` with `hq` value `"San Francisco, CA"` and the `lca` value `{"fy":2025,"jr":3,"level1":2,"newemp_jr":2,"software":5}` (Q1 and Q2 loaded).
+  - `test_nimbus_candidate_exactly`: `name == "Nimbus Robotics, Inc."`, `domain == "nimbusrobotics.com"`, `keys == {"legal_name": "Nimbus Robotics, Inc.", "fein": "111111111"}`, `source_ref == "lca:nimbus robotics"`, evidence facts `{lca, staffing_risk, hq, domain}` with `hq` value `"San Francisco, CA"` and the `lca` value `{"fy":2025,"jr":3,"level1":2,"median_jr_wage":120000,"newemp_jr":2,"software":5}` (Q1 and Q2 loaded).
   - `test_excluded_employer_is_stored_with_high_risk`: Bridgeway has `staffing_risk` `high` and quote `excluded: NAICS 5613`, and `work_tier("lca:bridgeway staffing solutions") == (3, ...)`.
   - `test_cap_exempt_tag`: Riverside has `cap_exempt` `likely`.
   - `test_shared_fein_and_domain`: `shared_keys()` is `[SharedKey("domain","veltrix.com",...), SharedKey("fein","333333333",...)]`; the three PEO candidates have no `fein` key; the two Veltrix candidates keep `Candidate.domain == "veltrix.com"` (so identity can see and refuse it) and their `domain` evidence has confidence `guess`.
@@ -296,7 +300,7 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
 **Interfaces:**
 - Consumes: `Candidate`, `Source` name strings, `add_alias`, `mark_shared_key`, `is_shared_key` (foundation), `name_key`, `append_event`, `record_evidence`, `normalize_fein`, `classify_domain`.
 - Produces:
-  - `tests/storetest.py::table_marks(conn) -> dict[str, tuple[int, int]]`: `(row count, max rowid)` for `company, company_alias, company_source, evidence, board, review_item, event, watched_page, company_work_tier, shared_key`. Idempotency tests compare two snapshots.
+  - `tests/storetest.py::table_marks(conn) -> dict[str, tuple[int, int]]`: `(row count, max rowid)` for `company, company_alias, company_source, evidence, board, review_item, event, watched_page, work_tier, company_post, shared_key`. Idempotency tests compare two snapshots.
   - `@dataclass(frozen=True) class Resolution: company_id: int; created: bool; basis: str; aliases_added: int; evidence_added: int; items_raised: int`. `basis` is one of `source_ref, fein, domain, name_state, created`.
   - `follow_merged(conn, company_id: int) -> int`: follows `merged_into` to the live company.
   - `company_state(conn, company_id: int) -> str | None`: the two-letter state from the company's non-`guess` `hq` evidence (`"City, ST"` or bare `"ST"`); `None` when absent or when two different states are recorded.
@@ -353,8 +357,8 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
 - Produces:
   - `set_work_tier(conn, company_id: int, tier: int, reason: str, source_version: str) -> bool`: upsert that writes only when `tier` or `reason` changed; returns whether it did. `effective_tier(conn, company_id) -> int`: 1 when `promoted`, the stored tier otherwise, 1 when there is no row (HN, by-hand and other sources). `promote(conn, company_id: int, actor: str) -> None`: sets `promoted = 1`, appends an event; a later `set_work_tier` never clears it.
   - `register_source(conn, name: str, version: str, run_id: int) -> None`: upsert into `source` (`ON CONFLICT(source_name) DO UPDATE SET version, last_run_id`).
-  - `@dataclass class SourceReport: candidates: int = 0; created: int = 0; attached: int = 0; skipped_unmatched: int = 0; items_raised: int = 0; evidence_added: int = 0; failed: list[str] = field(default_factory=list); error: str = ""`.
-  - `run_discover(conn, sources: Sequence[Source], *, creates: dict[str, bool] | None = None, since: str | None = None) -> tuple[int, dict[str, SourceReport]]`: one `job_run` `discover`; per source: register it, mark `shared_keys()` (if the source has them) before any candidate, then resolve each candidate with `resolve_candidate(creates=source.creates_companies)` (default `True`), set the work tier from `work_tier()` when the source has it, count. A source that raises is recorded in `error` and the others still run; a candidate that raises `sqlite3.Error` or `ValueError` is listed in `failed` with its message and the run continues. Status `ok`, or `partial` when any source errored or any candidate failed, or `failed` when every source errored. The summary is the reports as JSON.
+  - `@dataclass class SourceReport: candidates: int = 0; created: int = 0; attached: int = 0; skipped_unmatched: int = 0; items_raised: int = 0; evidence_added: int = 0; posts: int = 0; failed: list[str] = field(default_factory=list); error: str = ""`.
+  - `run_discover(conn, sources: Sequence[Source], *, creates: dict[str, bool] | None = None, since: str | None = None) -> tuple[int, dict[str, SourceReport]]`: one `job_run` `discover`; per source: register it, mark `shared_keys()` (if the source has them) before any candidate, then resolve each candidate with `resolve_candidate(creates=source.creates_companies)` (default `True`), set the work tier from `work_tier()` when the source has it (writing `work_tier` with `set_work_tier`), and, when the source has `posts()` (`PostSource`), write one `company_post` row per post of this candidate's `source_ref` (`INSERT ... ON CONFLICT(source_name, url) DO NOTHING`, `company_id` the resolved company, `text` capped at 20,000 characters), counting `posts`; count. A source that raises is recorded in `error` and the others still run; a candidate that raises `sqlite3.Error` or `ValueError` is listed in `failed` with its message and the run continues. Status `ok`, or `partial` when any source errored or any candidate failed, or `failed` when every source errored. The summary is the reports as JSON.
 
 - [ ] **Step 1: Write the failing tests.**
   - `test_tiers.py`: `test_set_work_tier_writes_only_on_change`, `test_effective_tier_defaults_to_1_without_a_row`, `test_promote_survives_a_later_rerun_that_says_tier_3`.
@@ -366,6 +370,7 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
     - `test_lca_fixtures_store_the_expected_companies` (14 companies, name aliases for each, `fein` aliases for Nimbus, Orchard and Riverside and none for the three PEO clients, `lca` evidence rows per employer, work tiers Nimbus 1, Quill 2, Bridgeway 3).
     - `test_rerun_writes_nothing_new` (`table_marks` equal after a second `run_discover` on the same files; only `job_run` and `company_source.last_seen_at` change).
     - `test_shared_fein_clients_stay_separate_companies` (Review Focus 1, end to end).
+    - `test_posts_are_written_after_the_candidate_resolves_and_once` (a fake `PostSource`: a post for a resolved candidate lands in `company_post` with its `asks_email`; a re-run adds none; a post whose candidate raised an error is not written).
 - [ ] **Step 2: Run** `uv run python -m unittest tests.test_tiers tests.test_jobs_discover -v`. Expected: FAIL.
 - [ ] **Step 3: Implement** both modules. Sources opt in to `creates_companies = False` (default `True` when the attribute is absent).
 - [ ] **Step 4: Run** the same command. Expected: PASS.
@@ -403,13 +408,13 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
 **Interfaces:**
 - Produces:
   - `SUPPORTED_ATS: frozenset[str]`: the `board.ats` values in the schema (the 0001 set plus the foundation's: `pinpoint, teamtailor, jazzhr, paycom, icims, personio, join_com, cornerstone, successfactors`).
-  - `@dataclass(frozen=True) class BoardRef: ats: str; token: str`, with `token` in the foundation's Shared format: lower case; Workday `<tenant>.wd<N>/<site>` (`riverside.wd5/external`); Oracle `<host>/<siteNumber>` (`ebwg.fa.us2.oraclecloud.com/cx`); iCIMS the board host (`careers-acme.icims.com`); every other ATS the slug. `normalize_token(ats: str, token: str) -> str` lower-cases and validates (Workday `^[a-z0-9-]+\.wd\d+/[a-z0-9_-]+$`, Oracle `^[a-z0-9.-]+/[a-z0-9_-]+$`, iCIMS `^[a-z0-9.-]+\.icims\.com$`, others `^[a-z0-9][a-z0-9._%-]*$`) and raises `ValueError` otherwise; `BoardRef.__post_init__` calls it, so no malformed token reaches a row.
+  - `@dataclass(frozen=True) class BoardRef: ats: str; token: str`, with `token` in the foundation's Shared format: Workday `<tenant>.wd<N>/<site>` (`riverside.wd5/External`, host and tenant lower case, `site` as spelled); Oracle `<host>/<siteNumber>` (`ebwg.fa.us2.oraclecloud.com/CX`, `siteNumber` as spelled); iCIMS the board host, lower case (`careers-acme.icims.com`); every other ATS the lower-case slug. `normalize_token(ats: str, token: str) -> str` lower-cases only the parts the foundation says (the slug, the Workday host and tenant, the Oracle host, the iCIMS host), then validates with `valid_token` (#30 Task 2: one grammar for #31 and #21, no `%` in a slug) and raises `ValueError` otherwise; `BoardRef.__post_init__` calls it, so no malformed token reaches a row.
   - `detect_ats(text: str) -> list[BoardRef]`: finds ATS hosts and embeds in HTML or text, in first-seen order, at most 3, without duplicates, ignoring tokens `embed, js, api, www, jobs, careers, static, assets, v1, widget`. Patterns ported from `careers_probe.py` with a named `token` group: Greenhouse (`boards|job-boards(.eu).greenhouse.io/<token>` and `embed/job_board(/js)?\?for=<token>`), Lever, Ashby, Workable (`apply.workable.com/<token>`), SmartRecruiters, Rippling (`ats.rippling.com/<token>`), BambooHR, JazzHR (`<token>.applytojob.com`), Breezy, Recruitee, Teamtailor, Pinpoint, Gem, Workday (`<tenant>.wd<N>.myworkdayjobs.com/<site>`, an optional `en-US` locale segment skipped, giving `<tenant>.wd<N>/<site>`), Oracle (`<host>.oraclecloud.com/hcmUI/CandidateExperience/<lang>/sites/<site>`, giving `<host>/<site>`), iCIMS (`<name>.icims.com`, giving the host). Hosts seen but not in `SUPPORTED_ATS` (Jobvite, Paylocity, ADP, UKG, Notion, LinkedIn) are returned by `detect_unsupported(text) -> list[str]` (host names) and never as boards.
-  - `add_board(conn, company_id: int, ref: BoardRef, *, via: str, matched_on: str) -> Literal["added", "exists", "conflict"]`: `INSERT INTO board ... ON CONFLICT(ats, token) DO NOTHING`; adds the alias `"<ats>:<token>"` (source `ats`); appends event `board` / `found` (actor `crawler`, detail `via`, `matched_on`, idempotency key `board-found:<ats>:<token>`). If the `(ats, token)` already belongs to another company it returns `conflict` and raises a `merge_candidate` for the pair (basis `same_board`) instead of moving the board.
+  - `add_board(conn, company_id: int, ref: BoardRef, *, via: str, matched_on: str, found_by: str) -> Literal["added", "exists", "conflict"]`: `INSERT INTO board (..., found_by) ... ON CONFLICT(ats, token) DO NOTHING` (`found_by` is one of the five values of `board.found_by`, ruling 6); adds the alias `"<ats>:<token>"` (source `ats`); appends event `board` / `found` (actor `crawler`, detail `via`, `matched_on`, idempotency key `board-found:<ats>:<token>`). If the `(ats, token)` already belongs to another company it returns `conflict` and raises a `merge_candidate` for the pair (basis `same_board`) instead of moving the board.
 
 - [ ] **Step 1: Write the failing tests.**
-  - `test_ats_detect.py`, one HTML snippet per ATS taken from `careers_probe.py` samples: `test_greenhouse_embed_and_board_urls`, `test_lever`, `test_ashby`, `test_workday_token_is_tenant_wd_n_slash_site` (`https://riverside.wd5.myworkdayjobs.com/en-US/External` gives `riverside.wd5/external`), `test_oracle_and_icims_tokens`, `test_rippling`, `test_generic_tokens_are_ignored` (`greenhouse.io/embed` gives nothing), `test_cap_of_three`, `test_unsupported_hosts_are_reported_not_returned`.
-  - `test_boards.py`: `test_add_board_inserts_row_alias_and_event`, `test_add_board_twice_is_exists_and_writes_nothing`, `test_board_owned_by_another_company_is_conflict_and_one_item`, `test_unsupported_ats_raises_value_error`, `test_tokens_are_lower_cased_and_validated` (`Acme` becomes `acme`; a Workday token without `.wd<N>` raises), `test_alias_uses_source_ats_and_key_ats_colon_token` (`company_alias.source == 'ats'`, key `greenhouse:acme`).
+  - `test_ats_detect.py`, one HTML snippet per ATS taken from `careers_probe.py` samples: `test_greenhouse_embed_and_board_urls`, `test_lever`, `test_ashby`, `test_workday_token_is_tenant_wd_n_slash_site` (`https://riverside.wd5.myworkdayjobs.com/en-US/External` gives `riverside.wd5/External`), `test_oracle_and_icims_tokens` (`siteNumber` `CX` keeps its case), `test_rippling`, `test_generic_tokens_are_ignored` (`greenhouse.io/embed` gives nothing), `test_cap_of_three`, `test_unsupported_hosts_are_reported_not_returned`.
+  - `test_boards.py`: `test_add_board_inserts_row_alias_and_event`, `test_add_board_records_found_by` (and a value outside the five raises `ValueError` before any write), `test_add_board_twice_is_exists_and_writes_nothing`, `test_board_owned_by_another_company_is_conflict_and_one_item`, `test_unsupported_ats_raises_value_error`, `test_tokens_are_lower_cased_and_validated` (`Acme` becomes `acme`; a Workday token without `.wd<N>` raises), `test_alias_uses_source_ats_and_key_ats_colon_token` (`company_alias.source == 'ats'`, key `greenhouse:acme`).
 - [ ] **Step 2: Run** `uv run python -m unittest tests.test_boards tests.test_ats_detect -v`. Expected: FAIL.
 - [ ] **Step 3: Implement** both modules.
 - [ ] **Step 4: Run** the same command. Expected: PASS.
@@ -424,7 +429,7 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
 **Interfaces:**
 - Consumes: `HttpClient`, `normalize_fein`, `find_company` (Task 7), `Candidate`.
 - Produces: `class FormDSource(dataset: Path, client: HttpClient)` with `name = "formd"`, `schedule = "daily"`, `version = "formd-1"`, `creates_companies = False`, `discover(since=None)`. `dataset` is the quarterly data set zip or a folder of its three TSV files. For each non-fund issuer (primary issuer of a filing whose `INDUSTRYGROUPTYPE` is not a pooled investment fund) filed on or after `since`, yield a `Candidate(name=issuer, domain=None, keys={"formd_cik": cik}, source_ref="formd:<cik>", evidence=(funding,), hq state from the issuer address)`. The `funding` draft: value `{"amount_usd": <TOTALAMOUNTSOLD or null>, "filed_on": "<date>", "kind": "form_d" or "form_d_amendment"}` (sorted keys), confidence `confirmed`, `source_kind="formd"`, `source_ref` the accession number, `observed_on` the filing date.
-  - Before yielding, the source asks the store nothing; matching is `run_discover`'s job with `creates=False`. To use the `ein` path, `FormDSource` fetches `https://data.sec.gov/submissions/CIK<10 digits>.json` once per issuer whose `name_key` equals a stored company's (a `name_lookup: Callable[[str], bool]` argument defaults to "always"; `run_discover` passes a store-backed one), through a `PoliteClient`-wrapped client, and adds `keys["fein"] = normalize_fein(ein)` when valid. An SEC `FetchError` or non-200 for one issuer drops the `fein` key for that issuer and counts it in `fetch_errors`; it never drops the filing.
+  - Before yielding, the source asks the store nothing; matching is `run_discover`'s job with `creates=False`. To use the `ein` path, `FormDSource` fetches `https://data.sec.gov/submissions/CIK<10 digits>.json` once per issuer whose `name_key` equals a stored company's (a `name_lookup: Callable[[str], bool]` argument defaults to "always"; `run_discover` passes a store-backed one), through a `SpacedClient`-wrapped client, and adds `keys["fein"] = normalize_fein(ein)` when valid. An SEC `FetchError` or non-200 for one issuer drops the `fein` key for that issuer and counts it in `fetch_errors`; it never drops the filing.
   - Per-source policy (documented in the module docstring): Form D never creates a company, never writes `stage` (money raised is not a round, design 5.4), and never raises merge items; an issuer matched weakly or not at all is counted (`skipped_unmatched`) and dropped. SPV issuers (investor vehicles named after a brand) are not matched: exact names only, since fuzzy matching was right 0 of 10 times.
 
 - [ ] **Step 1: Read the real layout once.** Download the 2026 Q3 Form D data set by hand (`https://www.sec.gov/data-research/sec-markets-data/form-d-data-sets`, one request with a declared User-Agent) into `~/Desktop/outreach-scratch/`, read its readme and header rows, and confirm the column names the source reads: `ACCESSIONNUMBER`, `FILING_DATE`, `SUBMISSIONTYPE`, `CIK`, `ENTITYNAME`, `ENTITYTYPE`, `STATEORCOUNTRY`, `CITY`, `INDUSTRYGROUPTYPE`, `TOTALOFFERINGAMOUNT`, `TOTALAMOUNTSOLD`, `IS_PRIMARYISSUER_FLAG`. Fix any name that differs, and build the fixture TSVs from the real header rows plus invented rows (never copy more than a header and three real rows). Not part of the tests.
@@ -453,6 +458,7 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
   - `parse_post(html: str) -> Post | None` (`Post(name, header, links, stage, location)`): the header is the first paragraph (text before the first `<p>`), tags stripped with `html.parser`, hrefs collected. Split the header on `|`, ` U+2014 ` (spaced), ` U+2013 ` (spaced) and ` - `; the first segment is the name: parentheses removed (a `YC S24`, `YC W26` or `YC` parenthetical gives stage `yc`, `Series A` to `Series E` give `series_a` to `series_e_plus`, `Seed` gives `seed`), a URL in it removed, `None` when empty, over 5 words, or containing `:`, `?` or `!`. Headers with no separator and more than 5 words are dropped (`unparsed`).
   - `is_us(header: str) -> bool`: false only when the header names a non-US place (config list: UK, London, Berlin, Europe, EU, Canada, Toronto, India, and so on) and no US marker (`US`, `USA`, `U.S.`, `United States`, `, <state code>`, a major US city, `NYC`, `SF`, `Remote (US`); no marker either way keeps the post (unknown location is never grounds to hide).
   - The `Candidate`: `name`, `domain` from the first link whose `classify_domain` is `company` (platform links such as `github.com` are not domains), `keys["ats"]` from `detect_ats` on the links (first supported), `source_ref = "hn:" + name_key(name)` (stable across months, so one company per name), evidence per post: `domain` (confidence `estimate`, `source_kind="hn"`, `source_ref` the post URL `https://news.ycombinator.com/item?id=<id>`, `quote` the header), `stage` when parsed (confidence `estimate`), `hq` as the location text when a location segment parses (confidence `guess`).
+  - `HnSource.posts() -> list[PostRecord]` (`PostSource` in `capabilities.py`; `@dataclass(frozen=True) class PostRecord: source_ref: str; url: str; posted_at: str | None; text: str; asks_email: bool`): one record per kept post of the pass `discover` just ran (cached, no second fetch), `source_ref` the candidate's `hn:<name key>`, `url` the post URL, `posted_at` the comment's canonical UTC time, `text` the plain text of the whole comment. `asks_email` is true when the text holds an email address or a phrase from `email_phrases` in `hn.toml` (`"email me"`, `"send your resume to"`, `"send your cv to"`, `"reach out at"` followed by an address); `run_discover` writes these to `company_post` (Task 8) so #6 and #15 can see a reply route.
 
 - [ ] **Step 1: Write the failing tests** (fixture thread, 7 top-level comments):
   - `test_parse_post_real_header_shapes`: `"Orchard (YC S21) | Backend Engineer | NYC | REMOTE | https://orchard.io/jobs"` gives name `Orchard`, stage `yc`; `"PrairieLearn (Remote US) <U+2014> Full-Stack Software Engineer" (the fixture file holds the real character)` gives name `PrairieLearn`; `"Thunder Compute (YC S24)"` gives `Thunder Compute`; `"Shepherd (Series B)"` gives stage `series_b`; `"Thanks for the thread, great month everyone"` gives `None`.
@@ -461,9 +467,9 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
   - `test_ats_link_becomes_a_key` (`https://jobs.lever.co/tidepoolapps` gives `keys["ats"] == "lever:tidepoolapps"`).
   - `test_algolia_calls_are_one_search_and_one_item_per_thread` (`client.requests` has 2 URLs for the latest thread).
   - `test_error_status_raises` (a 503 on the item call raises `FetchError`-derived `SourceError`, never an empty result).
-  - With `run_discover` after the LCA run: `test_orchard_post_attaches_by_domain_and_adds_yc_stage`; `test_tidepool_is_a_new_company_with_domain_and_ats_alias`; `test_non_us_post_is_dropped_and_counted`; `test_weak_name_collision_makes_company_and_one_item` (HN "Mesh Systems" on `meshsystems.dev` while the LCA company `Mesh Systems Inc` (CA) owns the name: a new company, one `merge_candidate`, the name alias stays with the LCA company); `test_next_month_post_is_not_a_second_company` (Review Focus 2: a November thread with the same Mesh Systems post adds no company and no item, only a `company_source.last_seen_at` change); `test_parent_domain_post_never_attaches` (Review Focus 1: a post linking `https://veltrix.com/careers` attaches to neither Veltrix company); `test_rerun_writes_nothing_new`; `test_hn_source_passes_check_source` (`check_source` with the fixture client).
+  - With `run_discover` after the LCA run: `test_orchard_post_attaches_by_domain_and_adds_yc_stage`; `test_tidepool_is_a_new_company_with_domain_and_ats_alias`; `test_non_us_post_is_dropped_and_counted`; `test_weak_name_collision_makes_company_and_one_item` (HN "Mesh Systems" on `meshsystems.dev` while the LCA company `Mesh Systems Inc` (CA) owns the name: a new company, one `merge_candidate`, the name alias stays with the LCA company); `test_next_month_post_is_not_a_second_company` (Review Focus 2: a November thread with the same Mesh Systems post adds no company and no item, only a `company_source.last_seen_at` change); `test_parent_domain_post_never_attaches` (Review Focus 1: a post linking `https://veltrix.com/careers` attaches to neither Veltrix company); `test_rerun_writes_nothing_new`; `test_hn_source_passes_check_source` (`check_source` with the fixture client); `test_posts_carry_text_url_time_and_asks_email` (an address in the text and a phrase with no address both give `asks_email`; a post with neither gives false); `test_posts_are_stored_in_company_post_once_per_url` (after `run_discover`, a re-run and a next-month repeat add no row).
 - [ ] **Step 2: Run** `uv run python -m unittest tests.test_hn -v`. Expected: FAIL.
-- [ ] **Step 3: Implement** `HnSource`. Region markers and non-US places live in a small `hn.toml` read with `tomllib`.
+- [ ] **Step 3: Implement** `HnSource`. Region markers, non-US places and `email_phrases` live in a small `hn.toml` read with `tomllib`.
 - [ ] **Step 4: Run** the same command. Expected: PASS.
 - [ ] **Step 5: Commit** `Sources: HN Who is hiring (#31)`.
 
@@ -506,8 +512,8 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
   - `board_match_key(name: str) -> str`: the exact normalized key the research measured (lower case, parentheses and `dba` tails dropped, punctuation removed, and `inc, llc, l l c, corp, corporation, co, ltd, limited, the, usa, us, incorporated, company, holdings, group, pbc, plc, lp, llp` removed, spaces removed); keys shorter than 4 characters never match.
   - `@dataclass(frozen=True) class BoardHit: ref: BoardRef; url: str; matched_on: Literal["name", "slug", "host"]`.
   - `class StapplyDirectory`: `StapplyDirectory.load(folder: Path) -> StapplyDirectory` (reads `manifest.json` and the `<ats>.csv` files with `name,slug,url`; `version = "stapply-1-" + manifest["generated_at"]`); `lookup(names: Iterable[str], domain: str | None) -> list[BoardHit]`: a hit when `board_match_key(name)` equals the key of a row's name (`name`) or its slug with `-` as spaces (`slug`), or when the row's URL host equals or ends with `.` plus the company's registrable domain (`host`). Exact matches only; at most 3 hits per company (more than 3 returns none: too ambiguous to trust). `refresh(client: HttpClient, folder: Path) -> list[str]`: downloads `manifest.json` (`https://storage.stapply.ai/jobhive/v1/manifest.json`, declared User-Agent: a bare client gets 403) and each `by_ats_companies` CSV whose sha256 differs from the manifest's, verifying the hash after download; returns the files updated.
-- Produces in `jobs.py`: `run_find_boards(conn, *, directory: StapplyDirectory | None, careers: CareersChecker | None = None, max_careers: int = 100) -> tuple[int, FindBoardsReport]`: one `job_run` `find_boards`. Candidates are live companies (status `candidate`, `backlog` or `working`, not merged) with no active board and no `watched_page`, ordered by `effective_tier` then `company_id`; tier 3 is skipped unless promoted. Steps per company: (0) any `ats` alias with no board becomes a board (`add_board`, via `alias`); (1) the stapply lookup over the company's `name`, `legal_name` and `dba` aliases and its non-shared domain, each hit added with `add_board(via="stapply", matched_on=...)` and a `company_source` row (`source_name="stapply"`, `source_ref="<ats>:<slug>"`; `stapply` is registered in `source` with the directory's version); (2) the careers step (Task 15) only when steps 0 and 1 found nothing. `FindBoardsReport` counts `considered, from_alias, from_stapply, skipped_tier3, conflicts`.
-- The match is by name, which design 5.2 treats as weaker than domain or FEIN for company identity; for a board it is the design's own step 1 (5.3) and was right about 95% of the time on exact normalized names (research section 3.1). The board's first read in #21 is where a wrong match shows (empty or odd postings).
+- Produces in `jobs.py`: `run_find_boards(conn, *, directory: StapplyDirectory | None, careers: CareersChecker | None = None, max_careers: int = 100) -> tuple[int, FindBoardsReport]`: one `job_run` `find_boards`. Candidates are live companies (status `candidate`, `backlog` or `working`, not merged) with no active board and no `watched_page`, ordered by `effective_tier` then `company_id`; tier 3 is skipped unless promoted. Steps per company: (0) any `ats` alias with no board becomes a board (`add_board`, via `alias`, `found_by` `hand` when the company has a `hand` `company_source`, else `import`); (1) the stapply lookup over the company's `name`, `legal_name` and `dba` aliases and its non-shared domain, each hit added with `add_board(via="stapply", matched_on=..., found_by=...)` (`stapply_name` for a `name` or `slug` match, `import` for a `host` match: ruling 6) and a `company_source` row (`source_name="stapply"`, `source_ref="<ats>:<slug>"`; `stapply` is registered in `source` with the directory's version); (2) the careers step (Task 15) only when steps 0 and 1 found nothing. `FindBoardsReport` counts `considered, from_alias, from_stapply, skipped_tier3, conflicts`.
+- The match is by name, which design 5.2 treats as weaker than domain or FEIN for company identity; for a board it is the design's own step 1 (5.3) and was right about 95% of the time on exact normalized names (research section 3.1). The board's first read in #21 is where a wrong match shows: a `stapply_name` board whose org name differs from the company's names raises the "board match doubtful" item, and ranking ignores that board's postings for every hide until it is resolved.
 
 - [ ] **Step 1: Write the failing tests.**
   - `test_stapply.py`: `test_board_match_key_matches_the_research_normalization` (`"Stryder Corporation"`, `"Nimbus Robotics, Inc."`, a `dba` tail, a short key), `test_exact_name_match_and_slug_match_and_host_match`, `test_board_token_formats` (the Workday, Oracle and iCIMS examples above, a Greenhouse slug `NimbusRobotics` giving `nimbusrobotics`, a URL slug giving `None`), `test_unsupported_ats_lists_are_ignored` (Jobvite row never returned), `test_more_than_three_hits_returns_none`, `test_version_comes_from_the_manifest`, `test_refresh_downloads_only_changed_files_and_checks_sha256` (FakeClient serving the manifest and two CSVs; a corrupted body raises), `test_refresh_uses_a_declared_user_agent`.
@@ -526,11 +532,12 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
 
 **Interfaces:**
 - Produces: `@dataclass(frozen=True) class CareersResult: kind: Literal["boards", "page", "none", "error"]; boards: tuple[BoardRef, ...]; page_url: str | None; unsupported: tuple[str, ...]; error: str` and `class CareersChecker(client: HttpClient)` with `check(domain: str) -> CareersResult`. Flow (design 5.3 step 3, at most 2 requests): `GET https://<domain>/careers`; on 200, `detect_ats` over the body gives `boards`, else `page` with the final URL. On 404 or another 4xx, `GET https://<domain>/` and follow the first link whose href contains `career`, `jobs` or `join` (relative links resolved, same site only); detect on that page. Both 404, or a homepage with no such link, is `none`. A `FetchError`, a 5xx or a 429 on any request is `error` (nothing is concluded). A detected ATS outside `SUPPORTED_ATS` is listed in `unsupported` and treated as `page`.
-- `run_find_boards` careers step (at most `max_careers` companies per run, only when `careers` is given): skipped when the company's domain is a shared key (a parent's portal: event `careers_skipped`, detail the domain) or has no usable domain (a tier 1 company then raises a `domain_missing` item, `raised_by 'crawler'`, `evidence_key "no-usable-domain"`). `boards` are added (`via="careers"`, `company_source` `careers`); `page` inserts `watched_page(company_id, url)` with `ON CONFLICT(company_id) DO NOTHING` (fingerprint empty, due now); `none` appends event `careers_checked` (detail `{"result": "none"}`, idempotency key `careers-checked:<company_id>:<YYYY-MM>`) and the company is not fetched again for 30 days; `error` only counts (`careers_errors`) and leaves no marker.
+- `run_find_boards` careers step (at most `max_careers` companies per run, only when `careers` is given): skipped when the company's domain is a shared key (a parent's portal: event `careers_skipped`, detail the domain) or has no usable domain (a tier 1 company then raises a `domain_missing` item, `raised_by 'crawler'`, `evidence_key "no-usable-domain"`). `boards` are added (`via="careers"`, `found_by="careers_page"`; `run_find_boards` first calls `register_source(conn, "careers", "careers-1", run_id)` so the `company_source` row with source `careers` has its `source` row, foreign keys being on); `page` inserts `watched_page(company_id, url)` with `ON CONFLICT(company_id) DO NOTHING` (fingerprint empty, due now); `none` appends event `careers_checked` (detail `{"result": "none"}`, idempotency key `careers-checked:<company_id>:<YYYY-MM>`) and the company is not fetched again for 30 days; `error` only counts (`careers_errors`) and leaves no marker.
+- **Boards with no crawler adapter.** After steps 0 to 2, a company whose active boards are all outside `outreach.crawl.ats.supported_ats()` (checked only when that module imports; otherwise this step is skipped and counted `adapter_unknown`) and which has no `watched_page` is given one, so it is never silently unread (design 6.3): `page` result from the careers check if the company has a usable domain; else, for an iCIMS board, its public host `https://<token>`; else nothing and `unreadable_boards` is counted. Same `ON CONFLICT(company_id) DO NOTHING` insert, same "due now" row. A board with an adapter never gets a watched page.
 
 - [ ] **Step 1: Write the failing tests.**
   - `test_careers.py` (FakeClient routes to HTML fixtures): `test_careers_page_with_ats_embed_gives_boards`, `test_404_then_homepage_link_then_page` (Clearpath: `/careers` 404, `/` links `/join-us`, which embeds an Ashby URL: 3 requests at most... exactly 3: careers, homepage, join page; assert `client.requests`), `test_page_without_ats_is_a_page_with_final_url`, `test_unsupported_ats_is_a_page_and_reported`, `test_both_404_is_none`, `test_503_is_error_not_none`, `test_timeout_is_error`, `test_link_to_another_site_is_not_followed`.
-  - `test_jobs_find_boards.py` additions after discover, HN and stapply: `test_careers_step_results` (Clearpath gets `ashby:clearpath`; Riverside gets `workday:riverside.wd5/external` (the fixture page links `https://riverside.wd5.myworkdayjobs.com/en-US/External`); the HN-created Mesh Systems company, whose stapply board is owned by the LCA Mesh company, gets a `watched_page` that is due now for #21: `fingerprint = ''`, `last_fetch_at IS NULL`, `next_fetch_at IS NULL`, `error_streak = 0`; Sundial and Quill get the `none` marker; Greenfield errors), `test_error_leaves_no_marker` (Review Focus 5: Greenfield's `/careers` is 503; no `careers_checked` event, and the next run fetches it again), `test_none_marker_blocks_refetch_for_the_month` (a second run makes no request for Sundial), `test_shared_domain_company_is_not_fetched` (Veltrix: no request to `veltrix.com`), `test_free_mail_tier_1_company_raises_domain_missing` (Solo Dev), `test_max_careers_limit`, `test_rerun_writes_nothing_new`.
+  - `test_jobs_find_boards.py` additions after discover, HN and stapply: `test_careers_step_results` (Clearpath gets `ashby:clearpath`; Riverside gets `workday:riverside.wd5/External` (the fixture page links `https://riverside.wd5.myworkdayjobs.com/en-US/External`); the HN-created Mesh Systems company, whose stapply board is owned by the LCA Mesh company, gets a `watched_page` that is due now for #21: `fingerprint = ''`, `last_fetch_at IS NULL`, `next_fetch_at IS NULL`, `error_streak = 0`; Sundial and Quill get the `none` marker; Greenfield errors), `test_careers_boards_write_company_source_with_a_registered_source` (the `careers` `source` row exists after the run), `test_company_with_only_unsupported_boards_gets_a_watched_page` (a Gem board with no adapter: a `watched_page` from the careers check; a Greenhouse board: none; with `outreach.crawl.ats` absent: none and `adapter_unknown` counted), `test_error_leaves_no_marker` (Review Focus 5: Greenfield's `/careers` is 503; no `careers_checked` event, and the next run fetches it again), `test_none_marker_blocks_refetch_for_the_month` (a second run makes no request for Sundial), `test_shared_domain_company_is_not_fetched` (Veltrix: no request to `veltrix.com`), `test_free_mail_tier_1_company_raises_domain_missing` (Solo Dev), `test_max_careers_limit`, `test_rerun_writes_nothing_new`.
 - [ ] **Step 2: Run** `uv run python -m unittest tests.test_careers tests.test_jobs_find_boards -v`. Expected: FAIL.
 - [ ] **Step 3: Implement** `CareersChecker` (links via `html.parser`) and the careers step.
 - [ ] **Step 4: Run** the same command. Expected: PASS.
@@ -539,9 +546,9 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
 ## Task 16: CLI, end-to-end run, real-data check and hand-off
 
 **Files:**
-- Create: `outreach/sources/__main__.py`, `tests/test_sources_e2e.py`, `tests/pipeline/sources_stages.py`, `tests/fixtures/pipeline/stapply/greenhouse.csv`
-- Modify: `tests/pipeline/test_flow.py` (call `sources_stages.register(harness)` and add the invariants below), `tests/fixtures/pipeline/` LCA extract (only if it lacks the shape below)
-- Modify: `CLAUDE.md` (add the `OUTREACH_SOURCES_DIR` row to the scratch table), `docs/README.md` (rows for this plan and the new modules), `docs/superpowers/plans/2026-10-21-pipeline-foundation.md` (one line under Task 1 noting `facts.py` was widened here, if Task 1 of this plan did it)
+- Create: `outreach/sources/__main__.py`, `tests/test_sources_e2e.py`, `tests/pipeline/stages_sources.py`, `tests/fixtures/pipeline/stapply/greenhouse.csv`
+- Modify: `tests/pipeline/test_flow.py` (call `stages_sources.register(harness)` and add the invariants below), `tests/fixtures/pipeline/` LCA extract (only if it lacks the shape below)
+- Modify: `CLAUDE.md` (add the `OUTREACH_SOURCES_DIR` row to the scratch table), `docs/README.md` (rows for this plan and the new modules)
 - Test: `tests/test_sources_e2e.py`
 
 **Interfaces:**
@@ -557,46 +564,46 @@ Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level 
   - `test_shared_keys_never_merge` (the third line): the three PEO clients and the two Veltrix companies are five distinct live companies; `company.merged_into` is `NULL` for every company; no alias has source `fein` for the shared FEIN.
   - `test_cli_discover_prints_report_and_sets_exit_code` (calls `main([...])` with the fixture files and a scratch `OUTREACH_DB`; a bad file gives exit 1 and a message naming the column).
   - `test_cli_refuses_the_live_store_outside_the_live_checkout` (the existing guard: with `OUTREACH_DB` unset, `main` exits before opening anything; follow `tests/test_live_guards.py`).
-- [ ] **Step 1b: Register the stages in the foundation's harness** (`tests/pipeline/harness.py::PipelineHarness`, foundation Task 6). `sources_stages.register(harness)` appends `("discover", ...)`, `("resolve", ...)` and `("find_boards", ...)` to `harness.stages`, in that order and before any later stage. They run on `harness.conn` and the fixtures: `discover` runs `run_discover` with `LcaSource([harness.fixture("lca_extract.csv")])`; `resolve` runs `run_resolve`; `find_boards` runs `run_find_boards` with `StapplyDirectory.load(harness.fixture("stapply"))` and no careers checker (no network). The extract is 3 small software employers, one with its own FEIN and two with a shared FEIN and different names and states; if the foundation's extract has another shape, edit it to this and tell the #30 owner. The stapply fixture has one Greenhouse row matching the own-FEIN employer, whose board list response is the fixture the crawler stage reads. In `test_flow.py`, `test_sources_flow_invariants` asserts after each stage:
+- [ ] **Step 1b: Register the stages in the foundation's harness** (`tests/pipeline/harness.py::PipelineHarness`, foundation Task 6). `stages_sources.register(harness)` appends `("discover", ...)`, `("resolve", ...)` and `("find_boards", ...)` to `harness.stages`, in that order and before any later stage. They run on `harness.conn` and the fixtures: `discover` runs `run_discover` with `LcaSource([harness.fixture("lca_extract.csv")])`; `resolve` runs `run_resolve`; `find_boards` runs `run_find_boards` with `StapplyDirectory.load(harness.fixture("stapply"))` and no careers checker (no network). The extract is 3 small software employers, one with its own FEIN and two with a shared FEIN and different names and states; if the foundation's extract has another shape, edit it to this and tell the #30 owner. The stapply fixture has one Greenhouse row matching the own-FEIN employer, whose board list response is the fixture the crawler stage reads. In `test_flow.py`, `test_sources_flow_invariants` asserts after each stage:
   - after `discover`: exactly 3 companies; exactly 1 `company_alias` with source `fein` (the own-FEIN employer; none for the two sharing); `shared_key` holds the shared FEIN (`is_shared_key(conn, "fein", <value>)` is true); one `lca` evidence row per company;
   - after `resolve`: still 3 live companies, every `merged_into` is `NULL`, no `merge_candidate` item (the shared FEIN raised none);
   - after `find_boards`: exactly one `board`, `ats = 'greenhouse'`, `token` lower case, alias `greenhouse:<token>` with source `ats`, and the row is due now (`last_read IS NULL`, `next_read_at IS NULL`, `active = 1`).
 - [ ] **Step 2: Run** `uv run python -m unittest tests.test_sources_e2e tests.pipeline.test_flow -v`. Expected: FAIL.
-- [ ] **Step 3: Implement** `__main__.py` (argparse, no logic beyond wiring) and `sources_stages.py`.
+- [ ] **Step 3: Implement** `__main__.py` (argparse, no logic beyond wiring) and `stages_sources.py`.
 - [ ] **Step 4: Run the whole suite** `uv run python -m unittest discover -s tests -t .` and `uv run python tests/mutation_check.py`. Expected: all OK.
 - [ ] **Step 5: Real-data check (a manual run, not a test).** With a scratch store `OUTREACH_DB=~/Desktop/outreach-scratch/sources-check/outreach.db` (run `OUTREACH_DB=... uv run python -m outreach.install` first; never the live path) and `OUTREACH_SOURCES_DIR` beside it, run `/usr/bin/time -l uv run python -m outreach.sources discover lca --files ~/Desktop/outreach-scratch/recon/lca/FY2025_Q{1,2,3,4}.xlsx`. Compare with `recon/lca/stats.json` and `small_junior_employers.csv`: 18,273 companies stored; work tier 3 is 6,781; tiers 1 and 2 together 11,492; kept staffing risk low 8,392, medium 2,359, high 741; `cap_exempt` `likely` on 487 of the kept; work tier 1 is the 2,902 product employers plus the cap-exempt ones whose risk is not high. Record wall time and peak memory in the PR body. Limits: over 15 minutes or over 3 GB means converting once to CSV (the spike's `convert.py`, `uv run --with python-calamine`) and passing the CSVs, and the PR says so. Any count off by more than 1% is a bug in Task 4 or 5, not a tolerance. Then `find-boards` with stapply lists downloaded by `fetch stapply` and `--max-careers 0`: report how many tier 1 companies got a board (the research measured 521 of the 2,902 by exact name).
-- [ ] **Step 6: Edit the docs** (the `CLAUDE.md` row, `docs/README.md`, the foundation note). `grep -cP "\x{2014}|\x{2013}"` over each edited file prints 0.
+- [ ] **Step 6: Edit the docs** (the `CLAUDE.md` row and `docs/README.md`). `grep -cP "\x{2014}|\x{2013}"` over each edited file prints 0.
 - [ ] **Step 7: Check every Done-when line of #31** against the three named tests and the real-data check, then commit `Sources: CLI, end-to-end fixtures and hand-off notes (#31)`.
 
 ---
 
 ## Hand-off to #21 (crawler)
 
-#21 only updates read state on rows this plan creates; it never inserts a `board` or a `watched_page`. It reads:
+#21 only updates read state on rows this plan creates; it never inserts a `board` or a `watched_page`, with one exception: its `probe_slugs` (#21 Task 26a) calls this plan's `add_board(found_by="slug_probe")`. It reads:
 
 | Table and columns | Meaning |
 |---|---|
-| `board`: `board_id, company_id, ats, token, active` | the board to read; `token` in the foundation's Shared format, `ats` in the schema's set. New rows have `last_read IS NULL`, `next_read_at IS NULL` (due now), `etag = ''`, `ids_fingerprint = ''`, no streaks |
+| `board`: `board_id, company_id, ats, token, active, found_by` | the board to read (`found_by = 'stapply_name'` marks a name-only match: #21 checks it on its first read); `token` in the foundation's Shared format, `ats` in the schema's set. New rows have `last_read IS NULL`, `next_read_at IS NULL` (due now), `etag = ''`, `ids_fingerprint = ''`, no streaks |
 | `watched_page`: `company_id, url` | the careers page to fetch; new rows have `fingerprint = ''` and `next_fetch_at IS NULL` (due now) |
 | `company_alias` with `source = 'ats'` | key `<ats>:<token>`; the same board seen from the company |
 | `company.status`, `company.merged_into` | read only live companies (`merged_into IS NULL`, status not `closed` or `removed`) |
-| `company_work_tier` (this plan's 0002): `tier, promoted` | optional: a crawler that must ration reads can order by effective tier (1, then 2); tier 3 has no boards unless promoted |
+| `work_tier` (#30 Task 1): `tier, promoted` | optional: a crawler that must ration reads can order by effective tier (1, then 2); tier 3 has no boards unless promoted |
 
 #21 owns and writes these columns: on `board`, `last_read, last_read_at, empty_streak, error_streak, streak_since, last_error, etag, ids_fingerprint, next_read_at, change_interval_s, active`; on `watched_page`, `fingerprint, last_fetch_at, last_change_at, next_fetch_at, error_streak`. A board this plan finds twice for one company changes nothing (`ON CONFLICT(ats, token) DO NOTHING`); a board found for a second company raises a `merge_candidate` instead of moving it, so #21 never sees a board change owner.
 
 ## Out of scope, with reasons
 
 - **Common Crawl** (design 5.1 source 6): it yields only ATS slugs, no company identity or evidence, and each slug needs an adapter read to verify (#21) before it can be a `board`. The index server failed four times in a row in the research and needs retry and resume machinery. Its measured gain (283 slugs from half of one host) matters only after `find_boards` runs. Follow-up issue: a monthly `commoncrawl` board-directory module beside `StapplyDirectory`, feeding the same `lookup`.
-- **Slug probing** (design 5.3 step 2): verification needs the #21 adapters (a hit counts only when the board's company name or posting location fits).
+- **Slug probing** (design 5.3 step 2): owned by #21 (Task 26a), which verifies a hit with its adapters and calls `add_board(found_by="slug_probe")` here.
 - **Reading boards and watched pages** (#21): this plan only creates `board` and `watched_page` rows. **Merging two stored companies** (the Needs-you confirm and its undo through `merged_into`): #16 owns the action. **Size and stage lookups for top-ranked companies**, E-Verify checks, **ranking and tiers' use in ranking**: later streams. **SPV and fuzzy Form D matching**, the bulk EIN-to-CIK join over `submissions.zip`: not run in the research at scale. **launchd jobs** for these commands: #17's deploy steps.
 
 ## Design questions a builder could not settle alone
 
-1. **Who widens the evidence vocabulary?** `outreach/rules/facts.py` mirrors the CHECK vocabularies and rejects `lca`, `hn` and the rest, and the foundation plan does not list it. Task 1 widens it here, which changes `ruleset_version()` (the file is in `RULE_FILES`). If the #30 owner prefers to do it in the foundation branch, Task 1 shrinks to the migration.
-2. **Migration 0002.** The work tier and its promote flag, and two lookup indexes, have no home in the foundation's 0001. The plan adds `0002_work_tier.sql`; if another stream also adds a 0002, one renumbers on rebase. The alternative is folding these three statements into 0001 before #30 merges.
-3. **HN post link.** A post with no usable site, no parsed stage and no location leaves only `company_source (hn, hn:<name key>)`; the post URL is kept only as the `source_ref` of the evidence rows that exist. If the people stream needs every post link ("HN posts that ask for email", design 10), a small `company_post` table is the fix.
+1. (Resolved by ruling 1: #30 owns it.) **Who widens the evidence vocabulary?** `outreach/rules/facts.py` mirrors the CHECK vocabularies and rejects `lca`, `hn` and the rest, and the foundation plan does not list it. Task 1 widens it here, which changes `ruleset_version()` (the file is in `RULE_FILES`). If the #30 owner prefers to do it in the foundation branch, Task 1 shrinks to the migration.
+2. (Resolved by ruling 1: no migration here.) **Migration 0002.** The work tier and its promote flag, and two lookup indexes, have no home in the foundation's 0001. The plan adds `0002_work_tier.sql`; if another stream also adds a 0002, one renumbers on rebase. The alternative is folding these three statements into 0001 before #30 merges.
+3. (Resolved by ruling 2: `company_post`, written in Task 8.) **HN post link.** A post with no usable site, no parsed stage and no location leaves only `company_source (hn, hn:<name key>)`; the post URL is kept only as the `source_ref` of the evidence rows that exist. If the people stream needs every post link ("HN posts that ask for email", design 10), a small `company_post` table is the fix.
 4. **Name-only stapply boards.** Board creation by exact normalized name has no state to check (stapply has none), so it is weaker than the identity rule in 5.2. The plan follows 5.3 and relies on the first read to expose a wrong board. If Devanshu wants a confirmation step, it is a review item per hit (about 500 on the real data).
-5. **Source evidence is labelled as rules.** `record_evidence` appends its event with actor `rules`, so LCA, HN and Form D evidence events read as rule-made. The plan reuses it unchanged; a `source` actor would need a schema change to `event.actor`.
+5. (Resolved by ruling 4: `actor='source'`.) **Source evidence is labelled as rules.** `record_evidence` appends its event with actor `rules`, so LCA, HN and Form D evidence events read as rule-made. The plan reuses it unchanged; a `source` actor would need a schema change to `event.actor`.
 
 ## Self-review
 

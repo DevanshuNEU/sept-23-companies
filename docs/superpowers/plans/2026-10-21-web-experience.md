@@ -29,6 +29,16 @@
    `outreach_touch` only (now in #30). Applications are touches with no person (now allowed by #30).
 9. The API supplies every derived field the UI shows (row state, reason and sources, `enough`, `quiet`, win line,
    score share, funnel denominators, tomorrow's preview); the UI computes none of them.
+10. **The reason line is his.** `NoteDraft` carries `reasonLine` and `reasonState` (`proposed` by Claude, `confirmed`
+    by his key, `written` when he edits the line). `needsYourLine` is `reasonState === 'proposed'`. `saveNote` sends
+    `{ text, reasonLine, revision }` and `confirmReason(noteId, revision, o)` confirms the line (key `y`). Note checks
+    are #15's: `note_too_long`, a banned phrase and a dash are `block` checks.
+11. **Types ownership.** Task 2 owns the view-only types in `types.ts`; #11 owns the types the API itself needs and adds
+    them additively; its generated `schema.ts` resolves any overlap, and #11's Task 24 runs after this plan merges.
+12. **Ranking hides and reader flags are shown** (design 16.9). The No-go view lists `hiddenCompanies` (kind, reason, and
+    the words "hidden, pending reader" when provisional) and the company page shows each posting's `flags` (field, both
+    values, both quotes). The types are #11's (its Tasks 7 and 21); Task 16 adds them to `types.ts` additively and to
+    the fixtures if #11 has not landed.
 
 ## Global Constraints
 
@@ -131,7 +141,7 @@ Each row is a design-review line for the PR body. "Proof" names where it is test
 
 - **One integration branch** `DevanshuNEU/web-experience`. Task 1 (docs only) can run in parallel with Tasks 2 to 5 (one agent, in order). Tasks 6 and 7 follow (7 waits for Devanshu's approval of the mockups). Tasks 8 to 16 are independent after 7 and may each get a worktree and agent (`git worktree add ../web-x<NN> -b web-x<NN>-<slug> DevanshuNEU/web-experience`, `pnpm install --frozen-lockfile`); they run unit tests, `pnpm lint` and `pnpm typecheck` only. Tasks 17 to 19 are the integrator's.
 - **Integrator, after each merge:** `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test`, and `WEB_PORT=$CONDUCTOR_PORT pnpm e2e` after Tasks 8, 12, 13 and 18. A red run goes back to the task's agent.
-- **Shared files** edited by more than one task are named in File layout; only the owner task edits them (Task 2 owns `types.ts`, `client.ts`, `keys.ts`, `fixture/data.ts`; Task 6 owns `routes.tsx`, `pages.tsx`, the sidebar and the shell).
+- **Shared files** edited by more than one task are named in File layout; only the owner task edits them (Task 2 owns the view-only types in `types.ts`, `client.ts`, `keys.ts` and `fixture/data.ts`; #11's API-driven types are additive edits to `types.ts` (ruling 11); Task 6 owns `routes.tsx`, `pages.tsx`, the sidebar and the shell).
 
 ## File layout
 
@@ -182,7 +192,8 @@ export interface SourceLink { label: string; url: string }
 export interface NoteFact { text: string; source: SourceLink; inNote: boolean }     // a public-page fact and its link
 export interface NoteDraft {
   noteId: Id; text: string; chars: number; maxChars: number;                         // maxChars from config, never hard-coded in the UI
-  needsYourLine: boolean;                                                            // derived: the one line that says why this person is not written yet
+  reasonLine: string; reasonState: 'proposed' | 'confirmed' | 'written';             // the one line that says why this person; Claude only proposes it
+  needsYourLine: boolean;                                                            // derived: reasonState === 'proposed'
   facts: NoteFact[]; checks: Check[]; savedBy: SavedBy; savedAt: IsoTime; revision: Revision;
 }
 export interface PlanStep { kind: StepKind; touchId: Id | null; at: IsoTime | null }  // at null: not done yet
@@ -203,7 +214,7 @@ export interface PlanView {
   asOf: IsoTime; date: IsoDate; builtAt: IsoTime | null; listJob: JobRunSummary | null;
   notReady: { reason: 'weekend' | 'not_built' | 'job_failed'; text: string } | null;
   rows: PlanRow[]; done: number; total: number;
-  linkedinMonth: { used: number; limit: number };
+  linkedinMonth: { used: number; limit: number; hardUsed: number; hardLimit: number };   // plan quota, and every request against the hard total
   tomorrow: { total: number; text: string; preview: { companyName: string; personName: string | null; roleTitle: string | null }[] };
   week: { requests: number; accepts: number; replies: number };
 }
@@ -250,7 +261,8 @@ logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string }, revisio
 logApplied(entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>; // 'not_allowed' with no role
 logOutcome(touchId: Id, kind: OutcomeKind, revision: Revision, o: WriteOptions, replyKind?: Exclude<ReplyKind, 'unsorted' | 'auto_reply'>): Promise<{ revision: Revision }>;
 skipRow(entryId: Id, revision: Revision, o: WriteOptions): Promise<PlanRow>;       // carried to tomorrow; 'not_allowed' on a done row
-saveNote(noteId: Id, edit: { text: string; revision: Revision }, o: WriteOptions): Promise<NoteDraft>;
+saveNote(noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions): Promise<NoteDraft>;
+confirmReason(noteId: Id, revision: Revision, o: WriteOptions): Promise<NoteDraft>;   // reasonState becomes 'confirmed'; 'not_allowed' with an empty line
 markWinsSeen(winIds: Id[], o: WriteOptions): Promise<void>;                          // 'not_found' for an unknown id
 dismissWatch(itemId: Id, o: WriteOptions): Promise<void>;
 ```
@@ -294,7 +306,7 @@ dismissWatch(itemId: Id, o: WriteOptions): Promise<void>;
 
 **Interfaces:**
 - Produces: the types and read methods above; `queryKeys.plan`, `.outcomePrompt`, `.wins`, `.progress`, `.findings`, `.watch`, `.score(id)`; `pollMs` unchanged (60 s for all); `Scenario` gains `quiet_week`, `first_week`, `plan_done`, `win`, `fresh` (no outcomes ever); `buildPlanFixture(scenario, ctx): PlanFixture` (the new `FixtureDb` fields `plan`, `prompt`, `wins`, `progress`, `findings`, `watch`, `scores: Record<Id, ScoreView>`; the one `Record` is fixture-internal, not the wire).
-- Fixture facts the tests and e2e rely on (default, 2026-11-10): 7 rows in this order, `done` 2, `total` 7. 1 Dana Whitfield, Resend, "Software Engineer, New Grad", `level_role`, request and apply done. 2 Tomas Reyes, Baseten, "Forward Deployed Engineer, New Grad", both done. 3 Lena Ortiz, Pylon, "Software Engineer I", `level_role`, todo, note 168 of 200 with two facts (each with an `.example` link). 4 Jonah Park, Inngest, "Software Engineer II", todo, `needsYourLine` true. 5 Cerebrium, `person` null, role "Member of Technical Staff", `findSomeone.searchUrl` a LinkedIn people-search link. 6 Ines Duarte (founder), Turso, `intern_junior`, role "Software Engineering Intern", todo. 7 Mintlify, `channel` email, `reason_no_role`, `emailTouchId` set, no role. `linkedinMonth` `{ used: 52, limit: 150 }`. `week` requests 31, accepts 9, replies 2. Progress week: requests 31, accepts 9 (from requests 31), replies 2 (from requests 31), referrals 0 (from replies 2), interviews 1 (from replies 2), `enough` true, `minRequests` 30; month requests 52, accepts 17, replies 4, referrals 1, interviews 2. `base`: requests 142, accepts 41, replies 9, `medianDaysToReply` 6, `enough` true. Prompt: 2 touches older than 7 days. Wins default: 5 kept wins (one interview at Distyl AI, one referral, three replies), `unseen` 0; scenario `win` has one unseen accept from Dana Whitfield. Findings for October: 2 findings (engineers on the team accepted 14 of 33 against founders 5 of 24, `changed` set; roles named in the note 5 of 71 against 0 of 29, `caution` set). Watch: 3 items (one of each `WatchKind`). Scores for every fixture company, Pylon with 8 signals including one neutral (size unknown) and one negative.
+- Fixture facts the tests and e2e rely on (default, 2026-11-10): 7 rows in this order, `done` 2, `total` 7. 1 Dana Whitfield, Resend, "Software Engineer, New Grad", `level_role`, request and apply done. 2 Tomas Reyes, Baseten, "Forward Deployed Engineer, New Grad", both done. 3 Lena Ortiz, Pylon, "Software Engineer I", `level_role`, todo, note 168 of 200 with two facts (each with an `.example` link), `reasonState` `confirmed`. 4 Jonah Park, Inngest, "Software Engineer II", todo, `needsYourLine` true (`reasonState` `proposed` with a proposed `reasonLine`). 5 Cerebrium, `person` null, role "Member of Technical Staff", `findSomeone.searchUrl` a LinkedIn people-search link. 6 Ines Duarte (founder), Turso, `intern_junior`, role "Software Engineering Intern", todo. 7 Mintlify, `channel` email, `reason_no_role`, `emailTouchId` set, no role. `linkedinMonth` `{ used: 52, limit: 150, hardUsed: 60, hardLimit: 200 }`. `week` requests 31, accepts 9, replies 2. Progress week: requests 31, accepts 9 (from requests 31), replies 2 (from requests 31), referrals 0 (from replies 2), interviews 1 (from replies 2), `enough` true, `minRequests` 30; month requests 52, accepts 17, replies 4, referrals 1, interviews 2. `base`: requests 142, accepts 41, replies 9, `medianDaysToReply` 6, `enough` true. Prompt: 2 touches older than 7 days. Wins default: 5 kept wins (one interview at Distyl AI, one referral, three replies), `unseen` 0; scenario `win` has one unseen accept from Dana Whitfield. Findings for October: 2 findings (engineers on the team accepted 14 of 33 against founders 5 of 24, `changed` set; roles named in the note 5 of 71 against 0 of 29, `caution` set). Watch: 3 items (one of each `WatchKind`). Scores for every fixture company, Pylon with 8 signals including one neutral (size unknown) and one negative.
 
 - [ ] **Step 1: Write the failing tests** (`plan-data.test.ts` unless noted):
   - `default plan has 7 rows in the listed order, done 2, total 7`; positions are 1 to 7.
@@ -333,7 +345,8 @@ dismissWatch(itemId: Id, o: WriteOptions): Promise<void>;
   - `quiet clears the prompt without a win` (Review Focus 3).
   - `said no is not a win`: `logOutcome(id, 'replied', rev, o, 'said_no')` clears the prompt, adds no win, but `progress().week` replies +1.
   - `skipRow carries the row`: `state === 'skipped'`, `tomorrow.total` +1; on a done row it rejects `not_allowed`.
-  - `saveNote rescans`: a body over `maxChars` adds a `block` check `note_length` ("Over the limit by N characters"); `I'd love to` adds a `warn` `banned_phrase`; an em dash adds `dash`; the returned `chars` equals the text length; a stale revision rejects `conflict`.
+  - `saveNote rescans`: a body over `maxChars` adds a `block` check `note_too_long` ("Over the limit by N characters"); `I'd love to` adds a `block` `banned_phrase`; an em dash adds a `block` `dash` (the codes and severities are #15's `check_note`); the returned `chars` equals the text length; a changed `reasonLine` makes `reasonState` `written` and an unchanged one keeps it; a stale revision rejects `conflict`.
+  - `confirmReason sets confirmed and clears needsYourLine`; with an empty reason line it rejects `not_allowed`; a stale revision rejects `conflict`.
   - `markWinsSeen zeroes unseen; an unknown id rejects not_found`; `dismissWatch removes the item`.
 - [ ] **Step 2: Run** `pnpm test src/api/fixture/client.write.test.ts`. Expected: FAIL.
 - [ ] **Step 3: Implement** the methods on `FixtureClient` through the existing `write()` helper. Keep a private `Map<string, Id>` of idempotency keys. Recompute derived counts in one place (`settle()` already does this for the shell).
@@ -379,7 +392,7 @@ dismissWatch(itemId: Id, o: WriteOptions): Promise<void>;
   - `nextStep(row: PlanRow): 'request' | 'apply' | 'review_email' | 'find_someone' | null`: `find_someone` when `person === null`; `review_email` for an unfinished email row; `request` or `apply` for the first step with `at === null`; `null` when done or skipped.
   - `withStepLogged(plan: PlanView, entryId: Id, kind: StepKind, at: IsoTime): PlanView`: sets the step, recomputes the row's `state` and `plan.done`; a step already logged changes nothing.
   - `nextTodoAfter(rows: PlanRow[], entryId: Id): Id | null`: the next `todo` row after it, else the nearest `todo` row before it, else `null`.
-  - `usePlanActions(): { logRequest(row), logApplied(row), skip(row), saveNote(row, text), answer(t: PromptTouch, kind: OutcomeKind, replyKind?), seeWins(ids: Id[]) }`. Pending ids: `log:<entryId>:request`, `log:<entryId>:apply`, `skip:<entryId>`, `answer:<touchId>`, `wins:seen`. Idempotency keys `plan:<entryId>:request` and `plan:<entryId>:apply`. Toast labels: `Logged: request sent to Lena Ortiz.`, `Logged: applied for Software Engineer I at Pylon.`, `Carried to tomorrow: Pylon.`; `afterCommit` adds `To change it, open Pylon's page.` Patches touch `queryKeys.plan` and `queryKeys.shell` (`plan.done`), and for `answer` also `queryKeys.outcomePrompt` and `queryKeys.wins`. Said no and asked to stop are `immediate`.
+  - `usePlanActions(): { logRequest(row), logApplied(row), skip(row), saveNote(row, text, reasonLine), confirmReason(row), answer(t: PromptTouch, kind: OutcomeKind, replyKind?), seeWins(ids: Id[]) }`. Pending ids: `log:<entryId>:request`, `log:<entryId>:apply`, `skip:<entryId>`, `confirm:<noteId>`, `answer:<touchId>`, `wins:seen`. Idempotency keys `plan:<entryId>:request` and `plan:<entryId>:apply`. Toast labels: `Logged: request sent to Lena Ortiz.`, `Logged: applied for Software Engineer I at Pylon.`, `Carried to tomorrow: Pylon.`; `afterCommit` adds `To change it, open Pylon's page.` Patches touch `queryKeys.plan` and `queryKeys.shell` (`plan.done`), and for `answer` also `queryKeys.outcomePrompt` and `queryKeys.wins`. Said no and asked to stop are `immediate`.
   - `useListNav` option `initial?: T`: used as the selection when the URL has no `sel`; the URL is not written until he moves.
 
 - [ ] **Step 1: Write the failing tests:**
@@ -419,14 +432,14 @@ Starts only after Devanshu approves the Task 1 mockups; follow them where they d
 - Consumes: `PlanRow`, `NoteDraft`, `SourceLink`, `CheckList` (existing), `safeHref`, `StatusBadge`, `Kbd`.
 - Produces:
   - `DayRail(props: { rows: PlanRow[]; rowProps: (id: Id) => RowProps; tomorrow: PlanView['tomorrow']; allDone: boolean; asOf: IsoTime })`: `role="listbox"` named "Today's people"; each row an option with `aria-selected`, a node (empty circle todo, ring when selected and todo, check when done, a half-filled circle when skipped), the position number, person or "Find someone", company, and a status word (To do, Logged, Done, Carried over); a connecting line between nodes; a final finish node "Done for today" with `tomorrow.text`; `aria-current="step"` on the first todo.
-  - `NoteBlock(props: { note: NoteDraft; onCopy: () => void; onEdit: () => void; editing?: ReactNode })`: the note text in the paper block, "168 of 200" characters (a `warn` tone past 90% and `bad` over the limit, always with words), the facts list ("Facts used" with each fact's text and its link as an anchor, new tab, `rel="noopener noreferrer"`), a `needsYourLine` prompt ("Add your line: say why this person."), and the note's checks through `CheckList`.
+  - `NoteBlock(props: { note: NoteDraft; onCopy: () => void; onEdit: () => void; onConfirm: () => void; editing?: ReactNode })`: the note text in the paper block, "168 of 200" characters (a `warn` tone past 90% and `bad` over the limit, always with words), the facts list ("Facts used" with each fact's text and its link as an anchor, new tab, `rel="noopener noreferrer"`), a `needsYourLine` prompt that shows the proposed `reasonLine` with "Confirm line" (key `y`) and the edit action to write his own ("Is this why you are writing to them? Confirm it or write your own."), and the note's checks through `CheckList`.
   - `StepMarks(props: { steps: PlanStep[]; role: boolean })`: "Requested" and "Applied" with a check or an empty mark and the time of day when logged; no Applied mark when `role` is false.
   - `SourceLinks(props: { links: SourceLink[] })`: anchors with the label; an unsafe URL renders its label as plain text with "No link".
   - `WinMark()`: a check whose stroke draws once (class from `win-draw`), `aria-hidden`.
 
 - [ ] **Step 1: Write the failing tests:**
   - `DayRail names each row with its status word` (`"3. Lena Ortiz at Pylon, To do"`); `the first todo has aria-current step`; `a skipped row reads Carried over and has no red tone`; `the finish node shows tomorrow's text`; clicking a row calls its `onClick`.
-  - `NoteBlock shows the count with words`; `NoteBlock flags a fact without a safe link` (a `javascript:` URL renders no anchor and shows "No link") (Review Focus 5); `NoteBlock shows facts with links before the actions`; `an over-limit note is bad toned and says "Over the limit by 12 characters"`; `needsYourLine shows the prompt`; `Copy and Edit buttons carry aria-keyshortcuts c and e`.
+  - `NoteBlock shows the count with words`; `NoteBlock flags a fact without a safe link` (a `javascript:` URL renders no anchor and shows "No link") (Review Focus 5); `NoteBlock shows facts with links before the actions`; `an over-limit note is bad toned and says "Over the limit by 12 characters"`; `needsYourLine shows the proposed line with a Confirm line button (aria-keyshortcuts y)`; `Copy and Edit buttons carry aria-keyshortcuts c and e`.
   - `StepMarks shows only Requested when there is no role`; `SourceLinks open in a new tab with noopener`.
   - `WinMark is aria-hidden`; `globals.css has win-draw and win-in inside the reduced motion override scope` (read the CSS as `tokens.test.ts` does; both animations are named in a rule the existing `prefers-reduced-motion` block disables by `animation: none !important`).
 - [ ] **Step 2: Run** `pnpm test src/components/plan-components.test.tsx`. Expected: FAIL.
@@ -444,7 +457,7 @@ Starts only after Devanshu approves the Task 1 mockups; follow them where they d
 
 **Interfaces:**
 - Consumes: Tasks 2 to 7.
-- Produces: `TodayPage` (default export). Bindings under group `Today`: `l` open profile, `o` open role, `a` open the apply page, `s` open the LinkedIn search (find someone rows), `c` copy the note (or the handoff on a find-someone row), `e` edit the note, `r` log request sent, `p` log applied, `x` carry to tomorrow, `n` not a fit (the phase-1 `RemoveDialog`, moved to `routes/proposals/remove-dialog.tsx` and imported from there), `shift+c` copy every find-someone handoff, plus `j k`, arrows and `enter` (company page) from `useListNav`. `useListNav({ ids, initial: firstTodoId, announce })`.
+- Produces: `TodayPage` (default export). Bindings under group `Today`: `l` open profile, `o` open role, `a` open the apply page, `s` open the LinkedIn search (find someone rows), `c` copy the note (or the handoff on a find-someone row), `e` edit the note, `y` confirm the reason line, `r` log request sent, `p` log applied, `x` carry to tomorrow, `y` confirm the reason line, `n` not a fit (the phase-1 `RemoveDialog`, moved to `routes/proposals/remove-dialog.tsx` and imported from there), `shift+c` copy every find-someone handoff, plus `j k`, arrows and `enter` (company page) from `useListNav`. `useListNav({ ids, initial: firstTodoId, announce })`.
 - Behavior: heading `h1` "Today" (sr-only) and visible `h2` of the date; a line `"7 people, 2 done"` and `"Requests this month 52 of 150"`; the rail on the left and the work panel for the selected row; the panel shows the person (name, title, kind badge, `foundOn` link), the one reason with `SourceLinks`, the role link and apply link, `NoteBlock`, `StepMarks`, and one primary button for `nextStep` (`Log request sent`, `Log applied`, `Review in Outbox`, `Open LinkedIn search`) with the other keys as quiet buttons; after the last step of a row the selection moves to `nextTodoAfter`; a logged row stays in place, relabelled; carried rows show `Carried over from Monday` in grey; `notReady` and empty plans use `EmptyState` and the existing stale banner for a failed list job; a loading skeleton at final height on first load only.
 
 - [ ] **Step 1: Write the failing tests** (`plan.test.tsx`, FixtureClient default scenario unless noted):
@@ -457,7 +470,8 @@ Starts only after Devanshu approves the Task 1 mockups; follow them where they d
   - `find someone row shows the search link, c copies the handoff, no note, no log button`; `shift+c copies every handoff and toasts "Copied 1 handoff for Claude."`.
   - `the email row shows its status and a Review in Outbox link to the item, and no log key acts on it`.
   - `copy puts the saved note on the clipboard` and toasts `Copied the note.`; with an unsafe fact link it toasts `Copied. One fact has no link: check it before you send.` (Review Focus 5).
-  - `edits survive moving rows`: type in the note editor on row 3, press `j`, come back, the text is still there; `Save` calls `saveNote` and shows the rescanned checks.
+  - `edits survive moving rows`: type in the note editor on row 3, press `j`, come back, the text is still there; `Save` calls `saveNote` (text and reason line) and shows the rescanned checks.
+  - `y confirms the proposed reason line`: on row 4 (`needsYourLine`) the prompt shows the proposed line; `y` calls `confirmReason`, the prompt goes and the toast reads `Confirmed your line.`; editing the line and saving makes it his (`reasonState` `written`).
   - `x carries a row`: the toast is `Carried to tomorrow: Inngest.`, the rail shows `Carried over`, and `plan.done` does not change; `x` on a find-someone row works the same way.
   - `n opens the not a fit dialog with the four reasons`.
   - `weekend scenario shows "No plan on weekends." with tomorrow's preview; job_failed shows the stale banner with the job's error; empty built plan says who to add and how`.
@@ -591,9 +605,9 @@ Starts only after Devanshu approves the Task 1 mockups; follow them where they d
 
 **Interfaces:**
 - Consumes: `score(companyId)` through its own `useViewQuery(queryKeys.score(id), ...)` so the tab loads, fails and retries on its own (the existing `TabBoundary` pattern).
-- Produces: `Score({ companyId })`: header "Score 0.74, rank 12 of 1,010" with the strongest lane named; a ledger, one row per signal in API order: label, a signed bar from `share` (right for positive, left for negative, a short grey tick for `neutral`), `points`, `share` as a percent of the total, the `reason` sentence, and its `source` as a link; a neutral signal reads "No data, scored neutral" in place of a bar; a footer "Ranker v4. Weights live in the ranking config. A change makes a new version." and, when `previous` is set, "Was 0.52 under v3".
+- Produces: `Score({ companyId })`: header "Score 0.74, rank 12 of 1,010" with the strongest lane named; a ledger, one row per signal in API order: label, a signed bar from `share` (right for positive, left for negative, a short grey tick for `neutral`), `points`, `share` as a percent of the total, the `reason` sentence, and its `source` as a link; a neutral signal reads "No data, scored neutral" in place of a bar; a footer "Ranker v4. Weights live in the ranking config. A change makes a new version." and, when `previous` is set, "Was 0.52 under v3". Also (ruling 12): the company page's postings list shows each posting's `flags` (field, both values, both quotes) and the No-go view lists `hiddenCompanies` with kind, reason and "hidden, pending reader" when provisional.
 
-- [ ] **Step 1: Write the failing tests:** `lists every signal with its reason and share`; `the shares printed add to 100 percent of the absolute total`; `a negative signal draws left and reads as a cost`; `the neutral size signal says "No data, scored neutral" and has no bar width`; `a source with an unsafe URL is plain text`; `key 7 opens the Score tab`; `a failing score read shows the partial state with Retry and the other tabs still work`; `the previous version line shows only when set`.
+- [ ] **Step 1: Write the failing tests:** `lists every signal with its reason and share`; `the shares printed add to 100 percent of the absolute total`; `a negative signal draws left and reads as a cost`; `the neutral size signal says "No data, scored neutral" and has no bar width`; `a source with an unsafe URL is plain text`; `key 7 opens the Score tab`; `a failing score read shows the partial state with Retry and the other tabs still work`; `the previous version line shows only when set`; `posting flags show both values and both quotes`; `the No-go view lists ranking hides with their reason and the pending-reader wording`.
 - [ ] **Step 2: Run** `pnpm test src/routes/company`. Expected: FAIL.
 - [ ] **Step 3: Implement** per the approved `company-score.html`.
 - [ ] **Step 4: Run** `pnpm test && pnpm typecheck && pnpm lint`. Expected: PASS.
@@ -691,8 +705,8 @@ Starts only after Devanshu approves the Task 1 mockups; follow them where they d
 **Decisions with a default this plan builds (change any before Task 8):**
 5. The phase-1 pick, backlog and remove view moves to `/proposals`, unchanged, linked quietly under the plan. Default: keep it until the switch, then decide whether to delete it. The pipeline design replaced "pick 5 of 15 to 20 companies" with a plan of people.
 6. Email rows appear in the plan (as "Review in Outbox"); the sender and reply reader log email outcomes, so no logging key acts on them.
-7. A win is an accept, a reply that is not "Said no" or "Asked to stop", a referral, an interview or an offer. "Not now" replies count as wins because a human answered (the metric is replies).
-8. "Nothing yet" on the 7-day prompt is a normal answer and stops the question for that touch.
+7. Recognition (the banner moment) fires on any accept or reply. The win log keeps referrals, interviews, offers and replies tagged Interested. A "Not now" reply counts as a reply in progress, not as a win; "Said no" and "Asked to stop" are neither (ruling 3).
+8. "Nothing yet" on the 7-day prompt is a normal answer: it asks once more 7 days later, and after 21 days with no outcome the touch is marked quiet on its own, without asking again (ruling 4).
 9. The minimum sample before any rate is shown is 30 requests (the API's `minRequests`), and a finding group shows a rate only from 20. Change the number in the API config, not the UI.
 10. Opening the Wins page counts as seeing them (the "New" marks stay for that visit).
 11. Note length comes from the API (`maxChars`). The research says plan for 200 (the newest LinkedIn page; an older page says 300 for Premium). Default: 200.

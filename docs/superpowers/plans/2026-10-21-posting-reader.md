@@ -23,7 +23,7 @@
 - The reader never approves or sends anything, and nothing here writes `touch`, `message` or `person` rows.
 - Python only, in the `outreach/` package. Tests: `uv run python -m unittest discover -s tests -t .`.
 - No em dashes or en dashes in code, comments, prompt text, docs or commit messages.
-- Commit trailer: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+- Commit trailer: the one the executing session is given.
 
 ## Review Focus
 
@@ -54,7 +54,7 @@
 - **Per-field state** is one of `agree`, `disagree`, `missing` (reader `unknown`, refused or blanked where the rules claim something), `reader_only` (no rules counterpart). A hide survives only when the field state is `agree`. A rules hide whose state is `disagree` or `missing` is relaxed in the stored row (`sponsorship no -> unclear`, `citizenship 1 -> 0`, `eligibility excluded -> ok` with reason NULL, `us no -> unknown`; the rules' quote stays) so `passes()` shows the posting again, and a `reader_disagrees` review item is raised. A reader hide the rules do not claim (reader `wont_sponsor`, rules `silent`) never hides, and also raises the item.
 - **Stored decision rows are the combined facts** (spec section 4: "decide() from reader facts plus phrase rules"). What the rules alone said is recomputable by `decide()` from the body, so `explain()` and `eval` lose nothing. `provisional = 0` and `reader_version = <version>` once a reading at the promoted version exists for the posting's current body hash, or the queue row for that key has ended `refused` (fail open); otherwise `provisional = 1` and `reader_version` is NULL.
 - **Promoted version.** The queue and the night job always work with the version computed from the files (the candidate). The combination uses readings of the version named in `outreach/reader/config.toml` `[reader] promoted_version`. `python -m outreach.reader promote` writes that line only when the eval gate passes. A new version therefore runs in shadow (stored, compared, deciding nothing) until promoted, as the research (section 5.7) recommends.
-- **Quote haystack.** `quote_in_body` runs against the stored body. Two fields also accept their header: `level` may quote the posting title, `location` may quote the structured location the reader was shown. All other fields: body only. Spec 7.1 says "stored body"; the header exceptions are listed in Open questions.
+- **Quote haystack.** `quote_in_body` runs against `title + "\n" + location + "\n" + body` for every field (ruling 3 below overrides the earlier header-only exceptions). Spec 7.1 says "stored body"; the title and location are listed in Open questions.
 - **Who is read.** Open postings whose current decision lane is `engineering` or `intern` and whose stored body has at least `min_body_chars` (config, 500) characters. Rules-only hides from the title lane (not engineering) are never read; they are lane filters, not evidence hides.
 - **The model never touches the store.** The night job sends the pinned prompt as the system prompt and the batch as the user message, with all tools off and a neutral working directory, and parses the reply. This keeps the session free of the repo's CLAUDE.md (which would load Devanshu's email voice) and of any ability to write.
 
@@ -64,7 +64,7 @@
 |---|---|
 | `outreach/reader/config.toml` | Create: model, promoted version, queue and night limits, failure patterns |
 | `outreach/reader/config.py` | Create: `ReaderConfig`, `load_reader_config` |
-| `outreach/reader/version.py` | Create: `reader_version(cfg)`, `body_sha256(text)` |
+| `outreach/reader/version.py` | Create: `reader_version(cfg)` (`body_sha256` is #30's, `outreach.store.writes`) |
 | `outreach/reader/prompts/read_posting.md` | Create: the pinned prompt |
 | `outreach/reader/queue.py` | Create: `enqueue`, `enqueue_missing`, `refresh_priorities`, `next_batch`, `release`, `batch_payload` |
 | `outreach/reader/submit.py` | Create: `SubmitResult`, `submit` |
@@ -73,11 +73,11 @@
 | `outreach/reader/gold.py` | Create: gold item format, `load_gold`, `sample_gold`, `confirm` |
 | `outreach/reader/evaluate.py` | Create: `rules_view`, `score`, `not_worse`, `promote` |
 | `outreach/reader/__main__.py` | Create: CLI `next`, `submit`, `apply`, `night`, `gold`, `eval`, `promote` |
-| `outreach/rules/rebuild.py` | Modify: public `stored_decision`, `combiner` hook, upsert writes `provisional` and `reader_version` |
+| `outreach/rules/rebuild.py` | Modify: `combiner` hook, upsert writes `provisional` and `reader_version` (`stored_decision` is made public by #30 Task 1) |
 | `launchd/com.devanshu.outreach-reader-night.plist.template` | Create: the night job template (not installed) |
 | `tests/gold/` | Create: `README.md` is not written; the format lives in `gold.py`. Holds `items.jsonl` and `readings/<version>.jsonl` |
 | `tests/test_reader_*.py` | Create: one per module above |
-| `tests/pipeline/harness.py`, `tests/pipeline/test_flow.py` | Modify (Task 9): register the `read_postings` stage and add the reader flow invariants |
+| `tests/pipeline/stages_reader.py`, `tests/pipeline/test_flow.py` | Create/Modify (Task 9): `register(harness)` for the `read_postings` stage (foundation Task 6 convention) and the reader flow invariants |
 | `tests/fixtures/pipeline/` | Modify (Task 9): one more posting body for the reader flow |
 | `docs/README.md`, `docs/superpowers/plans/2026-10-21-pipeline-foundation.md` | Modify in Task 10: map rows only |
 
@@ -96,14 +96,13 @@
   - `@dataclass(frozen=True) class ReaderConfig`: one attribute per key above (`model: str`, `promoted_version: str`, `min_body_chars: int`, `batch_size: int`, `lease_minutes: int`, `max_attempts: int`, `top_companies: int`, `max_postings_per_night: int`, `max_batches: int`, `max_consecutive_failures: int`, `call_timeout_s: int`, `session_limit_patterns: tuple[str, ...]`, `auth_patterns: tuple[str, ...]`, `prompt_path: Path`).
   - `load_reader_config(path: Path = CONFIG_PATH) -> ReaderConfig`: a missing section or key raises `KeyError` naming it (same style as `outreach/rules/config.py`).
   - `reader_version(cfg: ReaderConfig | None = None) -> str`: `"rv-" + sha256(prompt_bytes + b"\0" + model.encode() + b"\0" + str(READING_SCHEMA_VERSION).encode()).hexdigest()[:12]`.
-  - `body_sha256(text: str) -> str`: sha256 hex of the UTF-8 body, 64 characters, matching the `read_queue.body_sha256` CHECK.
+  - No `body_sha256` here: every module in this plan imports it from `outreach.store.writes` (#30 Task 4: whitespace collapsed, ends stripped, case kept, 64 hex, matching the `read_queue.body_sha256` CHECK). The crawler stores the same value in `posting_body.body_sha256`.
 
 - [ ] **Step 1: Write the failing tests** in `tests/test_reader_version.py`:
   - `test_version_shape`: `reader_version()` matches `^rv-[0-9a-f]{12}$`.
   - `test_version_changes_with_prompt`: two temp prompt files differing by one character give different versions (`load_reader_config` takes a `prompt_path` override argument through `dataclasses.replace`).
   - `test_version_changes_with_model`: `replace(cfg, model="claude-sonnet-5-5")` changes it.
   - `test_version_changes_with_schema_version`: patch `outreach.reader.version.READING_SCHEMA_VERSION` to 2; changes it.
-  - `test_body_sha256_is_64_hex_and_stable`.
   - `test_missing_config_key_names_it`: a config file without `max_attempts` raises `KeyError` whose text contains `max_attempts`.
   - `test_prompt_names_every_field_and_allowed_value`: the shipped prompt text contains every name in `FIELDS` and every allowed string in `ALLOWED` for the enum fields. A schema change that skips the prompt fails here.
   - `test_prompt_has_no_dashes`: the prompt has no em dash (code point 0x2014) and no en dash (code point 0x2013).
@@ -116,13 +115,11 @@
 
 **Files:**
 - Create: `outreach/reader/queue.py`
-- Modify: `outreach/rules/rebuild.py` (add public `stored_decision`, see below)
 - Test: `tests/test_reader_queue.py`
 
 **Interfaces:**
-- Consumes: `ReaderConfig`, `reader_version`, `body_sha256` (Task 1); `ReadRequest` (foundation); `passes` from `outreach/rules/decide.py`; `current_decision` view; tables `read_queue`, `company_score`, `posting_body`.
+- Consumes: `ReaderConfig`, `reader_version` (Task 1); `body_sha256` (`outreach.store.writes`, #30 Task 4); `stored_decision` (`outreach/rules/rebuild.py`, made public by #30 Task 1); `ReadRequest` (foundation); `passes` from `outreach/rules/decide.py`; `current_decision` view; tables `read_queue`, `company_score`, `posting_body`.
 - Produces:
-  - `rebuild.stored_decision(row: sqlite3.Row) -> Decision`: the existing private `_stored`, renamed public (keep `_stored = stored_decision` so nothing else breaks).
   - `enqueue(conn, posting_id: int, *, cfg: ReaderConfig | None = None, version: str | None = None) -> bool`: reads the posting's stored body, returns False (writes nothing) when there is no body or it is shorter than `min_body_chars` or the posting is closed or its current decision lane is not `engineering` or `intern`; otherwise inserts `(posting_id, body_sha256(body), version, priority, 'queued')` with `ON CONFLICT DO NOTHING` and returns True when a row was added. A changed body has a new hash and so a new key: the old key's rows stay as history.
   - `enqueue_missing(conn, *, cfg=None, version=None, limit: int | None = None) -> int`: enqueues every eligible open posting that has no `read_queue` row for its current body hash under `version` (the backlog, a skipped night, a new reader version). Returns the count added.
   - `refresh_priorities(conn, *, cfg=None) -> int`: recomputes `priority` for every `queued` row, returns how many changed. `priority = tier * 1_000_000 + points`. Tier 3: the posting's current decision has `provisional = 1` and `not passes(stored_decision(row))` (provisional hides first). Tier 2: lane 1 (`lane = 'engineering'` and `level_ok = 1`) at a company in the top `top_companies` by `company_score.score` at the most recently scored `ranker_version` (`SELECT ranker_version FROM company_score ORDER BY scored_at DESC LIMIT 1`); when `company_score` has no rows, every lane 1 posting is tier 2 with 0 points; `points = clamp(int(score * 1000), 0, 999_999)`. Tier 1: everything else. Within one priority, order is newest first (`posting_id DESC`).
@@ -144,7 +141,7 @@
   - `test_release_gives_back_the_attempt`.
   - `test_batch_payload_has_location_and_version`.
 - [ ] **Step 2: Run** `uv run python -m unittest tests.test_reader_queue -v`. Expected: FAIL.
-- [ ] **Step 3: Implement** `queue.py` and the `stored_decision` rename. Use `BEGIN IMMEDIATE` through `outreach.store.transaction` for the lease so two processes cannot take the same row; no write transaction stays open while Python computes `passes()` in `refresh_priorities` (read rows first, then write in short batches of 500, as `rebuild` does).
+- [ ] **Step 3: Implement** `queue.py` (it imports #30's public `stored_decision`; do not rename anything in `rebuild.py` here). Use `BEGIN IMMEDIATE` through `outreach.store.transaction` for the lease so two processes cannot take the same row; no write transaction stays open while Python computes `passes()` in `refresh_priorities` (read rows first, then write in short batches of 500, as `rebuild` does).
 - [ ] **Step 4: Run** the same command, then the whole suite. Expected: PASS.
 - [ ] **Step 5: Commit** `Reader: read queue with priorities and leases (#32)`.
 
@@ -155,14 +152,14 @@
 - Test: `tests/test_reader_submit.py`
 
 **Interfaces:**
-- Consumes: `PostingReading.from_json`, `PostingReading.to_json`, `quote_in_body`, `FIELDS`, `FieldReading` (foundation); `body_sha256`, `reader_version` (Task 1); `read_queue` and `posting_reading` tables; `append_event`.
+- Consumes: `PostingReading.from_json`, `PostingReading.to_json`, `quote_in_body`, `FIELDS`, `FieldReading` (foundation); `reader_version` (Task 1); `body_sha256` (`outreach.store.writes`); `read_queue` and `posting_reading` tables; `append_event`.
 - Produces:
   - `@dataclass(frozen=True) class SubmitResult: posting_id: int | None; body_sha256: str; status: Literal['stored', 'partial', 'refused', 'requeued', 'stale', 'duplicate', 'unknown']; refused_fields: tuple[str, ...] = (); error: str = ''`.
   - `submit(conn, readings: list[dict] | dict, *, cfg: ReaderConfig | None = None, now: str | None = None) -> list[SubmitResult]`: one result per reading, each in its own transaction so one bad reading never undoes its neighbours. Per reading, in order:
     1. `PostingReading.from_json(obj)` raises `ValueError`: the reading is malformed (extra or missing field, value outside `ALLOWED`, quote missing for a known value). Status `requeued` (attempts left) or `refused` (at the limit); `error` carries the message; nothing stored.
     2. No queue row for `(posting_id, body_sha256, reader_version)`: `unknown`, nothing written. Row `done` or `refused`: `duplicate`, nothing written.
     3. The stored body's hash is no longer `body_sha256`: `stale`; the row ends `done` with `last_error = 'body changed'`, and `enqueue` is called for the new body.
-    4. Quote check per field whose value is not `unknown`, `silent`, `None` or `''`: `quote_in_body(quote, haystack)` where the haystack is the body, plus the title for `level` and the structured location for `location`. A failing field is a refused field.
+    4. Quote check per field whose value is not `unknown`, `silent`, `None` or `''`: `quote_in_body(quote, haystack)` where the haystack is `title + "\n" + location + "\n" + body` for every field (ruling 3 below: the title and the structured location count for every field; the three-word minimum still applies and the rules still guard every hide). A failing field is a refused field.
     5. No refused fields: store a `posting_reading` row (`fields = PostingReading.to_json()` as JSON text, `verified = 1`, `refused_fields = '[]'`, `read_at = now`), queue row `done`, one `event` (entity `reading`, kind `stored`, actor `claude`, detail with posting id and version). Status `stored`.
     6. Some refused fields and `attempts < max_attempts`: nothing stored; queue row back to `queued` with `last_error = 'refused: <field list>'`. Status `requeued`.
     7. Some refused fields at the limit: store a partial reading (valid fields kept, each refused field blanked to `FieldReading('unknown', '')`, or `None` for the integer fields and `''` for text fields; `verified = 0`; `refused_fields` the JSON list), queue row `refused`. Status `partial`.
@@ -179,7 +176,7 @@
   - `test_stale_body_is_not_stored_and_the_new_body_is_queued`: change the body between `next_batch` and `submit`; status `stale`; the old row is `done`; a new queue row exists for the new hash.
   - `test_second_submit_is_a_duplicate`: submit the same valid reading twice; second status `duplicate`; still one `posting_reading` row (Review Focus 3).
   - `test_unknown_key_is_refused`: a reading for a posting that was never queued gets `unknown`.
-  - `test_level_may_quote_the_title_and_location_may_quote_the_header`: a body without the words, a title `"Software Engineer, New Grad"`, quote `"New Grad"` for `level = new_grad` is accepted; the same quote for `sponsorship` is refused.
+  - `test_title_and_location_count_as_quote_text_for_every_field`: a body without the words, a title `"Software Engineer, New Grad"`, quote `"Software Engineer, New Grad"` for `level = new_grad` is accepted, and the same quote for any other field is accepted too (ruling 3); a quote found in none of title, location and body is refused.
   - `test_one_bad_reading_does_not_undo_the_others`: a list of two (one good, one stale) stores the good one.
 - [ ] **Step 2: Run** `uv run python -m unittest tests.test_reader_submit -v`. Expected: FAIL.
 - [ ] **Step 3: Implement** `submit.py`. Normalization is the foundation's `quote_in_body`; do not add a second matcher.
@@ -268,11 +265,11 @@
 - Produces:
   - `@dataclass(frozen=True) class RunResult: returncode: int; stdout: str; stderr: str`.
   - `Runner = Callable[[str, str, str], RunResult]`: `(system_prompt, user_message, model)`.
-  - `classify_run(result: RunResult, cfg: ReaderConfig) -> Literal['ok', 'session_limit', 'auth', 'failed']`: case-insensitive match of `cfg.session_limit_patterns` and `cfg.auth_patterns` against stdout and stderr (a non-zero exit or an `is_error` JSON result is needed for either; an `ok` reply that merely quotes a posting containing "usage limit" must not stop the night).
+  - `classify_run(result: RunResult, *, session_limit_patterns: Sequence[str], auth_patterns: Sequence[str]) -> Literal['ok', 'session_limit', 'auth', 'failed']`: case-insensitive match of the two pattern lists (the night job passes `cfg.session_limit_patterns` and `cfg.auth_patterns`; #15's prepare step imports this function and passes its own lists) against stdout and stderr (a non-zero exit or an `is_error` JSON result is needed for either; an `ok` reply that merely quotes a posting containing "usage limit" must not stop the night).
   - `parse_reply(stdout: str) -> list[dict]`: takes the `claude -p --output-format json` envelope (`{"result": "<text>", ...}`), strips a Markdown code fence if present, parses the JSON, returns the `readings` list; raises `ValueError` on anything else.
   - `claude_runner(cfg: ReaderConfig) -> Runner`: `subprocess.run` of `claude -p --model <model> --output-format json --tools "" --no-session-persistence --disable-slash-commands --system-prompt <prompt text>` with the user message on stdin, `cwd` a neutral folder `~/Library/Application Support/outreach/reader-cwd/` (created on first use) so the repo's CLAUDE.md is not loaded, and `timeout=cfg.call_timeout_s` (a timeout is a `failed` run). Not `--bare` (that disables the seat login). The builder confirms each flag against `claude --help` for the installed version before relying on it.
-  - `@dataclass(frozen=True) class NightSummary: status: Literal['queue_empty', 'cap_reached', 'session_limit', 'auth', 'failed']; batches: int; stored: int; partial: int; requeued: int; stopped_reason: str`.
-  - `run_night(conn, runner: Runner, cfg: ReaderConfig | None = None, *, now=utcnow) -> NightSummary`: records a `job_run` with job `read_postings`; runs `enqueue_missing`; loops until the queue is empty, `max_postings_per_night` postings were handed out, or `max_batches` batches ran. Each batch: `next_batch(batch_size)`, one `runner` call, then `classify_run`. `session_limit` or `auth`: `release` the batch and stop (job `partial` for a session limit, `failed` for auth). `failed` or a `parse_reply` error: `release` the batch, count a consecutive failure, stop at `max_consecutive_failures`. `ok`: the model's readings get `reader_version` filled in by code (the model does not copy it), go through `submit`, then `apply_reading` for stored and partial results; postings the model skipped are `release`d. Never raises on a model or CLI problem; always closes the job.
+  - `@dataclass(frozen=True) class NightSummary: status: Literal['queue_empty', 'cap_reached', 'session_limit', 'auth', 'failed']; batches: int; stored: int; partial: int; requeued: int; applied: int; stopped_reason: str`.
+  - `run_night(conn, runner: Runner, cfg: ReaderConfig | None = None, *, now=utcnow) -> NightSummary`: records a `job_run` with job `read_postings`; runs `enqueue_missing`; loops until the queue is empty, `max_postings_per_night` postings were handed out, or `max_batches` batches ran. Each batch: `next_batch(batch_size)`, one `runner` call, then `classify_run(result, session_limit_patterns=cfg.session_limit_patterns, auth_patterns=cfg.auth_patterns)`. `session_limit` or `auth`: `release` the batch and stop (job `partial` for a session limit, `failed` for auth). `failed` or a `parse_reply` error: `release` the batch, count a consecutive failure, stop at `max_consecutive_failures`. `ok`: the model's readings get `reader_version` filled in by code (the model does not copy it), go through `submit`, then `apply_reading` for stored and partial results; postings the model skipped are `release`d. After the last batch, and also when the run stops early for any reason (session limit, failures, cap), `run_night` calls `apply_all(conn)` (Task 4) so every posting that has a stored reading or an ended-`refused` queue row has the combined decision, whatever wrote its row last: a crawler redecision or a rebuild that ran without the combiner heals overnight, with no reader call. Never raises on a model or CLI problem; always closes the job.
   - `main` subcommand `night [--max-batches N] [--max-postings N]`: calls `live_checkout.require_live("the reader night job")` first, then `run_night(conn, claude_runner(cfg))`, prints the summary line.
   - `launchd/com.devanshu.outreach-reader-night.plist.template`: label `com.devanshu.outreach-reader-night`, modeled on `com.devanshu.outreach-refresh.plist`: `StartCalendarInterval` daily at 02:30 (a run missed during sleep fires on wake), command `cd '{{LIVE_CHECKOUT}}' && PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/bin/caffeinate -i /opt/homebrew/bin/python3 -m outreach.reader night >> '{{LOG_PATH}}' 2>&1`; the comment block says: install is Devanshu's step, with the exact `launchctl bootstrap gui/$(id -u) <plist>` line, and `launchctl bootout` to remove.
 
@@ -288,6 +285,8 @@
   - `test_model_skipping_a_posting_leaves_it_queued`: the reply covers 19 of 20; the 20th is released and appears in the next batch.
   - `test_refused_quotes_requeue_and_finish_at_the_limit`: a runner that always returns a paraphrase: after `max_attempts` nights the postings end `refused` and their decisions are relaxed (fail open); no infinite loop.
   - `test_skipped_night_is_safe`: run `run_night` with a runner that stops at once, then again later; leases from a dead run (set `lease_until` in the past, no release) are handed out again.
+  - `test_night_applies_all_after_its_batches`: a posting with a stored verified reading at the promoted version and a decision row with `provisional = 1` (as a rebuild without the combiner leaves it) ends with the combined decision after a night whose queue is empty, and the fake runner is never called.
+  - `test_night_applies_all_when_a_session_limit_stops_it`; `test_classify_run_takes_pattern_lists` (the same result classifies differently under two lists).
   - `test_night_refuses_outside_the_live_checkout`: `main(['night'])` with `live_checkout.LIVE_ROOT` pointed elsewhere raises `SystemExit` naming "the reader night job" and opens no store.
   - `test_plist_template_is_complete`: the template contains the label, the `-m outreach.reader night` command and only the placeholders `{{LIVE_CHECKOUT}}` and `{{LOG_PATH}}`; `plutil -lint` passes after both are filled (skip the lint if `plutil` is absent).
 - [ ] **Step 2: Run** `uv run python -m unittest tests.test_reader_night -v`. Expected: FAIL.
@@ -306,7 +305,7 @@
 - Consumes: `FIELDS`, `ALLOWED`, `FieldReading`, `quote_in_body` (foundation); `body_sha256`; `rules_view` comes later, not needed here.
 - Produces:
   - File format, one JSON object per line in `tests/gold/items.jsonl`: `{"gold_id": "g0001", "stratum": "sponsorship:wont_sponsor", "title": str, "location": str, "body": str, "labels": {<every name in FIELDS>: {"value": ..., "quote": str}}, "status": "prelabeled" | "confirmed", "confirmed_on": "YYYY-MM-DD" | null}`. Bodies are stored in the file (public postings), so tests never need the store. `stratum` is `"<field>:<class>"`, or `"random"` or `"disagree"` for the two extra samples.
-  - `@dataclass(frozen=True) class GoldItem` with those attributes and `labels: dict[str, FieldReading]`; `load_gold(path: Path = GOLD_PATH) -> list[GoldItem]` raises `ValueError` naming the line and field for: a missing field, a value outside `ALLOWED`, a quote not found in the body (or title or location for `level` and `location`) by `quote_in_body`, a duplicate `gold_id`, a `confirmed` item without `confirmed_on`.
+  - `@dataclass(frozen=True) class GoldItem` with those attributes and `labels: dict[str, FieldReading]`; `load_gold(path: Path = GOLD_PATH) -> list[GoldItem]` raises `ValueError` naming the line and field for: a missing field, a value outside `ALLOWED`, a quote not found in the title, location and body by `quote_in_body`, a duplicate `gold_id`, a `confirmed` item without `confirmed_on`.
   - `STRATA`: the classes to cover, one `(field, value)` per rare class: `sponsorship` in `wont_sponsor`, `will_sponsor`, `opt_only`, `silent`; `citizenship_or_clearance` `yes`; `student_or_grad_window` `yes`; `location` class `non_us` (derived through `us_status`); `level` in `intern`, `new_grad`, `early_career`; plus `random` and `disagree`. `TARGET_PER_CLASS = 30` (first set; 150 for a hide class before it may rely on the 2% bound, research section 3.3).
   - `sample_gold(conn, per_class: int, *, seed: int, existing: set[str]) -> list[dict]`: draws postings from the store, stratified by the rules' decision classes (rules are the proxy for "class" when picking; the label is whatever Devanshu confirms), skips postings already in `existing` (matched by body hash), returns item dicts with `status "prelabeled"` and empty `labels` for Claude to fill. Deterministic for a seed.
   - `pending(items: list[GoldItem]) -> list[GoldItem]` and `coverage(items) -> dict[str, tuple[int, int]]`: per stratum, `(confirmed, target)`.
@@ -372,13 +371,13 @@ Foundation Task 6 gives every stream one shared flow test. This task registers t
 reader's invariants, so a break between the reader and the crawler, the rules or the ranker fails at this PR.
 
 **Files:**
-- Modify: `tests/pipeline/harness.py` (stage registration only), `tests/pipeline/test_flow.py`
+- Create: `tests/pipeline/stages_reader.py` (`register(harness, runner=None)`, foundation Task 6 convention); Modify: `tests/pipeline/test_flow.py`
 - Modify: `tests/fixtures/pipeline/` (add `posting_hide.txt`: a posting body of at least 500 characters that says "We do not sponsor visas." and states nothing else that hides it)
 - Test: `tests/pipeline/test_flow.py`
 
 **Interfaces:**
 - Consumes: `PipelineHarness` (`.conn`, `.fixture(name)`, `.stages`, stage names in the foundation's order `discover, resolve, find_boards, read_boards, read_postings, rules, rank, plan`); `enqueue`, `next_batch`, `submit`, `run_night`, `Runner`, `RunResult`, `reader_combiner`, `apply_reading`; `rebuild`, `decide_and_store` from `outreach/rules/rebuild.py`.
-- Produces: `read_postings_stage(h: PipelineHarness, runner: Runner | None = None) -> None`, appended to `h.stages` under the name `read_postings`. It decides the fixture postings the crawler stage left (`decide_and_store(h.conn, pid, combiner=reader_combiner(h.conn))`, after a `rebuild` if the store has no current ruleset), calls `enqueue` for each as #21 will, then `run_night(h.conn, runner)`. `runner` defaults to a fake that answers every posting from a table of scripted readings keyed by posting title; the real `claude_runner` is never constructed in the flow test. The `rules` stage registered by #4 must call `rebuild(conn, combiner=reader_combiner(conn))` and then `apply_all(conn)` so the reader's decisions survive a rebuild; the reader PR makes that change to the stage if it is already registered.
+- Produces: `register(h: PipelineHarness, runner: Runner | None = None) -> None` in `stages_reader.py`, appending the stage `read_postings` to `h.stages`. It decides the fixture postings the crawler stage left (`decide_and_store(h.conn, pid, combiner=reader_combiner(h.conn))`, after a `rebuild` if the store has no current ruleset), runs `enqueue_missing` (the crawler never enqueues), then `run_night(h.conn, runner)`. `runner` defaults to a fake that answers every posting from a table of scripted readings keyed by posting title; the real `claude_runner` is never constructed in the flow test. The `rules` stage is #30's (`tests/pipeline/stages_rules.py`, foundation Task 6): it calls `rebuild(conn, combiner=reader_combiner(conn))` and then `apply_all(conn)` so the reader's decisions survive a rebuild; `test_flow_a_rebuild_keeps_the_reader_decisions` below exercises it.
 - Boundaries (do not cross): #21 (crawler) never writes `read_queue` (controller ruling 2026-10-21): it stores the body and its `body_sha256`, and this plan's `enqueue_missing` (run before each night batch and on `next`) queues it; this plan owns leasing, `submit` and re-queue. #6 (ranking) writes `company_score`; the queue order reads it when present and ignores it when absent, so the flow test passes with the `rank` stage unregistered and again with a one-row `company_score` fixture.
 
 - [ ] **Step 1: Write the failing flow tests** in `tests/pipeline/test_flow.py` (each builds the harness, registers the stage with a scripted fake runner, runs it, then asserts on `h.conn`):
@@ -388,7 +387,7 @@ reader's invariants, so a break between the reader and the crawler, the rules or
   - `test_flow_queue_order_ignores_company_score_when_absent_and_reads_it_when_present`: run `next_batch` before and after inserting one `company_score` row; the first call works with the table empty, the second puts that company's lane 1 posting first.
   - `test_flow_a_rebuild_keeps_the_reader_decisions`: after the agreeing case, run the `rules` stage (rebuild with the combiner, then `apply_all`); the decision is still `provisional = 0` with the same `reader_version`, and no reader call is made (the fake runner's call count is unchanged).
 - [ ] **Step 2: Run** `uv run python -m unittest tests.pipeline.test_flow -v`. Expected: the new tests FAIL (stage not registered).
-- [ ] **Step 3: Implement** `read_postings_stage`, register it in the harness, add the fixture body. No product code changes; if a flow test fails because of a bug in Tasks 2 to 6, fix it there with a unit test first.
+- [ ] **Step 3: Implement** `register` in `stages_reader.py` (`harness.py` imports it in stage order), add the fixture body. No product code changes; if a flow test fails because of a bug in Tasks 2 to 6, fix it there with a unit test first.
 - [ ] **Step 4: Run** the full suite. Expected: all OK, and the foundation's `test_flow_runs_every_registered_stage` still passes.
 - [ ] **Step 5: Commit** `Tests: reader stage and invariants in the pipeline flow test (#32)`.
 
@@ -398,7 +397,7 @@ reader's invariants, so a break between the reader and the crawler, the rules or
 - Modify: `docs/README.md` (a row for this plan), `docs/superpowers/plans/2026-10-21-pipeline-foundation.md` (nothing if the foundation merged unchanged; otherwise only a note if a name changed)
 
 **Interfaces:**
-- Produces: the hand-off list the other streams read, written as a short "Hand-off" section at the end of this plan. Boundaries: #21 (crawler) only calls `enqueue` and `enqueue_missing` and writes nothing else in `read_queue`; this plan owns leasing, `submit`, re-queue and the combination. #6 (ranking) writes `company_score`; the queue order reads it when present and ignores it when absent. Each stream registers its stage in `tests/pipeline/harness.py` (the reader's is `read_postings`, Task 9). #13 wraps `next_batch(conn, limit)` plus `batch_payload` and `submit(conn, readings)` plus `apply_reading` as its two reader tools. #21's crawler calls `enqueue(conn, posting_id)` after it stores a new or changed body, then `decide_and_store(..., combiner=reader_combiner(conn))`. #6 reads `current_decision.provisional` and relies on `passes()` for posting-level hides. #11 and #12 call `explain(conn, posting_id)` for flagged fields and both quotes. After any `rebuild`, run `python -m outreach.reader apply`.
+- Produces: the hand-off list the other streams read, written as a short "Hand-off" section at the end of this plan. Boundaries: #21 (crawler) writes nothing in `read_queue` (ruling 0) and calls nothing here except passing `reader_combiner(conn)` into its decisions; `enqueue_missing` (run before each night batch and on `next`) queues every stored body that has no row; this plan owns leasing, `submit`, re-queue and the combination. #6 (ranking) writes `company_score`; the queue order reads it when present and ignores it when absent. Each stream registers its stage in its own `tests/pipeline/stages_<stream>.py` (the reader's is `stages_reader.py`, `read_postings`, Task 9). #13 wraps `next_batch(conn, limit)` plus `batch_payload` and `submit(conn, readings)` plus `apply_reading` as its two reader tools. #21's crawler stores the body and calls `decide_and_store(..., combiner=reader_combiner(conn))` (its tick resolves the combiner by lazy import); it never calls `enqueue`. #6 reads `current_decision.provisional` and relies on `passes()` for posting-level hides. #11 and #12 call `explain(conn, posting_id)` for flagged fields and both quotes. After any `rebuild`, run `python -m outreach.reader apply`.
 
 - [ ] **Step 1: Edit the docs.** No em or en dashes.
 - [ ] **Step 2: Run** `grep -c -P "[\x{2014}\x{2013}]" docs/README.md docs/superpowers/plans/2026-10-21-posting-reader.md outreach/reader/prompts/read_posting.md`. Expected: `0` for each.
@@ -413,18 +412,18 @@ What the other streams call and where the boundaries sit.
 
 | Stream | Calls | Boundary |
 |---|---|---|
-| #21 crawler | `enqueue(conn, posting_id)` after it stores a new or changed body, `enqueue_missing(conn)` for a backlog, then `decide_and_store(conn, posting_id, combiner=reader_combiner(conn))` | The crawler writes nothing else in `read_queue`. This plan owns leasing, `submit` and re-queue. Eligibility (lane, body length) lives in `enqueue` only, so it is not duplicated |
+| #21 crawler | `decide_and_store(conn, posting_id, combiner=reader_combiner(conn))` for every posting it decides, and `rebuild(conn, combiner=...)` at a ruleset change | The crawler never calls `enqueue` and writes nothing in `read_queue` (ruling 0): `enqueue_missing` finds the bodies it stored. This plan owns leasing, `submit` and re-queue. Eligibility (lane, body length) lives in `enqueue` only, so it is not duplicated |
 | #6 ranking | Writes `company_score`. Reads `current_decision.provisional` and keeps `passes()` as the posting-level hide policy | The queue order reads `company_score` when present and ignores it when absent. #6 never reads `read_queue` or `posting_reading` |
 | #13 MCP | Two reader tools: `next_batch(conn, limit)` with `batch_payload`, and `submit(conn, readings)` followed by `apply_reading` for each stored or partial result | The tools return only what the side session needs (the payload and the `SubmitResult` list) |
 | #11 and #12 API and web | `explain(conn, posting_id)` for flagged fields and both quotes; open `review_item` rows of kind `reader_disagrees` for Needs you | Read only |
-| #4 rules (`rules` stage) | `rebuild(conn, combiner=reader_combiner(conn))`, then `apply_all(conn)` after every rebuild | Without the combiner a rebuild resets `provisional` to 1 until `apply_all` runs |
-| Pipeline flow test | The reader registers `read_postings` in `tests/pipeline/harness.py` and adds the three invariants in Task 9 | The flow test stays green on every PR |
+| `rules` stage (#30 owns it) | `rebuild(conn, combiner=reader_combiner(conn))`, then `apply_all(conn)` after every rebuild | Without the combiner a rebuild resets `provisional` to 1 until `apply_all` runs; the night job also runs `apply_all` after its batches |
+| Pipeline flow test | The reader registers `read_postings` through `tests/pipeline/stages_reader.py` and adds the invariants in Task 9 | The flow test stays green on every PR |
 
 ## Self-review (against the spec and issue)
 
 - Section 7.1 facts with quotes and refusal: Tasks 1 and 3. 7.2 queue, `next`, `submit`, night job, side session, version hash, re-read on version change: Tasks 1, 2, 5, 6 (`enqueue_missing` covers a new version, never a crawl). 7.3 combination, provisional hides, queue order, backlog inside the cap: Tasks 2, 4, 6. 7.4 labeled set and `eval`: Tasks 7 and 8. Section 8 hide list: the `HIDE_FIELDS` table. Section 12 `read_queue` and `posting_reading`: used as the foundation defines them, no schema change here. Section 14 step 2 "lanes and the combination in #4's rules and #6": only the combiner hook touches `rebuild.py`; lane hide policy stays `passes()` and #6.
 - Issue "Done when": a fake reader tests lease (Task 2), refusal of an unquoted or paraphrased fact (Task 3), re-queue on a body change (Tasks 2 and 3), a skipped night (Task 6), eval output (Task 8); the 20-posting real run is Task 10 step 4. The coordinator's flow-test rule (register the stage, add invariants) is Task 9.
-- Names used across tasks: `ReaderConfig`, `reader_version`, `body_sha256`, `enqueue`, `enqueue_missing`, `refresh_priorities`, `next_batch`, `release`, `batch_payload`, `submit`, `SubmitResult`, `combine`, `Combined`, `FieldVerdict`, `apply_reading`, `apply_all`, `explain`, `run_night`, `Runner`, `RunResult`, `load_gold`, `score`, `not_worse`, `promote`. Each is defined once, in the task that lists it under Produces.
+- Names used across tasks: `ReaderConfig`, `reader_version`, `enqueue`, `enqueue_missing`, `refresh_priorities`, `next_batch`, `release`, `batch_payload`, `submit`, `SubmitResult`, `combine`, `Combined`, `FieldVerdict`, `apply_reading`, `apply_all`, `explain`, `run_night`, `Runner`, `RunResult`, `load_gold`, `score`, `not_worse`, `promote`. Each is defined once, in the task that lists it under Produces.
 
 ## Open questions for Devanshu
 

@@ -245,6 +245,26 @@ FINAL_4 = [  # (title, body, status, reason, start_2027)
     ("Software Engineer", "You must be a current student.", "excluded", "current_student", False),
 ]
 
+# Final fix wave 2, item 4 (#4): a degree "or currently pursuing one", a student-or-graduate line, and perk or team
+# lines about employees who study are no current-student rule.
+WAVE_2_STUDENT = [  # (title, body, status, reason, start_2027)
+    ("Software Engineer", "Bachelor's degree in CS or currently pursuing one.", "ok", None, False),
+    ("Software Engineer", "Degree in CS, or currently enrolled in a CS program.", "ok", None, False),
+    ("Software Engineer", "Currently pursuing or holding a degree in Computer Science.", "ok", None, False),
+    ("Software Engineer", "Currently enrolled in or a graduate of a BS/MS program.", "ok", None, False),
+    ("Software Engineer", "Current students and graduates of bootcamps are welcome.", "ok", None, False),
+    ("Software Engineer", "We support employees currently pursuing a master's degree with tuition reimbursement.",
+     "ok", None, False),
+    ("Software Engineer", "Many of our engineers are currently pursuing graduate degrees part-time.", "ok", None, False),
+    # still a current-student rule
+    ("Software Engineer", "You must be currently enrolled in a Bachelor's or Master's program in Computer Science.",
+     "excluded", "current_student", False),
+    ("Software Engineer", "Must be a student or currently enrolled in a degree program.", "excluded", "current_student",
+     False),
+    ("Software Engineer", "Currently pursuing a BS or MS degree in Computer Science.", "excluded", "current_student",
+     False),
+]
+
 # Body start wording is a 2027 start even next to immediate-start wording; only the title reading is cancelled.
 STARTS = [  # (title, body, start_2027)
     ("Software Engineer, New Grad", "Open to 2026 grads. This role starts in July 2027.", True),
@@ -298,6 +318,9 @@ class EligibilityTest(unittest.TestCase):
         body = "Meet our Class of 2024 interns on the blog. Candidates must graduate between December 2026 and June 2027."
         self.assertEqual(eligibility(NG, body, self.cfg),
                          ("excluded", "grad_window", "Candidates must graduate between December 2026 and June 2027."))
+
+    def test_wave_2_degree_or_pursuing_is_no_student_rule(self):
+        self.check(WAVE_2_STUDENT)
 
     def test_final_4_current_student_needs_a_program_cue(self):
         self.check(FINAL_4)

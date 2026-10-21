@@ -52,6 +52,9 @@ _BOUND_TAIL = r"\s{1,3}(?:the\s{1,3})?(?:end\s{1,3}of\s{1,3})?(?:[a-z]{1,9},?\s{
 # The same for a lower bound: "after December 2024", "since 2024", "on or after January 2025" (years 2023 to 2029)
 _LOWER_TAIL = r"\s{1,3}(?:the\s{1,3})?(?:end\s{1,3}of\s{1,3})?(?:[a-z]{1,9},?\s{1,3})?202[3-9](?!\d)"
 CUE_REACH = 60  # a candidate cue or a refusal this close to a graduation word belongs to it
+SUBJECT_REACH = 30  # a student_subject this close before a current-student phrase is who the phrase is about
+# "or" (after a comma or not) and at most three words, right before a current-student phrase: "CS or currently"
+_OR_BEFORE = re.compile(r"(?<!\w)or[\s,]{1,3}(?:[\w'.-]{1,20}[\s,]{1,3}){0,3}\Z", re.IGNORECASE)
 # What may come before a graduation word that opens its sentence: bullets, numbering, punctuation and spaces, no letter
 _LEADS = re.compile(r"[\W\d_]{0,20}")
 # The graduation words that, opening a sentence, make it a requirement bullet ("Graduated between May 2025 and August
@@ -80,6 +83,9 @@ class _Patterns:
                                            + r"]t(?!\w)", re.IGNORECASE)
         self.graduates_welcome = phrases(e["graduates_welcome"])
         self.graduate_route = phrases(e["graduate_route"])
+        self.degree_held = phrases(e["degree_held"])
+        self.student_subject = phrases(e["student_subject"])
+        self.student_perk = phrases(e["student_perk"])
         self.soft = phrases(e["soft"])
         self.company_history = phrases(e["company_history"])
         # "in", "since": what leads from founders to their year ("MIT graduates in 2024"); the date after it is theirs
@@ -302,6 +308,14 @@ def _window_holds(sentence: str, dates: list[tuple[int, int | None]], graduated:
     return lo <= graduated <= hi
 
 
+def _degree_or(body: str, a: int, at: int, p: _Patterns) -> bool:
+    """Whether "or" sits right before `at` (a current-student phrase) and a held degree is named before that "or" in
+    the sentence starting at `a`: "Bachelor's degree in CS or currently pursuing one"."""
+    lo = max(a, at - 80)
+    o = _OR_BEFORE.search(body, lo, at)
+    return o is not None and p.degree_held.search(body, a, o.start()) is not None
+
+
 def _quote(body: str, m: re.Match, offset: int = 0) -> str:
     start, end = offset + m.start(), offset + m.end()
     return quote_around(body, start, end, QUOTE_LIMIT) or body[start:end]
@@ -346,7 +360,8 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
     #    a BS.\nRecent grads welcome.")
     if m := p.graduates_welcome.search(body):
         return "ok", None, _quote(body, m)
-    # 3) a current-student requirement, unless its own sentence offers a graduate route, names no degree, program,
+    # 3) a current-student requirement, unless its own sentence offers a graduate route (or a held degree before
+    #    "or"), is a perk or team line ("employees currently pursuing ... tuition"), names no degree, program,
     #    school or enrollment ("We are currently pursuing Series B funding"), is negated ("not open to current
     #    students") or only prefers it ("Preferred Qualifications:" on the line before counts)
     starts = [a for a, _ in spans]
@@ -359,6 +374,10 @@ def eligibility(title: str, body: str, cfg: Config) -> tuple[str, str | None, st
         a, b = spans[i] if spans else (0, len(body))
         if p.graduate_route.search(body, a, b) is not None:
             continue
+        if _degree_or(body, a, m.start(), p) or p.student_perk.search(body, a, b) is not None:
+            continue  # "Bachelor's degree in CS or currently pursuing one"; a tuition perk line
+        if p.student_subject.search(body, max(a, m.start() - SUBJECT_REACH), m.start()) is not None:
+            continue  # "employees currently pursuing", "our engineers are currently pursuing"
         if p.student_cue.search(body, a, b) is None or p.student_negation.search(body, a, b) is not None:
             continue
         header = spans[i - 1][0] if i and body[spans[i - 1][1] - 1] in _JOINS_NEXT else a

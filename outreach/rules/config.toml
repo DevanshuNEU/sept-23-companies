@@ -607,6 +607,27 @@ graduate_route = [
   "or completed)",
   "completed or currently pursuing", "completed or pursuing", "completed or currently enrolled",
   "completed or enrolled", "completed or in progress", "completed or expected", "earned or expected",
+  # final fix wave 2, item 4: "Currently pursuing or holding a degree", "Currently enrolled in or a graduate of a BS/MS
+  # program", "Current students and graduates of bootcamps are welcome"
+  "or holding", "or hold", "or holds", "or a graduate", "or a graduate of", "or graduate of", "or graduates",
+  "or graduates of", "and graduates", "and graduates of",
+]
+# Final fix wave 2, item 4: a held degree named before "or" and a current-student phrase ("Bachelor's degree in CS or
+# currently pursuing one") is a route he meets, not a current-student rule. Read only in the sentence before the "or".
+degree_held = [
+  "degree", "degrees", "bachelor", "bachelor's", "bachelors", "master", "master's", "masters", "phd", "ph.d",
+  "doctorate", "bs", "ms", "b.s.", "m.s.", "ba", "b.a.", "bsc", "msc", "b.tech", "m.tech", "diploma",
+]
+# Final fix wave 2, item 4: who a current-student phrase is about when one of these sits just before it ("employees
+# currently pursuing", "Many of our engineers are currently pursuing"): his future colleagues, not him.
+student_subject = [
+  "employees", "employee", "engineers", "team members", "teammates", "colleagues", "staff", "our", "people",
+]
+# Final fix wave 2, item 4: a sentence naming one of these is a perk line ("We support employees currently pursuing a
+# master's degree with tuition reimbursement"), never a current-student rule
+student_perk = [
+  "tuition", "reimbursement", "reimburse", "reimburses", "education stipend", "learning stipend",
+  "education assistance", "education benefit", "education benefits", "learning budget",
 ]
 # refresh/eligibility.py:52 SOFT
 soft = [

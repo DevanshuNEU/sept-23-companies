@@ -8,7 +8,8 @@ nothing. Each topic sentence is cut into clauses at "but", "however", "and", "th
 negation is read before anything else, so a wrong "yes" from "will not sponsor ... OPT" cannot happen. A refusal counts only in a clause with a topic word, and
 a clause is also cut at a comma or spaced dash before a new subject, at ", except" and around a parenthetical that has a
 verb, so "Visa sponsorship is available, relocation is not provided" reads yes. A clause with a topic word and any
-negator reads unclear, never yes. A topic word
+negator reads unclear, never yes, but it still counts as a yes against a refusal in another sentence, so "We sponsor
+H-1B visas at no cost to you. We do not sponsor contractors." reads unclear, never no. A topic word
 reads yes only next to a sponsorship context word (visa, H-1B, work authorization), so "executive sponsors" and
 "Visa and Mastercard" say nothing. Every pattern is a list of literals with bounded gaps, and every window is
 bounded, so reading stays linear in the body.
@@ -54,8 +55,9 @@ CUE_CHARS = 60
 _SLACK = 20
 
 # A clause's reading. NEUTRAL is a clause with nothing to say ("We are a growing team, but ...", "executive
-# sponsors", an EEO line).
-NO, YES, UNCLEAR, NEUTRAL = "no", "yes", "unclear", "neutral"
+# sponsors", an EEO line). LEANS_YES is a yes clause that holds a negator ("We sponsor H-1B visas at no cost"): the
+# sentence reads unclear, and the body counts it as a yes against a refusal elsewhere.
+NO, YES, UNCLEAR, NEUTRAL, LEANS_YES = "no", "yes", "unclear", "neutral", "leans_yes"
 
 
 class _Patterns:
@@ -297,9 +299,10 @@ def _read_clause(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
         return UNCLEAR, m
     if topics and _has_context(clause, topics, p):
         # "yes" needs a clause with no negator at all: a refusal the lists do not know ("Sponsorship is not part of
-        # this role", "visa sponsorship for candidates with no gaps") reads unclear, never as the best answer.
+        # this role", "visa sponsorship for candidates with no gaps") reads unclear, never as the best answer. It
+        # still leans yes, so a refusal in another sentence cannot turn the body into no.
         if m := _negator(clause, p):
-            return UNCLEAR, m
+            return LEANS_YES, m
         return YES, p.topic.search(clause)
     return NEUTRAL, None  # no topic word, or one with no sponsorship context ("executive sponsors")
 
@@ -323,10 +326,11 @@ def _preferred(text: str, a: int, b: int, m: re.Match, p: _Patterns) -> bool:
 class _Reading:
     """What one sentence says: a stance (or None) and where in the body the deciding words are."""
 
-    def __init__(self, stance: str | None, start: int, end: int, opt: bool):
+    def __init__(self, stance: str | None, start: int, end: int, opt: bool, leans_yes: bool = False):
         self.stance = stance  # no, yes, unclear, opt_only, or None for a sentence that only supports OPT
         self.start, self.end = start, end
         self.opt = opt  # the sentence has a clause that supports OPT
+        self.leans_yes = leans_yes  # an unclear sentence with a yes clause that holds a negator
 
 
 def _read_sentence(sentence: str, offset: int, p: _Patterns) -> _Reading | None:
@@ -344,7 +348,7 @@ def _read_sentence(sentence: str, offset: int, p: _Patterns) -> _Reading | None:
                     return _Reading(None, offset + a + m.start(), offset + a + m.end(), True)
         return None
     found: dict[str, tuple[int, int]] = {}  # reading -> the first match that gave it, as body offsets
-    opt = False
+    opt = leans_yes = False
     outer, parens = _split_parens(text, p)
     spans = [(a, b, outer) for a, b in _clauses(outer, p)] + [(a, b, text) for a, b in parens]
     for a, b, source in spans:
@@ -361,6 +365,9 @@ def _read_sentence(sentence: str, offset: int, p: _Patterns) -> _Reading | None:
                 reading = UNCLEAR
         if reading == YES and source is not outer:
             reading = NEUTRAL  # a parenthetical only qualifies: "(i.e. H1B, F-1 OPT, TN)" is not a yes
+        if reading == LEANS_YES:
+            leans_yes = leans_yes or source is outer  # a parenthetical only qualifies, so it never leans the body
+            reading = UNCLEAR
         if reading != NEUTRAL:
             found.setdefault(reading, (offset + a + m.start(), offset + a + m.end()))
     if not found:
@@ -374,7 +381,7 @@ def _read_sentence(sentence: str, offset: int, p: _Patterns) -> _Reading | None:
     else:
         stance = YES  # a topic word sits in some clause, and that clause read yes
     start, end = found.get(stance, found.get(NO, found.get(YES, found.get("opt"))))
-    return _Reading(stance, start, end, opt)
+    return _Reading(stance, start, end, opt, leans_yes and stance == UNCLEAR)
 
 
 def _quote(body: str, reading: _Reading) -> str:
@@ -398,7 +405,8 @@ def sponsorship_stance(body: str, cfg: Config) -> tuple[str, str]:
     if "opt_only" in by_stance:
         return "opt_only", _quote(body, by_stance["opt_only"])
     opt = next((r for r in readings if r.opt), None)
-    if NO in by_stance and YES not in by_stance:
+    leans_yes = any(r.leans_yes for r in readings)  # "We sponsor H-1B visas at no cost to you." counts as a yes here
+    if NO in by_stance and YES not in by_stance and not leans_yes:
         if opt is not None:  # "We support OPT and CPT. We are unable to sponsor H-1B visas."
             first, second = sorted((opt, by_stance[NO]), key=lambda r: r.start)
             return "opt_only", _quote(body, first) + " " + _quote(body, second)

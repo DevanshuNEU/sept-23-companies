@@ -326,6 +326,25 @@ FINAL_3_CITIZEN = [  # (body, required)
 ]
 
 
+# Final fix wave 2, item 1 (#4): a sentence that says yes but holds a negator ("at no cost") reads unclear on its own,
+# and it still counts as a yes against a refusal elsewhere, so the body never reads no.
+WAVE_2_YES_WITH_NEGATOR = [  # (body, stances accepted)
+    ("We sponsor H-1B visas at no cost to you. We do not sponsor visas for contractors.", ("unclear", "yes")),
+    ("Visa sponsorship is not available for interns. Full-time hires get H-1B sponsorship with no waiting period.",
+     ("unclear", "yes")),
+    ("We do not sponsor visas for roles outside the US. In the US we offer H-1B sponsorship, no questions asked.",
+     ("unclear", "yes")),
+    ("No sponsorship for contract roles. We sponsor H-1B for full-time hires, never charging legal fees.",
+     ("unclear", "yes")),
+    # a plain refusal next to the negated yes is a conflict, and a conflict is unclear
+    ("We sponsor H-1B visas at no cost to you. We do not sponsor visas for this role.", ("unclear",)),
+    # the earlier ruling stands: a clause with a topic word and an unlisted negator never reads yes on its own
+    ("We sponsor H-1B visas at no cost to you.", ("unclear",)),
+    ("Visa sponsorship is available for candidates with no gaps in employment.", ("unclear",)),
+    # and a refusal with nothing positive anywhere is still no
+    ("We do not sponsor visas. Relocation is not provided.", ("no",)),
+]
+
 class SponsorshipStanceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -364,6 +383,11 @@ class SponsorshipStanceTest(unittest.TestCase):
 
     def test_final_2_a_negation_about_something_else_is_not_a_refusal(self):
         for body, accepted in FINAL_2_STANCE:
+            with self.subTest(body=body):
+                self.assertIn(sponsorship_stance(body, self.cfg)[0], accepted)
+
+    def test_wave_2_a_yes_with_a_negator_still_cancels_a_refusal(self):
+        for body, accepted in WAVE_2_YES_WITH_NEGATOR:
             with self.subTest(body=body):
                 self.assertIn(sponsorship_stance(body, self.cfg)[0], accepted)
 

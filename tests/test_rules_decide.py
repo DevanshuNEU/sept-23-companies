@@ -135,7 +135,9 @@ class DecideTests(unittest.TestCase):
         db = fresh_store()
         columns = {r["name"] for r in db.execute("PRAGMA table_info(decision)")}
         row = d("Software Engineer", "3+ years of experience.").as_row()
-        self.assertEqual(set(row), columns - {"posting_id", "ruleset_version", "decided_at"})
+        # provisional and reader_version are the reader's (#32 writes them through its combiner), not decide()'s.
+        self.assertEqual(set(row), columns - {"posting_id", "ruleset_version", "decided_at", "provisional",
+                                              "reader_version"})
         self.assertTrue(all(not isinstance(v, bool) for v in row.values()))
         self.assertIn(row["level_ok"], (0, 1))
 

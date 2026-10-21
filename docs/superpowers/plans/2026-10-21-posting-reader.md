@@ -460,3 +460,6 @@ What the other streams call and where the boundaries sit.
    writes it to `posting.pay`, so ranking's pay-level signal sees pay stated only in the body (#6 open question 3).
 9. **Queue order skips final hides:** tier 2 ("lane 1 at top companies") counts only companies whose stored
    `company_score.lanes` is non-empty and whose decision is not a final hide (#6 open question 6).
+10. **Quote floors.** `quote_in_body(quote, body, *, min_words=3)` (#30). #32 passes `min_words=1` for `location`,
+    `pay`, `start_date` and `remote`, and keeps 3 for `engineering`, `level`, `years`, `sponsorship`,
+    `citizenship_or_clearance` and `student_or_grad_window`.

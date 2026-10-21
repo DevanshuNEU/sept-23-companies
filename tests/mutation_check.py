@@ -36,6 +36,10 @@ import live_checkout  # noqa: E402
 
 RULES = ROOT / "outreach" / "rules"
 STORE = ROOT / "outreach" / "store"
+READER = ROOT / "outreach" / "reader"
+CRAWL = ROOT / "outreach" / "crawl"
+NET = ROOT / "outreach" / "net.py"
+SOURCES = ROOT / "outreach" / "sources"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
 # (file, guarantee broken, find, replace, expect). `find` must be exact text from the code as it is now and appear
@@ -174,6 +178,142 @@ MUTATIONS = [
      "    'skipped>drafted')\n"
      "  BEGIN SELECT RAISE(ABORT, 'illegal message state change'); END;\n",
      "", "test_message_state_machine"),
+    # The pipeline tables (#30). Each guard is swapped for CHECK (1), so the statement still parses.
+    (SCHEMA, "person_source takes LinkedIn pages, which prepare must never read",
+     "  CHECK (instr(lower(url), 'linkedin.com') = 0 AND instr(lower(url), 'lnkd.in') = 0),\n", "  CHECK (1),\n",
+     "test_person_source_refuses_linkedin_hosts"),
+    (SCHEMA, "a Claude save can confirm a LinkedIn reason line",
+     "  CHECK (saved_by <> 'claude' OR reason_state = 'proposed')\n", "  CHECK (1)\n",
+     "test_linkedin_draft_claude_cannot_confirm"),
+    (SCHEMA, "outreach_touch.idempotency_key not unique, so a double click logs two touches",
+     "  idempotency_key TEXT UNIQUE,\n", "  idempotency_key TEXT,\n", "test_outreach_touch_idempotency_key_unique"),
+    (SCHEMA, "an undone touch can take an outcome",
+     "  CHECK (undone_at IS NULL OR (accepted_at IS NULL AND replied_at IS NULL AND referred_at IS NULL\n"
+     "                               AND interview_at IS NULL AND offer_at IS NULL AND quiet_at IS NULL))\n",
+     "  CHECK (1)\n", "test_outreach_touch_undone_excludes_outcomes"),
+    # The ifnull(..., -1) >= 0 test below the type tests also refuses a missing key, so this mutation breaks both.
+    (SCHEMA, "an lca key test uses = again and has no ifnull range test, so a missing key reads NULL and the CHECK passes",
+     "AND json_type(value, '$.newemp_jr') IS 'integer'\n"
+     "           AND ifnull(json_type(value, '$.median_jr_wage'), 'integer') IS 'integer'\n"
+     "           AND ifnull(json_extract(value, '$.fy'), -1) >= 0 AND ifnull(json_extract(value, '$.software'), -1) >= 0\n"
+     "           AND ifnull(json_extract(value, '$.jr'), -1) >= 0 AND ifnull(json_extract(value, '$.level1'), -1) >= 0\n"
+     "           AND ifnull(json_extract(value, '$.newemp_jr'), -1) >= 0\n",
+     "AND json_type(value, '$.newemp_jr') = 'integer'\n"
+     "           AND ifnull(json_type(value, '$.median_jr_wage'), 'integer') IS 'integer'\n"
+     "           AND ifnull(json_extract(value, '$.fy'), -1) >= 0 AND ifnull(json_extract(value, '$.software'), -1) >= 0\n"
+     "           AND ifnull(json_extract(value, '$.jr'), -1) >= 0 AND ifnull(json_extract(value, '$.level1'), -1) >= 0\n",
+     "test_evidence_lca_value_must_be_json"),
+    (SCHEMA, "an outreach_touch can be deleted: the outreach_touch_never_deleted trigger removed",
+     "CREATE TRIGGER outreach_touch_never_deleted BEFORE DELETE ON outreach_touch\n  BEGIN SELECT",
+     "CREATE TRIGGER outreach_touch_never_deleted BEFORE DELETE ON outreach_touch\n  WHEN 0\n  BEGIN SELECT",
+     "test_an_outreach_touch_is_never_deleted"),
+    (SCHEMA, "the BEFORE INSERT replace guard on outreach_touch removed, so a plain connection can REPLACE a touch",
+     "CREATE TRIGGER outreach_touch_no_replace_insert BEFORE INSERT ON outreach_touch\n  WHEN EXISTS",
+     "CREATE TRIGGER outreach_touch_no_replace_insert BEFORE INSERT ON outreach_touch\n  WHEN 0 AND EXISTS",
+     "test_replace_cannot_overwrite_an_outreach_touch_without_recursive_triggers"),
+    (SCHEMA, 'the BEFORE UPDATE touch_id replace guard on outreach_touch removed',
+     '  WHEN EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id <> OLD.touch_id AND t.touch_id = NEW.touch_id)',
+     '  WHEN 0 AND EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id <> OLD.touch_id AND t.touch_id = NEW.touch_id)',
+     "test_replace_cannot_overwrite_an_outreach_touch_without_recursive_triggers"),
+    (SCHEMA, 'a repeated idempotency_key is no longer refused on INSERT',
+     'CREATE TRIGGER outreach_touch_key_no_replace_insert BEFORE INSERT ON outreach_touch\n  WHEN NEW.idempotency_key IS NOT NULL',
+     'CREATE TRIGGER outreach_touch_key_no_replace_insert BEFORE INSERT ON outreach_touch\n  WHEN 0 AND NEW.idempotency_key IS NOT NULL',
+     "test_replace_cannot_overwrite_an_outreach_touch_without_recursive_triggers"),
+    (SCHEMA, 'a repeated email_touch_id is no longer refused on INSERT',
+     'CREATE TRIGGER outreach_touch_email_no_replace_insert BEFORE INSERT ON outreach_touch\n  WHEN NEW.email_touch_id IS NOT NULL',
+     'CREATE TRIGGER outreach_touch_email_no_replace_insert BEFORE INSERT ON outreach_touch\n  WHEN 0 AND NEW.email_touch_id IS NOT NULL',
+     "test_replace_cannot_overwrite_an_outreach_touch_without_recursive_triggers"),
+    (SCHEMA, 'a repeated idempotency_key is no longer refused on UPDATE',
+     'CREATE TRIGGER outreach_touch_key_no_replace_update BEFORE UPDATE OF idempotency_key ON outreach_touch\n  WHEN NEW.idempotency_key IS NOT NULL',
+     'CREATE TRIGGER outreach_touch_key_no_replace_update BEFORE UPDATE OF idempotency_key ON outreach_touch\n  WHEN 0 AND NEW.idempotency_key IS NOT NULL',
+     "test_replace_cannot_overwrite_an_outreach_touch_without_recursive_triggers"),
+    (SCHEMA, 'a repeated email_touch_id is no longer refused on UPDATE',
+     'CREATE TRIGGER outreach_touch_email_no_replace_update BEFORE UPDATE OF email_touch_id ON outreach_touch\n  WHEN NEW.email_touch_id IS NOT NULL',
+     'CREATE TRIGGER outreach_touch_email_no_replace_update BEFORE UPDATE OF email_touch_id ON outreach_touch\n  WHEN 0 AND NEW.email_touch_id IS NOT NULL',
+     "test_replace_cannot_overwrite_an_outreach_touch_without_recursive_triggers"),
+    (SCHEMA, "one email touch can be counted twice: the outreach_touch_email unique index removed",
+     "CREATE UNIQUE INDEX outreach_touch_email ON outreach_touch(email_touch_id) WHERE email_touch_id IS NOT NULL;\n",
+     "", "test_one_email_touch_is_counted_once"),
+    (SCHEMA, "an lca filing count can be negative",
+     "           AND ifnull(json_extract(value, '$.jr'), -1) >= 0 AND ifnull(json_extract(value, '$.level1'), -1) >= 0\n",
+     "           AND ifnull(json_extract(value, '$.level1'), -1) >= 0\n",
+     "test_evidence_lca_and_funding_numbers_cannot_be_negative"),
+    (SCHEMA, "a funding amount can be negative",
+     "           AND ifnull(json_extract(value, '$.amount_usd'), 0) >= 0\n", "",
+     "test_evidence_lca_and_funding_numbers_cannot_be_negative"),
+
+    # ---- reader/types.py --------------------------------------------------------------------------------------
+    (READER / "types.py", "the Unicode hyphens and the soft hyphen no longer join two letters into one word",
+     '_JOINERS = r"-\'\\u2019\\u2010\\u2011\\u2012\\u2013\\u00ad"', '_JOINERS = r"-\'\\u2019"',
+     "test_other_hyphen_characters_between_letters_join_words"),
+
+    # ---- crawl/base.py (#30) ----------------------------------------------------------------------------------
+    (CRAWL / "base.py", "the Oracle grammar is keyed on 'oracle', a name board.ats does not allow",
+     '"oracle_orc": _ORACLE', '"oracle": _ORACLE', "test_oracle_is_keyed_on_the_board_ats_name"),
+    (CRAWL / "base.py", "an ATS name outside board.ats falls back to the slug grammar again",
+     "if not isinstance(token, str) or ats not in BOARD_ATS:", "if not isinstance(token, str):",
+     "test_an_ats_name_outside_the_board_vocabulary_is_refused"),
+
+    (NET, "a cross-host redirect keeps the caller's User-Agent (the SEC contact address) again",
+     "                headers = {}\n",
+     "                headers = {k: v for k, v in (headers or {}).items() if k.lower() == \"user-agent\"}\n",
+     "test_a_caller_user_agent_with_an_address_does_not_reach_the_second_host"),
+
+    (READER / "types.py", "quote_in_body's default floor drops from 3 words to 1",
+     "def quote_in_body(quote: str, body: str, *, min_words: int = 3) -> bool:",
+     "def quote_in_body(quote: str, body: str, *, min_words: int = 1) -> bool:",
+     "test_quote_in_body_rejects_short_quote"),
+    (READER / "types.py", "quote_in_body accepts a min_words below 1",
+     "    if min_words < 1:\n", "    if False:\n",
+     "test_min_words_can_raise_the_floor_and_must_be_at_least_one"),
+
+    (SOURCES / "base.py", "a candidate domain may be a URL, a host with a port or one with whitespace again",
+     "_NOT_A_HOST.search(d) or ", "", "test_candidate_rejects_bad_domain"),
+
+    # ---- store/writes.py helpers (#30) ------------------------------------------------------------------------
+    (STORE / "writes.py", "body_sha256 folds case, so 'A b' and 'a b' are the same body",
+     '.strip().encode("utf-8")', '.strip().lower().encode("utf-8")', "test_body_sha256_collapses_whitespace_and_keeps_case"),
+    (STORE / "writes.py", "add_alias hands an alias that belongs to another company back as a success",
+     "    if owner != company_id:\n", "    if False:\n", "test_add_alias_refuses_other_company"),
+    (STORE / "writes.py", "a FEIN alias goes through name_key, which drops the dash",
+     "        key = alias.lower()\n", "        key = name_key(alias)\n", "test_add_alias_fein_kept_raw"),
+    (STORE / "writes.py", "record_outcome writes an outcome on an undone touch",
+     '    if row["undone_at"] is not None:\n        raise ValueError(f"touch {touch_id} was undone")\n',
+     '    if False:\n        raise ValueError(f"touch {touch_id} was undone")\n',
+     "test_undo_touch_sets_undone_at_and_blocks_outcomes"),
+    (STORE / "writes.py", "record_outcome accepts an outcome dated before the touch was sent",
+     '    if when < row["sent_at"]:\n', "    if False:\n", "test_record_outcome_refuses_before_sent"),
+    (STORE / "writes.py", "a late reply no longer clears quiet_at",
+     '"replied_at = ?, reply_kind = ?, quiet_at = NULL"', '"replied_at = ?, reply_kind = ?"',
+     "test_replied_stores_the_kind_and_clears_quiet"),
+    (STORE / "writes.py", "a second outcome of the same kind moves the date again",
+     "    if row[column] is not None:\n", "    if False:\n", "test_a_second_outcome_of_the_same_kind_is_refused"),
+    (STORE / "writes.py", "a first reply with no kind is stored as NULL instead of unsorted",
+     '        reply_kind = reply_kind or "unsorted"\n', "", "test_a_first_replied_with_no_reply_kind_is_unsorted"),
+    (STORE / "writes.py", "undo_touch undoes a touch that has an outcome",
+     "    if any(row[c] is not None for c in _OUTCOME_COLUMNS.values()):\n", "    if False:\n",
+     "test_undo_touch_refuses_after_an_outcome"),
+    (STORE / "writes.py", "log_touch accepts a missing idempotency key, so a retry logs the touch again",
+     '    if not isinstance(idempotency_key, str) or not idempotency_key:\n', "    if False:\n",
+     "test_log_touch_refuses_a_missing_idempotency_key"),
+    (SCHEMA, "an evidence domain can be a URL, carry a port or whitespace, or start or end with a dot",
+     "AND value NOT LIKE '%.' AND value NOT GLOB ('*[@/:' || char(9,10,11,12,13,32,160) || ']*')", "",
+     "test_evidence_domain_must_be_a_bare_lower_case_host"),
+    (SCHEMA, "a reader_disagrees item can be raised with no posting",
+     "CHECK (kind NOT IN ('sponsorship_unclear','reader_disagrees') OR posting_id IS NOT NULL)",
+     "CHECK (kind <> 'sponsorship_unclear' OR posting_id IS NOT NULL)", "test_reader_disagrees_needs_a_posting"),
+    (STORE / "writes.py", "set_reply_kind sets a kind on a touch that never replied",
+     '    if row["replied_at"] is None:\n        raise ValueError(f"touch {touch_id} has no reply, so it has no',
+     '    if False:\n        raise ValueError(f"touch {touch_id} has no reply, so it has no',
+     "test_set_reply_kind_refuses_a_touch_with_no_reply"),
+    (STORE / "writes.py", "an auto reply is accepted as a reply kind again",
+     '_REPLY_KINDS = ("unsorted", "interested", "not_now", "said_no", "asked_to_stop")',
+     '_REPLY_KINDS = ("unsorted", "interested", "not_now", "said_no", "asked_to_stop", "auto_reply")',
+     "test_an_auto_reply_is_not_an_outcome"),
+    (SCHEMA, "outreach_touch.reply_kind accepts auto_reply again",
+     "  reply_kind      TEXT CHECK (reply_kind IN ('unsorted','interested','not_now','said_no','asked_to_stop')),\n  referred_at",
+     "  reply_kind      TEXT CHECK (reply_kind IN ('unsorted','interested','not_now','said_no','asked_to_stop','auto_reply')),\n  referred_at",
+     "test_outreach_touch_quiet_reply_person_and_context"),
 ]
 
 

@@ -3,6 +3,7 @@
 `config.py` is part of the ruleset hash (see version.py): `phrases()` decides how every word list matches, so
 changing it can change a decision just as much as changing a word.
 """
+import functools
 import re
 import tomllib
 from dataclasses import dataclass
@@ -20,10 +21,18 @@ REQUIRED = {
               "body_entry"),
     "location": ("us_marks", "us_state_codes", "us_state_names", "us_cities", "non_us_countries", "non_us_cities",
                  "shared_city_names"),
-    "sponsorship": ("topic", "negation", "hedge", "opt", "opt_support", "citizenship", "citizenship_negation"),
-    "eligibility": ("grad_words", "current_student", "graduates_welcome", "soft", "company_history", "upper_bound",
-                    "cohort_title", "start_2027", "immediate_start"),
-    "facts": ("stage", "size_guess_words"),
+    "sponsorship": ("topic", "context", "self_context", "benefit", "non_discrimination", "negation", "negation_near",
+                    "clause_verbs", "field_no", "hedge", "negators", "negation_elided", "elided_complete", "continuation",
+                    "not_subject", "negation_cued", "negation_cue", "opt", "opt_acronyms", "opt_support", "citizenship",
+                    "citizenship_negation", "citizenship_preference", "citizenship_us_forms", "citizenship_templates",
+                    "itar", "itar_cue", "refusal_scope", "citizenship_alternative"),
+    "eligibility": ("grad_words", "current_student", "graduates_welcome", "graduate_route", "soft", "company_history",
+                    "upper_bound", "cohort_title", "start_2027", "immediate_start",
+                    "history_date_lead", "student_cue", "student_negation", "lower_bound", "lower_bound_suffix",
+                    "upper_bound_suffix", "candidate_cue", "grad_refusal", "route_join", "degree_held",
+                    "student_subject", "student_perk"),
+    "facts": ("stage", "size_guess_words", "not_size", "source_estimate", "stage_guess", "size_source", "size_cues",
+              "headcount_nouns"),
 }
 
 
@@ -49,6 +58,12 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             if key not in data[section]:
                 raise KeyError(f"[{section}] {key} is missing from {Path(path).name}")
     return Config(raw=raw, **{section: data[section] for section in REQUIRED})
+
+
+@functools.lru_cache(maxsize=1)
+def default_config() -> Config:
+    """The shipped config, loaded once: what a None cfg means everywhere in the rules."""
+    return load_config()
 
 
 # Dashes a posting may use where a phrase has a hyphen: hyphen, two Unicode hyphens and the en dash (built from

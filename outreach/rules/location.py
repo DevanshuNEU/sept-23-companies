@@ -1,10 +1,11 @@
 """Whether a posting's location is in the US: yes, no or unknown.
 
 Ported from refresh/finalcheck.py:69-82 and refresh/crawl_boards.py:34-49, with the order the #4 plan sets: a
-structured country first, then US state names (set aside so "New Mexico" never reads as Mexico), then US marks
-(ruling R12: "US" beats a country next to it), then a bounded, word-matched non-US list, then state codes and
-cities, and last the city names shared by the US and other countries. Every pattern is a list of literals with
-bounded gaps, so a search is linear in the location.
+structured US country first, then the location text (a US place there beats a structured non-US country, ruling
+2026-10-21), then that non-US country. In the text: US state names (set aside so "New Mexico" never reads as
+Mexico), then US marks (ruling R12: "US" beats a country next to it), then a bounded, word-matched non-US list, then
+state codes and cities, and last the city names shared by the US and other countries. Every pattern is a list of
+literals with bounded gaps, so a search is linear in the location.
 """
 import re
 
@@ -27,6 +28,7 @@ class _Patterns:
         bare = [m for m in loc["us_marks"] if m.lower() == "us"]
         self.us_bare = phrases([m.upper() for m in bare], case=True)
         self.us_marks = phrases([m for m in loc["us_marks"] if m.lower() != "us"])
+        self.country_marks = phrases(loc["us_marks"])  # a whole structured country may be the bare "us" in any case
         # An upper-case state code after a comma ("Lima, OH") or at the end ("Austin TX"), never a word like "in".
         code = phrases(loc["us_state_codes"], case=True).pattern
         self.state_code = re.compile(r",\s{0,3}" + code + "|" + code + r"\W*\Z")
@@ -48,14 +50,31 @@ def _read_part(part: str, p: _Patterns) -> str:
     return "unknown"
 
 
+def _read_country(country: str, p: _Patterns) -> str | None:
+    """yes for a country that names the US ("US-Remote", "United States (Remote)", "Puerto Rico"), no for a known
+    non-US country, None for anything else ("North America", "Georgia", a country the lists do not know)."""
+    if p.country_marks.fullmatch(country) or p.us_marks.search(country) or p.us_bare.search(country):
+        return "yes"
+    if p.non_us.search(country):
+        return "no"
+    return None
+
+
 def us_status(location: str, country: str | None, cfg: Config) -> str:
-    """yes, no or unknown. A structured country wins; otherwise any US part of the location makes it yes."""
-    if country is not None and country.strip():
-        return "yes" if phrases(cfg.location["us_marks"]).fullmatch(country.strip()) else "no"
+    """yes, no or unknown. A structured country that names the US wins. A US place in the location text beats a
+    known non-US country (Devanshu's ruling, 2026-10-21: a multi-location posting carries one country, often the
+    primary office, so "Remote - US or Canada" with country Canada reads yes); with no US place in the text a known
+    non-US country reads no. Any other country is no evidence, so the location text decides (a country the lists do
+    not know is never a "no" on its own)."""
     p = _Patterns(cfg)
+    read = None
+    if country is not None and country.strip():
+        read = _read_country(country.strip(), p)
+        if read == "yes":
+            return read
     parts = {_read_part(part, p) for part in _SPLIT.split(location or "")}
     if "yes" in parts:
         return "yes"
-    if "no" in parts:
+    if read == "no" or "no" in parts:
         return "no"
     return "unknown"

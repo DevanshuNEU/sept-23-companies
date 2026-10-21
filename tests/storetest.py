@@ -49,10 +49,12 @@ def seed_posting(
 ) -> int:
     now = utcnow()
     cur = conn.execute(
-        "INSERT INTO posting(company_id, source_key, title, location, body, first_seen_at, last_seen_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (company_id, f"url:seed-{next(_counter)}", title, location, body, now, now),
+        "INSERT INTO posting(company_id, source_key, title, location, first_seen_at, last_seen_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (company_id, f"url:seed-{next(_counter)}", title, location, now, now),
     )
+    if body:
+        conn.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, ?)", (cur.lastrowid, body))
     return cur.lastrowid
 
 

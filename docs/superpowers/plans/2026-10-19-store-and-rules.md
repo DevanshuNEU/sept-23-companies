@@ -704,7 +704,7 @@ FROM (
 | `evidence` | one fact (size, stage, sponsorship, domain, HQ, E-Verify enrollment) with source, quote, confidence, lock and the date the source was read (`observed_on`) | rules (Task 15 `record_evidence`), #16 hand edits (locked), #17 hand verdicts (locked) | `company_fact`, #6, #12 company page |
 | `board` | ATS and token, last read, empty and error streaks | #21 crawler, #17 (frozen history: `active = 0`) | #16 triggers 1 and 2, #11 health |
 | `board_read` | the last 10 reads per board with HTTP status or error | #21 | #16 and #12 Needs-you evidence |
-| `posting` | every posting ever seen, body for rebuilds, never deleted | #21, #17 | rules, #6, #15, #12 |
+| `posting` | every posting ever seen, never deleted; its text is in `posting_body` | #21, #17 | rules, #6, #15, #12 |
 | `ruleset` | each ruleset version with its config text, one current | rules rebuild | rules, #11 health |
 | `decision` | posting x ruleset: lane, level tier, level ok, years, US, sponsorship stance, citizenship, eligibility, 2027 start, with quotes; current and previous versions kept, plus the last decision of closed postings | rules only | #6, #15, #16 trigger 3, #12 |
 | `person` | who, at which company, role kind, email or LinkedIn channel with the reason, rank, time zone | #13 add_people, #11 edits, #17 | #13, #14, #12 LinkedIn list |
@@ -726,7 +726,7 @@ The CHECK lists on `board.ats`, `event.entity`, `evidence.source_kind` and simil
 ### Left out on purpose
 
 - **Per-run board fetch rows for every board.** At 36,000 boards they would cost about 33 GB a year (data-lifecycle research, Part A3). `board_read` keeps only the last 10 reads per board, for about 1,000 boards (#21's list), which is what the Needs-you view shows.
-- **Posting content history** (Radar's `posting_version`, 77% of radar.db). `posting.body` holds the latest body, which is all a rebuild needs.
+- **Posting content history** (Radar's `posting_version`, 77% of radar.db). `posting_body.body` holds the latest body, which is all a rebuild needs.
 - **Full-text search index.** Search over about 1,000 companies and their people is fast with `LIKE`; #11 can add FTS5 in its own migration if it is not.
 - **Hide and order columns.** #6 owns them, built on `current_decision`, `company_fact` and `no_go`.
 - **An application table.** Applications and pipeline stages are `event` rows (`entity = 'application'` or `'company'`), which is what the design's events row says.
@@ -798,7 +798,7 @@ The lanes share no file: the store lane writes `outreach/store/`, `outreach/inst
 **Interfaces:**
 - Produces: an importable `outreach` package; the rule that every dependency is an exact pin.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 class Project(unittest.TestCase):
@@ -813,21 +813,21 @@ class Project(unittest.TestCase):
         # no file under mail/, refresh/, dashboard/ contains "import outreach" or "from outreach"
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 Run: `/opt/homebrew/bin/python3 -m unittest tests.test_project -v`
 Expected: FAIL / ERROR (`No module named 'outreach'`, no `pyproject.toml`).
 
-- [ ] **Step 3: Create the files.** `uv venv --python /opt/homebrew/bin/python3 && uv lock && uv sync`.
+- [x] **Step 3: Create the files.** `uv venv --python /opt/homebrew/bin/python3 && uv lock && uv sync`.
 
-- [ ] **Step 4: Run the whole suite under uv**
+- [x] **Step 4: Run the whole suite under uv**
 
 Run: `uv run python -m unittest discover -s tests -t .` then `.venv/bin/python -c "import sys; print(sys.base_prefix)"`
 Expected: all PASS (old and new tests); the prefix starts with `/opt/homebrew`.
 
-- [ ] **Step 5: Update `CLAUDE.md` "Building".** Replace "Once #4 adds `pyproject.toml`, run them with ..." with: tests run with `uv run python -m unittest discover -s tests -t .`; a new checkout runs `uv venv --python /opt/homebrew/bin/python3 && uv sync` once; the live checkout needs the same once before the deploy test run.
+- [x] **Step 5: Update `CLAUDE.md` "Building".** Replace "Once #4 adds `pyproject.toml`, run them with ..." with: tests run with `uv run python -m unittest discover -s tests -t .`; a new checkout runs `uv venv --python /opt/homebrew/bin/python3 && uv sync` once; the live checkout needs the same once before the deploy test run.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml uv.lock .gitignore outreach/__init__.py tests/test_project.py CLAUDE.md
@@ -845,7 +845,7 @@ git commit -m "Add the outreach package and a uv project on Homebrew Python 3.14
 **Interfaces:**
 - Produces: `utcnow() -> str` (`%Y-%m-%dT%H:%M:%SZ`); `iso_utc(s: str | None) -> str | None` (None for None or ""; raises `ValueError` on unparseable); `iso_date(v: str | int | float | None) -> str | None` (ISO prefix, or epoch seconds or milliseconds, port of `refresh/finalcheck.py:14-22`; None when unreadable).
 
-- [ ] **Step 1: Write the failing tests** (cases from Radar `tests/test_store.py:40-90`)
+- [x] **Step 1: Write the failing tests** (cases from Radar `tests/test_store.py:40-90`)
 
 ```python
 def test_the_four_wire_formats(self):
@@ -865,10 +865,10 @@ def test_iso_date_forms(self):
     iso_date("1756200000") == "2025-08-26"; iso_date("soon") is None; iso_date(None) is None
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_time -v` -> ImportError.
-- [ ] **Step 3: Implement** `timefmt.py` by porting Radar `store.py:92-133` with the one change above. `iso_date` uses `datetime.timezone.utc`, not the deprecated `utcfromtimestamp`.
-- [ ] **Step 4: Run and see them pass.** Same command, all PASS; then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Store time helpers: canonical UTC timestamps and dates (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_time -v` -> ImportError.
+- [x] **Step 3: Implement** `timefmt.py` by porting Radar `store.py:92-133` with the one change above. `iso_date` uses `datetime.timezone.utc`, not the deprecated `utcfromtimestamp`.
+- [x] **Step 4: Run and see them pass.** Same command, all PASS; then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Store time helpers: canonical UTC timestamps and dates (#4)"`
 
 ---
 
@@ -882,7 +882,7 @@ def test_iso_date_forms(self):
 - Consumes: `timefmt.utcnow`.
 - Produces: `MIGRATIONS_DIR: pathlib.Path`; `split_sql(sql: str) -> list[str]`; `migration_files(directory: Path = MIGRATIONS_DIR) -> list[tuple[int, str, Path]]` (sorted; ignores names starting with `.`, such as `.gitkeep`; raises `ValueError` on a gap, a duplicate number or any other file not named `NNNN_name.sql`); `latest_version(directory=MIGRATIONS_DIR) -> int`; `migrate(conn: sqlite3.Connection, directory=MIGRATIONS_DIR) -> int` (applies pending files, each in `BEGIN IMMEDIATE`, records `schema_migration`, sets `PRAGMA user_version`, returns the new version; raises `RuntimeError` when the database is newer than the files). `conn` must have `isolation_level=None`.
 
-- [ ] **Step 1: Write the failing tests** against temp migration directories (each test writes its own `0001_*.sql`, `0002_*.sql`; the first always creates `schema_migration` with the Task 4 definition).
+- [x] **Step 1: Write the failing tests** against temp migration directories (each test writes its own `0001_*.sql`, `0002_*.sql`; the first always creates `schema_migration` with the Task 4 definition).
 
 ```python
 def test_applies_in_order_and_sets_user_version(self):   # 0001, 0002 -> returns 2; PRAGMA user_version == 2; schema_migration has 2 rows
@@ -895,10 +895,10 @@ def test_bad_file_name_is_refused(self):                  # "1_init.sql" -> Valu
 def test_dotfiles_are_ignored(self):                       # a .gitkeep next to 0001_init.sql -> one migration, no error
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_migrate -v` -> ImportError.
-- [ ] **Step 3: Implement** by porting Radar `store.py:524-582` (statements executed one by one, never `executescript`, which commits implicitly).
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Store migration runner: ordered files, one transaction each (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_migrate -v` -> ImportError.
+- [x] **Step 3: Implement** by porting Radar `store.py:524-582` (statements executed one by one, never `executescript`, which commits implicitly).
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Store migration runner: ordered files, one transaction each (#4)"`
 
 ---
 
@@ -913,7 +913,7 @@ def test_dotfiles_are_ignored(self):                       # a .gitkeep next to 
 - Consumes: `migrate.migrate`.
 - Produces: the schema; `tests/storetest.py: fresh_store() -> sqlite3.Connection` (a migrated store in a new temp directory, `isolation_level=None`, `row_factory=sqlite3.Row`, `foreign_keys=ON`). In this task it opens with `sqlite3.connect` and calls `migrate`; Task 5 changes it to `install` plus `connect` without changing its signature. Also `storetest.seed_company(conn, name="Acme") -> int`, `storetest.seed_posting(conn, company_id, title, body="", location="") -> int` and `storetest.seed_touch(conn, company_id, email) -> int`. Test modules import it as `from tests.storetest import fresh_store, seed_company, seed_posting, seed_touch`.
 
-- [ ] **Step 1: Write the failing tests.** Generic checks first, then one test per invariant.
+- [x] **Step 1: Write the failing tests.** Generic checks first, then one test per invariant.
 
 ```python
 def test_every_table_is_strict(self):
@@ -973,10 +973,10 @@ def test_current_decision_view_follows_the_current_ruleset(self):
 def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserting sender_id 2 -> IntegrityError
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_schema -v` -> no tables.
-- [ ] **Step 3: Write `0001_initial.sql`** exactly as specified, and `tests/storetest.py`.
-- [ ] **Step 4: Run and see them pass**, then the whole suite. Also: `sqlite3 <fresh file> "PRAGMA integrity_check; PRAGMA foreign_key_check;"` prints `ok` and nothing else.
-- [ ] **Step 5: Commit** `git commit -m "Store schema 0001: STRICT tables, CHECKed states, append-only history (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_schema -v` -> no tables.
+- [x] **Step 3: Write `0001_initial.sql`** exactly as specified, and `tests/storetest.py`.
+- [x] **Step 4: Run and see them pass**, then the whole suite. Also: `sqlite3 <fresh file> "PRAGMA integrity_check; PRAGMA foreign_key_check;"` prints `ok` and nothing else.
+- [x] **Step 5: Commit** `git commit -m "Store schema 0001: STRICT tables, CHECKed states, append-only history (#4)"`
 
 ---
 
@@ -999,7 +999,7 @@ def test_sender_row_exists_and_is_single(self):  # one row, sender_id 1; inserti
   - `install.install(path: str) -> int`: guard; create the parent folder; on a new file set `PRAGMA auto_vacuum=INCREMENTAL` then `PRAGMA journal_mode=WAL` before any table; `migrate`; return the version. (Task 15 adds the ruleset registration.)
   - `install.main(argv: list[str] | None = None) -> int`: `install(db_path())`, prints `"<path>: store at version N"` and the applied migrations, returns 0.
 
-- [ ] **Step 1: Write the failing tests.** Tests that need a fake live path patch `outreach.store.db.DEFAULT_PATH` to a temp file and patch `live_checkout.is_live`.
+- [x] **Step 1: Write the failing tests.** Tests that need a fake live path patch `outreach.store.db.DEFAULT_PATH` to a temp file and patch `live_checkout.is_live`.
 
 ```python
 def test_tests_never_use_the_live_path(self):        # db_path() != realpath(DEFAULT_PATH)  (tests/__init__.py)
@@ -1026,11 +1026,11 @@ def test_transaction_rolls_back(self):                 # insert company then rai
 def test_install_main_prints_version(self):            # OUTREACH_DB=<tmp>; main([]) == 0 and output contains "version 1"
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_connect -v`.
-- [ ] **Step 3: Implement** `db.py` and `install.py`; switch `tests/storetest.py` to `install.install` plus `connect`.
-- [ ] **Step 4: Run and see them pass**, then the whole suite (Task 4's schema tests now run through `connect`).
-- [ ] **Step 5: Update `CLAUDE.md`** "Only in the live checkout": add that `python -m outreach.install` and anything that opens the default store path refuse to run outside it.
-- [ ] **Step 6: Commit** `git commit -m "Store connect refuses the live path outside the live checkout; install is the only migrator (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_connect -v`.
+- [x] **Step 3: Implement** `db.py` and `install.py`; switch `tests/storetest.py` to `install.install` plus `connect`.
+- [x] **Step 4: Run and see them pass**, then the whole suite (Task 4's schema tests now run through `connect`).
+- [x] **Step 5: Update `CLAUDE.md`** "Only in the live checkout": add that `python -m outreach.install` and anything that opens the default store path refuse to run outside it.
+- [x] **Step 6: Commit** `git commit -m "Store connect refuses the live path outside the live checkout; install is the only migrator (#4)"`
 
 ---
 
@@ -1048,7 +1048,7 @@ def test_install_main_prints_version(self):            # OUTREACH_DB=<tmp>; main
   - `append_event(conn, *, entity: str, kind: str, actor: str, entity_id: int | None = None, company_id: int | None = None, detail: dict | None = None, at: str | None = None, idempotency_key: str | None = None) -> int | None`: inserts one event (`at` canonicalised with `iso_utc`, default now; `recorded_at` now; `detail` as JSON); returns the new id, or None when `idempotency_key` was already used (`INSERT ... ON CONFLICT(idempotency_key) DO NOTHING`, never an update).
   - `start_job(conn, job: str, ruleset_version: str | None = None) -> int` and `finish_job(conn, run_id: int, status: str, summary: dict | None = None, error: str = "") -> None`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_name_key(self):
@@ -1060,10 +1060,10 @@ def test_unknown_actor_is_refused(self):               # actor="robot" -> sqlite
 def test_job_run_round_trip(self):                     # start_job -> status running; finish_job(ok, {"n": 3}) -> finished_at set, summary {"n": 3}
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_writes -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Store write helpers: events with idempotency keys, job runs, name keys (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_store_writes -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Store write helpers: events with idempotency keys, job runs, name keys (#4)"`
 
 ---
 
@@ -1094,7 +1094,7 @@ def test_job_run_round_trip(self):                     # start_job -> status run
 
   Word list changes from the old code, decided here: `senior` drops `fellow` and keeps `distinguished`; `strong_entry` includes `fellow` and `fellowship`; `open_level` is `member of technical staff`, `member of product staff`, `member of engineering staff`, `mts`, `forward deployed`, `fde` (not `founding`: the design names MTS and FDE only).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_config_loads_and_pins_the_decided_numbers(self):
@@ -1114,10 +1114,10 @@ def test_every_rules_file_is_classified(self):
     # every *.py and *.toml in outreach/rules is in RULE_FILES or NOT_RULES, and none is in both
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_config -v`.
-- [ ] **Step 3: Implement** the three modules and write the full `config.toml`, every section, with a one-line comment per key citing its source line.
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules config, text helpers and the ruleset version hash (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_config -v`.
+- [x] **Step 3: Implement** the three modules and write the full `config.toml`, every section, with a one-line comment per key citing its source line.
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules config, text helpers and the ruleset version hash (#4)"`
 
 ---
 
@@ -1143,7 +1143,7 @@ def test_every_rules_file_is_classified(self):
     8. otherwise None.
   - `basis` is a short sentence for the UI, for example "Title says new grad", "Title says Engineer II", "MTS role, no level in the title" (ported from `refresh/final_merge.py:28-37`).
 
-- [ ] **Step 1: Write the failing tests** (lane and tier per title; the misfire titles are repeated end to end in Task 14)
+- [x] **Step 1: Write the failing tests** (lane and tier per title; the misfire titles are repeated end to end in Task 14)
 
 ```python
 CASES = [  # (title, lane, tier)
@@ -1186,10 +1186,10 @@ def test_cases(self): for each case, classify_title(t, cfg) has that lane and (f
 def test_basis_is_never_empty(self): every case has a non-empty basis
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_title -v`.
-- [ ] **Step 3: Implement** `classify_title`; adjust only `[title]` lists if a case needs it.
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: title lane and level, MTS kept, staff always senior (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_title -v`.
+- [x] **Step 3: Implement** `classify_title`; adjust only `[title]` lists if a case needs it.
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: title lane and level, MTS kept, staff always senior (#4)"`
 
 ---
 
@@ -1209,7 +1209,7 @@ def test_basis_is_never_empty(self): every case has a non-empty basis
     - a `company_age` word sits within 3 words of the number ("founded", "ago", "in business", "history").
   - Ranges count their low end ("1-3 years", "1\u20133 years" with an en dash, "1 to 3 years" are all 1). Numbers above 30 are ignored.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 CASES = [  # (body, years)
@@ -1234,10 +1234,10 @@ def test_entry_wording(self):
     entry_wording("We hire great engineers.", cfg) == ""
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_years -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: years asked takes the largest requirement; ignores preferences, degree alternatives and company age (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_years -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: years asked takes the largest requirement; ignores preferences, degree alternatives and company age (#4)"`
 
 ---
 
@@ -1250,7 +1250,7 @@ def test_entry_wording(self):
 
 **Interfaces:**
 - Produces: `us_status(location: str, country: str | None, cfg: Config) -> str` returning `yes`, `no` or `unknown`. Order:
-  1. a structured `country` wins: US spellings (`US`, `USA`, `United States`, `United States of America`) -> `yes`; any other non-empty value -> `no`;
+  1. a structured `country` that names the US (`US`, `USA`, `United States`, `United States of America`) -> `yes`. A known non-US country -> `no` only when no part of the location text reads `yes` in step 2 (ruling, Devanshu, 2026-10-21: a US location in the text wins over a structured non-US country, so "Remote - US or Canada" with country Canada reads `yes`); any other value is no evidence and the text decides;
   2. split `location` on `|`, `;` and " or "; read each part alone:
      a. find US state names first and set them aside, so "New Mexico" never reads as Mexico;
      b. a `non_us_countries` word or a `non_us_cities` name in what is left -> `no` for this part, even next to a two-letter code ("Toronto, CA", "Munich, DE", "Tel Aviv - IL", "Madrid, MD, Spain", "Tbilisi, Georgia");
@@ -1260,7 +1260,7 @@ def test_entry_wording(self):
   3. any part `yes` -> `yes`; else any part `no` -> `no`; else `unknown` (a bare "Remote" and an empty location).
   A shared city name gives way to a US state code ("Paris, TX", "Athens, GA", "Lima, OH"); a non-US country or a non-US-only city beats one.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 CASES = [  # (location, country, expected)
@@ -1271,7 +1271,7 @@ CASES = [  # (location, country, expected)
   ("Paris, France", None, "no"), ("London, UK", None, "no"), ("Toronto, ON, Canada", None, "no"),
   ("Remote - EMEA", None, "no"), ("Bengaluru, India", None, "no"),
   ("Remote", None, "unknown"), ("", None, "unknown"),
-  ("Remote", "United States", "yes"), ("Austin, TX", "Canada", "no"),
+  ("Remote", "United States", "yes"), ("Austin, TX", "Canada", "yes"),
   ("Tel Aviv - IL", None, "no"), ("Madrid, MD, Spain", None, "no"), ("Munich, DE", None, "no"),
   ("Toronto, CA", None, "no"), ("Tbilisi, Georgia", None, "no"), ("Atlanta, Georgia", None, "yes"),
   ("Paris", None, "no"),
@@ -1280,10 +1280,10 @@ def test_cases(self): us_status(loc, country, cfg) == expected for each
 def test_lowercase_state_words_are_not_codes(self): us_status("Remote in Berlin", None, cfg) == "no"
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_location -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: US location checks the country, then states, then a bounded non-US list (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_location -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: US location checks the country, then states, then a bounded non-US list (#4)"`
 
 ---
 
@@ -1302,7 +1302,7 @@ def test_lowercase_state_words_are_not_codes(self): us_status("Remote in Berlin"
   - Across sentences: any `opt_only` -> `opt_only`; `no` with no `yes` -> `no`; `yes` with no `no` -> `yes`; both, or any `unclear` with no clear answer -> `unclear`; no topic sentence -> `silent`. The quote is the deciding sentence (for `unclear`, the first unclear or conflicting one).
   - Citizenship: a `citizenship` phrase in a sentence that has no `citizenship_negation` ("No security clearance required." is not a requirement).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 STANCE = [  # (body, stance)
@@ -1338,10 +1338,10 @@ def test_work_authorization_alone_is_never_yes(self): sponsorship_stance("Must b
 def test_citizenship(self): flag per case; quote non-empty when True
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_sponsorship -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: sponsorship stance reads negation first; citizenship ignores 'not required' (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_sponsorship -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: sponsorship stance reads negation first; citizenship ignores 'not required' (#4)"`
 
 ---
 
@@ -1359,7 +1359,7 @@ def test_citizenship(self): flag per case; quote non-empty when True
   - `cohort_title` names graduates, not start dates: "2027 graduate(s)", "class of 2027", "2027 university or college or campus grad or hire", "(college grad 2027)". "New Grad 2027" and "New Grad (2027)" are a 2027 start: ok, `starts_2027` True (#9 ruling; open question 3).
   - `starts_2027`: start wording (`start_2027` phrases such as "2027 start", "starts in July 2027", "summer 2027 start", "join our team in 2027") or a title that names 2027 without naming graduates ("New Grad 2027", "New Grad (2027)"), and no `immediate_start` phrase (`refresh/finalcheck.py:48-56`, `refresh/final_merge.py:17, 62`). Graduation wording ("class of 2027", "graduate in 2027") is not a start date.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 CASES = [  # (title, body, status, reason, start_2027)
@@ -1380,10 +1380,10 @@ def test_graduation_month_comes_from_config(self):
     # cfg with graduated "2027-05" -> CASES[0] becomes ok (the window now contains the month)
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_eligibility -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: one graduation-eligibility rule; a 2027 start is a flag, not a hide (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_eligibility -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: one graduation-eligibility rule; a 2027 start is a flag, not a hide (#4)"`
 
 ---
 
@@ -1405,7 +1405,7 @@ def test_graduation_month_comes_from_config(self):
   - `OldSignal` (frozen): `kind` (`over_500`, `big_by_filings`, `sec_filings`, `defence_contractor`, `agency`), `quote`.
   - `old_dashboard_signals(company: dict) -> list[OldSignal]`: the old dashboard's hide verdicts that are not headcount: "known to be well over 500 people" (233) -> `over_500`; "N lifetime visa filings; every known under-500 company has 26 or fewer" (9) -> `big_by_filings`; "decades of SEC filings, an established company" (1) -> `sec_filings`; `sizeClass` `cleared` (41, whatever the `sizeWhy` wording) -> `defence_contractor`; `sizeClass` `agency` (1) -> `agency`. This is the only place `sizeClass` is read. #17 records them: `defence_contractor` and `agency` as `no_go` rows (`source 'import'`, `quote` = the `sizeWhy`), the three size signals as a `review_item` (`kind 'flagged'`, `raised_by 'import'`) unless open question 1 makes them size evidence.
 
-- [ ] **Step 1: Write the failing tests** (strings are real `sizeWhy`, `head` and `funding` values from `dashboard/data.js`)
+- [x] **Step 1: Write the failing tests** (strings are real `sizeWhy`, `head` and `funding` values from `dashboard/data.js`)
 
 ```python
 def test_small_default_is_not_evidence(self):
@@ -1447,10 +1447,10 @@ def test_retell_record(self):
     # everify enrolled, checked 2026-09-27) -> 3 size drafts, 1 stage draft (series_b), 1 everify draft
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_facts -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: size, stage and E-Verify evidence; 'small' is never a size (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_facts -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: size, stage and E-Verify evidence; 'small' is never a size (#4)"`
 
 ---
 
@@ -1485,7 +1485,7 @@ t == "open"                  -> "open", ok
 otherwise                    -> "not_stated", ok = False, basis "Posting does not state a level"
 ```
 
-- [ ] **Step 1: Write the failing tests.** `tests/test_rules_misfires.py` has one class per audit misfire (section 2) plus the "small" default, each with its corpus count in the docstring, positives and a negative control, all through `decide()`. Default location "Boston, MA" unless the case is about location.
+- [x] **Step 1: Write the failing tests.** `tests/test_rules_misfires.py` has one class per audit misfire (section 2) plus the "small" default, each with its corpus count in the docstring, positives and a negative control, all through `decide()`. Default location "Boston, MA" unless the case is about location.
 
 ```python
 class Misfire1MTSDroppedByStaffRule(unittest.TestCase):          # 27 of 32 MTS titles dropped (crawl_boards.py:59)
@@ -1545,10 +1545,10 @@ def test_only_rules_classify(self):                # Done-when line 2
     # "entry", "intern", "remote" or a US state code list; a test file listing an allowed exception names its reason
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_decide tests.test_rules_misfires -v` -> ImportError for `decide`.
-- [ ] **Step 3: Implement** `decide.py`. If a misfire case fails because of a vocabulary, fix the list in the owning section of `config.toml`, not with a special case in code.
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules: one decide() for every posting, with the 8 audit misfires as regression tests (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_decide tests.test_rules_misfires -v` -> ImportError for `decide`.
+- [x] **Step 3: Implement** `decide.py`. If a misfire case fails because of a vocabulary, fix the list in the owning section of `config.toml`, not with a special case in code.
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules: one decide() for every posting, with the 8 audit misfires as regression tests (#4)"`
 
 ---
 
@@ -1580,7 +1580,7 @@ def test_only_rules_classify(self):                # Done-when line 2
   - `main(argv=None) -> int` for `uv run python -m outreach.rules.rebuild`: `connect()`, `rebuild`, print `lines()`, return 0.
   - `install.install` now ends with `rebuild(conn)` when the store has no current ruleset or a different one; `install.main` prints the report's `lines()`.
 
-- [ ] **Step 1: Write the failing tests** (all on `storetest.fresh_store()`)
+- [x] **Step 1: Write the failing tests** (all on `storetest.fresh_store()`)
 
 ```python
 def test_install_registers_the_current_ruleset(self):   # current ruleset == ruleset_version(); its config_toml == config.toml text
@@ -1613,10 +1613,10 @@ def test_record_evidence_raises_on_a_bad_draft(self):   # an EvidenceDraft with 
 def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>; main([]) == 0; output contains "shown to hidden"
 ```
 
-- [ ] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_rebuild -v`.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run and see them pass**, then the whole suite.
-- [ ] **Step 5: Commit** `git commit -m "Rules rebuild with a shown-to-hidden flip report; install registers the ruleset (#4)"`
+- [x] **Step 2: Run and watch them fail.** `uv run python -m unittest tests.test_rules_rebuild -v`.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run and see them pass**, then the whole suite.
+- [x] **Step 5: Commit** `git commit -m "Rules rebuild with a shown-to-hidden flip report; install registers the ruleset (#4)"`
 
 ---
 
@@ -1629,7 +1629,7 @@ def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>;
 - Consumes: everything.
 - Produces: `uv run python tests/mutation_check.py [--list]`, exit 0 only when every mutation is caught. Port of Radar `tests/mutation_check.py:45-60, 250-290`: baseline suite must be green; each mutation is `(path, guarantee, find, replace)`; a missing anchor is SKIP and fails the run; each file is restored in `finally` and the restore is verified by re-reading. It refuses to run when `live_checkout.is_live()` (it edits source files in place, and after #21 launchd runs the rules from the live checkout).
 
-- [ ] **Step 1: Write the mutation list.** One entry per guarantee below; the `find` anchors are exact strings from the code as implemented in Tasks 1 to 15.
+- [x] **Step 1: Write the mutation list.** One entry per guarantee below; the `find` anchors are exact strings from the code as implemented in Tasks 1 to 15.
 
 | # | File | Guarantee broken | Test that must fail |
 |---|---|---|---|
@@ -1660,16 +1660,16 @@ def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>;
 | 25 | `rules/rebuild.py` | `record_evidence` uses `INSERT OR IGNORE` | `test_record_evidence_raises_on_a_bad_draft` |
 | 26 | `rules/location.py` | non-US-only cities lose to a two-letter code | "Toronto, CA" case |
 
-- [ ] **Step 2: Run it.** `uv run python tests/mutation_check.py`
+- [x] **Step 2: Run it.** `uv run python tests/mutation_check.py`
   Expected: `baseline green (26 mutations to apply)`, 26 `CAUGHT` lines, `caught 26  missed 0  skipped 0`, exit 0. A MISSED line means a test is missing: add it to the owning task's test file and rerun.
-- [ ] **Step 3: Final checks, each with its expected output.**
+- [x] **Step 3: Final checks, each with its expected output.**
   - `uv run python -m unittest discover -s tests -t .` -> `OK`, old and new tests together.
   - `OUTREACH_DB=$(mktemp -d)/outreach.db uv run python -m outreach.install` -> prints `store at version 1` and an empty flip report; running it again changes nothing.
   - `H=$(mktemp -d); env -u OUTREACH_DB HOME="$H" .venv/bin/python -m outreach.install` from this worktree -> exits non-zero naming the live checkout, and `find "$H" -type f` prints nothing. HOME points at a fresh temp folder so that even a broken guard could only touch a temp file, never the real store.
   - `uv run python -c "import pathlib,sys; bad=[str(p) for g in ('outreach/**/*','tests/*.py','CLAUDE.md') for p in pathlib.Path('.').glob(g) if p.is_file() and any(c in p.read_text(errors='ignore') for c in chr(0x2013)+chr(0x2014))]; print(bad); sys.exit(bool(bad))"` -> prints `[]` (macOS grep has no `-P`).
   - `git diff --stat origin/master -- dashboard mail refresh` -> no output.
-- [ ] **Step 4: Check every "Done when" line of #4:** store created by one command (step 3 second bullet); rules suite and mutation check pass (steps 2 and 3); nothing in the new platform classifies titles except the rules module (`test_only_rules_classify`); `dashboard/app.js` untouched (last bullet).
-- [ ] **Step 5: Commit** `git commit -m "Mutation check: every rules and store guarantee has a test that notices (#4)"`
+- [x] **Step 4: Check every "Done when" line of #4:** store created by one command (step 3 second bullet); rules suite and mutation check pass (steps 2 and 3); nothing in the new platform classifies titles except the rules module (`test_only_rules_classify`); `dashboard/app.js` untouched (last bullet).
+- [x] **Step 5: Commit** `git commit -m "Mutation check: every rules and store guarantee has a test that notices (#4)"`
 
 ---
 
@@ -1677,7 +1677,19 @@ def test_cli_prints_the_report(self):                   # OUTREACH_DB=<scratch>;
 
 What each issue reads (R) and writes (W). Column names are exact; anything not listed needs its own migration (`0002_...`), added by that issue and applied through `install`. Every read follows `company.merged_into`.
 
-**#6 Ranking and hide rules.** R `current_decision` (`lane`, `level_tier`, `level_ok`, `level_basis`, `us`, `sponsorship`, `citizenship`, `eligibility`, `start_2027`), `posting` (`posted_on`, `first_seen_at`, `closed_at`), `company_fact` (`size`: `num_low`, `num_high`, `confidence`, `locked`; `sponsorship`; `stage`; `everify`), `no_go` (including lifted rows: a lifted company is never re-added), `company.status`. W `no_go` (`reason 'no_sponsorship'`, `source 'rules'`, `quote`, `source_ref` = posting id) for a company with a `sponsorship = 'no'` posting; `review_item` (`kind 'size_guess'`). Calls `outreach.rules.passes()` for the posting-level hide and adds the company-level part. **E-Verify** (`company_fact` where `fact = 'everify'`, with `observed_on` and `source_ref`): a ranking input only, never a hide rule unless #9 says so (open question 4).
+**Store rules from the 2026-10-20 scale audit** (60,000 and 300,000 postings; report in `~/Desktop/outreach-scratch/db-audit/REPORT.md`). Every issue that touches the store follows these:
+- The posting text is `posting_body(posting_id, body)`, not a `posting` column. The crawler (#21) and import (#17) write it there; readers join it only when they need the text. A body is plain text: the crawler strips HTML first.
+- The sender (#14) opens its connection with `connect(fullfsync=True)`: on macOS `synchronous=FULL` alone does not survive a power loss, and a lost send claim could send twice. Batch writers leave it off (it costs about 8 ms per commit).
+- No connection holds a transaction open across requests (#11, #13): a pinned reader stops WAL checkpoints, and the WAL grew 74 MB per crawl pass under one. Run `PRAGMA wal_checkpoint(PASSIVE)` after each crawl (#21).
+- The crawler commits in batches of 2,000 to 5,000 rows: touching `last_seen_at` writes one 4 KB page per row.
+- `board_read` keeps the last 10 rows per board (#21); nothing else prunes it.
+- A monthly job runs `conn.execute("PRAGMA incremental_vacuum").fetchall()` then `wal_checkpoint(TRUNCATE)` (the fetch matters: without it Python frees one page).
+- Any later migration on a populated store outlasts the sender's 5 s busy timeout: run `install` with the sender and API stopped (#17 part B runbook).
+- A rebuild is CPU-bound (decide() about 5.5 ms per posting: about 100 s at 60,000 postings, 530 s at 300,000). #21 runs it before crawling, never during; skipping decide() for an unchanged (title, body, location, country) is the first speed-up if it gets slow.
+- #6 ranking picks the best posting per company first, then joins `company_fact`; the lifted-row check uses `no_go_company_any`.
+- `send_unknown -> failed -> approved` is the only path to a second send: #14 proves by Message-ID that nothing went out before it, with a test.
+
+**#6 Ranking and hide rules.** R `current_decision` (`lane`, `level_tier`, `level_ok`, `level_basis`, `us`, `sponsorship`, `citizenship`, `eligibility`, `start_2027`), `posting` (`posted_on`, `first_seen_at`, `closed_at`), `company_fact` (`size`: `num_low`, `num_high`, `confidence`, `locked`; `sponsorship`; `stage`; `everify`), `no_go` (including lifted rows: a lifted company is never re-added), `company.status`. W `no_go` (`reason 'no_sponsorship'`, `source 'rules'`, `quote`, `source_ref` = posting id) only from a posting with `lane = 'engineering'`, `us <> 'no'` and `sponsorship = 'no'` (an intern, off-lane or non-US posting's refusal says nothing about his roles, so it never puts the company on no-go; final fix wave 2, item 7, 2026-10-21); `review_item` (`kind 'size_guess'`). Calls `outreach.rules.passes()` for the posting-level hide and adds the company-level part. **E-Verify** (`company_fact` where `fact = 'everify'`, with `observed_on` and `source_ref`): a ranking input only, never a hide rule unless #9 says so (open question 4).
 
 **#11 API.** R and W every table. Edits send and check `revision` (`UPDATE ... SET ..., revision = revision + 1 WHERE id = ? AND revision = ?`; zero rows means "changed in another tab"). Each write's `request_id` is `event.idempotency_key`. Health reads `job_run` (last row per `job`; `expected_next_at` is derived), `ruleset` (current), `board`. The sending-state read (#12 views 3 and shell) is built from `sender` (`paused`, `pause_kind`, `paused_reason`, `paused_at`), today's `send_day` (`send_limit`; ramp level = its position in 20, 30, ... 100; next limit if clean = `min(send_limit + 10, 100)`; last step-down = the latest `send_day` with `outcome 'warning'`), `message.sent_at` (sent today), clean-day signals (bounce rate over 3 days from `touch.bounced_at` against `message.sent_at`; Gmail limit or policy errors and stop replies from `event` rows #14 writes), and the next send (earliest `approved` message whose company is neither paused nor held). Message check results go in `message.checks` as `[{code, severity, title, detail, fix, spans}]`. Approve moves `message.state` `drafted` to `approved` (the trigger refuses anything else). Endpoint gaps the UI designer found, all #11's: global pause and resume of sending (with an acknowledgement after a hard block), search (companies via `company_alias` and `company_fact` domain, people, postings), taking a company or person off no-go (`no_go.lifted_at`, `lift_reason`), setting a reply kind (`touch.reply_kind`; `said_no` and `asked_to_stop` add a `no_go` person row; `auto_reply` sets `touch.state` back to `open` and clears the company hold), a recruiter role-kind override (`person.role_kind`, then re-run checks), compare drafts (two `message` bodies at one company), reopen a closed company (`company.status`), undo a LinkedIn log (an `undo` row in `linkedin_log`), and job run detail (`job_run.summary`, `error`).
 

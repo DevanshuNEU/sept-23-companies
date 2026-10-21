@@ -13,10 +13,34 @@ CASES = [  # (location, country, expected)
     ("Paris, France", None, "no"), ("London, UK", None, "no"), ("Toronto, ON, Canada", None, "no"),
     ("Remote - EMEA", None, "no"), ("Bengaluru, India", None, "no"),
     ("Remote", None, "unknown"), ("", None, "unknown"),
-    ("Remote", "United States", "yes"), ("Austin, TX", "Canada", "no"),
+    ("Remote", "United States", "yes"), ("Austin, TX", "Canada", "yes"),  # ruling 2026-10-21: US text wins
     ("Tel Aviv - IL", None, "no"), ("Madrid, MD, Spain", None, "no"), ("Munich, DE", None, "no"),
     ("Toronto, CA", None, "no"), ("Tbilisi, Georgia", None, "no"), ("Atlanta, Georgia", None, "yes"),
     ("Paris", None, "no"),
+]
+
+
+# Final fix wave, item 7 (#4): a structured country that is neither a US mark nor a known non-US country is not a "no";
+# the location text decides.
+COUNTRY_CASES = [  # (location, country, expected)
+    ("Remote", "United States (Remote)", "yes"), ("", "US-Remote", "yes"), ("Remote", "Puerto Rico", "yes"),
+    ("San Juan", "Puerto Rico", "yes"), ("", "Guam", "yes"),
+    ("Boston, MA", "North America", "yes"), ("", "North America", "unknown"), ("Remote", "North America", "unknown"),
+    ("Toronto, Canada", "North America", "no"),
+    ("Moscow", "Russia", "unknown"), ("Atlanta, Georgia", "Georgia", "yes"), ("Tbilisi, Georgia", "Georgia", "no"),
+    ("Austin, TX", "Remote", "yes"),
+    ("Remote", "Canada", "no"), ("Remote", "Germany", "no"), ("Boston, MA", "Germany", "yes"),
+    ("Remote", "Canada (Remote)", "no"), ("Remote", "United Kingdom", "no"),
+    ("Remote", "us", "yes"), ("Toronto", "United States", "yes"),
+]
+
+# Final fix wave 2, item 6 (#4), Devanshu's ruling 2026-10-21: a US location in the text wins over a structured non-US
+# country (a multi-location posting carries one country, often the primary office). A wrong show is cheap.
+TEXT_BEATS_COUNTRY = [  # (location, country, expected)
+    ("Remote - US or Canada", "Canada", "yes"), ("New York, NY; Toronto, ON", "Canada", "yes"),
+    ("Remote (US)", "India", "yes"), ("Bangalore or Remote US", "India", "yes"),
+    # no US place in the text: the structured country still decides
+    ("Toronto, ON", "Canada", "no"), ("Remote", "India", "no"), ("Bangalore", "India", "no"), ("", "Canada", "no"),
 ]
 
 
@@ -27,6 +51,16 @@ class UsStatusTest(unittest.TestCase):
 
     def test_cases(self):
         for loc, country, expected in CASES:
+            with self.subTest(location=loc, country=country):
+                self.assertEqual(us_status(loc, country, self.cfg), expected)
+
+    def test_an_unrecognised_country_falls_back_to_the_location(self):
+        for loc, country, expected in COUNTRY_CASES:
+            with self.subTest(location=loc, country=country):
+                self.assertEqual(us_status(loc, country, self.cfg), expected)
+
+    def test_a_us_location_in_the_text_beats_a_non_us_country(self):
+        for loc, country, expected in TEXT_BEATS_COUNTRY:
             with self.subTest(location=loc, country=country):
                 self.assertEqual(us_status(loc, country, self.cfg), expected)
 
@@ -75,9 +109,10 @@ class UsStatusTest(unittest.TestCase):
 
     def test_long_location_is_fast(self):
         loc = ("Paris, " * 20000) + "New " * 20000 + "x" + " " * 50000 + "CA" + " " * 50000 + "y"
-        start = time.perf_counter()
+        # CPU time, not wall time: scheduler wait on a loaded machine is not the code's cost.
+        start = time.process_time()
         us_status(loc, None, self.cfg)
-        self.assertLess(time.perf_counter() - start, 2.0)
+        self.assertLess(time.process_time() - start, 2.0)
 
 
 if __name__ == "__main__":

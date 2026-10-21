@@ -164,7 +164,7 @@ OLD_POSITIVES = {
         "must be us citizen", "Must be a US citizen", "security clearance", "active clearance",
         "clearance is required", "clearance required", "TS/SCI", "secret clearance", "green card holders only",
         "permanent residents only", "U.S. persons only", "U.S. persons, as defined", "US person as defined",
-        "U.S. persons required", "ITAR", "export control laws require",
+        "U.S. persons required", "export control laws require",
     ],
     # refresh/eligibility.py:41-43 ALTGRAD
     ("eligibility", "graduates_welcome"): [

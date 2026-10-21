@@ -1,5 +1,8 @@
 """Tasks 2 and 3 of #30: the source, crawl, reader and ranking contracts every stream imports."""
+import json
+import random
 import unittest
+from types import SimpleNamespace
 
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators, ids_fingerprint, valid_token
 from outreach.ranking.types import CompanyFacts, Signal, SignalValue
@@ -7,6 +10,8 @@ from outreach.reader.types import (ALLOWED, FIELDS, INT_FIELDS, READING_SCHEMA_V
                                    PostingReading, ReadRequest, check_value, quote_in_body)
 from outreach.rules.rebuild import EvidenceDraft
 from outreach.sources.base import Candidate, EvidenceDraft as ReExported, Source
+from tests.contracts import check_adapter, check_signal, check_source
+from tests.fakes import FakeClient, json_response, status_response
 
 
 def job(native_id="1"):
@@ -509,6 +514,206 @@ class RankingContractTests(unittest.TestCase):
 
         s: Signal = Funded()
         self.assertEqual(s.score(facts(funded_months_ago=3)).value, 0.5)
+
+
+
+class FixedSource:
+    name = "fixed"
+    version = "1"
+
+    def discover(self, since):
+        yield Candidate(name="Acme", domain="acme.example", keys={"fein": "12-3456789"})
+        yield Candidate(name="Orchard", domain=None, keys={})
+
+
+class RandomNameSource(FixedSource):
+    def discover(self, since):
+        yield Candidate(name=f"Acme {random.random()}", domain=None, keys={})
+
+
+class CheckSourceTests(unittest.TestCase):
+    def test_check_source_returns_the_candidates(self):
+        got = check_source(self, FixedSource())
+        self.assertEqual([c.name for c in got], ["Acme", "Orchard"])
+
+    def test_check_source_passes_since_through(self):
+        seen = []
+
+        class S(FixedSource):
+            def discover(self, since):
+                seen.append(since)
+                return super().discover(since)
+
+        check_source(self, S(), since="2026-10-01")
+        self.assertEqual(seen, ["2026-10-01", "2026-10-01"])
+
+    def test_check_source_flags_nondeterminism(self):
+        with self.assertRaises(AssertionError):
+            check_source(self, RandomNameSource())
+
+    def test_check_source_needs_a_name_and_a_version(self):
+        for field in ("name", "version"):
+            with self.subTest(field=field):
+                class S(FixedSource):
+                    pass
+
+                setattr(S, field, "")
+                with self.assertRaises(AssertionError):
+                    check_source(self, S())
+
+    def test_check_source_needs_candidates(self):
+        class S(FixedSource):
+            def discover(self, since):
+                yield {"name": "Acme"}
+
+        with self.assertRaises(AssertionError):
+            check_source(self, S())
+
+
+BOARD_URL = "https://boards.example/api/{token}/jobs"
+LIST_BODY = {"jobs": [{"id": 1, "title": "Engineer", "absolute_url": "https://boards.example/1",
+                       "location": {"name": "Boston, MA"}}]}
+
+
+class EtagAdapter:
+    """A toy adapter wired to a client: sends the stored ETag and treats a 304 as unchanged."""
+    ats = "greenhouse"
+
+    def __init__(self, client):
+        self.client = client
+
+    def list(self, token, validators):
+        headers = {"If-None-Match": validators.etag} if validators.etag else {}
+        r = self.client.get(BOARD_URL.format(token=token), headers)
+        if r.status == 304:
+            return ReadResult("unchanged", (), validators, 304)
+        if r.status != 200:
+            return ReadResult("error", (), validators, r.status, error=f"HTTP {r.status}")
+        jobs = tuple(JobRef(str(j["id"]), j["title"], j["absolute_url"], j["location"]["name"], None, None, None)
+                     for j in json.loads(r.body)["jobs"])
+        etag = r.headers.get("etag", "")
+        if not jobs:
+            return ReadResult("empty", (), Validators(etag=etag), 200)
+        return ReadResult("ok", jobs, Validators(etag, ids_fingerprint(j.native_id for j in jobs)), 200)
+
+    def body(self, token, job):
+        return None
+
+
+class BlindAdapter(EtagAdapter):
+    """Ignores the validators it is given, so a second read of the same board is never unchanged."""
+
+    def list(self, token, validators):
+        return super().list(token, Validators())
+
+
+class SwallowingAdapter(EtagAdapter):
+    """Catches every exception, so a request nobody routed shows up as a plain error read."""
+
+    def list(self, token, validators):
+        try:
+            return super().list(token, validators)
+        except Exception as err:
+            return ReadResult("error", (), validators, None, error=str(err))
+
+
+def scripted_client(url, *answers):
+    return FakeClient({url: list(answers)})
+
+
+class CheckAdapterTests(unittest.TestCase):
+    url = BOARD_URL.format(token="acme")
+
+    def test_check_adapter_passes_an_etag_adapter(self):
+        client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), status_response(304),
+                                 status_response(500))
+        check_adapter(self, EtagAdapter(client), "acme")
+        self.assertEqual(client.calls[1][2], {"If-None-Match": '"v1"'})
+
+    def test_check_adapter_passes_an_empty_first_read(self):
+        client = scripted_client(self.url, json_response({"jobs": []}, etag='"e"'), status_response(304),
+                                 status_response(500))
+        check_adapter(self, EtagAdapter(client), "acme")
+
+    def test_check_adapter_passes_a_fingerprint_adapter_whose_second_read_has_the_same_ids(self):
+        class Fingerprint(EtagAdapter):
+            def list(self, token, validators):
+                got = super().list(token, Validators())
+                if got.result == "ok" and got.validators.ids_fingerprint == validators.ids_fingerprint:
+                    return ReadResult("unchanged", (), validators, 200)
+                return got
+
+        client = scripted_client(self.url, json_response(LIST_BODY), json_response(LIST_BODY), status_response(500))
+        check_adapter(self, Fingerprint(client), "acme")
+
+    def test_check_adapter_needs_unchanged(self):
+        client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), json_response(LIST_BODY),
+                                 status_response(500))
+        with self.assertRaises(AssertionError):
+            check_adapter(self, BlindAdapter(client), "acme")
+
+    def test_check_adapter_needs_an_error_for_a_500(self):
+        client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), status_response(304),
+                                 json_response(LIST_BODY))
+        with self.assertRaises(AssertionError):
+            check_adapter(self, EtagAdapter(client), "acme")
+
+    def test_check_adapter_fails_on_an_unrouted_request(self):
+        client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), status_response(304))
+        with self.assertRaises(AssertionError) as caught:
+            check_adapter(self, SwallowingAdapter(client), "acme")
+        self.assertIn("unrouted", str(caught.exception))
+
+    def test_check_adapter_checks_the_client_it_is_given(self):
+        client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), status_response(304),
+                                 status_response(500))
+        other = FakeClient({})
+        other.unrouted.append("https://elsewhere.example/")
+        with self.assertRaises(AssertionError):
+            check_adapter(self, EtagAdapter(client), "acme", client=other)
+
+
+class Funded:
+    name = "funded"
+
+    def __init__(self, value=0.5, reason="raised money last month"):
+        self.result = SignalValue(value, reason)
+        self.raw = None
+
+    def score(self, f):
+        return self.raw if self.raw is not None else self.result
+
+
+class CheckSignalTests(unittest.TestCase):
+    def test_check_signal_returns_the_value(self):
+        got = check_signal(self, Funded(), facts())
+        self.assertEqual((got.value, got.reason), (0.5, "raised money last month"))
+
+    def test_check_signal_flags_an_empty_reason(self):
+        for reason in ("", "   "):
+            with self.subTest(reason=reason):
+                with self.assertRaises(AssertionError):
+                    check_signal(self, Funded(reason=reason), facts())
+
+    def test_check_signal_flags_an_em_or_en_dash(self):
+        for dash in (chr(0x2014), chr(0x2013)):
+            with self.subTest(dash=hex(ord(dash))):
+                with self.assertRaises(AssertionError):
+                    check_signal(self, Funded(reason=f"new grad {dash} live role"), facts())
+
+    def test_check_signal_flags_a_value_out_of_range_or_not_a_signal_value(self):
+        for raw in (SimpleNamespace(value=2.0, reason="why"), SimpleNamespace(value=-1.5, reason="why"), (0.5, "why")):
+            with self.subTest(raw=raw):
+                s = Funded()
+                s.raw = raw
+                with self.assertRaises(AssertionError):
+                    check_signal(self, s, facts())
+
+    def test_check_signal_needs_a_name(self):
+        s = Funded()
+        s.name = ""
+        with self.assertRaises(AssertionError):
+            check_signal(self, s, facts())
 
 
 if __name__ == "__main__":

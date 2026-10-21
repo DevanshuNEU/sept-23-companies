@@ -275,6 +275,16 @@ STARTS = [  # (title, body, start_2027)
 ]
 
 
+# Controller fix after final fix wave 2: an invitation for current students is no requirement ("may also apply").
+ALSO_APPLY = [  # (title, body, status, reason, start_2027)
+    ("Software Engineer", "Currently enrolled students may also apply.", "ok", None, False),
+    ("Software Engineer", "Current students pursuing a degree in CS can also apply.", "ok", None, False),
+    ("Software Engineer", "Current students in a Master's program are also eligible.", "ok", None, False),
+    ("Software Engineer", "Current undergraduates are also welcome.", "ok", None, False),
+    ("Software Engineer", "Must be currently enrolled in a degree program.", "excluded", "current_student", False),
+]
+
+
 class EligibilityTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -292,6 +302,9 @@ class EligibilityTest(unittest.TestCase):
 
     def test_cases(self):
         self.check(CASES)
+
+    def test_current_students_may_also_apply(self):
+        self.check(ALSO_APPLY)
 
     def test_more_cases(self):
         self.check(MORE)

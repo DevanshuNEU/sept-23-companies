@@ -629,10 +629,12 @@ student_perk = [
   "tuition", "reimbursement", "reimburse", "reimburses", "education stipend", "learning stipend",
   "education assistance", "education benefit", "education benefits", "learning budget",
 ]
-# refresh/eligibility.py:52 SOFT
+# refresh/eligibility.py:52 SOFT, plus invitations (controller fix after final fix wave 2: "Currently enrolled
+# students may also apply." invites students, it does not require being one)
 soft = [
   "preferred", "prioritized", "prioritised", "also considered", "also be considered", "ideal", "ideally", "a plus",
-  "nice to have", "bonus", "welcome to apply",
+  "nice to have", "bonus", "welcome to apply", "may also apply", "can also apply", "are also eligible",
+  "also eligible", "are also welcome", "also welcome", "also encouraged", "are also invited",
 ]
 # refresh/eligibility.py:67-68 (the company's own history is not an eligibility rule), plus founding lines and the
 # noun or adjective "graduate" in benefits and team lines ("founded in 2023 by two MIT graduates", "graduate school

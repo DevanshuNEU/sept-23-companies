@@ -232,11 +232,11 @@ def record_outcome(
 ) -> int:
     """Record what came of a touch. `kind` is accepted, replied, referred, interview, offer or quiet.
 
-    Sets the matching date (a repeat overwrites it; `correct_outcome` is the way to clear one). `replied` also
-    stores `reply_kind` and clears `quiet_at`: a late reply beats quiet. Returns the new revision and appends an
-    event of the same kind. `LookupError` when the touch is missing or `revision` is stale; `ValueError` when the
-    touch is undone, `at` is before it was sent, `reply_kind` is not a reply kind or is given with another outcome,
-    or a touch that replied is marked quiet.
+    Sets the matching date once. `replied` also stores `reply_kind` (`unsorted` when none is given) and clears
+    `quiet_at`: a late reply beats quiet. Returns the new revision and appends an event of the same kind.
+    `LookupError` when the touch is missing or `revision` is stale; `ValueError` when the touch is undone, that
+    outcome is already recorded (changing or clearing one is `correct_outcome`), `at` is before it was sent,
+    `reply_kind` is not a reply kind or is given with another outcome, or a touch that replied is marked quiet.
     """
     column = _OUTCOME_COLUMNS.get(kind)
     if column is None:
@@ -251,7 +251,10 @@ def record_outcome(
         raise ValueError(f"{kind} at {when} is before the touch was sent at {row['sent_at']}")
     if kind == "quiet" and row["replied_at"] is not None:
         raise ValueError(f"touch {touch_id} has a reply, so it is not quiet")
+    if row[column] is not None:
+        raise ValueError(f"touch {touch_id} already has {kind} at {row[column]}; change it with correct_outcome")
     if kind == "replied":
+        reply_kind = reply_kind or "unsorted"
         new = _bump(conn, "replied_at = ?, reply_kind = ?, quiet_at = NULL", (when, reply_kind), touch_id, revision)
     else:
         new = _bump(conn, f"{column} = ?", (when,), touch_id, revision)

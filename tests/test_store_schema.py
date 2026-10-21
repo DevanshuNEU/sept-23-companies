@@ -1039,13 +1039,17 @@ class SchemaTest(unittest.TestCase):
     def drop_touch_replace_guards(self):
         """The insert and update guards fire before the UNIQUE checks, so a test of a unique key itself drops them
         on its own scratch store; the guards have their own tests."""
-        self.db.execute("DROP TRIGGER outreach_touch_no_replace_insert")
-        self.db.execute("DROP TRIGGER outreach_touch_no_replace_update")
+        for kind in ("", "key_", "email_"):
+            for verb in ("insert", "update"):
+                self.db.execute(f"DROP TRIGGER outreach_touch_{kind}no_replace_{verb}")
 
     def test_outreach_touch_idempotency_key_unique(self):
         self.new_otouch(idempotency_key="click-1")
-        # the guard refuses a repeated key first (log_touch looks the key up instead)
-        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, idempotency_key="click-1")
+        # the guard refuses a repeated key first (log_touch looks the key up instead), and says which key
+        with self.assertRaises(sqlite3.IntegrityError) as cm:
+            self.new_otouch(idempotency_key="click-1")
+        self.assertIn("idempotency_key", str(cm.exception))
+        self.assertNotIn("never deleted", str(cm.exception))
         self.drop_touch_replace_guards()
         with self.assertRaises(sqlite3.IntegrityError) as cm:
             self.new_otouch(idempotency_key="click-1")
@@ -1101,12 +1105,24 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT count(*) FROM outreach_touch WHERE email_touch_id = ?",
                                          (self.touch,)).fetchone()[0], 1)
         self.assertIsNotNone(self.db.execute("SELECT 1 FROM outreach_touch WHERE touch_id = ?", (spare,)).fetchone())
+        for column, value, text in (("idempotency_key", "keep-2", "idempotency_key"),
+                                    ("email_touch_id", self.touch, "email_touch_id")):
+            with self.subTest(update=column):
+                with self.assertRaises(sqlite3.IntegrityError) as cm:
+                    self.db.execute(f"UPDATE outreach_touch SET {column} = ? WHERE touch_id = ?", (value, spare))
+                self.assertIn(text, str(cm.exception))
+        with self.assertRaises(sqlite3.IntegrityError) as cm:
+            self.db.execute("UPDATE outreach_touch SET touch_id = ? WHERE touch_id = ?", (touch, spare))
+        self.assertIn("never deleted", str(cm.exception))
         # an ordinary insert of a new touch is untouched by the guard
         self.new_otouch(idempotency_key="fresh")
 
     def test_one_email_touch_is_counted_once(self):
         self.new_otouch(channel="email", email_touch_id=self.touch)
-        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, channel="email", email_touch_id=self.touch)
+        with self.assertRaises(sqlite3.IntegrityError) as cm:
+            self.new_otouch(channel="email", email_touch_id=self.touch)
+        self.assertIn("email_touch_id", str(cm.exception))
+        self.assertNotIn("never deleted", str(cm.exception))
         self.drop_touch_replace_guards()  # so the index itself is what refuses the second
         with self.assertRaises(sqlite3.IntegrityError) as cm:
             self.new_otouch(channel="email", email_touch_id=self.touch)

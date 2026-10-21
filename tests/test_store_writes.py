@@ -256,6 +256,34 @@ class TouchTests(unittest.TestCase):
                          ["sent", "accepted", "referred", "interview", "offer", "quiet"])
         self.assertEqual(self.events(touch_id)[1]["at"], LATER)
 
+    def test_a_second_outcome_of_the_same_kind_is_refused(self):
+        for kind, column in (("accepted", "accepted_at"), ("replied", "replied_at"), ("referred", "referred_at"),
+                             ("interview", "interview_at"), ("offer", "offer_at"), ("quiet", "quiet_at")):
+            with self.subTest(kind=kind):
+                touch_id = self.log(f"twice-{kind}")
+                revision = record_outcome(self.conn, touch_id, kind=kind, at=LATER, revision=1)
+                with self.assertRaises(ValueError) as cm:
+                    record_outcome(self.conn, touch_id, kind=kind, at="2026-10-25T12:00:00Z", revision=revision)
+                self.assertIn("correct_outcome", str(cm.exception))
+                row = self.row(touch_id)
+                self.assertEqual((row[column], row["revision"]), (LATER, revision))
+                self.assertEqual([e["kind"] for e in self.events(touch_id)], ["sent", kind])
+
+    def test_a_repeated_replied_keeps_the_sorted_reply_kind(self):
+        touch_id = self.log()
+        revision = record_outcome(self.conn, touch_id, kind="replied", at=LATER, reply_kind="interested", revision=1)
+        for again in (None, "not_now"):
+            with self.subTest(reply_kind=again):
+                with self.assertRaises(ValueError):
+                    record_outcome(self.conn, touch_id, kind="replied", at=LATER, reply_kind=again, revision=revision)
+        row = self.row(touch_id)
+        self.assertEqual((row["reply_kind"], row["replied_at"], row["revision"]), ("interested", LATER, revision))
+
+    def test_a_first_replied_with_no_reply_kind_is_unsorted(self):
+        touch_id = self.log()
+        record_outcome(self.conn, touch_id, kind="replied", at=LATER, revision=1)
+        self.assertEqual(self.row(touch_id)["reply_kind"], "unsorted")
+
     def test_record_outcome_checks_revision(self):
         touch_id = self.log()
         record_outcome(self.conn, touch_id, kind="accepted", at=LATER, revision=1)

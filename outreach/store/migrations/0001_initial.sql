@@ -799,21 +799,35 @@ CREATE TRIGGER linkedin_log_no_delete BEFORE DELETE ON linkedin_log
 -- trigger only with recursive_triggers ON, so these INSERT and UPDATE guards (which run before conflict resolution)
 -- refuse a collision on touch_id, idempotency_key or email_touch_id on any connection. Because a trigger cannot see
 -- ON CONFLICT DO NOTHING, a repeated key is refused here too: log_touch looks the key up first and returns the touch
--- that has it, and no other writer inserts into this table.
+-- that has it, and no other writer inserts into this table. A key or email collision says which key it is; a touch_id
+-- collision (only a REPLACE can cause one) says the touch is never deleted.
 CREATE TRIGGER outreach_touch_never_deleted BEFORE DELETE ON outreach_touch
   BEGIN SELECT RAISE(ABORT, 'a touch is never deleted; set undone_at'); END;
 CREATE TRIGGER outreach_touch_no_replace_insert BEFORE INSERT ON outreach_touch
-  WHEN EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id = NEW.touch_id
-               OR (NEW.idempotency_key IS NOT NULL AND t.idempotency_key = NEW.idempotency_key)
-               OR (NEW.email_touch_id IS NOT NULL AND t.email_touch_id = NEW.email_touch_id))
+  WHEN EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id = NEW.touch_id)
   BEGIN SELECT RAISE(ABORT, 'a touch is never deleted; set undone_at'); END;
-CREATE TRIGGER outreach_touch_no_replace_update
-  BEFORE UPDATE OF touch_id, idempotency_key, email_touch_id ON outreach_touch
-  WHEN EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id <> OLD.touch_id
-               AND (t.touch_id = NEW.touch_id
-                    OR (NEW.idempotency_key IS NOT NULL AND t.idempotency_key = NEW.idempotency_key)
-                    OR (NEW.email_touch_id IS NOT NULL AND t.email_touch_id = NEW.email_touch_id)))
+CREATE TRIGGER outreach_touch_key_no_replace_insert BEFORE INSERT ON outreach_touch
+  WHEN NEW.idempotency_key IS NOT NULL
+    AND EXISTS (SELECT 1 FROM outreach_touch t WHERE t.idempotency_key = NEW.idempotency_key)
+  BEGIN SELECT RAISE(ABORT, 'a touch with this idempotency_key already exists'); END;
+CREATE TRIGGER outreach_touch_email_no_replace_insert BEFORE INSERT ON outreach_touch
+  WHEN NEW.email_touch_id IS NOT NULL
+    AND EXISTS (SELECT 1 FROM outreach_touch t WHERE t.email_touch_id = NEW.email_touch_id)
+  BEGIN SELECT RAISE(ABORT, 'this email_touch_id already has a touch'); END;
+CREATE TRIGGER outreach_touch_no_replace_update BEFORE UPDATE OF touch_id ON outreach_touch
+  WHEN EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id <> OLD.touch_id AND t.touch_id = NEW.touch_id)
   BEGIN SELECT RAISE(ABORT, 'a touch is never deleted; set undone_at'); END;
+CREATE TRIGGER outreach_touch_key_no_replace_update BEFORE UPDATE OF idempotency_key ON outreach_touch
+  WHEN NEW.idempotency_key IS NOT NULL
+    AND EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id <> OLD.touch_id
+                AND t.idempotency_key = NEW.idempotency_key)
+  BEGIN SELECT RAISE(ABORT, 'a touch with this idempotency_key already exists'); END;
+CREATE TRIGGER outreach_touch_email_no_replace_update BEFORE UPDATE OF email_touch_id ON outreach_touch
+  WHEN NEW.email_touch_id IS NOT NULL
+    AND EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id <> OLD.touch_id
+                AND t.email_touch_id = NEW.email_touch_id)
+  BEGIN SELECT RAISE(ABORT, 'this email_touch_id already has a touch'); END;
+
 CREATE TRIGGER inbound_no_update BEFORE UPDATE ON inbound_message
   BEGIN SELECT RAISE(ABORT, 'inbound_message is append-only'); END;
 CREATE TRIGGER inbound_no_delete BEFORE DELETE ON inbound_message

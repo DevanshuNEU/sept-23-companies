@@ -1,9 +1,9 @@
 """The pipeline flow test every stream extends (#30 Task 6).
 
 `test_flow_runs_every_registered_stage` builds a fresh harness, runs each registered stage in order, and after each
-one calls the invariant its stream declared with `@invariant("<stage>")`. A stream's PR adds its `register` line in
-`harness.py`, its stage module, and one invariant here. An invariant counts only the rows its own stage made or its
-own fixture companies, never a global total, because earlier stages may have put other rows in the store.
+one calls the invariant its stream declared with `@invariant("<stage>")`. How a stream plugs in is stated once, in the
+`tests/pipeline/harness.py` docstring. An invariant counts only the rows its own stage made or its own fixture
+companies, never a global total, because earlier stages may have put other rows in the store.
 """
 import importlib.util
 import unittest
@@ -12,6 +12,7 @@ from unittest import mock
 
 from outreach.rules.version import ruleset_version
 from tests.pipeline import stages_rules
+import tests.pipeline.harness as harness_module
 from tests.pipeline.harness import STAGE_NAMES, PipelineHarness
 from tests.storetest import seed_company, seed_posting
 
@@ -52,11 +53,7 @@ class FlowTests(HarnessCase):
         self.assertEqual(names, sorted(names, key=STAGE_NAMES.index), "stages register in pipeline order")
         self.assertEqual(len(names), len(set(names)))
         self.assertIn("rules", names)
-        for name, run in h.stages:
-            with self.subTest(stage=name):
-                run()
-                if name in INVARIANTS:
-                    INVARIANTS[name](h)
+        self.run_flow(h)
         self.assert_store_migrated(h)
 
     def test_a_flow_with_no_stages_registered_still_has_a_migrated_store(self):
@@ -64,6 +61,30 @@ class FlowTests(HarnessCase):
         self.assertEqual(h.stages, [])
         h.run()
         self.assert_store_migrated(h)
+
+    def run_flow(self, h):
+        """Run each stage and then its invariant, and stop at the first failure so later stages do not cascade."""
+        for name, run in h.stages:
+            try:
+                run()
+                if name in INVARIANTS:
+                    INVARIANTS[name](h)
+            except Exception as err:
+                self.fail(f"stage {name!r} failed, later stages were not run: {type(err).__name__}: {err}")
+
+    def test_the_flow_stops_at_the_first_failed_stage(self):
+        h = self.harness(register_streams=False)
+        ran = []
+
+        def boom():
+            raise RuntimeError("broke")
+
+        h.stages += [("discover", lambda: ran.append("discover")), ("resolve", boom),
+                     ("find_boards", lambda: ran.append("find_boards"))]
+        with self.assertRaises(AssertionError) as caught:
+            self.run_flow(h)
+        self.assertEqual(ran, ["discover"])
+        self.assertIn("'resolve'", str(caught.exception))
 
     def assert_store_migrated(self, h):
         tables = {r[0] for r in h.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -99,10 +120,15 @@ class FlowTests(HarnessCase):
 
 
 class RegistrationTests(HarnessCase):
+    def test_streams_and_their_stages_are_the_agreed_map(self):
+        self.assertEqual(harness_module.STREAM_STAGES, {
+            "sources": ("discover", "resolve", "find_boards"), "crawl": ("read_boards",),
+            "reader": ("read_postings",), "rules": ("rules",), "ranking": ("rank",), "plan": ("plan",)})
+        flat = [n for names in harness_module.STREAM_STAGES.values() for n in names]
+        self.assertEqual(tuple(flat), STAGE_NAMES)
+
     def test_a_missing_stream_module_is_skipped_but_a_broken_one_is_not(self):
-        import tests.pipeline.harness as harness_module
-        self.assertEqual(harness_module.STREAMS, ("sources", "crawl", "reader", "rules", "ranking", "plan"))
-        with mock.patch.object(harness_module, "STREAMS", ("rules", "ghost")):
+        with mock.patch.object(harness_module, "STREAM_STAGES", {"rules": ("rules",), "ghost": ("plan",)}):
             h = self.harness()
         self.assertEqual([n for n, _ in h.stages], ["rules"])
         with mock.patch.object(harness_module.importlib, "import_module",
@@ -110,30 +136,35 @@ class RegistrationTests(HarnessCase):
             with self.assertRaises(ModuleNotFoundError):
                 PipelineHarness()
 
+    def build_with(self, stream_stages, *modules):
+        with mock.patch.object(harness_module, "STREAM_STAGES", stream_stages), \
+                mock.patch.object(harness_module.importlib, "import_module", side_effect=list(modules)):
+            return PipelineHarness()
+
     def test_a_stream_may_only_register_its_own_stage_names_in_order(self):
-        import tests.pipeline.harness as harness_module
+        def adds(name):
+            return SimpleNamespace(register=lambda h: h.stages.append((name, lambda: None)))
 
-        def late(h):
-            h.stages.append(("plan", lambda: None))
+        two = {"rules": ("rules",), "ghost": ("plan", "rank")}
+        for bad in ("discover", "tidy_up", "rules", "read_boards"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    self.build_with(two, stages_rules, adds(bad))
+        h = self.build_with(two, stages_rules, adds("plan"))
+        self.assertEqual([n for n, _ in h.stages], ["rules", "plan"])
+        h.close()
 
-        def early(h):
-            h.stages.append(("discover", lambda: None))
+    def test_crawl_cannot_register_rank_and_a_stream_cannot_register_a_name_it_does_not_own(self):
+        crawl_registers_rank = SimpleNamespace(register=lambda h: h.stages.append(("rank", lambda: None)))
+        with self.assertRaises(ValueError) as caught:
+            self.build_with({"crawl": ("read_boards",)}, crawl_registers_rank)
+        self.assertIn("crawl", str(caught.exception))
 
-        def unknown(h):
-            h.stages.append(("tidy_up", lambda: None))
-
-        for bad in (early, unknown):
-            fake = SimpleNamespace(register=bad)
-            with self.subTest(bad=bad.__name__):
-                with mock.patch.object(harness_module, "STREAMS", ("rules", "ghost")), \
-                        mock.patch.object(harness_module.importlib, "import_module",
-                                          side_effect=[stages_rules, fake]):
-                    with self.assertRaises(ValueError):
-                        PipelineHarness()
-        fake = SimpleNamespace(register=late)
-        with mock.patch.object(harness_module, "STREAMS", ("rules", "ghost")), \
-                mock.patch.object(harness_module.importlib, "import_module", side_effect=[stages_rules, fake]):
-            self.assertEqual([n for n, _ in self.harness().stages], ["rules", "plan"])
+    def test_stages_in_the_wrong_order_across_streams_are_refused(self):
+        late = SimpleNamespace(register=lambda h: h.stages.append(("plan", lambda: None)))
+        early = SimpleNamespace(register=lambda h: h.stages.append(("rank", lambda: None)))
+        with self.assertRaises(ValueError):
+            self.build_with({"plan": ("plan",), "ranking": ("rank",)}, late, early)
 
 
 COMBINE_EXISTS = importlib.util.find_spec("outreach.reader.combine") is not None

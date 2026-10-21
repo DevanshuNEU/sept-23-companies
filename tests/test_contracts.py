@@ -561,7 +561,7 @@ class CheckSourceTests(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     check_source(self, S())
 
-    def test_check_source_needs_candidates(self):
+    def test_check_source_flags_an_item_that_is_not_a_candidate(self):
         class S(FixedSource):
             def discover(self, since):
                 yield {"name": "Acme"}
@@ -651,6 +651,63 @@ class CheckAdapterTests(unittest.TestCase):
                                  status_response(500))
         with self.assertRaises(AssertionError):
             check_adapter(self, BlindAdapter(client), "acme")
+
+    def test_check_adapter_fails_a_blind_adapter_that_handles_a_304(self):
+        client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), status_response(304),
+                                 status_response(500))
+        with self.assertRaises(AssertionError) as caught:
+            check_adapter(self, BlindAdapter(client), "acme")
+        self.assertIn("If-None-Match", str(caught.exception))
+
+    def test_check_adapter_fails_an_ok_read_that_returns_no_validators(self):
+        class NoValidators(EtagAdapter):
+            def list(self, token, validators):
+                got = super().list(token, validators)
+                return ReadResult(got.result, got.jobs, Validators(), got.http_status, got.error)
+
+        client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), status_response(304),
+                                 status_response(500))
+        with self.assertRaises(AssertionError):
+            check_adapter(self, NoValidators(client), "acme")
+
+    def test_check_adapter_accepts_if_modified_since(self):
+        class Modified(EtagAdapter):
+            def list(self, token, validators):
+                headers = {"If-Modified-Since": "Tue, 20 Oct 2026 00:00:00 GMT"} if validators.etag else {}
+                r = self.client.get(BOARD_URL.format(token=token), headers)
+                if r.status == 304:
+                    return ReadResult("unchanged", (), validators, 304)
+                if r.status != 200:
+                    return ReadResult("error", (), validators, r.status, error=f"HTTP {r.status}")
+                return ReadResult("ok", (JobRef("1", "Engineer", "https://boards.example/1", "Boston, MA", None,
+                                                None, None),), Validators(etag="lm1"), 200)
+
+        client = scripted_client(self.url, json_response(LIST_BODY), status_response(304), status_response(500))
+        check_adapter(self, Modified(client), "acme")
+
+    def test_check_adapter_fails_when_no_fake_client_is_reachable(self):
+        class Hidden(EtagAdapter):
+            def __init__(self, client):
+                self._client = client
+
+            def list(self, token, validators):
+                self.client = self._client  # only set while reading, so it is not reachable up front
+                try:
+                    return super().list(token, validators)
+                finally:
+                    del self.client
+
+        client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), status_response(304),
+                                 status_response(500))
+        with self.assertRaises(AssertionError) as caught:
+            check_adapter(self, Hidden(client), "acme")
+        self.assertIn("client=", str(caught.exception))
+
+    def test_check_adapter_fails_when_the_client_has_no_unrouted_list(self):
+        client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), status_response(304),
+                                 status_response(500))
+        with self.assertRaises(AssertionError):
+            check_adapter(self, EtagAdapter(client), "acme", client=SimpleNamespace(calls=client.calls))
 
     def test_check_adapter_needs_an_error_for_a_500(self):
         client = scripted_client(self.url, json_response(LIST_BODY, etag='"v1"'), status_response(304),

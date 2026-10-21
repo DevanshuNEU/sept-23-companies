@@ -1,21 +1,26 @@
 """The pipeline harness: one scratch store, the fixtures, and the ordered stages every stream registers (#30 Task 6).
 
-Registration convention (stated once; every stream follows it). Each stream owns one module
-`tests/pipeline/stages_<stream>.py` with a module-level `register(harness: PipelineHarness) -> None` that appends its
-stage or stages to `harness.stages`, each as `(name, callable)`. A stage's callable takes no arguments: `register`
-closes over the harness it was given. The streams and their stage names:
+Registration convention (stated once; every stream follows it). A stream adds exactly one file,
+`tests/pipeline/stages_<stream>.py`, with a module-level `register(harness: PipelineHarness) -> None` that appends its
+stage or stages to `harness.stages`, each as `(name, callable)`, and one `@invariant("<stage>")` function in
+`tests/pipeline/test_flow.py`. It edits nothing else in `tests/pipeline/`: `STREAM_STAGES` below already names every
+stream, so the harness finds the module by its name. A stage's callable takes no arguments: `register` closes over the
+harness it was given. A stage runs on the fixtures in `tests/fixtures/pipeline/` and its invariant counts only the rows
+its own stage made or its own fixture companies, never a global total.
 
-  stages_sources.py  (#31)  discover, resolve, find_boards
-  stages_crawl.py    (#21)  read_boards
-  stages_reader.py   (#32)  read_postings
-  stages_rules.py    (#30)  rules
-  stages_ranking.py  (#6)   rank
-  stages_plan.py     (#15)  plan
+`STREAM_STAGES` maps each stream to the stage names it may register, in stage order:
 
-`STREAMS` lists the modules in stage order and `PipelineHarness()` imports each one that exists and calls its
-`register`, so a stream's PR adds its one file and edits nothing else in this folder except `test_flow.py` (its
-invariant). An import of a missing stream module is skipped; a stream module that exists but fails to import is an
-error. A stream may only append stage names from `STAGE_NAMES`, in order after the stages already registered.
+  sources  (#31)  discover, resolve, find_boards
+  crawl    (#21)  read_boards
+  reader   (#32)  read_postings
+  rules    (#30)  rules
+  ranking  (#6)   rank
+  plan     (#15)  plan
+
+`PipelineHarness()` imports each `tests.pipeline.stages_<stream>` that exists, in that order, and calls its `register`.
+An import of a missing stream module is skipped; a stream module that exists but fails to import is an error. A stream
+that registers a name it does not own, or one out of pipeline order, is an error. A flow test runs every registered
+stage up to and including its own, in order, on a fresh harness.
 """
 from __future__ import annotations
 
@@ -25,10 +30,17 @@ from pathlib import Path
 
 from tests.storetest import fresh_store
 
-__all__ = ["STAGE_NAMES", "STREAMS", "PipelineHarness"]
+__all__ = ["STAGE_NAMES", "STREAM_STAGES", "PipelineHarness"]
 
-STAGE_NAMES = ("discover", "resolve", "find_boards", "read_boards", "read_postings", "rules", "rank", "plan")
-STREAMS = ("sources", "crawl", "reader", "rules", "ranking", "plan")
+STREAM_STAGES = {
+    "sources": ("discover", "resolve", "find_boards"),
+    "crawl": ("read_boards",),
+    "reader": ("read_postings",),
+    "rules": ("rules",),
+    "ranking": ("rank",),
+    "plan": ("plan",),
+}
+STAGE_NAMES = tuple(name for names in STREAM_STAGES.values() for name in names)
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "pipeline"
 
@@ -42,7 +54,7 @@ class PipelineHarness:
         self.stages: list[tuple[str, Callable[[], object]]] = []
         if register_streams:
             try:
-                for stream in STREAMS:
+                for stream in STREAM_STAGES:
                     self._register(stream)
             except BaseException:
                 self.close()
@@ -80,8 +92,9 @@ class PipelineHarness:
         module.register(self)
         last = max((STAGE_NAMES.index(n) for n, _ in self.stages[:before]), default=-1)
         for name, _ in self.stages[before:]:
-            if name not in STAGE_NAMES:
-                raise ValueError(f"{module_name} registered {name!r}, which is not a pipeline stage: {STAGE_NAMES}")
+            if name not in STREAM_STAGES[stream]:
+                raise ValueError(f"{module_name} registered {name!r}; the {stream} stream may register only "
+                                 f"{STREAM_STAGES[stream]}")
             if STAGE_NAMES.index(name) <= last:
                 raise ValueError(f"{module_name} registered {name!r} out of order: stages run as {STAGE_NAMES}")
             last = STAGE_NAMES.index(name)

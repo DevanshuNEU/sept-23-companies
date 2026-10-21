@@ -12,6 +12,7 @@ Decisions live in GitHub issue #9. This folder holds the design, plans, and the 
 | `superpowers/plans/2026-10-19-store-and-rules.md` | Plan for #4: the SQLite schema, store safety, the rules module, and which tables each later issue uses |
 | `design/README.md` and `design/*.html` | #12's UI design: the seven views, keyboard map, visual system, and the data each view needs (mockups approved by Devanshu) |
 | `superpowers/plans/2026-10-19-web-app.md` | Plan for #12 phase 1: the React app in `web/` against a fixture client, swapped for #11's API in phase 2 |
+| `superpowers/specs/2026-10-20-opportunity-pipeline-design.md` | Draft, awaiting Devanshu's approval: finding every reachable company, diff-only reads, reading postings through Claude Code, ranking, the daily people plan, outcomes; proposes changes to #9 |
 
 Every other issue gets its own plan here before coding starts.
 
@@ -28,6 +29,12 @@ Where one disagrees with #9, #9 wins. Each file opens with a note listing what #
 | `research/2026-10-17-crawl-and-scheduling.md` | ATS endpoints, ETags, launchd behavior across sleep (#21) |
 | `research/2026-10-17-growth-signals.md` | Form D, YC, HN and wage-level sources (deferred, #7) |
 | `research/2026-10-17-outreach-and-tracking.md` | Gmail and LinkedIn rules, CRM options considered |
+| `research/2026-10-20-outreach-history.md` | His recorded outreach April to September 2026: who replied, by stage, role and channel |
+| `research/2026-10-20-lca-small-junior-employers.md` | Small employers that filed junior software H-1Bs in FY2025, the staffing filter, coverage of his lists |
+| `research/2026-10-20-visa-rules-and-employer-targeting.md` | OPT, STEM OPT, the weighted lottery, fee rules and cap-exempt employers as of October 2026 |
+| `research/2026-10-20-company-discovery-and-job-data.md` | Which job boards small sponsors use, board discovery, ETag and diff support, free and paid sources |
+| `research/2026-10-20-llm-posting-extraction.md` | Reading postings with a model: Claude features, measured volumes and cost, accuracy evidence, schema |
+| `research/2026-10-20-people-and-channels.md` | Referral evidence, who to contact, LinkedIn rules and limits, finding emails safely |
 
 ## Superseded (history only, do not build from)
 

@@ -51,6 +51,7 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
 | `tests/test_store_schema.py` | Modify: schema tests for Task 1 |
 | `tests/test_contracts.py` | Create: contract validation tests |
 | `tests/test_store_writes.py` | Create: tests for the new write helpers |
+| `tests/contracts.py`, `tests/pipeline/` | Create: contract checks and the flow test every stream extends (Task 6) |
 | `docs/superpowers/plans/2026-10-19-store-and-rules.md` | Modify: "For downstream issues" points at this plan for the new tables |
 
 ## Task 1: Schema for the pipeline
@@ -237,3 +238,43 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
 - [ ] **Step 1: Edit both docs.** No em or en dashes.
 - [ ] **Step 2: Run** `grep -c "[—–]" docs/README.md docs/superpowers/plans/2026-10-19-store-and-rules.md`. Expected: `0` for each.
 - [ ] **Step 3: Commit** `Docs: foundation hand-off for the pipeline streams (#30)`.
+
+## Task 6: Contract checks and the pipeline flow test
+
+Every stream proves its parts against the same checks, and one flow test runs the whole pipeline on fixtures, so a
+break between streams fails at the PR that causes it, not at the switch.
+
+**Files:**
+- Create: `tests/contracts.py`, `tests/pipeline/__init__.py`, `tests/pipeline/harness.py`, `tests/pipeline/test_flow.py`
+- Create: `tests/fixtures/pipeline/` (a tiny LCA extract of 3 employers, one board list response, one posting body)
+
+**Interfaces:**
+- Consumes: Tasks 1 to 4.
+- Produces:
+  - `check_source(tc: unittest.TestCase, source: Source, since: str | None = None) -> list[Candidate]`: asserts
+    `name` and `version` are non-empty, every item is a `Candidate`, and a second `discover` over the same input
+    yields equal candidates (deterministic).
+  - `check_adapter(tc, adapter: Adapter, token: str) -> None`: given an adapter wired to a fake HTTP client, asserts
+    a first read is `ok` or `empty`, a read with the returned validators is `unchanged` when the fake returns 304 or
+    the same ids, and a 500 is `error` with no jobs.
+  - `check_signal(tc, signal: Signal, facts: CompanyFacts) -> SignalValue`: asserts the value is within -1.0 to 1.0
+    and the reason is non-empty and has no em or en dash.
+  - `PipelineHarness` in `tests/pipeline/harness.py`: `.conn` (a scratch store), `.fixture(name) -> Path`, and
+    `.stages`: an ordered list of `(name, callable)` that streams append to. Stage names, in order: `discover`,
+    `resolve`, `find_boards`, `read_boards`, `read_postings`, `rules`, `rank`, `plan`.
+  - `tests/pipeline/test_flow.py::test_flow_runs_every_registered_stage`: runs the stages registered so far against
+    the fixtures and asserts the invariants each stage declares. Each stream's PR registers its stage and adds its
+    invariant, for example sources: "3 companies, one alias per FEIN, the shared FEIN marked shared"; ranking: "the
+    employer with a live new-grad posting that says it sponsors ranks first and its reasons name both".
+
+- [ ] **Step 1: Write the failing tests** `tests/test_contracts.py::test_check_source_flags_nondeterminism` (a
+  source that yields a random name fails `check_source`), `::test_check_adapter_needs_unchanged` (an adapter that
+  ignores validators fails), and `test_flow_runs_every_registered_stage` with no stages registered (passes trivially
+  and asserts the store migrated).
+- [ ] **Step 2: Run** `uv run python -m unittest tests.test_contracts tests.pipeline.test_flow -v`. Expected: the contract tests FAIL (helpers missing).
+- [ ] **Step 3: Implement** the helpers and the harness.
+- [ ] **Step 4: Run** the full suite. Expected: all OK.
+- [ ] **Step 5: Commit** `Tests: contract checks and the pipeline flow test every stream extends (#30)`.
+
+**Rule for every stream plan:** each new Source, Adapter and Signal gets a `check_*` test; each stream registers
+its stage in the harness and adds one invariant to the flow test; the flow test must stay green on every PR.

@@ -40,6 +40,24 @@
     values, both quotes). The types are #11's (its Tasks 7 and 21); Task 16 adds them to `types.ts` additively and to
     the fixtures if #11 has not landed.
 
+13. **Mockups approved by Devanshu (2026-10-21), with these answers.** The day rail plus work panel replaces the
+    table of 7 rows. Rates show no percent until a stage has at least 20 in its denominator (`formatRate` follows the
+    findings rule). Bars are drawn against the larger of the period's top count and 30. The 7-day question is shown
+    open, not collapsed. Confirm line is the filled button until the reason line is his, then Log request sent.
+14. **A referral is the win.** His words: once a referrer has put his application in, that is the most he can do.
+    Recognition has three sizes: an accept is a quiet note in the rail; a human reply gets the banner; a referral gets
+    the largest moment the design allows (the banner in its strongest form, kept until seen, and the top of the win
+    log), and so do interviews and offers. The win log's first filter is Referrals.
+15. **An Insights view** (new task after Task 15, reads from #11): how many people and how many companies he has
+    reached, by channel and by month; and "What your interviews have in common": the companies that led to an
+    interview or a referral side by side with the rest, on the ranking signals (stage, size, junior H-1B filings,
+    live role at his level named, who he wrote to, channel, days from posting to message), with counts and the
+    small-sample rule. It starts from his real history (Distyl, Runlayer, Crusoe, Retell and the other interview
+    companies in DevVault interview-prep), imported by #17, so the pattern is there on day one.
+16. **QA:** the plan's e2e specs stay; in addition a QA pass (exploratory, against the running app on fixtures,
+    every view and every state in the mockups) runs before the PR, and the app gets a "Report a problem" key that
+    saves what he saw (view, selection, note) to a local file the side session can read, so his own use feeds fixes.
+
 ## Global Constraints
 
 - Everything lives in `web/`, plus `docs/design/` (Task 1) and `docs/README.md` (Task 19). Never touch `dashboard/`, `mail/`, `refresh/`, `outreach/`, the live checkout or DevVault. Never call the mail API on :3002.

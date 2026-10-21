@@ -46,6 +46,10 @@ Integration review rulings (2026-10-21), each also edited into the task text whe
    User-Agent; if SEC refuses the shared one, that is Devanshu's decision, not a code change here.
 9. **Companies whose only boards have no crawler adapter** get a watched page (Task 15), so they are never silently
    unread.
+10. **SEC hosts only** (Devanshu, 2026-10-21): requests to `sec.gov` and `data.sec.gov` send the User-Agent
+    `outreach-research chicholikar.d@northeastern.edu`, as SEC's access policy asks, at about 1 request a second
+    (SEC allows 10). Every other host keeps the shared agent with no contact address. Form D stays in this plan
+    after the LCA and stapply tasks: funding is an early hiring signal worth having soon, but nothing else waits on it.
 
 ## Global Constraints
 

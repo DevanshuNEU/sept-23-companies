@@ -230,6 +230,8 @@ function DetailBody({
   const write = usePendingWrite();
   const { flushPending, cancel } = usePendingControls();
   const articleRef = useRef<HTMLElement>(null);
+  /** The subject and body fields. mod+enter approves only from in here (design section 3, "from inside the editor"). */
+  const editorRef = useRef<HTMLDivElement>(null);
   const saving = useRef(false);
 
   const { item } = detail;
@@ -500,7 +502,16 @@ function DetailBody({
       { keys: 'e', label: 'Edit the body', group: 'Outbox', enabled: kind === 'draft', run: focusEditor },
       // Always taken, so the browser's own save dialog never opens on this view.
       { keys: 'mod+s', label: 'Save edits', group: 'Outbox', run: () => void save() },
-      { keys: 'mod+enter', label: 'Save and approve', group: 'Outbox', enabled: kind === 'draft', run: () => void saveThenApprove() },
+      // Only from the editor: a habitual Cmd+Enter in the filter or anywhere else must not approve the open draft.
+      {
+        keys: 'mod+enter',
+        label: 'Save and approve, from the editor',
+        group: 'Outbox',
+        enabled: kind === 'draft',
+        run: (e) => {
+          if (e.target instanceof Node && editorRef.current?.contains(e.target)) void saveThenApprove();
+        },
+      },
       { keys: 's', label: 'Skip (undo with Z)', group: 'Outbox', enabled: kind === 'draft' || kind === 'approved', run: skip },
       { keys: 'u', label: 'Withdraw approval', group: 'Outbox', enabled: kind === 'approved', run: () => void withdraw() },
       { keys: 'p', label: 'Pause or resume the company', group: 'Outbox', enabled: hasCompanyActions, run: togglePause },
@@ -587,6 +598,7 @@ function DetailBody({
           ) : null}
           {kind === 'draft' ? (
             <div
+              ref={editorRef}
               onFocus={() => setEditing(true)}
               onBlur={(e) => {
                 if (!e.currentTarget.contains(e.relatedTarget)) setEditing(false);

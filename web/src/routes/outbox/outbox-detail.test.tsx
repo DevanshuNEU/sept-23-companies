@@ -238,6 +238,38 @@ describe('approve', () => {
     expect(approve.mock.calls[0]?.[1]).toBe(2);
   });
 
+  it('mod+enter in the list filter does nothing, even with the selected draft filtered out of the list', async () => {
+    const { client } = await open(T.omar, 'Omar Haddad');
+    const approve = vi.spyOn(client, 'approve');
+    const save = vi.spyOn(client, 'saveMessage');
+    const filter = screen.getByRole('textbox', { name: 'Filter' });
+    act(() => filter.focus());
+    fireEvent.change(filter, { target: { value: 'sara' } });
+    await waitFor(() => expect(findRow('Omar Haddad')).toBeNull());
+    expect(screen.getByRole('heading', { level: 2, name: 'Omar Haddad' })).toBeInTheDocument();
+    startClock();
+    press('Enter', { ctrlKey: true }, filter);
+    press('Enter', { metaKey: true }, filter);
+    await settle(9000);
+    expect(liveUndos()).toHaveLength(0);
+    expect(toastText()).not.toContain('Approved');
+    expect(approve).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    expect(approveButton()).toBeInTheDocument();
+  });
+
+  it('mod+enter outside the editor does nothing; A and the button stay the ways to approve', async () => {
+    const { client } = await open(T.omar, 'Omar Haddad');
+    const approve = vi.spyOn(client, 'approve');
+    startClock();
+    press('Enter', { ctrlKey: true });
+    press('Enter', { ctrlKey: true }, approveButton());
+    await settle(9000);
+    expect(liveUndos()).toHaveLength(0);
+    expect(approve).not.toHaveBeenCalled();
+    expect(within(row('Omar Haddad')).getByText('Draft')).toBeInTheDocument();
+  });
+
   it('mod+enter does not approve a draft that is still blocked after the save', async () => {
     const { client } = await open(T.kenji, 'Kenji Watanabe');
     const approve = vi.spyOn(client, 'approve');

@@ -123,12 +123,15 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
     outcome TEXT NOT NULL DEFAULT 'open' CHECK (outcome IN ('open','screen','interview','offer','rejected','closed')),
     outcome_at, revision)`.
   - New table `outreach_touch` (every channel, for outcome learning):
-    `touch_id`, `person_id REFERENCES person`, `company_id`, `channel CHECK (channel IN ('linkedin_request',
+    `touch_id`, `person_id REFERENCES person` (NULL only for channel `application`), `company_id`, `channel CHECK (channel IN ('linkedin_request',
     'linkedin_message','email','application','hn_reply','other'))`, `posting_id`, `email_touch_id REFERENCES touch`
     (only for channel 'email'), `sent_at`, `accepted_at`, `replied_at`, `reply_kind` (the #9 tags), `referred_at`,
     `interview_at`, `offer_at`, `quiet_at`, `context TEXT CHECK (json_valid(context))` (lane, role kind, role age in
     days, ranker version, signal values at send time), `idempotency_key TEXT UNIQUE`, `revision`, `created_at`.
-    CHECKs: an outcome date is never before `sent_at`; `quiet_at` and `replied_at` are not both set.
+    CHECKs: an outcome date is never before `sent_at`; `quiet_at` and `replied_at` are not both set; `person_id` is NULL
+    only when `channel = 'application'`. `outreach_touch` is the one outcome record per touch: the LinkedIn view's
+    `linkedin_log` keeps the action history, and the API writes both in one transaction for a LinkedIn action, so
+    progress counts each touch once (it reads `outreach_touch` only).
   - New table `company_score(company_id, ranker_version, score REAL, signals TEXT CHECK (json_valid(signals)),
     lanes TEXT CHECK (json_valid(lanes)), scored_at, PRIMARY KEY (company_id, ranker_version))`.
   - `job_run.job` adds `'discover'`, `'resolve'`, `'find_boards'`, `'read_boards'`, `'watch_pages'`, `'read_postings'`,
@@ -244,11 +247,11 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
     if the key already belongs to this company; raises `ValueError` if it belongs to another company.
   - `mark_shared_key(conn, kind: str, value: str, reason: str) -> None` (idempotent).
   - `is_shared_key(conn, kind: str, value: str) -> bool`.
-  - `log_touch(conn, *, person_id: int, company_id: int, channel: str, sent_at: str, context: dict,
+  - `log_touch(conn, *, person_id: int | None, company_id: int, channel: str, sent_at: str, context: dict,
     posting_id: int | None = None, email_touch_id: int | None = None, idempotency_key: str) -> int`: returns the
     touch id, the existing one when the key was used before; appends an `event` (entity `outreach_touch`, kind `sent`).
   - `record_outcome(conn, touch_id: int, *, kind: str, at: str, reply_kind: str | None = None, revision: int) -> int`:
-    `kind` in `('accepted','replied','referred','interview','offer','quiet')`; sets the matching column; checks the
+    `kind` in `('accepted','replied','referred','interview','offer','quiet')`; sets the matching column (`replied` clears `quiet_at`, since a late reply beats quiet); checks the
     revision (raises `LookupError` on a mismatch); returns the new revision; appends an event.
 
 - [ ] **Step 1: Write the failing tests** `test_add_alias_refuses_other_company`, `test_add_alias_fein_kept_raw`,

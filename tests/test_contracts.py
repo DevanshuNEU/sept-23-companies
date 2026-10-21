@@ -122,7 +122,7 @@ class FingerprintTests(unittest.TestCase):
 class TokenTests(unittest.TestCase):
     def test_valid_token_grammar(self):
         self.assertTrue(valid_token("workday", "adobe.wd5/External_Experienced"))
-        self.assertTrue(valid_token("oracle", "eeho.fa.us2.oraclecloud.com/CX_1"))
+        self.assertTrue(valid_token("oracle_orc", "eeho.fa.us2.oraclecloud.com/CX_1"))
         self.assertTrue(valid_token("icims", "careers-acme.icims.com"))
         self.assertTrue(valid_token("greenhouse", "acme-co"))
         self.assertTrue(valid_token("lever", "acme.io_2"))
@@ -136,10 +136,34 @@ class TokenTests(unittest.TestCase):
         self.assertFalse(valid_token("workday", "adobe.wd5/"))
         self.assertFalse(valid_token("workday", "adobe.wd\u0665/External"))  # an Arabic-Indic digit is not a digit here
         self.assertFalse(valid_token("workday", "adobe.wd/External"))
-        self.assertFalse(valid_token("oracle", "eeho.fa.us2.oraclecloud.com"))
-        self.assertFalse(valid_token("oracle", "evil.example.com/CX_1"))
+        self.assertFalse(valid_token("oracle_orc", "eeho.fa.us2.oraclecloud.com"))
+        self.assertFalse(valid_token("oracle_orc", "evil.example.com/CX_1"))
         self.assertFalse(valid_token("icims", "careers-acme.example.com"))
         self.assertFalse(valid_token("icims", "Careers.icims.com"))
+
+    def test_oracle_is_keyed_on_the_board_ats_name(self):
+        self.assertTrue(valid_token("oracle_orc", "eeho.fa.us2.oraclecloud.com/CX_1"))
+        self.assertFalse(valid_token("oracle_orc", "cx_1"))
+        self.assertFalse(valid_token("oracle_orc", "evil.example.com/CX_1"))
+
+    def test_an_ats_name_outside_the_board_vocabulary_is_refused(self):
+        self.assertFalse(valid_token("oracle", "eeho.fa.us2.oraclecloud.com/CX_1"))
+        self.assertFalse(valid_token("oracle", "cx_1"))
+        self.assertFalse(valid_token("Greenhouse", "acme"))
+        self.assertFalse(valid_token("", "acme"))
+        self.assertFalse(valid_token("nonsense", "acme"))
+
+    def test_the_ats_list_matches_the_board_check_in_the_schema(self):
+        import re
+        from pathlib import Path
+        from outreach.crawl import base
+        sql = (Path(base.__file__).resolve().parents[1] / "store" / "migrations" / "0001_initial.sql").read_text()
+        block = re.search(r"CREATE TABLE board \(.*?ats\s+TEXT NOT NULL CHECK \(ats IN \((.*?)\)\)", sql, re.S)
+        names = set(re.findall(r"'([a-z_]+)'", block.group(1)))
+        self.assertEqual(set(base.BOARD_ATS), names)
+        self.assertEqual(set(base.BOARD_ATS) - set(base._GRAMMAR), names - set(base._GRAMMAR))
+        for name in names:
+            self.assertIsInstance(valid_token(name, "x"), bool)
 
 
 def reading_json(**over):

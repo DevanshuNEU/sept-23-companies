@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-__all__ = ["Validators", "JobRef", "ReadResult", "Adapter", "ids_fingerprint", "valid_token"]
+__all__ = ["Validators", "JobRef", "ReadResult", "Adapter", "ids_fingerprint", "valid_token", "BOARD_ATS"]
 
 
 @dataclass(frozen=True)
@@ -77,15 +77,21 @@ _SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _WORKDAY = re.compile(r"[a-z0-9-]+\.wd[0-9]+/[A-Za-z0-9_-]+")
 _ORACLE = re.compile(r"[a-z0-9.-]+\.oraclecloud\.com/[A-Za-z0-9_-]+")
 _ICIMS = re.compile(r"[a-z0-9.-]+\.icims\.com")
-_GRAMMAR = {"workday": _WORKDAY, "oracle": _ORACLE, "icims": _ICIMS}
+_GRAMMAR = {"workday": _WORKDAY, "oracle_orc": _ORACLE, "icims": _ICIMS}
+# The board.ats CHECK list in 0001_initial.sql; a test keeps the two in sync.
+BOARD_ATS = frozenset({
+    "ashby", "greenhouse", "lever", "workable", "smartrecruiters", "rippling", "gem", "recruitee", "bamboohr", "dover",
+    "breezy", "workday", "eightfold", "oracle_orc", "amazon", "apple", "google", "pinpoint", "teamtailor", "jazzhr",
+    "paycom", "icims", "personio", "join_com", "cornerstone", "successfactors"})
 
 
 def valid_token(ats: str, token: str) -> bool:
     """The one board-token grammar every stream shares (plan, Shared formats).
 
     Workday `<tenant>.wd<N>/<site>`, Oracle `<host>/<siteNumber>` (site kept as the ATS spells it), iCIMS the lower-case
-    board host, and every other ATS a lower-case slug with no `%`.
+    board host, and every other ATS a lower-case slug with no `%`. An ATS name outside `board.ats` (`BOARD_ATS`) is
+    never valid, so a misspelled name fails loudly instead of quietly getting the slug grammar.
     """
-    if not isinstance(token, str):
+    if not isinstance(token, str) or ats not in BOARD_ATS:
         return False
     return _GRAMMAR.get(ats, _SLUG).fullmatch(token) is not None

@@ -37,6 +37,7 @@ import live_checkout  # noqa: E402
 RULES = ROOT / "outreach" / "rules"
 STORE = ROOT / "outreach" / "store"
 READER = ROOT / "outreach" / "reader"
+CRAWL = ROOT / "outreach" / "crawl"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
 # (file, guarantee broken, find, replace, expect). `find` must be exact text from the code as it is now and appear
@@ -243,6 +244,13 @@ MUTATIONS = [
     (READER / "types.py", "the Unicode hyphens and the soft hyphen no longer join two letters into one word",
      '_JOINERS = r"-\'\\u2019\\u2010\\u2011\\u2012\\u2013\\u00ad"', '_JOINERS = r"-\'\\u2019"',
      "test_other_hyphen_characters_between_letters_join_words"),
+
+    # ---- crawl/base.py (#30) ----------------------------------------------------------------------------------
+    (CRAWL / "base.py", "the Oracle grammar is keyed on 'oracle', a name board.ats does not allow",
+     '"oracle_orc": _ORACLE', '"oracle": _ORACLE', "test_oracle_is_keyed_on_the_board_ats_name"),
+    (CRAWL / "base.py", "an ATS name outside board.ats falls back to the slug grammar again",
+     "if not isinstance(token, str) or ats not in BOARD_ATS:", "if not isinstance(token, str):",
+     "test_an_ats_name_outside_the_board_vocabulary_is_refused"),
 
     # ---- store/writes.py helpers (#30) ------------------------------------------------------------------------
     (STORE / "writes.py", "body_sha256 folds case, so 'A b' and 'a b' are the same body",

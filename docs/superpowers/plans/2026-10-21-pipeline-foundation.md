@@ -155,7 +155,8 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
     confirm a reason line), and its two `daily_list_entry` guards.
   - From the #11 plan (Task 4 there, copy exactly): `api_request` (idempotency store), `mx_check`, `win_seen`,
     `watch_dismissal`. Its `linkedin_note` table is dropped: the API reads and writes `linkedin_draft`.
-  - `posting_body` adds `body_sha256 TEXT NOT NULL DEFAULT '' CHECK (body_sha256 = '' OR length(body_sha256) = 64)`
+  - `posting_body` adds `fetched_at TEXT` (UTC, when the body was last fetched; NULL for imported bodies;
+    integration review M8) and `body_sha256 TEXT NOT NULL DEFAULT '' CHECK (body_sha256 = '' OR length(body_sha256) = 64)`
     (`body_sha256()` of Task 4; `''` for rows written before it existed, filled lazily by the crawler).
   - `decision` adds `provisional INTEGER NOT NULL DEFAULT 1 CHECK (provisional IN (0,1))` (1 until a verified
     reading agrees) and `reader_version TEXT` (NULL while provisional).

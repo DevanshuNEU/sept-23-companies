@@ -459,3 +459,5 @@ Decisions that overrode a "smallest fix" above are recorded in each plan's "Cont
 
 - The shared User-Agent carries no contact address. SEC's access policy asks for one on `sec.gov` hosts; if SEC refuses the shared agent, that is a decision for him (#31 ruling 8).
 - M8 above (monthly lane 1 body re-fetch and the changed-date re-fetch on detail-request ATSs).
+
+Controller, 2026-10-21: M8 resolved. #30 Task 1 adds `posting_body.fetched_at`; #21 re-fetches a detail body when the list shows a changed title or date, and monthly for lane 1 postings, using it.

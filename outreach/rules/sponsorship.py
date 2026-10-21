@@ -38,6 +38,7 @@ _CLAUSE_BREAK = re.compile(
     re.IGNORECASE,
 )
 _FINE_CUTS = ("except", "comma", "dash")
+_OR = re.compile(r"(?<!\w)or(?!\w)", re.IGNORECASE)
 # A parenthetical that holds a verb of its own is read as a clause of its own: "(we do not provide relocation)".
 _PARENS = re.compile(r"\([^()]{0,300}\)")
 _CURLY = chr(0x2019)  # a curly apostrophe, read as a straight one so "don't" in the lists matches "don" + curly + "t"
@@ -106,6 +107,7 @@ class _Patterns:
         self.itar_cue = phrases(s["itar_cue"])
         self.citizenship_negation = phrases(s["citizenship_negation"])
         self.citizenship_preference = phrases(s["citizenship_preference"])
+        self.citizenship_alternative = phrases(s["citizenship_alternative"])
 
 
 @functools.lru_cache(maxsize=8)
@@ -320,6 +322,13 @@ def _read_refusal_first(clause: str, p: _Patterns) -> tuple[str, re.Match | None
     return NEUTRAL, None  # no topic word, or one with no sponsorship context ("executive sponsors")
 
 
+def _has_alternative(text: str, b: int, m: re.Match, p: _Patterns) -> bool:
+    """Whether "or" and a citizenship_alternative follow the requirement m in its clause (ending at b): "Must be a US
+    citizen or have valid work authorization" lets a visa holder in."""
+    o = _OR.search(text, m.end(), b)
+    return o is not None and p.citizenship_alternative.search(text, o.end(), b) is not None
+
+
 def _preferred(text: str, a: int, b: int, m: re.Match, p: _Patterns) -> bool:
     """Whether a citizenship_preference sits within NEAR_CHARS of the requirement m, in clause [a, b), with no comma
     between ("Security clearance is a plus." yes; "Clearance required, TS/SCI preferred." no, for the first one)."""
@@ -437,7 +446,8 @@ def citizenship_required(body: str, cfg: Config) -> tuple[bool, str]:
 
     A clause that also says "not required", "no clearance" or "regardless of" is not a requirement, so "No security
     clearance required." and an EEO line naming citizenship never count. A preference ("a plus", "preferred")
-    cancels only the requirement next to it (see _preferred).
+    cancels only the requirement next to it (see _preferred), and so does "or" with an alternative a visa holder can
+    meet after it (see _has_alternative).
     """
     p = _patterns(cfg)
     pos = 0
@@ -466,7 +476,10 @@ def citizenship_required(body: str, cfg: Config) -> tuple[bool, str]:
             if i not in negated:
                 a, b = clauses[i]
                 negated[i] = p.citizenship_negation.search(text[a:b]) is not None
-            if not negated[i] and not _preferred(text, *clauses[i], m, p):
-                start, end = offset + m.start(), offset + m.end()
-                return True, quote_around(body, start, end) or body[start:end]
+            if negated[i] or _preferred(text, *clauses[i], m, p):
+                continue
+            if not bare_itar and _has_alternative(text, clauses[i][1], m, p):
+                continue  # "Must be a US citizen or otherwise authorized to work in the U.S."
+            start, end = offset + m.start(), offset + m.end()
+            return True, quote_around(body, start, end) or body[start:end]
     return False, ""

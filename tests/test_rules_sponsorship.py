@@ -367,6 +367,20 @@ WAVE_2_SCOPED = [  # (body, stances accepted)
     (CAPITAL_ONE, ("no",)),
 ]
 
+# Final fix wave 2, item 5 (#4): citizenship "or" an alternative that covers visa holders is no requirement.
+WAVE_2_CITIZEN = [  # (body, required)
+    ("Applicants must be U.S. citizens or otherwise authorized to work in the U.S.", False),
+    ("Must be a US citizen or have valid work authorization.", False),
+    ("You must be a U.S. citizen, green card holder, or hold a valid work visa.", False),
+    ("Must be a US citizen or permanent resident, or be eligible for H-1B sponsorship.", False),
+    ("Requires US citizenship or eligibility to work in the US.", False),
+    ("Candidates must be US citizens or hold an F-1 OPT EAD.", False),
+    # still a requirement
+    ("Must be a US citizen or permanent resident.", True),
+    ("Must be a US citizen and authorized to work in the US.", True),
+    ("You must be a U.S. citizen.", True),
+]
+
 class SponsorshipStanceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -484,7 +498,7 @@ class SponsorshipStanceTest(unittest.TestCase):
         for key in ("opt_support", "opt_acronyms", "negation_near", "context", "self_context", "benefit",
                     "non_discrimination", "field_no", "clause_verbs", "citizenship_preference", "negators", "negation_elided", "not_subject", "continuation",
                     "elided_complete", "negation_cued", "negation_cue", "citizenship_us_forms",
-                    "citizenship_templates", "itar", "itar_cue", "refusal_scope"):
+                    "citizenship_templates", "itar", "itar_cue", "refusal_scope", "citizenship_alternative"):
             with self.subTest(key=key):
                 self.assertIn(key, config_mod.REQUIRED["sponsorship"])
 
@@ -530,7 +544,7 @@ class CitizenshipTest(unittest.TestCase):
         cls.cfg = load_config()
 
     def test_citizenship(self):
-        for body, expected in CITIZEN + REVIEW_CITIZEN + REVIEW_2_CITIZEN + REVIEW_3_CITIZEN + FINAL_3_CITIZEN:
+        for body, expected in CITIZEN + REVIEW_CITIZEN + REVIEW_2_CITIZEN + REVIEW_3_CITIZEN + FINAL_3_CITIZEN + WAVE_2_CITIZEN:
             with self.subTest(body=body):
                 required, quote = citizenship_required(body, self.cfg)
                 self.assertIs(required, expected)

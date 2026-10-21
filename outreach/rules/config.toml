@@ -461,6 +461,17 @@ citizenship_templates = [
   "{us} citizenship or green card is required", "{us} citizens or permanent residents only",
   "{us} citizens or permanent residents required",
 ]
+# new in #4 (final fix wave 2, item 5): a citizenship phrase followed, in its clause, by "or" and one of these names an
+# alternative a visa holder can meet ("Must be a US citizen or otherwise authorized to work in the U.S.", "or hold an
+# F-1 OPT EAD"), so it is no requirement. "US citizen or permanent resident" names none and stays one.
+citizenship_alternative = [
+  "otherwise authorized", "otherwise authorised", "otherwise eligible", "authorized to work", "authorised to work",
+  "eligible to work", "eligibility to work", "legally authorized", "right to work", "work authorization",
+  "work authorisation", "employment authorization", "valid visa", "work visa", "work visas", "visa holder",
+  "visa holders", "eligible for sponsorship", "eligible for visa sponsorship", "eligible for h-1b", "eligible for h1b",
+  "require sponsorship", "requires sponsorship", "need sponsorship", "needs sponsorship", "f-1", "f1", "opt",
+  "stem opt", "ead",
+]
 # new in #4 (final fix wave, item 3): bare "ITAR" is a requirement only in a clause that also has one of the cue words
 # ("ITAR compliant" and "not subject to ITAR" are not)
 itar = [

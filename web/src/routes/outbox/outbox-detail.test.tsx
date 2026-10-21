@@ -57,6 +57,26 @@ async function settle(ms = 0) {
 /** Only the undo window and Query's notifications are timed; the rest of a test runs on the real clock. */
 const startClock = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
 
+/** The Outbox only while the URL is under /outbox, so leaving it unmounts the page like the real router does. */
+function OutboxOnly() {
+  const { pathname } = useLocation();
+  return pathname.startsWith('/outbox') ? <OutboxPage /> : <p>Elsewhere</p>;
+}
+
+/** The sidebar and the Outbox, where g t leaves the Outbox (and flushes what waits in its window). */
+async function openWithShell(touchId: number, name: string) {
+  const client = new FixtureClient(buildFixture());
+  const view = renderWithApp(
+    <>
+      <AppShell />
+      <OutboxOnly />
+    </>,
+    { route: `/outbox/${touchId}`, client },
+  );
+  await screen.findByRole('heading', { level: 2, name });
+  return { ...view, client };
+}
+
 afterEach(async () => {
   if (vi.isFakeTimers()) {
     await act(() => vi.runOnlyPendingTimersAsync());
@@ -380,11 +400,6 @@ describe('save and conflict', () => {
 });
 
 describe('unsaved edits outlive the Outbox', () => {
-  /** The Outbox only while the URL is under /outbox, so leaving it unmounts the page like the real router does. */
-  function OutboxOnly() {
-    const { pathname } = useLocation();
-    return pathname.startsWith('/outbox') ? <OutboxPage /> : <p>Elsewhere</p>;
-  }
   const beforeUnloadPrevented = () => {
     const event = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(event);
@@ -548,6 +563,44 @@ describe('skip', () => {
     await settle(8000);
     expect(skip).toHaveBeenCalledTimes(1);
     expect(skip.mock.calls[0]?.slice(0, 2)).toEqual([messageOf(T.omar), 1]);
+  });
+
+  it('a, then s, then g t inside the window: the email is skipped and the approve never reaches the API', async () => {
+    const { client } = await openWithShell(T.omar, 'Omar Haddad');
+    const approve = vi.spyOn(client, 'approve');
+    const skip = vi.spyOn(client, 'skip');
+    press('a');
+    await waitFor(() => expect(within(row('Omar Haddad')).getByText('Approved')).toBeInTheDocument());
+    press('s');
+    await waitFor(() => expect(within(row('Omar Haddad')).getByText('Skipped')).toBeInTheDocument());
+    press('g');
+    press('t');
+    await screen.findByText('Elsewhere');
+    await waitFor(() => expect(skip).toHaveBeenCalledTimes(1));
+    expect(skip.mock.calls[0]?.slice(0, 2)).toEqual([messageOf(T.omar), 1]);
+    await waitFor(async () => expect((await client.outboxDetail(T.omar)).item.state).toBe('skipped'));
+    expect(approve).not.toHaveBeenCalled();
+  });
+
+  it('a skip that fails after it cancelled the approve leaves the email a draft, never approved', async () => {
+    const { client } = await open(T.omar, 'Omar Haddad', { shell: true });
+    const approve = vi.spyOn(client, 'approve');
+    const skip = vi.spyOn(client, 'skip').mockRejectedValue(new Error('network down'));
+    startClock();
+    press('a');
+    await settle();
+    press('s');
+    await settle(500);
+    // One write waits now, the skip: the approve went with it.
+    expect(liveUndos()).toHaveLength(1);
+    expect(sidebarOutbox()).toHaveAccessibleName('Outbox, 1 reply to handle, 6 drafts to review');
+    await settle(7500);
+    expect(skip).toHaveBeenCalledTimes(1);
+    await settle(100);
+    expect(approve).not.toHaveBeenCalled();
+    expect((await client.outboxDetail(T.omar)).item.state).toBe('drafted');
+    expect(within(row('Omar Haddad')).getByText('Draft')).toBeInTheDocument();
+    expect(sidebarOutbox()).toHaveAccessibleName('Outbox, 1 reply to handle, 7 drafts to review');
   });
 });
 

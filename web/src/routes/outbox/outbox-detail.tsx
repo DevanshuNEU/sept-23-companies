@@ -374,7 +374,10 @@ function DetailBody({
 
   const skip = () => {
     if (kind !== 'draft' && kind !== 'approved') return;
-    const wasDraft = item.state === 'drafted';
+    // An approval still inside its undo window never reached the API: drop it, so the skip is the only write
+    // and a skip that fails leaves a draft, never an approved email the sender would pick up.
+    const approveDropped = cancel(`approve:${messageId}`);
+    const wasDraft = approveDropped || item.state === 'drafted';
     const skipped = { state: 'skipped', touchState: 'closed', group: 'closed', schedule: null, nextDue: null, summary: 'Skipped by you' } as const;
     const list: Patch<OutboxView> = { key: queryKeys.outbox, apply: (v) => patchRow(v, touchId, (i) => ({ ...i, ...skipped })) };
     const det: Patch<OutboxDetail> = { key: detailKey, apply: (x) => patchDetailItem(x, skipped) };

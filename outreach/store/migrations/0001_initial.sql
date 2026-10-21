@@ -285,6 +285,10 @@ CREATE TABLE evidence (
            AND json_type(value, '$.jr') IS 'integer' AND json_type(value, '$.level1') IS 'integer'
            AND json_type(value, '$.newemp_jr') IS 'integer'
            AND ifnull(json_type(value, '$.median_jr_wage'), 'integer') IS 'integer'
+           AND ifnull(json_extract(value, '$.fy'), -1) >= 0 AND ifnull(json_extract(value, '$.software'), -1) >= 0
+           AND ifnull(json_extract(value, '$.jr'), -1) >= 0 AND ifnull(json_extract(value, '$.level1'), -1) >= 0
+           AND ifnull(json_extract(value, '$.newemp_jr'), -1) >= 0
+           AND ifnull(json_extract(value, '$.median_jr_wage'), 0) >= 0
          ELSE 0 END),
   CHECK (fact <> 'cap_exempt' OR value IN ('likely','confirmed','no')),
   CHECK (fact <> 'staffing_risk' OR value IN ('low','medium','high')),
@@ -294,6 +298,7 @@ CREATE TABLE evidence (
            AND json_type(value, '$.filed_on') IS 'text'
            AND json_extract(value, '$.filed_on') IS date(json_extract(value, '$.filed_on'))
            AND ifnull(json_type(value, '$.amount_usd'), '') IN ('integer','null')
+           AND ifnull(json_extract(value, '$.amount_usd'), 0) >= 0
            AND json_type(value, '$.kind') IS 'text' AND length(json_extract(value, '$.kind')) > 0
          ELSE 0 END)
 ) STRICT;
@@ -539,7 +544,7 @@ CREATE TABLE outreach_touch (
                     AND json_type(context, '$.signals') IS 'object'
                     AND ifnull(json_type(context, '$.roleNamed'), '') IN ('true','false')
                   ELSE 0 END),
-  -- A double click logs one touch: writers insert ON CONFLICT DO NOTHING on this key.
+  -- A double click logs one touch: log_touch returns the touch that already has the key (see the guard triggers).
   idempotency_key TEXT UNIQUE,
   revision        INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
   created_at      TEXT NOT NULL CHECK (created_at IS strftime('%Y-%m-%dT%H:%M:%SZ', created_at)),
@@ -559,6 +564,8 @@ CREATE TABLE outreach_touch (
 CREATE INDEX outreach_touch_company ON outreach_touch(company_id, sent_at);
 CREATE INDEX outreach_touch_person ON outreach_touch(person_id, sent_at) WHERE person_id IS NOT NULL;
 CREATE INDEX outreach_touch_sent ON outreach_touch(channel, sent_at);
+-- One email touch is one outcome record, so it is counted once.
+CREATE UNIQUE INDEX outreach_touch_email ON outreach_touch(email_touch_id) WHERE email_touch_id IS NOT NULL;
 
 -- A job application he sent; its touch is an outreach_touch with channel 'application' and no person.
 CREATE TABLE application (
@@ -788,6 +795,25 @@ CREATE TRIGGER linkedin_log_no_update BEFORE UPDATE ON linkedin_log
   BEGIN SELECT RAISE(ABORT, 'linkedin_log is append-only; log an undo'); END;
 CREATE TRIGGER linkedin_log_no_delete BEFORE DELETE ON linkedin_log
   BEGIN SELECT RAISE(ABORT, 'linkedin_log is append-only; log an undo'); END;
+-- A touch is the record of an action that happened: never deleted (an undo sets undone_at). REPLACE fires the delete
+-- trigger only with recursive_triggers ON, so these INSERT and UPDATE guards (which run before conflict resolution)
+-- refuse a collision on touch_id, idempotency_key or email_touch_id on any connection. Because a trigger cannot see
+-- ON CONFLICT DO NOTHING, a repeated key is refused here too: log_touch looks the key up first and returns the touch
+-- that has it, and no other writer inserts into this table.
+CREATE TRIGGER outreach_touch_never_deleted BEFORE DELETE ON outreach_touch
+  BEGIN SELECT RAISE(ABORT, 'a touch is never deleted; set undone_at'); END;
+CREATE TRIGGER outreach_touch_no_replace_insert BEFORE INSERT ON outreach_touch
+  WHEN EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id = NEW.touch_id
+               OR (NEW.idempotency_key IS NOT NULL AND t.idempotency_key = NEW.idempotency_key)
+               OR (NEW.email_touch_id IS NOT NULL AND t.email_touch_id = NEW.email_touch_id))
+  BEGIN SELECT RAISE(ABORT, 'a touch is never deleted; set undone_at'); END;
+CREATE TRIGGER outreach_touch_no_replace_update
+  BEFORE UPDATE OF touch_id, idempotency_key, email_touch_id ON outreach_touch
+  WHEN EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id <> OLD.touch_id
+               AND (t.touch_id = NEW.touch_id
+                    OR (NEW.idempotency_key IS NOT NULL AND t.idempotency_key = NEW.idempotency_key)
+                    OR (NEW.email_touch_id IS NOT NULL AND t.email_touch_id = NEW.email_touch_id)))
+  BEGIN SELECT RAISE(ABORT, 'a touch is never deleted; set undone_at'); END;
 CREATE TRIGGER inbound_no_update BEFORE UPDATE ON inbound_message
   BEGIN SELECT RAISE(ABORT, 'inbound_message is append-only'); END;
 CREATE TRIGGER inbound_no_delete BEFORE DELETE ON inbound_message

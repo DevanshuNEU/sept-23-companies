@@ -407,6 +407,14 @@ class QuoteBoundaryTests(unittest.TestCase):
         self.assertFalse(quote_in_body("we offer full time", "We offer full time-off and more"))
         self.assertFalse(quote_in_body("they don at all", "they don\u2019t at all"))
 
+    def test_other_hyphen_characters_between_letters_join_words(self):
+        # U+2010 hyphen, U+2011 non-breaking hyphen, U+2012 figure dash, U+2013 en dash, U+00AD soft hyphen.
+        for joiner in ("\u2010", "\u2011", "\u2012", "\u2013", "\u00ad"):
+            with self.subTest(joiner=repr(joiner)):
+                self.assertFalse(quote_in_body("able to sponsor", f"We are un{joiner}able to sponsor visas."))
+                self.assertFalse(quote_in_body("sponsor visas for", f"We sponsor visas for{joiner}now."))
+                self.assertTrue(quote_in_body("able to sponsor", f"We are able to sponsor{joiner} visas."))
+
     def test_full_word_quotes_and_line_breaks_still_pass(self):
         self.assertTrue(quote_in_body("we do not sponsor visas", "We do not sponsor visas."))
         self.assertTrue(quote_in_body("we do not sponsor visas", "Note: we do not sponsor visas, sorry."))

@@ -39,9 +39,12 @@ _NO_QUOTE_VALUES = ("unknown", "silent", None, "")
 _MIN_QUOTE_WORDS = 3
 _WHITESPACE = re.compile(r"\s+")
 _HAS_WORD_CHAR = re.compile(r"\w")
-# A word edge: not next to a word character, and not next to one across a joining hyphen or apostrophe.
-_EDGE_BEFORE = r"(?<!\w)(?<!\w[-'\u2019])"
-_EDGE_AFTER = r"(?!\w)(?![-'\u2019]\w)"
+# Characters that join two letters into one word: hyphen, apostrophe, right quote, the Unicode hyphens U+2010 to
+# U+2013 (hyphen, non-breaking hyphen, figure dash, en dash) and the soft hyphen U+00AD.
+_JOINERS = r"-'\u2019\u2010\u2011\u2012\u2013\u00ad"
+# A word edge: not next to a word character, and not next to one across a joining character.
+_EDGE_BEFORE = r"(?<!\w)(?<!\w[" + _JOINERS + r"])"
+_EDGE_AFTER = r"(?!\w)(?![" + _JOINERS + r"]\w)"
 
 
 @dataclass(frozen=True)
@@ -145,7 +148,7 @@ def quote_in_body(quote: str, body: str) -> bool:
 
     Both sides get every run of whitespace turned into one space and are lower-cased; nothing else is folded, so
     punctuation, smart quotes and dashes must match. The quote needs at least 3 words (tokens with a letter or
-    digit in them, so ". . ." is no words). It must not start or end inside a word: a hyphen or apostrophe
+    digit in them, so ". . ." is no words). It must not start or end inside a word: a hyphen, dash or apostrophe
     between letters joins them, so "us citizens" is not found in "non-us citizens" nor "able to" in "unable to".
     A paraphrase never passes. Anything that is not text never passes.
     """

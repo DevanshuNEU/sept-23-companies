@@ -943,6 +943,22 @@ class SchemaTest(unittest.TestCase):
         insert(self.db, "evidence", {**self.base_row("evidence"), **lca,
                                      "value": json.dumps({**json.loads(LCA), "median_jr_wage": 120000})})
 
+    def test_evidence_lca_and_funding_numbers_cannot_be_negative(self):
+        lca = {**self.base_row("evidence"), "fact": "lca", "num_low": None, "num_high": None,
+               "confidence": "confirmed", "source_kind": "lca"}
+        for key in ("fy", "software", "jr", "level1", "newemp_jr", "median_jr_wage"):
+            with self.subTest(key=key):
+                value = json.dumps({**json.loads(LCA), "median_jr_wage": 1, key: -1})
+                self.assert_row_refused("evidence", {**lca, "value": value}, "CHECK")
+        insert(self.db, "evidence", {**lca, "value": json.dumps({**json.loads(LCA), "jr": 0, "median_jr_wage": 0})})
+        funding = {**self.base_row("evidence"), "fact": "funding", "num_low": None, "num_high": None,
+                   "source_kind": "formd"}
+        self.assert_row_refused("evidence", {**funding, "value": json.dumps(
+            {"amount_usd": -1, "filed_on": "2026-08-14", "kind": "form_d"})}, "CHECK")
+        for amount in (0, None):
+            insert(self.db, "evidence", {**funding, "value": json.dumps(
+                {"amount_usd": amount, "filed_on": "2026-08-14", "kind": "form_d"})})
+
     def test_evidence_takes_the_pipeline_facts_and_sources(self):
         base = {**self.base_row("evidence"), "num_low": None, "num_high": None}
         good = [("cap_exempt", v) for v in ("likely", "confirmed", "no")] + \
@@ -1020,15 +1036,24 @@ class SchemaTest(unittest.TestCase):
         insert(self.db, "outreach_touch", {**self.base_row("outreach_touch"), "replied_at": NOW,
                                            "reply_kind": "interested"})
 
+    def drop_touch_replace_guards(self):
+        """The insert and update guards fire before the UNIQUE checks, so a test of a unique key itself drops them
+        on its own scratch store; the guards have their own tests."""
+        self.db.execute("DROP TRIGGER outreach_touch_no_replace_insert")
+        self.db.execute("DROP TRIGGER outreach_touch_no_replace_update")
+
     def test_outreach_touch_idempotency_key_unique(self):
         self.new_otouch(idempotency_key="click-1")
+        # the guard refuses a repeated key first (log_touch looks the key up instead)
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, idempotency_key="click-1")
+        self.drop_touch_replace_guards()
         with self.assertRaises(sqlite3.IntegrityError) as cm:
             self.new_otouch(idempotency_key="click-1")
         self.assertIn("UNIQUE", str(cm.exception))
-        self.db.execute(
-            "INSERT INTO outreach_touch(person_id, company_id, channel, sent_at, context, created_at, "
-            "idempotency_key) VALUES (?, ?, 'linkedin_request', ?, ?, ?, 'click-1') ON CONFLICT DO NOTHING",
-            (self.person, self.company, NOW, CONTEXT, NOW))
+        other = self.new_otouch(idempotency_key="click-2")
+        with self.assertRaises(sqlite3.IntegrityError) as cm:
+            self.db.execute("UPDATE outreach_touch SET idempotency_key = 'click-1' WHERE touch_id = ?", (other,))
+        self.assertIn("UNIQUE", str(cm.exception))
         self.assertEqual(self.db.execute(
             "SELECT count(*) FROM outreach_touch WHERE idempotency_key = 'click-1'").fetchone()[0], 1)
 
@@ -1038,6 +1063,57 @@ class SchemaTest(unittest.TestCase):
         self.new_otouch(channel="email", email_touch_id=self.touch)
         self.assertRaises(sqlite3.IntegrityError, self.new_otouch, channel="email", email_touch_id=999999)
         self.assertRaises(sqlite3.IntegrityError, self.new_otouch, channel="fax")
+
+    def test_an_outreach_touch_is_never_deleted(self):
+        touch = self.new_otouch(idempotency_key="keep-1")
+        self.assert_refused("DELETE FROM outreach_touch WHERE touch_id = ?", (touch,), "never deleted")
+        undone = self.new_otouch(undone_at=NOW)
+        self.assert_refused("DELETE FROM outreach_touch WHERE touch_id = ?", (undone,), "never deleted")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM outreach_touch WHERE touch_id IN (?, ?)",
+                                         (touch, undone)).fetchone()[0], 2)
+
+    def test_replace_cannot_overwrite_an_outreach_touch_without_recursive_triggers(self):
+        touch = self.new_otouch(idempotency_key="keep-2")
+        self.new_otouch(channel="email", email_touch_id=self.touch)
+        spare = self.new_otouch(channel="email")
+        path = self.db.execute("PRAGMA database_list").fetchone()["file"]
+        plain = sqlite3.connect(path, isolation_level=None)
+        self.addCleanup(plain.close)
+        self.assertEqual(plain.execute("PRAGMA recursive_triggers").fetchone()[0], 0)
+        cols = "company_id, channel, sent_at, context, created_at"
+        for sql, params in [
+            (f"INSERT OR REPLACE INTO outreach_touch(touch_id, person_id, {cols}) "
+             "VALUES (?, ?, ?, 'linkedin_request', ?, ?, ?)", (touch, self.person, self.company, NOW, CONTEXT, NOW)),
+            (f"INSERT OR REPLACE INTO outreach_touch(person_id, {cols}, idempotency_key) "
+             "VALUES (?, ?, 'linkedin_request', ?, ?, ?, 'keep-2')",
+             (self.person, self.company, NOW, CONTEXT, NOW)),
+            (f"INSERT OR REPLACE INTO outreach_touch(person_id, {cols}, email_touch_id) "
+             "VALUES (?, ?, 'email', ?, ?, ?, ?)", (self.person, self.company, NOW, CONTEXT, NOW, self.touch)),
+            ("UPDATE OR REPLACE outreach_touch SET idempotency_key = 'keep-2' WHERE touch_id = ?", (spare,)),
+            ("UPDATE OR REPLACE outreach_touch SET touch_id = ? WHERE touch_id = ?", (touch, spare)),
+            ("UPDATE OR REPLACE outreach_touch SET email_touch_id = ? WHERE touch_id = ?", (self.touch, spare)),
+        ]:
+            with self.subTest(sql=sql):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    plain.execute(sql, params)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM outreach_touch WHERE touch_id = ? "
+                                         "AND idempotency_key = 'keep-2'", (touch,)).fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM outreach_touch WHERE email_touch_id = ?",
+                                         (self.touch,)).fetchone()[0], 1)
+        self.assertIsNotNone(self.db.execute("SELECT 1 FROM outreach_touch WHERE touch_id = ?", (spare,)).fetchone())
+        # an ordinary insert of a new touch is untouched by the guard
+        self.new_otouch(idempotency_key="fresh")
+
+    def test_one_email_touch_is_counted_once(self):
+        self.new_otouch(channel="email", email_touch_id=self.touch)
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, channel="email", email_touch_id=self.touch)
+        self.drop_touch_replace_guards()  # so the index itself is what refuses the second
+        with self.assertRaises(sqlite3.IntegrityError) as cm:
+            self.new_otouch(channel="email", email_touch_id=self.touch)
+        self.assertIn("UNIQUE", str(cm.exception))
+        # touches with no email touch are not limited
+        self.new_otouch()
+        self.new_otouch()
 
     def test_outreach_touch_undone_excludes_outcomes(self):
         self.assertRaises(sqlite3.IntegrityError, self.new_otouch, undone_at=NOW, accepted_at=NOW)

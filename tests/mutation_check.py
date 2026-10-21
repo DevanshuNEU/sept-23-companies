@@ -36,6 +36,7 @@ import live_checkout  # noqa: E402
 
 RULES = ROOT / "outreach" / "rules"
 STORE = ROOT / "outreach" / "store"
+READER = ROOT / "outreach" / "reader"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
 # (file, guarantee broken, find, replace, expect). `find` must be exact text from the code as it is now and appear
@@ -190,6 +191,53 @@ MUTATIONS = [
     (SCHEMA, "an lca key test uses = again, so a missing key reads NULL and the CHECK passes",
      "AND json_type(value, '$.newemp_jr') IS 'integer'", "AND json_type(value, '$.newemp_jr') = 'integer'",
      "test_evidence_lca_value_must_be_json"),
+    (SCHEMA, "an outreach_touch can be deleted: the outreach_touch_never_deleted trigger removed",
+     "CREATE TRIGGER outreach_touch_never_deleted BEFORE DELETE ON outreach_touch\n  BEGIN SELECT",
+     "CREATE TRIGGER outreach_touch_never_deleted BEFORE DELETE ON outreach_touch\n  WHEN 0\n  BEGIN SELECT",
+     "test_an_outreach_touch_is_never_deleted"),
+    (SCHEMA, "the BEFORE INSERT replace guard on outreach_touch removed, so a plain connection can REPLACE a touch",
+     "CREATE TRIGGER outreach_touch_no_replace_insert BEFORE INSERT ON outreach_touch\n  WHEN EXISTS",
+     "CREATE TRIGGER outreach_touch_no_replace_insert BEFORE INSERT ON outreach_touch\n  WHEN 0 AND EXISTS",
+     "test_replace_cannot_overwrite_an_outreach_touch_without_recursive_triggers"),
+    (SCHEMA, "the BEFORE UPDATE replace guard on outreach_touch removed",
+     "  WHEN EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id <> OLD.touch_id",
+     "  WHEN 0 AND EXISTS (SELECT 1 FROM outreach_touch t WHERE t.touch_id <> OLD.touch_id",
+     "test_replace_cannot_overwrite_an_outreach_touch_without_recursive_triggers"),
+    (SCHEMA, "one email touch can be counted twice: the outreach_touch_email unique index removed",
+     "CREATE UNIQUE INDEX outreach_touch_email ON outreach_touch(email_touch_id) WHERE email_touch_id IS NOT NULL;\n",
+     "", "test_one_email_touch_is_counted_once"),
+    (SCHEMA, "an lca filing count can be negative",
+     "           AND ifnull(json_extract(value, '$.jr'), -1) >= 0 AND ifnull(json_extract(value, '$.level1'), -1) >= 0\n",
+     "           AND ifnull(json_extract(value, '$.level1'), -1) >= 0\n",
+     "test_evidence_lca_and_funding_numbers_cannot_be_negative"),
+    (SCHEMA, "a funding amount can be negative",
+     "           AND ifnull(json_extract(value, '$.amount_usd'), 0) >= 0\n", "",
+     "test_evidence_lca_and_funding_numbers_cannot_be_negative"),
+
+    # ---- reader/types.py --------------------------------------------------------------------------------------
+    (READER / "types.py", "the Unicode hyphens and the soft hyphen no longer join two letters into one word",
+     '_JOINERS = r"-\'\\u2019\\u2010\\u2011\\u2012\\u2013\\u00ad"', '_JOINERS = r"-\'\\u2019"',
+     "test_other_hyphen_characters_between_letters_join_words"),
+
+    # ---- store/writes.py helpers (#30) ------------------------------------------------------------------------
+    (STORE / "writes.py", "body_sha256 folds case, so 'A b' and 'a b' are the same body",
+     '.strip().encode("utf-8")', '.strip().lower().encode("utf-8")', "test_body_sha256_collapses_whitespace_and_keeps_case"),
+    (STORE / "writes.py", "add_alias hands an alias that belongs to another company back as a success",
+     "    if owner != company_id:\n", "    if False:\n", "test_add_alias_refuses_other_company"),
+    (STORE / "writes.py", "a FEIN alias goes through name_key, which drops the dash",
+     "        key = alias.lower()\n", "        key = name_key(alias)\n", "test_add_alias_fein_kept_raw"),
+    (STORE / "writes.py", "record_outcome writes an outcome on an undone touch",
+     '    if row["undone_at"] is not None:\n        raise ValueError(f"touch {touch_id} was undone")\n',
+     '    if False:\n        raise ValueError(f"touch {touch_id} was undone")\n',
+     "test_undo_touch_sets_undone_at_and_blocks_outcomes"),
+    (STORE / "writes.py", "record_outcome accepts an outcome dated before the touch was sent",
+     '    if when < row["sent_at"]:\n', "    if False:\n", "test_record_outcome_refuses_before_sent"),
+    (STORE / "writes.py", "a late reply no longer clears quiet_at",
+     '"replied_at = ?, reply_kind = ?, quiet_at = NULL"', '"replied_at = ?, reply_kind = ?"',
+     "test_replied_stores_the_kind_and_clears_quiet"),
+    (STORE / "writes.py", "undo_touch undoes a touch that has an outcome",
+     "    if any(row[c] is not None for c in _OUTCOME_COLUMNS.values()):\n", "    if False:\n",
+     "test_undo_touch_refuses_after_an_outcome"),
 ]
 
 

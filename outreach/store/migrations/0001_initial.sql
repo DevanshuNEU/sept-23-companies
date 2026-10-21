@@ -477,6 +477,16 @@ CREATE TRIGGER inbound_no_delete BEFORE DELETE ON inbound_message
   BEGIN SELECT RAISE(ABORT, 'inbound_message is append-only'); END;
 CREATE TRIGGER posting_never_deleted BEFORE DELETE ON posting
   BEGIN SELECT RAISE(ABORT, 'postings are never deleted; set closed_at and close_reason'); END;
+-- REPLACE fires the delete trigger only with recursive_triggers ON; these hold on any connection (INSERT and UPDATE
+-- triggers fire before conflict resolution). An INSERT is refused on a taken posting_id only, not on a taken
+-- source_key, because the crawler upserts on source_key (#21: INSERT ... ON CONFLICT(source_key) DO UPDATE).
+CREATE TRIGGER posting_no_replace_insert BEFORE INSERT ON posting
+  WHEN EXISTS (SELECT 1 FROM posting p WHERE p.posting_id = NEW.posting_id)
+  BEGIN SELECT RAISE(ABORT, 'postings are never deleted; set closed_at and close_reason'); END;
+CREATE TRIGGER posting_no_replace_update BEFORE UPDATE OF posting_id, source_key ON posting
+  WHEN EXISTS (SELECT 1 FROM posting p WHERE p.posting_id <> OLD.posting_id
+               AND (p.posting_id = NEW.posting_id OR p.source_key = NEW.source_key))
+  BEGIN SELECT RAISE(ABORT, 'postings are never deleted; set closed_at and close_reason'); END;
 
 -- A message is born planned or drafted (sent only for imported history); approval is always an UPDATE.
 -- A follow-up exists beyond planned only once the first email has gone out.
@@ -509,6 +519,27 @@ CREATE TRIGGER message_followup_waits BEFORE UPDATE OF state ON message
 CREATE TRIGGER message_no_delete_claimed BEFORE DELETE ON message
   WHEN OLD.state IN ('sending','send_unknown','sent')
   BEGIN SELECT RAISE(ABORT, 'a claimed or sent message is never deleted'); END;
+-- On a connection without recursive_triggers (the sqlite3 shell, a DB browser) REPLACE skips the delete trigger, so
+-- an INSERT or UPDATE that would collide with a claimed or sent message on any unique key is refused before conflict
+-- resolution runs.
+CREATE TRIGGER message_no_replace_claimed_insert BEFORE INSERT ON message
+  WHEN EXISTS (SELECT 1 FROM message m WHERE m.state IN ('sending','send_unknown','sent')
+               AND (m.message_id = NEW.message_id OR (m.touch_id = NEW.touch_id AND m.seq = NEW.seq)
+                    OR m.rfc_message_id = NEW.rfc_message_id OR m.pending_rfc_id = NEW.pending_rfc_id))
+  BEGIN SELECT RAISE(ABORT, 'a claimed or sent message is never deleted'); END;
+CREATE TRIGGER message_no_replace_claimed_update
+  BEFORE UPDATE OF message_id, touch_id, seq, state, rfc_message_id, pending_rfc_id ON message
+  WHEN EXISTS (SELECT 1 FROM message m WHERE m.message_id <> OLD.message_id
+               AND m.state IN ('sending','send_unknown','sent')
+               AND (m.message_id = NEW.message_id OR (m.touch_id = NEW.touch_id AND m.seq = NEW.seq)
+                    OR m.rfc_message_id = NEW.rfc_message_id OR m.pending_rfc_id = NEW.pending_rfc_id))
+  BEGIN SELECT RAISE(ABORT, 'a claimed or sent message is never deleted'); END;
+-- The same for the one-sending index: UPDATE OR REPLACE ... SET state = 'sending' would erase the message sending
+-- now. Its error still names UNIQUE, as the index's own error does.
+CREATE TRIGGER message_no_replace_sending BEFORE UPDATE OF state ON message
+  WHEN NEW.state = 'sending' AND OLD.state <> 'sending'
+    AND EXISTS (SELECT 1 FROM message m WHERE m.state = 'sending' AND m.message_id <> OLD.message_id)
+  BEGIN SELECT RAISE(ABORT, 'UNIQUE: only one message is sending at a time'); END;
 
 CREATE TRIGGER message_frozen_once_claimed BEFORE UPDATE OF subject, body, seq, touch_id ON message
   WHEN OLD.state IN ('sending','send_unknown','sent')

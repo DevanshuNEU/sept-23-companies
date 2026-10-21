@@ -723,6 +723,64 @@ class SchemaTest(unittest.TestCase):
             "INSERT OR REPLACE INTO posting(posting_id, company_id, source_key, title, first_seen_at, last_seen_at) "
             "VALUES (?, ?, 'url:x', 'T', ?, ?)", (self.posting, self.company, NOW, NOW))
 
+    def test_replace_cannot_erase_a_sent_message_without_recursive_triggers(self):
+        # The sqlite3 shell, a DB browser or a future script opens the store without recursive_triggers, so the
+        # delete triggers do not fire for REPLACE there. The INSERT and UPDATE guards must hold anyway.
+        sent = self.message_in("sent")
+        touch, rfc = self.db.execute("SELECT touch_id, rfc_message_id FROM message WHERE message_id = ?",
+                                     (sent,)).fetchone()
+        sending = self.message_in("sending")
+        follow_up = self.new_message(touch, seq=1, state="planned")
+        approved = self.message_in("approved")
+        other = self.posting
+        second = seed_posting(self.db, self.company, "Backend Engineer")
+        second_key = self.db.execute("SELECT source_key FROM posting WHERE posting_id = ?", (second,)).fetchone()[0]
+        path = self.db.execute("PRAGMA database_list").fetchone()["file"]
+        plain = sqlite3.connect(path, isolation_level=None)
+        self.addCleanup(plain.close)
+        self.assertEqual(plain.execute("PRAGMA recursive_triggers").fetchone()[0], 0)
+        refused = [
+            ("INSERT OR REPLACE INTO message(touch_id, seq, state, subject, body, created_at, updated_at) "
+             "VALUES (?, 0, 'drafted', 's', 'b', ?, ?)", (touch, NOW, NOW)),
+            ("REPLACE INTO message(message_id, touch_id, seq, state, subject, body, created_at, updated_at) "
+             "VALUES (?, ?, 0, 'drafted', 's', 'b', ?, ?)", (sent, self.fresh_touch(), NOW, NOW)),
+            ("INSERT OR REPLACE INTO message(touch_id, seq, state, subject, body, rfc_message_id, sent_at, "
+             "approved_at, created_at, updated_at) VALUES (?, 0, 'sent', 's', 'b', ?, ?, ?, ?, ?)",
+             (self.fresh_touch(), rfc, NOW, NOW, NOW, NOW)),
+            ("UPDATE OR REPLACE message SET seq = 0 WHERE message_id = ?", (follow_up,)),
+            ("UPDATE OR REPLACE message SET message_id = ? WHERE message_id = ?", (sending, follow_up)),
+            ("INSERT OR REPLACE INTO posting(posting_id, company_id, source_key, title, first_seen_at, last_seen_at) "
+             "VALUES (?, ?, 'url:x', 'T', ?, ?)", (other, self.company, NOW, NOW)),
+            ("UPDATE OR REPLACE message SET state = 'sending', pending_rfc_id = '<p9@acme.co>', claimed_at = ? "
+             "WHERE message_id = ?", (NOW, approved)),
+            ("UPDATE OR REPLACE posting SET source_key = ? WHERE posting_id = ?", (second_key, other)),
+            ("UPDATE OR REPLACE posting SET posting_id = ? WHERE posting_id = ?", (second, other)),
+        ]
+        for sql, params in refused:
+            with self.subTest(sql=sql):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    plain.execute(sql, params)
+        for message_id in (sent, sending, approved):
+            self.assertIsNotNone(self.db.execute("SELECT 1 FROM message WHERE message_id = ?", (message_id,)).fetchone())
+        for posting_id in (other, second):
+            self.assertIsNotNone(self.db.execute("SELECT 1 FROM posting WHERE posting_id = ?", (posting_id,)).fetchone())
+
+    def test_the_replace_guards_leave_ordinary_writes_alone(self):
+        # A drafted message can still be replaced, renumbered or moved, and a posting's own key can be rewritten.
+        drafted = self.message_in("drafted")
+        touch = self.db.execute("SELECT touch_id FROM message WHERE message_id = ?", (drafted,)).fetchone()[0]
+        self.db.execute("INSERT OR REPLACE INTO message(touch_id, seq, state, subject, body, created_at, updated_at) "
+                        "VALUES (?, 0, 'drafted', 's2', 'b2', ?, ?)", (touch, NOW, NOW))
+        self.db.execute("UPDATE message SET subject = 'x' WHERE touch_id = ? AND seq = 0", (touch,))
+        key = self.db.execute("SELECT source_key FROM posting WHERE posting_id = ?", (self.posting,)).fetchone()[0]
+        self.db.execute("UPDATE posting SET source_key = ? WHERE posting_id = ?", (key, self.posting))
+        # the crawler's upsert on source_key (#21) still works
+        self.db.execute("INSERT INTO posting(company_id, source_key, title, first_seen_at, last_seen_at) "
+                        "VALUES (?, ?, 'New title', ?, ?) ON CONFLICT(source_key) DO UPDATE SET title = excluded.title",
+                        (self.company, key, NOW, NOW))
+        self.assertEqual(self.db.execute("SELECT title FROM posting WHERE posting_id = ?", (self.posting,)).fetchone()[0],
+                         "New title")
+
     def test_connect_sets_the_audit_pragmas(self):
         self.assertEqual(self.db.execute("PRAGMA recursive_triggers").fetchone()[0], 1)
         self.assertEqual(self.db.execute("PRAGMA cache_size").fetchone()[0], -65536)

@@ -10,6 +10,7 @@ import {
   OutboxPage,
   ParentReads,
   ProgressPage,
+  ProposalsPage,
   ToToday,
   TodayPage,
   WinsPage,
@@ -22,6 +23,7 @@ import {
  */
 export const viewRoutes: RouteObject[] = [
   { path: 'today', element: <TodayPage /> },
+  { path: 'proposals', element: <ProposalsPage /> },
   { path: 'outbox', element: <OutboxPage />, children: [{ path: ':touchId', element: <ParentReads /> }] },
   { path: 'linkedin', element: <LinkedInPage /> },
   { path: 'needs-you', element: <NeedsYouPage /> },

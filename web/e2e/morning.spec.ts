@@ -25,7 +25,7 @@ async function expectCleanPage(page: Page, consoleErrors: string[], foreign: str
   expect(foreign).toEqual([]);
 }
 
-// The phase-1 Today's own capacity box; the sidebar count reads the plan (2 of 7) and does not move on a pick.
+// The phase-1 Today, now at /proposals: its own capacity box. The sidebar count reads the plan (2 of 7) and does not move on a pick.
 const picked = (page: Page) => page.getByLabel('Capacity').locator('div').filter({ hasText: /^Picked today/ });
 
 const outboxLink = (page: Page) => page.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: /^Outbox/ });
@@ -35,12 +35,13 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   // The clock must run before the first load so runFor can drive the 8 second undo window.
   await page.clock.install({ time: new Date('2026-11-10T15:14:00Z') });
 
-  // 1. Land on Today.
+  // 1. Land on Today: the plan of people, on the first person to do.
   await page.goto('/today');
   await expect(page.getByRole('heading', { level: 1, name: 'Today' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Tuesday, November 10' })).toBeVisible();
   await expect(page.locator('[data-slot="sidebar"]').getByRole('link', { name: /^Today/ })).toContainText('2 of 7');
-  await expect(picked(page)).toContainText('3 of 5');
+  await expect(page.getByText('7 people, 2 done')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Selected person' }).getByRole('heading', { level: 2, name: 'Lena Ortiz' })).toBeVisible();
   await expectCleanPage(page, consoleErrors, foreign);
 
   // 2. Outbox: open the reply and tag it Interested.
@@ -58,10 +59,14 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await expect(interested).toHaveAttribute('aria-pressed', 'true');
   await expectCleanPage(page, consoleErrors, foreign);
 
-  // 3. Today: pick Pylon with x. Nothing is selected on load, so the first j lands on Pylon.
+  // 3. Today, then All proposed companies: pick Pylon with x. Nothing is selected there on load, so the first j
+  // lands on Pylon.
   await page.keyboard.press('g');
   await page.keyboard.press('t');
-  await expect(page.getByRole('heading', { name: 'Tuesday, November 10' })).toBeVisible();
+  await expect(page.getByText('7 people, 2 done')).toBeVisible();
+  await page.getByRole('link', { name: 'All proposed companies' }).click();
+  await expect(page).toHaveURL(/\/proposals$/);
+  await expect(picked(page)).toContainText('3 of 5');
   await page.keyboard.press('j');
   await expect(page.getByRole('complementary', { name: 'Pylon preview' })).toBeVisible();
   await page.keyboard.press('x');
@@ -133,6 +138,7 @@ test('every view loads clean: no foreign host, no console error, no Send button'
   const foreign = watchRequests(page);
   const views: [string, string][] = [
     ['/today', 'Today'],
+    ['/proposals', 'Today'],
     ['/outbox', 'Outbox'],
     ['/linkedin', 'LinkedIn list'],
     ['/needs-you', 'Needs you'],
@@ -162,9 +168,9 @@ const geometry = (box: { x: number; y: number; width: number; height: number } |
 const intersect = (a: ReturnType<typeof geometry>, b: ReturnType<typeof geometry>) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
 
 for (const width of [1440, 1280]) {
-  test(`Today at ${width}: the selected row's actions never cover its Sponsorship badge`, async ({ page, consoleErrors }) => {
+  test(`Proposals at ${width}: the selected row's actions never cover its Sponsorship badge`, async ({ page, consoleErrors }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/today');
+    await page.goto('/proposals');
     await expect(page.getByRole('heading', { name: 'Tuesday, November 10' })).toBeVisible();
     await page.keyboard.press('j');
     await expect(page.getByRole('complementary', { name: 'Pylon preview' })).toBeVisible();
@@ -187,16 +193,17 @@ for (const width of [1440, 1280]) {
   });
 }
 
-test('1280: no page or table scrolls sideways on Today, Done and No-go', async ({ page, consoleErrors }) => {
+test('1280: no page or table scrolls sideways on Today, Proposals, Done and No-go', async ({ page, consoleErrors }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  for (const [path, heading] of [
-    ['/today', 'Today'],
-    ['/done', 'Done companies'],
-    ['/no-go', 'No-go list'],
+  for (const [path, heading, ready] of [
+    ['/today', 'Today', 'listbox'],
+    ['/proposals', 'Today', 'table'],
+    ['/done', 'Done companies', 'table'],
+    ['/no-go', 'No-go list', 'table'],
   ] as const) {
     await page.goto(path);
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
-    await expect(page.getByRole('table').first()).toBeVisible();
+    await expect(page.getByRole(ready).first()).toBeVisible();
     const sideways = await page.evaluate(() => {
       const bad: string[] = [];
       if (document.documentElement.scrollWidth > document.documentElement.clientWidth) bad.push('page');

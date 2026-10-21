@@ -15,14 +15,15 @@ function paths(routes: RouteObject[]): RouteObject[] {
 /**
  * Renders `ui` inside every app provider and a memory router at `route` (default `/today`). `ui` is
  * the layout of every route, so it renders for any path; render `<AppShell />` in it for the shell.
- * Each call gets a fresh QueryClient with retries off and, unless given one, a fresh FixtureClient.
+ * Each call gets a fresh QueryClient with retries off (or the one given, so a test can lay a poll's result into
+ * the cache) and, unless given one, a fresh FixtureClient.
  */
 export function renderWithApp(
   ui: ReactElement,
-  opts: { route?: string; client?: OutreachClient } = {},
+  opts: { route?: string; client?: OutreachClient; queryClient?: QueryClient } = {},
 ): RenderResult & { client: OutreachClient } {
   const client = opts.client ?? new FixtureClient();
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = opts.queryClient ?? new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createMemoryRouter(
     [{ path: '/', element: ui, children: [{ index: true }, ...paths(viewRoutes), { path: '*' }] }],
     { initialEntries: [opts.route ?? '/today'] },

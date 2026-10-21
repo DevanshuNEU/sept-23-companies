@@ -7,7 +7,7 @@ import { buildFixture, ids, messageOf } from '@/api/fixture/data';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import LinkedInPage from '@/routes/linkedin';
 import OutboxPage from '@/routes/outbox';
-import TodayPage from '@/routes/today';
+import ProposalsPage from '@/routes/proposals';
 import { AppSidebar } from '@/shell/app-sidebar';
 import { renderWithApp } from '@/test/render';
 import { HotkeysProvider, useHotkeys, useSelectionSync, type LiveSelection } from './hotkeys';
@@ -67,13 +67,13 @@ describe('a key right after a selection change acts on the new row', () => {
     expect(approve.mock.calls.some((c) => c[0] === messageOf(ids.touch.omar))).toBe(false);
   });
 
-  it('Today: j then x picks the row he moved to and leaves the picked row he left alone', async () => {
+  it('Proposals: j then x picks the row he moved to and leaves the picked row he left alone', async () => {
     renderWithApp(
       <SidebarProvider>
         <AppSidebar />
-        <TodayPage />
+        <ProposalsPage />
       </SidebarProvider>,
-      { route: '/today', client: new FixtureClient() },
+      { route: '/proposals', client: new FixtureClient() },
     );
     await screen.findByRole('checkbox', { name: 'Pick Pylon' });
     const boxes = () => screen.getAllByRole('checkbox', { name: /^Pick / });

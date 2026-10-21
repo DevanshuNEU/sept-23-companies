@@ -1,7 +1,7 @@
 import { Check, Flag } from 'lucide-react';
-import type { Id, IsoDate, IsoTime, PlanRow, PlanView } from '@/api';
+import type { Id, IsoTime, PlanRow, PlanView } from '@/api';
 import type { RowProps } from '@/keyboard/list-nav';
-import { ageDays, formatDueDay, parseIsoDate } from '@/lib/format';
+import { formatCarriedDay } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 /** How a node is drawn. `current` is the selected row while it is still to do. */
@@ -20,19 +20,6 @@ function nodeOf(row: PlanRow, selected: boolean): Node {
   if (row.state === 'skipped') return 'carried';
   if (row.steps.some((s) => s.at !== null)) return 'logged';
   return selected ? 'current' : 'todo';
-}
-
-const WEEKDAY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' });
-
-/**
- * "Monday" for a day in the last week, "Mon Nov 2" before that. The day is a calendar date: it is read at
- * noon UTC from its parts, so no zone moves it, and the distance comes from `asOf`, never the real clock.
- */
-function carriedDay(from: IsoDate, asOf: IsoTime): string {
-  const { y, m, d } = parseIsoDate(from);
-  const noon = new Date(Date.UTC(y, m - 1, d, 12));
-  const days = ageDays(noon.toISOString(), asOf);
-  return days >= 1 && days <= 6 ? WEEKDAY.format(noon) : formatDueDay(from);
 }
 
 function title(row: PlanRow): string {
@@ -77,7 +64,7 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
   const { ref, onClick, ...aria } = props;
   const node = nodeOf(row, aria['aria-selected']);
   const word = WORD[node];
-  const carried = row.carriedFrom !== null && row.state === 'todo' ? `Carried over from ${carriedDay(row.carriedFrom, asOf)}` : null;
+  const carried = row.carriedFrom !== null && row.state === 'todo' ? `Carried over from ${formatCarriedDay(row.carriedFrom, asOf)}` : null;
   const ask = row.state === 'todo' && row.note?.needsYourLine === true ? 'Your line to confirm' : null;
   const where = row.channel === 'email' ? `${title(row)} by email` : `${title(row)} at ${row.company.name}`;
   const label = [`${row.position}. ${where}`, word, ...[carried, ask].flatMap((p) => (p ? [lowerFirst(p)] : []))].join(', ');

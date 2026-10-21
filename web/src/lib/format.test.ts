@@ -1,4 +1,4 @@
-import { ageDays, formatAge, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatMonth, formatRecipientTime, formatWeekdayTime, parseIsoDate } from '@/lib/format';
+import { ageDays, formatAge, formatCarriedDay, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatLongDate, formatMonth, formatRecipientTime, formatWeekdayTime, parseIsoDate } from '@/lib/format';
 
 const ASOF = '2026-11-10T15:14:00Z'; // Tuesday 10:14 in Boston
 
@@ -136,5 +136,23 @@ describe('formatMonth', () => {
   it('names the month of an instant in the app zone', () => {
     expect(formatMonth('2026-11-10T15:14:00Z')).toBe('November');
     expect(formatMonth('2026-11-01T03:30:00Z')).toBe('October'); // 23:30 EDT on Oct 31
+  });
+});
+
+describe('formatLongDate', () => {
+  it('writes a calendar date with its weekday and month in full', () => {
+    expect(formatLongDate('2026-11-10')).toBe('Tuesday, November 10');
+    expect(formatLongDate('2026-11-14')).toBe('Saturday, November 14');
+  });
+});
+
+describe('formatCarriedDay', () => {
+  const asOf = '2026-11-10T15:14:00Z';
+  it('names the weekday within the last week', () => {
+    expect(formatCarriedDay('2026-11-09', asOf)).toBe('Monday');
+    expect(formatCarriedDay('2026-11-04', asOf)).toBe('Wednesday');
+  });
+  it('writes the date from a week back', () => {
+    expect(formatCarriedDay('2026-11-03', asOf)).toBe('Tue Nov 3');
   });
 });

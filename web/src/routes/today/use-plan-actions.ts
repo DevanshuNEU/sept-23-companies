@@ -1,6 +1,7 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  ApiError,
   queryKeys,
   useClient,
   type Id,
@@ -27,6 +28,12 @@ type Reply = Exclude<ReplyKind, 'unsorted' | 'auto_reply'>;
 const AT_ONCE = new Set<Reply>(['said_no', 'asked_to_stop']);
 
 const ADD = (company: string) => `To change it, open ${company}'s page.`;
+/** A press that does nothing says why, once. */
+const refuse = (text: string): false => {
+  toast(text);
+  return false;
+};
+const sentence = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
 
 /* ------------------------------------------------------------------ revisions */
 
@@ -76,6 +83,8 @@ function sendVersioned<T extends { revision: Revision }>(
 }
 
 let saves = 0;
+/** The newest save per note, per client, so the view can tell a note whose save has not landed yet. */
+const lastSave = new WeakMap<QueryClient, Map<Id, string>>();
 
 const cachedPlan = (queryClient: QueryClient) => queryClient.getQueryData<PlanView>(queryKeys.plan);
 const cachedRow = (queryClient: QueryClient, entryId: Id) => cachedPlan(queryClient)?.rows.find((r) => r.entryId === entryId);
@@ -134,25 +143,37 @@ export function usePlanActions() {
   const { isPending } = usePendingControls();
   const queryClient = useQueryClient();
 
-  const logStep = (row: PlanRow, kind: StepKind) => {
+  /** True when the log was queued; a refused or repeated press returns false (and says why, unless it repeats). */
+  const logStep = (row: PlanRow, kind: StepKind): boolean => {
     const { entryId } = row;
     const id = `log:${entryId}:${kind === 'request' ? 'request' : 'apply'}`;
-    if (isPending(id)) return;
+    if (isPending(id)) return false;
     const company = row.company.name;
+    // The sender and the reply reader log email, so no key logs anything on an email row.
+    if (row.channel === 'email') return refuse('Review this email in the Outbox.');
+    // The row on screen against the newest poll: a key that lands before the view drew a changed row is refused.
+    const latest = cachedRow(queryClient, entryId);
     let call: (revision: Revision, o: WriteOptions) => Promise<PlanRow>;
     const key = `plan:${entryId}:${kind}`;
     if (kind === 'request') {
-      if (row.channel === 'email') return void toast('Review this email in the Outbox.');
-      if (!row.person) return void toast(`Find someone at ${company} first.`);
+      if (!row.person) return refuse(`Find someone at ${company} first.`);
       const personId = row.person.person.id;
+      if (latest && latest.person?.person.id !== personId) {
+        const now = latest.person ? ` to ${latest.person.person.name}` : '';
+        return refuse(`Not logged. The person on ${company}'s row changed${now}. Check the row, then press R again.`);
+      }
       call = (revision, o) => client.logRequest(entryId, { personId, idempotencyKey: key }, revision, o);
     } else {
-      if (!row.role || !row.steps.some((s) => s.kind === 'apply')) return void toast('No role to apply for.');
+      if (!row.role || !row.steps.some((s) => s.kind === 'apply')) return refuse('No role to apply for.');
       const postingId = row.role.postingId;
+      if (latest && latest.role?.postingId !== postingId) {
+        const now = latest.role ? ` to ${latest.role.title}` : '';
+        return refuse(`Not logged. The role on ${company}'s row changed${now}. Check the row, then press P again.`);
+      }
       call = (revision, o) => client.logApplied(entryId, { postingId, idempotencyKey: key }, revision, o);
     }
-    if (row.state === 'skipped') return void toast(`${company} is carried to tomorrow.`);
-    if (row.state === 'done' || row.steps.find((s) => s.kind === kind)?.at) return void toast('Already logged.');
+    if (row.state === 'skipped') return refuse(`${company} is carried to tomorrow.`);
+    if (row.state === 'done' || row.steps.find((s) => s.kind === kind)?.at) return refuse('Already logged.');
 
     const label = stepLabel(row, kind);
     const delta = finishes(row, kind) ? 1 : 0;
@@ -166,21 +187,30 @@ export function usePlanActions() {
       ],
       commit: (o) =>
         sendVersioned(queryClient, `plan:${entryId}`, row.revision, () => cachedRow(queryClient, entryId)?.revision, o, (revision) =>
-          call(revision, o),
+          call(revision, o).catch((err: unknown) => {
+            // The row changed inside the window (another person or role, carried elsewhere): say what did not happen
+            // and what to do, not only the server's reason.
+            if (err instanceof ApiError && err.code === 'not_allowed') {
+              throw new ApiError('not_allowed', `Not logged. ${sentence(err.message)} Check ${company}'s row, then log it again.`);
+            }
+            throw err;
+          }),
         ),
     });
+    return true;
   };
 
   const logRequest = (row: PlanRow) => logStep(row, 'request');
   const logApplied = (row: PlanRow) => logStep(row, 'apply');
 
-  const skip = (row: PlanRow) => {
+  /** True when the carry was queued. */
+  const skip = (row: PlanRow): boolean => {
     const { entryId } = row;
     const id = `skip:${entryId}`;
-    if (isPending(id)) return;
+    if (isPending(id)) return false;
     const company = row.company.name;
-    if (row.state === 'done') return void toast(`${company} is already done.`);
-    if (row.state === 'skipped') return void toast(`${company} is already carried to tomorrow.`);
+    if (row.state === 'done') return refuse(`${company} is already done.`);
+    if (row.state === 'skipped') return refuse(`${company} is already carried to tomorrow.`);
     const label = `Carried to tomorrow: ${company}.`;
     write({
       id,
@@ -192,6 +222,7 @@ export function usePlanActions() {
           client.skipRow(entryId, revision, o),
         ),
     });
+    return true;
   };
 
   const noteOf = (queryClient: QueryClient, row: PlanRow) => cachedRow(queryClient, row.entryId)?.note?.revision;
@@ -202,8 +233,12 @@ export function usePlanActions() {
     const label = `Saved the note for ${row.person?.person.name ?? row.company.name}.`;
     // One id per save: the store ignores a write whose id is still active, and a second save must not be dropped. The
     // note's lane keeps the saves in order, and each sends the full text and reason line, so the later one supersedes.
+    const id = `note:${note.noteId}:${++saves}`;
+    const map = lastSave.get(queryClient) ?? new Map<Id, string>();
+    map.set(note.noteId, id);
+    lastSave.set(queryClient, map);
     write({
-      id: `note:${note.noteId}:${++saves}`,
+      id,
       label,
       afterCommit: label,
       patches: [
@@ -223,7 +258,7 @@ export function usePlanActions() {
   const confirmReason = (row: PlanRow) => {
     const note = row.note;
     if (!note) return;
-    const label = `Confirmed the reason line for ${row.person?.person.name ?? row.company.name}.`;
+    const label = 'Confirmed your line.';
     write({
       id: `confirm:${note.noteId}`,
       label,
@@ -287,5 +322,13 @@ export function usePlanActions() {
     });
   };
 
-  return { logRequest, logApplied, skip, saveNote, confirmReason, answer, seeWins };
+  /** True while the newest save of this note waits in its window or for its commit: its checks are unknown. */
+  const noteSaving = (noteId: Id): boolean => {
+    const id = lastSave.get(queryClient)?.get(noteId);
+    return id !== undefined && isPending(id);
+  };
+  /** True while Confirm line for this note waits in its window or for its commit. */
+  const confirming = (noteId: Id): boolean => isPending(`confirm:${noteId}`);
+
+  return { logRequest, logApplied, skip, saveNote, confirmReason, answer, seeWins, noteSaving, confirming };
 }

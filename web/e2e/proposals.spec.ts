@@ -1,17 +1,17 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 
-// The phase-1 Today's own capacity box. The sidebar count now reads the plan (2 of 7), not the picks.
+// The phase-1 Today, now at /proposals: its own capacity box. The sidebar count reads the plan (2 of 7), not the picks.
 const picked = (page: Page) => page.getByLabel('Capacity').locator('div').filter({ hasText: /^Picked today/ });
 
-async function openToday(page: Page) {
-  await page.goto('/today');
+async function openProposals(page: Page) {
+  await page.goto('/proposals');
   await expect(page.getByRole('heading', { name: 'Tuesday, November 10' })).toBeVisible();
   await expect(picked(page)).toContainText('3 of 5');
 }
 
 test('j selects Pylon, x picks it, and Picked today reads 4 of 5 at once', async ({ page, consoleErrors }) => {
-  await openToday(page);
+  await openProposals(page);
   // Nothing is selected on load, so the first j lands on the first row (Pylon). A second j would land on
   // Resend, which is already picked, and x there would unpick it.
   await page.keyboard.press('j');
@@ -24,7 +24,7 @@ test('j selects Pylon, x picks it, and Picked today reads 4 of 5 at once', async
 });
 
 test('at capacity, hovering an unpicked checkbox shows the limit and x picks nothing', async ({ page, consoleErrors }) => {
-  await openToday(page);
+  await openProposals(page);
   await page.keyboard.press('j');
   await expect(page.getByRole('complementary', { name: 'Pylon preview' })).toBeVisible();
   await page.keyboard.press('x');

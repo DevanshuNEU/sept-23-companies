@@ -47,6 +47,8 @@ function Fact({ fact }: { fact: NoteFact }) {
 }
 
 const small = 'h-7 gap-1.5 px-2.5 text-xs has-[>svg]:px-2';
+/** A button that cannot run yet keeps its focus (`aria-disabled`, not `disabled`) and looks like it waits. */
+const waiting = 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
 /** A key hint on the filled button, as the mockup draws it: a translucent chip in the button's own text color. */
 const onFilled = 'bg-primary-foreground/15 text-primary-foreground';
 
@@ -55,8 +57,10 @@ const onFilled = 'bg-primary-foreground/15 text-primary-foreground';
  * the limit, the question about his line while Claude only proposed it, the text (or `editing` in its place),
  * his line, the facts with their links before any action, the checks, then Copy and Edit.
  *
- * Copy cannot run while a save is pending (`saving`: the checks are unknown until the save lands) or while a
- * check blocks the note, so a blocked note is never copied. The view's `c` key must follow the same rule.
+ * Copy cannot run while a save is pending (`saving`: the checks are unknown until the save lands), before any
+ * check ran, or while a check blocks the note, so a blocked note is never copied. Copy and Confirm line are then
+ * `aria-disabled`, never `disabled`, so a focused button keeps its focus. The view's `c` and `y` keys follow the
+ * same rule.
  */
 export function NoteBlock({
   note,
@@ -113,7 +117,16 @@ export function NoteBlock({
           <q className="text-sm leading-[22px] [quotes:none]">{note.reasonLine}</q>
           <span className="text-xs text-muted-foreground">Proposed by Claude from the facts below.</span>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" className={small} aria-keyshortcuts="y" disabled={saving} onClick={onConfirm}>
+            <Button
+              type="button"
+              size="sm"
+              className={cn(small, waiting)}
+              aria-keyshortcuts="y"
+              aria-disabled={saving}
+              onClick={() => {
+                if (!saving) onConfirm();
+              }}
+            >
               Confirm line
               <Kbd aria-hidden className={onFilled}>
                 Y
@@ -130,7 +143,8 @@ export function NoteBlock({
 
       {editing ?? <p className="max-w-[62ch] px-4 py-3.5 text-sm leading-[22px] whitespace-pre-wrap">{note.text}</p>}
 
-      {note.needsYourLine ? null : (
+      {/* While he edits, the line is a field in the editor, so it is not shown twice. */}
+      {note.needsYourLine || editing ? null : (
         <div className="grid gap-0.5 px-4 pb-3 text-[13px]">
           <span className="text-xs text-muted-foreground">Why them, in your words</span>
           <span>{note.reasonLine}</span>
@@ -177,11 +191,13 @@ export function NoteBlock({
           type="button"
           variant="outline"
           size="sm"
-          className={small}
+          className={cn(small, waiting)}
           aria-keyshortcuts="c"
           aria-describedby={canCopy ? undefined : summaryId}
-          disabled={!canCopy}
-          onClick={onCopy}
+          aria-disabled={!canCopy}
+          onClick={() => {
+            if (canCopy) onCopy();
+          }}
         >
           <Copy aria-hidden />
           Copy

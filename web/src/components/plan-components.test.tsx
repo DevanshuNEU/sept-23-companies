@@ -250,7 +250,7 @@ describe('NoteBlock', () => {
     const note = { ...noteOf(plan(), 'Pylon'), checks: [pass('a', 'Under the limit'), pass('b', 'No banned phrases')] };
     noteBlock(note);
     expect(screen.getByRole('status')).toHaveTextContent('2 checks passed.');
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Copy' })).toHaveAttribute('aria-disabled', 'false');
   });
 
   it('a blocking check shows in the check list and Copy cannot run', () => {
@@ -259,7 +259,7 @@ describe('NoteBlock', () => {
     expect(within(screen.getByRole('group', { name: 'Check results' })).getByText('Note is too long')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('1 check blocks this note.');
     const copy = screen.getByRole('button', { name: 'Copy' });
-    expect(copy).toBeDisabled();
+    expect(copy).toHaveAttribute('aria-disabled', 'true');
     expect(copy).toHaveAccessibleDescription('1 check blocks this note.');
     fireEvent.click(copy);
     expect(calls.copy).not.toHaveBeenCalled();
@@ -269,10 +269,20 @@ describe('NoteBlock', () => {
     const calls = noteBlock(noteOf(plan(), 'Inngest'), { saving: true });
     expect(screen.getByRole('status')).toHaveTextContent('Saving. The checks run again before you can copy.');
     expect(screen.queryByText(/checks? passed/)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Confirm line' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Copy' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: 'Confirm line' })).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm line' }));
     expect(calls.copy).not.toHaveBeenCalled();
+    expect(calls.confirm).not.toHaveBeenCalled();
+  });
+
+  it('a waiting Copy keeps its focus: it is aria-disabled, never disabled', () => {
+    noteBlock(noteOf(plan(), 'Inngest'), { saving: true });
+    const copy = screen.getByRole('button', { name: 'Copy' });
+    expect(copy).not.toHaveAttribute('disabled');
+    copy.focus();
+    expect(copy).toHaveFocus();
   });
 
   it('announces the count and the check result in one polite status region', () => {
@@ -283,18 +293,18 @@ describe('NoteBlock', () => {
     expect(region).toHaveAttribute('aria-live', 'polite');
     expect(region).toHaveAttribute('aria-atomic', 'true');
     expect(region).toHaveTextContent('168 of 200 characters. Saving. The checks run again before you can copy.');
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Copy' })).toHaveAttribute('aria-disabled', 'true');
     rerender(<NoteBlock {...props} note={{ ...note, chars: 150 }} saving={false} />);
     expect(screen.getByRole('status')).toBe(region);
     expect(region).toHaveTextContent('150 of 200 characters. 2 checks passed.');
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Copy' })).toHaveAttribute('aria-disabled', 'false');
   });
 
   it('with no checks yet Copy waits, because the checks are unknown', () => {
     const calls = noteBlock({ ...noteOf(plan(), 'Pylon'), checks: [] });
     expect(screen.getByRole('status')).toHaveTextContent('The checks have not run yet. Copy waits for them.');
     const copy = screen.getByRole('button', { name: 'Copy' });
-    expect(copy).toBeDisabled();
+    expect(copy).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(copy);
     expect(calls.copy).not.toHaveBeenCalled();
   });
@@ -313,6 +323,13 @@ describe('NoteBlock', () => {
     expect(screen.getByRole('textbox', { name: 'Note to Lena Ortiz' })).toBeInTheDocument();
     expect(screen.queryByText(note.text)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+  });
+
+  it('while he edits, his line is a field in the editor and is not shown twice', () => {
+    const note = noteOf(plan(), 'Pylon');
+    noteBlock(note, { editing: <textarea aria-label="Note to Lena Ortiz" defaultValue="draft" /> });
+    expect(screen.queryByText('Why them, in your words')).toBeNull();
+    expect(screen.queryByText(note.reasonLine)).toBeNull();
   });
 });
 

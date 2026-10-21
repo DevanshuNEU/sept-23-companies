@@ -7,13 +7,13 @@ import { renderWithApp } from '@/test/render';
 import TodayPage from './index';
 
 async function open(client = new FixtureClient()) {
-  const view = renderWithApp(<TodayPage />, { route: '/today', client });
+  const view = renderWithApp(<TodayPage />, { route: '/proposals', client });
   await screen.findByRole('checkbox', { name: 'Pick Pylon' });
   return view;
 }
 
 async function openScenario(scenario: Scenario) {
-  return renderWithApp(<TodayPage />, { route: '/today', client: new FixtureClient(buildFixture(scenario)) });
+  return renderWithApp(<TodayPage />, { route: '/proposals', client: new FixtureClient(buildFixture(scenario)) });
 }
 
 const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
@@ -346,7 +346,7 @@ describe('Today', () => {
     const [railway] = data.today.proposed.splice(at, 1);
     if (!railway) throw new Error('No Railway in the fixture');
     data.today.proposed.splice(1, 0, railway);
-    renderWithApp(<TodayPage />, { route: '/today', client: new FixtureClient(data) });
+    renderWithApp(<TodayPage />, { route: '/proposals', client: new FixtureClient(data) });
     await screen.findByRole('checkbox', { name: 'Pick Pylon' });
 
     select('Pylon');

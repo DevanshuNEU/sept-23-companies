@@ -489,7 +489,7 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
   const done = rows.filter((r) => r.state === 'done').length;
 
   const notReady: PlanView['notReady'] =
-    scenario === 'weekend' ? { reason: 'weekend', text: "No list on weekends. Monday's list will have 7 people." }
+    scenario === 'weekend' ? { reason: 'weekend', text: "No plan on weekends. Monday's plan has 7 people." }
     : scenario === 'job_failed' ? { reason: 'job_failed', text: "Today's list is not ready. It is built at 08:00 on weekdays." }
     : scenario === 'empty' ? { reason: 'not_built', text: "Today's list has not been built yet." }
     : null;

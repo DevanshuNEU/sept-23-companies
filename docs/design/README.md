@@ -17,6 +17,12 @@ keys and tabs. All data in them is fake; email addresses use `.example` domains.
 | No-go list | `no-go.html` | companies and people with reason, evidence and source |
 | Company page | `company.html` | Browserbase held by a reply, six tabs |
 | Done | `done.html` | Crusoe, Retell AI, Distyl AI, a referral, replies per month |
+| Today as a plan (#33) | `today-plan.html` | 7 people on a day rail, Lena Ortiz ready, find someone, an email row, the 7-day question, the watch list, a win arriving (section 16) |
+| Finish (#33) | `today-finish.html` | all 7 done, and one carried to tomorrow |
+| Progress (#33) | `progress.html` | today against the plan, week and month ledgers, a first-week state, monthly findings |
+| Quiet week (#33) | `progress-quiet.html` | no replies this week: work first, his own usual rate second |
+| Wins (#33) | `wins.html` | 6 kept wins with what he sent, a new one, and no wins yet |
+| Company page, Score (#33) | `company-score.html` | Pylon's 8 signals with points, share, reason and source |
 
 ## 1. What the UI is for
 
@@ -94,6 +100,7 @@ chord that waits 1 second for the second key.
 |---|---|
 | ⌘K or / | Search and commands |
 | G T, G O, G L, G N, G X, G D | Today, Outbox, LinkedIn, Needs you, No-go, Done |
+| G P, G W | Progress, Wins (#33, section 16.6) |
 | J / K or ↓ / ↑ | Next, previous row |
 | Enter | Open the row (company page, or the item's detail) |
 | Z | Undo the last action (while its toast is up, and for 8 seconds) |
@@ -102,6 +109,9 @@ chord that waits 1 second for the second key.
 | ⌘B | Toggle sidebar |
 
 ### Today
+
+With #33 these keys move to Proposals (`/proposals`, the list of all proposed companies). Today as a plan has its
+own keys in section 16.6.
 
 | Key | Action |
 |---|---|
@@ -194,6 +204,9 @@ Each view lists its purpose, layout, elements, states and actions. Shared states
 partial, conflict) are drawn in `index.html` and defined once in section 7.
 
 ### 5.1 Today
+
+With #33 this view moves to Proposals (`/proposals`), unchanged, linked quietly from under the plan as "All proposed
+companies". Today is now a plan of people: section 16.1 replaces this section for `/today`.
 
 **Purpose.** Pick today's companies from 15 to 20 proposals, and see the companies still being emailed.
 
@@ -822,3 +835,202 @@ small, local change.
 - **Gaps in design section 4** for #4: company needs `paused` (with reason and time) and `held` (derived from
   touches) beside its status; person needs `linkedin_reason`; touch needs `reply_kind` and the stored check
   results with spans; `daily_list` needs `group`, rank and capacity per day.
+
+## 16. Web experience (#33): Today as a plan, Finish, Progress, Wins, Score
+
+Status: mockups for Devanshu's approval. They gate #33 Tasks 7 to 16. Plan:
+`docs/superpowers/plans/2026-10-21-web-experience.md`. The bar for every view is the design spec's section 16 (how it
+should feel). Each mockup has a "Mockup state" switch in its top bar; it is not part of the product.
+
+What changes in the shell: the sidebar Today count reads people done of today's plan (`2 of 7`); a Results group
+holds Progress and Wins; Wins shows a green count with a dot while a win is unseen (`Wins, 1 new`); the footer's
+replies count is this month's replies, the same number Progress shows.
+
+### 16.1 Today as a plan (replaces 5.1)
+
+**Purpose.** Make today's effort clear and quick: about 7 people, one at a time, in order, ending in a finish line.
+
+**Layout.** Under the date and `7 people, 2 done` (with `Requests this month 52 of 150` on the right), two columns:
+the day rail (320 px) and the work panel (text at most 62 characters wide). Below the panel, quiet and collapsed: the
+7-day question and the watch list. A win banner, when there is one, sits above everything.
+
+**The day rail** is the one bold element in the app. It is a vertical line of nodes, one per person, ending in a
+finish node, because the content really is a sequence. Each option shows its number, the person (or "Find
+someone"), the company, and a status word:
+
+| Node | Word | Meaning |
+|---|---|---|
+| empty circle | To do | nothing logged yet |
+| ring | To do | the selected row |
+| blue dot (info pair) | Logged | one step logged, one to go |
+| filled check | Done | every step logged |
+| half-filled circle | Carried over | carried to tomorrow; grey, never red |
+| dashed circle with a flag | Done for today | the finish node, with `Tomorrow: 7 people`; filled when the day is done |
+
+The line between two done nodes is drawn darker, so the distance travelled shows. A logged row stays where it is,
+relabelled; the selection moves to the next row to do. Rows carried from an earlier day say "Carried over from
+Monday" in grey under the company. A row whose line Claude only proposed says "Your line to confirm".
+
+**The work panel**, for the selected row, top to bottom: the person's name (24/32), title, kind badge and where they
+were found (a link); the lane word on the right (`Role at your level`, `Intern or junior work`, `Reason to reach out`,
+`Open US role`); the one reason (16/24) with its sources as links; the role with Open role and Apply page; the note
+block; then the actions, with the one next step as the only filled button, and a footer with the step marks
+(Requested, Applied, each with the time once logged) and the quiet actions Carry to tomorrow and Not a fit.
+
+**The note block** is the only tinted surface on Today (paper: `subtle`). It holds the note text, its length
+against the limit from the API (`168 of 200 characters`), "Why her, in your words" (his reason line), "Facts used"
+with each fact's link before any action, the check result, and Copy and Edit. When Claude only proposed the line,
+the block asks first: "Is this why you are writing to him? Confirm it or write your own.", with Confirm line (Y)
+as the next step and Write my own (E).
+
+**Row kinds.**
+
+- Person with a role: Log request sent (R), then Log applied (P).
+- Person without a role: Log request sent only; P says "No role to apply for."
+- Find someone (no person yet): three numbered steps (search, hand it to Claude, back here), Open LinkedIn search (S)
+  as the next step, Copy handoff (C) with the handoff text shown. No note, no logging key.
+- Email row: the company's drafts in the Outbox and Review in Outbox as the next step. The sender and the reply reader
+  log email outcomes, so no logging key acts on it.
+- Done: the step marks with their times and "To change a log, open Resend's page."
+
+**Below the plan.** "Last week, what happened?" with a grey count asks one question at a time for the oldest touch
+with no outcome ("What happened with Kai Brennan? You sent a request on Nov 2 for Software Engineer, Platform at
+Railway."): Accepted (1), Replied (2, then the reply kind), Nothing yet (3, a normal answer that asks again in 7
+days). The watch list (grey count) shows careers pages that changed, new companies to reach and possible duplicates,
+each with its reason, date, one link and Dismiss.
+
+**States.** First load lands on the first person to do, ready (Lena Ortiz in the fixtures). The weekend, a plan not
+built yet and a failed list job use the shared empty and stale states (#33 Task 8 copy). The phase-1 picks live on at
+Proposals.
+
+**Actions.**
+
+| Action | Key | Toast | Undo |
+|---|---|---|---|
+| Log request sent | R | Logged: request sent to Lena Ortiz. | Z, 8 seconds |
+| Log applied | P | Logged: applied for Software Engineer I at Pylon. | Z |
+| Carry to tomorrow | X | Carried to tomorrow: Inngest. | Z |
+| Not a fit | N | the phase-1 remove dialog: Removed Pylon. Find it on the No-go list. | Z |
+| Confirm line | Y | Confirmed your line. | Z |
+| Copy the note, the handoff | C, ⇧C | Copied the note. / Copied 1 handoff for Claude. | |
+| Answer the question | 1, 2, 3 | Logged: Kai Brennan accepted. | Z (Said no and Asked to stop log at once) |
+| Mark wins seen | W | Marked seen. | Z |
+
+A key on a step already logged says "Already logged." and does nothing else. After the 8 seconds a log is corrected
+from the touch's history on the company page.
+
+### 16.2 Finish
+
+When no row is left to do, the work panel becomes the finish panel and focus moves to its heading, "Done for today"
+(announced once: "All 7 done for today."). The finish node on the rail fills. The panel, on paper: the heading with a
+filled flag and one calm line ("All 7 people on today's plan are done. Nothing else is asked of you today."); What you
+did (counts, then one line per row with its time); Carried to tomorrow (only when a row was carried); Tomorrow (the
+count, when the plan is built, up to 3 people, then "and 4 more"); This week so far (plain counts and a link to
+Progress). Nothing red, no counting of days in a row, no "come back".
+
+### 16.3 Progress and the quiet week
+
+**Progress** (`/progress`): Today against the plan (a one-row ledger: people done of the plan, requests,
+applications, accepted, replied); then the week or month (tabs, keys 1 and 2) as a ledger, not tiles and not a
+funnel graphic. Each stage shows its count, the rate beside its count and denominator (`9 of 31 (29%) of requests`),
+and one thin monochrome bar. Beside it, "Your work this week" lists the effort. Below, "What the data says" shows the
+month's one or two findings with their counts, a grey caution when a group is small, "Changed: ..." when the plan
+changed because of it, and earlier changes collapsed.
+
+The ledger bar (dataviz rules): one series, so no legend; the column head names it ("On one scale"). It grows from one
+baseline, square there and rounded 4 px at the data end, 8 px tall, `muted-foreground` on the card (5.3:1 light, 7.6:1
+dark). A non-zero count is never under 2 px; zero draws no bar and a grey 0. Every value is also a number in the same
+row, so the table is the text equivalent; each bar also has a text alternative and a hover tip. The scale is the
+period's largest count, but never less than the minimum sample (30 requests), so a first week of 9 looks small.
+
+Honest numbers: with fewer than 30 requests in the period, rates are dropped and counts stay ("2 of 9"), with "Only 9
+requests so far. Rates this small swing a lot, so none are shown." A stage measured against replies shows a percent
+only from 20 replies, the same rule findings use. With nothing to measure, the rate says "None yet". No NaN, no "1 in
+0".
+
+**The quiet week** (a week with requests and no replies) keeps the page and changes the order: "Your work this week"
+first (counts at 20/28), then one paragraph from his own data on paper ("About 1 in 16 requests gets a reply, and
+replies often take about 6 days." with "From your own 142 requests since Oct 12: 41 accepted, 9 replies."), then the
+week's counts, muted, with zeros in grey. With too few outcomes the paragraph says "Not enough outcomes yet to say what
+is usual. It takes about 30 requests." With no replies ever, it is left out. A month that is not quiet keeps the usual
+order.
+
+### 16.4 Wins
+
+**The win banner** sits at the top of Today the moment an accept or a reply is known (logged on the 7-day question,
+or found by the reply reader): a green check that draws once, the line ("Dana Whitfield accepted your request. 9:41"),
+"Open the win log", and Mark seen (W). It enters with one 240 ms fade, the only animated moment in the app, and stays
+across polls and reloads until he marks it seen. Reduced motion shows it complete, without the fade or the draw.
+
+**The win log** (`/wins`) keeps referrals, interviews, offers and replies he marked Interested, newest first, grouped by
+month. Each entry: the date, the line, the person and role, "What you sent" (collapsed, with the channel and date),
+and a green kind badge (Interview, Referral, Replied). A counts line sits on top ("Since Oct 12: 2 interviews, 1
+referral, 9 replies, 41 accepted requests."), with a toggle All (1) or Referrals and interviews (2). A win he has not
+seen carries "New" and a green edge for this visit; opening the page marks it seen. Empty: "No wins yet. Referrals,
+interviews and interested replies land here the moment you log them, with what you sent."
+
+### 16.5 Score tab
+
+The company page gains a seventh tab, Score (key 7, count = signals). Header: "Score 0.74, rank 12 of 1,010" and the
+lanes with the strongest named. A ledger, one row per signal in API order: label; a signed bar from the share (right
+when it adds, left when it costs, on a centre axis); points with value times weight under them; the share as a percent
+of all points moved; the reason sentence and its source as a link. A neutral signal reads "No data, scored neutral" in
+place of a bar. Footer: "Ranker v4. Weights live in the ranking config. A change makes a new version." and, when set,
+"Was 0.52 under v3."
+
+### 16.6 Keyboard map (#33)
+
+Single keys work only outside text fields, as in section 3.
+
+| View | Key | Action |
+|---|---|---|
+| Today | J / K, ↓ / ↑ | Next, previous person on the rail |
+| Today | Enter | Open the company |
+| Today | L | Open profile |
+| Today | O | Open role |
+| Today | A | Open the apply page |
+| Today | S | Open LinkedIn search (find someone rows) |
+| Today | C | Copy the note, or the handoff on a find-someone row |
+| Today | E | Edit the note |
+| Today | Y | Confirm your line |
+| Today | R | Log request sent |
+| Today | P | Log applied |
+| Today | X | Carry to tomorrow |
+| Today | N | Not a fit (dialog) |
+| Today | 1 / 2 / 3 | Answer the question: Accepted, Replied, Nothing yet |
+| Today | W | Mark wins seen |
+| Today | ⇧C | Copy every find-someone handoff |
+| Today | Z | Undo the last log (8 seconds) |
+| Progress | 1 / 2 | Week, Month |
+| Wins | 1 / 2 | All, Referrals and interviews |
+| Company page | 7 | Score |
+| Everywhere | G P, G W | Progress, Wins |
+
+### 16.7 Copy rules for these views
+
+- One verb per action across button, key hint and toast: Log request sent, "Logged: request sent to ...". Carry to
+  tomorrow, "Carried to tomorrow: ...". Confirm line, "Confirmed your line.". Mark seen, "Marked seen.".
+- No button says Send. The request is sent by him on LinkedIn; the app only logs it.
+- Calm: no guilt copy and no counting of days in a row (the words the plan's Global Constraints list never appear, and
+  `web/src/copy-rules.test.ts` checks them). Unfinished rows say "Carried over" in grey. "Nothing yet" is a normal
+  answer.
+- Every number sits beside what it is out of: `2 of 7`, `9 of 31 (29%)`, `52 of 150`. A rate never shows without its
+  count, and never under the minimum sample.
+- The win line, the reason, the finding text and the base-rate inputs come from the API; the UI words them only as
+  given.
+- Reasons name their source: "From Pylon blog, Oct 14". A fact in a note always shows its link.
+
+### 16.8 Visual additions and contrast
+
+No new token and no new hue. `mockup.css` gains four families only: the day rail (`.rail-*`, `.work-*`,
+`.plan-steps`), the note block (`.note-*`), the ledger and its bars (`.ledger`, `.lbar`, `.sbar`, `.ledger-effort`),
+and the win banner (`.win-*`, with the `win-in` and `win-draw` keyframes the global reduced-motion rule turns off).
+`mockup.js` gains the Progress and Wins chords, three icons (chart, award, flag), a `data-key` hook so a visible
+control answers its key, and `window.mockToast` for the pages' scripts.
+
+Contrast, computed (WCAG 2.1) for every text and background pair on the six pages. Light: body 19.9:1, on the note
+paper 19.1:1, on the active rail row 18.1:1, on the win banner 19.0:1; secondary text 5.3:1 on white, 5.1:1 on paper,
+4.8:1 on the active row, 5.0:1 on the win banner; Logged 6.7:1 (6.1:1 on the active row); badges ok 4.8, warn 4.8,
+info 6.2, idle 7.0; primary button 17.0:1. Dark: every text pair 5.8:1 or higher. Graphics (3:1 needed): bars and
+empty nodes 5.3:1 light and 7.6:1 dark on the card, the Logged dot 3.4:1 light and 4.8:1 dark, the win check 4.8:1 light. The lowest text
+pair is the existing warn badge at 4.76:1.

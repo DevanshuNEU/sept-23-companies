@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pylon, score | Outreach mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">O</span>Outreach</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today-plan.html" aria-label="Today, 2 of 7 done"><svg class="i"><use href="#today"/></svg>Today<span class="count" aria-hidden="true">2 of 7</span></a>
+      <a class="sb-item" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">7</span></a>
+      <a class="sb-item" href="linkedin.html"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Results">
+      <p class="sb-label">Results</p>
+      <a class="sb-item" href="progress.html"><svg class="i"><use href="#chart"/></svg>Progress</a>
+      <a class="sb-item" href="wins.html"><svg class="i"><use href="#award"/></svg>Wins</a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company-score.html" aria-current="page"><svg class="i"><use href="#building"/></svg>Pylon</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Resend</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Inngest</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">20 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>4 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><a href="today-plan.html">Companies</a><svg class="i"><use href="#chevron"/></svg><b>Pylon</b></div>
+      <div class="right">
+        <span class="t-xs muted">Company 512</span>
+        <span class="vsep"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="page">
+        <div class="co-head">
+          <div>
+            <div class="row"><h1 class="t-2xl">Pylon</h1><span class="badge s-info"><span class="dot"></span>On today's plan</span></div>
+            <p class="lede t-sm muted" style="margin-top:4px">pylon.example, San Francisco. Today's plan has Lena Ortiz for the Software Engineer I role.</p>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-outline" type="button"><svg class="i"><use href="#pause"/></svg>Pause<span class="kbd">P</span></button>
+            <button class="btn btn-outline" type="button">Close with a reason<span class="kbd">C</span></button>
+            <button class="btn btn-ghost btn-icon" type="button" aria-label="More actions"><svg class="i"><use href="#more"/></svg></button>
+          </div>
+        </div>
+
+        <div class="co-facts">
+          <div><span class="k">Size</span><span class="v"><span class="badge s-warn" data-tip="No headcount source yet. A review item is open in Needs you.">Unknown</span></span><span class="s">No source yet</span></div>
+          <div><span class="k">Stage</span><span class="v">Series B</span><span class="s">Press release, Jun 2025</span></div>
+          <div><span class="k">Sponsorship</span><span class="v"><span class="badge s-ok"><span class="dot"></span>Says it sponsors</span></span><span class="s">Software Engineer I posting, Nov 3</span></div>
+          <div><span class="k">Email domain</span><span class="v">pylon.example</span><span class="s">Mail server found</span></div>
+          <div><span class="k">Job board</span><span class="v"><span class="dot-only ok"></span>Ashby, ok</span><span class="s">Read Mon Nov 9, 08:04</span></div>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="Company sections" style="margin-bottom:16px">
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-over" data-key="1">Overview</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-roles" data-key="2">Roles<span class="count">3</span></button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-people" data-key="3">People<span class="count">4</span></button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-mail" data-key="4">Emails<span class="count">0</span></button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-ev" data-key="5">Evidence<span class="count">6</span></button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-hist" data-key="6">History<span class="count">18</span></button>
+          <button class="tab" role="tab" aria-selected="true" aria-controls="c-score" data-key="7" aria-keyshortcuts="7">Score<span class="count">8</span></button>
+        </div>
+
+        <div id="c-over" role="tabpanel" hidden><p class="mock-note">The first six tabs are drawn in company.html. This page adds the seventh.</p></div>
+        <div id="c-roles" role="tabpanel" hidden><p class="mock-note">Drawn in company.html.</p></div>
+        <div id="c-people" role="tabpanel" hidden><p class="mock-note">Drawn in company.html.</p></div>
+        <div id="c-mail" role="tabpanel" hidden><p class="mock-note">Drawn in company.html.</p></div>
+        <div id="c-ev" role="tabpanel" hidden><p class="mock-note">Drawn in company.html.</p></div>
+        <div id="c-hist" role="tabpanel" hidden><p class="mock-note">Drawn in company.html.</p></div>
+
+        <!-- Score: every signal, its points, its share and why -->
+        <div id="c-score" role="tabpanel" style="max-width:1180px">
+          <div class="row-wrap" style="gap:4px 16px;margin-bottom:12px;align-items:baseline">
+            <h2 class="t-lg num">Score 0.74, rank 12 of 1,010</h2>
+            <span class="t-sm muted">Lanes: <span style="color:var(--foreground)">Role at your level</span> (strongest), Reason to reach out</span>
+          </div>
+          <div class="table-wrap">
+            <table class="ledger">
+              <thead><tr><th>Signal</th><th>Share of the score</th><th class="num">Points</th><th class="num">Share</th><th>Why, and where it comes from</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td class="stage">Role at your level</td>
+                  <td><span class="sbar" role="img" aria-label="Adds 27 percent of the score"><i class="pos" style="width:99px"></i></span></td>
+                  <td class="num">+0.22<div class="t-xs muted">1.00 × 0.22</div></td>
+                  <td class="num">27%</td>
+                  <td class="why">Software Engineer I, posted Nov 3, asks 0 to 2 years. <a class="link" href="https://pylon.example/careers/software-engineer-i" target="_blank" rel="noopener noreferrer">Pylon careers page</a></td>
+                </tr>
+                <tr>
+                  <td class="stage">Sponsorship</td>
+                  <td><span class="sbar" role="img" aria-label="Adds 17 percent of the score"><i class="pos" style="width:62px"></i></span></td>
+                  <td class="num">+0.14<div class="t-xs muted">1.00 × 0.14</div></td>
+                  <td class="num">17%</td>
+                  <td class="why">The posting says Pylon sponsors visas for this role. <a class="link" href="https://pylon.example/careers/software-engineer-i" target="_blank" rel="noopener noreferrer">Posting, Nov 3</a></td>
+                </tr>
+                <tr>
+                  <td class="stage">Engineers you can reach</td>
+                  <td><span class="sbar" role="img" aria-label="Adds 15 percent of the score"><i class="pos" style="width:55px"></i></span></td>
+                  <td class="num">+0.12<div class="t-xs muted">0.80 × 0.15</div></td>
+                  <td class="num">15%</td>
+                  <td class="why">4 engineers on the team page, 3 of them on LinkedIn. <a class="link" href="https://pylon.example/team" target="_blank" rel="noopener noreferrer">Pylon team page</a></td>
+                </tr>
+                <tr>
+                  <td class="stage">Hiring momentum</td>
+                  <td><span class="sbar" role="img" aria-label="Adds 13 percent of the score"><i class="pos" style="width:49px"></i></span></td>
+                  <td class="num">+0.11<div class="t-xs muted">0.55 × 0.20</div></td>
+                  <td class="num">13%</td>
+                  <td class="why">3 engineering roles opened in the last 30 days. <a class="link" href="https://jobs.ashby.example/pylon" target="_blank" rel="noopener noreferrer">Ashby board, read Nov 9</a></td>
+                </tr>
+                <tr>
+                  <td class="stage">Recent public work</td>
+                  <td><span class="sbar" role="img" aria-label="Adds 13 percent of the score"><i class="pos" style="width:49px"></i></span></td>
+                  <td class="num">+0.11<div class="t-xs muted">0.55 × 0.20</div></td>
+                  <td class="num">13%</td>
+                  <td class="why">Shipped usage billing on Oct 14, a fact a note can name. <a class="link" href="https://pylon.example/blog/usage-billing" target="_blank" rel="noopener noreferrer">Pylon blog</a></td>
+                </tr>
+                <tr>
+                  <td class="stage">Role age</td>
+                  <td><span class="sbar" role="img" aria-label="Adds 10 percent of the score"><i class="pos" style="width:36px"></i></span></td>
+                  <td class="num">+0.08<div class="t-xs muted">0.80 × 0.10</div></td>
+                  <td class="num">10%</td>
+                  <td class="why">Posted 7 days ago. Newer roles score higher. <a class="link" href="https://pylon.example/careers/software-engineer-i" target="_blank" rel="noopener noreferrer">Pylon careers page</a></td>
+                </tr>
+                <tr>
+                  <td class="stage">Size</td>
+                  <td><span class="sbar" role="img" aria-label="No data, scored neutral"><span class="neutral">No data, scored neutral</span></span></td>
+                  <td class="num zero">0.00<div class="t-xs muted">0 × 0.10</div></td>
+                  <td class="num zero">0%</td>
+                  <td class="why">No headcount source yet, so size neither helps nor hurts. <a class="link" href="needs-you.html">Open in Needs you</a></td>
+                </tr>
+                <tr>
+                  <td class="stage">Recently reached</td>
+                  <td><span class="sbar" role="img" aria-label="Lowers the score by 5 percent of the total"><i class="neg" style="width:18px"></i></span></td>
+                  <td class="num">-0.04<div class="t-xs muted">1.00 × -0.04</div></td>
+                  <td class="num">-5%</td>
+                  <td class="why">A cost: you reached someone at Pylon on Oct 20 and have no reply yet. <a class="link" href="company.html">History, Oct 20</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="stack-sm" style="margin-top:10px">
+            <p class="ledger-scale">Bars grow right when a signal adds to the score and left when it costs. A share is a signal's part of all the points moved, added or taken away, so the shares make 100% when the cost counts as 5.</p>
+            <p class="t-sm muted">Ranker v4. Weights live in the ranking config. A change makes a new version. Was 0.52 under v3. Scored today at 08:00.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<template id="page-keys">
+  <h4>Company page</h4>
+  <div><span>Overview to History</span><span class="kbd-row"><span class="kbd">1</span><span class="kbd">6</span></span></div>
+  <div><span>Score</span><span class="kbd-row"><span class="kbd">7</span></span></div>
+  <div><span>Close with a reason</span><span class="kbd-row"><span class="kbd">C</span></span></div>
+</template>
+<script src="mockup.js"></script>
+<script>
+document.addEventListener("click", function (e) {
+  var a = e.target.closest('a[target="_blank"]'); if (a) { e.preventDefault(); window.mockToast("Opens in a new tab: " + a.hostname + "."); }
+});
+</script>
+</body>
+</html>

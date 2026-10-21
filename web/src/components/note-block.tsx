@@ -1,0 +1,189 @@
+import { useId, type ReactNode } from 'react';
+import { Ban, Check, Clock, Copy, ExternalLink, Pencil, TriangleAlert } from 'lucide-react';
+import type { CheckFix, NoteDraft, NoteFact } from '@/api';
+import { CheckList } from '@/components/check-list';
+import { SourceAnchor } from '@/components/source-links';
+import { Button } from '@/components/ui/button';
+import { Kbd } from '@/components/ui/kbd';
+import { cn } from '@/lib/utils';
+
+type Tone = 'idle' | 'warn' | 'bad';
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** The length against the API's limit, always in words: "168 of 200 characters", then how many are left past 90%. */
+function charCount(chars: number, max: number): { tone: Tone; text: string } {
+  const of = `${chars} of ${max} characters`;
+  if (chars > max) return { tone: 'bad', text: `${of}. Over the limit by ${plural(chars - max, 'character', 'characters')}.` };
+  if (chars > 0.9 * max) return { tone: 'warn', text: `${of}, ${max - chars} left` };
+  return { tone: 'idle', text: of };
+}
+
+/** One line for the foot: what the checks say, with an icon beside the words. */
+function checkSummary(note: NoteDraft, saving: boolean): { tone: 'ok' | Tone; text: string } {
+  if (saving) return { tone: 'idle', text: 'Saving. The checks run again before you can copy.' };
+  const blocks = note.checks.filter((c) => c.severity === 'block').length;
+  const warns = note.checks.filter((c) => c.severity === 'warn').length;
+  if (blocks > 0) return { tone: 'bad', text: `${plural(blocks, 'check blocks', 'checks block')} this note` };
+  if (warns > 0) return { tone: 'warn', text: plural(warns, 'warning', 'warnings') };
+  if (note.checks.length === 0) return { tone: 'idle', text: 'No checks yet' };
+  return { tone: 'ok', text: `${plural(note.checks.length, 'check', 'checks')} passed` };
+}
+
+const SUMMARY_ICON = { ok: Check, warn: TriangleAlert, bad: Ban, idle: Clock } as const;
+const TONE_TEXT = { ok: 'text-ok', warn: 'text-warn', bad: 'text-bad', idle: 'text-muted-foreground' } as const;
+
+const sentence = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
+
+function Fact({ fact }: { fact: NoteFact }) {
+  return (
+    <li className="grid grid-cols-[14px_minmax(0,1fr)] items-start gap-2">
+      <ExternalLink aria-hidden className="mt-0.5 size-3.5 text-muted-foreground" />
+      <span>
+        {sentence(fact.text)} <SourceAnchor link={fact.source} className="text-xs text-muted-foreground" />
+      </span>
+    </li>
+  );
+}
+
+const small = 'h-7 gap-1.5 px-2.5 text-xs has-[>svg]:px-2';
+/** A key hint on the filled button, as the mockup draws it: a translucent chip in the button's own text color. */
+const onFilled = 'bg-primary-foreground/15 text-primary-foreground';
+
+/**
+ * The note to send (design 16.1, `.note-*`), on paper, the only tinted surface on Today: its length against
+ * the limit, the question about his line while Claude only proposed it, the text (or `editing` in its place),
+ * his line, the facts with their links before any action, the checks, then Copy and Edit.
+ *
+ * Copy cannot run while a save is pending (`saving`: the checks are unknown until the save lands) or while a
+ * check blocks the note, so a blocked note is never copied. The view's `c` key must follow the same rule.
+ */
+export function NoteBlock({
+  note,
+  onCopy,
+  onEdit,
+  onConfirm,
+  editing,
+  saving = false,
+  onFix,
+}: {
+  note: NoteDraft;
+  onCopy: () => void;
+  onEdit: () => void;
+  onConfirm: () => void;
+  /** The editor, shown in place of the note text while he edits. */
+  editing?: ReactNode;
+  /** A save of this note is waiting to land: its checks are unknown. */
+  saving?: boolean;
+  /** Fix buttons on the checks; without it a check shows no fix. */
+  onFix?: (fix: CheckFix) => void;
+}) {
+  const ids = useId();
+  const summaryId = `${ids}-checks`;
+  const count = charCount(note.chars, note.maxChars);
+  const summary = checkSummary(note, saving);
+  const SummaryIcon = SUMMARY_ICON[summary.tone];
+  const flagged = !saving && note.checks.some((c) => c.severity !== 'pass');
+  const blocked = note.checks.some((c) => c.severity === 'block');
+  const canCopy = !saving && !blocked;
+  const used = note.facts.filter((f) => f.inNote);
+  const CountIcon = count.tone === 'bad' ? Ban : count.tone === 'warn' ? TriangleAlert : null;
+
+  return (
+    <section aria-labelledby={`${ids}-head`} className="rounded-lg border bg-subtle">
+      <div className="flex items-center gap-2 border-b px-4 py-2.5 text-[13px]">
+        <h3 id={`${ids}-head`} className="font-medium">
+          Note to send
+        </h3>
+        <span
+          data-tone={count.tone}
+          className={cn('ml-auto inline-flex items-center gap-1 text-xs tabular-nums', TONE_TEXT[count.tone])}
+        >
+          {CountIcon ? <CountIcon aria-hidden className="size-3.5" /> : null}
+          {count.text}
+        </span>
+      </div>
+
+      {note.needsYourLine ? (
+        <div className="mx-4 my-3 grid gap-2 rounded-md border bg-background px-3.5 py-3 text-[13px]">
+          <b className="font-medium">Is this why you are writing to them? Confirm it or write your own.</b>
+          <q className="text-sm leading-[22px] [quotes:none]">{note.reasonLine}</q>
+          <span className="text-xs text-muted-foreground">Proposed by Claude from the facts below.</span>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" className={small} aria-keyshortcuts="y" disabled={saving} onClick={onConfirm}>
+              Confirm line
+              <Kbd aria-hidden className={onFilled}>
+                Y
+              </Kbd>
+            </Button>
+            <Button type="button" variant="outline" size="sm" className={small} aria-keyshortcuts="e" onClick={onEdit}>
+              <Pencil aria-hidden />
+              Write my own
+              <Kbd aria-hidden>E</Kbd>
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {editing ?? <p className="max-w-[62ch] px-4 py-3.5 text-sm leading-[22px] whitespace-pre-wrap">{note.text}</p>}
+
+      {note.needsYourLine ? null : (
+        <div className="grid gap-0.5 px-4 pb-3 text-[13px]">
+          <span className="text-xs text-muted-foreground">Why them, in your words</span>
+          <span>{note.reasonLine}</span>
+        </div>
+      )}
+
+      <div className="grid gap-1.5 border-t px-4 py-3 text-[13px]">
+        <span className="text-xs text-muted-foreground">Facts used</span>
+        {used.length > 0 ? (
+          <ul className="grid gap-2">
+            {used.map((f, i) => (
+              <Fact key={`${i}:${f.text}`} fact={f} />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground">None. The note names no fact from a public page.</p>
+        )}
+      </div>
+
+      {flagged ? (
+        <div className="border-t px-4 py-3">
+          <CheckList
+            checks={onFix ? note.checks : note.checks.map((c) => ({ ...c, fix: null }))}
+            onFix={(fix) => onFix?.(fix)}
+          />
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-1.5 border-t px-4 py-2.5 text-xs text-muted-foreground">
+        <span id={summaryId} className={cn('inline-flex items-center gap-1.5', summary.tone !== 'ok' && TONE_TEXT[summary.tone])}>
+          <SummaryIcon aria-hidden className={cn('size-3.5', TONE_TEXT[summary.tone])} />
+          {summary.text}
+        </span>
+        <span className="flex-1" />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className={small}
+          aria-keyshortcuts="c"
+          aria-describedby={canCopy ? undefined : summaryId}
+          disabled={!canCopy}
+          onClick={onCopy}
+        >
+          <Copy aria-hidden />
+          Copy
+          <Kbd aria-hidden>C</Kbd>
+        </Button>
+        {note.needsYourLine || editing ? null : (
+          <Button type="button" variant="ghost" size="sm" className={small} aria-keyshortcuts="e" onClick={onEdit}>
+            <Pencil aria-hidden />
+            Edit
+            <Kbd aria-hidden>E</Kbd>
+          </Button>
+        )}
+      </div>
+    </section>
+  );
+}

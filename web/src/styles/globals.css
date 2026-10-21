@@ -182,6 +182,27 @@
   }
 }
 
+/* The one animated moment (#33, design 16.4): a win. The banner fades in once and its check draws once,
+   240 ms each. The reduced-motion rule below turns both off, and both render complete without them. */
+@keyframes win-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes win-draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+}
+.win-in {
+  animation: win-in 240ms ease-out both;
+}
+.win-draw {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 0;
+  animation: win-draw 240ms ease-out 120ms both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

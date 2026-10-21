@@ -4,7 +4,7 @@ import unittest
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators, ids_fingerprint, valid_token
 from outreach.ranking.types import CompanyFacts, Signal, SignalValue
 from outreach.reader.types import (ALLOWED, FIELDS, INT_FIELDS, READING_SCHEMA_VERSION, TEXT_FIELDS, FieldReading,
-                                   PostingReading, ReadRequest, quote_in_body)
+                                   PostingReading, ReadRequest, check_value, quote_in_body)
 from outreach.rules.rebuild import EvidenceDraft
 from outreach.sources.base import Candidate, EvidenceDraft as ReExported, Source
 
@@ -135,10 +135,6 @@ class TokenTests(unittest.TestCase):
         self.assertFalse(valid_token("oracle", "evil.example.com/CX_1"))
         self.assertFalse(valid_token("icims", "careers-acme.example.com"))
         self.assertFalse(valid_token("icims", "Careers.icims.com"))
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 def reading_json(**over):
@@ -397,6 +393,62 @@ class QuoteInBodyTests(unittest.TestCase):
         self.assertFalse(quote_in_body("must be authorised to work in the us.", body))
 
 
+class QuoteBoundaryTests(unittest.TestCase):
+    def test_quote_must_start_and_end_on_a_word_edge(self):
+        self.assertFalse(quote_in_body("able to sponsor visas", "We are unable to sponsor visas."))
+        self.assertFalse(quote_in_body("not sponsor visa", "We do not sponsor visas."))
+        self.assertFalse(quote_in_body("ot sponsor visas", "We do not sponsor visas."))
+        self.assertTrue(quote_in_body("unable to sponsor visas", "We are unable to sponsor visas."))
+
+    def test_a_hyphen_or_apostrophe_between_letters_joins_words(self):
+        self.assertFalse(quote_in_body("us citizens welcome", "Non-US citizens welcome to apply."))
+        self.assertTrue(quote_in_body("non-us citizens welcome", "Non-US citizens welcome to apply."))
+        self.assertTrue(quote_in_body("us citizens welcome", "Open to all. US citizens welcome to apply."))
+        self.assertFalse(quote_in_body("we offer full time", "We offer full time-off and more"))
+        self.assertFalse(quote_in_body("they don at all", "they don\u2019t at all"))
+
+    def test_full_word_quotes_and_line_breaks_still_pass(self):
+        self.assertTrue(quote_in_body("we do not sponsor visas", "We do not sponsor visas."))
+        self.assertTrue(quote_in_body("we do not sponsor visas", "Note: we do not sponsor visas, sorry."))
+        self.assertTrue(quote_in_body("we do  not\nsponsor visas", "Hi\nWe do not\n\nsponsor visas\n"))
+        self.assertTrue(quote_in_body("not sponsor visas.", "We do not sponsor visas."))
+
+    def test_a_later_whole_word_occurrence_is_found_after_an_earlier_partial_one(self):
+        self.assertTrue(quote_in_body("able to sponsor visas", "We are unable to sponsor visas. Some are able to sponsor visas."))
+
+    def test_regex_characters_in_a_quote_are_literal(self):
+        self.assertTrue(quote_in_body("pay is $40+ per hour (usd)", "Pay is $40+ per hour (USD) plus equity"))
+        self.assertFalse(quote_in_body("pay is .* per hour", "Pay is $40 per hour"))
+
+    def test_the_word_gate_counts_only_tokens_with_a_word_character(self):
+        self.assertFalse(quote_in_body(". . .", "Wait . . . what"))
+        self.assertFalse(quote_in_body("- - -", "Rule - - - end"))
+        self.assertFalse(quote_in_body("a - -", "a - - b"))
+        self.assertFalse(quote_in_body("must --- do", "we must --- do it"))
+        self.assertTrue(quote_in_body("to be a", "Ready to be a part of it"))
+        self.assertTrue(quote_in_body("to - be a", "Ready to - be a part"))
+
+
+class CheckValueTests(unittest.TestCase):
+    def test_check_value_validates_all_eleven_fields(self):
+        check_value("level", "intern")
+        check_value("years_low", None)
+        check_value("years_high", 30)
+        check_value("pay", "")
+        check_value("location", "Boston")
+        for name, bad in (("level", "wizard"), ("years_low", 31), ("years_high", True), ("pay", None),
+                          ("remote", "maybe")):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    check_value(name, bad)
+        with self.assertRaises(ValueError):
+            check_value("salary", "x")
+
+    def test_every_field_name_is_known_to_check_value(self):
+        for name in FIELDS:
+            check_value(name, "" if name in TEXT_FIELDS else None if name in INT_FIELDS else "unknown")
+
+
 class ReadRequestTests(unittest.TestCase):
     def test_read_request_holds_what_the_reader_needs(self):
         r = ReadRequest(posting_id=1, body_sha256="ab" * 32, reader_version="rv-1", title="SWE", body="text")
@@ -449,3 +501,7 @@ class RankingContractTests(unittest.TestCase):
 
         s: Signal = Funded()
         self.assertEqual(s.score(facts(funded_months_ago=3)).value, 0.5)
+
+
+if __name__ == "__main__":
+    unittest.main()

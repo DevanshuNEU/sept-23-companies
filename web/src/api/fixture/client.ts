@@ -6,7 +6,7 @@ import type {
   FindingsView, FunnelKey, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, WatchView, Win, WinKind, WinsView,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, STEP_LINE, type FixtureDb } from './data';
-import { rescanNote } from './plan-data';
+import { rescanNote, winsOnDay } from './plan-data';
 
 const STOP_WORDS = new Set(['of', 'the', 'and', 'a', 'an', 'at', 'for', 'in', 'to']);
 
@@ -215,8 +215,7 @@ export class FixtureClient implements OutreachClient {
     plan.week = { requests: week('requests'), accepts: week('accepts'), replies: week('replies') };
 
     const logged = (kind: StepKind) => plan.rows.reduce((n, r) => n + r.steps.filter((st) => st.kind === kind && st.at !== null).length, 0);
-    const unseen = (kind: WinKind) => wins.wins.filter((w) => w.unseen && w.kind === kind).length;
-    progress.today = { planned: plan.rows.length, done: plan.done, requests: logged('request'), applications: logged('apply'), accepted: unseen('accepted'), replied: unseen('replied') };
+    progress.today = { planned: plan.rows.length, done: plan.done, requests: logged('request'), applications: logged('apply'), accepted: winsOnDay(wins.wins, plan.date, 'accepted'), replied: winsOnDay(wins.wins, plan.date, 'replied') };
 
     wins.unseen = wins.wins.filter((w) => w.unseen).length;
     const tally = (k: WinKind) => wins.wins.filter((w) => w.kind === k).length;

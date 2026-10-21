@@ -2,6 +2,7 @@ import { safeHref } from '@/lib/safe-href';
 import type { PlanView, ProgressView, ScoreView } from '../types';
 import { FixtureClient } from './client';
 import { buildFixture, SCENARIOS, type Scenario } from './data';
+import { winsOnDay } from './plan-data';
 
 const client = (scenario: Scenario = 'default') => new FixtureClient(buildFixture(scenario));
 const row = (plan: PlanView, n: number) => {
@@ -218,6 +219,17 @@ describe('plan scenarios', () => {
     expect(unseen[0]).toMatchObject({ kind: 'accepted', person: { name: 'Dana Whitfield' }, company: { name: 'Resend' } });
     expect(w.counts.accepted).toBe(1);
     expect((await client('win').progress()).today.accepted).toBe(1);
+  });
+
+  it("today's win counts do not depend on whether the wins are seen", () => {
+    const db = buildFixture('win');
+    expect(db.progress.today.accepted).toBe(1);
+    const seen = db.wins.wins.map((w) => ({ ...w, unseen: false }));
+    expect(winsOnDay(seen, db.plan.date, 'accepted')).toBe(db.progress.today.accepted);
+    expect(winsOnDay(seen, db.plan.date, 'replied')).toBe(db.progress.today.replied);
+    // Kept wins from earlier days are not today's.
+    expect(db.wins.wins.filter((w) => !w.unseen).length).toBe(5);
+    expect(db.progress.today.replied).toBe(0);
   });
 
   it('plan_done: every row done, with Wen Zhao on row 5', async () => {

@@ -1109,7 +1109,18 @@ describe('plan writes: skip, notes, wins, watch', () => {
     expect(after.unseen).toBe(0);
     expect(after.wins.every((w) => !w.unseen)).toBe(true);
     expect((await c.shell()).winsUnseen).toBe(0);
-    expect((await c.progress()).today.accepted).toBe(0);
+    expect((await c.progress()).today.accepted).toBe(1);
+  });
+
+  it('the day keeps its wins after they are seen, and a win from an earlier day is not today\'s', async () => {
+    const c = client();
+    const t = (await c.outcomePrompt()).touches[0];
+    if (!t) throw new Error('No prompt touch');
+    await c.logOutcome(t.touchId, 'replied', t.revision, opt(), 'interested');
+    expect((await c.progress()).today).toMatchObject({ accepted: 0, replied: 1 });
+    const all = (await c.wins()).wins;
+    await c.markWinsSeen(all.map((w) => w.winId), opt());
+    expect((await c.progress()).today).toMatchObject({ accepted: 0, replied: 1 });
   });
 
   it('dismissWatch removes the item', async () => {

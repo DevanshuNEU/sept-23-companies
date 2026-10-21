@@ -42,6 +42,12 @@ const RANKER = '2026.11.02';
 const link = (label: string, host: string, path: string): SourceLink => ({ label, url: `https://${host}.example/${path}` });
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
+const ET_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+/** The calendar day in Boston that an instant falls on. */
+export const etDate = (at: IsoTime): IsoDate => ET_DAY.format(new Date(at));
+/** Wins of one kind that arrived on `date`. Seen or not: marking a win seen never takes it out of today's count. */
+export const winsOnDay = (wins: Win[], date: IsoDate, kind: Win['kind']): number => wins.filter((w) => w.kind === kind && etDate(w.at) === date).length;
+
 /** Whole calendar days from `from` to `to`, both "YYYY-MM-DD". */
 function daysBetween(from: IsoDate, to: IsoDate): number {
   const ms = (d: IsoDate) => { const [y, m, day] = d.split('-').map(Number); return Date.UTC(y ?? 0, (m ?? 1) - 1, day ?? 1); };
@@ -504,7 +510,7 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
   const wins = buildWins(c, scenario, rows);
   const progress: ProgressView = {
     asOf: c.asOf,
-    today: { planned: rows.length, done, requests: built.requests, applications: built.applications, accepted: wins.wins.filter((w) => w.unseen && w.kind === 'accepted').length, replied: 0 },
+    today: { planned: rows.length, done, requests: built.requests, applications: built.applications, accepted: winsOnDay(wins.wins, c.date, 'accepted'), replied: winsOnDay(wins.wins, c.date, 'replied') },
     week: period('Last 7 days', weekFrom, to, week, n.weekEffort, { enough: week[0] >= MIN_REQUESTS, quiet: n.quiet }),
     month: period('This month', monthFrom, to, month, n.monthEffort, { enough: month[0] >= MIN_REQUESTS, quiet: false }),
     base: {

@@ -25,6 +25,9 @@ async function expectCleanPage(page: Page, consoleErrors: string[], foreign: str
   expect(foreign).toEqual([]);
 }
 
+// The phase-1 Today's own capacity box; the sidebar count reads the plan (2 of 7) and does not move on a pick.
+const picked = (page: Page) => page.getByLabel('Capacity').locator('div').filter({ hasText: /^Picked today/ });
+
 const outboxLink = (page: Page) => page.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: /^Outbox/ });
 
 test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ page, consoleErrors }) => {
@@ -36,7 +39,8 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await page.goto('/today');
   await expect(page.getByRole('heading', { level: 1, name: 'Today' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Tuesday, November 10' })).toBeVisible();
-  await expect(page.locator('[data-slot="sidebar"]').getByRole('link', { name: /^Today/ })).toContainText('3 of 5');
+  await expect(page.locator('[data-slot="sidebar"]').getByRole('link', { name: /^Today/ })).toContainText('2 of 7');
+  await expect(picked(page)).toContainText('3 of 5');
   await expectCleanPage(page, consoleErrors, foreign);
 
   // 2. Outbox: open the reply and tag it Interested.
@@ -61,7 +65,7 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await page.keyboard.press('j');
   await expect(page.getByRole('complementary', { name: 'Pylon preview' })).toBeVisible();
   await page.keyboard.press('x');
-  await expect(page.locator('[data-slot="sidebar"]').getByRole('link', { name: /^Today/ })).toContainText('4 of 5');
+  await expect(picked(page)).toContainText('4 of 5');
   await expect(page.getByRole('checkbox', { name: 'Pick Pylon' })).toBeChecked();
   await expectCleanPage(page, consoleErrors, foreign);
 

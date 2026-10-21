@@ -9,8 +9,10 @@ import {
   NoGoPage,
   OutboxPage,
   ParentReads,
+  ProgressPage,
   ToToday,
   TodayPage,
+  WinsPage,
 } from '@/app/pages';
 
 /**
@@ -26,6 +28,8 @@ export const viewRoutes: RouteObject[] = [
   { path: 'no-go', element: <NoGoPage />, children: [{ path: 'people', element: <ParentReads /> }] },
   { path: 'companies/:companyId', element: <CompanyPage /> },
   { path: 'done', element: <DonePage /> },
+  { path: 'progress', element: <ProgressPage /> },
+  { path: 'wins', element: <WinsPage /> },
 ];
 
 export const routes: RouteObject[] = [

@@ -58,7 +58,7 @@ beforeEach(() => {
 describe('AppShell sidebar', () => {
   it('shows the counts by each view', async () => {
     await shell();
-    expect(within(nav(/^Today/)).getByText('3 of 5')).toBeInTheDocument();
+    expect(within(nav(/^Today/)).getByText('2 of 7')).toBeInTheDocument();
 
     const outbox = nav(/^Outbox/);
     const replies = within(outbox).getByText('1');
@@ -77,6 +77,47 @@ describe('AppShell sidebar', () => {
     await shell();
     expect(nav(/^Outbox/)).toHaveAccessibleName('Outbox, 1 reply to handle, 7 drafts to review');
     expect(nav(/^Needs you/)).toHaveAccessibleName('Needs you, 5 open');
+  });
+
+  it('counts people done of today\'s plan, and says so in the link name', async () => {
+    await shell();
+    expect(nav(/^Today/)).toHaveAccessibleName('Today, 2 of 7 done');
+  });
+
+  it('shows no count by Today when nothing is planned', async () => {
+    await shell('/today', new FixtureClient(buildFixture('weekend')));
+    expect(nav(/^Today/)).toHaveAccessibleName('Today');
+    expect(within(nav(/^Today/)).queryByText(/ of /)).toBeNull();
+  });
+
+  it('puts Progress and Wins under Results, with no badge while no win is new', async () => {
+    await shell();
+    const results = screen.getByRole('navigation', { name: 'Results' });
+    expect(within(results).getByRole('link', { name: 'Progress' })).toHaveAttribute('href', '/progress');
+    const wins = within(results).getByRole('link', { name: 'Wins' });
+    expect(wins).toHaveAttribute('href', '/wins');
+    expect(wins.querySelector('[data-slot="badge"]')).toBeNull();
+  });
+
+  it('shows a green count with a dot by Wins while a win is new', async () => {
+    await shell('/today', new FixtureClient(buildFixture('win')));
+    const wins = nav(/^Wins/);
+    expect(wins).toHaveAccessibleName('Wins, 1 new');
+    const badge = within(wins).getByText('1').closest('[data-slot="badge"]');
+    expect(badge).toHaveAttribute('data-variant', 'ok');
+    expect(badge?.querySelector('.bg-ok-dot')).not.toBeNull();
+  });
+
+  it('marks Progress and Wins as the current view on their routes', async () => {
+    await shell('/progress');
+    expect(nav(/^Progress/)).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('navigation', { name: 'breadcrumb' })).toHaveTextContent('Progress');
+  });
+
+  it('titles the Wins view in the breadcrumb', async () => {
+    await shell('/wins');
+    expect(nav(/^Wins/)).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('navigation', { name: 'breadcrumb' })).toHaveTextContent('Wins');
   });
 
   it('shows the sender, replies this month and the last board read in the footer', async () => {
@@ -115,6 +156,8 @@ describe('AppShell sidebar', () => {
       ['n', '/needs-you'],
       ['x', '/no-go'],
       ['d', '/done'],
+      ['p', '/progress'],
+      ['w', '/wins'],
     ];
     for (const [key, path] of chords) {
       press('g');

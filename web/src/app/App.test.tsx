@@ -3,6 +3,7 @@ import { App } from '@/app/App';
 import { createQueryClient } from '@/app/query-client';
 import { ApiError } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
+import { routes, viewRoutes } from '@/app/routes';
 
 describe('App', () => {
   it('sends / to Today inside the shell', async () => {
@@ -10,7 +11,37 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument();
     expect(window.location.pathname).toBe('/today');
     expect(screen.getByRole('navigation', { name: 'Views' })).toBeInTheDocument();
-    expect(await screen.findByText('3 of 5')).toBeInTheDocument();
+    expect(await screen.findByText('2 of 7')).toBeInTheDocument();
+  });
+});
+
+describe('App routes for results', () => {
+  it.each([['/progress', 'Progress'], ['/wins', 'Wins']])('opens %s with its title inside the shell', async (path, title) => {
+    window.history.pushState({}, '', path);
+    render(<App client={new FixtureClient()} />);
+    expect(await screen.findByRole('heading', { level: 1, name: title })).toBeInTheDocument();
+    expect(screen.getByText('Coming in this branch')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Results' })).toBeInTheDocument();
+    window.history.pushState({}, '', '/');
+  });
+});
+
+describe('route table', () => {
+  const pathsOf = (list: typeof routes, parent = ''): string[] =>
+    list.flatMap((r) => {
+      const here = r.path ? `${parent}/${r.path}`.replace(/\/+/g, '/') : parent;
+      return [...(r.path ? [here] : []), ...(r.children ? pathsOf(r.children, here) : [])];
+    });
+
+  it('has no duplicate paths', () => {
+    const all = pathsOf(routes);
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it('has Progress and Wins as views', () => {
+    const paths = viewRoutes.map((r) => r.path);
+    expect(paths).toContain('progress');
+    expect(paths).toContain('wins');
   });
 });
 

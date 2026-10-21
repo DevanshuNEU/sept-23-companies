@@ -10,6 +10,8 @@ export const NeedsYouPage = lazy(() => import('@/routes/needs-you/index'));
 export const NoGoPage = lazy(() => import('@/routes/no-go/index'));
 export const CompanyPage = lazy(() => import('@/routes/company/index'));
 export const DonePage = lazy(() => import('@/routes/done/index'));
+export const ProgressPage = lazy(() => import('@/routes/progress/index'));
+export const WinsPage = lazy(() => import('@/routes/wins/index'));
 
 /**
  * Element for child paths the parent view reads itself (`/outbox/:touchId`, `/no-go/people`).

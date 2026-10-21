@@ -18,6 +18,7 @@ from outreach.store.writes import (
     mark_shared_key,
     name_key,
     record_outcome,
+    set_reply_kind,
     start_job,
     undo_touch,
 )
@@ -26,5 +27,6 @@ __all__ = [
     "DEFAULT_PATH", "StoreError", "connect", "db_path", "is_live_path", "transaction",
     "utcnow", "iso_utc", "iso_date",
     "name_key", "append_event", "start_job", "finish_job",
-    "body_sha256", "add_alias", "mark_shared_key", "is_shared_key", "log_touch", "record_outcome", "undo_touch",
+    "body_sha256", "add_alias", "mark_shared_key", "is_shared_key", "log_touch", "record_outcome", "set_reply_kind",
+    "undo_touch",
 ]

@@ -1143,6 +1143,8 @@ class SchemaTest(unittest.TestCase):
         self.assertRaises(sqlite3.IntegrityError, self.new_otouch, quiet_at=NOW, replied_at=NOW)
         self.assertRaises(sqlite3.IntegrityError, self.new_otouch, reply_kind="interested")  # a kind needs a reply
         self.assertRaises(sqlite3.IntegrityError, self.new_otouch, replied_at=NOW, reply_kind="maybe")
+        # an out-of-office is not an outcome: it lives on touch.auto_reply_at, never here
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, replied_at=NOW, reply_kind="auto_reply")
         # person_id is NULL only for an application.
         self.assertRaises(sqlite3.IntegrityError, self.new_otouch, person_id=None)
         self.new_otouch(person_id=None, channel="application")

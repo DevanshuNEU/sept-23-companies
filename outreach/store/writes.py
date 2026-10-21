@@ -12,7 +12,7 @@ import sqlite3
 from outreach.store.timefmt import iso_utc, utcnow
 
 __all__ = ["name_key", "append_event", "start_job", "finish_job", "body_sha256", "add_alias", "mark_shared_key",
-           "is_shared_key", "log_touch", "record_outcome", "undo_touch"]
+           "is_shared_key", "log_touch", "record_outcome", "set_reply_kind", "undo_touch"]
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -196,7 +196,8 @@ _OUTCOME_COLUMNS = {
     "accepted": "accepted_at", "replied": "replied_at", "referred": "referred_at",
     "interview": "interview_at", "offer": "offer_at", "quiet": "quiet_at",
 }
-_REPLY_KINDS = ("unsorted", "interested", "not_now", "said_no", "asked_to_stop", "auto_reply")
+# No auto_reply: an out-of-office is not an outcome (it stays on the email touch, touch.auto_reply_at).
+_REPLY_KINDS = ("unsorted", "interested", "not_now", "said_no", "asked_to_stop")
 
 
 def _touch_row(conn: sqlite3.Connection, touch_id: int, revision: int) -> sqlite3.Row:
@@ -261,6 +262,33 @@ def record_outcome(
     append_event(
         conn, entity="outreach_touch", kind=kind, actor=actor, entity_id=touch_id, company_id=row["company_id"],
         at=when, detail={"replyKind": reply_kind} if reply_kind else {},
+    )
+    return new
+
+
+def set_reply_kind(
+    conn: sqlite3.Connection,
+    touch_id: int,
+    *,
+    reply_kind: str,
+    revision: int,
+    actor: str = "devanshu",
+) -> int:
+    """Sort a reply: change only `reply_kind` on a touch that has `replied_at`. Returns the new revision and
+    appends a `reply_kind` event holding the old and the new kind. `LookupError` when the touch is missing or
+    `revision` is stale; `ValueError` when `reply_kind` is not a reply kind (an auto reply is not one), the touch
+    is undone, or it has no reply yet (a first reply is `record_outcome`)."""
+    if reply_kind not in _REPLY_KINDS:
+        raise ValueError(f"reply_kind {reply_kind!r} is not a reply kind")
+    row = _touch_row(conn, touch_id, revision)
+    if row["undone_at"] is not None:
+        raise ValueError(f"touch {touch_id} was undone")
+    if row["replied_at"] is None:
+        raise ValueError(f"touch {touch_id} has no reply, so it has no reply kind to set")
+    new = _bump(conn, "reply_kind = ?", (reply_kind,), touch_id, revision)
+    append_event(
+        conn, entity="outreach_touch", kind="reply_kind", actor=actor, entity_id=touch_id,
+        company_id=row["company_id"], detail={"from": row["reply_kind"], "to": reply_kind},
     )
     return new
 

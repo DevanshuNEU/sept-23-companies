@@ -275,6 +275,18 @@ MUTATIONS = [
     (STORE / "writes.py", "undo_touch undoes a touch that has an outcome",
      "    if any(row[c] is not None for c in _OUTCOME_COLUMNS.values()):\n", "    if False:\n",
      "test_undo_touch_refuses_after_an_outcome"),
+    (STORE / "writes.py", "set_reply_kind sets a kind on a touch that never replied",
+     '    if row["replied_at"] is None:\n        raise ValueError(f"touch {touch_id} has no reply, so it has no',
+     '    if False:\n        raise ValueError(f"touch {touch_id} has no reply, so it has no',
+     "test_set_reply_kind_refuses_a_touch_with_no_reply"),
+    (STORE / "writes.py", "an auto reply is accepted as a reply kind again",
+     '_REPLY_KINDS = ("unsorted", "interested", "not_now", "said_no", "asked_to_stop")',
+     '_REPLY_KINDS = ("unsorted", "interested", "not_now", "said_no", "asked_to_stop", "auto_reply")',
+     "test_an_auto_reply_is_not_an_outcome"),
+    (SCHEMA, "outreach_touch.reply_kind accepts auto_reply again",
+     "  reply_kind      TEXT CHECK (reply_kind IN ('unsorted','interested','not_now','said_no','asked_to_stop')),\n  referred_at",
+     "  reply_kind      TEXT CHECK (reply_kind IN ('unsorted','interested','not_now','said_no','asked_to_stop','auto_reply')),\n  referred_at",
+     "test_outreach_touch_quiet_reply_person_and_context"),
 ]
 
 

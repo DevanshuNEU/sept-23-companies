@@ -527,8 +527,8 @@ CREATE TABLE outreach_touch (
   sent_at         TEXT NOT NULL CHECK (sent_at IS strftime('%Y-%m-%dT%H:%M:%SZ', sent_at)),
   accepted_at     TEXT CHECK (accepted_at IS strftime('%Y-%m-%dT%H:%M:%SZ', accepted_at)),
   replied_at      TEXT CHECK (replied_at IS strftime('%Y-%m-%dT%H:%M:%SZ', replied_at)),
-  reply_kind      TEXT CHECK (reply_kind IN ('unsorted','interested','not_now','said_no','asked_to_stop',
-                                             'auto_reply')),
+  -- No 'auto_reply' here: an out-of-office is not an outcome. It stays on the email touch (touch.auto_reply_at).
+  reply_kind      TEXT CHECK (reply_kind IN ('unsorted','interested','not_now','said_no','asked_to_stop')),
   referred_at     TEXT CHECK (referred_at IS strftime('%Y-%m-%dT%H:%M:%SZ', referred_at)),
   interview_at    TEXT CHECK (interview_at IS strftime('%Y-%m-%dT%H:%M:%SZ', interview_at)),
   offer_at        TEXT CHECK (offer_at IS strftime('%Y-%m-%dT%H:%M:%SZ', offer_at)),

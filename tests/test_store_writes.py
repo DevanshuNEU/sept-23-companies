@@ -3,8 +3,8 @@ import sqlite3
 import unittest
 
 from outreach.store import append_event, finish_job, name_key, start_job
-from outreach.store.writes import (add_alias, body_sha256, is_shared_key, log_touch, mark_shared_key,
-                                   record_outcome, undo_touch)
+from outreach.store.writes import (add_alias, body_sha256, is_shared_key, log_touch, mark_shared_key, set_reply_kind,
+                                   record_outcome, set_reply_kind, undo_touch)
 from tests.storetest import fresh_store, seed_company, seed_touch
 
 
@@ -283,6 +283,54 @@ class TouchTests(unittest.TestCase):
         touch_id = self.log()
         record_outcome(self.conn, touch_id, kind="replied", at=LATER, revision=1)
         self.assertEqual(self.row(touch_id)["reply_kind"], "unsorted")
+
+    def test_an_auto_reply_is_not_an_outcome(self):
+        touch_id = self.log()
+        with self.assertRaises(ValueError):
+            record_outcome(self.conn, touch_id, kind="replied", at=LATER, reply_kind="auto_reply", revision=1)
+        row = self.row(touch_id)
+        self.assertEqual((row["replied_at"], row["reply_kind"], row["revision"]), (None, None, 1))
+
+    def test_set_reply_kind_changes_only_the_kind(self):
+        touch_id = self.log()
+        revision = record_outcome(self.conn, touch_id, kind="replied", at=LATER, revision=1)
+        before = self.row(touch_id)
+        new = set_reply_kind(self.conn, touch_id, reply_kind="interested", revision=revision)
+        after = self.row(touch_id)
+        self.assertEqual(new, revision + 1)
+        self.assertEqual((after["reply_kind"], after["revision"]), ("interested", new))
+        for column in before.keys():
+            if column not in ("reply_kind", "revision"):
+                self.assertEqual(after[column], before[column], column)
+        last = self.events(touch_id)[-1]
+        self.assertEqual((last["kind"], last["actor"], json.loads(last["detail"])),
+                         ("reply_kind", "devanshu", {"from": "unsorted", "to": "interested"}))
+        new2 = set_reply_kind(self.conn, touch_id, reply_kind="said_no", revision=new, actor="import")
+        self.assertEqual(self.row(touch_id)["reply_kind"], "said_no")
+        self.assertEqual(self.events(touch_id)[-1]["actor"], "import")
+        self.assertEqual(new2, new + 1)
+
+    def test_set_reply_kind_refuses_a_touch_with_no_reply(self):
+        touch_id = self.log()
+        with self.assertRaises(ValueError):
+            set_reply_kind(self.conn, touch_id, reply_kind="interested", revision=1)
+        row = self.row(touch_id)
+        self.assertEqual((row["reply_kind"], row["revision"]), (None, 1))
+        self.assertEqual(len(self.events(touch_id)), 1)
+
+    def test_set_reply_kind_refuses_a_bad_kind_and_checks_revision(self):
+        touch_id = self.log()
+        revision = record_outcome(self.conn, touch_id, kind="replied", at=LATER, revision=1)
+        for bad in ("auto_reply", "maybe", None):
+            with self.subTest(reply_kind=bad):
+                with self.assertRaises(ValueError):
+                    set_reply_kind(self.conn, touch_id, reply_kind=bad, revision=revision)
+        with self.assertRaises(LookupError):
+            set_reply_kind(self.conn, touch_id, reply_kind="interested", revision=revision - 1)
+        with self.assertRaises(LookupError):
+            set_reply_kind(self.conn, 999, reply_kind="interested", revision=1)
+        row = self.row(touch_id)
+        self.assertEqual((row["reply_kind"], row["revision"]), ("unsorted", revision))
 
     def test_record_outcome_checks_revision(self):
         touch_id = self.log()

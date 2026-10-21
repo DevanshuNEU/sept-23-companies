@@ -25,13 +25,15 @@ function List<T extends string | number>({
   param,
   onOpen,
   announce,
+  initial,
 }: {
   ids: T[];
   param?: string;
   onOpen?: (id: T) => void;
   announce?: (id: T) => string;
+  initial?: T;
 }) {
-  const nav = useListNav({ ids, param, onOpen, announce });
+  const nav = useListNav({ ids, param, onOpen, announce, initial });
   return (
     <>
       <p data-testid="selected">{nav.selected === null ? 'none' : String(nav.selected)}</p>
@@ -47,7 +49,7 @@ function List<T extends string | number>({
 }
 
 function renderList<T extends string | number>(
-  props: { ids: T[]; param?: string; onOpen?: (id: T) => void; announce?: (id: T) => string },
+  props: { ids: T[]; param?: string; onOpen?: (id: T) => void; announce?: (id: T) => string; initial?: T },
   route = '/outbox',
 ) {
   return render(
@@ -121,6 +123,35 @@ describe('useListNav', () => {
   it('an id that is not in the list selects nothing', () => {
     renderList({ ids: ['t1', 't2'] }, '/outbox?sel=gone');
     expect(selected()).toBe('none');
+  });
+
+  it('with initial the selection is the initial row and the URL is untouched', () => {
+    renderList({ ids: ['t1', 't2', 't3'], initial: 't2' });
+    expect(selected()).toBe('t2');
+    expect(location()).toBe('/outbox ' + 'POP');
+    expect(screen.getByText('row t2')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('j moves from the initial row and writes the URL then', () => {
+    renderList({ ids: ['t1', 't2', 't3'], initial: 't2' });
+    press('j');
+    expect(selected()).toBe('t3');
+    expect(location()).toBe('/outbox?sel=t3 REPLACE');
+  });
+
+  it('the URL selection wins over initial, and a sel that is not in the list selects nothing', () => {
+    const { unmount } = renderList({ ids: ['t1', 't2', 't3'], initial: 't2' }, '/outbox?sel=t1');
+    expect(selected()).toBe('t1');
+    unmount();
+    renderList({ ids: ['t1', 't2', 't3'], initial: 't2' }, '/outbox?sel=gone');
+    expect(selected()).toBe('none');
+  });
+
+  it('an initial that is not in ids selects nothing', () => {
+    renderList({ ids: ['t1', 't2'], initial: 'gone' });
+    expect(selected()).toBe('none');
+    press('j');
+    expect(selected()).toBe('t1');
   });
 
   it('works with number ids and another param', () => {

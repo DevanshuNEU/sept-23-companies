@@ -105,6 +105,11 @@ class PendingStore {
     return entry ? this.undo(entry) : false;
   }
 
+  /** True from the moment a write with this id is queued until its commit and refetch settle (an undo ends it too). */
+  isPending(id: string): boolean {
+    return this.active.has(id);
+  }
+
   /** Commits every write still in its window at once. Each leaves the queue before its commit starts. */
   async flush(keepalive = false): Promise<void> {
     const entries = this.queue;
@@ -220,13 +225,24 @@ export function usePendingWrite(): (w: PendingWrite) => void {
 /**
  * `undoLast` (bound to `z`) drops the newest write still in its window; `flushPending` commits them all now;
  * `cancel(id)` drops the write with that id if it is still in its window (a view uses it when the next action
- * on a thing is the opposite of a pending one, so nothing is sent).
+ * on a thing is the opposite of a pending one, so nothing is sent). `isPending(id)` says whether a write with that id
+ * is queued or still settling, so a repeat press can stay silent instead of saying "already logged".
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function usePendingControls(): { undoLast: () => boolean; flushPending: () => Promise<void>; cancel: (id: string) => boolean } {
+export function usePendingControls(): {
+  undoLast: () => boolean;
+  flushPending: () => Promise<void>;
+  cancel: (id: string) => boolean;
+  isPending: (id: string) => boolean;
+} {
   const { store } = usePendingContext();
   return useMemo(
-    () => ({ undoLast: () => store.undoLast(), flushPending: () => store.flush(), cancel: (id: string) => store.cancel(id) }),
+    () => ({
+      undoLast: () => store.undoLast(),
+      flushPending: () => store.flush(),
+      cancel: (id: string) => store.cancel(id),
+      isPending: (id: string) => store.isPending(id),
+    }),
     [store],
   );
 }

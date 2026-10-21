@@ -9,6 +9,8 @@ export type ListNavOptions<T extends string | number> = {
   onOpen?: (id: T) => void;
   /** Text for the polite live region when the selection changes. */
   announce?: (id: T) => string;
+  /** The selection while the URL has none (the first row to work on). The URL is written only when he moves. */
+  initial?: T;
 };
 
 export type RowProps = {
@@ -20,7 +22,8 @@ export type RowProps = {
 
 /**
  * j/k and the arrow keys move the selection without wrapping, Enter opens it. The selection lives in the URL
- * (`?sel=` by default) and is written with replace, so moving through a list adds no history entries.
+ * (`?sel=` by default) and is written with replace, so moving through a list adds no history entries. With no
+ * `sel` in the URL, `initial` (when it is in `ids`) is the selection and the URL stays clean until he moves.
  *
  * That write renders late, so every move is also recorded at once (`useSelectionSync`). j and k step from the
  * row he moved to last, and a key bound with `useHotkeys(..., { selection: selected })` that follows a move
@@ -31,13 +34,15 @@ export function useListNav<T extends string | number>({
   param = 'sel',
   onOpen,
   announce,
+  initial,
 }: ListNavOptions<T>): { selected: T | null; select: (id: T) => void; rowProps: (id: T) => RowProps } {
   // No param means nothing selected; useUrlState writes with replace.
   const [raw, setRaw] = useUrlState(param, '');
   const say = useAnnounce();
   const rows = useRef(new Map<T, HTMLElement>());
 
-  const selected = ids.find((id) => String(id) === raw) ?? null;
+  const fromUrl = ids.find((id) => String(id) === raw) ?? null;
+  const selected = raw === '' && initial !== undefined && ids.includes(initial) ? initial : fromUrl;
   const live = useSelectionSync(selected);
 
   const select = (id: T) => {

@@ -33,18 +33,20 @@ const api: {
   undoLast?: () => boolean;
   flushPending?: () => Promise<void>;
   cancel?: (id: string) => boolean;
+  isPending?: (id: string) => boolean;
 } = {};
 
 function View({ pollMs }: { pollMs?: number }) {
   const item = useViewQuery(ITEM, fetchItem, { pollMs });
   const shell = useViewQuery(SHELL, fetchShell);
   const write = usePendingWrite();
-  const { undoLast, flushPending, cancel } = usePendingControls();
+  const { undoLast, flushPending, cancel, isPending } = usePendingControls();
   useEffect(() => {
     api.write = write;
     api.undoLast = undoLast;
     api.flushPending = flushPending;
     api.cancel = cancel;
+    api.isPending = isPending;
   });
   return (
     <>
@@ -118,6 +120,7 @@ afterEach(async () => {
   delete api.undoLast;
   delete api.flushPending;
   delete api.cancel;
+  delete api.isPending;
 });
 
 describe('pending writes', () => {
@@ -226,6 +229,26 @@ describe('pending writes', () => {
     await settle(8000);
     expect(first).toHaveBeenCalledTimes(1);
     expect(second).not.toHaveBeenCalled();
+  });
+
+  it('isPending is true from the queue until the commit has settled, and false after an undo', async () => {
+    await setup();
+    expect(api.isPending!('approve:m12')).toBe(false);
+    approve(approveCommit());
+    await settle();
+    expect(api.isPending!('approve:m12')).toBe(true);
+    expect(api.isPending!('approve:other')).toBe(false);
+    await settle(8000);
+    await settle();
+    expect(api.isPending!('approve:m12')).toBe(false);
+
+    approve(approveCommit(), { id: 'approve:m13' });
+    await settle();
+    expect(api.isPending!('approve:m13')).toBe(true);
+    act(() => {
+      api.undoLast!();
+    });
+    expect(api.isPending!('approve:m13')).toBe(false);
   });
 
   it('cancel drops a pending write by id: no commit, overlay and toast gone', async () => {

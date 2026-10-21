@@ -1,10 +1,11 @@
 """Whether a posting's location is in the US: yes, no or unknown.
 
 Ported from refresh/finalcheck.py:69-82 and refresh/crawl_boards.py:34-49, with the order the #4 plan sets: a
-structured country first, then US state names (set aside so "New Mexico" never reads as Mexico), then US marks
-(ruling R12: "US" beats a country next to it), then a bounded, word-matched non-US list, then state codes and
-cities, and last the city names shared by the US and other countries. Every pattern is a list of literals with
-bounded gaps, so a search is linear in the location.
+structured US country first, then the location text (a US place there beats a structured non-US country, ruling
+2026-10-21), then that non-US country. In the text: US state names (set aside so "New Mexico" never reads as
+Mexico), then US marks (ruling R12: "US" beats a country next to it), then a bounded, word-matched non-US list, then
+state codes and cities, and last the city names shared by the US and other countries. Every pattern is a list of
+literals with bounded gaps, so a search is linear in the location.
 """
 import re
 
@@ -60,15 +61,20 @@ def _read_country(country: str, p: _Patterns) -> str | None:
 
 
 def us_status(location: str, country: str | None, cfg: Config) -> str:
-    """yes, no or unknown. A structured country that names the US or a known non-US country wins; any other one is
-    no evidence, so the location text decides (a country the lists do not know is never a "no" on its own)."""
+    """yes, no or unknown. A structured country that names the US wins. A US place in the location text beats a
+    known non-US country (Devanshu's ruling, 2026-10-21: a multi-location posting carries one country, often the
+    primary office, so "Remote - US or Canada" with country Canada reads yes); with no US place in the text a known
+    non-US country reads no. Any other country is no evidence, so the location text decides (a country the lists do
+    not know is never a "no" on its own)."""
     p = _Patterns(cfg)
+    read = None
     if country is not None and country.strip():
-        if (read := _read_country(country.strip(), p)) is not None:
+        read = _read_country(country.strip(), p)
+        if read == "yes":
             return read
     parts = {_read_part(part, p) for part in _SPLIT.split(location or "")}
     if "yes" in parts:
         return "yes"
-    if "no" in parts:
+    if read == "no" or "no" in parts:
         return "no"
     return "unknown"

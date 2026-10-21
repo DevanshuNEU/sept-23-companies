@@ -1250,7 +1250,7 @@ def test_entry_wording(self):
 
 **Interfaces:**
 - Produces: `us_status(location: str, country: str | None, cfg: Config) -> str` returning `yes`, `no` or `unknown`. Order:
-  1. a structured `country` wins: US spellings (`US`, `USA`, `United States`, `United States of America`) -> `yes`; any other non-empty value -> `no`;
+  1. a structured `country` that names the US (`US`, `USA`, `United States`, `United States of America`) -> `yes`. A known non-US country -> `no` only when no part of the location text reads `yes` in step 2 (ruling, Devanshu, 2026-10-21: a US location in the text wins over a structured non-US country, so "Remote - US or Canada" with country Canada reads `yes`); any other value is no evidence and the text decides;
   2. split `location` on `|`, `;` and " or "; read each part alone:
      a. find US state names first and set them aside, so "New Mexico" never reads as Mexico;
      b. a `non_us_countries` word or a `non_us_cities` name in what is left -> `no` for this part, even next to a two-letter code ("Toronto, CA", "Munich, DE", "Tel Aviv - IL", "Madrid, MD, Spain", "Tbilisi, Georgia");
@@ -1271,7 +1271,7 @@ CASES = [  # (location, country, expected)
   ("Paris, France", None, "no"), ("London, UK", None, "no"), ("Toronto, ON, Canada", None, "no"),
   ("Remote - EMEA", None, "no"), ("Bengaluru, India", None, "no"),
   ("Remote", None, "unknown"), ("", None, "unknown"),
-  ("Remote", "United States", "yes"), ("Austin, TX", "Canada", "no"),
+  ("Remote", "United States", "yes"), ("Austin, TX", "Canada", "yes"),
   ("Tel Aviv - IL", None, "no"), ("Madrid, MD, Spain", None, "no"), ("Munich, DE", None, "no"),
   ("Toronto, CA", None, "no"), ("Tbilisi, Georgia", None, "no"), ("Atlanta, Georgia", None, "yes"),
   ("Paris", None, "no"),

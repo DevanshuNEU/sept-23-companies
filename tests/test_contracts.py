@@ -41,7 +41,9 @@ class CandidateTests(unittest.TestCase):
                 Candidate(name=name, domain="acme.com", keys={})
 
     def test_candidate_rejects_bad_domain(self):
-        for domain in ("a@acme.com", "Acme.com", "acme", ""):
+        for domain in ("a@acme.com", "Acme.com", "acme", "", "https://acme.com", "acme.com/careers", "acme.com:8080",
+                       "acme.com/", "http:acme.com", "acme .com", "acme.com ", "\tacme.com", "acme.com\n",
+                       ".acme.com", "acme.com."):
             with self.subTest(domain=domain):
                 with self.assertRaises(ValueError):
                     Candidate(name="Acme", domain=domain, keys={})

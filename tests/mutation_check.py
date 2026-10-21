@@ -39,6 +39,7 @@ STORE = ROOT / "outreach" / "store"
 READER = ROOT / "outreach" / "reader"
 CRAWL = ROOT / "outreach" / "crawl"
 NET = ROOT / "outreach" / "net.py"
+SOURCES = ROOT / "outreach" / "sources"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
 # (file, guarantee broken, find, replace, expect). `find` must be exact text from the code as it is now and appear
@@ -265,6 +266,9 @@ MUTATIONS = [
     (READER / "types.py", "quote_in_body accepts a min_words below 1",
      "    if min_words < 1:\n", "    if False:\n",
      "test_min_words_can_raise_the_floor_and_must_be_at_least_one"),
+
+    (SOURCES / "base.py", "a candidate domain may be a URL, a host with a port or one with whitespace again",
+     "_NOT_A_HOST.search(d) or ", "", "test_candidate_rejects_bad_domain"),
 
     # ---- store/writes.py helpers (#30) ------------------------------------------------------------------------
     (STORE / "writes.py", "body_sha256 folds case, so 'A b' and 'a b' are the same body",

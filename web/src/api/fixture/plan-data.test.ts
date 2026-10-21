@@ -271,7 +271,7 @@ describe('plan scenarios', () => {
   });
 
   it('no em or en dash in any string of any scenario', () => {
-    const bad = /[–—]/;
+    const bad = /[\u2013\u2014]/;
     const found: string[] = [];
     const walk = (node: unknown, path: string) => {
       if (typeof node === 'string') {

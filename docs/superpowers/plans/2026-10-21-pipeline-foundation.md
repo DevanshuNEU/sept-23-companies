@@ -115,6 +115,11 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
   - `outreach/rules/facts.py` `FACTS` and `SOURCE_KINDS` widen to the new evidence values above, so `EvidenceDraft`
     accepts them. This changes `ruleset_version()` (facts.py is a rule file); expected, and the rebuild after
     install handles it.
+  - From the #15 plan (Task 1 there, copy its definitions and CHECKs exactly): `person_source` (public source pages
+    per person; LinkedIn hosts refused by CHECK), `linkedin_draft` (the one LinkedIn note table; Claude can never
+    confirm a reason line), and its two `daily_list_entry` guards.
+  - From the #11 plan (Task 4 there, copy exactly): `api_request` (idempotency store), `mx_check`, `win_seen`,
+    `watch_dismissal`. Its `linkedin_note` table is dropped: the API reads and writes `linkedin_draft`.
   - `posting_body` adds `body_sha256 TEXT NOT NULL DEFAULT ''` (sha256 hex of the body; `''` for rows written
     before it existed, filled lazily by the crawler).
   - `decision` adds `provisional INTEGER NOT NULL DEFAULT 1 CHECK (provisional IN (0,1))` (1 until a verified

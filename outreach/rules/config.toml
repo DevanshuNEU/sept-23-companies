@@ -308,6 +308,17 @@ negation = [
   "are not the sponsor", "won't be the sponsor", "cannot be your sponsor", "can't be your sponsor",
   "not be your sponsor", "cannot act as sponsor", "cannot act as your sponsor",
 ]
+# new in #4 (final fix wave 2, item 7): a refusal clause that also names one of these refuses someone else (interns,
+# contractors, roles outside the US), so it reads unclear, never no: "Sponsorship is not available for internships"
+# says nothing flat about a full-time US role, and #6 must not put the company on no-go for it. A non-US country or
+# city in the refusal clause ("for our London office") counts the same way.
+refusal_scope = [
+  "intern", "interns", "internship", "internships", "co op", "co ops", "contractor", "contractors", "contract role",
+  "contract roles", "contract position", "contract positions", "contract work", "contract to hire", "part time",
+  "temporary", "seasonal", "freelance", "freelancer", "freelancers", "outside the us", "outside the u.s.",
+  "outside the usa", "outside the united states", "outside of the us", "outside of the u.s.", "outside of the usa",
+  "outside of the united states", "non us", "international offices", "international roles", "offshore",
+]
 # new in #4 (final fix wave, item 2): refusals with the verb left out ("We would love to sponsor you, but we are
 # unable at this time."). `negation` counts only in a clause with a topic word; one of these also counts in a clause
 # with none, because the topic is the one the sentence is about; but "we are unable to provide relocation" in such a clause is only unclear (see

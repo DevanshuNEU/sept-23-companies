@@ -25,7 +25,7 @@ REQUIRED = {
                     "clause_verbs", "field_no", "hedge", "negators", "negation_elided", "elided_complete", "continuation",
                     "not_subject", "negation_cued", "negation_cue", "opt", "opt_acronyms", "opt_support", "citizenship",
                     "citizenship_negation", "citizenship_preference", "citizenship_us_forms", "citizenship_templates",
-                    "itar", "itar_cue"),
+                    "itar", "itar_cue", "refusal_scope"),
     "eligibility": ("grad_words", "current_student", "graduates_welcome", "graduate_route", "soft", "company_history",
                     "upper_bound", "cohort_title", "start_2027", "immediate_start",
                     "history_date_lead", "student_cue", "student_negation", "lower_bound", "lower_bound_suffix",

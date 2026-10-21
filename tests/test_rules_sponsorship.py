@@ -96,7 +96,9 @@ MORE_STANCE = [  # (body, stance)
     ("We do not sponsor visas. Sponsorship may be discussed later.", "no"),
     ("We sponsor H-1B visas. Sponsorship may take a few months.", "yes"),
     # across sentences: yes and no conflict
-    ("We sponsor H-1B visas. We do not sponsor visas for contractors.", "unclear"),
+    ("We sponsor H-1B visas. We do not sponsor visas for this role.", "unclear"),
+    # a refusal scoped to contractors does not conflict with a yes for the role (final fix wave 2, item 7)
+    ("We sponsor H-1B visas. We do not sponsor visas for contractors.", "yes"),
 ]
 
 # Review round 1 (#4, Task 11): every misreading the review saw. Each row read wrong before the fix.
@@ -345,6 +347,26 @@ WAVE_2_YES_WITH_NEGATOR = [  # (body, stances accepted)
     ("We do not sponsor visas. Relocation is not provided.", ("no",)),
 ]
 
+# Final fix wave 2, item 7 (#4): a refusal scoped to someone else (interns, contractors, roles outside the US, a
+# non-US office) says nothing flat about a full-time US engineering role: it reads unclear, never no.
+WAVE_2_SCOPED = [  # (body, stances accepted)
+    ("Visa sponsorship is not available for roles outside the United States.", ("unclear",)),
+    ("We cannot sponsor visas for our London office.", ("unclear",)),
+    ("Sponsorship is not available for internships.", ("unclear",)),
+    ("We are unable to sponsor visas for this internship.", ("unclear",)),
+    ("We cannot sponsor visas for interns, but full-time hires are sponsored.", ("unclear", "yes")),
+    ("We do not sponsor visas for contractors.", ("unclear",)),
+    ("No sponsorship for contract roles.", ("unclear",)),
+    ("We do not sponsor visas for part-time roles.", ("unclear",)),
+    ("Visa sponsorship is not available for roles in Canada.", ("unclear",)),
+    # refusals of this role stay no
+    ("We do not sponsor visas.", ("no",)),
+    ("We cannot sponsor visas for this role.", ("no",)),
+    ("Visa sponsorship is not available for this position.", ("no",)),
+    ("Candidates must be authorized to work in the United States without sponsorship now or in the future.", ("no",)),
+    (CAPITAL_ONE, ("no",)),
+]
+
 class SponsorshipStanceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -388,6 +410,11 @@ class SponsorshipStanceTest(unittest.TestCase):
 
     def test_wave_2_a_yes_with_a_negator_still_cancels_a_refusal(self):
         for body, accepted in WAVE_2_YES_WITH_NEGATOR:
+            with self.subTest(body=body):
+                self.assertIn(sponsorship_stance(body, self.cfg)[0], accepted)
+
+    def test_wave_2_a_scoped_refusal_is_not_a_flat_no(self):
+        for body, accepted in WAVE_2_SCOPED:
             with self.subTest(body=body):
                 self.assertIn(sponsorship_stance(body, self.cfg)[0], accepted)
 
@@ -437,7 +464,7 @@ class SponsorshipStanceTest(unittest.TestCase):
         self.assertEqual(sponsorship_stance(body, self.cfg), ("no", "Visa sponsorship is not available."))
 
     def test_unclear_quotes_the_first_unclear_or_conflicting_sentence(self):
-        body = "We build tools. We sponsor H-1B visas. We do not sponsor visas for contractors."
+        body = "We build tools. We sponsor H-1B visas. We do not sponsor visas for this role."
         self.assertEqual(sponsorship_stance(body, self.cfg), ("unclear", "We sponsor H-1B visas."))
         body = "We build tools. Sponsorship may be possible. Visa sponsorship depends on the role."
         self.assertEqual(sponsorship_stance(body, self.cfg), ("unclear", "Sponsorship may be possible."))
@@ -457,7 +484,7 @@ class SponsorshipStanceTest(unittest.TestCase):
         for key in ("opt_support", "opt_acronyms", "negation_near", "context", "self_context", "benefit",
                     "non_discrimination", "field_no", "clause_verbs", "citizenship_preference", "negators", "negation_elided", "not_subject", "continuation",
                     "elided_complete", "negation_cued", "negation_cue", "citizenship_us_forms",
-                    "citizenship_templates", "itar", "itar_cue"):
+                    "citizenship_templates", "itar", "itar_cue", "refusal_scope"):
             with self.subTest(key=key):
                 self.assertIn(key, config_mod.REQUIRED["sponsorship"])
 

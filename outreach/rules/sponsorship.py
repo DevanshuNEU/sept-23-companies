@@ -95,6 +95,10 @@ class _Patterns:
         self.opt_acronyms = phrases(s["opt_acronyms"], case=True)  # "OPT", never "opt in" or "opt out"
         self.opt_support = phrases(s["opt_support"])
         self.non_us = phrases(cfg.location["non_us_countries"])
+        # what limits a refusal to someone else: interns, contractors, "outside the US", a non-US country or city
+        loc = cfg.location
+        self.refusal_scope = phrases(s["refusal_scope"] + loc["non_us_countries"] + loc["non_us_cities"]
+                                     + loc["shared_city_names"])
         forms = s["citizenship_us_forms"]
         templates = [t.replace("{us}", form) for t in s["citizenship_templates"] for form in forms]
         self.citizenship = phrases(s["citizenship"] + templates)
@@ -264,6 +268,15 @@ def _negator(clause: str, p: _Patterns) -> re.Match | None:
 
 
 def _read_clause(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
+    """_read_refusal_first(), with a refusal scoped to someone else read as unclear: "Sponsorship is not available
+    for internships", "We cannot sponsor visas for our London office" say nothing flat about a full-time US role."""
+    reading, m = _read_refusal_first(clause, p)
+    if reading == NO and p.refusal_scope.search(clause):
+        return UNCLEAR, m
+    return reading, m
+
+
+def _read_refusal_first(clause: str, p: _Patterns) -> tuple[str, re.Match | None]:
     """no, unclear, yes or neutral, and the match that decided it. A refusal first, then the equal opportunity
     marker ("We do not sponsor visas, regardless of seniority" is a refusal), then hedges and countries. A refusal
     counts only in a clause with a topic word: "we do not provide relocation" is about relocation."""

@@ -36,7 +36,6 @@ TEXT_FIELDS = ("start_date", "location", "pay")
 _YEARS_MAX = 30
 # A quote may be '' only when the value says nothing was found.
 _NO_QUOTE_VALUES = ("unknown", "silent", None, "")
-_MIN_QUOTE_WORDS = 3
 _WHITESPACE = re.compile(r"\s+")
 _HAS_WORD_CHAR = re.compile(r"\w")
 # Characters that join two letters into one word: hyphen, apostrophe, right quote, the Unicode hyphens U+2010 to
@@ -138,7 +137,7 @@ def _collapse(text: str) -> str:
     return _WHITESPACE.sub(" ", text).strip().lower()
 
 
-def quote_in_body(quote: str, body: str) -> bool:
+def quote_in_body(quote: str, body: str, *, min_words: int = 3) -> bool:
     """True when `quote` is a word-for-word piece of `body`, starting and ending on a word edge.
 
     This is a presence check and nothing more. It cannot see a negation outside the quote: "security clearance
@@ -147,15 +146,19 @@ def quote_in_body(quote: str, body: str) -> bool:
     quoting words the posting never had.
 
     Both sides get every run of whitespace turned into one space and are lower-cased; nothing else is folded, so
-    punctuation, smart quotes and dashes must match. The quote needs at least 3 words (tokens with a letter or
-    digit in them, so ". . ." is no words). It must not start or end inside a word: a hyphen, dash or apostrophe
+    punctuation, smart quotes and dashes must match. The quote needs at least `min_words` words (default 3; tokens
+    with a letter or digit in them, so ". . ." is no words). Fields whose natural quote is short and exact ("Austin,
+    TX", "Remote", a pay range) pass `min_words=1`; fields that hide or rank keep 3. `ValueError` when `min_words`
+    is below 1. It must not start or end inside a word: a hyphen, dash or apostrophe
     between letters joins them, so "us citizens" is not found in "non-us citizens" nor "able to" in "unable to".
     A paraphrase never passes. Anything that is not text never passes.
     """
+    if min_words < 1:
+        raise ValueError(f"min_words must be at least 1, not {min_words}")
     if not isinstance(quote, str) or not isinstance(body, str):
         return False
     q = _collapse(quote)
-    if sum(1 for token in q.split(" ") if _HAS_WORD_CHAR.search(token)) < _MIN_QUOTE_WORDS:
+    if sum(1 for token in q.split(" ") if _HAS_WORD_CHAR.search(token)) < min_words:
         return False
     return re.search(_EDGE_BEFORE + re.escape(q) + _EDGE_AFTER, _collapse(body)) is not None
 

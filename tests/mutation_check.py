@@ -258,6 +258,14 @@ MUTATIONS = [
      "                headers = {k: v for k, v in (headers or {}).items() if k.lower() == \"user-agent\"}\n",
      "test_a_caller_user_agent_with_an_address_does_not_reach_the_second_host"),
 
+    (READER / "types.py", "quote_in_body's default floor drops from 3 words to 1",
+     "def quote_in_body(quote: str, body: str, *, min_words: int = 3) -> bool:",
+     "def quote_in_body(quote: str, body: str, *, min_words: int = 1) -> bool:",
+     "test_quote_in_body_rejects_short_quote"),
+    (READER / "types.py", "quote_in_body accepts a min_words below 1",
+     "    if min_words < 1:\n", "    if False:\n",
+     "test_min_words_can_raise_the_floor_and_must_be_at_least_one"),
+
     # ---- store/writes.py helpers (#30) ------------------------------------------------------------------------
     (STORE / "writes.py", "body_sha256 folds case, so 'A b' and 'a b' are the same body",
      '.strip().encode("utf-8")', '.strip().lower().encode("utf-8")', "test_body_sha256_collapses_whitespace_and_keeps_case"),

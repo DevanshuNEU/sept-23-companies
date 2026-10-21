@@ -354,6 +354,26 @@ class QuoteInBodyTests(unittest.TestCase):
     def test_three_words_pass(self):
         self.assertTrue(quote_in_body("not sponsor visas", self.BODY))
 
+    def test_min_words_lowers_the_floor_for_short_exact_values(self):
+        body = "Software Engineer\nAustin, TX\n$120,000 - $150,000 a year. Remote."
+        self.assertFalse(quote_in_body("Austin, TX", body))
+        self.assertTrue(quote_in_body("Austin, TX", body, min_words=1))
+        self.assertTrue(quote_in_body("Remote", body, min_words=1))
+        self.assertTrue(quote_in_body("$120,000 - $150,000", body, min_words=1))
+        self.assertFalse(quote_in_body("Remote", body))
+        self.assertFalse(quote_in_body("", body, min_words=1))  # no words is still no quote
+        self.assertFalse(quote_in_body(". . .", body, min_words=1))
+        self.assertFalse(quote_in_body("Boston, MA", body, min_words=1))  # presence is still required
+        self.assertFalse(quote_in_body("Aust", body, min_words=1))  # and a word edge
+
+    def test_min_words_can_raise_the_floor_and_must_be_at_least_one(self):
+        self.assertTrue(quote_in_body("not sponsor visas", self.BODY, min_words=3))
+        self.assertFalse(quote_in_body("not sponsor visas", self.BODY, min_words=4))
+        for bad in (0, -1):
+            with self.subTest(min_words=bad):
+                with self.assertRaises(ValueError):
+                    quote_in_body("not sponsor visas", self.BODY, min_words=bad)
+
     def test_case_is_ignored_on_both_sides(self):
         self.assertTrue(quote_in_body("WE DO NOT SPONSOR visas", "we Do Not Sponsor VISAS"))
 

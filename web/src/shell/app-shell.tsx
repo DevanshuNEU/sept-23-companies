@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, type CSSProperties } from 'react';
+import { Suspense, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router';
 import { Keyboard } from 'lucide-react';
 import { pollMs, queryKeys, useClient } from '@/api';
@@ -17,7 +17,9 @@ import { isTypingTarget, useHotkeys, type Binding } from '@/keyboard/hotkeys';
 import { formatLocalTime } from '@/lib/format';
 import { usePendingControls, useViewQuery } from '@/pending/pending';
 import { AppSidebar } from './app-sidebar';
+import { CommandPalette } from './command-palette';
 import { recordRecentCompany } from './recent';
+import { ShortcutSheet } from './shortcut-sheet';
 
 const VIEW_TITLE: Record<string, string> = {
   today: 'Today',
@@ -49,7 +51,7 @@ function companyIdOf(param: string | undefined): number | null {
  * The keys that work everywhere, the flush when the view changes, and the recent companies list.
  * None of the bindings set `inDialogs`: behind a dialog only its own keys and escape act.
  */
-function ShellBehaviour() {
+function ShellBehaviour({ openPalette, openSheet }: { openPalette: () => void; openSheet: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { companyId } = useParams();
@@ -84,6 +86,9 @@ function ShellBehaviour() {
   const group = 'Everywhere';
   const bindings: Binding[] = [
     ...GO.map(([key, path, name]): Binding => ({ keys: `g ${key}`, label: `Go to ${name}`, group, run: () => navigate(path) })),
+    { keys: 'mod+k', label: 'Search and commands', group, run: openPalette },
+    { keys: '/', label: 'Search', group, run: openPalette },
+    { keys: '?', label: 'Keyboard shortcuts', group, run: openSheet },
     { keys: 'mod+b', label: 'Toggle sidebar', group, run: () => toggleSidebar() },
     { keys: 'z', label: 'Undo the last action', group, run: () => void undoLast() },
     {
@@ -135,7 +140,7 @@ function Crumbs() {
   );
 }
 
-/** `onKeys` opens the shortcut sheet (Task 13 mounts it). */
+/** `onKeys` opens the shortcut sheet. */
 function TopBar({ onKeys }: { onKeys?: () => void }) {
   const client = useClient();
   const shell = useViewQuery(queryKeys.shell, () => client.shell(), { pollMs: pollMs.default });
@@ -173,18 +178,22 @@ function ViewSkeleton() {
 
 /** The sidebar, the 48 px top bar and the current view (spec section 2). */
 export function AppShell() {
+  const [palette, setPalette] = useState(false);
+  const [sheet, setSheet] = useState(false);
   return (
     <SidebarProvider style={{ '--sidebar-width': '240px' } as CSSProperties}>
-      <ShellBehaviour />
-      <AppSidebar />
+      <ShellBehaviour openPalette={() => setPalette(true)} openSheet={() => setSheet(true)} />
+      <AppSidebar onSearch={() => setPalette(true)} />
       <SidebarInset className="h-svh min-w-0 overflow-hidden">
-        <TopBar />
+        <TopBar onKeys={() => setSheet(true)} />
         <div className="min-h-0 flex-1 overflow-y-auto">
           <Suspense fallback={<ViewSkeleton />}>
             <Outlet />
           </Suspense>
         </div>
       </SidebarInset>
+      <CommandPalette open={palette} onOpenChange={setPalette} onShowKeys={() => setSheet(true)} />
+      <ShortcutSheet open={sheet} onOpenChange={setSheet} />
     </SidebarProvider>
   );
 }

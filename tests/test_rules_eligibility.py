@@ -202,6 +202,24 @@ WAVE_2_OPEN = [  # (title, body, status, reason, start_2027)
     (NG, "Must have graduated between December 2023 and June 2024.", "excluded", "grad_window", False),
 ]
 
+# Final fix wave 2, item 3 (#4): a candidate cue is never the graduation word itself, so company and team lines with a
+# year are no rule, and a real window later in the body still decides.
+WAVE_2_TEAM = [  # (title, body, status, reason, start_2027)
+    (NG, "Last year our class of 2025 new grads shipped three products.", "ok", None, False),
+    (NG, "Meet our Class of 2024 interns on the blog.", "ok", None, False),
+    (NG, "Our team includes graduates from the Class of 2024 and 2025.", "ok", None, False),
+    (NG, "Our 2025 graduating class loved the onboarding.", "ok", None, False),
+    (NG, "The class of 2024 alumni mentor every new hire.", "ok", None, False),
+    (NG, "You will join engineers who graduated in 2023 and 2024.", "ok", None, False),
+    (NG, "Last year our class of 2025 new grads shipped three products. Candidates must graduate between December "
+     "2026 and June 2027.", "excluded", "grad_window", False),
+    (NG, "You will join engineers who graduated in 2023 and 2024. You must graduate between December 2026 and June "
+     "2027.", "excluded", "grad_window", False),    # a requirement bullet that opens with the graduation word is still a rule
+    (NG, "- Graduated between December 2023 and June 2024.", "excluded", "grad_window", False),
+    (NG, "Graduating in December 2027.", "excluded", "grad_window", False),
+    (NG, "Graduation: Spring 2028", "excluded", "grad_window", False),
+]
+
 # Final fix wave, item 4 (#4): a current-student phrase excludes only in a sentence that names a degree, program, school
 # or enrollment, with no negation and no preference wording.
 FINAL_4 = [  # (title, body, status, reason, start_2027)
@@ -272,6 +290,14 @@ class EligibilityTest(unittest.TestCase):
 
     def test_wave_2_open_ended_windows(self):
         self.check(WAVE_2_OPEN)
+
+    def test_wave_2_team_lines_are_no_rule(self):
+        self.check(WAVE_2_TEAM)
+
+    def test_wave_2_a_team_line_does_not_hide_a_later_window(self):
+        body = "Meet our Class of 2024 interns on the blog. Candidates must graduate between December 2026 and June 2027."
+        self.assertEqual(eligibility(NG, body, self.cfg),
+                         ("excluded", "grad_window", "Candidates must graduate between December 2026 and June 2027."))
 
     def test_final_4_current_student_needs_a_program_cue(self):
         self.check(FINAL_4)

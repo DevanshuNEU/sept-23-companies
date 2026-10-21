@@ -653,13 +653,15 @@ upper_bound_suffix = [
 ]
 # new in #4 (final fix wave, item 5): a dated graduation sentence is a rule only when one of these sits within 60
 # characters of the graduation word that has the date: "Graduates apply by January 15, 2027" and "a team of MIT
-# graduates who started the company in 2025" name no candidate
+# graduates who started the company in 2025" name no candidate. Final fix wave 2, item 3: no graduation wording here
+# ("class of", "graduating", "graduated in"), and the cue is read outside the graduation word, so a team line ("Our
+# team includes graduates from the Class of 2024") is no rule; bare "hire" is out too ("mentor every new hire").
 candidate_cue = [
-  "must", "should", "eligible", "eligibility", "required", "requirement", "requirements", "graduating",
-  "graduate in", "graduate by", "graduate between", "graduates in", "graduates between", "graduated in",
-  "graduated between", "graduated on", "graduated by", "graduated after", "expected", "class of", "hiring", "hire",
-  "hires", "candidates", "candidate", "applicants", "applicant", "students", "welcome", "open to", "seeking",
-  "looking for", "who will graduate", "who graduate", "who have graduated", "will graduate", "have graduated",
+  "must", "should", "eligible", "eligibility", "required", "requirement", "requirements", "expected", "only",
+  "hiring", "we hire", "we also hire", "to hire", "will hire", "and hire", "and hires", "hire engineers",
+  "hire students", "hire graduates", "hire candidates", "hires engineers", "hires students", "hires graduates",
+  "hires candidates", "candidates", "candidate", "applicants", "applicant", "students", "welcome", "open to",
+  "seeking", "looking for",
 ]
 # new in #4 (final fix wave, item 5): a graduation word within 60 characters after one of these is refused, not
 # required ("This role is not open to students graduating in 2027"), so its date is no window

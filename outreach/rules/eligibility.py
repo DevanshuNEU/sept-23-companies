@@ -52,6 +52,11 @@ _BOUND_TAIL = r"\s{1,3}(?:the\s{1,3})?(?:end\s{1,3}of\s{1,3})?(?:[a-z]{1,9},?\s{
 # The same for a lower bound: "after December 2024", "since 2024", "on or after January 2025" (years 2023 to 2029)
 _LOWER_TAIL = r"\s{1,3}(?:the\s{1,3})?(?:end\s{1,3}of\s{1,3})?(?:[a-z]{1,9},?\s{1,3})?202[3-9](?!\d)"
 CUE_REACH = 60  # a candidate cue or a refusal this close to a graduation word belongs to it
+# What may come before a graduation word that opens its sentence: bullets, numbering, punctuation and spaces, no letter
+_LEADS = re.compile(r"[\W\d_]{0,20}")
+# The graduation words that, opening a sentence, make it a requirement bullet ("Graduated between May 2025 and August
+# 2026", "Graduating in 2027"); "Graduates apply by January 15, 2027" addresses graduates and is no rule
+_OPENERS = ("graduated", "graduating", "graduation")
 _TITLE_YEAR = re.compile(r"(?<!\w)" + START_YEAR + r"(?!\w)")
 _CLAUSE_BREAK = re.compile(r"[,;:.!?\n]")  # where a clause ends, for the company-history phrases
 _JOINS_NEXT = ";:"  # a sentence ending in one of these runs on into the next for step 1
@@ -263,16 +268,25 @@ def _dates_near_grad_words(sentence: str, grads: list[re.Match],
     return [(int(dates[i].group("year")), _month_of(dates[i].group("month"))) for i in sorted(near)], used
 
 
+def _opens(sentence: str, g: re.Match) -> bool:
+    """Whether g is one of _OPENERS with nothing but bullets, numbers and punctuation before it in the sentence."""
+    return (g.start() <= 20 and g.group(0).lower() in _OPENERS
+            and _LEADS.fullmatch(sentence, 0, g.start()) is not None)
+
+
 def _is_rule(sentence: str, used: list[re.Match], p: _Patterns) -> bool:
-    """Whether a dated graduation sentence says something about candidates: a cue word (must, eligible, class of)
-    sits within CUE_REACH of a graduation word that has a date, and none of those graduation words was refused just
-    before ("not open to students graduating in 2027")."""
+    """Whether a dated graduation sentence says something about candidates: a cue word (must, eligible, candidates)
+    sits within CUE_REACH of a graduation word that has a date, outside that word, or that word opens the sentence as
+    a requirement bullet ("Graduated between May 2025 and August 2026", see _opens); and none of those graduation words was refused just
+    before ("not open to students graduating in 2027"). A team line names someone first ("Our team includes graduates
+    from the Class of 2024"), so it is no rule."""
     cued = False
     for g in used:
         lo = max(0, g.start() - CUE_REACH)
         if p.grad_refusal.search(sentence, lo, g.start()):
             return False
-        if not cued and p.candidate_cue.search(sentence, lo, g.end() + CUE_REACH):
+        if not cued and (_opens(sentence, g) or p.candidate_cue.search(sentence, lo, g.start())
+                         or p.candidate_cue.search(sentence, g.end(), g.end() + CUE_REACH)):
             cued = True
     return cued
 

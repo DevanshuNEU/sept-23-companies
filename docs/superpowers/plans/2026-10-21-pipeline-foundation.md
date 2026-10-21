@@ -28,6 +28,17 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
 - No em dashes or en dashes in code, comments, docs or commit messages.
 - Commit trailer: `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
 
+## Shared formats (every stream and #17 use these exactly)
+
+- `posting.source_key` is `<ats>:<token>:<native_id>`; postings with no board keep `url:<url>`.
+- `board.token`: the ATS slug as the ATS spells it, lower case, for Greenhouse, Lever, Ashby and the rest; Workday
+  `<tenant>.wd<N>/<site>`; Oracle `<host>/<siteNumber>`; iCIMS the board host.
+- `company_alias` for a board uses `source='ats'` and alias key `<ats>:<token>`.
+- `job_run.job` values the crawler writes are `read_boards` and `watch_pages` (not `crawl`).
+- The read queue belongs to #32 alone: no other stream inserts, updates or deletes `read_queue` rows. #32's
+  `enqueue_missing` finds stored bodies with no row for the current reader version, so a stream that stores a new
+  or changed body needs to do nothing else.
+
 ## Review Focus
 
 1. A re-run of any source or reader over the same input writes no new rows (idempotency through unique keys), and a CHECK failure is never swallowed.
@@ -87,6 +98,8 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
   - New table `posting_reading(posting_id, body_sha256, reader_version, read_at, fields TEXT CHECK (json_valid(fields)),
     verified INTEGER CHECK (verified IN (0,1)), refused_fields TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (posting_id,
     body_sha256, reader_version))`. `fields` is the `PostingReading.to_json()` of Task 3.
+  - `posting_body` adds `body_sha256 TEXT NOT NULL DEFAULT ''` (sha256 hex of the body; `''` for rows written
+    before it existed, filled lazily by the crawler).
   - `decision` adds `provisional INTEGER NOT NULL DEFAULT 1 CHECK (provisional IN (0,1))` (1 until a verified
     reading agrees) and `reader_version TEXT` (NULL while provisional).
   - New table `application(application_id, company_id, posting_id, applied_on (date), url TEXT NOT NULL DEFAULT '',

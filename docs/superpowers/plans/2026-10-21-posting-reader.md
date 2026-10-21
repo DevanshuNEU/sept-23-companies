@@ -379,7 +379,7 @@ reader's invariants, so a break between the reader and the crawler, the rules or
 **Interfaces:**
 - Consumes: `PipelineHarness` (`.conn`, `.fixture(name)`, `.stages`, stage names in the foundation's order `discover, resolve, find_boards, read_boards, read_postings, rules, rank, plan`); `enqueue`, `next_batch`, `submit`, `run_night`, `Runner`, `RunResult`, `reader_combiner`, `apply_reading`; `rebuild`, `decide_and_store` from `outreach/rules/rebuild.py`.
 - Produces: `read_postings_stage(h: PipelineHarness, runner: Runner | None = None) -> None`, appended to `h.stages` under the name `read_postings`. It decides the fixture postings the crawler stage left (`decide_and_store(h.conn, pid, combiner=reader_combiner(h.conn))`, after a `rebuild` if the store has no current ruleset), calls `enqueue` for each as #21 will, then `run_night(h.conn, runner)`. `runner` defaults to a fake that answers every posting from a table of scripted readings keyed by posting title; the real `claude_runner` is never constructed in the flow test. The `rules` stage registered by #4 must call `rebuild(conn, combiner=reader_combiner(conn))` and then `apply_all(conn)` so the reader's decisions survive a rebuild; the reader PR makes that change to the stage if it is already registered.
-- Boundaries (do not cross): #21 (crawler) calls `enqueue` and `enqueue_missing` after it stores a new or changed body and writes nothing else in `read_queue`; this plan owns leasing, `submit` and re-queue. #6 (ranking) writes `company_score`; the queue order reads it when present and ignores it when absent, so the flow test passes with the `rank` stage unregistered and again with a one-row `company_score` fixture.
+- Boundaries (do not cross): #21 (crawler) never writes `read_queue` (controller ruling 2026-10-21): it stores the body and its `body_sha256`, and this plan's `enqueue_missing` (run before each night batch and on `next`) queues it; this plan owns leasing, `submit` and re-queue. #6 (ranking) writes `company_score`; the queue order reads it when present and ignores it when absent, so the flow test passes with the `rank` stage unregistered and again with a one-row `company_score` fixture.
 
 - [ ] **Step 1: Write the failing flow tests** in `tests/pipeline/test_flow.py` (each builds the harness, registers the stage with a scripted fake runner, runs it, then asserts on `h.conn`):
   - `test_flow_refused_quote_leaves_the_decision_provisional`: the fake returns `sponsorship = wont_sponsor` with the paraphrase `"no visa sponsorship is offered"`. After the stage: no `posting_reading` row for the posting; its `decision` has `provisional = 1` and `reader_version IS NULL`; `passes()` of the stored decision is still False (still a rules hide, read again next night); the queue row is `queued` with `last_error` naming `sponsorship`.
@@ -437,6 +437,10 @@ What the other streams call and where the boundaries sit.
 7. **Where `promoted_version` lives.** In `config.toml` (a git commit, visible in history) as planned, or in the store so a promotion needs no commit?
 
 ## Controller rulings on the open questions (2026-10-21)
+
+0. **This plan owns every `read_queue` write,** including priority (design 7.3). The crawler does not enqueue.
+   The flow invariant "a new engineering posting with a body lands in `read_queue` with the right priority" is this
+   plan's (Task 9), checked after `enqueue_missing`. `posting_body.body_sha256` comes from #30's Task 1.
 
 1. **Decision rows hold the combined facts** (no new migration). The rules' own verdict can always be recomputed by
    `decide()` from the stored body, which is what `eval` does, and `posting_reading` keeps the reader's side.

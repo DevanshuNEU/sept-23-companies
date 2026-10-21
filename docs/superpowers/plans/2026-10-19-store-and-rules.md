@@ -1681,6 +1681,8 @@ What each issue reads (R) and writes (W). Column names are exact; anything not l
 
 **Email replies (#30 final review).** #14's reply reader records an email reply on the matching `outreach_touch` (found by `email_touch_id`) through `record_outcome`, and auto replies stay on the email touch only (`touch.auto_reply_at`; `outreach_touch.reply_kind` has no `auto_reply`); sorting a reply later is `set_reply_kind` in `outreach/store/writes.py`.
 
+**Foundation notes (#30 final review).** One `@invariant` per stage and no manual `register(harness)` call: the harness imports each stream's stages module itself, so a manual call registers the stages twice. `daily_list_entry`, `application` and `outreach_touch` have `revision` but no `updated_at`, so #11's `bump()` must not set it on them.
+
 **Store rules from the 2026-10-20 scale audit** (60,000 and 300,000 postings; report in `~/Desktop/outreach-scratch/db-audit/REPORT.md`). Every issue that touches the store follows these:
 - The posting text is `posting_body(posting_id, body)`, not a `posting` column. The crawler (#21) and import (#17) write it there; readers join it only when they need the text. A body is plain text: the crawler strips HTML first.
 - The sender (#14) opens its connection with `connect(fullfsync=True)`: on macOS `synchronous=FULL` alone does not survive a power loss, and a lost send claim could send twice. Batch writers leave it off (it costs about 8 ms per commit).

@@ -158,13 +158,18 @@ def log_touch(
     posting_id: int | None = None,
     email_touch_id: int | None = None,
     idempotency_key: str,
+    actor: str = "devanshu",
 ) -> int:
     """Record that Devanshu reached out. Returns the touch id: the existing one when `idempotency_key` was used
     before (nothing else is written then). A new touch appends an `outreach_touch` event of kind `sent`.
 
     `context` is the dict #11's `build_context` makes; the schema refuses any other shape. The touch row and its
-    event are two statements: wrap the call in `db.transaction` when it sits beside other writes.
+    event are two statements: wrap the call in `db.transaction` when it sits beside other writes. `ValueError` when
+    `idempotency_key` is missing or empty (without one a retry would log the touch again). `actor` is the event's
+    actor: Devanshu's click by default, `sender` or `import` for those writers.
     """
+    if not isinstance(idempotency_key, str) or not idempotency_key:
+        raise ValueError("log_touch needs a non-empty idempotency_key")
     found = conn.execute("SELECT touch_id FROM outreach_touch WHERE idempotency_key = ?",
                          (idempotency_key,)).fetchone()
     if found:
@@ -186,7 +191,7 @@ def log_touch(
         raise
     touch_id = cur.lastrowid
     append_event(
-        conn, entity="outreach_touch", kind="sent", actor="devanshu", entity_id=touch_id, company_id=company_id,
+        conn, entity="outreach_touch", kind="sent", actor=actor, entity_id=touch_id, company_id=company_id,
         at=sent, detail={"channel": channel, "personId": person_id, "postingId": posting_id},
     )
     return touch_id

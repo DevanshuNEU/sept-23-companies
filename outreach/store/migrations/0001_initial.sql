@@ -651,7 +651,7 @@ CREATE TABLE review_item (
   CHECK ((state = 'resolved') = (resolution IS NOT NULL)),
   CHECK ((state = 'resolved') = (resolved_at IS NOT NULL)),
   CHECK (kind NOT IN ('board_unreadable','board_empty') OR board_id IS NOT NULL),
-  CHECK (kind <> 'sponsorship_unclear' OR posting_id IS NOT NULL)
+  CHECK (kind NOT IN ('sponsorship_unclear','reader_disagrees') OR posting_id IS NOT NULL)
 ) STRICT;
 -- Raising the same item on the same evidence again is a no-op, so a resolved item stays resolved
 -- until the evidence (and so evidence_key) changes (#16).

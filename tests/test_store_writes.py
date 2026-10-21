@@ -227,6 +227,19 @@ class TouchTests(unittest.TestCase):
         self.assertEqual(len(self.events(first)), 1)
         self.assertNotEqual(self.log("click-2"), first)
 
+    def test_log_touch_refuses_a_missing_idempotency_key(self):
+        for key in (None, "", 0):
+            with self.subTest(key=key):
+                with self.assertRaises(ValueError):
+                    self.log(key)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM outreach_touch").fetchone()[0], 0)
+
+    def test_log_touch_event_actor_defaults_to_devanshu_and_can_be_the_sender(self):
+        mine = self.log("a-1")
+        theirs = self.log("a-2", actor="sender")
+        self.assertEqual(self.events(mine)[0]["actor"], "devanshu")
+        self.assertEqual(self.events(theirs)[0]["actor"], "sender")
+
     def test_log_touch_takes_an_application_with_no_person_and_an_email_touch(self):
         application = self.log("app-1", person_id=None, channel="application")
         self.assertIsNone(self.row(application)["person_id"])

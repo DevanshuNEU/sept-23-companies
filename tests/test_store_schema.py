@@ -1251,6 +1251,12 @@ class SchemaTest(unittest.TestCase):
                     insert(self.db, "event", {"at": NOW, "recorded_at": NOW, "entity": entity, "kind": "k",
                                               "actor": actor})
 
+    def test_reader_disagrees_needs_a_posting(self):
+        self.assert_row_refused("review_item", {
+            "kind": "reader_disagrees", "company_id": self.company, "reason": "r", "evidence_key": "rd-none",
+            "raised_by": "reader", "created_at": NOW}, "CHECK")
+        self.review(kind="reader_disagrees", raised_by="reader", posting_id=self.posting, evidence_key="rd-1")
+
     def test_daily_list_entry_person_and_channel(self):
         insert(self.db, "daily_list", {"list_date": "2026-10-03", "built_at": NOW, "capacity": 60})
         self.assert_row_refused("daily_list", {"list_date": "2026-10-04", "built_at": NOW, "capacity": 61}, "CHECK")

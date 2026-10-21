@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Today | Outreach mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">O</span>Outreach</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today-plan.html" aria-current="page" id="sb-today" aria-label="Today, 2 of 7 done"><svg class="i"><use href="#today"/></svg>Today<span class="count" id="sb-today-count" aria-hidden="true">2 of 7</span></a>
+      <a class="sb-item" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">7</span></a>
+      <a class="sb-item" href="linkedin.html"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Results">
+      <p class="sb-label">Results</p>
+      <a class="sb-item" href="progress.html"><svg class="i"><use href="#chart"/></svg>Progress</a>
+      <a class="sb-item" href="wins.html" id="sb-wins"><svg class="i"><use href="#award"/></svg>Wins<span class="badge s-ok" id="sb-wins-badge" style="display:none"><span class="dot"></span>1</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company-score.html"><svg class="i"><use href="#building"/></svg>Pylon</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Resend</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Inngest</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">20 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>4 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><b>Today</b></div>
+      <div class="right">
+        <span class="t-xs muted">Mockup state</span>
+        <span class="seg" role="group" aria-label="Mockup state">
+          <button type="button" aria-pressed="true" data-state="plain">Plan</button>
+          <button type="button" aria-pressed="false" data-state="win">A win arrives</button>
+        </span>
+        <span class="vsep"></span>
+        <span class="t-xs muted">Plan built at 08:00</span>
+        <span class="vsep"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <!-- Win banner: on top of Today until he marks it seen -->
+    <div id="win-slot" style="padding:16px 24px 0" hidden>
+      <div class="win" role="status" id="win">
+        <svg class="win-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+        <div class="win-lines">
+          <span id="win-line"><b style="font-weight:500">Dana Whitfield</b> accepted your request.<span class="when">9:41</span></span>
+          <span class="t-sm"><a class="link" href="wins.html">Open the win log</a></span>
+        </div>
+        <div class="win-act"><button class="btn btn-outline btn-sm" type="button" data-key="w" id="win-seen" aria-keyshortcuts="w">Mark seen<span class="kbd">W</span></button></div>
+      </div>
+    </div>
+
+    <div class="page-head" style="padding:20px 24px 16px;margin:0;border-bottom:1px solid var(--border)">
+      <div>
+        <h1 class="sr-only">Today</h1>
+        <h2 class="t-xl">Tuesday, November 10</h2>
+        <p class="lede num" id="plan-count">7 people, 2 done</p>
+      </div>
+      <div class="actions t-sm">
+        <span class="muted">Requests this month</span><b class="num" style="font-weight:600">52</b><span class="muted">of 150</span>
+        <span class="t-xs muted" data-tip="The plan uses 150 of LinkedIn's 200 a month. 60 of 200 are used, counting requests sent outside the plan." tabindex="0"><svg class="i i-sm" aria-label="About this limit"><use href="#help"/></svg></span>
+      </div>
+    </div>
+
+    <div class="rail-split">
+      <!-- The day rail -->
+      <div class="rail-col">
+        <div class="rail" role="listbox" aria-label="Today's people">
+          <div class="rail-opt is-done" role="option" aria-selected="false" data-row data-pane="p1" data-href="company.html" id="r1" aria-label="1. Dana Whitfield at Resend, Done">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span>
+            <span class="rail-who"><b><span class="n">1</span>Dana Whitfield</b><span class="sub">Resend</span></span>
+            <span class="rail-word">Done</span>
+          </div>
+          <div class="rail-opt is-done" role="option" aria-selected="false" data-row data-pane="p2" data-href="company.html" id="r2" aria-label="2. Tomas Reyes at Baseten, Done">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span>
+            <span class="rail-who"><b><span class="n">2</span>Tomas Reyes</b><span class="sub">Baseten</span></span>
+            <span class="rail-word">Done</span>
+          </div>
+          <div class="rail-opt is-active" role="option" aria-selected="true" aria-current="step" data-row data-pane="p3" data-href="company-score.html" id="r3" aria-label="3. Lena Ortiz at Pylon, To do">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span>
+            <span class="rail-who"><b><span class="n">3</span>Lena Ortiz</b><span class="sub">Pylon</span></span>
+            <span class="rail-word">To do</span>
+          </div>
+          <div class="rail-opt" role="option" aria-selected="false" data-row data-pane="p4" data-href="company.html" id="r4" aria-label="4. Jonah Park at Inngest, To do">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span>
+            <span class="rail-who"><b><span class="n">4</span>Jonah Park</b><span class="sub">Inngest</span><span class="sub2" id="r4-ask">Your line to confirm</span></span>
+            <span class="rail-word">To do</span>
+          </div>
+          <div class="rail-opt" role="option" aria-selected="false" data-row data-pane="p5" data-href="company.html" id="r5" aria-label="5. Find someone at Cerebrium, To do">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span>
+            <span class="rail-who"><b><span class="n">5</span>Find someone</b><span class="sub">Cerebrium</span></span>
+            <span class="rail-word">To do</span>
+          </div>
+          <div class="rail-opt" role="option" aria-selected="false" data-row data-pane="p6" data-href="company.html" id="r6" aria-label="6. Ines Duarte at Turso, To do, carried over from Monday">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span>
+            <span class="rail-who"><b><span class="n">6</span>Ines Duarte</b><span class="sub">Turso</span><span class="sub2">Carried over from Monday</span></span>
+            <span class="rail-word">To do</span>
+          </div>
+          <div class="rail-opt" role="option" aria-selected="false" data-row data-pane="p7" data-href="company.html" id="r7" aria-label="7. Mintlify by email, To do">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span>
+            <span class="rail-who"><b><span class="n">7</span>Mintlify</b><span class="sub">By email, in the Outbox</span></span>
+            <span class="rail-word">To do</span>
+          </div>
+        </div>
+        <div class="rail">
+          <div class="rail-opt rail-finish" id="r-finish" aria-label="Done for today. Tomorrow: 7 people">
+            <span class="rail-node"><svg class="i"><use href="#flag"/></svg></span>
+            <span class="rail-who"><b>Done for today</b><span class="sub">Tomorrow: 7 people</span></span>
+            <span></span>
+          </div>
+        </div>
+        <div class="stack-sm" style="margin:24px 12px 0">
+          <button class="btn btn-ghost btn-sm" type="button" style="justify-self:start" data-key="C" aria-keyshortcuts="shift+c" id="copy-all"><svg class="i"><use href="#terminal"/></svg>Copy every find-someone handoff<span class="kbd">⇧</span><span class="kbd">C</span></button>
+          <a class="link t-xs muted" href="today.html" style="justify-self:start;margin-left:10px">All proposed companies</a>
+        </div>
+      </div>
+
+      <!-- The work panel: one person, one next step -->
+      <section class="work" aria-label="Selected person">
+
+        <!-- 1 Dana Whitfield, done -->
+        <div class="detail work-inner" id="p1" hidden>
+          <div class="work-head">
+            <div>
+              <h2 class="t-2xl">Dana Whitfield</h2>
+              <div class="meta"><span>Engineering Manager at <a class="link" href="company.html">Resend</a></span><span class="badge">Manager</span></div>
+            </div>
+            <span class="badge s-idle">Role at your level</span>
+          </div>
+          <div>
+            <p class="work-reason">She manages the team hiring for the Software Engineer, New Grad role posted Nov 8.</p>
+            <div class="work-sources"><span>From</span><a class="link" href="https://resend.example/careers/new-grad" target="_blank" rel="noopener noreferrer">Resend careers page, Nov 8</a><a class="link" href="https://resend.example/team" target="_blank" rel="noopener noreferrer">Resend team page</a></div>
+          </div>
+          <div class="row"><span class="plan-steps"><span class="on"><span class="mk"><svg class="i"><use href="#check"/></svg></span>Requested 9:02</span><span class="on"><span class="mk"><svg class="i"><use href="#check"/></svg></span>Applied 9:06</span></span></div>
+          <p class="t-sm muted">Done at 9:06. To change a log, open <a class="link" href="company.html">Resend's page</a>.</p>
+        </div>
+
+        <!-- 2 Tomas Reyes, done -->
+        <div class="detail work-inner" id="p2" hidden>
+          <div class="work-head">
+            <div>
+              <h2 class="t-2xl">Tomas Reyes</h2>
+              <div class="meta"><span>Forward Deployed Engineer at <a class="link" href="company.html">Baseten</a></span><span class="badge">Engineer</span></div>
+            </div>
+            <span class="badge s-idle">Role at your level</span>
+          </div>
+          <div>
+            <p class="work-reason">He does the job the Forward Deployed Engineer, New Grad role is hiring for.</p>
+            <div class="work-sources"><span>From</span><a class="link" href="https://baseten.example/careers/fde-new-grad" target="_blank" rel="noopener noreferrer">Baseten careers page, Nov 5</a></div>
+          </div>
+          <div class="row"><span class="plan-steps"><span class="on"><span class="mk"><svg class="i"><use href="#check"/></svg></span>Requested 9:20</span><span class="on"><span class="mk"><svg class="i"><use href="#check"/></svg></span>Applied 9:24</span></span></div>
+          <p class="t-sm muted">Done at 9:24. To change a log, open <a class="link" href="company.html">Baseten's page</a>.</p>
+        </div>
+
+        <!-- 3 Lena Ortiz, the first person ready -->
+        <div class="detail work-inner" id="p3">
+          <div class="work-head">
+            <div>
+              <h2 class="t-2xl">Lena Ortiz</h2>
+              <div class="meta"><span>Software Engineer, Billing at <a class="link" href="company-score.html">Pylon</a></span><span class="badge">Engineer</span><a class="link" href="https://pylon.example/team" target="_blank" rel="noopener noreferrer">Found on Pylon's team page</a></div>
+            </div>
+            <span class="badge s-idle">Role at your level</span>
+          </div>
+          <div>
+            <p class="work-reason">Her team shipped usage billing in October, and Pylon is hiring a Software Engineer I to join it.</p>
+            <div class="work-sources"><span>From</span><a class="link" href="https://pylon.example/blog/usage-billing" target="_blank" rel="noopener noreferrer">Pylon blog, Oct 14</a><a class="link" href="https://pylon.example/careers/software-engineer-i" target="_blank" rel="noopener noreferrer">Pylon careers page, Nov 3</a></div>
+          </div>
+          <div class="work-role">
+            <span class="muted">Role</span><span class="grow"><b style="font-weight:500">Software Engineer I</b> <span class="muted">San Francisco. Posted Nov 3.</span></span>
+            <a class="btn btn-outline btn-sm" href="https://pylon.example/careers/software-engineer-i" target="_blank" rel="noopener noreferrer" data-key="o" aria-keyshortcuts="o"><svg class="i"><use href="#external"/></svg>Open role<span class="kbd">O</span></a>
+            <a class="btn btn-outline btn-sm" href="https://jobs.ashby.example/pylon/software-engineer-i/apply" target="_blank" rel="noopener noreferrer" data-key="a" aria-keyshortcuts="a"><svg class="i"><use href="#external"/></svg>Apply page<span class="kbd">A</span></a>
+          </div>
+
+          <div class="note" id="note3">
+            <div class="note-head"><b>Note to send</b><span class="chars">168 of 200 characters</span></div>
+            <p class="note-text" id="note3-text">Hi Lena, I saw Pylon's post on shipping usage billing. I'm a new grad engineer and built OpenCodeIntel, code search for AI agents. I'm applying for Software Engineer I.</p>
+            <div id="note3-edit" hidden>
+              <textarea class="note-edit" aria-label="Note to Lena Ortiz">Hi Lena, I saw Pylon's post on shipping usage billing. I'm a new grad engineer and built OpenCodeIntel, code search for AI agents. I'm applying for Software Engineer I.</textarea>
+              <div class="row" style="padding:0 12px 12px"><span class="t-xs muted">Edits are kept if you move to another person.</span><span class="grow"></span><button class="btn btn-ghost btn-sm" type="button" data-edit-cancel="3">Cancel</button><button class="btn btn-sm" type="button" data-edit-save="3">Save<span class="kbd">⌘S</span></button></div>
+            </div>
+            <div class="note-line"><span class="k">Why her, in your words</span><span>Her team owns billing, and billing rules are what I built at Jaksh.</span></div>
+            <div class="note-facts">
+              <span class="k">Facts used</span>
+              <ul class="stack-sm">
+                <li><svg class="i"><use href="#external"/></svg><span>Pylon shipped usage billing in October. <a class="link src" href="https://pylon.example/blog/usage-billing" target="_blank" rel="noopener noreferrer">Pylon blog, Oct 14</a></span></li>
+                <li><svg class="i"><use href="#external"/></svg><span>Pylon is hiring a Software Engineer I. <a class="link src" href="https://pylon.example/careers/software-engineer-i" target="_blank" rel="noopener noreferrer">Pylon careers page, Nov 3</a></span></li>
+              </ul>
+            </div>
+            <div class="note-foot">
+              <svg class="i i-sm" style="color:var(--ok)" aria-hidden="true"><use href="#check"/></svg>5 checks passed
+              <span class="spacer"></span>
+              <button class="btn btn-outline btn-sm" type="button" data-key="c" aria-keyshortcuts="c" data-copy="note"><svg class="i"><use href="#copy"/></svg>Copy<span class="kbd">C</span></button>
+              <button class="btn btn-ghost btn-sm" type="button" data-key="e" aria-keyshortcuts="e" data-edit="3"><svg class="i"><use href="#pencil"/></svg>Edit<span class="kbd">E</span></button>
+            </div>
+          </div>
+
+          <div class="work-act" id="act3">
+            <a class="btn btn-outline" href="https://linkedin.example/in/lena-ortiz" target="_blank" rel="noopener noreferrer" data-key="l" aria-keyshortcuts="l"><svg class="i"><use href="#linkedin"/></svg>Open profile<span class="kbd">L</span></a>
+            <button class="btn" type="button" id="b3-req" data-key="r" aria-keyshortcuts="r" data-log="3:req">Log request sent<span class="kbd">R</span></button>
+            <button class="btn btn-outline" type="button" id="b3-app" data-key="p" aria-keyshortcuts="p" data-log="3:app">Log applied<span class="kbd">P</span></button>
+          </div>
+          <div class="work-foot" id="foot3">
+            <span class="plan-steps" aria-label="Steps"><span id="s3-req"><span class="mk"><svg class="i"><use href="#check"/></svg></span><span class="t">Requested</span></span><span id="s3-app"><span class="mk"><svg class="i"><use href="#check"/></svg></span><span class="t">Applied</span></span></span>
+            <span class="spacer"></span>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="x" aria-keyshortcuts="x" data-carry="3">Carry to tomorrow<span class="kbd">X</span></button>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="n" aria-keyshortcuts="n" data-dialog="dlg-nofit" data-nofit="Pylon">Not a fit<span class="kbd">N</span></button>
+          </div>
+          <p class="t-sm muted" id="done3" hidden></p>
+        </div>
+
+        <!-- 4 Jonah Park: Claude proposed the line, he confirms it -->
+        <div class="detail work-inner" id="p4" hidden>
+          <div class="work-head">
+            <div>
+              <h2 class="t-2xl">Jonah Park</h2>
+              <div class="meta"><span>Senior Software Engineer at <a class="link" href="company.html">Inngest</a></span><span class="badge">Engineer</span><a class="link" href="https://inngest.example/blog/durable-steps" target="_blank" rel="noopener noreferrer">Found on the Inngest blog</a></div>
+            </div>
+            <span class="badge s-idle">Role at your level</span>
+          </div>
+          <div>
+            <p class="work-reason">He wrote Inngest's post on durable step functions, and Inngest is hiring a Software Engineer II on his team.</p>
+            <div class="work-sources"><span>From</span><a class="link" href="https://inngest.example/blog/durable-steps" target="_blank" rel="noopener noreferrer">Inngest blog, Oct 28</a><a class="link" href="https://inngest.example/careers/software-engineer-ii" target="_blank" rel="noopener noreferrer">Inngest careers page, Nov 4</a></div>
+          </div>
+          <div class="work-role">
+            <span class="muted">Role</span><span class="grow"><b style="font-weight:500">Software Engineer II</b> <span class="muted">Remote US. Posted Nov 4. Asks 2 years.</span></span>
+            <a class="btn btn-outline btn-sm" href="https://inngest.example/careers/software-engineer-ii" target="_blank" rel="noopener noreferrer" data-key="o" aria-keyshortcuts="o"><svg class="i"><use href="#external"/></svg>Open role<span class="kbd">O</span></a>
+            <a class="btn btn-outline btn-sm" href="https://jobs.ashby.example/inngest/software-engineer-ii/apply" target="_blank" rel="noopener noreferrer" data-key="a" aria-keyshortcuts="a"><svg class="i"><use href="#external"/></svg>Apply page<span class="kbd">A</span></a>
+          </div>
+          <div class="note">
+            <div class="note-head"><b>Note to send</b><span class="chars">168 of 200 characters</span></div>
+            <div class="note-ask" id="ask4">
+              <b style="font-weight:500">Is this why you are writing to him? Confirm it or write your own.</b>
+              <q>His step functions post is the closest thing to the agent tooling I build.</q>
+              <span class="t-xs muted">Proposed by Claude from the facts below.</span>
+              <div class="btn-group"><button class="btn btn-sm" type="button" data-key="y" aria-keyshortcuts="y" id="confirm4">Confirm line<span class="kbd">Y</span></button><button class="btn btn-outline btn-sm" type="button" data-key="e" aria-keyshortcuts="e" data-toast="Editing your line. Save keeps it as yours."><svg class="i"><use href="#pencil"/></svg>Write my own<span class="kbd">E</span></button></div>
+            </div>
+            <div class="note-line" id="line4" hidden><span class="k">Why him, in your words</span><span>His step functions post is the closest thing to the agent tooling I build.</span></div>
+            <p class="note-text">Hi Jonah, your post on durable step functions at Inngest was the clearest I have read. I build agent tools like OpenCodeIntel and I'm applying for Software Engineer II.</p>
+            <div class="note-facts">
+              <span class="k">Facts used</span>
+              <ul class="stack-sm">
+                <li><svg class="i"><use href="#external"/></svg><span>Jonah wrote the Inngest post on durable step functions. <a class="link src" href="https://inngest.example/blog/durable-steps" target="_blank" rel="noopener noreferrer">Inngest blog, Oct 28</a></span></li>
+                <li><svg class="i"><use href="#external"/></svg><span>Inngest is hiring a Software Engineer II. <a class="link src" href="https://inngest.example/careers/software-engineer-ii" target="_blank" rel="noopener noreferrer">Inngest careers page, Nov 4</a></span></li>
+              </ul>
+            </div>
+            <div class="note-foot">
+              <svg class="i i-sm" style="color:var(--ok)" aria-hidden="true"><use href="#check"/></svg>5 checks passed
+              <span class="spacer"></span>
+              <button class="btn btn-outline btn-sm" type="button" data-key="c" aria-keyshortcuts="c" data-copy="note"><svg class="i"><use href="#copy"/></svg>Copy<span class="kbd">C</span></button>
+            </div>
+          </div>
+          <div class="work-act" id="act4">
+            <a class="btn btn-outline" href="https://linkedin.example/in/jonah-park" target="_blank" rel="noopener noreferrer" data-key="l" aria-keyshortcuts="l"><svg class="i"><use href="#linkedin"/></svg>Open profile<span class="kbd">L</span></a>
+            <button class="btn btn-outline" type="button" id="b4-req" data-key="r" aria-keyshortcuts="r" data-log="4:req">Log request sent<span class="kbd">R</span></button>
+            <button class="btn btn-outline" type="button" id="b4-app" data-key="p" aria-keyshortcuts="p" data-log="4:app">Log applied<span class="kbd">P</span></button>
+          </div>
+          <div class="work-foot" id="foot4">
+            <span class="plan-steps" aria-label="Steps"><span id="s4-req"><span class="mk"><svg class="i"><use href="#check"/></svg></span><span class="t">Requested</span></span><span id="s4-app"><span class="mk"><svg class="i"><use href="#check"/></svg></span><span class="t">Applied</span></span></span>
+            <span class="spacer"></span>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="x" aria-keyshortcuts="x" data-carry="4">Carry to tomorrow<span class="kbd">X</span></button>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="n" aria-keyshortcuts="n" data-dialog="dlg-nofit" data-nofit="Inngest">Not a fit<span class="kbd">N</span></button>
+          </div>
+          <p class="t-sm muted" id="done4" hidden></p>
+        </div>
+
+        <!-- 5 Find someone at Cerebrium -->
+        <div class="detail work-inner" id="p5" hidden>
+          <div class="work-head">
+            <div>
+              <h2 class="t-2xl">Find someone at Cerebrium</h2>
+              <div class="meta"><span>Nobody at <a class="link" href="company.html">Cerebrium</a> is on your list yet</span></div>
+            </div>
+            <span class="badge s-idle">Role at your level</span>
+          </div>
+          <div>
+            <p class="work-reason">Cerebrium is hiring a Member of Technical Staff, and one engineer there is enough for today.</p>
+            <div class="work-sources"><span>From</span><a class="link" href="https://cerebrium.example/careers/mts" target="_blank" rel="noopener noreferrer">Cerebrium careers page, Nov 5</a></div>
+          </div>
+          <div class="work-role">
+            <span class="muted">Role</span><span class="grow"><b style="font-weight:500">Member of Technical Staff</b> <span class="muted">New York. Posted Nov 5.</span></span>
+            <a class="btn btn-outline btn-sm" href="https://cerebrium.example/careers/mts" target="_blank" rel="noopener noreferrer" data-key="o" aria-keyshortcuts="o"><svg class="i"><use href="#external"/></svg>Open role<span class="kbd">O</span></a>
+            <a class="btn btn-outline btn-sm" href="https://jobs.ashby.example/cerebrium/mts/apply" target="_blank" rel="noopener noreferrer" data-key="a" aria-keyshortcuts="a"><svg class="i"><use href="#external"/></svg>Apply page<span class="kbd">A</span></a>
+          </div>
+          <ol class="note" style="display:grid">
+            <li class="note-line" style="padding-top:14px"><span class="k">1. Search</span><span>Open the LinkedIn search and pick one engineer on the team.</span></li>
+            <li class="note-line"><span class="k">2. Hand it to Claude</span><span>Copy the handoff and paste it in the side terminal with their profile.</span>
+              <div class="prompt" style="margin-top:6px">Find someone at Cerebrium (company 233) for today's plan.
+Role to name: Member of Technical Staff.
+Person: paste their LinkedIn profile here.</div></li>
+            <li class="note-line"><span class="k">3. Back here</span><span>Claude adds them and writes the note. This row becomes theirs.</span></li>
+          </ol>
+          <div class="work-act">
+            <a class="btn" href="https://www.linkedin.com/search/results/people/?keywords=Cerebrium%20software%20engineer&amp;origin=GLOBAL_SEARCH_HEADER" target="_blank" rel="noopener noreferrer" data-key="s" aria-keyshortcuts="s"><svg class="i"><use href="#search"/></svg>Open LinkedIn search<span class="kbd">S</span></a>
+            <button class="btn btn-outline" type="button" data-key="c" aria-keyshortcuts="c" data-copy="handoff"><svg class="i"><use href="#terminal"/></svg>Copy handoff<span class="kbd">C</span></button>
+            <span class="spacer"></span>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="x" aria-keyshortcuts="x" data-carry="5">Carry to tomorrow<span class="kbd">X</span></button>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="n" aria-keyshortcuts="n" data-dialog="dlg-nofit" data-nofit="Cerebrium">Not a fit<span class="kbd">N</span></button>
+          </div>
+          <p class="t-sm muted" id="done5" hidden></p>
+        </div>
+
+        <!-- 6 Ines Duarte, carried over from Monday -->
+        <div class="detail work-inner" id="p6" hidden>
+          <div class="work-head">
+            <div>
+              <h2 class="t-2xl">Ines Duarte</h2>
+              <div class="meta"><span>Co-founder at <a class="link" href="company.html">Turso</a></span><span class="badge">Founder</span><span>Carried over from Monday</span></div>
+            </div>
+            <span class="badge s-idle">Intern or junior work</span>
+          </div>
+          <div>
+            <p class="work-reason">Turso posted a Software Engineering Intern role open to graduates on OPT, and at 30 people a founder still reads every request.</p>
+            <div class="work-sources"><span>From</span><a class="link" href="https://turso.example/careers/intern" target="_blank" rel="noopener noreferrer">Turso careers page, Nov 2</a><a class="link" href="https://turso.example/about" target="_blank" rel="noopener noreferrer">Turso about page</a></div>
+          </div>
+          <div class="work-role">
+            <span class="muted">Role</span><span class="grow"><b style="font-weight:500">Software Engineering Intern</b> <span class="muted">Remote US. Posted Nov 2. Open to graduates.</span></span>
+            <a class="btn btn-outline btn-sm" href="https://turso.example/careers/intern" target="_blank" rel="noopener noreferrer" data-key="o" aria-keyshortcuts="o"><svg class="i"><use href="#external"/></svg>Open role<span class="kbd">O</span></a>
+            <a class="btn btn-outline btn-sm" href="https://jobs.ashby.example/turso/intern/apply" target="_blank" rel="noopener noreferrer" data-key="a" aria-keyshortcuts="a"><svg class="i"><use href="#external"/></svg>Apply page<span class="kbd">A</span></a>
+          </div>
+          <div class="note">
+            <div class="note-head"><b>Note to send</b><span class="chars">165 of 200 characters</span></div>
+            <p class="note-text">Hi Ines, I saw Turso's Software Engineering Intern role is open to graduates on OPT. I built OpenCodeIntel, code search for AI coding agents, and would value a chat.</p>
+            <div class="note-line"><span class="k">Why her, in your words</span><span>A small team where an intern role can turn into a full-time one.</span></div>
+            <div class="note-facts">
+              <span class="k">Facts used</span>
+              <ul class="stack-sm">
+                <li><svg class="i"><use href="#external"/></svg><span>The intern role is open to graduates on OPT. <a class="link src" href="https://turso.example/careers/intern" target="_blank" rel="noopener noreferrer">Turso careers page, Nov 2</a></span></li>
+              </ul>
+            </div>
+            <div class="note-foot">
+              <svg class="i i-sm" style="color:var(--ok)" aria-hidden="true"><use href="#check"/></svg>5 checks passed
+              <span class="spacer"></span>
+              <button class="btn btn-outline btn-sm" type="button" data-key="c" aria-keyshortcuts="c" data-copy="note"><svg class="i"><use href="#copy"/></svg>Copy<span class="kbd">C</span></button>
+              <button class="btn btn-ghost btn-sm" type="button" data-key="e" aria-keyshortcuts="e" data-toast="Editing the note. Save runs the checks again."><svg class="i"><use href="#pencil"/></svg>Edit<span class="kbd">E</span></button>
+            </div>
+          </div>
+          <div class="work-act" id="act6">
+            <a class="btn btn-outline" href="https://linkedin.example/in/ines-duarte" target="_blank" rel="noopener noreferrer" data-key="l" aria-keyshortcuts="l"><svg class="i"><use href="#linkedin"/></svg>Open profile<span class="kbd">L</span></a>
+            <button class="btn" type="button" id="b6-req" data-key="r" aria-keyshortcuts="r" data-log="6:req">Log request sent<span class="kbd">R</span></button>
+            <button class="btn btn-outline" type="button" id="b6-app" data-key="p" aria-keyshortcuts="p" data-log="6:app">Log applied<span class="kbd">P</span></button>
+          </div>
+          <div class="work-foot" id="foot6">
+            <span class="plan-steps" aria-label="Steps"><span id="s6-req"><span class="mk"><svg class="i"><use href="#check"/></svg></span><span class="t">Requested</span></span><span id="s6-app"><span class="mk"><svg class="i"><use href="#check"/></svg></span><span class="t">Applied</span></span></span>
+            <span class="spacer"></span>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="x" aria-keyshortcuts="x" data-carry="6">Carry to tomorrow<span class="kbd">X</span></button>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="n" aria-keyshortcuts="n" data-dialog="dlg-nofit" data-nofit="Turso">Not a fit<span class="kbd">N</span></button>
+          </div>
+          <p class="t-sm muted" id="done6" hidden></p>
+        </div>
+
+        <!-- 7 Mintlify, an email row: reviewed in the Outbox, no logging key -->
+        <div class="detail work-inner" id="p7" hidden>
+          <div class="work-head">
+            <div>
+              <h2 class="t-2xl">Mintlify, by email</h2>
+              <div class="meta"><span>2 people at <a class="link" href="company.html">Mintlify</a> by email</span></div>
+            </div>
+            <span class="badge s-idle">Reason to reach out</span>
+          </div>
+          <div>
+            <p class="work-reason">No open role yet, but Mintlify raised a Series B in October and says it is growing its engineering team.</p>
+            <div class="work-sources"><span>From</span><a class="link" href="https://mintlify.example/blog/series-b" target="_blank" rel="noopener noreferrer">Mintlify blog, Oct 22</a></div>
+          </div>
+          <div class="note">
+            <div class="note-head"><b>In the Outbox</b><span class="chars">2 drafts to review</span></div>
+            <ul class="list">
+              <li class="list-row" style="grid-template-columns:1fr auto;padding:10px 16px"><span><b style="font-weight:500">Marcus Feld</b> <span class="muted t-sm">Software Engineer</span></span><span class="badge"><span class="dot" style="background:var(--idle-dot)"></span>Draft</span></li>
+              <li class="list-row" style="grid-template-columns:1fr auto;padding:10px 16px"><span><b style="font-weight:500">Dana Whitcomb</b> <span class="muted t-sm">Technical Recruiter</span></span><span class="badge"><span class="dot" style="background:var(--idle-dot)"></span>Draft</span></li>
+            </ul>
+            <div class="note-foot">The sender and the reply reader log what happens to email, so nothing here needs a key.</div>
+          </div>
+          <div class="work-act">
+            <a class="btn" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Review in Outbox</a>
+            <span class="spacer"></span>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="x" aria-keyshortcuts="x" data-carry="7">Carry to tomorrow<span class="kbd">X</span></button>
+            <button class="btn btn-ghost btn-sm" type="button" data-key="n" aria-keyshortcuts="n" data-dialog="dlg-nofit" data-nofit="Mintlify">Not a fit<span class="kbd">N</span></button>
+          </div>
+          <p class="t-sm muted" id="done7" hidden></p>
+        </div>
+
+        <!-- Below the plan, quiet: the 7-day prompt and the watch list -->
+        <div class="work-below">
+          <details id="prompt">
+            <summary><svg class="i chev"><use href="#chevron"/></svg>Last week, what happened?<span class="count" id="q-count">2</span></summary>
+            <div class="stack-sm" style="padding:4px 0 12px 24px">
+              <p class="t-sm" id="q-text" style="max-width:62ch">What happened with Kai Brennan? You sent a request on Nov 2 for Software Engineer, Platform at Railway.</p>
+              <div class="btn-group">
+                <button class="btn btn-outline btn-sm" type="button" data-key="1" aria-keyshortcuts="1" data-answer="accepted">Accepted<span class="kbd">1</span></button>
+                <button class="btn btn-outline btn-sm" type="button" data-key="2" aria-keyshortcuts="2" data-dialog="dlg-reply">Replied<span class="kbd">2</span></button>
+                <button class="btn btn-outline btn-sm" type="button" data-key="3" aria-keyshortcuts="3" data-answer="quiet">Nothing yet<span class="kbd">3</span></button>
+              </div>
+              <p class="t-xs muted" id="q-more">1 more after this one. Nothing yet is a normal answer: it asks again in 7 days.</p>
+            </div>
+          </details>
+          <details>
+            <summary><svg class="i chev"><use href="#chevron"/></svg>Watch list<span class="count" id="w-count">3</span></summary>
+            <ul class="list" style="margin:4px 0 8px 24px">
+              <li class="list-row" style="grid-template-columns:minmax(0,1fr) auto;padding-left:0" id="w1">
+                <span class="stack-sm" style="gap:4px"><span class="row-wrap"><span class="badge">Careers page changed</span><a class="link" href="company.html" style="font-weight:500">Railway</a><span class="t-xs muted">Nov 9</span></span><span class="t-sm">Two engineering roles were added since Nov 6. One says new grad.</span><a class="link t-xs muted" href="https://railway.example/careers" target="_blank" rel="noopener noreferrer">Open the careers page</a></span>
+                <button class="btn btn-ghost btn-sm" type="button" data-dismiss="w1" data-name="Railway">Dismiss</button></li>
+              <li class="list-row" style="grid-template-columns:minmax(0,1fr) auto;padding-left:0" id="w2">
+                <span class="stack-sm" style="gap:4px"><span class="row-wrap"><span class="badge">New company to reach</span><a class="link" href="company.html" style="font-weight:500">Modal</a><span class="t-xs muted">Nov 8</span></span><span class="t-sm">Raised a Series B on Nov 4 and has no open role yet. It joins the plan as a reason to reach out.</span><a class="link t-xs muted" href="company.html">Open Modal's page</a></span>
+                <button class="btn btn-ghost btn-sm" type="button" data-dismiss="w2" data-name="Modal">Dismiss</button></li>
+              <li class="list-row" style="grid-template-columns:minmax(0,1fr) auto;padding-left:0" id="w3">
+                <span class="stack-sm" style="gap:4px"><span class="row-wrap"><span class="badge">Possible duplicate</span><a class="link" href="company.html" style="font-weight:500">Trigger.dev</a><span class="t-xs muted">Nov 7</span></span><span class="t-sm">Trigger.dev and Trigger Dev Inc share the domain trigger.example.</span><a class="link t-xs muted" href="needs-you.html">Decide in Needs you</a></span>
+                <button class="btn btn-ghost btn-sm" type="button" data-dismiss="w3" data-name="Trigger.dev">Dismiss</button></li>
+            </ul>
+          </details>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- Not a fit: the phase-1 remove dialog, reused -->
+<div class="overlay" id="dlg-nofit" data-modal hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-nofit-t">
+    <div class="dialog-body">
+      <h2 class="t-lg" id="dlg-nofit-t">Not a fit: remove <span data-nofit-name>Pylon</span> for good?</h2>
+      <p class="t-sm muted">It leaves today's plan and is never proposed again. It shows on the No-go list under Removed by you, where you can bring it back.</p>
+      <div class="radio-list" role="radiogroup" aria-label="Reason">
+        <label><input type="radio" name="why" checked>Not a fit for me</label>
+        <label><input type="radio" name="why">Already applied or in touch another way</label>
+        <label><input type="radio" name="why">Bigger than it looks</label>
+        <label><input type="radio" name="why">Other</label>
+      </div>
+      <input class="input" placeholder="Note (optional)" aria-label="Note">
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+      <button class="btn" type="button" data-close id="nofit-go">Remove</button>
+    </div>
+  </div>
+</div>
+
+<!-- Replied: which kind of reply -->
+<div class="overlay" id="dlg-reply" data-modal hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-reply-t">
+    <div class="dialog-body">
+      <h2 class="t-lg" id="dlg-reply-t">What did <span data-q-name>Kai Brennan</span> say?</h2>
+      <div class="radio-list" role="radiogroup" aria-label="Reply kind">
+        <label><input type="radio" name="kind" value="Interested" checked>Interested</label>
+        <label><input type="radio" name="kind" value="Not now">Not now</label>
+        <label><input type="radio" name="kind" value="Said no">Said no</label>
+        <label><input type="radio" name="kind" value="Asked to stop">Asked to stop</label>
+      </div>
+      <p class="t-xs muted">Said no and Asked to stop add the person to the No-go list. They log at once, with no undo window.</p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+      <button class="btn" type="button" data-close id="reply-go">Log reply</button>
+    </div>
+  </div>
+</div>
+
+<template id="page-keys">
+  <h4>Today</h4>
+  <div><span>Open the company</span><span class="kbd-row"><span class="kbd">Enter</span></span></div>
+  <div><span>Open profile</span><span class="kbd-row"><span class="kbd">L</span></span></div>
+  <div><span>Open role</span><span class="kbd-row"><span class="kbd">O</span></span></div>
+  <div><span>Open the apply page</span><span class="kbd-row"><span class="kbd">A</span></span></div>
+  <div><span>Open LinkedIn search</span><span class="kbd-row"><span class="kbd">S</span></span></div>
+  <div><span>Copy the note or handoff</span><span class="kbd-row"><span class="kbd">C</span></span></div>
+  <div><span>Edit the note</span><span class="kbd-row"><span class="kbd">E</span></span></div>
+  <div><span>Confirm your line</span><span class="kbd-row"><span class="kbd">Y</span></span></div>
+  <div><span>Log request sent</span><span class="kbd-row"><span class="kbd">R</span></span></div>
+  <div><span>Log applied</span><span class="kbd-row"><span class="kbd">P</span></span></div>
+  <div><span>Carry to tomorrow</span><span class="kbd-row"><span class="kbd">X</span></span></div>
+  <div><span>Not a fit</span><span class="kbd-row"><span class="kbd">N</span></span></div>
+  <div><span>Answer the prompt</span><span class="kbd-row"><span class="kbd">1</span><span class="kbd">2</span><span class="kbd">3</span></span></div>
+  <div><span>Mark wins seen</span><span class="kbd-row"><span class="kbd">W</span></span></div>
+  <div><span>Copy every handoff</span><span class="kbd-row"><span class="kbd">⇧</span><span class="kbd">C</span></span></div>
+</template>
+<script src="mockup.js"></script>
+<script>
+/* Mockup behaviour for Today as a plan: one key per step, the row stays in place, the count moves at once. */
+(function () {
+  "use strict";
+  var toast = window.mockToast, NOW = "10:14";
+  var plan = {
+    1: { state: "done" }, 2: { state: "done" },
+    3: { state: "todo", name: "Lena Ortiz", company: "Pylon", role: "Software Engineer I", req: null, app: null },
+    4: { state: "todo", name: "Jonah Park", company: "Inngest", role: "Software Engineer II", req: null, app: null },
+    5: { state: "todo", company: "Cerebrium", find: true },
+    6: { state: "todo", name: "Ines Duarte", company: "Turso", role: "Software Engineering Intern", req: null, app: null },
+    7: { state: "todo", company: "Mintlify", email: true }
+  };
+  var $ = function (id) { return document.getElementById(id); };
+  var label = function (n) {
+    var d = plan[n];
+    return n + ". " + (d.email ? d.company + " by email" : (d.find ? "Find someone" : d.name) + " at " + d.company);
+  };
+
+  function done() { var d = 0; for (var k in plan) if (plan[k].state === "done") d++; return d; }
+  function counts() {
+    var d = done();
+    $("plan-count").textContent = "7 people, " + d + " done";
+    $("sb-today-count").textContent = d + " of 7";
+    $("sb-today").setAttribute("aria-label", "Today, " + d + " of 7 done");
+  }
+  function setRail(n, state, word) {
+    var r = $("r" + n);
+    r.classList.remove("is-done", "is-logged", "is-carried");
+    if (state) r.classList.add("is-" + state);
+    r.querySelector(".rail-word").textContent = word;
+    r.setAttribute("aria-label", label(n) + ", " + word);
+  }
+  function firstTodo() {
+    document.querySelectorAll(".rail-opt[aria-current]").forEach(function (x) { x.removeAttribute("aria-current"); });
+    for (var k = 1; k <= 7; k++) if (plan[k].state === "todo") { $("r" + k).setAttribute("aria-current", "step"); return; }
+  }
+  function moveOn(n) {
+    for (var k = n + 1; k <= 7; k++) if (plan[k].state === "todo") return $("r" + k).click();
+    for (k = n - 1; k >= 1; k--) if (plan[k].state === "todo") return $("r" + k).click();
+  }
+  function primary(n) {
+    var d = plan[n], req = $("b" + n + "-req"), app = $("b" + n + "-app");
+    req.className = d.req ? "btn btn-ghost" : "btn";
+    app.className = d.req && !d.app ? "btn" : (d.app ? "btn btn-ghost" : "btn btn-outline");
+    if (d.req) req.innerHTML = '<svg class="i"><use href="#check"/></svg>Request logged ' + d.req + '<span class="kbd">R</span>';
+    if (d.app) app.innerHTML = '<svg class="i"><use href="#check"/></svg>Applied ' + d.app + '<span class="kbd">P</span>';
+  }
+  function log(n, step) {
+    var d = plan[n];
+    if (d.state !== "todo") { toast("Already logged."); return; }
+    if (d[step]) { toast("Already logged."); return; }
+    d[step] = NOW;
+    var m = $("s" + n + "-" + step); m.classList.add("on");
+    m.querySelector(".t").textContent = (step === "req" ? "Requested " : "Applied ") + NOW;
+    toast(step === "req" ? "Logged: request sent to " + d.name + "." : "Logged: applied for " + d.role + " at " + d.company + ".", true);
+    if (d.req && d.app) {
+      d.state = "done"; setRail(n, "done", "Done"); counts(); firstTodo();
+      $("act" + n).hidden = true; $("foot" + n).querySelectorAll(".btn").forEach(function (b) { b.hidden = true; });
+      var p = $("done" + n); p.hidden = false; p.textContent = "Done at " + NOW + ". To change a log, open " + d.company + "'s page.";
+      moveOn(n);
+    } else { setRail(n, "logged", "Logged"); primary(n); }
+  }
+  function carry(n) {
+    var d = plan[n];
+    if (d.state !== "todo") { toast("Already logged."); return; }
+    d.state = "carried"; setRail(n, "carried", "Carried over"); firstTodo();
+    var ask = $("r" + n + "-ask"); if (ask) ask.hidden = true;
+    document.querySelectorAll("#p" + n + " .work-act, #p" + n + " .work-foot .btn").forEach(function (a) { a.hidden = true; });
+    var p = $("done" + n); p.hidden = false; p.textContent = "Carried to tomorrow. It is first on tomorrow's plan.";
+    toast("Carried to tomorrow: " + d.company + ".", true);
+    moveOn(n);
+  }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("button, a"); if (!t) return;
+    if (t.matches('a[target="_blank"]')) { e.preventDefault(); toast("Opens in a new tab: " + t.hostname + ". The mockup does not follow it."); return; }
+    if (t.hasAttribute("data-log")) { var p = t.getAttribute("data-log").split(":"); log(+p[0], p[1]); return; }
+    if (t.hasAttribute("data-carry")) { carry(+t.getAttribute("data-carry")); return; }
+    if (t.hasAttribute("data-nofit")) { document.querySelectorAll("[data-nofit-name]").forEach(function (s) { s.textContent = t.getAttribute("data-nofit"); }); $("nofit-go").setAttribute("data-co", t.getAttribute("data-nofit")); return; }
+    if (t.id === "nofit-go") { toast("Removed " + t.getAttribute("data-co") + ". Find it on the No-go list.", true); return; }
+    if (t.hasAttribute("data-copy")) { toast(t.getAttribute("data-copy") === "note" ? "Copied the note." : "Copied the handoff for Claude."); return; }
+    if (t.id === "copy-all") { toast("Copied 1 handoff for Claude."); return; }
+    if (t.hasAttribute("data-edit")) { $("note3-text").hidden = true; $("note3-edit").hidden = false; $("note3-edit").querySelector("textarea").focus(); return; }
+    if (t.hasAttribute("data-edit-cancel") || t.hasAttribute("data-edit-save")) {
+      var ta = $("note3-edit").querySelector("textarea");
+      if (t.hasAttribute("data-edit-save")) { $("note3-text").textContent = ta.value; document.querySelector("#note3 .chars").textContent = ta.value.length + " of 200 characters"; toast("Saved the note. The checks ran again: 5 passed."); }
+      $("note3-text").hidden = false; $("note3-edit").hidden = true; return;
+    }
+    if (t.id === "confirm4") { $("b4-req").className = "btn"; $("ask4").hidden = true; $("line4").hidden = false; $("r4-ask").hidden = true; toast("Confirmed your line.", true); return; }
+    if (t.hasAttribute("data-dismiss")) { $(t.getAttribute("data-dismiss")).hidden = true; var c = $("w-count"); c.textContent = +c.textContent - 1; toast("Dismissed: " + t.getAttribute("data-name") + ".", true); return; }
+    if (t.hasAttribute("data-answer")) { answer(t.getAttribute("data-answer")); return; }
+    if (t.id === "reply-go") { var k = document.querySelector('input[name="kind"]:checked').value; answer("replied", k); return; }
+    if (t.id === "win-seen") { $("win-slot").hidden = true; $("sb-wins-badge").style.display = "none"; toast("Marked seen.", true); return; }
+  });
+
+  /* the 7-day prompt: one question at a time */
+  var qs = [
+    { name: "Kai Brennan", co: "Railway", text: "What happened with Kai Brennan? You sent a request on Nov 2 for Software Engineer, Platform at Railway." },
+    { name: "Priya Raman", co: "Warp", text: "What happened with Priya Raman? You sent a request on Nov 3 for Software Engineer I at Warp." }
+  ];
+  function answer(kind, replyKind) {
+    var q = qs.shift(); if (!q) return;
+    if (kind === "accepted") { toast("Logged: " + q.name + " accepted.", true); showWin(q.name + "</b> accepted your request."); }
+    else if (kind === "quiet") toast("Logged: nothing yet from " + q.name + ". It asks again on Nov 17.", true);
+    else {
+      var now = replyKind === "Said no" || replyKind === "Asked to stop";
+      toast("Logged: " + q.name + " replied, " + replyKind + "." + (now ? " Added to the No-go list." : ""), !now);
+      if (!now) showWin(q.name + "</b> replied: " + replyKind + ".");
+    }
+    $("q-count").textContent = qs.length;
+    if (!qs.length) { $("prompt").hidden = true; return; }
+    $("q-text").textContent = qs[0].text;
+    document.querySelectorAll("[data-q-name]").forEach(function (s) { s.textContent = qs[0].name; });
+    $("q-more").textContent = "Last one. Nothing yet is a normal answer: it asks again in 7 days.";
+  }
+
+  /* the win banner: enters once, stays until marked seen */
+  function showWin(html, when) {
+    $("win-line").innerHTML = '<b style="font-weight:500">' + html + '<span class="when">' + (when || NOW) + "</span>";
+    var w = $("win"); w.classList.remove("win-in"); void w.offsetWidth; w.classList.add("win-in");
+    $("win-slot").hidden = false; $("sb-wins-badge").style.display = "";
+  }
+  function setState(s) {
+    document.querySelectorAll("[data-state]").forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-state") === s); });
+    if (s === "win") showWin("Dana Whitfield</b> accepted your request.", "9:41");
+    else { $("win-slot").hidden = true; $("sb-wins-badge").style.display = "none"; }
+  }
+  document.querySelectorAll("[data-state]").forEach(function (b) { b.addEventListener("click", function () { setState(b.getAttribute("data-state")); }); });
+  if (/state=win/.test(location.search)) setState("win");
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Progress | Outreach mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">O</span>Outreach</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today-plan.html" aria-label="Today, 2 of 7 done"><svg class="i"><use href="#today"/></svg>Today<span class="count" aria-hidden="true">2 of 7</span></a>
+      <a class="sb-item" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">7</span></a>
+      <a class="sb-item" href="linkedin.html"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Results">
+      <p class="sb-label">Results</p>
+      <a class="sb-item" href="progress.html" aria-current="page"><svg class="i"><use href="#chart"/></svg>Progress</a>
+      <a class="sb-item" href="wins.html"><svg class="i"><use href="#award"/></svg>Wins</a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company-score.html"><svg class="i"><use href="#building"/></svg>Pylon</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Resend</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Inngest</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">20 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>4 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><b>Progress</b></div>
+      <div class="right">
+        <span class="t-xs muted">Mockup state</span>
+        <span class="seg" role="group" aria-label="Mockup state">
+          <button type="button" aria-pressed="true" data-state="enough">Enough data</button>
+          <button type="button" aria-pressed="false" data-state="first">First week</button>
+        </span>
+        <span class="vsep"></span>
+        <span class="t-xs muted">Updated 10:14</span>
+        <span class="vsep"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="page" style="max-width:1120px">
+        <div class="page-head">
+          <div>
+            <h1 class="t-xl">Progress</h1>
+            <p class="lede">What you logged, counted plainly. A rate shows once a period has 30 requests.</p>
+          </div>
+        </div>
+
+        <!-- Today against the plan -->
+        <h2 class="section-title" style="margin-top:8px">Today, Tuesday</h2>
+        <div class="table-wrap" style="max-width:720px">
+          <table class="ledger">
+            <thead><tr><th>People done</th><th>Requests sent</th><th>Applications sent</th><th>Accepted</th><th>Replied</th></tr></thead>
+            <tbody><tr><td><b style="font-weight:600">2</b> <span class="muted">of 7 on the plan</span></td><td>2</td><td>2</td><td class="zero">0</td><td class="zero">0</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="two-col" style="margin-top:28px;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:32px">
+          <section aria-labelledby="funnel-h">
+            <h2 class="section-title" id="funnel-h" style="margin-top:0"><span id="period-label">This week, Nov 9 to 15</span>
+              <span class="right">
+                <span class="tabs" role="tablist" aria-label="Period">
+                  <button class="tab" role="tab" aria-selected="true" aria-controls="pw" id="tab-w" data-key="1" aria-keyshortcuts="1">Week<span class="kbd">1</span></button>
+                  <button class="tab" role="tab" aria-selected="false" aria-controls="pm" id="tab-m" data-key="2" aria-keyshortcuts="2">Month<span class="kbd">2</span></button>
+                </span>
+              </span>
+            </h2>
+
+            <!-- Week, enough data -->
+            <div id="pw" role="tabpanel" aria-labelledby="tab-w">
+              <div data-when="enough">
+                <div class="table-wrap">
+                  <table class="ledger">
+                    <thead><tr><th>Stage</th><th class="num">Count</th><th>Rate, with its count</th><th>On one scale</th></tr></thead>
+                    <tbody>
+                      <tr><td class="stage">Requests sent</td><td class="num">31</td><td class="rate"><span class="of">Where every rate starts</span></td><td><span class="lbar" role="img" aria-label="Requests sent: 31, the largest count this week" data-tip="Requests sent: 31"><i style="width:239px"></i></span></td></tr>
+                      <tr><td class="stage">Accepted</td><td class="num">9</td><td class="rate">9 of 31 (29%) <span class="of">of requests</span></td><td><span class="lbar" role="img" aria-label="Accepted: 9 of 31" data-tip="Accepted: 9 of 31 requests"><i style="width:69px"></i></span></td></tr>
+                      <tr><td class="stage">Replied</td><td class="num">2</td><td class="rate">2 of 31 (6%) <span class="of">of requests</span></td><td><span class="lbar" role="img" aria-label="Replied: 2 of 31" data-tip="Replied: 2 of 31 requests"><i style="width:15px"></i></span></td></tr>
+                      <tr><td class="stage">Referrals</td><td class="num zero">0</td><td class="rate">0 of 2 <span class="of">of replies</span></td><td><span class="lbar is-zero" role="img" aria-label="Referrals: 0"><i></i></span></td></tr>
+                      <tr><td class="stage">Interviews</td><td class="num">1</td><td class="rate">1 of 2 <span class="of">of replies</span></td><td><span class="lbar" role="img" aria-label="Interviews: 1 of 2 replies" data-tip="Interviews: 1 of 2 replies"><i style="width:8px"></i></span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="ledger-scale" style="margin-top:8px">Bars share one scale: 31, this week's largest count. Rates of replies show from 20 replies, so 2 shows as a count.</p>
+              </div>
+              <div data-when="first" hidden>
+                <div class="table-wrap">
+                  <table class="ledger">
+                    <thead><tr><th>Stage</th><th class="num">Count</th><th>Rate, with its count</th><th>On one scale</th></tr></thead>
+                    <tbody>
+                      <tr><td class="stage">Requests sent</td><td class="num">9</td><td class="rate"><span class="of">Where every rate starts</span></td><td><span class="lbar" role="img" aria-label="Requests sent: 9, drawn against 30" data-tip="Requests sent: 9"><i style="width:72px"></i></span></td></tr>
+                      <tr><td class="stage">Accepted</td><td class="num">2</td><td class="rate">2 of 9 <span class="of">of requests</span></td><td><span class="lbar" role="img" aria-label="Accepted: 2 of 9" data-tip="Accepted: 2 of 9 requests"><i style="width:16px"></i></span></td></tr>
+                      <tr><td class="stage">Replied</td><td class="num">1</td><td class="rate">1 of 9 <span class="of">of requests</span></td><td><span class="lbar" role="img" aria-label="Replied: 1 of 9" data-tip="Replied: 1 of 9 requests"><i style="width:8px"></i></span></td></tr>
+                      <tr><td class="stage">Referrals</td><td class="num zero">0</td><td class="rate">0 of 1 <span class="of">of replies</span></td><td><span class="lbar is-zero" role="img" aria-label="Referrals: 0"><i></i></span></td></tr>
+                      <tr><td class="stage">Interviews</td><td class="num zero">0</td><td class="rate">0 of 1 <span class="of">of replies</span></td><td><span class="lbar is-zero" role="img" aria-label="Interviews: 0"><i></i></span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="t-sm" style="margin-top:10px">Only 9 requests so far. Rates this small swing a lot, so none are shown.</p>
+                <p class="ledger-scale" style="margin-top:4px">Bars are drawn against 30 requests, the point where rates start, so a small week looks small.</p>
+              </div>
+            </div>
+
+            <!-- Month -->
+            <div id="pm" role="tabpanel" aria-labelledby="tab-m" hidden>
+              <div data-when="enough">
+                <div class="table-wrap">
+                  <table class="ledger">
+                    <thead><tr><th>Stage</th><th class="num">Count</th><th>Rate, with its count</th><th>On one scale</th></tr></thead>
+                    <tbody>
+                      <tr><td class="stage">Requests sent</td><td class="num">52</td><td class="rate"><span class="of">Where every rate starts</span></td><td><span class="lbar" role="img" aria-label="Requests sent: 52, the largest count this month" data-tip="Requests sent: 52"><i style="width:239px"></i></span></td></tr>
+                      <tr><td class="stage">Accepted</td><td class="num">17</td><td class="rate">17 of 52 (33%) <span class="of">of requests</span></td><td><span class="lbar" role="img" aria-label="Accepted: 17 of 52" data-tip="Accepted: 17 of 52 requests"><i style="width:78px"></i></span></td></tr>
+                      <tr><td class="stage">Replied</td><td class="num">4</td><td class="rate">4 of 52 (8%) <span class="of">of requests</span></td><td><span class="lbar" role="img" aria-label="Replied: 4 of 52" data-tip="Replied: 4 of 52 requests"><i style="width:18px"></i></span></td></tr>
+                      <tr><td class="stage">Referrals</td><td class="num">1</td><td class="rate">1 of 4 <span class="of">of replies</span></td><td><span class="lbar" role="img" aria-label="Referrals: 1 of 4 replies" data-tip="Referrals: 1 of 4 replies"><i style="width:5px"></i></span></td></tr>
+                      <tr><td class="stage">Interviews</td><td class="num">2</td><td class="rate">2 of 4 <span class="of">of replies</span></td><td><span class="lbar" role="img" aria-label="Interviews: 2 of 4 replies" data-tip="Interviews: 2 of 4 replies"><i style="width:9px"></i></span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="ledger-scale" style="margin-top:8px">Bars share one scale: 52, this month's largest count.</p>
+              </div>
+              <div data-when="first" hidden>
+                <div class="table-wrap">
+                  <table class="ledger">
+                    <thead><tr><th>Stage</th><th class="num">Count</th><th>Rate, with its count</th><th>On one scale</th></tr></thead>
+                    <tbody>
+                      <tr><td class="stage">Requests sent</td><td class="num">9</td><td class="rate"><span class="of">Where every rate starts</span></td><td><span class="lbar" role="img" aria-label="Requests sent: 9, drawn against 30"><i style="width:72px"></i></span></td></tr>
+                      <tr><td class="stage">Accepted</td><td class="num">2</td><td class="rate">2 of 9 <span class="of">of requests</span></td><td><span class="lbar" role="img" aria-label="Accepted: 2 of 9"><i style="width:16px"></i></span></td></tr>
+                      <tr><td class="stage">Replied</td><td class="num">1</td><td class="rate">1 of 9 <span class="of">of requests</span></td><td><span class="lbar" role="img" aria-label="Replied: 1 of 9"><i style="width:8px"></i></span></td></tr>
+                      <tr><td class="stage">Referrals</td><td class="num zero">0</td><td class="rate">0 of 1 <span class="of">of replies</span></td><td><span class="lbar is-zero" role="img" aria-label="Referrals: 0"><i></i></span></td></tr>
+                      <tr><td class="stage">Interviews</td><td class="num zero">0</td><td class="rate">0 of 1 <span class="of">of replies</span></td><td><span class="lbar is-zero" role="img" aria-label="Interviews: 0"><i></i></span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="t-sm" style="margin-top:10px">Only 9 requests so far. Rates this small swing a lot, so none are shown.</p>
+              </div>
+            </div>
+          </section>
+
+          <section aria-labelledby="effort-h">
+            <h2 class="section-title" id="effort-h" style="margin-top:6px"><span id="effort-period">Your work this week</span></h2>
+            <ul class="ledger-effort small" data-when="enough" data-period="w">
+              <li><b>31</b><span>requests sent</span></li>
+              <li><b>24</b><span>applications sent</span></li>
+              <li><b>12</b><span>emails reviewed</span></li>
+              <li><b>3</b><span>people found for companies with nobody yet</span></li>
+            </ul>
+            <ul class="ledger-effort small" data-when="enough" data-period="m" hidden>
+              <li><b>52</b><span>requests sent</span></li>
+              <li><b>41</b><span>applications sent</span></li>
+              <li><b>20</b><span>emails reviewed</span></li>
+              <li><b>5</b><span>people found for companies with nobody yet</span></li>
+            </ul>
+            <ul class="ledger-effort small" data-when="first" hidden>
+              <li><b>9</b><span>requests sent</span></li>
+              <li><b>7</b><span>applications sent</span></li>
+              <li><b>3</b><span>emails reviewed</span></li>
+            </ul>
+            <p class="t-sm" style="margin-top:16px"><a class="link" href="wins.html">Open the win log</a> <span class="muted">for every referral, interview and interested reply.</span></p>
+          </section>
+        </div>
+
+        <!-- Monthly findings -->
+        <section aria-labelledby="find-h" style="margin-top:36px;max-width:820px">
+          <h2 class="section-title" id="find-h">What the data says<span class="count" data-when="enough">October, reported Nov 2</span></h2>
+          <div data-when="enough" class="stack">
+            <div class="card">
+              <div class="card-body stack-sm">
+                <p style="font-weight:500">Requests to engineers on the team were accepted about twice as often as requests to founders.</p>
+                <table class="ledger" style="max-width:420px">
+                  <tbody>
+                    <tr><td>Engineers on the team</td><td class="num">14 of 33 (42%)</td></tr>
+                    <tr><td>Founders</td><td class="num">5 of 24 (21%)</td></tr>
+                  </tbody>
+                </table>
+                <p class="t-sm"><span class="muted">Changed:</span> the plan now puts an engineer first when a company has both.</p>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-body stack-sm">
+                <p style="font-weight:500">Notes that named the role got replies. Notes that did not name it got none.</p>
+                <table class="ledger" style="max-width:420px">
+                  <tbody>
+                    <tr><td>Role named in the note</td><td class="num">5 of 71 (7%)</td></tr>
+                    <tr><td>Role not named</td><td class="num">0 of 29 (0%)</td></tr>
+                  </tbody>
+                </table>
+                <p class="t-sm muted">Only 5 replies in all, so this can move a lot next month.</p>
+              </div>
+            </div>
+            <details class="passed" style="border:1px solid var(--border);border-radius:var(--radius)">
+              <summary><svg class="i chev" style="color:var(--muted-foreground)"><use href="#chevron"/></svg>Earlier changes <span class="num">2</span></summary>
+              <ul>
+                <li>Oct 5: Notes name the role first, from September's finding on replies.</li>
+                <li>Sep 7: Requests go out before 11:00 their time, from August's acceptance times.</li>
+              </ul>
+            </details>
+          </div>
+          <div data-when="first" hidden>
+            <div class="table-wrap"><div class="empty" style="padding:28px 24px"><svg class="i"><use href="#chart"/></svg><b>The first findings arrive after your first month of outcomes.</b><span>Each month brings one or two plain findings, with their counts and what changed because of them.</span></div></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+
+<template id="page-keys">
+  <h4>Progress</h4>
+  <div><span>Week</span><span class="kbd-row"><span class="kbd">1</span></span></div>
+  <div><span>Month</span><span class="kbd-row"><span class="kbd">2</span></span></div>
+</template>
+<script src="mockup.js"></script>
+<script>
+/* Mockup behaviour for Progress: the period tabs relabel the section; a state button shows the first week. */
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var state = "enough";
+  function period() { return $("tab-m").getAttribute("aria-selected") === "true" ? "m" : "w"; }
+  function sync() {
+    var p = period();
+    $("period-label").textContent = p === "m" ? "This month, Nov 1 to 10" : "This week, Nov 9 to 15";
+    $("effort-period").textContent = p === "m" ? "Your work this month" : "Your work this week";
+    document.querySelectorAll("[data-when]").forEach(function (el) {
+      var on = el.getAttribute("data-when") === state;
+      var per = el.getAttribute("data-period");
+      el.hidden = !on || (per && per !== p);
+    });
+  }
+  document.querySelector('[role="tablist"]').addEventListener("click", function () { setTimeout(sync); });
+  document.querySelectorAll("[data-state]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      state = b.getAttribute("data-state");
+      document.querySelectorAll("[data-state]").forEach(function (x) { x.setAttribute("aria-pressed", x === b); });
+      sync();
+    });
+  });
+  if (/state=first/.test(location.search)) document.querySelector('[data-state="first"]').click();
+  if (/period=month/.test(location.search)) $("tab-m").click();
+})();
+</script>
+</body>
+</html>

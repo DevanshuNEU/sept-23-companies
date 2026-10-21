@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wins | Outreach mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">O</span>Outreach</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today-plan.html" aria-label="Today, 2 of 7 done"><svg class="i"><use href="#today"/></svg>Today<span class="count" aria-hidden="true">2 of 7</span></a>
+      <a class="sb-item" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">7</span></a>
+      <a class="sb-item" href="linkedin.html"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Results">
+      <p class="sb-label">Results</p>
+      <a class="sb-item" href="progress.html"><svg class="i"><use href="#chart"/></svg>Progress</a>
+      <a class="sb-item" href="wins.html" aria-current="page"><svg class="i"><use href="#award"/></svg>Wins</a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company-score.html"><svg class="i"><use href="#building"/></svg>Pylon</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Distyl AI</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Baseten</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">20 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>4 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><b>Wins</b></div>
+      <div class="right">
+        <span class="t-xs muted">Mockup state</span>
+        <span class="seg" role="group" aria-label="Mockup state">
+          <button type="button" aria-pressed="true" data-state="kept">Kept wins</button>
+          <button type="button" aria-pressed="false" data-state="new">One new</button>
+          <button type="button" aria-pressed="false" data-state="empty">No wins yet</button>
+        </span>
+        <span class="vsep"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="page" style="max-width:880px">
+        <div class="page-head" style="align-items:flex-start">
+          <div>
+            <h1 class="t-xl">Wins</h1>
+            <p class="lede">Every referral, interview and interested reply, newest first, with what you sent.</p>
+          </div>
+        </div>
+
+        <div data-when="list">
+          <div class="row-wrap" style="justify-content:space-between;margin-bottom:12px;gap:12px">
+            <p class="t-sm num" id="counts">Since Oct 12: <b style="font-weight:600">2</b> interviews, <b style="font-weight:600">1</b> referral, <b style="font-weight:600">9</b> replies, <b style="font-weight:600">41</b> accepted requests.</p>
+            <span class="tabs" role="tablist" aria-label="Which wins">
+              <button class="tab" role="tab" aria-selected="true" data-filter="all" data-key="1" aria-keyshortcuts="1">All<span class="kbd">1</span></button>
+              <button class="tab" role="tab" aria-selected="false" data-filter="big" data-key="2" aria-keyshortcuts="2">Referrals and interviews<span class="kbd">2</span></button>
+            </span>
+          </div>
+
+          <div class="table-wrap">
+            <ul class="list" id="wins">
+              <li class="group-head" data-month><div class="ob-ghead" style="border-bottom:1px solid var(--border)">November</div></li>
+
+              <li class="list-row" style="grid-template-columns:64px minmax(0,1fr) auto;align-items:start;padding:14px 16px;box-shadow:inset 2px 0 0 var(--ok-dot)" data-kind="reply" data-new hidden>
+                <span class="t-sm muted num">Today</span>
+                <span class="stack-sm" style="gap:4px">
+                  <span><b style="font-weight:500">Ravi Iyer at <a class="link" href="company.html">Railway</a> replied: Interested.</b></span>
+                  <span class="t-sm muted">Staff Engineer. For Software Engineer, Platform. Logged at 10:02.</span>
+                  <details class="passed" style="margin-left:-12px"><summary style="padding:4px 12px"><svg class="i i-sm" style="color:var(--muted-foreground)"><use href="#chevron"/></svg>What you sent</summary>
+                    <p class="quote" style="margin:4px 12px 4px 12px">Hi Ravi, I read Railway's post on the new build pipeline. I'm a new grad engineer and built OpenCodeIntel, code search for AI agents. I'm applying for Software Engineer, Platform.<br><span class="t-xs">LinkedIn note, Nov 2</span></p></details>
+                </span>
+                <span class="row"><span class="badge badge-solid">New</span><span class="badge s-ok"><span class="dot"></span>Replied</span></span>
+              </li>
+
+              <li class="list-row" style="grid-template-columns:64px minmax(0,1fr) auto;align-items:start;padding:14px 16px" data-kind="interview">
+                <span class="t-sm muted num">Nov 6</span>
+                <span class="stack-sm" style="gap:4px">
+                  <span><b style="font-weight:500"><a class="link" href="company.html">Distyl AI</a> invited you to interview.</b></span>
+                  <span class="t-sm muted">Maya Chen, Engineering Manager. For Software Engineer, New Grad.</span>
+                  <details class="passed" style="margin-left:-12px"><summary style="padding:4px 12px"><svg class="i i-sm" style="color:var(--muted-foreground)"><use href="#chevron"/></svg>What you sent</summary>
+                    <p class="quote" style="margin:4px 12px">Hi Maya, I read Distyl's write-up on evaluating agents in production. I built Overhear, which grades voice agent calls with code checks and an LLM judge. I'm applying for Software Engineer, New Grad.<br><span class="t-xs">Email, Oct 27, then a reply from Maya on Oct 30</span></p></details>
+                </span>
+                <span class="badge s-ok"><span class="dot"></span>Interview</span>
+              </li>
+
+              <li class="list-row" style="grid-template-columns:64px minmax(0,1fr) auto;align-items:start;padding:14px 16px" data-kind="reply">
+                <span class="t-sm muted num">Nov 4</span>
+                <span class="stack-sm" style="gap:4px">
+                  <span><b style="font-weight:500">Arjun Mehta at <a class="link" href="company.html">Graphite</a> replied: Interested.</b></span>
+                  <span class="t-sm muted">Software Engineer. For Software Engineer I.</span>
+                  <details class="passed" style="margin-left:-12px"><summary style="padding:4px 12px"><svg class="i i-sm" style="color:var(--muted-foreground)"><use href="#chevron"/></svg>What you sent</summary>
+                    <p class="quote" style="margin:4px 12px">Hi Arjun, I saw Graphite's stacked diffs talk. I built OpenCodeIntel, code search for AI coding agents, and I'm applying for Software Engineer I.<br><span class="t-xs">LinkedIn note, Oct 31</span></p></details>
+                </span>
+                <span class="badge s-ok"><span class="dot"></span>Replied</span>
+              </li>
+
+              <li class="list-row" style="grid-template-columns:64px minmax(0,1fr) auto;align-items:start;padding:14px 16px" data-kind="referral">
+                <span class="t-sm muted num">Nov 2</span>
+                <span class="stack-sm" style="gap:4px">
+                  <span><b style="font-weight:500">Sofia Alvarez referred you at <a class="link" href="company.html">Baseten</a>.</b></span>
+                  <span class="t-sm muted">Forward Deployed Engineer. For Forward Deployed Engineer, New Grad.</span>
+                  <details class="passed" style="margin-left:-12px"><summary style="padding:4px 12px"><svg class="i i-sm" style="color:var(--muted-foreground)"><use href="#chevron"/></svg>What you sent</summary>
+                    <p class="quote" style="margin:4px 12px">Hi Sofia, your talk on deploying models for customers is the job I want. I'm a new grad who built a 12-tool MCP server and I'm applying for Forward Deployed Engineer, New Grad.<br><span class="t-xs">LinkedIn note, Oct 24, then a message on Oct 28</span></p></details>
+                </span>
+                <span class="badge s-ok"><span class="dot"></span>Referral</span>
+              </li>
+
+              <li class="group-head" data-month><div class="ob-ghead" style="border-bottom:1px solid var(--border);border-top:1px solid var(--border)">October</div></li>
+
+              <li class="list-row" style="grid-template-columns:64px minmax(0,1fr) auto;align-items:start;padding:14px 16px" data-kind="interview">
+                <span class="t-sm muted num">Oct 29</span>
+                <span class="stack-sm" style="gap:4px">
+                  <span><b style="font-weight:500"><a class="link" href="company.html">Crusoe</a> invited you to interview.</b></span>
+                  <span class="t-sm muted">Daniel Osei, Software Engineer. For Software Engineer, Cloud Platform.</span>
+                  <details class="passed" style="margin-left:-12px"><summary style="padding:4px 12px"><svg class="i i-sm" style="color:var(--muted-foreground)"><use href="#chevron"/></svg>What you sent</summary>
+                    <p class="quote" style="margin:4px 12px">Hi Daniel, I taught AWS and Terraform to 100+ graduate students and wrote a CI/CD lab that three course sections adopted. I'm applying for Software Engineer, Cloud Platform.<br><span class="t-xs">Email, Oct 19</span></p></details>
+                </span>
+                <span class="badge s-ok"><span class="dot"></span>Interview</span>
+              </li>
+
+              <li class="list-row" style="grid-template-columns:64px minmax(0,1fr) auto;align-items:start;padding:14px 16px" data-kind="reply">
+                <span class="t-sm muted num">Oct 22</span>
+                <span class="stack-sm" style="gap:4px">
+                  <span><b style="font-weight:500">Hannah Kim at <a class="link" href="company.html">Resend</a> replied: Interested.</b></span>
+                  <span class="t-sm muted">Engineering Manager. For Software Engineer, New Grad.</span>
+                  <details class="passed" style="margin-left:-12px"><summary style="padding:4px 12px"><svg class="i i-sm" style="color:var(--muted-foreground)"><use href="#chevron"/></svg>What you sent</summary>
+                    <p class="quote" style="margin:4px 12px">Hi Hannah, I read Resend's post on email deliverability. I'm a new grad engineer and built OpenCodeIntel, code search for AI agents. I'm applying for Software Engineer, New Grad.<br><span class="t-xs">LinkedIn note, Oct 20</span></p></details>
+                </span>
+                <span class="badge s-ok"><span class="dot"></span>Replied</span>
+              </li>
+
+              <li class="list-row" style="grid-template-columns:64px minmax(0,1fr) auto;align-items:start;padding:14px 16px" data-kind="reply">
+                <span class="t-sm muted num">Oct 15</span>
+                <span class="stack-sm" style="gap:4px">
+                  <span><b style="font-weight:500">Leo Brandt at <a class="link" href="company.html">Warp</a> replied: Interested.</b></span>
+                  <span class="t-sm muted">Software Engineer. For Software Engineer I.</span>
+                  <details class="passed" style="margin-left:-12px"><summary style="padding:4px 12px"><svg class="i i-sm" style="color:var(--muted-foreground)"><use href="#chevron"/></svg>What you sent</summary>
+                    <p class="quote" style="margin:4px 12px">Hi Leo, Warp's agent mode is close to what I build. I made OpenCodeIntel, code search for AI coding agents, and I'm applying for Software Engineer I.<br><span class="t-xs">LinkedIn note, Oct 13</span></p></details>
+                </span>
+                <span class="badge s-ok"><span class="dot"></span>Replied</span>
+              </li>
+            </ul>
+          </div>
+          <p class="t-xs muted" style="margin-top:10px">The log keeps referrals, interviews, offers and replies you marked Interested. Accepted requests and other replies get the moment on Today and count on Progress.</p>
+        </div>
+
+        <div data-when="empty" hidden>
+          <div class="table-wrap"><div class="empty"><svg class="i"><use href="#award"/></svg><b>No wins yet</b><span>Referrals, interviews and interested replies land here the moment you log them, with what you sent.</span></div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<template id="page-keys">
+  <h4>Wins</h4>
+  <div><span>All</span><span class="kbd-row"><span class="kbd">1</span></span></div>
+  <div><span>Referrals and interviews</span><span class="kbd-row"><span class="kbd">2</span></span></div>
+</template>
+<script src="mockup.js"></script>
+<script>
+/* Mockup behaviour for the win log: the toggle filters, a state shows a new win or the empty page. */
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var filter = "all", state = "kept";
+  function sync() {
+    document.querySelectorAll("[data-when]").forEach(function (el) { el.hidden = el.getAttribute("data-when") !== (state === "empty" ? "empty" : "list"); });
+    document.querySelectorAll("#wins [data-kind]").forEach(function (li) {
+      var k = li.getAttribute("data-kind");
+      li.hidden = (filter === "big" && k === "reply") || (li.hasAttribute("data-new") && state !== "new");
+    });
+    $("counts").innerHTML = 'Since Oct 12: <b style="font-weight:600">2</b> interviews, <b style="font-weight:600">1</b> referral, <b style="font-weight:600">' + (state === "new" ? 10 : 9) + '</b> replies, <b style="font-weight:600">41</b> accepted requests.';
+  }
+  document.querySelectorAll("[data-filter]").forEach(function (b) { b.addEventListener("click", function () { filter = b.getAttribute("data-filter"); sync(); }); });
+  document.querySelectorAll("[data-state]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      state = b.getAttribute("data-state");
+      document.querySelectorAll("[data-state]").forEach(function (x) { x.setAttribute("aria-pressed", x === b); });
+      sync();
+    });
+  });
+  var m = /state=(new|empty)/.exec(location.search); if (m) document.querySelector('[data-state="' + m[1] + '"]').click();
+})();
+</script>
+</body>
+</html>

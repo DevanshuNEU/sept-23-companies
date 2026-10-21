@@ -42,7 +42,10 @@
     undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
     keyboard: '<path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10M8 12h.01"/><rect x="2" y="4" width="20" height="16" rx="2"/>',
     help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/>',
-    plus: '<path d="M5 12h14M12 5v14"/>'
+    plus: '<path d="M5 12h14M12 5v14"/>',
+    chart: '<path d="M5 21v-6M12 21V3M19 21V9"/>',
+    award: '<path d="m15.477 12.89 1.515 8.526a.5.5 0 0 1-.81.47l-3.58-2.687a1 1 0 0 0-1.197 0l-3.586 2.686a.5.5 0 0 1-.81-.469l1.514-8.526"/><circle cx="12" cy="8" r="6"/>',
+    flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>'
   };
   var sprite = '<svg xmlns="http://www.w3.org/2000/svg" style="display:none">' +
     Object.keys(P).map(function (k) { return '<symbol id="' + k + '" viewBox="0 0 24 24">' + P[k] + '</symbol>'; }).join("") + "</svg>";
@@ -78,6 +81,7 @@
     toaster.appendChild(t);
     setTimeout(function () { t.remove(); }, undo ? 8000 : 3000);
   }
+  window.mockToast = toast; /* #33 pages script their own one-key flows on top of this */
   document.addEventListener("click", function (e) {
     var b = e.target.closest("[data-toast]");
     if (b) toast(b.getAttribute("data-toast"), b.hasAttribute("data-undo"));
@@ -120,7 +124,8 @@
   /* ---------- command palette ---------- */
   var pages = [
     ["Today", "today.html", "today", "G T"], ["Outbox", "outbox.html", "outbox", "G O"], ["LinkedIn list", "linkedin.html", "linkedin", "G L"],
-    ["Needs you", "needs-you.html", "alert", "G N"], ["No-go list", "no-go.html", "ban", "G X"], ["Done companies", "done.html", "done", "G D"]
+    ["Needs you", "needs-you.html", "alert", "G N"], ["No-go list", "no-go.html", "ban", "G X"], ["Done companies", "done.html", "done", "G D"],
+    ["Today as a plan", "today-plan.html", "flag", ""], ["Progress", "progress.html", "chart", "G P"], ["Wins", "wins.html", "award", "G W"]
   ];
   var companies = [
     ["Browserbase", "Held: reply from Priya Natarajan"], ["Mintlify", "Emailing, day 2 of 3"], ["Resend", "Picked today"],
@@ -154,7 +159,7 @@
     };
     grp("Companies", companies, function (x, i) { return '<a class="cmd-item" role="option" href="company.html" aria-selected="' + (i === sel) + '">' + icon("building") + "<span>" + x[0] + '</span><span class="sub">' + x[1] + "</span></a>"; });
     grp("People", people, function (x, i) { return '<a class="cmd-item" role="option" href="company.html" aria-selected="' + (i === sel) + '">' + icon("user") + "<span>" + x[0] + '</span><span class="sub">' + x[1] + "</span></a>"; });
-    grp("Go to", pages, function (x, i) { return '<a class="cmd-item" role="option" href="' + x[1] + '" aria-selected="' + (i === sel) + '">' + icon(x[2]) + "<span>" + x[0] + '</span><span class="kbd-row">' + x[3].split(" ").map(function (k) { return '<span class="kbd">' + k + "</span>"; }).join("") + "</span></a>"; });
+    grp("Go to", pages, function (x, i) { return '<a class="cmd-item" role="option" href="' + x[1] + '" aria-selected="' + (i === sel) + '">' + icon(x[2]) + "<span>" + x[0] + '</span><span class="kbd-row">' + x[3].split(" ").filter(Boolean).map(function (k) { return '<span class="kbd">' + k + "</span>"; }).join("") + "</span></a>"; });
     grp("Actions", actions, function (x, i) { return '<a class="cmd-item" role="option" href="#" data-cmd="' + x[0] + '" aria-selected="' + (i === sel) + '">' + icon(x[2]) + "<span>" + x[0] + '</span><span class="sub">' + x[1] + "</span></a>"; });
     list.innerHTML = html || '<div class="cmd-empty">Nothing matches. Try a company, a person or a view name.</div>';
   }
@@ -185,7 +190,7 @@
     '<div class="row"><h2 class="t-lg">Keyboard shortcuts</h2><button class="btn btn-ghost btn-icon btn-sm" style="margin-left:auto" data-close aria-label="Close">' + icon("x") + "</button></div>" +
     '<div class="keys-grid"><h4>Everywhere</h4>' +
     [["Search and commands", "⌘ K"], ["Search", "/"], ["Today", "G T"], ["Outbox", "G O"], ["LinkedIn list", "G L"], ["Needs you", "G N"],
-     ["No-go list", "G X"], ["Done companies", "G D"], ["Move down, up", "J K"], ["Open", "Enter"], ["Undo last action", "Z"],
+     ["No-go list", "G X"], ["Done companies", "G D"], ["Progress", "G P"], ["Wins", "G W"], ["Move down, up", "J K"], ["Open", "Enter"], ["Undo last action", "Z"],
      ["Close, go back", "Esc"], ["This sheet", "?"], ["Toggle sidebar", "⌘ B"]].map(function (k) {
       return "<div><span>" + k[0] + '</span><span class="kbd-row">' + k[1].split(" ").map(function (x) { return '<span class="kbd">' + x + "</span>"; }).join("") + "</span></div>";
     }).join("") + (tpl ? tpl.innerHTML : "") + "</div></div></div>";
@@ -202,7 +207,7 @@
 
   /* ---------- global keys ---------- */
   var chord = false, chordT = 0;
-  var go = { t: "today.html", o: "outbox.html", l: "linkedin.html", n: "needs-you.html", x: "no-go.html", d: "done.html", c: "company.html" };
+  var go = { t: "today.html", o: "outbox.html", l: "linkedin.html", n: "needs-you.html", x: "no-go.html", d: "done.html", c: "company.html", p: "progress.html", w: "wins.html" };
   document.addEventListener("keydown", function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); ov.hidden ? openCmd() : closeAll(); return; }
     if (e.key === "Escape") { closeAll(); return; }
@@ -214,6 +219,11 @@
     if (k === "g") { chord = true; chordT = setTimeout(function () { chord = false; }, 900); return; }
     if (k === "/") { e.preventDefault(); openCmd(); return; }
     if (k === "?") { openKeys(); return; }
+    /* any visible [data-key] control answers its key (#33 pages: one key per step) */
+    var keyed = Array.prototype.slice.call(document.querySelectorAll("[data-key]")).filter(function (b) {
+      return b.getAttribute("data-key") === k && b.offsetParent !== null && b.getAttribute("aria-disabled") !== "true";
+    });
+    if (keyed.length) { e.preventDefault(); keyed[0].click(); return; }
     var rs = rows(); if (!rs.length) return;
     var i = rs.findIndex(function (r) { return r.classList.contains("is-active"); });
     if (k === "j" || k === "ArrowDown") { e.preventDefault(); activate(rs[Math.min(rs.length - 1, i + 1)]); }

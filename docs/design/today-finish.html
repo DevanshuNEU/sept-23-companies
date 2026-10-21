@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Today, done | Outreach mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">O</span>Outreach</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today-plan.html" aria-current="page" id="sb-today" aria-label="Today, 7 of 7 done"><svg class="i"><use href="#today"/></svg>Today<span class="count" id="sb-today-count" aria-hidden="true">7 of 7</span></a>
+      <a class="sb-item" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">5</span></a>
+      <a class="sb-item" href="linkedin.html"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Results">
+      <p class="sb-label">Results</p>
+      <a class="sb-item" href="progress.html"><svg class="i"><use href="#chart"/></svg>Progress</a>
+      <a class="sb-item" href="wins.html"><svg class="i"><use href="#award"/></svg>Wins</a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Mintlify</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Turso</a>
+      <a class="sb-item sub" href="company-score.html"><svg class="i"><use href="#building"/></svg>Pylon</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">22 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>4 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><b>Today</b></div>
+      <div class="right">
+        <span class="t-xs muted">Mockup state</span>
+        <span class="seg" role="group" aria-label="Mockup state">
+          <button type="button" aria-pressed="true" data-state="all">All done</button>
+          <button type="button" aria-pressed="false" data-state="carried">One carried over</button>
+        </span>
+        <span class="vsep"></span>
+        <span class="t-xs muted">Plan built at 08:00</span>
+        <span class="vsep"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <div class="page-head" style="padding:20px 24px 16px;margin:0;border-bottom:1px solid var(--border)">
+      <div>
+        <h1 class="sr-only">Today</h1>
+        <h2 class="t-xl">Tuesday, November 10</h2>
+        <p class="lede num" id="plan-count">7 people, 7 done</p>
+      </div>
+      <div class="actions t-sm"><span class="muted">Requests this month</span><b class="num" style="font-weight:600" id="month-used">56</b><span class="muted">of 150</span></div>
+    </div>
+
+    <div class="rail-split">
+      <div class="rail-col">
+        <div class="rail" role="listbox" aria-label="Today's people">
+          <div class="rail-opt is-done" role="option" aria-selected="false" data-row data-href="company.html" aria-label="1. Dana Whitfield at Resend, Done">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span><span class="rail-who"><b><span class="n">1</span>Dana Whitfield</b><span class="sub">Resend</span></span><span class="rail-word">Done</span></div>
+          <div class="rail-opt is-done" role="option" aria-selected="false" data-row data-href="company.html" aria-label="2. Tomas Reyes at Baseten, Done">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span><span class="rail-who"><b><span class="n">2</span>Tomas Reyes</b><span class="sub">Baseten</span></span><span class="rail-word">Done</span></div>
+          <div class="rail-opt is-done" role="option" aria-selected="false" data-row data-href="company-score.html" aria-label="3. Lena Ortiz at Pylon, Done">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span><span class="rail-who"><b><span class="n">3</span>Lena Ortiz</b><span class="sub">Pylon</span></span><span class="rail-word">Done</span></div>
+          <div class="rail-opt is-done" role="option" aria-selected="false" data-row data-href="company.html" aria-label="4. Jonah Park at Inngest, Done">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span><span class="rail-who"><b><span class="n">4</span>Jonah Park</b><span class="sub">Inngest</span></span><span class="rail-word">Done</span></div>
+          <div class="rail-opt is-done" role="option" aria-selected="false" data-row data-href="company.html" aria-label="5. Wen Zhao at Cerebrium, Done">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span><span class="rail-who"><b><span class="n">5</span>Wen Zhao</b><span class="sub">Cerebrium. Found today</span></span><span class="rail-word">Done</span></div>
+          <div class="rail-opt is-done" role="option" aria-selected="false" data-row data-href="company.html" aria-label="6. Ines Duarte at Turso, Done" id="r6">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span><span class="rail-who"><b><span class="n">6</span>Ines Duarte</b><span class="sub">Turso</span></span><span class="rail-word">Done</span></div>
+          <div class="rail-opt is-done" role="option" aria-selected="false" data-row data-href="company.html" aria-label="7. Mintlify by email, Done">
+            <span class="rail-node"><svg class="i"><use href="#check"/></svg></span><span class="rail-who"><b><span class="n">7</span>Mintlify</b><span class="sub">By email, reviewed</span></span><span class="rail-word">Done</span></div>
+        </div>
+        <div class="rail">
+          <div class="rail-opt rail-finish is-done is-active" aria-current="step" aria-label="Done for today. Tomorrow: 7 people">
+            <span class="rail-node"><svg class="i"><use href="#flag"/></svg></span>
+            <span class="rail-who"><b>Done for today</b><span class="sub">Tomorrow: 7 people</span></span><span></span>
+          </div>
+        </div>
+        <div class="stack-sm" style="margin:24px 12px 0"><a class="link t-xs muted" href="today.html" style="justify-self:start;margin-left:10px">All proposed companies</a></div>
+      </div>
+
+      <section class="work" aria-label="Finish">
+        <p class="sr-only" role="status" id="live">All 7 done for today.</p>
+        <div class="work-inner" style="gap:24px">
+          <div class="note" style="padding:24px 24px 20px;display:grid;gap:6px">
+            <div class="row" style="gap:12px">
+              <span class="rail-node" style="width:28px;height:28px;border:0;background:var(--foreground);color:var(--background)"><svg class="i" style="visibility:visible;width:15px;height:15px;stroke-width:2.5"><use href="#flag"/></svg></span>
+              <h2 class="t-2xl" tabindex="-1" id="finish-h">Done for today</h2>
+            </div>
+            <p class="work-reason" id="finish-sub" style="padding-left:40px">All 7 people on today's plan are done. Nothing else is asked of you today.</p>
+          </div>
+
+          <section aria-labelledby="did-h" class="stack-sm">
+            <h3 class="section-title" id="did-h" style="margin:0">What you did</h3>
+            <ul class="ledger-effort" id="did">
+              <li><b id="did-req">6</b><span>requests sent</span></li>
+              <li><b id="did-app">6</b><span>applications sent</span></li>
+              <li><b>1</b><span>email reviewed</span></li>
+            </ul>
+            <ul class="list" style="border-top:1px solid var(--border);margin-top:4px">
+              <li class="list-row" style="grid-template-columns:16px minmax(0,1fr) auto;padding:8px 0"><svg class="i i-sm" aria-hidden="true"><use href="#check"/></svg><span class="t-sm"><b style="font-weight:500">Dana Whitfield</b> at Resend <span class="muted">request and application</span></span><span class="t-xs muted num">9:06</span></li>
+              <li class="list-row" style="grid-template-columns:16px minmax(0,1fr) auto;padding:8px 0"><svg class="i i-sm" aria-hidden="true"><use href="#check"/></svg><span class="t-sm"><b style="font-weight:500">Tomas Reyes</b> at Baseten <span class="muted">request and application</span></span><span class="t-xs muted num">9:24</span></li>
+              <li class="list-row" style="grid-template-columns:16px minmax(0,1fr) auto;padding:8px 0"><svg class="i i-sm" aria-hidden="true"><use href="#check"/></svg><span class="t-sm"><b style="font-weight:500">Lena Ortiz</b> at Pylon <span class="muted">request and application</span></span><span class="t-xs muted num">10:18</span></li>
+              <li class="list-row" style="grid-template-columns:16px minmax(0,1fr) auto;padding:8px 0"><svg class="i i-sm" aria-hidden="true"><use href="#check"/></svg><span class="t-sm"><b style="font-weight:500">Jonah Park</b> at Inngest <span class="muted">your line, request and application</span></span><span class="t-xs muted num">10:31</span></li>
+              <li class="list-row" style="grid-template-columns:16px minmax(0,1fr) auto;padding:8px 0"><svg class="i i-sm" aria-hidden="true"><use href="#check"/></svg><span class="t-sm"><b style="font-weight:500">Wen Zhao</b> at Cerebrium <span class="muted">found today, request and application</span></span><span class="t-xs muted num">10:52</span></li>
+              <li class="list-row" style="grid-template-columns:16px minmax(0,1fr) auto;padding:8px 0" id="did-ines"><svg class="i i-sm" aria-hidden="true"><use href="#check"/></svg><span class="t-sm"><b style="font-weight:500">Ines Duarte</b> at Turso <span class="muted">request and application</span></span><span class="t-xs muted num">11:05</span></li>
+              <li class="list-row" style="grid-template-columns:16px minmax(0,1fr) auto;padding:8px 0"><svg class="i i-sm" aria-hidden="true"><use href="#check"/></svg><span class="t-sm"><b style="font-weight:500">Mintlify</b> <span class="muted">2 emails reviewed in the Outbox</span></span><span class="t-xs muted num">11:12</span></li>
+            </ul>
+          </section>
+
+          <section aria-labelledby="carry-h" class="stack-sm" id="carried" hidden>
+            <h3 class="section-title" id="carry-h" style="margin:0">Carried to tomorrow</h3>
+            <p class="t-sm"><b style="font-weight:500">Ines Duarte</b> at Turso. <span class="muted">She is first on tomorrow's plan, with her note as you left it.</span></p>
+          </section>
+
+          <section aria-labelledby="tom-h" class="stack-sm">
+            <h3 class="section-title" id="tom-h" style="margin:0">Tomorrow, Wednesday</h3>
+            <p class="t-sm muted">7 people. The plan is built at 08:00.</p>
+            <ol class="t-sm" style="display:grid;gap:6px">
+              <li class="row" id="tom-ines" hidden><span class="muted num" style="width:16px">1</span><span><b style="font-weight:500">Ines Duarte</b> at Turso, Software Engineering Intern <span class="muted">carried over</span></span></li>
+              <li class="row"><span class="muted num" style="width:16px" data-n>1</span><span><b style="font-weight:500">Priya Raman</b> at Warp, Software Engineer I</span></li>
+              <li class="row"><span class="muted num" style="width:16px" data-n>2</span><span><b style="font-weight:500">Find someone</b> at Hex, Software Engineer, New Grad</span></li>
+              <li class="row" id="tom-3"><span class="muted num" style="width:16px" data-n>3</span><span><b style="font-weight:500">Lucia Romero</b> at Railway, Software Engineer, Platform</span></li>
+            </ol>
+            <p class="t-sm muted" style="padding-left:24px">and 4 more</p>
+          </section>
+
+          <section aria-labelledby="week-h" class="stack-sm" style="padding-top:16px;border-top:1px solid var(--border)">
+            <h3 class="section-title" id="week-h" style="margin:0">This week so far</h3>
+            <p class="t-sm num" id="week-line">35 requests, 9 accepted, 2 replies.</p>
+            <a class="link t-sm" href="progress.html" style="justify-self:start">Open Progress</a>
+          </section>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<template id="page-keys">
+  <h4>Today</h4>
+  <div><span>Move through the day</span><span class="kbd-row"><span class="kbd">J</span><span class="kbd">K</span></span></div>
+  <div><span>Open the company</span><span class="kbd-row"><span class="kbd">Enter</span></span></div>
+  <div><span>Progress</span><span class="kbd-row"><span class="kbd">G</span><span class="kbd">P</span></span></div>
+</template>
+<script src="mockup.js"></script>
+<script>
+/* Mockup behaviour for the finish line: focus lands on the heading, one state carries a row over. */
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  $("finish-h").focus();
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest('a[target="_blank"]'); if (a) { e.preventDefault(); window.mockToast("Opens in a new tab: " + a.hostname + "."); }
+  });
+  function setState(s) {
+    var c = s === "carried";
+    document.querySelectorAll("[data-state]").forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-state") === s); });
+    var r = $("r6");
+    r.classList.toggle("is-done", !c); r.classList.toggle("is-carried", c);
+    r.querySelector(".rail-word").textContent = c ? "Carried over" : "Done";
+    r.setAttribute("aria-label", "6. Ines Duarte at Turso, " + (c ? "Carried over" : "Done"));
+    $("plan-count").textContent = c ? "7 people, 6 done, 1 carried over" : "7 people, 7 done";
+    $("sb-today-count").textContent = c ? "6 of 7" : "7 of 7";
+    $("sb-today").setAttribute("aria-label", "Today, " + (c ? "6" : "7") + " of 7 done");
+    $("finish-sub").textContent = c ? "6 of 7 done. Ines Duarte carries to tomorrow, so nothing else is asked of you today." : "All 7 people on today's plan are done. Nothing else is asked of you today.";
+    $("live").textContent = c ? "Done for today. 6 of 7 done, 1 carried to tomorrow." : "All 7 done for today.";
+    $("did-req").textContent = c ? "5" : "6"; $("did-app").textContent = c ? "5" : "6";
+    $("did-ines").hidden = c; $("carried").hidden = !c; $("tom-ines").hidden = !c; $("tom-3").hidden = c;
+    document.querySelectorAll("[data-n]").forEach(function (n, i) { n.textContent = c ? i + 2 : i + 1; });
+    $("week-line").textContent = c ? "34 requests, 9 accepted, 2 replies." : "35 requests, 9 accepted, 2 replies.";
+    $("month-used").textContent = c ? "55" : "56";
+    $("finish-h").focus();
+  }
+  document.querySelectorAll("[data-state]").forEach(function (b) { b.addEventListener("click", function () { setState(b.getAttribute("data-state")); }); });
+  if (/state=carried/.test(location.search)) setState("carried");
+})();
+</script>
+</body>
+</html>

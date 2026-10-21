@@ -457,3 +457,7 @@ What the other streams call and where the boundaries sit.
 6. **Starting numbers as proposed** (02:30 run, 20 per batch, 400 and 25 batches a night, 3 attempts, 30-minute
    leases, top 200 companies, 500-character minimum body), all in config.
 7. **`promoted_version` lives in `config.toml`,** so promoting a reader is a reviewed commit.
+8. **Pay from the body:** when a verified reading has a `pay` value and `posting.pay` is empty, `apply_reading`
+   writes it to `posting.pay`, so ranking's pay-level signal sees pay stated only in the body (#6 open question 3).
+9. **Queue order skips final hides:** tier 2 ("lane 1 at top companies") counts only companies whose stored
+   `company_score.lanes` is non-empty and whose decision is not a final hide (#6 open question 6).

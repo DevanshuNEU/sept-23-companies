@@ -84,7 +84,7 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
   - `evidence.fact` adds `'lca'`, `'cap_exempt'`, `'staffing_risk'`, `'funding'`, `'headcount'`.
     `evidence.source_kind` adds `'stapply'`, `'commoncrawl'`, `'hn'`, `'simplify'`.
     CHECKs: `fact='lca'` stores JSON in `value` (`json_valid(value)`) with keys `fy`, `software`, `jr`, `level1`,
-    `newemp_jr`; `fact='cap_exempt'` value in `('likely','confirmed','no')`; `fact='staffing_risk'` value in
+    `newemp_jr` and optional `median_jr_wage` (USD per year); `fact='cap_exempt'` value in `('likely','confirmed','no')`; `fact='staffing_risk'` value in
     `('low','medium','high')`; `fact='funding'` value is JSON with `filed_on`, `amount_usd` (nullable), `kind`;
     `fact='headcount'` uses `num_low`/`num_high` like size.
   - New table `source(source_name TEXT PRIMARY KEY, version TEXT NOT NULL, last_run_id INTEGER REFERENCES job_run)`.
@@ -108,6 +108,8 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
     and reply to them.
   - Indexes: `evidence_domain ON evidence(value) WHERE fact = 'domain'` (identity lookups by domain) and
     `company_source_ref ON company_source(source_name, source_ref)`.
+  - `outreach/rules/rebuild.py`: `_stored_decision` becomes public `stored_decision` (ranking and the reader both
+    read it).
   - `event.actor` adds `'source'` and `'reader'`; `record_evidence` gains an `actor` keyword (default `'rules'`), so
     LCA, HN and Form D evidence is labeled by its source.
   - `outreach/rules/facts.py` `FACTS` and `SOURCE_KINDS` widen to the new evidence values above, so `EvidenceDraft`

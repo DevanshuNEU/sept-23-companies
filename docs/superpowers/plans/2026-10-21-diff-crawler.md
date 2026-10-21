@@ -30,7 +30,8 @@
    with the reason "careers page unreadable", once per evidence key.
 8. **First read of a board created from a name-only match** (#31 ruling 3): if the board's org name differs from
    the company's names, or a company with 25 LCAs or fewer has a board listing over 300 jobs, raise a `flagged`
-   review item "board match doubtful" and set evidence so ranking ignores the board until he confirms.
+   review item whose reason starts with "board match doubtful" (assert that prefix in the test). No evidence
+   row: ranking reads the open review item and ignores the board until he confirms.
 
 ## Global Constraints
 

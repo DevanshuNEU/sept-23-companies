@@ -959,6 +959,17 @@ class SchemaTest(unittest.TestCase):
             insert(self.db, "evidence", {**funding, "value": json.dumps(
                 {"amount_usd": amount, "filed_on": "2026-08-14", "kind": "form_d"})})
 
+    def test_evidence_domain_must_be_a_bare_lower_case_host(self):
+        base = {**self.base_row("evidence"), "num_low": None, "num_high": None, "fact": "domain"}
+        for value in ("acme.com", "careers.acme.co.uk", "acme-2.io"):
+            with self.subTest(value=value):
+                insert(self.db, "evidence", {**base, "value": value})
+        for value in ("https://acme.com", "acme.com/careers", "acme.com/", "acme.com:8080", "http:acme.com",
+                      "acme .com", "acme.com ", "\tacme.com", "acme.com\n", "acme\u00a0.com",
+                      ".acme.com", "acme.com.", "a@acme.com", "Acme.com", "acme", ""):
+            with self.subTest(value=value):
+                self.assert_row_refused("evidence", {**base, "value": value}, "CHECK")
+
     def test_evidence_takes_the_pipeline_facts_and_sources(self):
         base = {**self.base_row("evidence"), "num_low": None, "num_high": None}
         good = [("cap_exempt", v) for v in ("likely", "confirmed", "no")] + \

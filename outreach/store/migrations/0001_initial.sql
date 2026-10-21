@@ -273,7 +273,10 @@ CREATE TABLE evidence (
   CHECK (fact <> 'sponsorship' OR value IN ('yes','no','opt_only','unclear')),
   CHECK (fact <> 'stage' OR value IN ('pre_seed','seed','series_a','series_b','series_c','series_d',
                                       'series_e_plus','late_private','public','yc','early')),
-  CHECK (fact <> 'domain' OR (value = lower(value) AND value NOT LIKE '%@%' AND value LIKE '%_._%')),
+  -- A domain is a bare lower-case host (same rule as Candidate.domain): no @, slash, colon (so no scheme or port),
+  -- whitespace (tab, newline, space, no-break space) or leading or trailing dot.
+  CHECK (fact <> 'domain' OR (value = lower(value) AND value LIKE '%_._%' AND value NOT LIKE '.%'
+                              AND value NOT LIKE '%.' AND value NOT GLOB ('*[@/:' || char(9,10,11,12,13,32,160) || ']*'))),
   CHECK (fact <> 'everify' OR (value IN ('enrolled','not_enrolled') AND observed_on IS NOT NULL)),
   -- One fiscal year of LCA filings (#31): {"fy","software","jr","level1","newemp_jr"} as integers, plus
   -- "median_jr_wage" (USD a year) when known. json_type() raises on text that is not JSON, so CASE tests that

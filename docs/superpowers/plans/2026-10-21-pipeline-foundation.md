@@ -58,6 +58,7 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
 | `outreach/crawl/__init__.py`, `outreach/crawl/base.py` | Create: `Validators`, `JobRef`, `ReadResult`, `Adapter` Protocol |
 | `outreach/reader/__init__.py`, `outreach/reader/types.py` | Create: reading schema constants, `ReadRequest`, `FieldReading`, `PostingReading` |
 | `outreach/ranking/__init__.py`, `outreach/ranking/types.py` | Create: `CompanyFacts`, `SignalValue`, `Signal` Protocol |
+| `outreach/rules/facts.py`, `outreach/rules/rebuild.py` | Modify: widen `FACTS` and `SOURCE_KINDS`; `record_evidence(..., actor='rules')` |
 | `outreach/store/writes.py` | Modify: `add_alias`, `mark_shared_key`, `log_touch` |
 | `tests/test_store_schema.py` | Modify: schema tests for Task 1 |
 | `tests/test_contracts.py` | Create: contract validation tests |
@@ -98,6 +99,20 @@ typed modules (dataclasses and Protocols) with no behavior beyond validation, on
   - New table `posting_reading(posting_id, body_sha256, reader_version, read_at, fields TEXT CHECK (json_valid(fields)),
     verified INTEGER CHECK (verified IN (0,1)), refused_fields TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (posting_id,
     body_sha256, reader_version))`. `fields` is the `PostingReading.to_json()` of Task 3.
+  - New table `work_tier(company_id INTEGER PRIMARY KEY REFERENCES company, tier INTEGER NOT NULL CHECK (tier IN
+    (1,2,3)), promoted INTEGER NOT NULL DEFAULT 0 CHECK (promoted IN (0,1)), reason TEXT NOT NULL, set_at)`: which
+    companies get board finding first (#31 design 5.1); tier 3 is staffing-flagged, worked only when promoted.
+  - New table `company_post(post_id INTEGER PRIMARY KEY, company_id REFERENCES company, source_name REFERENCES
+    source, url TEXT NOT NULL, posted_at, text TEXT NOT NULL DEFAULT '', asks_email INTEGER NOT NULL DEFAULT 0
+    CHECK (asks_email IN (0,1)), UNIQUE (source_name, url))`: HN and similar posts, kept so the people plan can link
+    and reply to them.
+  - Indexes: `evidence_domain ON evidence(value) WHERE fact = 'domain'` (identity lookups by domain) and
+    `company_source_ref ON company_source(source_name, source_ref)`.
+  - `event.actor` adds `'source'` and `'reader'`; `record_evidence` gains an `actor` keyword (default `'rules'`), so
+    LCA, HN and Form D evidence is labeled by its source.
+  - `outreach/rules/facts.py` `FACTS` and `SOURCE_KINDS` widen to the new evidence values above, so `EvidenceDraft`
+    accepts them. This changes `ruleset_version()` (facts.py is a rule file); expected, and the rebuild after
+    install handles it.
   - `posting_body` adds `body_sha256 TEXT NOT NULL DEFAULT ''` (sha256 hex of the body; `''` for rows written
     before it existed, filled lazily by the crawler).
   - `decision` adds `provisional INTEGER NOT NULL DEFAULT 1 CHECK (provisional IN (0,1))` (1 until a verified

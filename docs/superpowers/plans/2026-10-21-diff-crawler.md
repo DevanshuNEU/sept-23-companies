@@ -26,6 +26,9 @@
 5. **Backoff** stays 6, 12, 24 hours; `board_unreadable` after three errors is a Needs-you item, never a close.
 6. **Bodies on detail-request ATSs** are fetched once per new posting, and again when the list shows a changed
    title or updated date; lane 1 postings are re-fetched monthly.
+8. **First read of a board created from a name-only match** (#31 ruling 3): if the board's org name differs from
+   the company's names, or a company with 25 LCAs or fewer has a board listing over 300 jobs, raise a `flagged`
+   review item "board match doubtful" and set evidence so ranking ignores the board until he confirms.
 7. **A watched page that is unreadable** (JavaScript only, or three fetch errors) raises a `flagged` review item
    with the reason "careers page unreadable", once per evidence key.
 

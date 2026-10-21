@@ -11,6 +11,13 @@ export const queryKeys = {
   noGo: ['no-go'],
   company: (id: Id) => ['company', id],
   done: ['done'],
+  plan: ['plan'],
+  outcomePrompt: ['outcome-prompt'],
+  wins: ['wins'],
+  progress: ['progress'],
+  findings: ['findings'],
+  watch: ['watch'],
+  score: (id: Id) => ['score', id],
 } as const;
 
 export const pollMs = { outbox: 15000, default: 60000 } as const;

@@ -22,9 +22,15 @@ import type {
   ReviewItem, ReviewKind, RoleKind, RoleToName, Schedule, SearchCompany, SearchIndex, SearchPerson, SenderState, SendingStatus,
   ShellSummary, SourceKind, SponsorshipShown, StillEmailing, ThreadMessage, TodayView, TouchState,
 } from '../types';
+import type { FindingsView, OutcomePromptView, PlanView, ProgressView, ScoreView, WatchView, WinsView } from '../types';
+import { buildPlanFixture } from './plan-data';
 
-export type Scenario = 'default' | 'hard_block' | 'signed_out' | 'empty' | 'weekend' | 'job_failed' | 'error' | 'many_sent';
-export const SCENARIOS: readonly Scenario[] = ['default', 'hard_block', 'signed_out', 'empty', 'weekend', 'job_failed', 'error', 'many_sent'];
+export type Scenario =
+  | 'default' | 'hard_block' | 'signed_out' | 'empty' | 'weekend' | 'job_failed' | 'error' | 'many_sent'
+  | 'quiet_week' | 'first_week' | 'plan_done' | 'win' | 'fresh'; // the last five are the plan scenarios (#33); `fresh` has no outcomes ever
+export const SCENARIOS: readonly Scenario[] = [
+  'default', 'hard_block', 'signed_out', 'empty', 'weekend', 'job_failed', 'error', 'many_sent', 'quiet_week', 'first_week', 'plan_done', 'win', 'fresh',
+];
 
 export interface FixtureDb {
   scenario: Scenario;
@@ -40,6 +46,13 @@ export interface FixtureDb {
   noGo: NoGoView;
   companies: Record<Id, CompanyView>;
   done: DoneView;
+  plan: PlanView;
+  prompt: OutcomePromptView;
+  wins: WinsView;
+  progress: ProgressView;
+  findings: FindingsView;
+  watch: WatchView;
+  scores: Record<Id, ScoreView>; // by company id; fixture-internal, the wire has no Record
 }
 
 /* ------------------------------------------------------------------ time */
@@ -268,6 +281,7 @@ const JOBS = {
     expectedNextAt: et('2026-11-08', '07:00'), late: true,
   }),
 };
+const failedListJob = (): JobRunSummary => ({ ...JOBS.daily_list(), finishedAt: et(TODAY, '08:00'), status: 'failed', error: 'Could not read the company store: database is locked', counts: [] });
 const jobList = (): JobRunSummary[] => [JOBS.crawl(), JOBS.daily_list(), JOBS.sender(), JOBS.import(), JOBS.rebuild()];
 
 /* ------------------------------------------------------------------ Today (today.html) */
@@ -1127,13 +1141,14 @@ function buildSearch(c: Ctx, v: Views): SearchIndex {
   return { asOf: AS_OF, companies, people };
 }
 
-export function computeShell(db: Pick<FixtureDb, 'today' | 'outbox' | 'linkedin' | 'needsYou' | 'noGo' | 'done'> & { jobs: JobRunSummary[] }): ShellSummary {
+export function computeShell(db: Pick<FixtureDb, 'today' | 'outbox' | 'linkedin' | 'needsYou' | 'noGo' | 'done' | 'plan' | 'wins'> & { jobs: JobRunSummary[] }): ShellSummary {
   const s = db.outbox.sending;
   return {
     asOf: db.today.asOf, pickedToday: db.today.picked, capacityToday: db.today.capacity, unhandledReplies: db.outbox.counts.replied, draftsToReview: db.outbox.counts.review,
     linkedinToReach: db.linkedin.counts.toReach, openReviewItems: db.needsYou.open.length, noGoCount: db.noGo.companies.length + db.noGo.people.length,
     doneCount: db.done.companies.length, sending: { state: s.state, sentToday: s.sentToday, limitToday: s.limitToday },
     repliesThisMonth: db.done.metrics.repliesThisMonth, jobs: db.jobs,
+    plan: { done: db.plan.done, total: db.plan.total }, winsUnseen: db.wins.unseen,
   };
 }
 
@@ -1168,8 +1183,17 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
     ...c.postings,
     ...(bb ? bb.postings.slice(1).map((p) => ({ postingId: p.id, title: p.title, companyId: bb.company.id, companyName: 'Browserbase', open: p.state === 'open' })) : []),
   ];
+  const searchIndex = buildSearch(c, views);
+  // The plan reads come last, so the people and roles they add take ids after everything above and change none of them.
+  const weekend = scenario === 'weekend';
+  const planFixture = buildPlanFixture(scenario, {
+    asOf: weekend ? '2026-11-14T15:14:00Z' : AS_OF, date: weekend ? '2026-11-14' : TODAY, listJob: scenario === 'job_failed' ? failedListJob() : JOBS.daily_list(),
+    et, addDays, co: c.co, person: (name, title, kind, company) => c.person(name, title, kind, company), role: (company, title, tier, loc, age) => c.role(company, title, tier, loc, age),
+    companies: COMPANY_ORDER.map((name) => ({ name, id: companyId(name), status: c.spec(name).status, hq: c.spec(name).hq, domain: domainOf(name) })),
+    touch: { priya: ids.touch.priya, marcus: ids.touch.marcus },
+  });
   const db: FixtureDb = {
-    scenario, shell: computeShell({ ...views, jobs: jobList() }), searchIndex: buildSearch(c, views), postings, today, outbox, details, compares, linkedin, needsYou, noGo, companies, done,
+    scenario, shell: computeShell({ ...views, ...planFixture, jobs: jobList() }), searchIndex, postings, today, outbox, details, compares, linkedin, needsYou, noGo, companies, done, ...planFixture,
   };
 
   const s = db.outbox.sending;
@@ -1190,8 +1214,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
   } else if (scenario === 'job_failed') {
     db.today.proposed = []; db.today.picked = 0; db.today.builtAt = null;
     db.today.notReady = { reason: 'job_failed', text: "Today's list is not ready. It is built at 08:00 on weekdays." };
-    const failed: JobRunSummary = { ...JOBS.daily_list(), finishedAt: et(TODAY, '08:00'), status: 'failed', error: 'Could not read the company store: database is locked', counts: [] };
-    db.today.listJob = failed;
+    db.today.listJob = failedListJob();
   } else if (scenario === 'empty') {
     db.searchIndex.companies = []; db.searchIndex.people = []; db.postings = [];
     db.today.proposed = []; db.today.backlog = []; db.today.stillEmailing = []; db.today.picked = 0;

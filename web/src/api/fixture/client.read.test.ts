@@ -356,6 +356,7 @@ describe('FixtureClient scenarios', () => {
     const reads: (() => Promise<unknown>)[] = [
       () => c.shell(), () => c.searchIndex(), () => c.searchPostings('a'), () => c.today(), () => c.outbox(), () => c.outboxDetail(1),
       () => c.compareDrafts(1, 2), () => c.linkedin(), () => c.needsYou(), () => c.noGo(), () => c.company(1), () => c.done(),
+      () => c.plan(), () => c.outcomePrompt(), () => c.wins(), () => c.progress(), () => c.findings(), () => c.watchList(), () => c.score(1),
     ];
     for (const read of reads) {
       const err = await read().catch((e: unknown) => e);
@@ -389,6 +390,33 @@ describe('FixtureClient behavior', () => {
     expect((await c.shell()).pickedToday).toBe(3);
     expect((await c.shell()).sending.limitToday).toBe(30);
     expect((await c.outbox()).items.length).toBeGreaterThan(0);
+  });
+
+  it('the plan reads return copies, so a caller cannot change the db', async () => {
+    const c = client();
+    const plan = await c.plan();
+    plan.rows.length = 0;
+    plan.done = 99;
+    const wins = await c.wins();
+    wins.wins.length = 0;
+    const id = (await c.searchIndex()).companies.find((x) => x.name === 'Pylon')?.id ?? 0;
+    const score = await c.score(id);
+    score.signals.length = 0;
+    expect((await c.plan()).rows).toHaveLength(7);
+    expect((await c.plan()).done).toBe(2);
+    expect((await c.wins()).wins).toHaveLength(5);
+    expect((await c.score(id)).signals).toHaveLength(8);
+    for (const read of [() => c.outcomePrompt(), () => c.progress(), () => c.findings(), () => c.watchList()]) {
+      const first = await read();
+      (first as { asOf: string }).asOf = 'changed';
+      expect((await read()).asOf).toBe('2026-11-10T15:14:00Z');
+    }
+  });
+
+  it('score rejects not_found for an unknown company', async () => {
+    const err = await client().score(999999).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBe('not_found');
   });
 
   it('buildFixture returns a fresh copy each call', () => {

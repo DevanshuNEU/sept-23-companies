@@ -17,7 +17,9 @@ export type TouchState = 'open' | 'replied' | 'bounced' | 'closed';
 export type ReplyKind = 'unsorted' | 'interested' | 'not_now' | 'said_no' | 'asked_to_stop' | 'auto_reply';
 export type OutboxGroup = 'replied' | 'review' | 'approved' | 'sending' | 'checking' | 'sent' | 'paused' | 'closed'; // derived
 export type CheckSeverity = 'block' | 'warn' | 'pass';
-export type ReviewKind = 'board_unreadable' | 'board_empty' | 'sponsorship_unclear' | 'size_unknown' | 'size_guess' | 'domain_missing' | 'flagged';
+export type ReviewKind =
+  | 'board_unreadable' | 'board_empty' | 'sponsorship_unclear' | 'size_unknown' | 'size_guess' | 'domain_missing' | 'flagged'
+  | 'merge_candidate' | 'careers_changed' | 'size_check' | 'reader_disagrees'; // the last four are the foundation values (#33)
 export type NoGoReason = 'no_sponsorship' | 'citizenship' | 'over_300' | 'defence_contractor' | 'agency' | 'said_no' | 'stop_reply' | 'not_a_fit' | 'other';
 export type NoGoSource = 'devanshu' | 'rules' | 'reply' | 'import' | 'claude';
 export type Actor = 'devanshu' | 'claude' | 'sender' | 'crawler' | 'rules' | 'daily_list' | 'import' | 'system';
@@ -51,6 +53,7 @@ export interface ShellSummary {
   linkedinToReach: number; openReviewItems: number; noGoCount: number; doneCount: number;
   sending: { state: SenderState; sentToday: number; limitToday: number };
   repliesThisMonth: number; jobs: JobRunSummary[];
+  plan: { done: number; total: number }; winsUnseen: number; // #33
 }
 export interface SearchCompany { id: Id; name: string; aliases: string[]; domain: string | null; status: CompanyStatus; statusLine: string; inProgress: boolean }
 export interface SearchPerson { id: Id; companyId: Id; companyName: string; name: string; title: string; email: string | null; statusLine: string }
@@ -60,7 +63,7 @@ export interface PostingHit { postingId: Id; title: string; companyId: Id; compa
 // Today (spec 13.2)
 export interface DailyEntry {
   company: CompanyRef & { domain: string | null; hq: string };
-  listGroup: 'level_role' | 'any_us_role'; rank: number; state: 'proposed' | 'picked' | 'backlog' | 'removed'; revision: Revision;
+  listGroup: ListGroup; rank: number; state: 'proposed' | 'picked' | 'backlog' | 'removed'; revision: Revision;
   role: RoleToName | null; size: Fact | null; stage: Fact | null; sponsorship: SponsorshipShown;
   sponsorshipFact: Fact | null; domainFact: Fact | null; mailServerOk: boolean | null; // needs #4 0002 (stored MX check)
   why: string; otherRoles: { title: string; firstSeenAt: IsoTime }[]; peopleCount: number; draftCount: number;
@@ -189,4 +192,71 @@ export interface DoneCompany { company: CompanyRef; outcome: 'interview' | 'refe
 export interface DoneView {
   asOf: IsoTime; companies: DoneCompany[];
   metrics: { repliesThisMonth: number; repliesPerWeek: { weekOf: IsoDate; count: number }[]; replyRate: { replies: number; firstEmails: number }; referrals: number; interviews: number };
+}
+
+// Plan, outcomes, progress, wins (#33)
+// They mirror foundation tables outreach_touch (channels, outcome dates), application, company_score (signals, lanes)
+// and daily_list_entry (person_id, channel, list_group). #11's generated types replace these without touching a view.
+export type Channel = 'linkedin_request' | 'linkedin_message' | 'email' | 'application' | 'hn_reply' | 'other';
+export type ListGroup = 'level_role' | 'intern_junior' | 'reason_no_role' | 'any_us_role'; // widens DailyEntry.listGroup
+export type StepKind = 'request' | 'apply';
+export type OutcomeKind = 'accepted' | 'replied' | 'referred' | 'interview' | 'offer' | 'quiet';
+export type WinKind = 'accepted' | 'replied' | 'referred' | 'interview' | 'offer';
+export type WatchKind = 'careers_changed' | 'new_reason_no_role' | 'merge_candidate';
+export type FunnelKey = 'requests' | 'accepts' | 'replies' | 'referrals' | 'interviews';
+
+export interface SourceLink { label: string; url: string }
+export interface NoteFact { text: string; source: SourceLink; inNote: boolean }     // a public-page fact and its link
+export interface NoteDraft {
+  noteId: Id; text: string; chars: number; maxChars: number;                         // maxChars from config, never hard-coded in the UI
+  reasonLine: string; reasonState: 'proposed' | 'confirmed' | 'written';             // the one line that says why this person; Claude only proposes it
+  needsYourLine: boolean;                                                            // derived: reasonState === 'proposed'
+  facts: NoteFact[]; checks: Check[]; savedBy: SavedBy; savedAt: IsoTime; revision: Revision;
+}
+export interface PlanStep { kind: StepKind; touchId: Id | null; at: IsoTime | null }  // at null: not done yet
+export interface PlanRow {
+  entryId: Id; position: number; channel: 'linkedin_request' | 'email'; lane: ListGroup;
+  company: CompanyRef & { domain: string | null; hq: string; revision: Revision };
+  person: { person: PersonRef; foundOn: SourceLink | null } | null;                  // null: find someone
+  role: RoleToName | null; applyUrl: string | null;                                  // null with no role
+  reason: string; reasonSources: SourceLink[];                                       // derived: one reason and where it comes from
+  note: NoteDraft | null;
+  findSomeone: { searchUrl: string; handoff: string } | null;                        // set only when person is null
+  emailTouchId: Id | null;                                                           // channel 'email': the Outbox item
+  steps: PlanStep[];                                                                 // linkedin_request: request, then apply when there is a role
+  state: 'todo' | 'done' | 'skipped';                                                // derived
+  carriedFrom: IsoDate | null; revision: Revision;
+}
+export interface PlanView {
+  asOf: IsoTime; date: IsoDate; builtAt: IsoTime | null; listJob: JobRunSummary | null;
+  notReady: { reason: 'weekend' | 'not_built' | 'job_failed'; text: string } | null;
+  rows: PlanRow[]; done: number; total: number;
+  linkedinMonth: { used: number; limit: number; hardUsed: number; hardLimit: number };   // plan quota, and every request against the hard total
+  tomorrow: { total: number; text: string; preview: { companyName: string; personName: string | null; roleTitle: string | null }[] };
+  week: { requests: number; accepts: number; replies: number };
+}
+export interface PromptTouch { touchId: Id; person: PersonRef; company: CompanyRef; channel: Channel; sentAt: IsoTime; ageDays: number; context: string; revision: Revision }
+export interface OutcomePromptView { asOf: IsoTime; touches: PromptTouch[] }
+export interface Win {
+  winId: Id; kind: WinKind; at: IsoTime; touchId: Id; person: PersonRef | null; company: CompanyRef;
+  line: string; sentNote: string | null; role: string | null; replyKind: ReplyKind | null; unseen: boolean;   // line is derived
+}
+export interface WinsView { asOf: IsoTime; wins: Win[]; unseen: number; counts: { accepted: number; replied: number; referred: number; interview: number; offer: number }; since: IsoDate }
+export interface FunnelStage { stage: FunnelKey; label: string; count: number; from: { stage: FunnelKey; count: number } | null }  // rate = count / from.count
+export interface ProgressPeriod { label: string; from: IsoDate; to: IsoDate; stages: FunnelStage[]; effort: { label: string; count: number }[]; enough: boolean; quiet: boolean }
+export interface BaseRates { since: IsoDate; requests: number; accepts: number; replies: number; medianDaysToReply: number | null; enough: boolean; minRequests: number }
+export interface TodayProgress { planned: number; done: number; requests: number; applications: number; accepted: number; replied: number }
+export interface ProgressView { asOf: IsoTime; today: TodayProgress; week: ProgressPeriod; month: ProgressPeriod; base: BaseRates }
+export interface Finding { id: Id; text: string; counts: { label: string; count: number; of: number }[]; caution: string | null; changed: string | null }
+export interface FindingsView { asOf: IsoTime; month: IsoDate; reportedOn: IsoDate | null; findings: Finding[]; changes: { at: IsoTime; text: string }[] }
+export interface WatchItem { id: Id; kind: WatchKind; company: CompanyRef; text: string; at: IsoTime; link: SourceLink | null; reviewId: Id | null }
+export interface WatchView { asOf: IsoTime; items: WatchItem[] }
+export interface ScoreSignal {
+  name: string; label: string; value: number; weight: number; points: number; share: number;   // share = points / sum of |points|, signed
+  neutral: boolean; reason: string; source: SourceLink | null;
+}
+export interface ScoreView {
+  asOf: IsoTime; companyId: Id; rankerVersion: string; score: number; rank: number | null; ofCompanies: number;
+  lanes: { lane: ListGroup; strongest: boolean }[]; signals: ScoreSignal[]; scoredAt: IsoTime;
+  previous: { rankerVersion: string; score: number } | null;
 }

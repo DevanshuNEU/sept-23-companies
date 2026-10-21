@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -44,4 +44,13 @@ export interface OutreachClient {
 
   company(companyId: Id): Promise<CompanyView>;
   done(): Promise<DoneView>;
+
+  // Plan, outcomes, progress, wins (#33)
+  plan(): Promise<PlanView>;
+  outcomePrompt(): Promise<OutcomePromptView>;
+  wins(): Promise<WinsView>;
+  progress(): Promise<ProgressView>;
+  findings(): Promise<FindingsView>;
+  watchList(): Promise<WatchView>;
+  score(companyId: Id): Promise<ScoreView>; // 'not_found' for an unknown company
 }

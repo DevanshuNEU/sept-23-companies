@@ -3,6 +3,7 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, SearchIndex, SendingStatus, ShellSummary, TodayView,
+  FindingsView, OutcomePromptView, PlanView, ProgressView, ScoreView, WatchView, WinsView,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, STEP_LINE, type FixtureDb } from './data';
 
@@ -149,6 +150,19 @@ export class FixtureClient implements OutreachClient {
     });
   }
   done(): Promise<DoneView> { return this.read(() => this.db.done); }
+  plan(): Promise<PlanView> { return this.read(() => this.db.plan); }
+  outcomePrompt(): Promise<OutcomePromptView> { return this.read(() => this.db.prompt); }
+  wins(): Promise<WinsView> { return this.read(() => this.db.wins); }
+  progress(): Promise<ProgressView> { return this.read(() => this.db.progress); }
+  findings(): Promise<FindingsView> { return this.read(() => this.db.findings); }
+  watchList(): Promise<WatchView> { return this.read(() => this.db.watch); }
+  score(companyId: Id): Promise<ScoreView> {
+    return this.read(() => {
+      const s = this.db.scores[companyId];
+      if (!s) throw new ApiError('not_found', `No score for company ${companyId}`);
+      return s;
+    });
+  }
 
 
   /* ================================================================== writes */

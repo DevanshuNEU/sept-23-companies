@@ -28,6 +28,10 @@ export const TRIGGER = {
   board_unreadable: { label: 'Board unreadable', tone: 'bad' },
   board_empty: { label: 'Board shows zero jobs', tone: 'warn' },
   flagged: { label: 'Flagged', tone: 'warn' },
+  merge_candidate: { label: 'Merge?', tone: 'warn' },
+  careers_changed: { label: 'Careers page changed', tone: 'warn' },
+  size_check: { label: 'Check size', tone: 'warn' },
+  reader_disagrees: { label: 'Check posting', tone: 'warn' },
 } satisfies Record<ReviewKind, Status>;
 
 const ICON: Record<ReviewKind, LucideIcon> = {
@@ -38,6 +42,10 @@ const ICON: Record<ReviewKind, LucideIcon> = {
   board_unreadable: RefreshCw,
   board_empty: Archive,
   flagged: Flag,
+  merge_candidate: CircleHelp,
+  careers_changed: RefreshCw,
+  size_check: User,
+  reader_disagrees: Flag,
 };
 
 /** The field Edit sets for each trigger. A flag has none: mark it ok or no-go. */
@@ -50,6 +58,10 @@ export const EDIT_FIELD: Record<ReviewKind, EditField | null> = {
   board_unreadable: 'board_url',
   board_empty: 'board_url',
   flagged: null,
+  merge_candidate: null,
+  careers_changed: 'board_url',
+  size_check: 'size',
+  reader_disagrees: null,
 };
 
 const FIELD_LABEL: Record<EditField, string> = { domain: 'Email domain', size: 'Size', sponsorship: 'Sponsorship', board_url: 'Board URL' };

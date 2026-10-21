@@ -1,4 +1,5 @@
 import itertools
+import json
 import re
 import sqlite3
 import unittest
@@ -7,6 +8,11 @@ from tests.storetest import fresh_store, seed_company, seed_posting, seed_touch
 
 NOW = "2026-10-19T12:00:00Z"
 TODAY = "2026-10-19"
+SHA = "0123456789abcdef" * 4
+# outreach_touch.context: the one key set build_context writes (#30 Task 1, controller ruling 3).
+CONTEXT = json.dumps({"source": "plan", "lane": "engineering", "roleKind": "engineer", "roleAgeDays": 3,
+                      "rankerVersion": "k-1", "signals": {"lca": 0.4}, "roleNamed": True})
+LCA = json.dumps({"fy": 2025, "jr": 3, "level1": 2, "newemp_jr": 2, "software": 5})
 _n = itertools.count(1)
 
 STATES = ("planned", "drafted", "approved", "sending", "send_unknown", "sent", "failed", "skipped")
@@ -71,6 +77,8 @@ class SchemaTest(unittest.TestCase):
         self.board = self.new_board()
         insert(self.db, "daily_list", {"list_date": "2026-10-01", "built_at": NOW, "capacity": 5})
         self.spare_person = self.new_person()
+        insert(self.db, "source", {"source_name": "lca", "version": "lca-1"})
+        self.otouch = self.new_otouch()
 
     # ---- builders -------------------------------------------------------
 
@@ -137,6 +145,13 @@ class SchemaTest(unittest.TestCase):
         for step in PATH[state]:
             self.transition(message_id, step)
         return message_id
+
+    def new_otouch(self, **over):
+        """An outreach_touch row (the outcome record of #30), default a LinkedIn request sent at NOW."""
+        row = {"person_id": self.person, "company_id": self.company, "channel": "linkedin_request",
+               "sent_at": NOW, "context": CONTEXT, "created_at": NOW}
+        row.update(over)
+        return insert(self.db, "outreach_touch", row)
 
     def evidence(self, **over):
         row = {
@@ -219,6 +234,35 @@ class SchemaTest(unittest.TestCase):
             "import_record": {"run_id": self.run, "source": "data_js", "source_key": "k", "raw": "r",
                               "raw_sha256": "a" * 64, "outcome": "imported", "entity": "company",
                               "entity_id": self.company, "imported_at": NOW},
+            "posting_body": {"posting_id": self.posting, "body": "B", "fetched_at": NOW},
+            "shared_key": {"kind": "fein", "value": "111111111", "reason": "payroll provider", "recorded_at": NOW},
+            "company_source": {"company_id": self.company, "source_name": "lca", "source_ref": "lca:acme",
+                               "first_seen_at": NOW, "last_seen_at": NOW},
+            "watched_page": {"company_id": self.company, "url": "https://acme.example/careers",
+                             "last_fetch_at": NOW, "last_change_at": NOW, "next_fetch_at": NOW},
+            "read_queue": {"posting_id": self.posting, "body_sha256": SHA, "reader_version": "rv-1",
+                           "priority": 1, "state": "leased", "lease_until": NOW, "enqueued_at": NOW},
+            "posting_reading": {"posting_id": self.posting, "body_sha256": SHA, "reader_version": "rv-1",
+                                "read_at": NOW, "fields": "{}", "verified": 1},
+            "work_tier": {"company_id": self.company, "tier": 1, "reason": "small LCA filer", "set_at": NOW},
+            "company_post": {"company_id": self.company, "source_name": "lca", "url": "https://hn.example/1",
+                             "posted_at": NOW},
+            "company_score": {"company_id": self.company, "ranker_version": "k-1", "score": 0.5,
+                              "signals": "{}", "lanes": "[]", "scored_at": NOW},
+            "application": {"company_id": self.company, "posting_id": self.posting, "applied_on": TODAY,
+                            "outcome": "screen", "outcome_at": NOW},
+            "outreach_touch": {"person_id": self.person, "company_id": self.company, "channel": "linkedin_request",
+                               "sent_at": NOW, "accepted_at": NOW, "replied_at": NOW, "referred_at": NOW,
+                               "interview_at": NOW, "offer_at": NOW, "context": CONTEXT, "created_at": NOW},
+            "person_source": {"person_id": self.person, "kind": "team", "url": "https://acme.example/team",
+                              "observed_on": TODAY, "recorded_at": NOW},
+            "linkedin_draft": {"person_id": self.person, "body": "Hi", "saved_by": "claude",
+                               "created_at": NOW, "updated_at": NOW},
+            "api_request": {"request_id": "req-00001", "method": "POST", "path": "/api/x", "fingerprint": "f" * 64,
+                            "status": 200, "response": "{}", "created_at": NOW},
+            "mx_check": {"domain": "acme.co", "status": "ok", "checked_at": NOW},
+            "win_seen": {"touch_id": self.otouch, "kind": "accepted", "seen_at": NOW},
+            "watch_dismissal": {"kind": "new_reason_no_role", "ref_id": 1, "dismissed_at": NOW},
         }
         return dict(rows[table])
 
@@ -282,9 +326,9 @@ class SchemaTest(unittest.TestCase):
         columns = self.checked_columns("strftime")
         # Every timestamp column named like one, and streak_since, has the format CHECK.
         named = {(t, c) for t in self.tables() for c in self.columns(t)
-                 if c == "at" or c.endswith("_at") or c == "streak_since"}
+                 if c == "at" or c.endswith("_at") or c in ("streak_since", "lease_until")}
         self.assertEqual(columns, named)
-        self.assertEqual(len(columns), 50)
+        self.assertEqual(len(columns), 81)  # 50 before the pipeline tables (#30), 31 with them
         for table, column in sorted(columns):
             self.assertTrue(self._has_base(table), f"no base row for {table}")
             self.assert_bad_value_refused(table, column, bad, f"{column} IS strftime(")
@@ -321,7 +365,8 @@ class SchemaTest(unittest.TestCase):
         columns = {(t, c) for t in self.tables() for c in self.columns(t) if c.endswith("_on")} | extra
         # Every column the schema checks with date() is tested, and nothing is tested that is not named.
         self.assertLessEqual(self.checked_columns("date"), columns)
-        self.assertEqual(len(columns), 6)  # posted_on, observed_on, due_on and the three named ones
+        # posted_on, observed_on (evidence and person_source), due_on, applied_on and the three named ones
+        self.assertEqual(len(columns), 8)
         for table, column in sorted(columns):
             self.assertTrue(self._has_base(table), f"no base row for {table}")
             # daily_list_entry.list_date has no CHECK of its own: the foreign key to
@@ -813,6 +858,410 @@ class SchemaTest(unittest.TestCase):
                           "AND f.fact = 'size' WHERE c.company_id = ?", (self.company,))
         self.assertNotRegex(facts, r"SCAN (e|evidence)\b")
 
+
+    # ---- the opportunity pipeline (#30 Task 1) ----------------------------
+
+    def board_row(self, **over):
+        row = {"company_id": self.company, "ats": "teamtailor", "token": f"pipe{next(_n)}", "created_at": NOW}
+        row.update(over)
+        return row
+
+    def test_board_accepts_unchanged_read_and_new_ats(self):
+        insert(self.db, "board", self.board_row(last_read="unchanged", last_read_at=NOW, streak_since=NOW))
+        for ats in ("pinpoint", "teamtailor", "jazzhr", "paycom", "icims", "personio", "join_com", "cornerstone",
+                    "successfactors"):
+            with self.subTest(ats=ats):
+                insert(self.db, "board", self.board_row(ats=ats))
+        # An unchanged read clears both streaks, as ok does.
+        for streaks in ({"empty_streak": 1}, {"error_streak": 1}):
+            with self.subTest(streaks=streaks):
+                self.assert_row_refused("board", self.board_row(
+                    last_read="unchanged", last_read_at=NOW, streak_since=NOW, **streaks), "CHECK")
+        self.assert_row_refused("board", self.board_row(ats="taleo"), "CHECK")
+        insert(self.db, "board_read", {"board_id": self.board, "run_id": self.run, "at": NOW, "result": "unchanged"})
+        self.assert_row_refused("board_read", {"board_id": self.new_board(), "run_id": self.run, "at": NOW,
+                                               "result": "same"}, "CHECK")
+
+    def test_board_read_validators_and_schedule(self):
+        board_id = insert(self.db, "board", self.board_row(etag='W/"abc"', ids_fingerprint="f1", next_read_at=NOW,
+                                                           change_interval_s=3600))
+        row = self.db.execute("SELECT etag, ids_fingerprint, next_read_at, change_interval_s FROM board "
+                              "WHERE board_id = ?", (board_id,)).fetchone()
+        self.assertEqual(tuple(row), ('W/"abc"', "f1", NOW, 3600))
+        fresh = insert(self.db, "board", self.board_row())
+        row = self.db.execute("SELECT etag, ids_fingerprint, next_read_at, change_interval_s FROM board "
+                              "WHERE board_id = ?", (fresh,)).fetchone()
+        self.assertEqual(tuple(row), ("", "", None, None))  # NULL next_read_at means due now
+        for bad in (0, -5):
+            with self.subTest(change_interval_s=bad):
+                self.assert_row_refused("board", self.board_row(change_interval_s=bad), "change_interval_s")
+
+    def test_board_found_by_check(self):
+        self.assert_row_refused("board", self.board_row(found_by="bogus"), "found_by")
+        default = insert(self.db, "board", self.board_row())
+        self.assertEqual(self.db.execute("SELECT found_by FROM board WHERE board_id = ?", (default,)).fetchone()[0],
+                         "import")
+        for how in ("stapply_name", "slug_probe", "careers_page", "import", "hand"):
+            with self.subTest(found_by=how):
+                insert(self.db, "board", self.board_row(found_by=how))
+
+    def test_company_alias_takes_the_identity_sources(self):
+        for source in ("fein", "dba", "legal_name", "ats", "formd", "linkedin"):
+            with self.subTest(source=source):
+                insert(self.db, "company_alias", {"alias_key": f"key-{source}", "company_id": self.company,
+                                                  "alias": source, "source": source, "created_at": NOW})
+        self.assert_row_refused("company_alias", {"alias_key": "key-x", "company_id": self.company, "alias": "x",
+                                                  "source": "guess", "created_at": NOW}, "CHECK")
+
+    def test_shared_key_is_unique_per_kind_value(self):
+        sql = ("INSERT INTO shared_key(kind, value, reason, recorded_at) VALUES (?, ?, ?, ?) "
+               "ON CONFLICT DO NOTHING")
+        self.db.execute(sql, ("fein", "12-3456789", "payroll provider files for many clients", NOW))
+        self.db.execute(sql, ("fein", "12-3456789", "seen again", at(13)))
+        rows = self.db.execute("SELECT reason, recorded_at FROM shared_key").fetchall()
+        self.assertEqual([tuple(r) for r in rows], [("payroll provider files for many clients", NOW)])
+        # The same value as a domain is another key.
+        self.db.execute(sql, ("domain", "12-3456789", "r", NOW))
+        self.assert_row_refused("shared_key", {"kind": "ein", "value": "1", "reason": "r", "recorded_at": NOW},
+                                "CHECK")
+        self.assert_row_refused("shared_key", {"kind": "domain", "value": "Gusto.com", "reason": "r",
+                                               "recorded_at": NOW}, "CHECK")
+        self.assert_row_refused("shared_key", {"kind": "domain", "value": "gusto.com", "reason": " ",
+                                               "recorded_at": NOW}, "CHECK")
+
+    def test_evidence_lca_value_must_be_json(self):
+        lca = {"fact": "lca", "num_low": None, "num_high": None, "confidence": "confirmed", "source_kind": "lca"}
+        self.assert_row_refused("evidence", {**self.base_row("evidence"), **lca, "value": "x"}, "CHECK")
+        missing = json.dumps({"fy": 2025, "software": 5, "jr": 3, "level1": 2})  # no newemp_jr
+        self.assert_row_refused("evidence", {**self.base_row("evidence"), **lca, "value": missing}, "CHECK")
+        text = json.dumps({"fy": "2025", "software": 5, "jr": 3, "level1": 2, "newemp_jr": 2})
+        self.assert_row_refused("evidence", {**self.base_row("evidence"), **lca, "value": text}, "CHECK")
+        wage = json.dumps({**json.loads(LCA), "median_jr_wage": "lots"})
+        self.assert_row_refused("evidence", {**self.base_row("evidence"), **lca, "value": wage}, "CHECK")
+        self.assert_row_refused("evidence", {**self.base_row("evidence"), **lca, "value": "[1, 2]"}, "CHECK")
+        insert(self.db, "evidence", {**self.base_row("evidence"), **lca, "value": LCA})
+        insert(self.db, "evidence", {**self.base_row("evidence"), **lca,
+                                     "value": json.dumps({**json.loads(LCA), "median_jr_wage": 120000})})
+
+    def test_evidence_takes_the_pipeline_facts_and_sources(self):
+        base = {**self.base_row("evidence"), "num_low": None, "num_high": None}
+        good = [("cap_exempt", v) for v in ("likely", "confirmed", "no")] + \
+            [("staffing_risk", v) for v in ("low", "medium", "high")] + \
+            [("funding", json.dumps({"amount_usd": 4500000, "filed_on": "2026-08-14", "kind": "form_d"})),
+             ("funding", json.dumps({"amount_usd": None, "filed_on": "2026-08-14", "kind": "form_d_amendment"}))]
+        for fact, value in good:
+            with self.subTest(fact=fact, value=value):
+                insert(self.db, "evidence", {**base, "fact": fact, "value": value})
+        bad = [("cap_exempt", "maybe"), ("staffing_risk", "none"), ("funding", "4.5M"),
+               ("funding", json.dumps({"amount_usd": 1, "kind": "form_d"})),
+               ("funding", json.dumps({"filed_on": "2026-08-14", "kind": "form_d"})),
+               ("funding", json.dumps({"amount_usd": "1", "filed_on": "2026-08-14", "kind": "form_d"})),
+               ("funding", json.dumps({"amount_usd": 1, "filed_on": "2026-08-14T00:00:00Z", "kind": "form_d"})),
+               ("funding", json.dumps({"amount_usd": 1, "filed_on": "2026-08-14", "kind": ""}))]
+        for fact, value in bad:
+            with self.subTest(fact=fact, value=value):
+                self.assert_row_refused("evidence", {**base, "fact": fact, "value": value}, "CHECK")
+        # headcount uses num_low and num_high like size; no other new fact carries numbers.
+        self.assert_row_refused("evidence", {**base, "fact": "headcount", "value": "40"}, "CHECK")
+        insert(self.db, "evidence", {**base, "fact": "headcount", "value": "40-60", "num_low": 40, "num_high": 60})
+        self.assert_row_refused("evidence", {**base, "fact": "cap_exempt", "value": "likely", "num_low": 1},
+                                "CHECK")
+        for kind in ("stapply", "commoncrawl", "hn", "simplify"):
+            with self.subTest(source_kind=kind):
+                insert(self.db, "evidence", {**base, "fact": "hq", "value": f"Boston, MA {kind}", "source_kind": kind})
+
+    def test_read_queue_lease_states(self):
+        row = {**self.base_row("read_queue"), "state": "leased", "lease_until": NOW}
+        insert(self.db, "read_queue", row)
+        state = self.db.execute("SELECT state, attempts, last_error FROM read_queue").fetchone()
+        self.assertEqual(tuple(state), ("leased", 0, ""))
+        self.assert_row_refused("read_queue", {**row, "reader_version": "rv-2", "state": "bogus"}, "CHECK")
+        self.assert_row_refused("read_queue", {**row, "reader_version": "rv-3", "lease_until": None}, "CHECK")
+        for state in ("queued", "done", "refused"):
+            with self.subTest(state=state):
+                insert(self.db, "read_queue", {**row, "reader_version": f"rv-{state}", "state": state,
+                                               "lease_until": None})
+        self.assert_row_refused("read_queue", {**row, "reader_version": "rv-9", "body_sha256": "abc"}, "CHECK")
+        self.assert_row_refused("read_queue", {**row, "reader_version": "rv-9", "body_sha256": "G" * 64}, "CHECK")
+        # one row per posting, body and reader version
+        self.assert_row_refused("read_queue", row, "UNIQUE")
+
+    def test_posting_reading_fields_must_be_json(self):
+        row = self.base_row("posting_reading")
+        self.assert_row_refused("posting_reading", {**row, "fields": "not json"}, "CHECK")
+        self.assert_row_refused("posting_reading", {**row, "verified": 2}, "CHECK")
+        self.assert_row_refused("posting_reading", {**row, "refused_fields": "{}"}, "CHECK")
+        insert(self.db, "posting_reading", row)
+        self.assertEqual(self.db.execute("SELECT refused_fields FROM posting_reading").fetchone()[0], "[]")
+        self.assert_row_refused("posting_reading", row, "UNIQUE")
+
+    def test_decision_defaults_provisional(self):
+        self.decision(self.posting, self.ruleset_a)
+        row = self.db.execute("SELECT provisional, reader_version FROM decision").fetchone()
+        self.assertEqual(tuple(row), (1, None))
+        later = seed_posting(self.db, self.company, "Backend Engineer")
+        self.assertRaises(sqlite3.IntegrityError, self.decision, later, self.ruleset_a, provisional=2)
+        # reader_version is NULL while provisional; a final row may have one (or none, when the body was unreadable).
+        self.assertRaises(sqlite3.IntegrityError, self.decision, later, self.ruleset_a, provisional=1,
+                          reader_version="rv-1")
+        self.decision(later, self.ruleset_a, provisional=0, reader_version="rv-1")
+        self.decision(seed_posting(self.db, self.company, "Data Engineer"), self.ruleset_a, provisional=0)
+        self.make_current(self.ruleset_a)
+        chosen = self.db.execute("SELECT provisional, reader_version FROM posting_decision WHERE posting_id = ?",
+                                 (later,)).fetchone()
+        self.assertEqual(tuple(chosen), (0, "rv-1"))
+
+    def test_outreach_touch_outcome_not_before_sent(self):
+        before = "2026-10-19T11:59:59Z"
+        for column in ("accepted_at", "replied_at", "referred_at", "interview_at", "offer_at", "quiet_at"):
+            with self.subTest(column=column):
+                self.assert_row_refused("outreach_touch", {**self.base_row("outreach_touch"),
+                                                           "replied_at": None, column: before}, "CHECK")
+        insert(self.db, "outreach_touch", {**self.base_row("outreach_touch"), "replied_at": NOW,
+                                           "reply_kind": "interested"})
+
+    def test_outreach_touch_idempotency_key_unique(self):
+        self.new_otouch(idempotency_key="click-1")
+        with self.assertRaises(sqlite3.IntegrityError) as cm:
+            self.new_otouch(idempotency_key="click-1")
+        self.assertIn("UNIQUE", str(cm.exception))
+        self.db.execute(
+            "INSERT INTO outreach_touch(person_id, company_id, channel, sent_at, context, created_at, "
+            "idempotency_key) VALUES (?, ?, 'linkedin_request', ?, ?, ?, 'click-1') ON CONFLICT DO NOTHING",
+            (self.person, self.company, NOW, CONTEXT, NOW))
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM outreach_touch WHERE idempotency_key = 'click-1'").fetchone()[0], 1)
+
+    def test_outreach_touch_email_needs_email_channel(self):
+        self.assert_row_refused("outreach_touch", {**self.base_row("outreach_touch"), "channel": "linkedin_request",
+                                                   "email_touch_id": self.touch}, "CHECK")
+        self.new_otouch(channel="email", email_touch_id=self.touch)
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, channel="email", email_touch_id=999999)
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, channel="fax")
+
+    def test_outreach_touch_undone_excludes_outcomes(self):
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, undone_at=NOW, accepted_at=NOW)
+        for column in ("replied_at", "referred_at", "interview_at", "offer_at", "quiet_at"):
+            with self.subTest(column=column):
+                self.assertRaises(sqlite3.IntegrityError, self.new_otouch, undone_at=NOW, **{column: NOW})
+        undone = self.new_otouch(undone_at=NOW)
+        self.assert_refused("UPDATE outreach_touch SET accepted_at = ? WHERE touch_id = ?", (NOW, undone), "CHECK")
+
+    def test_outreach_touch_quiet_reply_person_and_context(self):
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, quiet_at=NOW, replied_at=NOW)
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, reply_kind="interested")  # a kind needs a reply
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, replied_at=NOW, reply_kind="maybe")
+        # person_id is NULL only for an application.
+        self.assertRaises(sqlite3.IntegrityError, self.new_otouch, person_id=None)
+        self.new_otouch(person_id=None, channel="application")
+        for channel in ("linkedin_message", "hn_reply", "other"):
+            self.new_otouch(channel=channel)
+        context = json.loads(CONTEXT)
+        bad_contexts = ["not json", "[]", json.dumps({**context, "source": "import"}),
+                        json.dumps({k: v for k, v in context.items() if k != "roleNamed"}),
+                        json.dumps({**context, "signals": [1]}), json.dumps({**context, "roleNamed": 1})]
+        for bad in bad_contexts:
+            with self.subTest(context=bad):
+                self.assertRaises(sqlite3.IntegrityError, self.new_otouch, context=bad)
+        # Values may be JSON null where build_context has none (no posting, no ranker run yet).
+        self.new_otouch(context=json.dumps({**context, "source": "own", "roleKind": None, "roleAgeDays": None,
+                                            "rankerVersion": None}))
+        row = self.db.execute("SELECT revision, undone_at FROM outreach_touch WHERE touch_id = ?",
+                              (self.otouch,)).fetchone()
+        self.assertEqual(tuple(row), (1, None))
+
+    def test_work_tier_one_row_per_company_and_tier_4_refused(self):
+        row = self.base_row("work_tier")
+        self.assert_row_refused("work_tier", {**row, "tier": 4}, "CHECK")
+        self.assert_row_refused("work_tier", {**row, "promoted": 2}, "CHECK")
+        insert(self.db, "work_tier", row)
+        self.assert_row_refused("work_tier", {**row, "tier": 3}, "UNIQUE")
+        stored = self.db.execute("SELECT promoted, source_version FROM work_tier").fetchone()
+        self.assertEqual(tuple(stored), (0, ""))
+
+    def test_posting_body_hash_must_be_64_chars_or_empty(self):
+        self.assert_refused("INSERT INTO posting_body(posting_id, body, body_sha256) VALUES (?, 'b', ?)",
+                            (self.posting, "a" * 10), "CHECK")
+        self.assert_refused("INSERT INTO posting_body(posting_id, body, body_sha256) VALUES (?, 'b', ?)",
+                            (self.posting, "Z" * 64), "CHECK")
+        self.db.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, 'b')", (self.posting,))
+        row = self.db.execute("SELECT body_sha256, fetched_at FROM posting_body WHERE posting_id = ?",
+                              (self.posting,)).fetchone()
+        self.assertEqual(tuple(row), ("", None))
+        self.db.execute("UPDATE posting_body SET body_sha256 = ?, fetched_at = ? WHERE posting_id = ?",
+                        (SHA, NOW, self.posting))
+
+    def test_source_and_company_source(self):
+        self.assert_row_refused("source", {"source_name": "hn", "version": ""}, "CHECK")
+        insert(self.db, "source", {"source_name": "hn", "version": "hn-1", "last_run_id": self.run})
+        self.assert_row_refused("source", {"source_name": "formd", "version": "1", "last_run_id": 999999},
+                                "FOREIGN KEY")
+        row = self.base_row("company_source")
+        insert(self.db, "company_source", row)
+        self.db.execute("INSERT INTO company_source(company_id, source_name, source_ref, first_seen_at, last_seen_at) "
+                        "VALUES (?, 'lca', 'lca:acme', ?, ?) ON CONFLICT DO NOTHING", (self.company, NOW, NOW))
+        self.assertEqual(self.db.execute("SELECT count(*) FROM company_source").fetchone()[0], 1)
+        self.assert_row_refused("company_source", {**row, "source_name": "nobody"}, "FOREIGN KEY")
+        self.assert_row_refused("company_source", {**row, "source_ref": "lca:other", "last_seen_at": at(11)},
+                                "CHECK")
+
+    def test_watched_page_one_per_company(self):
+        row = self.base_row("watched_page")
+        self.assert_row_refused("watched_page", {**row, "url": "acme.example/careers"}, "CHECK")
+        self.assert_row_refused("watched_page", {**row, "error_streak": -1}, "CHECK")
+        insert(self.db, "watched_page", row)
+        self.assertEqual(tuple(self.db.execute("SELECT fingerprint, error_streak FROM watched_page").fetchone()),
+                         ("", 0))
+        self.assert_row_refused("watched_page", row, "UNIQUE")
+
+    def test_company_post_unique_per_source_and_url(self):
+        row = self.base_row("company_post")
+        insert(self.db, "company_post", row)
+        self.db.execute("INSERT INTO company_post(company_id, source_name, url) VALUES (?, 'lca', ?) "
+                        "ON CONFLICT DO NOTHING", (self.company, row["url"]))
+        self.assertEqual(self.db.execute("SELECT count(*), max(asks_email), max(text) FROM company_post")
+                         .fetchone()[:], (1, 0, ""))
+        self.assert_row_refused("company_post", {**row, "url": "https://hn.example/2", "asks_email": 2}, "CHECK")
+
+    def test_company_score_and_application(self):
+        row = self.base_row("company_score")
+        self.assert_row_refused("company_score", {**row, "signals": "nope"}, "CHECK")
+        self.assert_row_refused("company_score", {**row, "lanes": "nope"}, "CHECK")
+        insert(self.db, "company_score", row)
+        self.assert_row_refused("company_score", row, "UNIQUE")
+        insert(self.db, "company_score", {**row, "ranker_version": "k-2"})
+        app = {"company_id": self.company, "applied_on": TODAY}
+        app_id = insert(self.db, "application", app)
+        self.assertEqual(tuple(self.db.execute("SELECT outcome, url, revision FROM application WHERE "
+                                               "application_id = ?", (app_id,)).fetchone()), ("open", "", 1))
+        for outcome in ("screen", "interview", "offer", "rejected", "closed"):
+            with self.subTest(outcome=outcome):
+                insert(self.db, "application", {**app, "outcome": outcome, "outcome_at": NOW})
+        self.assert_row_refused("application", {**app, "outcome": "ghosted", "outcome_at": NOW}, "CHECK")
+        self.assert_row_refused("application", {**app, "outcome": "offer"}, "CHECK")  # an outcome has a date
+
+    def test_new_job_and_review_kinds_insert(self):
+        for job in ("discover", "resolve", "find_boards", "read_boards", "watch_pages", "read_postings", "rank",
+                    "plan", "prepare"):
+            with self.subTest(job=job):
+                insert(self.db, "job_run", {"job": job, "started_at": NOW})
+        for kind in ("merge_candidate", "reader_disagrees", "careers_changed", "size_check"):
+            for raised_by in ("source", "reader", "ranker"):
+                with self.subTest(kind=kind, raised_by=raised_by):
+                    self.review(kind=kind, raised_by=raised_by, posting_id=self.posting,
+                                evidence_key=f"{kind}-{raised_by}")
+        self.assert_row_refused("job_run", {"job": "crawl_boards", "started_at": NOW}, "CHECK")
+        for entity in ("source", "reading", "outreach_touch", "score"):
+            for actor in ("source", "reader"):
+                with self.subTest(entity=entity, actor=actor):
+                    insert(self.db, "event", {"at": NOW, "recorded_at": NOW, "entity": entity, "kind": "k",
+                                              "actor": actor})
+
+    def test_daily_list_entry_person_and_channel(self):
+        insert(self.db, "daily_list", {"list_date": "2026-10-03", "built_at": NOW, "capacity": 60})
+        self.assert_row_refused("daily_list", {"list_date": "2026-10-04", "built_at": NOW, "capacity": 61}, "CHECK")
+        entry = {"list_date": "2026-10-03", "company_id": self.company, "rank": 1, "proposed_at": NOW,
+                 "list_group": "intern_junior", "person_id": self.person, "channel": "linkedin_request"}
+        insert(self.db, "daily_list_entry", entry)
+        other = seed_company(self.db, "Other")
+        insert(self.db, "daily_list_entry", {**entry, "company_id": other, "rank": 2, "list_group": "reason_no_role",
+                                             "person_id": None, "channel": None})
+        self.assert_row_refused("daily_list_entry", {**entry, "company_id": seed_company(self.db, "Third"),
+                                                     "rank": 3, "channel": "pigeon"}, "CHECK")
+
+    # ---- the people plan's tables (#15 Task 1, copied here) ----------------
+
+    def test_person_source_refuses_linkedin_hosts(self):
+        row = self.base_row("person_source")
+        for url in ("https://www.linkedin.com/in/x", "https://LinkedIn.com/in/x", "https://lnkd.in/abc"):
+            with self.subTest(url=url):
+                self.assert_row_refused("person_source", {**row, "url": url}, "CHECK")
+        self.assert_row_refused("person_source", {**row, "url": "http://acme.example/team"}, "CHECK")
+        insert(self.db, "person_source", {**row, "url": "https://acme.example/team"})
+
+    def test_person_source_email_needs_basis_and_only_email_has_one(self):
+        row = self.base_row("person_source")
+        self.assert_row_refused("person_source", {**row, "kind": "email"}, "CHECK")
+        self.assert_row_refused("person_source", {**row, "kind": "team", "email_basis": "published"}, "CHECK")
+        self.assert_row_refused("person_source", {**row, "kind": "email", "email_basis": "guessed"}, "CHECK")
+        for basis in ("published", "verified", "pattern"):
+            insert(self.db, "person_source", {**row, "kind": "email", "email_basis": basis,
+                                              "url": f"https://acme.example/{basis}"})
+
+    def test_person_source_unique_per_person_kind_url(self):
+        sql = ("INSERT INTO person_source(person_id, kind, url, label, recorded_at) VALUES (?, 'context', ?, ?, ?) "
+               "ON CONFLICT DO NOTHING")
+        self.db.execute(sql, (self.person, "https://acme.example/neu", "Northeastern", NOW))
+        self.db.execute(sql, (self.person, "https://acme.example/neu", "again", NOW))
+        self.assertEqual([r[0] for r in self.db.execute("SELECT label FROM person_source")], ["Northeastern"])
+
+    def test_linkedin_draft_claude_cannot_confirm(self):
+        row = self.base_row("linkedin_draft")
+        for state in ("confirmed", "written"):
+            with self.subTest(reason_state=state):
+                self.assert_row_refused("linkedin_draft", {**row, "reason_state": state}, "CHECK")
+        insert(self.db, "linkedin_draft", {**row, "saved_by": "devanshu", "reason_state": "written",
+                                           "reason_line": "We were both at Northeastern."})
+        self.assert_row_refused("linkedin_draft", {**row, "person_id": self.spare_person, "saved_by": "sender"},
+                                "CHECK")
+
+    def test_linkedin_draft_one_per_person_and_checks_must_be_json_array(self):
+        row = self.base_row("linkedin_draft")
+        for column in ("checks", "facts"):
+            for bad in ("{}", "not json"):
+                with self.subTest(column=column, value=bad):
+                    self.assert_row_refused("linkedin_draft", {**row, column: bad}, "CHECK")
+        self.assert_row_refused("linkedin_draft", {**row, "body": "  "}, "CHECK")
+        insert(self.db, "linkedin_draft", row)
+        stored = self.db.execute("SELECT reason_state, facts, checks, revision FROM linkedin_draft").fetchone()
+        self.assertEqual(tuple(stored), ("proposed", "[]", "[]", 1))
+        self.assert_row_refused("linkedin_draft", row, "UNIQUE")
+
+    def test_daily_entry_person_needs_channel_and_is_unique_per_date(self):
+        entry = {"list_date": "2026-10-01", "company_id": self.company, "list_group": "level_role", "rank": 1,
+                 "proposed_at": NOW, "person_id": self.person}
+        self.assert_row_refused("daily_list_entry", entry, "CHECK")
+        insert(self.db, "daily_list_entry", {**entry, "channel": "email"})
+        other = seed_company(self.db, "Other")
+        self.assert_row_refused("daily_list_entry", {**entry, "company_id": other, "rank": 2, "channel": "email"},
+                                "UNIQUE")
+        insert(self.db, "daily_list", {"list_date": "2026-10-02", "built_at": NOW, "capacity": 5})
+        insert(self.db, "daily_list_entry", {**entry, "list_date": "2026-10-02", "channel": "email"})
+
+    # ---- the API's tables (#11 Task 4, copied here) ------------------------
+
+    def test_api_tables_take_one_good_row_and_refuse_bad_ones(self):
+        bad = {
+            "api_request": [("status", 500), ("status", 199), ("request_id", "short"), ("request_id", "r" * 81),
+                            ("fingerprint", "f" * 63), ("response", "not json")],
+            "mx_check": [("domain", "Acme.co"), ("status", "unknown")],
+            "win_seen": [("kind", "quiet"), ("touch_id", 999999)],
+            "watch_dismissal": [("kind", "other")],
+        }
+        for table, cases in bad.items():
+            for column, value in cases:
+                with self.subTest(table=table, column=column, value=value):
+                    self.assert_row_refused(table, {**self.base_row(table), column: value})
+            insert(self.db, table, self.base_row(table))
+            with self.subTest(table=table, repeat=True):
+                self.assert_row_refused(table, self.base_row(table), "UNIQUE")
+        mx_none = {**self.base_row("mx_check"), "domain": "nomail.example", "status": "none"}
+        insert(self.db, "mx_check", mx_none)
+
+    def test_pipeline_indexes_exist(self):
+        names = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        for name in ("evidence_domain", "company_source_ref", "read_queue_next", "person_source_person",
+                     "daily_entry_person"):
+            self.assertIn(name, names)
+        plan = self.plan("SELECT company_id FROM evidence WHERE fact = 'domain' AND value = ?", ("acme.co",))
+        self.assertIn("evidence_domain", plan)
+        plan = self.plan("SELECT company_id FROM company_source WHERE source_name = ? AND source_ref = ?",
+                         ("lca", "lca:acme"))
+        self.assertIn("company_source_ref", plan)
+        plan = self.plan("SELECT posting_id FROM read_queue WHERE state = 'queued' "
+                         "ORDER BY priority DESC, enqueued_at LIMIT 5")
+        self.assertIn("read_queue_next", plan)
+        self.assertNotIn("TEMP B-TREE", plan)
 
 if __name__ == "__main__":
     unittest.main()

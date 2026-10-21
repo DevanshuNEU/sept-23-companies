@@ -3,9 +3,10 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  FindingsView, OutcomePromptView, PlanView, ProgressView, ScoreView, WatchView, WinsView,
+  FindingsView, FunnelKey, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, WatchView, Win, WinKind, WinsView,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, STEP_LINE, type FixtureDb } from './data';
+import { rescanNote } from './plan-data';
 
 const STOP_WORDS = new Set(['of', 'the', 'and', 'a', 'an', 'at', 'for', 'in', 'to']);
 
@@ -87,6 +88,14 @@ export class FixtureClient implements OutreachClient {
   private readonly results = new Map<string, unknown>();
   /** Today rows taken off the list by removeCompany, so restoreCompany can bring back the same row. */
   private readonly removedEntries = new Map<Id, DailyEntry>();
+  /** Idempotency keys (`plan:<entryId>:request`) and the touch each one made, so a repeated key writes nothing. Only successes are kept. */
+  private readonly keys = new Map<string, Id>();
+  /** Prompt touches that got an outcome and left the prompt. A reply on a quiet touch still finds its person here. */
+  private readonly leftPrompt = new Map<Id, PromptTouch>();
+  /** Touch revisions after an outcome. A touch with no entry is at its own revision, or 1. */
+  private readonly touchRevisions = new Map<Id, number>();
+  /** Funnel stages already counted for a touch, so an outcome logged twice never counts twice. */
+  private readonly counted = new Map<Id, Set<FunnelKey>>();
   private nextId = 900_000;
 
   constructor(protected db: FixtureDb = buildFixture(), opts: { latencyMs?: number } = {}) {
@@ -184,7 +193,34 @@ export class FixtureClient implements OutreachClient {
       s.nextSend = next && at ? { at, tz: next.schedule?.tz ?? '', touchId: next.touchId, personName: next.person.name, companyName: next.company.name } : null;
       s.noneReason = next ? null : 'Nothing is approved.';
     }
+    this.settlePlan();
     db.shell = computeShell({ ...db, jobs: db.shell.jobs });
+  }
+
+  /** Everything the plan, progress and wins views derive, worked out here from the rows and wins and nowhere else. */
+  private settlePlan(): void {
+    const { plan, progress, wins } = this.db;
+    for (const row of plan.rows) if (row.state === 'todo' && row.steps.length > 0 && row.steps.every((st) => st.at !== null)) row.state = 'done';
+    plan.done = plan.rows.filter((r) => r.state === 'done').length;
+    plan.total = plan.rows.length;
+
+    for (const period of [progress.week, progress.month]) {
+      const count = (k: FunnelKey) => period.stages.find((st) => st.stage === k)?.count ?? 0;
+      for (const st of period.stages) if (st.from) st.from.count = count(st.from.stage);
+      period.enough = count('requests') >= progress.base.minRequests;
+      if (period.quiet && count('replies') + count('referrals') + count('interviews') > 0) period.quiet = false;
+    }
+    progress.base.enough = progress.base.requests >= progress.base.minRequests;
+    const week = (k: FunnelKey) => progress.week.stages.find((st) => st.stage === k)?.count ?? 0;
+    plan.week = { requests: week('requests'), accepts: week('accepts'), replies: week('replies') };
+
+    const logged = (kind: StepKind) => plan.rows.reduce((n, r) => n + r.steps.filter((st) => st.kind === kind && st.at !== null).length, 0);
+    const unseen = (kind: WinKind) => wins.wins.filter((w) => w.unseen && w.kind === kind).length;
+    progress.today = { planned: plan.rows.length, done: plan.done, requests: logged('request'), applications: logged('apply'), accepted: unseen('accepted'), replied: unseen('replied') };
+
+    wins.unseen = wins.wins.filter((w) => w.unseen).length;
+    const tally = (k: WinKind) => wins.wins.filter((w) => w.kind === k).length;
+    wins.counts = { accepted: tally('accepted'), replied: tally('replied'), referred: tally('referred'), interview: tally('interview'), offer: tally('offer') };
   }
 
   private view(id: Id): CompanyView {
@@ -686,6 +722,221 @@ export class FixtureClient implements OutreachClient {
         this.touchCompany(v.company.id, { status: 'candidate' }, ['no_go_lifted', `No-go lifted: ${reason}`], 'Candidate');
         v.company.closed = null;
       }
+    });
+  }
+
+  /* ---------------------------------------------------- the people plan (#33) */
+
+  private planRow(entryId: Id): PlanRow {
+    const row = this.db.plan.rows.find((r) => r.entryId === entryId);
+    if (!row) throw new ApiError('not_found', `No plan row ${entryId}`);
+    return row;
+  }
+
+  private freshRow(entryId: Id, revision: Revision): PlanRow {
+    const row = this.planRow(entryId);
+    if (row.revision !== revision) throw new ApiError('conflict', `${row.company.name} changed since you loaded it`);
+    return row;
+  }
+
+  /** One more request, accept, reply, referral or interview in the week, the month and the base rates. Rates and `from` counts follow in settlePlan. */
+  private countStage(stage: FunnelKey): void {
+    const { progress } = this.db;
+    for (const period of [progress.week, progress.month]) {
+      const hit = period.stages.find((st) => st.stage === stage);
+      if (hit) hit.count += 1;
+    }
+    if (stage === 'requests' || stage === 'accepts' || stage === 'replies') progress.base[stage] += 1;
+  }
+
+  private countEffort(label: string): void {
+    const { progress } = this.db;
+    const periods: ProgressPeriod[] = [progress.week, progress.month];
+    for (const period of periods) {
+      const hit = period.effort.find((e) => e.label === label);
+      if (hit) hit.count += 1;
+    }
+  }
+
+  /** Log one step of a row. The key is stored with the touch it made, so the same key later changes nothing. */
+  private logStep(entryId: Id, kind: StepKind, key: string, revision: Revision, check: (row: PlanRow) => void): PlanRow {
+    const row = this.planRow(entryId);
+    if (this.keys.has(key)) return row;
+    if (row.revision !== revision) throw new ApiError('conflict', `${row.company.name} changed since you loaded it`);
+    if (row.state === 'skipped') throw notAllowed(`${row.company.name} is carried to tomorrow`);
+    const step = row.steps.find((st) => st.kind === kind);
+    if (!step) throw notAllowed(kind === 'request' ? 'This row has no request to log' : 'This row has no role to apply to');
+    check(row);
+    if (step.at !== null && step.touchId !== null) {
+      this.keys.set(key, step.touchId);
+      return row;
+    }
+    step.at = this.now;
+    step.touchId = this.nextId++;
+    row.revision += 1;
+    this.keys.set(key, step.touchId);
+    if (kind === 'request') {
+      this.countStage('requests');
+      this.countEffort('Requests sent');
+      this.db.plan.linkedinMonth.used += 1;
+      this.db.plan.linkedinMonth.hardUsed += 1;
+    } else {
+      this.countEffort('Applications sent');
+    }
+    return row;
+  }
+
+  logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow> {
+    return this.write(o, () => this.logStep(entryId, 'request', input.idempotencyKey, revision, (row) => {
+      if (!row.person) throw notAllowed('Find someone at this company first');
+      if (row.person.person.id !== input.personId) throw notAllowed('That person is not on this row');
+    }));
+  }
+
+  logApplied(entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow> {
+    return this.write(o, () => this.logStep(entryId, 'apply', input.idempotencyKey, revision, (row) => {
+      if (!row.role) throw notAllowed('This row has no role to apply to');
+      if (row.role.postingId !== input.postingId) throw notAllowed('That role is not on this row');
+    }));
+  }
+
+  skipRow(entryId: Id, revision: Revision, o: WriteOptions): Promise<PlanRow> {
+    return this.write(o, () => {
+      const row = this.freshRow(entryId, revision);
+      if (row.state === 'done') throw notAllowed(`${row.company.name} is already done`);
+      if (row.state === 'skipped') return row;
+      row.state = 'skipped';
+      row.revision += 1;
+      const t = this.db.plan.tomorrow;
+      t.total += 1;
+      t.text = t.text.replace(/\d+/, String(t.total));
+      t.preview = [{ companyName: row.company.name, personName: row.person?.person.name ?? null, roleTitle: row.role?.title ?? null }, ...t.preview].slice(0, 5);
+      return row;
+    });
+  }
+
+  /** Where a touch came from, for a win's words: the prompt, a request logged from the plan, or an earlier win. */
+  private touchInfo(id: Id): { person: PersonRef | null; company: CompanyRef; role: string | null; sentNote: string | null; revision: Revision } | undefined {
+    const revision = this.touchRevisions.get(id) ?? 1;
+    const prompted = this.db.prompt.touches.find((t) => t.touchId === id) ?? this.leftPrompt.get(id);
+    if (prompted) return { person: prompted.person, company: prompted.company, role: null, sentNote: null, revision: this.touchRevisions.get(id) ?? prompted.revision };
+    for (const row of this.db.plan.rows) {
+      const step = row.steps.find((st) => st.touchId === id);
+      if (step) return { person: step.kind === 'request' ? (row.person?.person ?? null) : null, company: refOf(row.company), role: row.role?.title ?? null, sentNote: step.kind === 'request' ? (row.note?.text ?? null) : null, revision };
+    }
+    const win = this.db.wins.wins.find((w) => w.touchId === id);
+    if (win) return { person: win.person, company: win.company, role: win.role, sentNote: win.sentNote, revision };
+    return undefined;
+  }
+
+  private winLine(kind: WinKind, person: PersonRef | null, company: string, replyKind: ReplyKind | null): string {
+    const who = person ? `${person.name} at ${company}` : company;
+    switch (kind) {
+      case 'accepted': return `${who} accepted your request.`;
+      case 'replied': return replyKind === 'interested' ? `${who} replied and wants to talk.` : replyKind === 'not_now' ? `${who} replied, but not now.` : `${who} replied.`;
+      case 'referred': return `${who} referred you.`;
+      case 'interview': return person ? `Interview at ${company}, set up by ${person.name}.` : `Interview at ${company}.`;
+      case 'offer': return `Offer from ${company}.`;
+    }
+  }
+
+  logOutcome(touchId: Id, kind: OutcomeKind, revision: Revision, o: WriteOptions, replyKind?: Exclude<ReplyKind, 'unsorted' | 'auto_reply'>): Promise<{ revision: Revision }> {
+    return this.write(o, () => {
+      const info = this.touchInfo(touchId);
+      if (!info) throw new ApiError('not_found', `No touch ${touchId}`);
+      if (info.revision !== revision) throw new ApiError('conflict', 'This touch changed since you loaded it');
+      const next = revision + 1;
+      this.touchRevisions.set(touchId, next);
+      const prompt = this.db.prompt;
+      const asked = prompt.touches.find((t) => t.touchId === touchId);
+      if (asked) {
+        this.leftPrompt.set(touchId, asked);
+        prompt.touches = prompt.touches.filter((t) => t !== asked);
+      }
+      if (kind === 'quiet') return { revision: next };
+
+      const refusal = kind === 'replied' && (replyKind === 'said_no' || replyKind === 'asked_to_stop');
+      // An interview, referral or offer needs a reply first, so the reply is counted once when it was not already.
+      const stages: FunnelKey[] = kind === 'accepted' ? ['accepts'] : kind === 'referred' ? ['replies', 'referrals'] : kind === 'interview' ? ['replies', 'interviews'] : ['replies'];
+      const have = this.counted.get(touchId) ?? new Set<FunnelKey>();
+      for (const w of this.db.wins.wins) {
+        if (w.touchId !== touchId) continue;
+        have.add(w.kind === 'accepted' ? 'accepts' : 'replies');
+        if (w.kind === 'referred') have.add('referrals');
+        if (w.kind === 'interview') have.add('interviews');
+      }
+      for (const stage of stages) {
+        if (have.has(stage)) continue;
+        have.add(stage);
+        this.countStage(stage);
+      }
+      this.counted.set(touchId, have);
+
+      if (refusal) {
+        if (info.person) this.noGoReply(info.person, info.company.name, replyKind, '', null);
+        return { revision: next };
+      }
+      if (this.db.wins.wins.some((w) => w.touchId === touchId && w.kind === kind)) return { revision: next };
+      const kept: ReplyKind | null = kind === 'replied' ? (replyKind ?? 'unsorted') : null;
+      const win: Win = {
+        winId: this.nextId++, kind, at: this.now, touchId, person: info.person ? { ...info.person } : null, company: { ...info.company },
+        line: this.winLine(kind, info.person, info.company.name, kept), sentNote: info.sentNote, role: info.role, replyKind: kept, unseen: true,
+      };
+      this.db.wins.wins.unshift(win);
+      return { revision: next };
+    });
+  }
+
+  private noteRow(noteId: Id): NoteDraft {
+    const note = this.db.plan.rows.find((r) => r.note?.noteId === noteId)?.note;
+    if (!note) throw new ApiError('not_found', `No note ${noteId}`);
+    return note;
+  }
+
+  saveNote(noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions): Promise<NoteDraft> {
+    return this.write(o, () => {
+      const note = this.noteRow(noteId);
+      if (note.revision !== edit.revision) throw new ApiError('conflict', 'This note changed since you loaded it');
+      if (edit.reasonLine !== note.reasonLine) note.reasonState = 'written';
+      note.text = edit.text;
+      note.chars = edit.text.length;
+      note.reasonLine = edit.reasonLine;
+      note.needsYourLine = note.reasonState === 'proposed';
+      note.checks = rescanNote(edit.text, note.maxChars);
+      note.savedBy = 'devanshu';
+      note.savedAt = this.now;
+      note.revision += 1;
+      return note;
+    });
+  }
+
+  confirmReason(noteId: Id, revision: Revision, o: WriteOptions): Promise<NoteDraft> {
+    return this.write(o, () => {
+      const note = this.noteRow(noteId);
+      if (note.revision !== revision) throw new ApiError('conflict', 'This note changed since you loaded it');
+      if (note.reasonLine.trim() === '') throw notAllowed('Write the reason line before you confirm it');
+      note.reasonState = 'confirmed';
+      note.needsYourLine = false;
+      note.revision += 1;
+      return note;
+    });
+  }
+
+  markWinsSeen(winIds: Id[], o: WriteOptions): Promise<void> {
+    return this.write(o, () => {
+      const hits = winIds.map((id) => {
+        const win = this.db.wins.wins.find((w) => w.winId === id);
+        if (!win) throw new ApiError('not_found', `No win ${id}`);
+        return win;
+      });
+      for (const win of hits) win.unseen = false;
+    });
+  }
+
+  dismissWatch(itemId: Id, o: WriteOptions): Promise<void> {
+    return this.write(o, () => {
+      if (!this.db.watch.items.some((i) => i.id === itemId)) throw new ApiError('not_found', `No watch item ${itemId}`);
+      this.db.watch.items = this.db.watch.items.filter((i) => i.id !== itemId);
     });
   }
 }

@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -53,4 +53,14 @@ export interface OutreachClient {
   findings(): Promise<FindingsView>;
   watchList(): Promise<WatchView>;
   score(companyId: Id): Promise<ScoreView>; // 'not_found' for an unknown company
+
+  // Idempotency keys are `plan:<entryId>:request` and `plan:<entryId>:apply`: the same key twice returns the first result and writes nothing.
+  logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>;
+  logApplied(entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>; // 'not_allowed' with no role
+  logOutcome(touchId: Id, kind: OutcomeKind, revision: Revision, o: WriteOptions, replyKind?: Exclude<ReplyKind, 'unsorted' | 'auto_reply'>): Promise<{ revision: Revision }>;
+  skipRow(entryId: Id, revision: Revision, o: WriteOptions): Promise<PlanRow>; // carried to tomorrow; 'not_allowed' on a done row
+  saveNote(noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions): Promise<NoteDraft>;
+  confirmReason(noteId: Id, revision: Revision, o: WriteOptions): Promise<NoteDraft>; // reasonState becomes 'confirmed'; 'not_allowed' with an empty line
+  markWinsSeen(winIds: Id[], o: WriteOptions): Promise<void>; // 'not_found' for an unknown id
+  dismissWatch(itemId: Id, o: WriteOptions): Promise<void>;
 }

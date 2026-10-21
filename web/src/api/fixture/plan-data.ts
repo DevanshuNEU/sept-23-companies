@@ -61,6 +61,7 @@ interface RowSpec {
   carriedFrom?: IsoDate;
 }
 
+const copyFact = (f: NoteFact): NoteFact => ({ ...f, source: { ...f.source } }); // each build owns its copies, so a write never leaks into the next fixture
 const fact = (text: string, label: string, host: string, path: string): NoteFact => ({ text, source: link(label, host, path), inNote: true });
 
 const ROWS: RowSpec[] = [
@@ -140,11 +141,31 @@ const HANDOFF = (company: string, role: string) =>
 const searchUrl = (company: string) =>
   `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`engineer ${company}`)}&origin=GLOBAL_SEARCH_HEADER`;
 
-const NOTE_CHECKS = (): Check[] => [
-  { code: 'pass_notelength', severity: 'pass', title: `Within ${MAX_CHARS} characters`, detail: '', fix: null, spans: [] },
-  { code: 'pass_nobannedphrases', severity: 'pass', title: 'No banned phrases', detail: '', fix: null, spans: [] },
-  { code: 'pass_noemorendashes', severity: 'pass', title: 'No em or en dashes', detail: '', fix: null, spans: [] },
+/** Stands in for #15's `check_note`: the codes and severities are its own. A note rule that fails is a `block`. */
+const NOTE_PHRASE_RULES = [
+  { code: 'banned_phrase', passCode: 'pass_nobannedphrases', passTitle: 'No banned phrases', title: 'Banned phrase', detail: '"I\'d love to" is on the banned list. Say it plainly.', find: /I['\u2019]d love to/gi },
+  { code: 'dash', passCode: 'pass_noemorendashes', passTitle: 'No em or en dashes', title: 'Em or en dash', detail: 'Use a comma, a colon or two sentences instead.', find: /[\u2013\u2014]/g },
 ];
+const BLOCK_FIRST = { block: 0, warn: 1, pass: 2 } as const;
+
+/** Every check for a note's text, in one pass: the length, then each phrase rule. Blocks come first, so a passing note lists only passes. */
+export function rescanNote(text: string, maxChars: number): Check[] {
+  const over = text.length - maxChars;
+  const checks: Check[] = [
+    over > 0
+      ? { code: 'note_too_long', severity: 'block', title: `Over the limit by ${over} characters`, detail: `A note can be ${maxChars} characters or fewer.`, fix: null, spans: [{ field: 'body', start: maxChars, end: text.length }] }
+      : { code: 'pass_notelength', severity: 'pass', title: `Within ${maxChars} characters`, detail: '', fix: null, spans: [] },
+  ];
+  for (const r of NOTE_PHRASE_RULES) {
+    const spans = [...text.matchAll(r.find)].map((m) => ({ field: 'body' as const, start: m.index ?? 0, end: (m.index ?? 0) + m[0].length }));
+    checks.push(spans.length
+      ? { code: r.code, severity: 'block', title: r.title, detail: r.detail, fix: null, spans }
+      : { code: r.passCode, severity: 'pass', title: r.passTitle, detail: '', fix: null, spans: [] });
+  }
+  return checks.sort((a, b) => BLOCK_FIRST[a.severity] - BLOCK_FIRST[b.severity]);
+}
+
+const NOTE_CHECKS = (): Check[] => rescanNote('', MAX_CHARS);
 
 interface Built { rows: PlanRow[]; requests: number; applications: number }
 
@@ -182,14 +203,14 @@ function buildRows(c: PlanCtx, mode: Mode): Built {
     const note: NoteDraft | null = noteSpec ? {
       noteId: 6100 + n, text: noteSpec.text, chars: noteSpec.text.length, maxChars: MAX_CHARS,
       reasonLine: noteSpec.line, reasonState: noteSpec.state, needsYourLine: noteSpec.state === 'proposed',
-      facts: noteSpec.facts, checks: NOTE_CHECKS(), savedBy: noteSpec.by ?? 'claude', savedAt: c.et(c.date, '08:01'), revision: 1,
+      facts: noteSpec.facts.map(copyFact), checks: NOTE_CHECKS(), savedBy: noteSpec.by ?? 'claude', savedAt: c.et(c.date, '08:01'), revision: 1,
     } : filledIn ? wenNote(c, n) : null;
 
     return {
       entryId: 6000 + n, position: n, channel: spec.channel, lane: spec.lane,
       company: { ...c.co(spec.company), domain: companyRef.domain, hq: companyRef.hq, revision: 1 },
       person, role, applyUrl: role?.url ?? null,
-      reason: spec.reason, reasonSources: spec.sources, note,
+      reason: spec.reason, reasonSources: spec.sources.map((x) => ({ ...x })), note,
       findSomeone: person || spec.channel === 'email' ? null : {
         searchUrl: searchUrl(spec.company), handoff: HANDOFF(spec.company, role?.title ?? 'an engineering role'),
       },

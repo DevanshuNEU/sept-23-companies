@@ -174,6 +174,22 @@ MUTATIONS = [
      "    'skipped>drafted')\n"
      "  BEGIN SELECT RAISE(ABORT, 'illegal message state change'); END;\n",
      "", "test_message_state_machine"),
+    # The pipeline tables (#30). Each guard is swapped for CHECK (1), so the statement still parses.
+    (SCHEMA, "person_source takes LinkedIn pages, which prepare must never read",
+     "  CHECK (instr(lower(url), 'linkedin.com') = 0 AND instr(lower(url), 'lnkd.in') = 0),\n", "  CHECK (1),\n",
+     "test_person_source_refuses_linkedin_hosts"),
+    (SCHEMA, "a Claude save can confirm a LinkedIn reason line",
+     "  CHECK (saved_by <> 'claude' OR reason_state = 'proposed')\n", "  CHECK (1)\n",
+     "test_linkedin_draft_claude_cannot_confirm"),
+    (SCHEMA, "outreach_touch.idempotency_key not unique, so a double click logs two touches",
+     "  idempotency_key TEXT UNIQUE,\n", "  idempotency_key TEXT,\n", "test_outreach_touch_idempotency_key_unique"),
+    (SCHEMA, "an undone touch can take an outcome",
+     "  CHECK (undone_at IS NULL OR (accepted_at IS NULL AND replied_at IS NULL AND referred_at IS NULL\n"
+     "                               AND interview_at IS NULL AND offer_at IS NULL AND quiet_at IS NULL))\n",
+     "  CHECK (1)\n", "test_outreach_touch_undone_excludes_outcomes"),
+    (SCHEMA, "an lca key test uses = again, so a missing key reads NULL and the CHECK passes",
+     "AND json_type(value, '$.newemp_jr') IS 'integer'", "AND json_type(value, '$.newemp_jr') = 'integer'",
+     "test_evidence_lca_value_must_be_json"),
 ]
 
 

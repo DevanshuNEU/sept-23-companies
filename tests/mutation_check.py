@@ -76,9 +76,20 @@ MUTATIONS = [
     (RULES / "location.py", "non-US-only cities lose to a two-letter state code",
      "    if p.non_us.search(rest):", "    if p.non_us.search(rest) and not p.state_code.search(rest):", "location"),
 
+    (RULES / "location.py", "a structured non-US country beats a US location in the text again",
+     '        read = _read_country(country.strip(), p)\n        if read == "yes":',
+     '        read = _read_country(country.strip(), p)\n        if read is not None:',
+     "test_a_us_location_in_the_text_beats_a_non_us_country"),
+
     # ---- rules/sponsorship.py and its topic words -------------------------------------------------------------
     (RULES / "sponsorship.py", "the negation check removed",
      "    if topics and (m := p.negation.search(clause)):\n        return NO, m\n", "", "Misfire7"),
+    (RULES / "sponsorship.py", "a yes sentence with a negator no longer cancels a refusal in another sentence",
+     "    if NO in by_stance and YES not in by_stance and not leans_yes:",
+     "    if NO in by_stance and YES not in by_stance:", "test_wave_2_a_yes_with_a_negator_still_cancels_a_refusal"),
+    (RULES / "sponsorship.py", "a refusal scoped to interns, contractors or non-US roles reads a flat no",
+     "    if reading == NO and p.refusal_scope.search(clause):", "    if False:",
+     "test_wave_2_a_scoped_refusal_is_not_a_flat_no"),
     (RULES / "config.toml", "'immigration' added to the topic words",
      '"sponsorship", "sponsorships", "visa", "visas", "h-1b", "h1b",\n]',
      '"sponsorship", "sponsorships", "visa", "visas", "h-1b", "h1b", "immigration",\n]',
@@ -147,6 +158,10 @@ MUTATIONS = [
      "  WHEN OLD.state IN ('sending','send_unknown','sent')\n  BEGIN SELECT RAISE(ABORT, 'a claimed or sent message is never deleted'); END;\n",
      "  WHEN 0\n  BEGIN SELECT RAISE(ABORT, 'a claimed or sent message is never deleted'); END;\n",
      "test_a_claimed_or_sent_message_is_never_deleted"),
+    (SCHEMA, "the BEFORE INSERT replace guard on message removed, so a plain connection can REPLACE a sent message",
+     "CREATE TRIGGER message_no_replace_claimed_insert BEFORE INSERT ON message\n  WHEN EXISTS",
+     "CREATE TRIGGER message_no_replace_claimed_insert BEFORE INSERT ON message\n  WHEN 0 AND EXISTS",
+     "test_replace_cannot_erase_a_sent_message_without_recursive_triggers"),
     (SCHEMA, "the message_legal_transition trigger removed",
      "CREATE TRIGGER message_legal_transition BEFORE UPDATE OF state ON message\n"
      "  WHEN NEW.state <> OLD.state AND (OLD.state || '>' || NEW.state) NOT IN (\n"

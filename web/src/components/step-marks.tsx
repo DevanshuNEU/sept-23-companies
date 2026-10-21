@@ -1,12 +1,9 @@
 import { Check } from 'lucide-react';
 import type { IsoTime, PlanStep, StepKind } from '@/api';
-import { formatLocalTime } from '@/lib/format';
+import { formatClockTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 const WORD: Record<StepKind, string> = { request: 'Requested', apply: 'Applied' };
-
-/** "9:02", as the mockups write a time of day (no leading zero). */
-const clock = (at: IsoTime) => formatLocalTime(at).replace(/^0/, '');
 
 function Mark({ kind, at }: { kind: StepKind; at: IsoTime | null }) {
   const done = at !== null;
@@ -22,7 +19,7 @@ function Mark({ kind, at }: { kind: StepKind; at: IsoTime | null }) {
         {done ? <Check className="size-[9px]" strokeWidth={3.5} /> : null}
       </span>
       {done ? (
-        `${WORD[kind]} ${clock(at)}`
+        `${WORD[kind]} ${formatClockTime(at)}`
       ) : (
         <span>
           {WORD[kind]}

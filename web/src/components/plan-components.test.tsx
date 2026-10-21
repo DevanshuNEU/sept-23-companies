@@ -167,14 +167,14 @@ describe('NoteBlock', () => {
 
   it('past 90% of the limit the count is warn toned and says how many are left', () => {
     noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 185, maxChars: 200 });
-    const count = screen.getByText(/185 of 200 characters/);
+    const count = screen.getByText(/185 of 200 characters/, { selector: '[data-tone]' });
     expect(count).toHaveAttribute('data-tone', 'warn');
     expect(count).toHaveTextContent('185 of 200 characters, 15 left');
   });
 
   it('an over-limit note is bad toned and says "Over the limit by 12 characters"', () => {
     noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 212, maxChars: 200 });
-    const count = screen.getByText(/212 of 200 characters/);
+    const count = screen.getByText(/212 of 200 characters/, { selector: '[data-tone]' });
     expect(count).toHaveAttribute('data-tone', 'bad');
     expect(count).toHaveTextContent('Over the limit by 12 characters');
   });
@@ -249,7 +249,7 @@ describe('NoteBlock', () => {
   it('says how many checks passed in the foot', () => {
     const note = { ...noteOf(plan(), 'Pylon'), checks: [pass('a', 'Under the limit'), pass('b', 'No banned phrases')] };
     noteBlock(note);
-    expect(screen.getByText('2 checks passed')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('2 checks passed.');
     expect(screen.getByRole('button', { name: 'Copy' })).toBeEnabled();
   });
 
@@ -257,22 +257,54 @@ describe('NoteBlock', () => {
     const block: Check = { code: 'note_too_long', severity: 'block', title: 'Note is too long', detail: 'Cut 12 characters.', fix: null, spans: [] };
     const calls = noteBlock({ ...noteOf(plan(), 'Pylon'), checks: [block, pass('b', 'No banned phrases')] });
     expect(within(screen.getByRole('group', { name: 'Check results' })).getByText('Note is too long')).toBeInTheDocument();
-    expect(screen.getByText('1 check blocks this note')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('1 check blocks this note.');
     const copy = screen.getByRole('button', { name: 'Copy' });
     expect(copy).toBeDisabled();
-    expect(copy).toHaveAccessibleDescription('1 check blocks this note');
+    expect(copy).toHaveAccessibleDescription('1 check blocks this note.');
     fireEvent.click(copy);
     expect(calls.copy).not.toHaveBeenCalled();
   });
 
   it('while a save is pending the checks are unknown and Copy and Confirm line wait', () => {
     const calls = noteBlock(noteOf(plan(), 'Inngest'), { saving: true });
-    expect(screen.getByText('Saving. The checks run again before you can copy.')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Saving. The checks run again before you can copy.');
     expect(screen.queryByText(/checks? passed/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Confirm line' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
     expect(calls.copy).not.toHaveBeenCalled();
+  });
+
+  it('announces the count and the check result in one polite status region', () => {
+    const note = { ...noteOf(plan(), 'Pylon'), chars: 168, maxChars: 200, checks: [pass('a', 'Under the limit'), pass('b', 'No banned phrases')] };
+    const props = { note, onCopy: vi.fn(), onEdit: vi.fn(), onConfirm: vi.fn() };
+    const { rerender } = render(<NoteBlock {...props} saving />);
+    const region = screen.getByRole('status');
+    expect(region).toHaveAttribute('aria-live', 'polite');
+    expect(region).toHaveAttribute('aria-atomic', 'true');
+    expect(region).toHaveTextContent('168 of 200 characters. Saving. The checks run again before you can copy.');
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeDisabled();
+    rerender(<NoteBlock {...props} note={{ ...note, chars: 150 }} saving={false} />);
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region).toHaveTextContent('150 of 200 characters. 2 checks passed.');
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeEnabled();
+  });
+
+  it('with no checks yet Copy waits, because the checks are unknown', () => {
+    const calls = noteBlock({ ...noteOf(plan(), 'Pylon'), checks: [] });
+    expect(screen.getByRole('status')).toHaveTextContent('The checks have not run yet. Copy waits for them.');
+    const copy = screen.getByRole('button', { name: 'Copy' });
+    expect(copy).toBeDisabled();
+    fireEvent.click(copy);
+    expect(calls.copy).not.toHaveBeenCalled();
+  });
+
+  it('while he edits, the question about his line steps aside', () => {
+    noteBlock(noteOf(plan(), 'Inngest'), { editing: <textarea aria-label="Note to Jonah Park" defaultValue="draft" /> });
+    expect(screen.queryByText('Is this why you are writing to them? Confirm it or write your own.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Confirm line' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Write my own' })).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Note to Jonah Park' })).toBeInTheDocument();
   });
 
   it('the editor takes the place of the note text', () => {
@@ -325,6 +357,12 @@ describe('SourceLinks', () => {
     expect(screen.getByText('No link')).toBeInTheDocument();
   });
 
+  it('takes its spacing from the caller', () => {
+    const { container } = render(<SourceLinks links={[{ label: 'Pylon blog', url: 'https://pylon.example/blog' }]} className="mt-3" />);
+    expect(container.firstElementChild).toHaveClass('mt-3');
+    expect(container.firstElementChild).not.toHaveClass('mt-1.5');
+  });
+
   it('renders nothing with no links', () => {
     const { container } = render(<SourceLinks links={[]} />);
     expect(container).toBeEmptyDOMElement();
@@ -345,7 +383,8 @@ describe('the win motion', () => {
   const css = readFileSync(path.resolve(import.meta.dirname, '../styles/globals.css'), 'utf8');
 
   function ruleBody(selector: string): string {
-    const start = css.indexOf(`${selector} {`);
+    // A top-level rule starts its line, so `.win-draw` never matches inside `.win-in .win-draw`.
+    const start = css.indexOf(`\n${selector} {`);
     if (start < 0) throw new Error(`No ${selector} rule in globals.css`);
     return css.slice(start, css.indexOf('}', start));
   }
@@ -353,10 +392,12 @@ describe('the win motion', () => {
   it('globals.css has win-draw and win-in inside the reduced motion override scope', () => {
     expect(css).toMatch(/@keyframes win-draw\s*\{/);
     expect(css).toMatch(/@keyframes win-in\s*\{/);
-    const draw = ruleBody('.win-draw');
+    const draw = ruleBody('.win-in .win-draw');
     const fade = ruleBody('.win-in');
     expect(draw).toMatch(/animation:\s*win-draw 240ms/);
     expect(fade).toMatch(/animation:\s*win-in 240ms/);
+    // The draw runs only inside the banner's entrance, so a remount of the mark alone does not replay it.
+    expect(ruleBody('.win-draw')).not.toMatch(/animation/);
     // The override is `* { animation: none !important }`: it beats both rules only while neither is !important.
     expect(draw).not.toContain('!important');
     expect(fade).not.toContain('!important');

@@ -22,11 +22,11 @@ function charCount(chars: number, max: number): { tone: Tone; text: string } {
 /** One line for the foot: what the checks say, with an icon beside the words. */
 function checkSummary(note: NoteDraft, saving: boolean): { tone: 'ok' | Tone; text: string } {
   if (saving) return { tone: 'idle', text: 'Saving. The checks run again before you can copy.' };
+  if (note.checks.length === 0) return { tone: 'idle', text: 'The checks have not run yet. Copy waits for them.' };
   const blocks = note.checks.filter((c) => c.severity === 'block').length;
   const warns = note.checks.filter((c) => c.severity === 'warn').length;
   if (blocks > 0) return { tone: 'bad', text: `${plural(blocks, 'check blocks', 'checks block')} this note` };
   if (warns > 0) return { tone: 'warn', text: plural(warns, 'warning', 'warnings') };
-  if (note.checks.length === 0) return { tone: 'idle', text: 'No checks yet' };
   return { tone: 'ok', text: `${plural(note.checks.length, 'check', 'checks')} passed` };
 }
 
@@ -85,7 +85,10 @@ export function NoteBlock({
   const SummaryIcon = SUMMARY_ICON[summary.tone];
   const flagged = !saving && note.checks.some((c) => c.severity !== 'pass');
   const blocked = note.checks.some((c) => c.severity === 'block');
-  const canCopy = !saving && !blocked;
+  // Copy runs only on a note whose checks are known and pass: not while a save is pending, not before any
+  // check ran, never with a block.
+  const canCopy = !saving && note.checks.length > 0 && !blocked;
+  const asking = note.needsYourLine && !editing;
   const used = note.facts.filter((f) => f.inNote);
   const CountIcon = count.tone === 'bad' ? Ban : count.tone === 'warn' ? TriangleAlert : null;
 
@@ -104,7 +107,7 @@ export function NoteBlock({
         </span>
       </div>
 
-      {note.needsYourLine ? (
+      {asking ? (
         <div className="mx-4 my-3 grid gap-2 rounded-md border bg-background px-3.5 py-3 text-[13px]">
           <b className="font-medium">Is this why you are writing to them? Confirm it or write your own.</b>
           <q className="text-sm leading-[22px] [quotes:none]">{note.reasonLine}</q>
@@ -157,9 +160,17 @@ export function NoteBlock({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-1.5 border-t px-4 py-2.5 text-xs text-muted-foreground">
-        <span id={summaryId} className={cn('inline-flex items-center gap-1.5', summary.tone !== 'ok' && TONE_TEXT[summary.tone])}>
+        {/* One polite, atomic region for what decides Copy: the length and the check result. A save that lands
+            and turns Copy on or off is heard. The count shows in the head; here it is for screen readers. */}
+        <span
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className={cn('inline-flex items-center gap-1.5', summary.tone !== 'ok' && TONE_TEXT[summary.tone])}
+        >
           <SummaryIcon aria-hidden className={cn('size-3.5', TONE_TEXT[summary.tone])} />
-          {summary.text}
+          <span className="sr-only">{sentence(count.text)} </span>
+          <span id={summaryId}>{sentence(summary.text)}</span>
         </span>
         <span className="flex-1" />
         <Button

@@ -45,6 +45,11 @@ export function formatLocalTime(at: IsoTime): string {
   return `${p.hour}:${p.minute}`;
 }
 
+/** "9:02": the time of day in the app's zone with no leading zero, as the plan, finish and win views write it. */
+export function formatClockTime(at: IsoTime): string {
+  return formatLocalTime(at).replace(/^0(?=\d:)/, '');
+}
+
 export function parseIsoDate(d: IsoDate): { y: number; m: number; d: number } {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
   if (!match) throw new Error(`Not a calendar date: ${d}`);

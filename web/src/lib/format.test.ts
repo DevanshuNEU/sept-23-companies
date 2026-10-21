@@ -1,4 +1,4 @@
-import { ageDays, formatAge, formatDay, formatDayTime, formatDue, formatDueDay, formatLocalTime, formatMonth, formatRecipientTime, formatWeekdayTime, parseIsoDate } from '@/lib/format';
+import { ageDays, formatAge, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatMonth, formatRecipientTime, formatWeekdayTime, parseIsoDate } from '@/lib/format';
 
 const ASOF = '2026-11-10T15:14:00Z'; // Tuesday 10:14 in Boston
 
@@ -37,6 +37,15 @@ describe('formatLocalTime', () => {
   it('reads the app zone, America/New_York, with no zone suffix', () => {
     expect(formatLocalTime('2026-11-10T15:14:00Z')).toBe('10:14');
     expect(formatLocalTime('2026-10-30T14:14:00Z')).toBe('10:14');
+  });
+});
+
+describe('formatClockTime', () => {
+  it('is the time of day in the app zone with no leading zero, as the plan views write it', () => {
+    expect(formatClockTime('2026-11-10T14:02:00Z')).toBe('9:02');
+    expect(formatClockTime('2026-11-10T15:14:00Z')).toBe('10:14');
+    expect(formatClockTime('2026-11-10T05:05:00Z')).toBe('0:05');
+    expect(formatClockTime('2026-10-30T13:41:00Z')).toBe('9:41');
   });
 });
 

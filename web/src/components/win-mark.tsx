@@ -1,9 +1,10 @@
 import { cn } from '@/lib/utils';
 
 /**
- * The win check (design 16.4): a green stroke that draws once, 240 ms after a 120 ms wait (`win-draw` in
- * globals.css). It is decoration beside the win's own words, so screen readers skip it. With reduced motion
- * the global rule turns the draw off and the check shows complete. `className` sizes it for the larger moments.
+ * The win check (design 16.4): a green stroke. Inside the banner's entrance (a parent with `win-in`) it
+ * draws once, 240 ms after a 120 ms wait; anywhere else it rests drawn, so a remount does not replay it.
+ * It is decoration beside the win's own words, so screen readers skip it. With reduced motion the global
+ * rule turns the draw off and the check shows complete. `className` sizes it for the larger moments.
  */
 export function WinMark({ className }: { className?: string }) {
   return (

@@ -197,9 +197,12 @@
 .win-in {
   animation: win-in 240ms ease-out both;
 }
+/* The mark rests drawn; it draws only inside the banner's entrance, so a remount of the mark alone does not replay it. */
 .win-draw {
   stroke-dasharray: 24;
   stroke-dashoffset: 0;
+}
+.win-in .win-draw {
   animation: win-draw 240ms ease-out 120ms both;
 }
 

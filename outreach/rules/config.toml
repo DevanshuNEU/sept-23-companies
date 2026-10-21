@@ -636,10 +636,17 @@ upper_bound = [
 # window upward; the date after one of them is a lower bound, not a window
 lower_bound = [
   "after", "on or after", "in or after", "since",
+  # final fix wave 2, item 2: "no earlier than December 2025", "not before 2025"
+  "no earlier than", "not earlier than", "not before", "no sooner than",
 ]
 # and the same after the date: "June 2025 or later"; "June 2027 or earlier" bounds the window above like "by"
 lower_bound_suffix = [
   "or later", "or after", "and later", "and after", "and beyond", "onward", "onwards", "or newer",
+  # final fix wave 2, item 2: "December 2024 or more recently", and a window whose top end is today ("between May
+  # 2025 and present", "from December 2024 to now") has no upper bound
+  "or more recently", "or more recent", "and present", "to present", "through present", "until present",
+  "and the present", "to the present", "through the present", "until the present", "and now", "to now",
+  "until now", "to date", "and today", "to today", "until today",
 ]
 upper_bound_suffix = [
   "or earlier", "or before", "and earlier", "and before", "or prior",

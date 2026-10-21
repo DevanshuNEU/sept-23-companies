@@ -186,6 +186,22 @@ FINAL_5 = [  # (title, body, status, reason, start_2027)
     (NG, "Graduation expected in Spring 2027.", "excluded", "grad_window", False),
 ]
 
+# Final fix wave 2, item 2 (#4): a window open at the top ("and present", "no earlier than") lets a May 2026 graduate in.
+WAVE_2_OPEN = [  # (title, body, status, reason, start_2027)
+    (NG, "Graduated between May 2025 and present.", "ok", None, False),
+    (NG, "Must have graduated between December 2024 and now.", "ok", None, False),
+    (NG, "Must have graduated from December 2024 to present.", "ok", None, False),
+    (NG, "Must have graduated between December 2024 and the present.", "ok", None, False),
+    (NG, "Must have graduated no earlier than December 2025.", "ok", None, False),
+    (NG, "Must have graduated not before 2025.", "ok", None, False),
+    (NG, "Must have graduated not earlier than June 2025.", "ok", None, False),
+    (NG, "Must have graduated December 2024 or more recently.", "ok", None, False),
+    (NG, "Must have graduated in 2025 or more recent.", "ok", None, False),
+    # closed windows he misses stay closed
+    (NG, "Must have graduated no earlier than December 2026.", "excluded", "grad_window", False),
+    (NG, "Must have graduated between December 2023 and June 2024.", "excluded", "grad_window", False),
+]
+
 # Final fix wave, item 4 (#4): a current-student phrase excludes only in a sentence that names a degree, program, school
 # or enrollment, with no negation and no preference wording.
 FINAL_4 = [  # (title, body, status, reason, start_2027)
@@ -253,6 +269,9 @@ class EligibilityTest(unittest.TestCase):
 
     def test_final_5_dated_graduation_sentences(self):
         self.check(FINAL_5)
+
+    def test_wave_2_open_ended_windows(self):
+        self.check(WAVE_2_OPEN)
 
     def test_final_4_current_student_needs_a_program_cue(self):
         self.check(FINAL_4)

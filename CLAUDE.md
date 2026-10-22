@@ -52,6 +52,7 @@ with a scratch `OUTREACH_DB` it runs anywhere.
 | `OUTREACH_MAIL_HOME` | contacts, config, send log | `mail/` in the checkout |
 | `OUTREACH_GMAIL_DIR` | Gmail client and token | the real secrets folder |
 | `OUTREACH_DB` | new platform store | the live store path (opening it outside the live checkout is refused, #4) |
+| `OUTREACH_SOURCES_DIR` | downloaded source files (LCA xlsx, stapply lists, Form D sets) | `~/Library/Application Support/outreach/sources` |
 
 Claude never approves or sends an email; approval is Devanshu's click, sending is the sender's job. Never call
 the mail API on :3002 (`/api/approve`, `/api/save`, `/api/skip`, `/api/unapprove`, `/api/pause`) by any means;

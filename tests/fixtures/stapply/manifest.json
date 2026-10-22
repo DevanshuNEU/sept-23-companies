@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-10-20T14:30:05.124532+00:00",
+  "generator": "ats-scrapers/0.3.0",
+  "by_ats_companies": {
+    "greenhouse": {
+      "csv": "https://storage.stapply.ai/jobhive/v1/greenhouse/companies.csv",
+      "rows": 4,
+      "sha256": "6ea0a516a64c6aa6bb43309e3634b804a63fed7a6d404d6484978e5e49c24695",
+      "size_bytes": 296
+    },
+    "ashby": {
+      "csv": "https://storage.stapply.ai/jobhive/v1/ashby/companies.csv",
+      "rows": 1,
+      "sha256": "38f8687f2ffc0b14f9ee7324c53723533431473bb73e67d2080d16fab4be1e18",
+      "size_bytes": 63
+    },
+    "lever": {
+      "csv": "https://storage.stapply.ai/jobhive/v1/lever/companies.csv",
+      "rows": 3,
+      "sha256": "31386294978258bb7635fa2a9e0bf7dd67a9cdbc7cbcd1fc52a5b1ddfb4b940c",
+      "size_bytes": 155
+    },
+    "workday": {
+      "csv": "https://storage.stapply.ai/jobhive/v1/workday/companies.csv",
+      "rows": 2,
+      "sha256": "66b17b7362470bfa9fa581c4c2de27bd4d9720ae824d04094ff20fb468058548",
+      "size_bytes": 188
+    },
+    "jobvite": {
+      "csv": "https://storage.stapply.ai/jobhive/v1/jobvite/companies.csv",
+      "rows": 1,
+      "sha256": "078cc9f34015d8ac3b4b64fad562af597ff603528b137a37f621fe88786bebcf",
+      "size_bytes": 63
+    }
+  }
+}

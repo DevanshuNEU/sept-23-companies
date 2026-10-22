@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-10-20T14:30:05.124532+00:00",
+  "generator": "ats-scrapers/0.3.0",
+  "by_ats_companies": {
+    "greenhouse": {
+      "csv": "https://storage.stapply.ai/jobhive/v1/greenhouse/companies.csv",
+      "rows": 1,
+      "sha256": "80f6180ce7befa5db701122c7ce1460589947b26a06305a3ff2edcd134440cab",
+      "size_bytes": 92
+    }
+  }
+}

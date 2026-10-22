@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from outreach.rules.version import ruleset_version
+from outreach.store import is_shared_key
 from tests.pipeline import stages_rules
 import tests.pipeline.harness as harness_module
 from tests.pipeline.harness import STAGE_NAMES, PipelineHarness
@@ -31,6 +32,55 @@ def invariant(stage):
     return add
 
 
+SOURCES_FIXTURE = ("Clearpath Inc", "Greenfield AI Inc", "Kestrel Robotics Inc")
+
+
+def _fixture_companies(h):
+    """The fixture companies the sources stages made: {name: company_id}, by the `lca` source link."""
+    rows = h.conn.execute("SELECT c.name, c.company_id FROM company c JOIN company_source s USING (company_id) "
+                          "WHERE s.source_name = 'lca'").fetchall()
+    return {r["name"]: r["company_id"] for r in rows}
+
+
+@invariant("discover")
+def sources_discover_made_the_three_fixture_companies(h):
+    ids = _fixture_companies(h)
+    assert sorted(ids) == sorted(SOURCES_FIXTURE), f"discover made {sorted(ids)}"
+    marks = ",".join("?" * len(ids))
+    fein = h.conn.execute(f"SELECT company_id, alias_key FROM company_alias WHERE source = 'fein' "
+                          f"AND company_id IN ({marks})", tuple(ids.values())).fetchall()
+    assert [(r["company_id"], r["alias_key"]) for r in fein] == [(ids["Kestrel Robotics Inc"], "123456780")], \
+        "only the own-FEIN employer gets a fein alias; the two sharing one get none"
+    assert is_shared_key(h.conn, "fein", "333333333"), "the shared FEIN is recorded as shared"
+    for name, company_id in ids.items():
+        n = h.conn.execute("SELECT count(*) FROM evidence WHERE company_id = ? AND fact = 'lca'",
+                           (company_id,)).fetchone()[0]
+        assert n == 1, f"{name} has {n} lca evidence rows, not 1"
+
+
+@invariant("resolve")
+def sources_resolve_merged_nothing(h):
+    ids = _fixture_companies(h)
+    assert len(ids) == 3
+    merged = h.conn.execute("SELECT count(*) FROM company WHERE merged_into IS NOT NULL").fetchone()[0]
+    assert merged == 0, "resolve merged a company"
+    items = h.conn.execute("SELECT count(*) FROM review_item WHERE kind = 'merge_candidate'").fetchone()[0]
+    assert items == 0, "the shared FEIN raised a merge_candidate item"
+
+
+@invariant("find_boards")
+def sources_find_boards_made_the_one_board(h):
+    rows = h.conn.execute("SELECT * FROM board").fetchall()
+    assert len(rows) == 1, f"find_boards made {len(rows)} boards, not 1"
+    (board,) = rows
+    assert board["ats"] == "greenhouse" and board["token"] == "kestrelrobotics" == board["token"].lower()
+    assert board["company_id"] == _fixture_companies(h)["Kestrel Robotics Inc"]
+    alias = h.conn.execute("SELECT company_id, source FROM company_alias WHERE alias_key = ?",
+                           ("greenhouse:" + board["token"],)).fetchone()
+    assert alias is not None and tuple(alias) == (board["company_id"], "ats")
+    assert (board["last_read"], board["next_read_at"], board["active"]) == (None, None, 1), "the board is due now"
+
+
 @invariant("rules")
 def rules_made_the_current_ruleset(h):
     row = h.conn.execute("SELECT ruleset_version FROM ruleset WHERE is_current = 1").fetchone()
@@ -44,6 +94,24 @@ class HarnessCase(unittest.TestCase):
         h = PipelineHarness(**kwargs)
         self.addCleanup(h.close)
         return h
+
+
+class SourcesFlowTests(HarnessCase):
+    def test_sources_flow_invariants(self):
+        h = self.harness()
+        self.assertEqual([n for n, _ in h.stages][:3], ["discover", "resolve", "find_boards"])
+        for name in ("discover", "resolve", "find_boards"):
+            self.assertIn(name, INVARIANTS)
+        for name, run in h.stages[:3]:
+            run()
+            INVARIANTS[name](h)  # after each stage, not only at the end
+
+    def test_the_sources_stages_run_on_the_fixtures_with_no_network(self):
+        h = self.harness()
+        with mock.patch("socket.socket", side_effect=AssertionError("the sources stages opened a socket")):
+            h.run(through="find_boards")
+        statuses = {r["job"]: r["status"] for r in h.conn.execute("SELECT job, status FROM job_run")}
+        self.assertEqual((statuses["discover"], statuses["resolve"], statuses["find_boards"]), ("ok", "ok", "ok"))
 
 
 class FlowTests(HarnessCase):
@@ -81,7 +149,7 @@ class FlowTests(HarnessCase):
 
         h.stages += [("discover", lambda: ran.append("discover")), ("resolve", boom),
                      ("find_boards", lambda: ran.append("find_boards"))]
-        with self.assertRaises(AssertionError) as caught:
+        with mock.patch.dict(INVARIANTS, clear=True), self.assertRaises(AssertionError) as caught:  # fake stages
             self.run_flow(h)
         self.assertEqual(ran, ["discover"])
         self.assertIn("'resolve'", str(caught.exception))

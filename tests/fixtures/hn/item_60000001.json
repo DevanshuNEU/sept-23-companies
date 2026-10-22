@@ -1,0 +1,37 @@
+{
+  "author": "whoishiring",
+  "children": [
+    {
+      "author": "user60000101",
+      "children": [],
+      "created_at": "2026-09-01T15:10:00.000Z",
+      "created_at_i": 0,
+      "id": 60000101,
+      "parent_id": 60000001,
+      "story_id": 60000001,
+      "text": "Tidepool Apps | Full-stack | Remote (US) | <a href=\"https:&#x2F;&#x2F;tidepoolapps.com\" rel=\"nofollow\">https:&#x2F;&#x2F;tidepoolapps.com</a><p>Hiring our first backend engineer. Send your resume to jobs@tidepoolapps.com",
+      "type": "comment"
+    },
+    {
+      "author": "user60000102",
+      "children": [],
+      "created_at": "2026-09-01T15:30:00.000Z",
+      "created_at_i": 0,
+      "id": 60000102,
+      "parent_id": 60000001,
+      "story_id": 60000001,
+      "text": "Fernwood Labs (Seed) | Frontend | Austin, TX | <a href=\"https:&#x2F;&#x2F;fernwood.dev\" rel=\"nofollow\">https:&#x2F;&#x2F;fernwood.dev</a><p>React and design systems.",
+      "type": "comment"
+    }
+  ],
+  "created_at": "2026-09-01T15:00:00.000Z",
+  "created_at_i": 0,
+  "id": 60000001,
+  "parent_id": null,
+  "points": 300,
+  "story_id": 60000001,
+  "text": null,
+  "title": "Ask HN: Who is hiring? (September 2026)",
+  "type": "story",
+  "url": null
+}

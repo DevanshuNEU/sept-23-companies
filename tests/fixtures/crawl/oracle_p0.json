@@ -1,0 +1,33 @@
+{
+  "items": [
+    {
+      "TotalJobsCount": 3,
+      "Offset": 0,
+      "Limit": 200,
+      "requisitionList": [
+        {
+          "Id": "300000123456789",
+          "Title": "Software Engineer, New Grad",
+          "PostedDate": "2026-09-21",
+          "PrimaryLocation": "Redwood City, CA, United States",
+          "PrimaryLocationCountry": "US",
+          "WorkplaceTypeCode": "ORA_ON_SITE",
+          "ShortDescriptionStr": "Build services."
+        },
+        {
+          "Id": "300000123456790",
+          "Title": "Account Executive",
+          "PostedDate": "2026-10-03",
+          "PrimaryLocation": "London, United Kingdom",
+          "PrimaryLocationCountry": "GB",
+          "WorkplaceTypeCode": "ORA_HYBRID",
+          "ShortDescriptionStr": null
+        }
+      ]
+    }
+  ],
+  "count": 1,
+  "hasMore": false,
+  "limit": 25,
+  "offset": 0
+}

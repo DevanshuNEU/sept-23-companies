@@ -104,6 +104,55 @@ class AddBoardTest(unittest.TestCase):
         (item,) = self.items()
         self.assertEqual((item["company_id"], item["evidence_key"]), (self.acme, str(self.other)))
 
+    def put_alias(self, key, company, alias=None):
+        self.conn.execute("INSERT INTO company_alias(alias_key, company_id, alias, source, created_at) "
+                          "VALUES (?, ?, ?, 'ats', '2026-10-21T00:00:00Z')", (key, company, alias or key))
+
+    def merge(self, loser, winner):
+        self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' "
+                          "WHERE company_id = ?", (winner, loser))
+
+    def test_own_alias_with_no_board_becomes_a_board(self):
+        self.put_alias("lever:acme", self.acme)
+        self.assertEqual(add_board(self.conn, self.acme, BoardRef("lever", "acme"), **KW), "added")
+        (board,) = self.boards()
+        self.assertEqual((board["company_id"], board["ats"], board["token"]), (self.acme, "lever", "acme"))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM company_alias").fetchone()[0], 1)
+        (event,) = self.events()
+        self.assertEqual((event["kind"], event["idempotency_key"]), ("found", "board-found:lever:acme"))
+        self.assertEqual(self.items(), [])
+
+    def test_alias_of_a_company_merged_into_this_one_becomes_a_board(self):
+        self.put_alias("lever:acme", self.other)
+        self.merge(self.other, self.acme)
+        self.assertEqual(add_board(self.conn, self.acme, BoardRef("lever", "acme"), **KW), "added")
+        (board,) = self.boards()
+        self.assertEqual(board["company_id"], self.acme)
+        self.assertEqual(len(self.events()), 1)
+        self.assertEqual(self.items(), [])
+
+    def test_alias_of_the_survivor_of_this_companys_merge_becomes_a_board(self):
+        self.put_alias("lever:acme", self.acme)
+        self.merge(self.other, self.acme)
+        self.assertEqual(add_board(self.conn, self.other, BoardRef("lever", "acme"), **KW), "added")
+        self.assertEqual(self.items(), [])
+
+    def test_workday_alias_of_another_company_is_a_conflict_whatever_the_case(self):
+        # add_alias stores the key lower-cased, so the lookup must too
+        add_board(self.conn, self.other, BoardRef("workday", "riverside.wd5/External"), **KW)
+        self.conn.execute("DELETE FROM board")  # leave the alias with no board behind it
+        self.assertEqual(add_board(self.conn, self.acme, BoardRef("workday", "Riverside.WD5/External"), **KW),
+                         "conflict")
+        self.assertEqual(self.boards(), [])
+        (item,) = self.items()
+        self.assertEqual((item["company_id"], item["evidence_key"]), (self.acme, str(self.other)))
+
+    def test_workday_board_of_another_company_is_a_conflict_whatever_the_case(self):
+        add_board(self.conn, self.other, BoardRef("workday", "riverside.wd5/External"), **KW)
+        self.assertEqual(add_board(self.conn, self.acme, BoardRef("workday", "RIVERSIDE.wd5/External"), **KW),
+                         "conflict")
+        self.assertEqual(len(self.boards()), 1)
+
     def test_a_board_of_a_company_merged_into_this_one_exists(self):
         ref = BoardRef("greenhouse", "acme")
         add_board(self.conn, self.other, ref, **KW)
@@ -174,6 +223,23 @@ class AddBoardTest(unittest.TestCase):
         add_board(self.conn, self.acme, BoardRef("greenhouse", "acme"), **KW)
         self.conn.execute("ROLLBACK")
         self.assertEqual(self.counts(), (0, 0, 0, 0))
+
+    def test_a_failure_inside_the_callers_transaction_keeps_the_callers_earlier_work(self):
+        self.conn.execute("BEGIN IMMEDIATE")
+        self.conn.execute("INSERT INTO company(name, status_at, created_at) VALUES "
+                          "('Early', '2026-10-21T00:00:00Z', '2026-10-21T00:00:00Z')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            add_board(self.conn, 9999, BoardRef("greenhouse", "ghost"), **KW)
+        self.assertTrue(self.conn.in_transaction)
+        self.conn.execute("COMMIT")
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM company WHERE name = 'Early'").fetchone()[0], 1)
+        self.assertEqual(self.counts(), (0, 0, 0, 0))
+
+    def test_exists_never_upgrades_found_by(self):
+        ref = BoardRef("greenhouse", "acme")
+        add_board(self.conn, self.acme, ref, **dict(KW, found_by="stapply_name"))
+        self.assertEqual(add_board(self.conn, self.acme, ref, **dict(KW, found_by="hand")), "exists")
+        self.assertEqual(self.boards()[0]["found_by"], "stapply_name")
 
 
 if __name__ == "__main__":

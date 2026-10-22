@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from outreach.crawl import base
-from outreach.sources.ats_detect import detect_ats, detect_unsupported
+from outreach.sources.ats_detect import detect_all, detect_ats, detect_unsupported
 from outreach.sources.boards import SUPPORTED_ATS, BoardRef
 
 
@@ -120,6 +120,91 @@ class DetectAtsTest(unittest.TestCase):
             names.update(r.ats for r in detect_ats(chunk))
         self.assertEqual(len(names), 13)
         self.assertLessEqual(names, SUPPORTED_ATS)
+
+
+class VendorShapesTest(unittest.TestCase):
+    """Vendor pages, app paths and locale segments that look like a token but are not a board."""
+
+    def test_smartrecruiters_app_paths_are_not_tokens(self):
+        self.assertEqual(refs("https://jobs.smartrecruiters.com/oneclick-ui/company/AcmeCorp/publication/x"), [])
+        self.assertEqual(refs("https://jobs.smartrecruiters.com/ni/AcmeCorp/743"), [])
+        self.assertEqual(refs("https://jobs.smartrecruiters.com/AcmeCorp/743"), [("smartrecruiters", "acmecorp")])
+
+    def test_workable_job_path_is_not_a_token(self):
+        self.assertEqual(refs("https://apply.workable.com/j/ABC123"), [])
+        self.assertEqual(refs("https://apply.workable.com/acme/j/ABC123"), [("workable", "acme")])
+
+    def test_rippling_skips_a_locale_segment(self):
+        self.assertEqual(refs("https://ats.rippling.com/en-GB/acme/jobs"), [("rippling", "acme")])
+        self.assertEqual(refs("https://ats.rippling.com/en/acme/jobs"), [("rippling", "acme")])
+        self.assertEqual(refs("https://ats.rippling.com/en-GB"), [])
+
+    def test_vendor_subdomains_are_not_boards(self):
+        for host in ("docs", "help", "support", "app", "login", "community", "info", "go", "developers", "blog",
+                     "status", "marketplace", "partners", "learn"):
+            with self.subTest(host=host):
+                self.assertEqual(refs(f"https://{host}.bamboohr.com/x https://{host}.breezy.hr/x"), [])
+                self.assertEqual(refs(f"https://{host}.recruitee.com/x https://{host}.teamtailor.com/x"), [])
+                self.assertEqual(refs(f"https://{host}.pinpointhq.com/x https://{host}.applytojob.com/x"), [])
+
+    def test_icims_vendor_hosts_are_not_boards(self):
+        for host in ("login", "community", "info", "www", "api"):
+            with self.subTest(host=host):
+                self.assertEqual(refs(f"https://{host}.icims.com/x"), [])
+
+    def test_icims_keeps_the_full_host(self):
+        self.assertEqual(refs("https://careers.Acme.icims.com/jobs"), [("icims", "careers.acme.icims.com")])
+
+
+class BoundaryTest(unittest.TestCase):
+    def test_a_slug_cut_by_a_non_ascii_letter_is_not_a_board(self):
+        self.assertEqual(refs("https://boards.greenhouse.io/caf\u00e9"), [])
+        self.assertEqual(refs("https://jobs.lever.co/caf\u00e9/x"), [])
+        self.assertEqual(refs("https://caf\u00e9.bamboohr.com/x"), [])
+        self.assertEqual(refs("https://acme.wd5.myworkdayjobs.com/Caf\u00e9"), [])
+
+    def test_workday_skips_a_bare_locale_and_non_site_paths(self):
+        self.assertEqual(refs("https://acme.wd5.myworkdayjobs.com/en/External"), [("workday", "acme.wd5/External")])
+        self.assertEqual(refs("https://acme.wd5.myworkdayjobs.com/en"), [])
+        self.assertEqual(refs("https://acme.wd5.myworkdayjobs.com/login.html"), [])
+        self.assertEqual(refs("https://acme.wd5.myworkdayjobs.com/assets/app.js"), [])
+        self.assertEqual(refs("https://acme.wd5.myworkdayjobs.com/Careers."), [("workday", "acme.wd5/Careers")])
+
+    def test_a_subdomain_board_must_end_at_the_host(self):
+        self.assertEqual(refs("mailto:hr@acme.bamboohr.com"), [("bamboohr", "acme")])
+        self.assertEqual(refs("https://acme.teamtailor.com.evil.com/jobs"), [])
+        self.assertEqual(refs("https://acme.icims.com.evil.com/jobs"), [])
+        self.assertEqual(refs("see acme.teamtailor.com."), [("teamtailor", "acme")])
+
+    def test_a_host_must_start_at_a_boundary(self):
+        self.assertEqual(refs("https://notjobs.lever.co/acme https://xboards.greenhouse.io/acme"), [])
+
+
+class FalseNegativeTest(unittest.TestCase):
+    def test_json_escaped_urls(self):
+        self.assertEqual(refs('{"url":"https:\\/\\/boards.greenhouse.io\\/acme"}'), [("greenhouse", "acme")])
+        self.assertEqual(refs('"https:\\/\\/jobs.lever.co\\/acme\\/123"'), [("lever", "acme")])
+
+    def test_api_and_other_embed_shapes(self):
+        self.assertEqual(refs("https://boards-api.greenhouse.io/v1/boards/acme/jobs"), [("greenhouse", "acme")])
+        self.assertEqual(refs("https://api.lever.co/v0/postings/acme?mode=json"), [("lever", "acme")])
+        self.assertEqual(refs("https://boards.greenhouse.io/embed/job_app?for=acme&token=1"), [("greenhouse", "acme")])
+        self.assertEqual(refs("https://boards-api.greenhouse.io/v1/boards"), [])
+
+    def test_known_misses_stay_missed(self):
+        self.assertEqual(refs("https://acme.wd5.myworkdaysite.com/recruiting/acme/External"), [])
+        self.assertEqual(refs("https://ebwg.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/"), [])
+
+
+class DetectAllTest(unittest.TestCase):
+    TEXT = " ".join(f"https://jobs.lever.co/co{i}" for i in range(6)) + " https://jobs.lever.co/CO0"
+
+    def test_detect_all_is_uncapped_in_first_seen_order(self):
+        self.assertEqual([r.token for r in detect_all(self.TEXT)], [f"co{i}" for i in range(6)])
+        self.assertEqual(detect_all(""), [])
+
+    def test_detect_ats_is_the_first_three_of_detect_all(self):
+        self.assertEqual(detect_ats(self.TEXT), detect_all(self.TEXT)[:3])
 
 
 class DetectUnsupportedTest(unittest.TestCase):

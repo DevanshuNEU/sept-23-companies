@@ -76,9 +76,11 @@ def add_board(conn: sqlite3.Connection, company_id: int, ref: BoardRef, *, via: 
 
     `added`: a new `board` row (with `found_by`), the alias `<ats>:<token>` (source `ats`) and a `board` / `found`
     event (actor `crawler`, detail `via` and `matched_on`, key `board-found:<ats>:<token>`), as one unit.
-    `exists`: the board already belongs to this company (or to one merged into or from it): nothing is written.
-    `conflict`: the board, or its `ats` alias, belongs to another company: the board never moves, and one
-    `merge_candidate` item (basis `same_board`) is raised for the pair; a re-run raises nothing new.
+    `exists`: the board row already belongs to this company (or to one merged into or from it): nothing is written,
+    and `found_by` is never upgraded (the first finder stands). An `ats` alias with no board row behind it, this
+    company's or its merge chain's, does not count as the board: the row is added and the alias is kept.
+    `conflict`: the board row, or the `ats` alias of a board with no row, belongs to another company: the board never
+    moves, and one `merge_candidate` item (basis `same_board`) is raised for the pair; a re-run raises nothing new.
     `ValueError` before any write for an ATS outside `SUPPORTED_ATS`, a malformed token or a `found_by` outside
     `FOUND_BY`.
     """
@@ -89,28 +91,37 @@ def add_board(conn: sqlite3.Connection, company_id: int, ref: BoardRef, *, via: 
     token = normalize_token(ref.ats, ref.token)  # a BoardRef changed after construction is still checked
     alias = f"{ref.ats}:{token}"
     with _atomic(conn):
-        owner = _owner(conn, ref.ats, token)
+        owner = _board_owner(conn, ref.ats, token)
         if owner is None:
-            cur = conn.execute(
-                "INSERT INTO board(company_id, ats, token, found_by, created_at) VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(ats, token) DO NOTHING", (company_id, ref.ats, token, found_by, utcnow()))
-            if cur.rowcount:
-                add_alias(conn, company_id, alias, "ats")
-                append_event(conn, entity="board", kind="found", actor="crawler", entity_id=cur.lastrowid,
-                             company_id=company_id, detail={"via": via, "matched_on": matched_on},
-                             idempotency_key=f"board-found:{ref.ats}:{token}")
-                return "added"
-            owner = _owner(conn, ref.ats, token)  # another writer took it between the read and the insert
+            # No board row. The alias only tells whether another company already claims the board.
+            claim = _alias_owner(conn, alias)
+            if claim is None or follow_merged(conn, claim) == follow_merged(conn, company_id):
+                cur = conn.execute(
+                    "INSERT INTO board(company_id, ats, token, found_by, created_at) VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(ats, token) DO NOTHING", (company_id, ref.ats, token, found_by, utcnow()))
+                if cur.rowcount:
+                    if claim is None:  # else the alias is already ours (or our merge chain's)
+                        add_alias(conn, company_id, alias, "ats")
+                    append_event(conn, entity="board", kind="found", actor="crawler", entity_id=cur.lastrowid,
+                                 company_id=company_id, detail={"via": via, "matched_on": matched_on},
+                                 idempotency_key=f"board-found:{ref.ats}:{token}")
+                    return "added"
+                owner = _board_owner(conn, ref.ats, token)  # another writer took it between the read and the insert
+            else:
+                owner = claim
         if follow_merged(conn, owner) == follow_merged(conn, company_id):
             return "exists"
         raise_merge_candidate(conn, company_id, owner, "same_board", f"both claim the {ref.ats} board {token}")
         return "conflict"
 
 
-def _owner(conn: sqlite3.Connection, ats: str, token: str) -> int | None:
-    """The company that holds the board, or failing that the one whose `ats` alias names it."""
+def _board_owner(conn: sqlite3.Connection, ats: str, token: str) -> int | None:
     row = conn.execute("SELECT company_id FROM board WHERE ats = ? AND token = ?", (ats, token)).fetchone()
-    if row is None:
-        row = conn.execute("SELECT company_id FROM company_alias WHERE alias_key = ?",
-                           (f"{ats}:{token}",)).fetchone()
+    return row[0] if row else None
+
+
+def _alias_owner(conn: sqlite3.Connection, alias: str) -> int | None:
+    """The company holding the `ats` alias. `add_alias` stores the key lower-cased (a Workday site keeps its case in
+    the token), so the lookup lower-cases too."""
+    row = conn.execute("SELECT company_id FROM company_alias WHERE alias_key = lower(?)", (alias,)).fetchone()
     return row[0] if row else None

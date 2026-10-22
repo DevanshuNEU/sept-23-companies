@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from outreach.crawl.ats.ashby import AshbyAdapter
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
 from outreach.crawl.ats.lever import LeverAdapter
 from outreach.crawl.base import Adapter
@@ -14,6 +15,7 @@ __all__ = ["ADAPTERS", "adapter_for", "supported_ats"]
 ADAPTERS: dict[str, Callable[[HttpClient], Adapter]] = {
     "greenhouse": GreenhouseAdapter,
     "lever": LeverAdapter,
+    "ashby": AshbyAdapter,
 }
 
 

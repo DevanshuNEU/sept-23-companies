@@ -137,17 +137,17 @@ def _reason(kind: str, cfg: SendConfig) -> str:
 
 
 def note_signal(conn: sqlite3.Connection, kind: str, *, at: str, detail: dict, key: str, cfg: SendConfig,
-                notify: Notifier, now: datetime | None = None) -> None:
+                notify: Notifier, now: datetime) -> None:
     """Record a signal and apply it. The signal lands on its own day (`signals.signal_day`), whose `outcome`
     becomes `warning`, or `hard_block` for a hard kind (never downgraded). A hard kind also pauses the sender with
     `pause_kind 'hard_block'` (over his own pause too), appends a `hard_block` event and tells him once per kind
-    per day. A repeated `key` changes nothing. `now` is when the signal is processed (default: the clock).
-    Callers pass only send-path Gmail limits as `gmail_limit` or `gmail_policy`: a 429 on a read is not one."""
+    per day. A repeated `key` changes nothing. `now` is when the signal is processed (required: nothing here
+    reads the real clock). Callers pass only send-path Gmail limits as `gmail_limit` or `gmail_policy`: a 429 on
+    a read is not one."""
     if kind not in signals.WARNING_KINDS + signals.HARD_KINDS:
         raise ValueError(f"unknown signal kind {kind!r}")
-    moment = now if now is not None else datetime.now(timezone.utc)
-    stamp = moment.astimezone(timezone.utc).strftime(ISO_FMT)
-    day = signals.signal_day(conn, at, cfg, now=moment)
+    stamp = now.astimezone(timezone.utc).strftime(ISO_FMT)
+    day = signals.signal_day(conn, at, cfg, now=now)
     if not signals.record_signal(conn, kind, at=at, detail={**detail, "day": day.isoformat()}, key=key):
         return
     row = _ensure_row(conn, day, cfg, stamp)
@@ -165,4 +165,4 @@ def note_signal(conn: sqlite3.Connection, kind: str, *, at: str, detail: dict, k
         append_event(conn, entity="sender", entity_id=1, kind="hard_block", actor="sender", at=at,
                      detail={"kind": kind, "day": day.isoformat(), "reason": reason},
                      idempotency_key=f"hard_block:{key}")
-    notify_once(conn, notify, kind, day, "Outreach sending paused", reason)
+    notify_once(conn, notify, kind, day, "Outreach sending paused", reason, at=stamp)

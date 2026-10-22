@@ -32,10 +32,12 @@ def mac_notifier(title: str, text: str) -> None:
         pass
 
 
-def notify_once(conn: Connection, notifier: Notifier, kind: str, day: date, title: str, text: str) -> bool:
+def notify_once(conn: Connection, notifier: Notifier, kind: str, day: date, title: str, text: str, *,
+                at: str) -> bool:
     """Call `notifier` unless this kind was already announced for this New York day (the event key
     `notify:<kind>:<day>`). Returns True when it was called. A notifier that raises is recorded as not delivered
-    and the error is not passed on, so the caller's transaction (the pause) still commits."""
+    and the error is not passed on, so the caller's transaction (the pause) still commits. `at` is the moment of
+    the notice, as canonical UTC text, so the event never reads the real clock for it."""
     key = f"notify:{kind}:{day.isoformat()}"
     if conn.execute("SELECT 1 FROM event WHERE idempotency_key = ?", (key,)).fetchone():
         return False
@@ -47,5 +49,5 @@ def notify_once(conn: Connection, notifier: Notifier, kind: str, day: date, titl
     append_event(conn, entity="sender", entity_id=1, kind="notified", actor="sender",
                  detail={"kind": kind, "day": day.isoformat(), "title": title, "delivered": delivered,
                          "error": error},
-                 idempotency_key=key)
+                 at=at, idempotency_key=key)
     return True

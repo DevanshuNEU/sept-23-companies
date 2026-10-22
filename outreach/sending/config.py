@@ -6,6 +6,7 @@ import tomllib
 from dataclasses import dataclass, fields
 from datetime import date, time
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 HARD_CEILING = 100  # #9; also the send_day.send_limit CHECK
 DEFAULT_PATH = Path(__file__).with_name("config.toml")
@@ -46,11 +47,50 @@ class SendConfig:
     prune_noop_after_days: int
 
 
+# Whole numbers that count things, so zero or less makes no sense.
+COUNT_KEYS = ("ramp_step", "bounce_days", "hard_bounce_last_n", "hard_bounce_min_sends", "stop_replies_hard",
+              "stop_replies_days", "per_company_daily", "followup_lapse_business_days", "close_after_business_days",
+              "reconcile_after_minutes", "max_send_attempts", "rethread_days", "inbound_meta_cap",
+              "prune_noop_after_days")
+# Whole numbers that may be zero.
+WHOLE_KEYS = ("ramp_start", "ramp_ceiling", "ramp_floor", "per_company_gap_minutes")
+RATE_KEYS = ("clean_bounce_rate", "hard_bounce_rate")
+TEXT_KEYS = ("from_address", "from_name", "day_tz", "old_sender_label")
+
+
+def _whole(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _types(raw: dict) -> None:
+    """Refuse a value of the wrong type or outside its plain range, naming the key."""
+    for key in COUNT_KEYS:
+        if not _whole(raw[key]) or raw[key] < 1:
+            raise ValueError(f"{key} must be a whole number of at least 1, not {raw[key]!r}")
+    for key in WHOLE_KEYS:
+        if not _whole(raw[key]) or raw[key] < 0:
+            raise ValueError(f"{key} must be a whole number, 0 or more, not {raw[key]!r}")
+    for key in RATE_KEYS:
+        value = raw[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value < 1:
+            raise ValueError(f"{key} must be a number between 0 and 1 (not 0 or 1), not {value!r}")
+    for key in TEXT_KEYS:
+        if not isinstance(raw[key], str) or not raw[key].strip():
+            raise ValueError(f"{key} must be non-empty text, not {raw[key]!r}")
+    try:
+        ZoneInfo(raw["day_tz"])
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        raise ValueError(f"day_tz must be a time zone this computer knows, not {raw['day_tz']!r}") from None
+
+
 def _time(key: str, value) -> time:
     try:
-        return time.fromisoformat(value)
+        parsed = time.fromisoformat(value)
     except (TypeError, ValueError):
         raise ValueError(f"{key} must be a time like \"08:30\", not {value!r}") from None
+    if parsed.tzinfo is not None:
+        raise ValueError(f"{key} is a time on the recipient's clock and takes no zone, not {value!r}")
+    return parsed
 
 
 def _date(key: str, value) -> date:
@@ -91,7 +131,8 @@ def _check(cfg: SendConfig) -> None:
 
 
 def load_config(path: Path = DEFAULT_PATH) -> SendConfig:
-    """Read the TOML file at `path` into a SendConfig. Raises ValueError naming the key that is wrong, missing or unknown."""
+    """Read the TOML file at `path` into a SendConfig. Raises ValueError naming the key that is wrong, missing or
+    unknown."""
     with open(path, "rb") as handle:
         raw = tomllib.load(handle)
     names = {f.name for f in fields(SendConfig)}
@@ -99,6 +140,7 @@ def load_config(path: Path = DEFAULT_PATH) -> SendConfig:
         raise ValueError(f"{key} is not a sending setting")
     for key in sorted(names - raw.keys()):
         raise ValueError(f"{key} is missing from the sending config")
+    _types(raw)
     values = dict(raw)
     values["window_start"] = _time("window_start", raw["window_start"])
     values["window_end"] = _time("window_end", raw["window_end"])

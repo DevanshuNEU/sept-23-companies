@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from outreach.drafts.followups import canonical_company, company_map, held_survivors, resolve_company
+from outreach.drafts.followups import (canonical_company, company_map, held_survivors, no_go_sets,
+                                       resolve_company)
 from outreach.sending import calendar as cal
 from outreach.sending import ramp, signals
 from outreach.sending.config import SendConfig, load_config
@@ -126,18 +127,13 @@ def load_queue(conn: sqlite3.Connection, cfg: SendConfig | None = None) -> list[
 
 def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], conn: sqlite3.Connection) -> dict:
     """Message id to its stop reason, for the messages that have one."""
-    no_go_people, no_go_companies = set(), set()
-    for row in conn.execute("SELECT person_id, company_id FROM no_go WHERE lifted_at IS NULL"):
-        if row["person_id"] is not None:
-            no_go_people.add(row["person_id"])
-        else:
-            no_go_companies.add(row["company_id"])
+    no_go_people, no_go_companies = no_go_sets(conn, companies)
     stops = {}
     for row in rows:
         chain = resolve_company(companies, row["person_company"])
         if companies[chain[-1]]["status"] in ("closed", "removed"):
             stops[row["message_id"]] = "company_closed"
-        elif row["person_id"] in no_go_people or no_go_companies.intersection(chain):
+        elif row["person_id"] in no_go_people or chain[-1] in no_go_companies:
             stops[row["message_id"]] = "no_go"
         elif row["touch_state"] == "replied":
             stops[row["message_id"]] = "reply_stop"
@@ -146,7 +142,8 @@ def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], co
     return stops
 
 
-def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row], since: str) -> dict[int, list[datetime]]:
+def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
+                   since: str) -> dict[int, list[datetime]]:
     """When each surviving company was last sent to, from `since` on. A claimed message that may have gone out
     (`sending`, `send_unknown`) counts at its claim time: better one wait too many than one send too many."""
     sends: dict[int, list[datetime]] = {}
@@ -187,16 +184,20 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     limit = ramp.effective_limit(conn, today, cfg)
     if day is not None and day.day == today:
         limit = min(limit, day.effective_limit)  # the tick's snapshot can only be older, so it can only be higher
-    sent_today = signals.sends_on(conn, today, cfg)
+    # The ramp counts only what is sent; the limit also counts a claimed message that may have gone out.
+    sent_today = signals.sends_on(conn, today, cfg) + conn.execute(
+        "SELECT COUNT(*) FROM message WHERE state IN ('sending', 'send_unknown') AND claimed_at >= ? "
+        "AND claimed_at < ?", cal.ny_day_bounds(today, cfg)).fetchone()[0]
     next_send = conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()["next_send_at"]
     next_send = _utc(next_send) if next_send else None
     tomorrow = _local(cal.add_business_days(today, 1, cfg), cfg.window_start, ny_zone)
 
     out = []
     for q in queue:
-        out.append(Verdict(q.message_id, *_decide(q, stops, gate, companies[q.company_id], q.company_id in held, now, cfg, today,
-                                                  sent_today >= limit, sends.get(q.company_id, []), day_begins, gap,
-                                                  tomorrow, next_send, q.company_id in live_others)))
+        reason, earliest = _decide(q, stops, gate, companies[q.company_id], q.company_id in held, now, cfg, today,
+                                   sent_today >= limit, sends.get(q.company_id, []), day_begins, gap, tomorrow,
+                                   next_send, q.company_id in live_others)
+        out.append(Verdict(q.message_id, reason, earliest))
     return out
 
 

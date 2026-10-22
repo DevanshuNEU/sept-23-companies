@@ -100,6 +100,39 @@ class DueFollowupsTest(unittest.TestCase):
         self.assertNotIn(at_survivor, due_followups(self.db, TODAY))
         self.assertNotIn(at_duplicate, due_followups(self.db, TODAY))
 
+    def no_go(self, *, person_id=None, company_id=None, lifted=False):
+        lift = ", lifted_at, lift_reason" if lifted else ""
+        marks = ", '2026-11-02T01:00:00Z', 'wrong'" if lifted else ""
+        self.db.execute(f"INSERT INTO no_go(person_id, company_id, reason, source, created_at{lift}) "
+                        f"VALUES (?, ?, 'said_no', 'reply', '2026-11-01T12:00:00Z'{marks})", (person_id, company_id))
+
+    def person_of(self, message_id):
+        return self.db.execute("SELECT t.person_id FROM message m JOIN touch t USING (touch_id) "
+                               "WHERE m.message_id = ?", (message_id,)).fetchone()[0]
+
+    def test_an_active_no_go_on_the_person_or_the_company_skips_the_follow_up(self):
+        keep = self.followup("2026-11-09")
+        on_person = self.followup("2026-11-09")
+        self.no_go(person_id=self.person_of(on_person))
+        no_go_company = seed_company(self.db, "NoGo")
+        on_company = self.followup("2026-11-09", company=no_go_company)
+        self.no_go(company_id=no_go_company)
+        lifted_company = seed_company(self.db, "Lifted")
+        lifted = self.followup("2026-11-09", company=lifted_company)
+        self.no_go(company_id=lifted_company, lifted=True)
+        self.assertEqual(due_followups(self.db, TODAY), [keep, lifted])
+        self.assertNotIn(on_person, due_followups(self.db, TODAY))
+        self.assertNotIn(on_company, due_followups(self.db, TODAY))
+
+    def test_a_no_go_on_a_merged_away_duplicate_skips_the_survivors_people(self):
+        survivor = seed_company(self.db, "Survivor")
+        duplicate = seed_company(self.db, "Duplicate")
+        self.no_go(company_id=duplicate)
+        self.merge(duplicate, survivor)
+        self.followup("2026-11-09", company=survivor)
+        self.followup("2026-11-09", company=duplicate)
+        self.assertEqual(due_followups(self.db, TODAY), [])
+
     def test_a_touch_with_no_thread_has_no_follow_up(self):
         message = self.followup("2026-11-09")
         self.db.execute("UPDATE touch SET origin = 'import', gmail_thread_id = NULL WHERE touch_id = ?",

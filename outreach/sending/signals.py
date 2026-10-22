@@ -36,12 +36,12 @@ def record_signal(conn: sqlite3.Connection, kind: str, *, at: str, detail: dict,
                         idempotency_key=key) is not None
 
 
-def signal_day(conn: sqlite3.Connection, at: str, cfg: SendConfig, *, now: datetime | None = None) -> date:
+def signal_day(conn: sqlite3.Connection, at: str, cfg: SendConfig, *, now: datetime) -> date:
     """The day a signal that happened at `at` belongs to: its New York date, or today when that day is already
     closed (or is gone: a later day has opened without it). `now` is the moment the signal is being processed;
-    it defaults to the clock."""
+    it is required, so no caller reads the real clock by accident."""
     day = cal.ny_date(as_datetime(at), cfg)
-    today = cal.ny_date(now if now is not None else datetime.now(timezone.utc), cfg)
+    today = cal.ny_date(now, cfg)
     row = conn.execute("SELECT closed_at FROM send_day WHERE day = ?", (day.isoformat(),)).fetchone()
     if row is not None:
         return today if row["closed_at"] is not None else day

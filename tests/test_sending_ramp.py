@@ -13,6 +13,7 @@ from tests.storetest import fresh_store, seed_company
 CFG = load_config()
 NY = ZoneInfo("America/New_York")
 BASE = date(2026, 11, 2)  # a Monday
+STAMP = "2026-11-02T15:00:00Z"
 
 
 def d(n: int) -> date:
@@ -450,12 +451,30 @@ class StopTagsTest(Base):
         self.assertEqual(signals.stop_tags_in(self.db, ny(2), 7), 1)
 
 
+class NowIsRequiredTest(Base):
+    def test_signal_day_and_note_signal_need_the_moment_they_run(self):
+        with self.assertRaises(TypeError):
+            signals.signal_day(self.db, iso(ny(0, 11)), CFG)
+        with self.assertRaises(TypeError):
+            ramp.note_signal(self.db, "bounce_warning", at=iso(ny(0, 11)), detail={}, key="k", cfg=CFG,
+                             notify=self.notifier)
+
+
 class NotifyTest(Base):
+    def test_the_notified_event_carries_the_moment_it_was_sent(self):
+        notify.notify_once(self.db, self.notifier, "gmail_limit", d(0), "Paused", "Limit", at=STAMP)
+        row = self.db.execute("SELECT at FROM event WHERE kind = 'notified'").fetchone()
+        self.assertEqual(row["at"], STAMP)
+
+    def test_notify_once_needs_the_moment(self):
+        with self.assertRaises(TypeError):
+            notify.notify_once(self.db, self.notifier, "gmail_limit", d(0), "Paused", "Limit")
+
     def test_notify_once_dedupes_by_kind_and_day(self):
-        self.assertTrue(notify.notify_once(self.db, self.notifier, "gmail_limit", d(0), "Paused", "Limit"))
-        self.assertFalse(notify.notify_once(self.db, self.notifier, "gmail_limit", d(0), "Paused", "Limit"))
-        self.assertTrue(notify.notify_once(self.db, self.notifier, "gmail_limit", d(1), "Paused", "Limit"))
-        self.assertTrue(notify.notify_once(self.db, self.notifier, "gmail_policy", d(0), "Paused", "Policy"))
+        self.assertTrue(notify.notify_once(self.db, self.notifier, "gmail_limit", d(0), "Paused", "Limit", at=STAMP))
+        self.assertFalse(notify.notify_once(self.db, self.notifier, "gmail_limit", d(0), "Paused", "Limit", at=STAMP))
+        self.assertTrue(notify.notify_once(self.db, self.notifier, "gmail_limit", d(1), "Paused", "Limit", at=STAMP))
+        self.assertTrue(notify.notify_once(self.db, self.notifier, "gmail_policy", d(0), "Paused", "Policy", at=STAMP))
         self.assertEqual(len(self.notices), 3)
         keys = [r[0] for r in self.db.execute("SELECT idempotency_key FROM event WHERE kind = 'notified' "
                                               "ORDER BY event_id")]

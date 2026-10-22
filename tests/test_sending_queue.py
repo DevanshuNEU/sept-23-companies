@@ -120,6 +120,27 @@ class LimitsTest(Base):
         self.assertEqual(verdict.reason, "daily_limit")
         self.assertEqual(verdict.earliest_at, ny(3, 8, 30))
 
+    def claim(self, company, at):
+        """A message claimed at `at` that may or may not have gone out."""
+        message = seed_message(self.db, self.person(company=company))
+        self.db.execute("UPDATE message SET state = 'sending', pending_rfc_id = '<x@y.z>', claimed_at = ? "
+                        "WHERE message_id = ?", (stamp(at), message))
+        return message
+
+    def test_an_in_flight_send_counts_against_the_daily_limit(self):
+        put_day(self.db, MON_DAY, 2)
+        _, message = self.approve()
+        self.sent_at(seed_company(self.db, "Other"), ny(2, 8))
+        self.assertEqual(self.reason(message), "ready")
+        self.claim(seed_company(self.db, "InFlight"), ny(2, 8, 45))
+        self.assertEqual(self.reason(message), "daily_limit")
+
+    def test_an_in_flight_send_from_yesterday_does_not_count_today(self):
+        put_day(self.db, MON_DAY, 1)
+        _, message = self.approve()
+        self.claim(seed_company(self.db, "Old"), ny(1, 10))
+        self.assertEqual(self.reason(message), "ready")
+
     def test_a_warning_lowers_the_daily_limit_at_once(self):
         put_day(self.db, MON_DAY, 30)
         _, message = self.approve()
@@ -351,6 +372,18 @@ class HoldsAndStopsTest(Base):
                         "'2026-11-01T12:00:00Z')", (survivor,))
         _, message = self.approve(company=duplicate)
         self.assertEqual(self.reason(message), "no_go")
+
+    def test_a_no_go_on_a_merged_away_duplicate_stops_the_survivors_people(self):
+        survivor = seed_company(self.db, "Survivor")
+        duplicate = seed_company(self.db, "Duplicate")
+        self.db.execute("INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'agency', 'rules', "
+                        "'2026-11-01T12:00:00Z')", (duplicate,))
+        self.merge(duplicate, survivor)
+        _, at_survivor = self.approve(company=survivor)
+        _, at_duplicate = self.approve(company=duplicate)
+        verdicts = self.verdicts_at()
+        self.assertEqual(verdicts[at_survivor].reason, "no_go")
+        self.assertEqual(verdicts[at_duplicate].reason, "no_go")
 
     def test_closed_company_is_a_stop_reason(self):
         closed = seed_company(self.db, "Closed")

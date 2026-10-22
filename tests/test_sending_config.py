@@ -96,6 +96,48 @@ class SendConfigTest(unittest.TestCase):
         self.refused("weekdays", weekdays="[-1, 0]")
         self.refused("weekdays", weekdays="[]")
 
+    def test_counts_must_be_at_least_one(self):
+        for key in ("bounce_days", "per_company_daily", "ramp_step", "hard_bounce_last_n", "hard_bounce_min_sends",
+                    "stop_replies_hard", "stop_replies_days", "followup_lapse_business_days",
+                    "close_after_business_days", "max_send_attempts", "rethread_days", "inbound_meta_cap",
+                    "prune_noop_after_days", "reconcile_after_minutes"):
+            with self.subTest(key=key):
+                self.refused(key, **{key: "0"})
+                self.refused(key, **{key: "-1"})
+
+    def test_rates_sit_strictly_between_0_and_1(self):
+        for key in ("clean_bounce_rate", "hard_bounce_rate"):
+            for bad in ("0", "0.0", "1", "1.5", "-0.1"):
+                with self.subTest(key=key, bad=bad):
+                    self.refused(key, **{key: bad})
+        self.assertEqual(load_config(config_with(clean_bounce_rate="0.5")).clean_bounce_rate, 0.5)
+
+    def test_values_of_the_wrong_type_name_their_key(self):
+        self.refused("bounce_days", bounce_days='"three"')
+        self.refused("bounce_days", bounce_days="3.5")
+        self.refused("bounce_days", bounce_days="true")
+        self.refused("clean_bounce_rate", clean_bounce_rate='"low"')
+        self.refused("clean_bounce_rate", clean_bounce_rate="false")
+        self.refused("from_address", from_address="5")
+        self.refused("from_address", from_address='""')
+        self.refused("day_tz", day_tz="5")
+        self.refused("old_sender_label", old_sender_label="[]")
+
+    def test_a_time_zone_that_does_not_load_is_refused(self):
+        self.refused("day_tz", day_tz='"Mars/Olympus"')
+
+    def test_a_window_time_with_a_zone_is_refused(self):
+        self.refused("window_start", window_start='"08:30+01:00"')
+        self.refused("window_end", window_end='"16:30Z"')
+
+    def test_a_refusal_says_what_is_wrong(self):
+        with self.assertRaises(ValueError) as cm:
+            load_config(config_with(bounce_days="0"))
+        self.assertIn("at least 1", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            load_config(config_with(hard_bounce_rate="1.5"))
+        self.assertIn("between 0 and 1", str(cm.exception))
+
     def test_from_address_is_the_one_sender(self):
         cfg = load_config()
         self.assertEqual(cfg.from_address, "devanshurajesh@gmail.com")

@@ -146,7 +146,8 @@ class LiveGuardTest(NoNetwork):
             "find_sent": lambda c: c.find_sent("<a1@gmail.com>", 0, send_returned_ms=0),
         }
         with mock.patch("builtins.open", spy_open), mock.patch("os.open", spy_os_open):
-            for which, client in enumerate((gmail.GmailClient(self.dir), gmail.GmailClient(self.dir, transport=transport))):
+            clients = (gmail.GmailClient(self.dir), gmail.GmailClient(self.dir, transport=transport))
+            for which, client in enumerate(clients):
                 for name, call in calls.items():
                     with self.subTest(name=name, client=which), self.assertRaises(SystemExit) as cm:
                         call(client)
@@ -590,7 +591,8 @@ class FindSentTest(NoNetwork):
         self.assertEqual(self.find(client), (None, False))
 
     def test_a_miss_too_soon_after_the_failed_send_is_not_proof(self):
-        folder = SentFolder([("g1", "<n1@gmail.com>", self.CLAIM + 5), ("g0", "<o@gmail.com>", self.CLAIM - 20 * self.MIN)])
+        folder = SentFolder([("g1", "<n1@gmail.com>", self.CLAIM + 5),
+                             ("g0", "<o@gmail.com>", self.CLAIM - 20 * self.MIN)])
         early, _ = self.client(folder, now_ms=self.CLAIM + 9 * self.MIN)
         self.assertEqual(self.find(early), (None, False))
         settled, _ = self.client(folder, now_ms=self.CLAIM + 10 * self.MIN)

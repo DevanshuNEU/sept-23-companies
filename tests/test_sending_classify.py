@@ -43,7 +43,8 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(got.kind, "human")
 
     def test_his_own_message_in_the_thread_is_ignored(self):
-        for sender in ("Devanshu C <devanshurajesh@gmail.com>", "DEVANSHURAJESH@GMAIL.COM", "<devanshurajesh@gmail.com>"):
+        for sender in ("Devanshu C <devanshurajesh@gmail.com>", "DEVANSHURAJESH@GMAIL.COM",
+                       "<devanshurajesh@gmail.com>"):
             with self.subTest(sender=sender):
                 self.assertEqual(classify(meta(from_addr=sender), ACCOUNT).kind, "ours")
 

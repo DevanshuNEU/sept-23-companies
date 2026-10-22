@@ -188,5 +188,13 @@ class WindowTest(unittest.TestCase):
                 self.assertTrue(cal.in_window(nxt, zone, CFG), (at, zone, nxt))
 
 
+class WindowResultZoneTest(unittest.TestCase):
+    def test_next_window_start_in_the_window_comes_back_as_utc(self):
+        inside = datetime(2026, 11, 2, 10, 0, tzinfo=NY)
+        result = cal.next_window_start(inside, NY, CFG)
+        self.assertEqual(result, inside)
+        self.assertIs(result.tzinfo, timezone.utc)
+
+
 if __name__ == "__main__":
     unittest.main()

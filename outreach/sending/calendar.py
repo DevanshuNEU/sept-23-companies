@@ -56,7 +56,8 @@ def recipient_zone(tz_name: str) -> ZoneInfo | None:
 
 
 def in_window(at: datetime, zone: ZoneInfo, cfg: SendConfig) -> bool:
-    """True when the recipient's local date is a business day and the local time is inside the window (ends inclusive)."""
+    """True when the recipient's local date is a business day and the local time is inside the window (ends
+    inclusive)."""
     local = _aware(at).astimezone(zone)
     return is_business_day(local.date(), cfg) and cfg.window_start <= local.time() <= cfg.window_end
 
@@ -69,7 +70,7 @@ def next_window_start(at: datetime, zone: ZoneInfo, cfg: SendConfig) -> datetime
     """The first moment at or after `at` that is inside the window: `at` itself when it already is, else the next
     opening (`window_start` on the next business day, or later today when today is a business day and not yet open)."""
     if in_window(at, zone, cfg):
-        return at
+        return at.astimezone(timezone.utc)
     local = at.astimezone(zone)
     day = local.date()
     if not (is_business_day(day, cfg) and local.time() < cfg.window_start):

@@ -552,8 +552,8 @@ Excluded on purpose: `~/Desktop/DevVault/tool-crowding/outreach/contacted.txt` (
     (`ValueError` naming the first). One `job_run` `import`; `register_source(conn, 'import', IMPORTER_VERSION,
     run_id)`. Writes in this order, one `transaction` per company (its people, touches, applications and records), so a
     failure keeps every finished company and the run ends `partial` with the error, never `ok`:
-    1. Company: `resolve_candidate(conn, Candidate(name=..., domain=..., keys={'ats': '<ats>:<token>'} (the first
-       board, or `{}`), evidence=<the plan's drafts>, source_ref=<first record id>), source_name='import',
+    1. Company: `resolve_candidate(conn, Candidate(name=..., domain=..., state=<the old record's US state when it has one, else None>,
+       keys={'ats': '<ats>:<token>'} (the first board, or `{}`), evidence=<the plan's drafts>, source_ref=<first record id>), source_name='import',
        actor='import')`; every other
        spelling through `add_alias(..., 'import')` (an alias owned elsewhere raises an `import` review item, never a
        move); hand drafts inserted `locked = 1` once per `(company, fact, value, source_ref)`; `no_go` rows
@@ -562,8 +562,7 @@ Excluded on purpose: `~/Desktop/DevVault/tool-crowding/outreach/contacted.txt` (
        record}`, key `import:note:<record id>:<n>`); a company with any touch or application and no close is
        `working`. The import never sets `removed`.
     2. Boards through `add_board(conn, company_id, BoardRef(ats, token), via='import', matched_on='import',
-       found_by='import')`, plus `actor='import'` once #31 Task 10 accepts it (integration review M4; until then the
-       board event reads actor `crawler`), then `active = 0` for frozen ones. Postings `INSERT ... ON CONFLICT(source_key) DO NOTHING`
+       found_by='import', actor='import')` (`add_board` takes `actor=`, so the board event does not read `crawler`), then `active = 0` for frozen ones. Postings `INSERT ... ON CONFLICT(source_key) DO NOTHING`
        (`source_key` `<ats>:<token>:<native_id>`, or `url:<url>`), closed ones with `close_reason 'imported_closed'`;
        bodies into `posting_body` with `body_sha256(body)` and `fetched_at NULL`.
     3. People: `person` rows `added_by 'import'`; `channel 'email'` with or without an address (the schema allows a
@@ -955,7 +954,7 @@ checkout `~/Desktop/Sept 23 Companies`. If a check fails, stop and roll back (R-
 - **Reading Gmail during the import.** Sent and reply state comes from `contacts.json` and `send.log`; the Gmail Sent
   check is #14's first run. The importer never opens the Gmail token.
 - **Writing the discovery job.** New companies after the switch come from #31's source modules (settled, A11). #31
-  Task 16 ships `launchd/com.devanshu.outreach-sources.plist.template` and `python -m outreach.sources tick`; this plan
+  Task 16 ships `launchd/com.devanshu.outreach-sources.plist.template` and `python -m outreach.sources run-due` (not `tick`; (from #31's final review, 2026-10-22)); this plan
   only lists that job as required in `NEW_JOBS` (Task 17) and installs it at S11, before the old refresh retires at
   S12.
 - **Writing the cold-email skill text.** #13 Task 16 writes it; this plan commits it in PR B2 (Task 19) so the skill
@@ -1003,8 +1002,7 @@ and big-by-filings verdicts (A10: size evidence and hidden, no-go, Needs you), w
 - **#31 (sources and identity):** the importer calls `resolve_candidate(..., source_name='import', actor='import')`
   (it takes `actor`), `raise_merge_candidate(..., 'import_near_name', detail, confidence='weak')` (an unlisted basis
   passes `confidence=`, so no #31 change), `register_source(conn, 'import', 'import-1', run_id)` and
-  `add_board(..., via='import', matched_on='import', found_by='import')`. Optional for #31 Task 10: an `actor=` on
-  `add_board` so imported boards do not read "found by crawler" (M4). Part A waits for #31 Tasks 7, 8 and 10. Part B
+  `add_board(..., via='import', matched_on='import', found_by='import', actor='import')`. Part A waits for #31 Tasks 7, 8 and 10. Part B
   needs #31 Task 16's template `com.devanshu.outreach-sources` (placeholders `{{LIVE_CHECKOUT}}` and `{{LOG_PATH}}`
   only), which this plan's deploy tool installs as required.
 - **#11 (API):** Task 9 types `build_context(lane: str | None)` with `test_context_lane_may_be_null` (imported touches

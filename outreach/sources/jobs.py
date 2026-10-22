@@ -19,13 +19,14 @@ from dataclasses import asdict, dataclass, field
 
 from outreach import identity
 from outreach.identity import StoreResolveReport, resolve_store
-from outreach.sources.base import Source, describe_error
+from outreach.sources.base import Source
 from outreach.sources.boards import BoardRef, add_board
 from outreach.sources.careers import CareersChecker, CareersResult
 from outreach.sources.keys import classify_domain, registrable_domain
 from outreach.sources.stapply import StapplyDirectory
 from outreach.sources.tiers import effective_tier, register_source, set_work_tier
-from outreach.store import append_event, finish_job, is_shared_key, iso_utc, mark_shared_key, start_job, transaction, utcnow
+from outreach.store import (append_event, describe_error, finish_job, is_shared_key, iso_utc, mark_shared_key,
+                            start_job, transaction, utcnow)
 
 __all__ = ["SourceReport", "run_discover", "run_resolve", "store_name_lookup", "POST_TEXT_CAP", "FindBoardsReport",
            "run_find_boards"]
@@ -425,8 +426,9 @@ class _Careers:
         return result
 
     def no_domain(self, company_id: int, shared: list[str]) -> None:
-        """A company with no usable domain: skipped for a shared one (an event), else a tier 1 company raises a
-        `domain_missing` item (a lower tier raises nothing)."""
+        """A company with no usable domain: a shared domain also leaves a `careers_skipped` event; a tier 1 company
+        raises one `domain_missing` item either way (the reason names the shared domain, if any); a lower tier raises
+        no item."""
         if self.checker is None:
             return
         if shared:
@@ -434,12 +436,15 @@ class _Careers:
             append_event(self.conn, entity="company", kind="careers_skipped", actor="crawler", entity_id=company_id,
                          company_id=company_id, detail={"domain": shared[0]},
                          idempotency_key=f"careers-skipped:{company_id}:{shared[0]}")
-        elif effective_tier(self.conn, company_id) == 1:
+            reason = (f"Its only domain, {shared[0]}, is shared with other employers, so its careers page "
+                      "cannot be checked for a board.")
+        else:
+            reason = "No company domain is known, so its careers page cannot be checked for a board."
+        if effective_tier(self.conn, company_id) == 1:
             self.report.domain_missing += self.conn.execute(
                 "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
                 "VALUES ('domain_missing', ?, ?, 'no-usable-domain', 'crawler', ?) ON CONFLICT DO NOTHING",
-                (company_id, "No company domain is known, so its careers page cannot be checked for a board.",
-                 utcnow())).rowcount
+                (company_id, reason, utcnow())).rowcount
 
 
 def _careers_boards(conn: sqlite3.Connection, company_id: int, name: str, careers: _Careers,

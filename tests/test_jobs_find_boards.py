@@ -398,14 +398,33 @@ class CareersStepTest(FindBoardsBase):
         _, report = self.run_careers()
         rows = {self.conn.execute("SELECT name FROM company WHERE company_id = ?", (r["company_id"],)).fetchone()[0]:
                 dict(r) for r in self.conn.execute("SELECT * FROM review_item WHERE kind = 'domain_missing'")}
-        self.assertEqual(sorted(rows), ["PrairieLearn", "Solo Dev Studio Inc"])  # a gmail contact, a github link
+        # a gmail contact, a github link, and the three companies whose only domain is shared (next test)
+        self.assertEqual(sorted(rows), ["PrairieLearn", "Solo Dev Studio Inc", "Veltrix Bio", "Veltrix Diagnostics Inc",
+                                        "Veltrix Pharma Inc"])
         for item in rows.values():
             self.assertEqual((item["raised_by"], item["evidence_key"], item["state"]),
                              ("crawler", "no-usable-domain", "open"))
-        self.assertEqual(report.domain_missing, 2)
+        self.assertEqual(report.domain_missing, 5)
         _, again = self.run_careers()
         self.assertEqual(again.domain_missing, 0)  # the same item is not raised twice
-        self.assertEqual(count(self.conn, "SELECT count(*) FROM review_item WHERE kind = 'domain_missing'"), 2)
+        self.assertEqual(count(self.conn, "SELECT count(*) FROM review_item WHERE kind = 'domain_missing'"), 5)
+
+    def test_a_tier_1_company_with_only_a_shared_domain_raises_domain_missing_too(self):
+        ids = {r["name"]: r["company_id"] for r in self.conn.execute("SELECT * FROM company WHERE name LIKE 'Veltrix%'")}
+        self.assertEqual(self.conn.execute("UPDATE work_tier SET tier = 2 WHERE company_id = ?",
+                                           (ids["Veltrix Diagnostics Inc"],)).rowcount, 1)
+        _, report = self.run_careers()
+        rows = {r["name"]: dict(r) for r in self.conn.execute(
+            "SELECT c.name, i.reason, i.evidence_key, i.raised_by, i.state FROM review_item i "
+            "JOIN company c USING (company_id) WHERE i.kind = 'domain_missing' AND c.name LIKE 'Veltrix%'")}
+        self.assertEqual(sorted(rows), ["Veltrix Bio", "Veltrix Pharma Inc"])  # tier 1 only; the tier 2 one is quiet
+        for row in rows.values():
+            self.assertIn("veltrix.com", row["reason"])
+            self.assertEqual((row["evidence_key"], row["raised_by"], row["state"]), ("no-usable-domain", "crawler", "open"))
+        self.assertEqual(len(self.events("careers_skipped")), 3)  # the event stays for all three
+        self.assertEqual(report.careers_skipped, 3)
+        _, again = self.run_careers()
+        self.assertEqual(again.domain_missing, 0)  # the same item is not raised twice
 
     def test_a_lower_tier_company_with_no_domain_raises_no_item(self):
         cid = self.company("Solo Dev Studio Inc")

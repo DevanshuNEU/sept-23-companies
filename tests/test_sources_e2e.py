@@ -83,7 +83,10 @@ class SourcesE2E(CliCase):
             ("size_check", "Veltrix Diagnostics Inc", "open"), ("size_check", "Veltrix Pharma Inc", "open"),
             ("size_check", "Veltrix Bio", "open"),  # the third Veltrix: the plan's draft counted the pair
             ("domain_missing", "Solo Dev Studio Inc", "open"),
-            ("domain_missing", "PrairieLearn", "open")]))  # the draft counted Solo Dev alone
+            ("domain_missing", "PrairieLearn", "open"),  # the draft counted Solo Dev alone
+            # a tier 1 company whose only domain is the shared veltrix.com raises one too
+            ("domain_missing", "Veltrix Diagnostics Inc", "open"), ("domain_missing", "Veltrix Pharma Inc", "open"),
+            ("domain_missing", "Veltrix Bio", "open")]))
         (merge,) = conn.execute("SELECT reason FROM review_item WHERE kind = 'merge_candidate'").fetchall()
         self.assertIn("Mesh Systems Inc", merge["reason"])
         self.assertIn(f"#{by_name['Mesh Systems']}", merge["reason"])

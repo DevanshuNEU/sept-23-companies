@@ -58,7 +58,7 @@ describe('FinishPanel', () => {
     const did = within(section('What you did'));
     const items = did.getAllByRole('listitem');
     const ledger = items.slice(0, 3).map((li) => li.textContent);
-    expect(ledger).toEqual(['6Requests sent', '6Applications sent', '1Emails reviewed']);
+    expect(ledger).toEqual(['6requests sent', '6applications sent', '1email reviewed']);
 
     // One line per row done: the person, the company, the step and the time with no leading zero.
     const dana = plan.rows[0] as PlanRow;
@@ -124,7 +124,7 @@ describe('FinishPanel', () => {
     expect(screen.getByText('6 of 7 done. Ines Duarte carries to tomorrow, so nothing else is asked of you today.')).toBeInTheDocument();
     // What he did leaves her out: no step was logged.
     expect(within(section('What you did')).queryByText('Ines Duarte')).not.toBeInTheDocument();
-    expect(within(section('What you did')).getByText('Requests sent').previousSibling).toHaveTextContent('5');
+    expect(within(section('What you did')).getByText('requests sent').previousSibling).toHaveTextContent('5');
   });
 
   it('two carried rows read as a count', () => {
@@ -165,10 +165,53 @@ describe('FinishPanel', () => {
     expect(screen.getByText('1 request, 0 accepted, 1 reply.')).toBeInTheDocument();
   });
 
+  it('does not take focus from a field he is typing in', async () => {
+    const field = document.createElement('textarea');
+    document.body.append(field);
+    field.focus();
+    try {
+      showPanel(planOf());
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('All 7 done for today.'));
+      expect(field).toHaveFocus();
+    } finally {
+      field.remove();
+    }
+  });
+
   it('announces the day and takes focus on arrival', async () => {
     showPanel(planOf());
     await waitFor(() => expect(heading()).toHaveFocus());
     expect(screen.getByRole('status')).toHaveTextContent('All 7 done for today.');
+  });
+
+  it('writes each ledger label in the singular for one', () => {
+    const plan = planOf();
+    // One request, one application and one email reviewed: only row 1 and the email row stay done.
+    for (const r of plan.rows) {
+      if (r.channel === 'linkedin_request' && r.position !== 1) {
+        r.state = 'skipped';
+        r.skipReason = 'carried';
+        r.steps = r.steps.map((s) => ({ ...s, at: null, touchId: null }));
+      }
+    }
+    showPanel(plan);
+    const ledger = within(section('What you did'))
+      .getAllByRole('listitem')
+      .slice(0, 3)
+      .map((li) => li.textContent);
+    expect(ledger).toEqual(['1request sent', '1application sent', '1email reviewed']);
+  });
+
+  it('takes the latest step time by instant, not by text', () => {
+    const plan = planOf();
+    const dana = plan.rows[0] as PlanRow;
+    // The same instant order written with different offsets: as text "...T09:30:00-05:00" sorts before "...T14:10:00Z".
+    const [first, second] = dana.steps;
+    if (!first || !second) throw new Error('fixture: Dana has two steps');
+    first.at = '2026-11-10T14:10:00Z';
+    second.at = '2026-11-10T09:30:00-05:00';
+    showPanel(plan);
+    expect(within(section('What you did')).getByText('Dana Whitfield').closest('li')).toHaveTextContent(formatClockTime('2026-11-10T14:30:00Z'));
   });
 
   it('announces what carried over', async () => {
@@ -240,6 +283,19 @@ describe('Today with no row to do', () => {
     });
     expect(screen.getByRole('heading', { level: 2, name: 'Done for today' })).toBeInTheDocument();
     expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  });
+
+  it('a not-a-fit row leaves the head carried-over count at zero', async () => {
+    const db = buildFixture('plan_done');
+    const row = db.plan.rows[5] as PlanRow;
+    row.state = 'skipped';
+    row.skipReason = 'not_a_fit';
+    row.steps = row.steps.map((s) => ({ ...s, at: null, touchId: null }));
+    db.plan.done = 6;
+    await openToday({ db });
+    expect(await screen.findByRole('heading', { level: 2, name: 'Done for today' })).toBeInTheDocument();
+    expect(screen.getByText('7 people, 6 done')).toBeInTheDocument();
+    expect(screen.queryByText(/carried over/)).not.toBeInTheDocument();
   });
 
   it('the weekend plan (no rows) shows the not-ready state, not the finish panel', async () => {

@@ -260,7 +260,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
 
   let panel = (
     <p className="max-w-[62ch] text-sm text-muted-foreground">
-      {allDone ? 'Every row on the plan is done or carried. Pick anyone on the left to see what you did.' : 'Pick a person on the left to see their work.'}
+      {allDone ? 'Nothing is left to do on the plan. Pick anyone on the left to see what you did.' : 'Pick a person on the left to see their work.'}
     </p>
   );
   if (current) {

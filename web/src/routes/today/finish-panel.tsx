@@ -31,11 +31,23 @@ function stepsDone(row: PlanRow): string {
   return row.note?.reasonState === 'written' ? `your line, ${steps}` : steps;
 }
 
-/** The time of the row's last logged step, or null (an email logs none here). */
+/** The time of the row's last logged step, or null. An email row has no step to log, so it shows no time. */
 function lastAt(row: PlanRow): string | null {
-  const last = row.steps.flatMap((s) => (s.at === null ? [] : [s.at])).sort().at(-1);
+  // By instant, not by text: two times written with different offsets do not sort as strings.
+  const last = row.steps.flatMap((s) => (s.at === null ? [] : [s.at])).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1);
   return last === undefined ? null : formatClockTime(last);
 }
+
+/** The ledger's words for a count, in lower case as in the mockup: "1 request sent", "6 requests sent". */
+const LEDGER: Record<string, [one: string, many: string]> = {
+  'Requests sent': ['request sent', 'requests sent'],
+  'Applications sent': ['application sent', 'applications sent'],
+  'Emails reviewed': ['email reviewed', 'emails reviewed'],
+};
+const ledgerWord = (label: string, count: number) => {
+  const words = LEDGER[label];
+  return words ? words[count === 1 ? 0 : 1] : label.toLowerCase();
+};
 
 /**
  * How the day ended, in the API's counts: every row is done, carried or removed as not a fit. A not-a-fit row is
@@ -90,8 +102,13 @@ export function FinishPanel({ plan }: { plan: PlanView }) {
   const did = didToday(plan.rows);
   const { sub, say: spoken } = summary(plan, carried, removed);
 
+  // Focus comes to the heading only when it would otherwise be lost: on the page, or inside the work region he
+  // was in. A poll that finishes the plan never takes it from a field or a dialog he is using elsewhere.
   useEffect(() => {
-    headingRef.current?.focus();
+    const heading = headingRef.current;
+    const active = document.activeElement;
+    const region = heading?.closest('section') ?? null;
+    if (active === null || active === document.body || (region !== null && region.contains(active))) heading?.focus();
   }, []);
   useEffect(() => {
     say(spoken);
@@ -123,7 +140,7 @@ export function FinishPanel({ plan }: { plan: PlanView }) {
             {did.map((d) => (
               <li key={d.label} className="grid grid-cols-[32px_minmax(0,1fr)] items-baseline gap-3 py-1.5 text-sm">
                 <b className="text-right text-xl leading-7 font-semibold tabular-nums">{d.count}</b>
-                <span>{d.label}</span>
+                <span>{ledgerWord(d.label, d.count)}</span>
               </li>
             ))}
           </ul>

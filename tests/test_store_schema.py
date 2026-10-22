@@ -307,8 +307,8 @@ class SchemaTest(unittest.TestCase):
 
     def test_migration_is_recorded(self):
         row = self.db.execute("SELECT version, name FROM schema_migration").fetchall()
-        self.assertEqual([(r[0], r[1]) for r in row], [(1, "initial")])
-        self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 1)
+        self.assertEqual([(r[0], r[1]) for r in row][:2], [(1, "initial"), (2, "sending")])
+        self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], len(row))
 
     def test_store_is_sound(self):
         self.assertEqual(self.db.execute("PRAGMA integrity_check").fetchall()[0][0], "ok")
@@ -328,7 +328,7 @@ class SchemaTest(unittest.TestCase):
         named = {(t, c) for t in self.tables() for c in self.columns(t)
                  if c == "at" or c.endswith("_at") or c in ("streak_since", "lease_until")}
         self.assertEqual(columns, named)
-        self.assertEqual(len(columns), 81)  # 50 before the pipeline tables (#30), 31 with them
+        self.assertEqual(len(columns), 84)  # 50 before the pipeline tables (#30), 31 with them, 3 from 0002 (#14)
         for table, column in sorted(columns):
             self.assertTrue(self._has_base(table), f"no base row for {table}")
             self.assert_bad_value_refused(table, column, bad, f"{column} IS strftime(")

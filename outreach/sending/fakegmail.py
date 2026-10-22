@@ -16,7 +16,8 @@ from email.utils import formataddr, parseaddr
 from typing import Literal
 
 from outreach.sending.mail import (META_HEADERS, Added, GmailError, HistoryExpired, HistoryPage, MailClient,
-                                   MessageMeta, Outgoing, Profile, Sent, check_outgoing)
+                                   MessageMeta, Outgoing, Profile, Sent, check_outgoing, miss_is_proof,
+                                   normalise_message_id, page_reaches, settle_minutes)
 
 __all__ = ["FakeClock", "FakeGmail", "DSN_FROM"]
 
@@ -74,15 +75,18 @@ class FakeGmail(MailClient):
     """In-memory Gmail. `probe(method_name)` runs at the start of every client method, before it does anything."""
 
     def __init__(self, *, clock: Callable[[], datetime], account: str = "devanshurajesh@gmail.com",
-                 probe: Callable[[str], None] | None = None):
+                 probe: Callable[[str], None] | None = None, reconcile_after_minutes: int | None = None):
         self.clock = clock
         self.account = account
         self.probe = probe
+        self.settle_minutes = settle_minutes(reconcile_after_minutes)
         self.sent: list[tuple[Outgoing, Sent, datetime]] = []
         self.sent_box: list[MessageMeta] = []        # what find_sent scans, oldest first
         self.calls: list[str] = []
-        self.find_sent_page_cap: int | None = None   # pages find_sent may read; None is unlimited
+        self.find_sent_page_cap: int | None = 10     # pages find_sent may read, as the real client; None unlimited
         self.find_sent_page_size = 50
+        self.rewrite_message_ids = False             # Gmail stores sends under its own Message-ID
+        self._lands_at: dict[str, datetime] = {}     # a Sent entry find_sent cannot see before this time
         self._messages: dict[str, MessageMeta] = {}
         self._threads: dict[str, list[str]] = {}
         self._history: list[tuple[int, str]] = []    # (history id, gmail message id)
@@ -90,16 +94,17 @@ class FakeGmail(MailClient):
         self._next_message = 0
         self._next_thread = 0
         self._next_rfc = 0
-        self._send_failures: list[tuple[BaseException, bool, bool]] = []
+        self._send_failures: list[tuple[BaseException, bool, bool, timedelta | None]] = []
         self._profile_error: BaseException | None = None
         self._expire_next_history = False
 
     # -- scripting (not client calls: no probe, not in calls) ---------------------------------------------------
 
-    def fail_next_send(self, error: BaseException, *, accepted: bool = False, in_sent: bool = True) -> None:
-        """The next send raises `error`. With `accepted=True` the email goes out first (and lands in Sent unless
-        `in_sent=False`), as a timeout after Gmail took it. Calls queue up: each send uses one."""
-        self._send_failures.append((error, accepted, in_sent))
+    def fail_next_send(self, error: BaseException, *, accepted: bool = False, in_sent: bool = True,
+                       lands_after: timedelta | None = None) -> None:
+        """The next send raises `error`. With `accepted=True` the email goes out first, as a timeout after Gmail
+        took it, and lands in Sent (`lands_after` later, or never with `in_sent=False`). Calls queue up."""
+        self._send_failures.append((error, accepted, in_sent, lands_after))
 
     def fail_profile(self, error: BaseException | None) -> None:
         """Every profile call raises `error` until fail_profile(None): a dead token stays dead."""
@@ -175,19 +180,29 @@ class FakeGmail(MailClient):
             first = self._messages[self._threads[thread_id][0]]
             if _subject_key(first.subject) != _subject_key(m.subject):
                 thread_id = None                       # Gmail threads only when the subjects match
-        headers = {"message-id": m.message_id, "content-type": 'text/plain; charset="utf-8"'}
+        stored_id = m.message_id
+        if self.rewrite_message_ids:
+            self._next_rfc += 1
+            stored_id = f"<rewritten{self._next_rfc}@mail.gmail.com>"
+        headers = {"message-id": stored_id, "content-type": 'text/plain; charset="utf-8"'}
         if m.in_reply_to:
             headers["in-reply-to"] = m.in_reply_to
-        if m.references:
-            headers["references"] = " ".join(m.references)
+        refs = m.references or ((m.in_reply_to,) if m.in_reply_to else ())
+        if refs:
+            headers["references"] = " ".join(refs)
         meta = self._store(thread_id or self._new_thread(), formataddr((m.from_name, m.from_addr)), m.to,
                            m.subject, ("SENT",), headers, " ".join(m.body.split())[:100], None)
-        sent = Sent(gmail_message_id=meta.gmail_message_id, thread_id=meta.thread_id, rfc_message_id=m.message_id)
+        sent = Sent(gmail_message_id=meta.gmail_message_id, thread_id=meta.thread_id, rfc_message_id=stored_id)
         self.sent.append((m, sent, self.clock()))
         if failure is None or failure[2]:
             self.sent_box.append(meta)
+            if failure is not None and failure[3] is not None:
+                self._lands_at[meta.gmail_message_id] = self.clock() + failure[3]
         if failure is not None:
             raise failure[0]
+        if stored_id != m.message_id:
+            raise GmailError("message_id_rewritten", None, "Gmail stored the email under another Message-ID",
+                             sent=sent)
         return sent
 
     def history(self, start_history_id: str) -> HistoryPage:
@@ -218,24 +233,29 @@ class FakeGmail(MailClient):
             raise GmailError("bad_request", 404, "Requested entity was not found.")
         return [self._messages[mid] for mid in self._threads[thread_id]]
 
-    def find_sent(self, rfc_message_id: str, not_before_ms: int) -> tuple[Sent | None, bool]:
-        """Newest first, a page at a time; a whole page is checked for a match before an older message ends the
-        scan (the same rule as the real client)."""
+    def find_sent(self, rfc_message_id: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+        """Newest first, a page at a time, by the same rules as the real client (see MailClient.find_sent)."""
         self._enter("find_sent")
-        newest_first = sorted(enumerate(self.sent_box), key=lambda p: (p[1].internal_ms, p[0]), reverse=True)
+        now = self.clock()
+        visible = [(i, meta) for i, meta in enumerate(self.sent_box)
+                   if self._lands_at.get(meta.gmail_message_id, now) <= now]
+        newest_first = sorted(visible, key=lambda p: (p[1].internal_ms, p[0]), reverse=True)
         box = [meta for _, meta in newest_first]
-        size, pages = self.find_sent_page_size, 0
+        wanted = normalise_message_id(rfc_message_id)
+        size, pages, complete = self.find_sent_page_size, 0, True
         for start in range(0, len(box), size):
             if self.find_sent_page_cap is not None and pages >= self.find_sent_page_cap:
-                return None, False
+                complete = False
+                break
             pages += 1
             page = box[start:start + size]
             for meta in page:
-                if meta.headers.get("message-id") == rfc_message_id:
+                if normalise_message_id(meta.headers.get("message-id")) == wanted:
                     return Sent(meta.gmail_message_id, meta.thread_id, rfc_message_id), True
-            if any(meta.internal_ms < not_before_ms for meta in page):
-                return None, True
-        return None, True
+            if page_reaches([meta.internal_ms for meta in page], not_before_ms):
+                break
+        now_ms = int(now.timestamp() * 1000)
+        return None, miss_is_proof(complete, now_ms, send_returned_ms, self.settle_minutes)
 
     # -- internals ----------------------------------------------------------------------------------------------
 

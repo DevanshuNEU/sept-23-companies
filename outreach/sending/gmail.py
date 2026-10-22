@@ -33,12 +33,16 @@ import urllib.parse
 import urllib.request
 import webbrowser
 from collections.abc import Callable
+from datetime import datetime, timezone
+from email import message_from_bytes
+from email import policy as email_policy
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 
 import live_checkout
 from outreach.sending.mail import (META_HEADERS, Added, GmailError, HistoryExpired, HistoryPage, MailClient,
-                                   MessageMeta, Outgoing, Profile, Sent, check_outgoing, classify_http, scrub)
+                                   MessageMeta, Outgoing, Profile, Sent, check_outgoing, classify_http, miss_is_proof,
+                                   normalise_message_id, page_reaches, scrub, settle_minutes)
 
 __all__ = ["DEFAULT_DIR", "SCOPES", "gmail_dir", "is_default_dir", "build_mime", "new_message_id", "GmailClient",
            "check_auth_location", "authorize", "main"]
@@ -61,6 +65,17 @@ READ_HEADERS = ["From", "To", "Subject", "Auto-Submitted", "X-Autoreply", "X-Aut
 assert {h.lower() for h in READ_HEADERS} == set(META_HEADERS) | {"from", "to", "subject"}
 
 Transport = Callable[[str, str, dict | None, dict | None], dict]
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is an HTTP error, never followed, so the Authorization header never goes to another host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+# Every request this module makes goes through this opener.
+_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def gmail_dir() -> str:
@@ -101,13 +116,19 @@ def build_mime(m: Outgoing) -> bytes:
     msg["To"] = m.to.strip()
     msg["From"] = formataddr((m.from_name, m.from_addr))
     msg["Subject"] = m.subject
-    msg["Message-ID"] = m.message_id.strip()
+    msg["Message-ID"] = m.message_id
     if m.in_reply_to:
         msg["In-Reply-To"] = m.in_reply_to
-    if m.references:
-        msg["References"] = " ".join(m.references)
+    refs = m.references or ((m.in_reply_to,) if m.in_reply_to else ())
+    if refs:
+        msg["References"] = " ".join(refs)
     msg.set_content(m.body, charset="utf-8")
-    return msg.as_bytes()
+    raw = msg.as_bytes()
+    # The id in the bytes is the id the claim saved: a Sent scan looks for exactly this one.
+    written = message_from_bytes(raw, policy=email_policy.default)["Message-ID"]
+    if normalise_message_id(str(written or "")) != normalise_message_id(m.message_id):
+        raise ValueError("the Message-ID written is not the one claimed")
+    return raw
 
 
 def new_message_id(from_addr: str) -> str:
@@ -141,7 +162,7 @@ def _client(directory: str) -> dict:
 
 def _post(url: str, form: dict) -> dict:
     req = urllib.request.Request(url, data=urllib.parse.urlencode(form).encode(), method="POST")
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    with _OPENER.open(req, timeout=TIMEOUT) as r:
         return json.loads(r.read())
 
 
@@ -188,11 +209,10 @@ def _token(directory: str) -> str:
             new = _post(TOKEN_URL, {"client_id": c["client_id"], "client_secret": c.get("client_secret", ""),
                                     "refresh_token": tok["refresh_token"], "grant_type": "refresh_token"})
         except urllib.error.HTTPError as err:
-            # 400 invalid_grant is a revoked or expired refresh token: signed out, not a bad message.
-            kind = "auth" if err.code in (400, 401, 403) else classify_http(err.code, "")
+            # The token endpoint's errors are a sign-in problem (400 invalid_grant: revoked or expired refresh
+            # token) or Google's trouble, never a sending limit: auth for 400, 401 and 403, server for the rest.
+            kind = "auth" if err.code in (400, 401, 403) else "server"
             raise GmailError(kind, err.code, f"token refresh failed: {_google_error(err)}") from None
-        except (TimeoutError, socket.timeout):
-            raise GmailError("timeout", None, "token refresh timed out") from None
         except (urllib.error.URLError, http.client.HTTPException, OSError) as err:
             raise GmailError("network", None, f"token refresh failed: {type(err).__name__}") from None
         except ValueError:
@@ -206,11 +226,14 @@ def _token(directory: str) -> str:
 
 
 def _urlopen(method: str, path: str, body: dict | None, query: dict | None, token: str) -> dict:
+    """The one real Gmail API call. Refuses outside the live checkout whatever token it was handed."""
+    if not live_checkout.is_live():
+        raise SystemExit(f"the real Gmail API is only called from the live checkout ({live_checkout.LIVE_ROOT})")
     url = API + path + ("?" + urllib.parse.urlencode(query, doseq=True) if query else "")
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
                                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    with _OPENER.open(req, timeout=TIMEOUT) as r:
         return json.loads(r.read() or b"{}")
 
 
@@ -235,12 +258,27 @@ def _headers(msg: dict) -> dict[str, str]:
     return out
 
 
+def _date(value) -> int:
+    """Gmail's internalDate as an int, or GmailError: a bad date is Gmail's fault, never a crash in the tick."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise GmailError("server", None, "Gmail gave a message without a usable date") from None
+
+
+def _id(obj: dict, key: str = "id") -> str:
+    value = obj.get(key) if isinstance(obj, dict) else None
+    if not value:
+        raise GmailError("server", None, f"Gmail gave a message without its {key}")
+    return str(value)
+
+
 def _meta(msg: dict) -> MessageMeta:
     h = _headers(msg)
     return MessageMeta(
-        gmail_message_id=str(msg.get("id", "")), thread_id=str(msg.get("threadId", "")),
+        gmail_message_id=_id(msg), thread_id=str(msg.get("threadId", "")),
         from_addr=h.get("from", ""), to_addr=h.get("to", ""), subject=h.get("subject", ""),
-        internal_ms=int(msg.get("internalDate", 0) or 0), labels=tuple(msg.get("labelIds", []) or ()),
+        internal_ms=_date(msg.get("internalDate")), labels=tuple(msg.get("labelIds", []) or ()),
         headers={k: h[k] for k in META_HEADERS if k in h}, snippet=str(msg.get("snippet", "")))
 
 
@@ -252,15 +290,21 @@ def _quote(gmail_id: str) -> str:
 
 class GmailClient(MailClient):
     """Gmail through its REST API. `transport(method, path, body, query) -> dict` replaces the HTTP call in tests;
-    `token_provider` runs before every call either way (by default `_token`, the live-checkout gate)."""
+    `token_provider` runs before every call either way (by default `_token`, the live-checkout gate), and is only
+    accepted with a transport. `clock` (aware now) is for tests of find_sent's timing."""
 
     def __init__(self, directory: str | None = None, *, transport: Transport | None = None,
-                 token_provider: Callable[[], str] | None = None):
+                 token_provider: Callable[[], str] | None = None, clock: Callable[[], datetime] | None = None,
+                 reconcile_after_minutes: int | None = None):
+        if token_provider is not None and transport is None:
+            raise ValueError("a token_provider replaces the real token only with a fake transport")
         self.directory = _normalise(directory or gmail_dir())
         if is_default_dir(self.directory):
             live_checkout.require_live("the real Gmail client")
         self._transport = transport
         self._token_provider = token_provider or (lambda: _token(self.directory))
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self.settle_minutes = settle_minutes(reconcile_after_minutes)
 
     def _call(self, method: str, path: str, body: dict | None = None, query: dict | None = None) -> dict:
         token = self._token_provider()          # SystemExit outside the live checkout, before anything else
@@ -303,7 +347,19 @@ class GmailClient(MailClient):
         res = self._call("POST", "/messages/send", body)
         if not res.get("id") or not res.get("threadId"):
             raise GmailError("server", None, "Gmail answered the send without message and thread ids")
-        return Sent(gmail_message_id=str(res["id"]), thread_id=str(res["threadId"]), rfc_message_id=m.message_id)
+        sent = Sent(gmail_message_id=str(res["id"]), thread_id=str(res["threadId"]), rfc_message_id=m.message_id)
+        # Settling an unclear send looks for this Message-ID in Sent, so check Gmail kept it. If the check itself
+        # fails, the send still succeeded: report it as sent (raising would make a sent email look unclear).
+        try:
+            stored = _headers(self._call("GET", f"/messages/{_quote(sent.gmail_message_id)}",
+                                         query={"format": "metadata", "metadataHeaders": ["Message-ID"]}))
+        except GmailError:
+            return sent
+        actual = normalise_message_id(stored.get("message-id"))
+        if actual != normalise_message_id(m.message_id):
+            raise GmailError("message_id_rewritten", None, "Gmail stored the email under another Message-ID",
+                             sent=Sent(sent.gmail_message_id, sent.thread_id, actual))
+        return sent
 
     def history(self, start_history_id: str) -> HistoryPage:
         if not start_history_id:
@@ -347,37 +403,35 @@ class GmailClient(MailClient):
                          query={"format": "metadata", "metadataHeaders": READ_HEADERS})
         return [_meta(m) for m in res.get("messages", []) or []]
 
-    def find_sent(self, rfc_message_id: str, not_before_ms: int) -> tuple[Sent | None, bool]:
-        """Page Sent newest first and read each Message-ID; match it exactly, never by To or Subject.
-
-        Gmail does not promise the listing order, so a page is read to its end before a message older than
-        `not_before_ms` ends the scan. A message without a date proves nothing. Ten pages of 50 without reaching
-        the claim time is an incomplete scan: a miss then is not proof.
+    def find_sent(self, rfc_message_id: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+        """Page Sent (Trash and Spam included) newest first and read each Message-ID; match it exactly, never by
+        To or Subject. The rules for when a miss is proof are MailClient.find_sent's. Gmail does not promise the
+        listing order, so a page is read to its end and judged by its last dated message. Ten pages of 50 that
+        never reach the claim time make an incomplete scan.
         """
-        wanted = rfc_message_id.strip()
-        page_token = None
+        wanted = normalise_message_id(rfc_message_id)
+        started_ms = int(self._clock().timestamp() * 1000)
+        page_token, complete = None, False
         for _ in range(FIND_SENT_PAGES):
-            query = {"labelIds": "SENT", "maxResults": FIND_SENT_PAGE_SIZE}
+            query = {"labelIds": "SENT", "includeSpamTrash": "true", "maxResults": FIND_SENT_PAGE_SIZE}
             if page_token:
                 query["pageToken"] = page_token
             res = self._call("GET", "/messages", query=query)
-            reached_claim = False
+            dates: list[int | None] = []
             for ref in res.get("messages", []) or []:
-                msg = self._call("GET", f"/messages/{_quote(ref['id'])}",
+                gid = _id(ref)
+                msg = self._call("GET", f"/messages/{_quote(gid)}",
                                  query={"format": "metadata", "metadataHeaders": ["Message-ID"]})
-                if _headers(msg).get("message-id", "").strip() == wanted:
-                    return Sent(gmail_message_id=str(ref["id"]),
-                                thread_id=str(msg.get("threadId") or ref.get("threadId", "")),
+                if normalise_message_id(_headers(msg).get("message-id")) == wanted:
+                    return Sent(gmail_message_id=gid, thread_id=str(msg.get("threadId") or ref.get("threadId", "")),
                                 rfc_message_id=rfc_message_id), True
                 when = msg.get("internalDate")
-                if when not in (None, "") and int(when) < not_before_ms:
-                    reached_claim = True
-            if reached_claim:
-                return None, True
+                dates.append(None if when in (None, "") else _date(when))
             page_token = res.get("nextPageToken")
-            if not page_token:
-                return None, True
-        return None, False
+            if page_reaches(dates, not_before_ms) or not page_token:
+                complete = True
+                break
+        return None, miss_is_proof(complete, started_ms, send_returned_ms, self.settle_minutes)
 
 
 # -- sign-in ----------------------------------------------------------------------------------------------------

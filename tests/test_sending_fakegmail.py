@@ -7,10 +7,12 @@ from datetime import datetime, timedelta, timezone
 
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import (RETRYABLE, GmailError, HistoryExpired, MailClient, MessageMeta, Outgoing, Sent,
-                                   classify_http)
+                                   classify_http, normalise_message_id)
 
 ACCOUNT = "devanshurajesh@gmail.com"
 START = datetime(2026, 11, 10, 14, 0, tzinfo=timezone.utc)
+# Malformed Message-IDs: no brackets, two ids, two @, a space, an empty local part.
+BAD_IDS = ("a1@gmail.com", "<a1@gmail.com> <a2@gmail.com>", "<a1@b@gmail.com>", "<a 1@gmail.com>", "<@gmail.com>")
 
 
 def outgoing(to="founder@sendwell.example", subject="Backend role at Sendwell", *, message_id="<a1@gmail.com>",
@@ -87,6 +89,27 @@ class FakeGmailTest(unittest.TestCase):
         self.assertEqual((cm.exception.kind, cm.exception.status), ("bad_request", 404))
         self.assertEqual(self.gmail.sent, [])
 
+    def test_malformed_message_ids_are_refused_in_every_header(self):
+        for bad in BAD_IDS:
+            for m in (outgoing(message_id=bad), outgoing(in_reply_to=bad, references=("<a0@gmail.com>",)),
+                      outgoing(in_reply_to="<a0@gmail.com>", references=("<a0@gmail.com>", bad))):
+                with self.subTest(bad=bad, m=m), self.assertRaises(GmailError) as cm:
+                    self.gmail.send(m)
+                self.assertEqual(cm.exception.kind, "bad_request")
+        self.assertEqual(self.gmail.sent, [])
+
+    def test_a_rewritten_message_id_is_its_own_error_and_still_counts_as_sent(self):
+        self.gmail.rewrite_message_ids = True
+        with self.assertRaises(GmailError) as cm:
+            self.gmail.send(outgoing())
+        err = cm.exception
+        self.assertEqual(err.kind, "message_id_rewritten")
+        self.assertFalse(err.retryable)
+        self.assertEqual(len(self.gmail.sent), 1)
+        self.assertEqual((err.sent.gmail_message_id, err.sent.thread_id), ("m1", "t1"))
+        self.assertNotEqual(err.sent.rfc_message_id, "<a1@gmail.com>")
+        self.assertEqual(self.gmail.message("m1").headers["message-id"], err.sent.rfc_message_id)
+
     def test_bad_outgoing_is_refused_before_anything_goes_out(self):
         for bad in (outgoing(to="a@x.example, b@y.example"), outgoing(message_id=""),
                     outgoing(subject="Hi\r\nBcc: x@y.example")):
@@ -100,7 +123,8 @@ class FakeGmailTest(unittest.TestCase):
         with self.assertRaises(GmailError):
             self.gmail.send(outgoing())
         self.assertEqual((self.gmail.sent, self.gmail.sent_box), ([], []))
-        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START) - 1), (None, True))
+        self.clock.advance(minutes=10)
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=ms(START)), (None, True))
         # The script is used once: the next send goes through.
         self.assertEqual(self.gmail.send(outgoing()).gmail_message_id, "m1")
 
@@ -109,7 +133,7 @@ class FakeGmailTest(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             self.gmail.send(outgoing())
         self.assertEqual(len(self.gmail.sent), 1)
-        found, complete = self.gmail.find_sent("<a1@gmail.com>", ms(START))
+        found, complete = self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=ms(START))
         self.assertTrue(complete)
         self.assertEqual(found, self.gmail.sent[0][1])
 
@@ -188,27 +212,64 @@ class FakeGmailTest(unittest.TestCase):
         for i in range(120):                       # many newer messages: more than two fake pages
             self.clock.advance(minutes=1)
             self.gmail.send(outgoing(to=f"p{i}@co.example", subject=f"s{i}", message_id=f"<n{i}@gmail.com>"))
-        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(claim)), (target, True))
+        done = ms(claim)
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(claim), send_returned_ms=done), (target, True))
         # A miss that reached past the claim time is proof.
-        self.assertEqual(self.gmail.find_sent("<never@gmail.com>", ms(claim) + 1), (None, True))
+        self.assertEqual(self.gmail.find_sent("<never@gmail.com>", ms(claim) + 1, send_returned_ms=done), (None, True))
         # A miss that reached the end of Sent is proof too.
-        self.assertEqual(self.gmail.find_sent("<never@gmail.com>", 0), (None, True))
+        self.assertEqual(self.gmail.find_sent("<never@gmail.com>", 0, send_returned_ms=done), (None, True))
 
     def test_find_sent_matches_by_message_id_only(self):
         self.gmail.add_to_sent("founder@sendwell.example", "Backend role at Sendwell", message_id="<other@gmail.com>")
-        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", 0), (None, True))
+        self.clock.advance(minutes=10)
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", 0, send_returned_ms=ms(START)), (None, True))
 
     def test_find_sent_with_a_page_cap_reports_incomplete(self):
         self.gmail.send(outgoing())
         for i in range(60):
             self.clock.advance(minutes=1)
             self.gmail.send(outgoing(to=f"p{i}@co.example", subject=f"s{i}", message_id=f"<n{i}@gmail.com>"))
+        self.assertEqual(self.gmail.find_sent_page_cap, 10)     # like the real client
+        done = ms(START)
         self.gmail.find_sent_page_cap = 1           # one page of 50: the target is on page 2
-        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START)), (None, False))
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=done), (None, False))
         self.gmail.find_sent_page_cap = 0
-        self.assertEqual(self.gmail.find_sent("<n59@gmail.com>", 0), (None, False))
-        self.gmail.find_sent_page_cap = None
-        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START))[1], True)
+        self.assertEqual(self.gmail.find_sent("<n59@gmail.com>", 0, send_returned_ms=done), (None, False))
+        self.gmail.find_sent_page_cap = 10
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=done)[1], True)
+
+    def test_a_miss_too_soon_after_the_failed_send_is_not_proof(self):
+        self.gmail.fail_next_send(GmailError("server", 503, "backend"))
+        with self.assertRaises(GmailError):
+            self.gmail.send(outgoing())
+        done = ms(START)
+        self.clock.advance(minutes=9, seconds=59)
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=done), (None, False))
+        self.clock.advance(seconds=1)                                    # ten minutes after the send returned
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=done), (None, True))
+
+    def test_a_send_that_lands_in_sent_late_is_not_called_missing(self):
+        self.gmail.fail_next_send(TimeoutError(), accepted=True, lands_after=timedelta(minutes=4))
+        with self.assertRaises(TimeoutError):
+            self.gmail.send(outgoing())
+        done = ms(START)
+        self.clock.advance(minutes=3)
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=done), (None, False))
+        self.clock.advance(minutes=2)
+        found, complete = self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=done)
+        self.assertEqual((found, complete), (self.gmail.sent[0][1], True))
+
+    def test_the_scan_allows_for_the_mac_clock_running_ahead(self):
+        # Gmail took the email at START; the Mac, two minutes fast, claimed it at START + 2 min. Fifty later
+        # messages, all older than the claim by the Mac's clock, fill the first page.
+        target = self.gmail.send(outgoing())
+        for i in range(50):
+            self.clock.advance(seconds=1)
+            self.gmail.send(outgoing(to=f"p{i}@co.example", subject=f"s{i}", message_id=f"<n{i}@gmail.com>"))
+        claim = START + timedelta(minutes=2)
+        self.clock.set(START + timedelta(minutes=30))
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(claim), send_returned_ms=ms(claim)),
+                         (target, True))
 
     def test_probe_sees_every_call(self):
         seen = []
@@ -218,7 +279,7 @@ class FakeGmailTest(unittest.TestCase):
         gmail.history("1")
         gmail.message(first.gmail_message_id)
         gmail.thread(first.thread_id)
-        gmail.find_sent(first.rfc_message_id, 0)
+        gmail.find_sent(first.rfc_message_id, 0, send_returned_ms=0)
         names = ["send", "profile", "history", "message", "thread", "find_sent"]
         self.assertEqual(seen, names)
         self.assertEqual(gmail.calls, names)
@@ -285,6 +346,8 @@ class ClassifyHttpTest(unittest.TestCase):
         kinds = {"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
                  "timeout"}
         self.assertEqual(kinds - RETRYABLE, {"bad_request"})
+        # A rewritten Message-ID means the email went out: never retried.
+        self.assertNotIn("message_id_rewritten", RETRYABLE)
         self.assertLessEqual(RETRYABLE, kinds)
 
 
@@ -300,6 +363,10 @@ class GmailErrorTest(unittest.TestCase):
         err = GmailError("server", 500, '{"access_token": "abc123", "refresh_token": "1//zzz"}')
         self.assertNotIn("abc123", err.detail)
         self.assertNotIn("1//zzz", err.detail)
+
+    def test_message_ids_compare_without_folding_whitespace(self):
+        self.assertEqual(normalise_message_id(" <a1@gmail.com>\r\n "), "<a1@gmail.com>")
+        self.assertEqual(normalise_message_id("<a1@\r\n gmail.com>"), "<a1@gmail.com>")
 
     def test_unknown_kind_is_refused(self):
         with self.assertRaises(ValueError):

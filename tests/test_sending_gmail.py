@@ -6,6 +6,8 @@ test, so a broken guard shows up as a failure, never as a real call.
 """
 import base64
 import builtins
+import datetime as dt
+import threading
 import email
 import email.policy
 import io
@@ -16,14 +18,19 @@ import stat
 import tempfile
 import unittest
 import urllib.error
+import urllib.request
+import webbrowser
 from email.message import Message
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
+import tests
 from outreach.sending import gmail
 from outreach.sending.mail import GmailError, HistoryExpired, MessageMeta, Outgoing, Sent
 
 ACCOUNT = "devanshurajesh@gmail.com"
 SECRET = "ya29.tok-secret-abc"
+BAD_IDS = ("a1@gmail.com", "<a1@gmail.com> <a2@gmail.com>", "<a1@b@gmail.com>", "<a 1@gmail.com>", "<@gmail.com>")
 
 
 def outgoing(to="founder@sendwell.example", subject="Backend role at Sendwell", *, message_id="<a1@gmail.com>",
@@ -61,7 +68,7 @@ class SentFolder:
 
     def __call__(self, method, path, body, query):
         if path == "/messages":
-            assert query["labelIds"] == "SENT", query
+            assert query["labelIds"] == "SENT" and query["includeSpamTrash"] == "true", query
             self.list_calls += 1
             start = int(query.get("pageToken") or 0)
             size = int(query["maxResults"])
@@ -91,11 +98,16 @@ class NoNetwork(unittest.TestCase):
             patcher = mock.patch(target, side_effect=refuse)
             patcher.start()
             self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(gmail._OPENER, "open", side_effect=refuse)
+        self.opener_open = patcher.start()
+        self.addCleanup(patcher.stop)
         self.dir = tempfile.mkdtemp(prefix="outreach-gmail-test-")
 
-    def client(self, handler=None, token=SECRET):
+    def client(self, handler=None, token=SECRET, now_ms=None):
         transport = Transport(handler)
-        return gmail.GmailClient(self.dir, transport=transport, token_provider=lambda: token), transport
+        clock = None if now_ms is None else (lambda: dt.datetime.fromtimestamp(now_ms / 1000, dt.timezone.utc))
+        return gmail.GmailClient(self.dir, transport=transport, token_provider=lambda: token,
+                                 clock=clock), transport
 
     def live(self, value: bool):
         patcher = mock.patch.object(gmail.live_checkout, "is_live", lambda *a, **k: value)
@@ -131,7 +143,7 @@ class LiveGuardTest(NoNetwork):
             "history": lambda c: c.history("100"),
             "message": lambda c: c.message("m1"),
             "thread": lambda c: c.thread("t1"),
-            "find_sent": lambda c: c.find_sent("<a1@gmail.com>", 0),
+            "find_sent": lambda c: c.find_sent("<a1@gmail.com>", 0, send_returned_ms=0),
         }
         with mock.patch("builtins.open", spy_open), mock.patch("os.open", spy_os_open):
             for which, client in enumerate((gmail.GmailClient(self.dir), gmail.GmailClient(self.dir, transport=transport))):
@@ -162,6 +174,18 @@ class LiveGuardTest(NoNetwork):
             self.assertIn("live checkout", str(cm.exception.code))
         with mock.patch.dict(os.environ, {"OUTREACH_GMAIL_DIR": ""}), self.assertRaises(SystemExit):
             gmail.GmailClient(transport=Transport(), token_provider=lambda: "x")
+
+    def test_a_token_provider_needs_a_fake_transport(self):
+        # A test token with the real HTTP call would reach Gmail from a worktree: refused.
+        with self.assertRaises(ValueError):
+            gmail.GmailClient(self.dir, token_provider=lambda: "x")
+
+    def test_the_http_call_itself_refuses_outside_the_live_checkout(self):
+        self.live(False)
+        with self.assertRaises(SystemExit) as cm:
+            gmail._urlopen("GET", "/profile", None, None, "x")
+        self.assertIn("live checkout", str(cm.exception.code))
+        self.opener_open.assert_not_called()
 
     def test_gmail_dir_follows_the_environment(self):
         self.assertEqual(gmail.gmail_dir(), os.environ["OUTREACH_GMAIL_DIR"])
@@ -245,6 +269,17 @@ class TokenTest(NoNetwork):
         for secret in ("1//revoked", "csecret"):
             self.assertNotIn(secret, str(cm.exception))
 
+    def test_token_endpoint_errors_are_only_auth_server_or_network(self):
+        self.write_token(access_token="old", refresh_token="1//r", expires_at=0)
+        rows = [(http_error(401, "{}"), "auth"), (http_error(403, "{}"), "auth"),
+                (http_error(429, '{"error": "rate_limit_exceeded"}'), "server"), (http_error(503, ""), "server"),
+                (urllib.error.URLError("no route"), "network"), (TimeoutError("slow"), "network")]
+        for error, kind in rows:
+            with self.subTest(error=error), mock.patch.object(gmail, "_post", side_effect=error), \
+                    self.assertRaises(GmailError) as cm:
+                gmail._token(self.dir)
+            self.assertEqual(cm.exception.kind, kind)
+
     def test_missing_token_is_signed_out(self):
         with self.assertRaises(GmailError) as cm:
             gmail._token(self.dir)
@@ -292,6 +327,25 @@ class MimeTest(unittest.TestCase):
             with self.subTest(to=to), self.assertRaises(ValueError):
                 gmail.build_mime(outgoing(to=to))
 
+    def test_malformed_message_ids_are_refused_in_every_header(self):
+        for bad in BAD_IDS:
+            for m in (outgoing(message_id=bad), outgoing(in_reply_to=bad, references=("<a0@gmail.com>",)),
+                      outgoing(in_reply_to="<a0@gmail.com>", references=("<a0@gmail.com>", bad))):
+                with self.subTest(bad=bad, m=m), self.assertRaises(ValueError):
+                    gmail.build_mime(m)
+
+    def test_references_fall_back_to_in_reply_to(self):
+        msg = self.parse(outgoing(subject="Re: x", in_reply_to="<a1@gmail.com>", references=()))
+        self.assertEqual((msg["In-Reply-To"], msg["References"]), ("<a1@gmail.com>", "<a1@gmail.com>"))
+
+    def test_the_message_id_written_is_the_one_claimed(self):
+        real = gmail.EmailMessage.as_bytes
+
+        def mangled(self, *a, **k):
+            return real(self, *a, **k).replace(b"<a1@gmail.com>", b"<zz@gmail.com>")
+        with mock.patch.object(gmail.EmailMessage, "as_bytes", mangled), self.assertRaises(ValueError):
+            gmail.build_mime(outgoing())
+
     def test_empty_message_id_and_header_injection_are_refused(self):
         with self.assertRaises(ValueError):
             gmail.build_mime(outgoing(message_id=""))
@@ -311,8 +365,45 @@ class ClientCallsTest(NoNetwork):
         self.assertEqual((profile.email, profile.history_id), (ACCOUNT, "4521"))
         self.assertEqual(t.requests[0][:2], ("GET", "/profile"))
 
+    @staticmethod
+    def gmail_that_keeps(rewrite=None, readback_error=None):
+        """POST /messages/send answers ids; the readback GET returns the Message-ID Gmail stored."""
+        stored = {}
+
+        def handler(method, path, body, query):
+            if method == "POST":
+                raw = email.message_from_bytes(base64.urlsafe_b64decode(body["raw"]), policy=email.policy.default)
+                gid = f"g{len(stored) + 1}"
+                stored[gid] = rewrite or raw["Message-ID"]
+                return {"id": gid, "threadId": "th1"}
+            assert query == {"format": "metadata", "metadataHeaders": ["Message-ID"]}, query
+            if readback_error is not None:
+                raise readback_error
+            gid = path.rsplit("/", 1)[1]
+            return {"id": gid, "threadId": "th1", "internalDate": "1",
+                    "payload": {"headers": [{"name": "Message-Id", "value": " " + stored[gid] + " "}]}}
+        return handler
+
+    def test_send_reads_the_stored_message_id_back(self):
+        client, t = self.client(self.gmail_that_keeps())
+        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<a1@gmail.com>"))
+        self.assertEqual([r[:2] for r in t.requests], [("POST", "/messages/send"), ("GET", "/messages/g1")])
+
+    def test_a_rewritten_message_id_is_its_own_error_with_the_sent_ids(self):
+        client, _ = self.client(self.gmail_that_keeps(rewrite="<CAgmail123@mail.gmail.com>"))
+        with self.assertRaises(GmailError) as cm:
+            client.send(outgoing())
+        self.assertEqual(cm.exception.kind, "message_id_rewritten")
+        self.assertFalse(cm.exception.retryable)
+        self.assertEqual(cm.exception.sent, Sent("g1", "th1", "<CAgmail123@mail.gmail.com>"))
+
+    def test_a_failed_readback_still_reports_the_send(self):
+        # The send succeeded; only the check failed. Raising would make it look unclear for no reason.
+        client, _ = self.client(self.gmail_that_keeps(readback_error=TimeoutError()))
+        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<a1@gmail.com>"))
+
     def test_send_posts_raw_and_thread_id(self):
-        client, t = self.client(lambda *a: {"id": "g1", "threadId": "th1"})
+        client, t = self.client(self.gmail_that_keeps())
         sent = client.send(outgoing())
         self.assertEqual(sent, Sent(gmail_message_id="g1", thread_id="th1", rfc_message_id="<a1@gmail.com>"))
         method, path, body, _ = t.requests[0]
@@ -321,8 +412,8 @@ class ClientCallsTest(NoNetwork):
         self.assertEqual(raw["Message-ID"], "<a1@gmail.com>")
         client.send(outgoing(subject="Re: Backend role at Sendwell", message_id="<a2@gmail.com>", thread_id="th1",
                              in_reply_to="<a1@gmail.com>", references=("<a1@gmail.com>",)))
-        self.assertEqual(set(t.requests[1][2]), {"raw", "threadId"})
-        self.assertEqual(t.requests[1][2]["threadId"], "th1")
+        self.assertEqual(set(t.requests[2][2]), {"raw", "threadId"})
+        self.assertEqual(t.requests[2][2]["threadId"], "th1")
 
     def test_a_refused_outgoing_never_reaches_the_transport(self):
         client, t = self.client(lambda *a: {"id": "g1", "threadId": "th1"})
@@ -405,6 +496,14 @@ class ClientCallsTest(NoNetwork):
                                                                        "message-id": "<r1@sendwell.example>"},
                                            snippet="Happy to chat"))
 
+    def test_a_bad_date_or_a_missing_id_is_a_gmail_error(self):
+        for res in ({"id": "g1", "threadId": "t", "internalDate": "soon", "payload": {}},
+                    {"threadId": "t", "internalDate": "1", "payload": {}},
+                    {"id": "g1", "threadId": "t", "payload": {}}):
+            client, _ = self.client(lambda *a, res=res: res)
+            with self.subTest(res=res), self.assertRaises(GmailError):
+                client.message("g1")
+
     def test_thread_lists_every_message(self):
         def answer(method, path, body, query):
             self.assertEqual(path, "/threads/th1")
@@ -416,51 +515,91 @@ class ClientCallsTest(NoNetwork):
         self.assertEqual([m.gmail_message_id for m in client.thread("th1")], ["g1", "g2"])
 
     def test_ids_are_quoted_into_the_path(self):
-        client, t = self.client(lambda *a: {"id": "x", "threadId": "y", "payload": {}})
+        client, t = self.client(lambda *a: {"id": "x", "threadId": "y", "internalDate": "1", "payload": {}})
         client.message("../profile")
         self.assertEqual(t.requests[0][1], "/messages/..%2Fprofile")
 
 
 class FindSentTest(NoNetwork):
     CLAIM = 1_762_786_800_000
+    MIN = 60_000
+
+    def client(self, handler=None, token=SECRET, now_ms=None):
+        return super().client(handler, token, now_ms=self.CLAIM + 30 * self.MIN if now_ms is None else now_ms)
+
+    def find(self, client, rfc="<a1@gmail.com>"):
+        return client.find_sent(rfc, self.CLAIM, send_returned_ms=self.CLAIM)
 
     def test_find_sent_returns_the_exact_message_id(self):
         folder = SentFolder([("g3", "<n2@gmail.com>", self.CLAIM + 3), ("g2", "<a1@gmail.com>", self.CLAIM + 1),
                              ("g1", "<old@gmail.com>", self.CLAIM - 5)])
         client, _ = self.client(folder)
-        self.assertEqual(client.find_sent("<a1@gmail.com>", self.CLAIM),
-                         (Sent("g2", "th-g2", "<a1@gmail.com>"), True))
+        self.assertEqual(self.find(client), (Sent("g2", "th-g2", "<a1@gmail.com>"), True))
 
     def test_find_sent_matches_by_message_id_only(self):
         # Same To and Subject, another Message-ID: not a hit (follow-ups share a subject).
         folder = SentFolder([("g2", "<other@gmail.com>", self.CLAIM + 1), ("g1", "<old@gmail.com>", self.CLAIM - 5)])
         client, _ = self.client(folder)
-        self.assertEqual(client.find_sent("<a1@gmail.com>", self.CLAIM), (None, True))
+        self.assertEqual(self.find(client), (None, True))
 
     def test_find_sent_stops_at_the_claim_time_and_says_complete(self):
         entries = [(f"n{i}", f"<n{i}@gmail.com>", self.CLAIM + 1000 - i) for i in range(30)]
-        entries += [(f"o{i}", f"<o{i}@gmail.com>", self.CLAIM - 1 - i) for i in range(90)]
+        entries += [(f"o{i}", f"<o{i}@gmail.com>", self.CLAIM - 11 * self.MIN - i) for i in range(90)]
         folder = SentFolder(entries)
         client, _ = self.client(folder)
-        self.assertEqual(client.find_sent("<a1@gmail.com>", self.CLAIM), (None, True))
+        self.assertEqual(self.find(client), (None, True))
         self.assertEqual(folder.list_calls, 1)          # the first page already reached past the claim
         self.assertEqual(len(folder.reads), 50)
 
     def test_find_sent_reaching_the_end_of_sent_is_complete(self):
         folder = SentFolder([("g1", "<n1@gmail.com>", self.CLAIM + 5)])
         client, _ = self.client(folder)
-        self.assertEqual(client.find_sent("<a1@gmail.com>", self.CLAIM), (None, True))
+        self.assertEqual(self.find(client), (None, True))
 
     def test_find_sent_after_ten_pages_says_incomplete(self):
         folder = SentFolder([(f"n{i}", f"<n{i}@gmail.com>", self.CLAIM + 10_000 - i) for i in range(700)])
         client, _ = self.client(folder)
-        self.assertEqual(client.find_sent("<a1@gmail.com>", self.CLAIM), (None, False))
+        self.assertEqual(self.find(client), (None, False))
         self.assertEqual(folder.list_calls, 10)
 
     def test_a_message_without_a_date_proves_nothing(self):
         folder = SentFolder([(f"n{i}", f"<n{i}@gmail.com>", None) for i in range(600)])
         client, _ = self.client(folder)
-        self.assertEqual(client.find_sent("<a1@gmail.com>", self.CLAIM), (None, False))
+        self.assertEqual(self.find(client), (None, False))
+
+    def test_a_miss_too_soon_after_the_failed_send_is_not_proof(self):
+        folder = SentFolder([("g1", "<n1@gmail.com>", self.CLAIM + 5), ("g0", "<o@gmail.com>", self.CLAIM - 20 * self.MIN)])
+        early, _ = self.client(folder, now_ms=self.CLAIM + 9 * self.MIN)
+        self.assertEqual(self.find(early), (None, False))
+        settled, _ = self.client(folder, now_ms=self.CLAIM + 10 * self.MIN)
+        self.assertEqual(self.find(settled), (None, True))
+        # A hit is a hit at any time.
+        self.assertEqual(self.find(early, "<n1@gmail.com>"), (Sent("g1", "th-g1", "<n1@gmail.com>"), True))
+
+    def test_the_scan_allows_for_the_mac_clock_running_ahead(self):
+        # Gmail took it a minute before the Mac's claim time; a full page of later mail sits in front of it.
+        entries = [(f"n{i}", f"<n{i}@gmail.com>", self.CLAIM - 1000 - i) for i in range(50)]
+        entries += [("g1", "<a1@gmail.com>", self.CLAIM - self.MIN)]
+        client, _ = self.client(SentFolder(entries))
+        self.assertEqual(self.find(client), (Sent("g1", "th-g1", "<a1@gmail.com>"), True))
+
+    def test_a_stray_old_message_on_page_one_does_not_end_the_scan(self):
+        entries = [(f"n{i}", f"<n{i}@gmail.com>", self.CLAIM + 10_000 - i) for i in range(50)]
+        entries[10] = ("stray", "<stray@gmail.com>", self.CLAIM - 400 * self.MIN)
+        entries += [("g1", "<a1@gmail.com>", self.CLAIM + 1)]
+        folder = SentFolder(entries)
+        client, _ = self.client(folder)
+        self.assertEqual(self.find(client), (Sent("g1", "th-g1", "<a1@gmail.com>"), True))
+        self.assertEqual(folder.list_calls, 2)
+
+    def test_a_listing_without_ids_or_a_bad_date_is_a_gmail_error(self):
+        client, _ = self.client(lambda m, path, b, q: {"messages": [{"threadId": "t"}]})
+        with self.assertRaises(GmailError):
+            self.find(client)
+        folder = SentFolder([("g1", "<n1@gmail.com>", "yesterday")])
+        client, _ = self.client(folder)
+        with self.assertRaises(GmailError):
+            self.find(client)
 
 
 class HistoryTest(NoNetwork):
@@ -512,6 +651,64 @@ class HistoryTest(NoNetwork):
         client, _ = self.client(endless)
         with self.assertRaises(HistoryExpired):
             client.history("100")
+
+
+class RedirectsAreNotFollowed(unittest.TestCase):
+    """Loopback only: a 302 to another server is an error, so Authorization never travels to another host."""
+
+    def serve(self, handler):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}/"
+
+    def test_a_redirect_is_an_error_and_the_other_host_sees_nothing(self):
+        hits = []
+
+        class Other(BaseHTTPRequestHandler):
+            def do_POST(self):
+                hits.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+        other = self.serve(Other)
+
+        class Redirect(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(307)
+                self.send_header("Location", other)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+        first = self.serve(Redirect)
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            gmail._post(first, {"a": "b"})
+        cm.exception.close()
+        self.assertEqual(cm.exception.code, 307)
+        self.assertEqual(hits, [])
+        followers = [h for h in gmail._OPENER.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)]
+        self.assertTrue(followers)
+        self.assertTrue(all(isinstance(h, gmail._NoRedirect) for h in followers))
+
+
+class SuiteGuardTest(unittest.TestCase):
+    """tests/__init__.py makes any test that reaches the network or a browser fail loudly."""
+
+    def test_the_network_is_refused_for_every_test(self):
+        with self.assertRaises(tests.NetworkUsedInTest):
+            urllib.request.urlopen("https://gmail.googleapis.com/gmail/v1/users/me/profile", timeout=1)
+        with self.assertRaises(tests.NetworkUsedInTest):
+            urllib.request.build_opener().open("https://oauth2.googleapis.com/token", timeout=1)
+        with self.assertRaises(tests.NetworkUsedInTest):
+            webbrowser.open("https://accounts.google.com/")
+
+    def test_the_guard_is_not_an_exception_code_can_swallow(self):
+        self.assertFalse(issubclass(tests.NetworkUsedInTest, Exception))
 
 
 if __name__ == "__main__":

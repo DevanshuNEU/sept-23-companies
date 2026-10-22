@@ -16,7 +16,8 @@ from typing import Literal, Protocol, runtime_checkable
 
 __all__ = [
     "Outgoing", "Sent", "Profile", "MessageMeta", "Added", "HistoryPage", "HistoryExpired", "GmailError", "KINDS",
-    "classify_http", "RETRYABLE", "MailClient", "META_HEADERS", "check_outgoing",
+    "classify_http", "RETRYABLE", "MailClient", "META_HEADERS", "check_outgoing", "normalise_message_id",
+    "MESSAGE_ID", "CLOCK_SKEW_MS", "settle_minutes", "page_reaches", "miss_is_proof",
 ]
 
 # The only header names a MessageMeta carries (lower case). The metadata scope cannot read bodies; these are
@@ -85,11 +86,12 @@ class HistoryExpired(Exception):
 
 
 KINDS = frozenset({"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
-                   "timeout"})
+                   "timeout", "message_id_rewritten"})
 
-# A failure of every kind but bad_request says nothing about the message itself (it never went out because of
-# the account, the token, Gmail or the network), so a proven-failed send may be tried again. A bad request (a bad
-# address or header) would fail the same way again.
+# A failure of these kinds says nothing about the message itself (it never went out because of the account, the
+# token, Gmail or the network), so a send proven missing from Sent may be tried again. Not retryable: a bad request
+# (a bad address or header would fail the same way again) and message_id_rewritten (the email went out; Gmail
+# stored it under another Message-ID, so a Sent scan by the claimed id would never find it).
 RETRYABLE = frozenset({"rate_limit", "daily_limit", "account_blocked", "auth", "server", "network", "timeout"})
 
 DETAIL_LIMIT = 300
@@ -119,13 +121,16 @@ class GmailError(Exception):
     """A Gmail call failed. `kind` is one of KINDS; `status` the HTTP status when there was one."""
 
     def __init__(self, kind: Literal["auth", "rate_limit", "daily_limit", "account_blocked", "bad_request",
-                                     "server", "network", "timeout"],
-                 status: int | None = None, detail: str = ""):
+                                     "server", "network", "timeout", "message_id_rewritten"],
+                 status: int | None = None, detail: str = "", *, sent: "Sent | None" = None):
         if kind not in KINDS:
             raise ValueError(f"unknown Gmail error kind {kind!r}")
+        if (kind == "message_id_rewritten") != (sent is not None):
+            raise ValueError("message_id_rewritten, and only it, carries the Sent ids of the email that went out")
         self.kind = kind
         self.status = status
         self.detail = scrub(detail)
+        self.sent = sent
         super().__init__(f"Gmail {kind}" + (f" {status}" if status is not None else "") +
                          (f": {self.detail}" if self.detail else ""))
 
@@ -159,6 +164,42 @@ def classify_http(status: int, body: str) -> str:
     return "server"
 
 
+# One Message-ID: <local@domain>, no spaces, brackets or second @ inside (make_msgid's shape).
+MESSAGE_ID = re.compile(r"^<[^<>\s@]+@[^<>\s@]+>$")
+
+
+def normalise_message_id(value: str | None) -> str:
+    """The form both clients compare Message-IDs in: header folding and surrounding whitespace removed. A
+    Message-ID never holds whitespace, so removing all of it cannot join two different ids into one."""
+    return "".join((value or "").split())
+
+
+# Gmail's internalDate is Gmail's clock and the claim time is the Mac's. A Sent scan stops only at a message older
+# than the claim by this much, so a Mac clock running fast cannot end a scan before the message it is looking for.
+CLOCK_SKEW_MS = 10 * 60 * 1000
+
+
+def settle_minutes(value: int | None = None) -> int:
+    """How long after a failed send returned a Sent miss starts to count as proof (config reconcile_after_minutes)."""
+    if value is not None:
+        return value
+    from outreach.sending.config import load_config
+    return load_config().reconcile_after_minutes
+
+
+def page_reaches(dates: list[int | None], not_before_ms: int) -> bool:
+    """True when the last dated message on a Sent page (newest first) is older than the claim, less the skew margin.
+    One stray old message earlier on the page does not end the scan; a page with no dates proves nothing."""
+    dated = [d for d in dates if d is not None]
+    return bool(dated) and dated[-1] < not_before_ms - CLOCK_SKEW_MS
+
+
+def miss_is_proof(complete: bool, now_ms: int, send_returned_ms: int, settle: int) -> bool:
+    """A miss proves the email did not go out only after a complete scan begun `settle` minutes after the send
+    returned: Gmail can take a while to show an accepted message in Sent."""
+    return complete and now_ms >= send_returned_ms + settle * 60_000
+
+
 def check_outgoing(m: Outgoing) -> None:
     """Refuse anything but one plain email to one person with a claimed Message-ID. Raises ValueError.
 
@@ -178,9 +219,13 @@ def check_outgoing(m: Outgoing) -> None:
         raise ValueError("an email goes to exactly one address")
     if "@" not in (m.from_addr or ""):
         raise ValueError("from_addr is not an address")
-    mid = (m.message_id or "").strip()
-    if not (mid.startswith("<") and mid.endswith(">") and "@" in mid):
-        raise ValueError("message_id is empty or not a Message-ID")
+    if not MESSAGE_ID.match(m.message_id or ""):
+        raise ValueError("message_id is empty or not one Message-ID")
+    if m.in_reply_to is not None and not MESSAGE_ID.match(m.in_reply_to):
+        raise ValueError("in_reply_to is not one Message-ID")
+    for ref in m.references:
+        if not MESSAGE_ID.match(ref or ""):
+            raise ValueError("references holds something that is not one Message-ID")
     if not (m.subject or "").strip() or not (m.body or "").strip():
         raise ValueError("subject and body must not be empty")
 
@@ -194,7 +239,9 @@ class MailClient(Protocol):
         ...
 
     def send(self, m: Outgoing) -> Sent:
-        """Send one email. An exception means the outcome is unclear: settle it with find_sent."""
+        """Send one email. An exception means the outcome is unclear: settle it with find_sent. The one exception
+        that is not unclear is GmailError kind message_id_rewritten: the email went out, and `err.sent` holds the
+        ids Gmail stored it under (record it as sent, never retry it)."""
         ...
 
     def history(self, start_history_id: str) -> HistoryPage:
@@ -208,11 +255,13 @@ class MailClient(Protocol):
         """Every message in the thread, oldest first."""
         ...
 
-    def find_sent(self, rfc_message_id: str, not_before_ms: int) -> tuple[Sent | None, bool]:
+    def find_sent(self, rfc_message_id: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
         """Look in Sent for the message with exactly this Message-ID (never by To or Subject).
 
-        The bool is True when the scan reached a Sent message older than `not_before_ms` or the end of Sent, so a
-        miss is proof the email did not go out. `internalDate` is Gmail's clock, not the Mac's: the caller passes
-        the claim time minus a clock-skew margin, never the bare claim time.
+        `not_before_ms` is the claim time; `send_returned_ms` is when the failed send call returned (after a crash
+        with no record of that, the claim time). Both are the Mac's clock. A hit is (Sent, True) at any time. A miss
+        is (None, True), proof the email did not go out, only when the scan reached a page whose last dated message
+        is older than the claim less CLOCK_SKEW_MS, or the end of Sent, and it began at least `settle_minutes`
+        after the send returned. Any other miss is (None, False).
         """
         ...

@@ -142,8 +142,9 @@ def add_by_hand(conn: sqlite3.Connection, *, name: str, reason: str, domain: str
     value), and sets the work tier to 1 (`by hand`) and promotes it, so a later source run cannot lower it.
 
     Claude's add writes them through `record_evidence` as `guess`, unlocked, source kind `other`, and promotes
-    nothing: a locked fact is only ever Devanshu's own. Its state is not given to identity for matching (the
-    record key still has it), so the same name in the same state is a weak match, never `name_state`.
+    nothing: a locked fact is only ever Devanshu's own. Neither its state nor its domain is given to identity
+    (the record key still has both), so a domain Claude guessed never matches or aliases another company, and the
+    same name in the same state is a weak match, never `name_state`.
 
     A company that is `removed` (the one the candidate resolves to) is returned with `status="removed"` and nothing
     is written or promoted.
@@ -154,7 +155,9 @@ def add_by_hand(conn: sqlite3.Connection, *, name: str, reason: str, domain: str
     (cand,) = ByHandSource([entry]).discover()  # Candidate validates the domain
     bare = _bare(cand.domain)
     if actor == "claude":
-        cand = dataclasses.replace(cand, state=None)  # a guess never drives a name and state merge; the ref keeps it
+        # A guess never drives a match: no state (a name and state merge) and no domain (a domain match or alias).
+        # The record key keeps both, and the domain and hq guesses are still stored below.
+        cand = dataclasses.replace(cand, state=None, domain=None)
     reason_text = entry.reason.strip()
     with atomic(conn, "add_by_hand"):
         match = find_company(conn, cand, source_name=SOURCE_NAME)

@@ -121,6 +121,26 @@ class AddByHandTest(unittest.TestCase):
                                 (got.company_id,)).fetchone()[0]
         self.assertEqual(ref, "hand:acme@TX")
 
+    def test_claude_domain_never_drives_a_match_or_an_alias(self):
+        acme = self.add("Acme Robotics", domain="acme.com")
+        got = self.add("Foo Labs", "claude guessed the domain", domain="acme.com", actor="claude")
+        self.assertNotEqual(got.company_id, acme.company_id)
+        self.assertEqual((got.created, got.basis), (True, "created"))
+        self.assertEqual(got.items_raised, 0)  # nothing else matches by name, and a guessed domain raises no item
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item").fetchone()[0], 0)
+        # a same-name Claude add still raises its one item through the name
+        twin = self.add("Acme Robotics", "claude saw it", domain="foo.example", actor="claude")
+        self.assertEqual((twin.created, twin.items_raised), (True, 1))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM company_alias WHERE company_id = ? "
+                                           "AND alias_key = 'foo.example'", (acme.company_id,)).fetchone()[0], 0)
+        # the guessed domain is stored on Foo Labs as a guess, and Acme gains nothing
+        rows = {(e["fact"], e["value"], e["confidence"], e["locked"]) for e in self.evidence(got.company_id)}
+        self.assertEqual(rows, {("domain", "acme.com", "guess", 0)})
+        aliases = [r[0] for r in self.conn.execute("SELECT alias_key FROM company_alias WHERE company_id = ?",
+                                                   (acme.company_id,))]
+        self.assertEqual(aliases, [name_key("Acme Robotics")])
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM company").fetchone()[0], 3)
+
     def test_claude_guess_never_overrides_a_locked_fact(self):
         first = self.add("Acme Robotics", domain="acme.com", state="MA")
         self.add("Acme Robotics", "claude saw it too", domain="acme.com", state="CA", actor="claude")
@@ -198,11 +218,13 @@ class AddByHandTest(unittest.TestCase):
         self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'not a fit', status_at = ? "
                           "WHERE company_id = ?", (now, first.company_id))
         before = table_marks(self.conn)
-        for actor in ("devanshu", "claude"):
-            got = self.add("Acme Labs", "a new reason", domain="acme.com", state="MA", actor=actor)
-            self.assertEqual((got.company_id, got.created, got.basis, got.status, got.items_raised),
-                             (first.company_id, False, "domain", "removed", 0))
+        got = self.add("Acme Labs", "a new reason", domain="acme.com", state="MA")
+        self.assertEqual((got.company_id, got.created, got.basis, got.status, got.items_raised),
+                         (first.company_id, False, "domain", "removed", 0))
         self.assertEqual(table_marks(self.conn), before)
+        # Claude's guessed domain is not an identity key, so it cannot even find the removed company
+        got = self.add("Acme Labs", "a new reason", domain="acme.com", state="MA", actor="claude")
+        self.assertNotEqual(got.company_id, first.company_id)
 
     def test_weak_name_creates_company_and_item(self):
         # Identity refuses hand drafts, so a by-hand candidate has no state at resolve time and a name already known

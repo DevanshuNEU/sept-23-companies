@@ -235,6 +235,52 @@ class DoubtfulBoardTests(IngestTestCase):
         self.assertEqual(item["state"], "resolved")  # resolved stays resolved
         self.assertEqual(self.board()["last_read"], "ok")
 
+    def test_ok_then_error_then_ok_with_another_org_name_raises_nothing(self):
+        self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
+        self.set_found_by("stapply_name")
+        self.read(ok())
+        self.read(status_response(500), at(1))
+        other = board_json(lambda jobs: [j.update(company_name="Someone Else") for j in jobs])
+        self.read(ok(other, '"B"'), at(2))
+        self.assertEqual(self.items("flagged"), [])
+
+    def test_an_empty_first_read_is_the_first_read_even_after_an_error(self):
+        self.set_found_by("stapply_name")
+        self.read(ok(EMPTY, None))  # no org name and no jobs: nothing to doubt, but the first read has happened
+        self.read(status_response(500), at(1))
+        self.conn.execute("DELETE FROM board_read")  # only the board row itself still says an empty read happened
+        self.read(ok(), at(2))
+        self.assertEqual(self.items("flagged"), [])
+
+    def test_imported_postings_do_not_count_as_a_first_read(self):
+        self.set_found_by("stapply_name")
+        self.conn.execute(
+            "INSERT INTO posting(company_id, board_id, source_key, title, location, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, 'greenhouse:acme:1', 'Software Engineer', '', ?, ?)", (self.company, self.board_id, T0, T0))
+        self.read(status_response(500))
+        self.read(ok(), at(1))
+        item, = self.items("flagged")
+        self.assertTrue(item["reason"].startswith("board match doubtful"))
+
+    def test_the_size_rule_counts_distinct_jobs(self):
+        self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
+        self.set_found_by("stapply_name")
+        self.add_lca()
+        jobs = [JobRef(str(i), f"Account Executive {i}", "", "", None, None, None) for i in range(300)]
+        jobs += jobs[:5]  # a listing that repeats ids is still 300 jobs
+
+        class Repeating:
+            ats = "greenhouse"
+
+            def list(self, token, validators):
+                return ReadResult("ok", tuple(jobs), Validators('"A"', ""), board_name="Acme Robotics")
+
+            def body(self, token, job):
+                return None
+
+        self.read(None, adapter=Repeating())
+        self.assertEqual(self.items("flagged"), [])
+
     def test_a_first_read_that_errors_leaves_the_check_for_the_first_good_read(self):
         self.set_found_by("stapply_name")
         self.read(status_response(500))
@@ -363,19 +409,38 @@ class GreenhouseFlowTests(IngestTestCase):
         self.assertEqual(out.decided, 1)
         self.assertIsNotNone(self.decision(data))
 
-    def test_a_body_saved_before_a_crash_is_decided_on_the_next_read(self):
+    def test_a_body_and_its_decision_are_one_unit(self):
         self.read(ok())
         swe = self.pid(SWE)
-        with mock.patch.object(ingest, "decide_postings", side_effect=RuntimeError("crash after the body save")):
+        old_body = self.conn.execute("SELECT body FROM posting_body WHERE posting_id = ?", (swe,)).fetchone()[0]
+        with mock.patch.object(ingest, "decide_postings", side_effect=RuntimeError("crash in the decide")):
             with self.assertRaises(RuntimeError):
                 self.read(ok(CHANGED, '"B"'), at(1))
+        # The crash undid the body with its decision, so the stored body never runs ahead of the decision on it.
+        self.assertEqual(self.conn.execute("SELECT body FROM posting_body WHERE posting_id = ?", (swe,)).fetchone()[0],
+                         old_body)
+        self.assertEqual(self.board()["etag"], '"A"')  # the crash kept the old validators: the board is listed again
+        self.read(ok(CHANGED, '"B"'), at(1.1))
         self.assertIn("H-1B", self.conn.execute("SELECT body FROM posting_body WHERE posting_id = ?",
                                                 (swe,)).fetchone()[0])
-        self.assertEqual(self.board()["etag"], '"A"')  # the crash kept the old validators: the board is listed again
-        self.assertNotEqual(self.decision(swe)["sponsorship"], "yes")
-        out = self.read(ok(CHANGED, '"B"'), at(1.1))
         self.assertEqual(self.decision(swe)["sponsorship"], "yes")
-        self.assertGreaterEqual(out.decided, 2)  # the new posting and the body the crash left undecided
+
+    def test_a_retitle_and_its_decision_are_one_unit(self):
+        self.read(ok())
+        sales = self.pid(SALES)
+
+        def retitle(jobs):
+            jobs[1]["title"] = "Software Engineer I"
+
+        retitled = board_json(retitle)
+        with mock.patch.object(ingest, "decide_postings", side_effect=RuntimeError("crash in the decide")):
+            with self.assertRaises(RuntimeError):
+                self.read(ok(retitled, '"B"'), at(1))
+        self.assertEqual(self.posting(SALES)["title"], "Account Executive")  # undone with its decision
+        self.read(ok(retitled, '"B"'), at(1.1))
+        self.assertEqual(self.posting(SALES)["title"], "Software Engineer I")
+        self.assertEqual(self.decision(sales)["lane"], "engineering")
+        self.assertIsNotNone(self.conn.execute("SELECT 1 FROM posting_body WHERE posting_id = ?", (sales,)).fetchone())
 
 
 class ClosingTests(IngestTestCase):
@@ -534,6 +599,38 @@ class DetailBackfillTests(IngestTestCase):
         self.assertEqual(out.bodies, 1)  # only e1's text changed
         decision = self.decision(e1)
         self.assertEqual((decision["citizenship"], decision["provisional"], decision["reader_version"]), (1, 1, None))
+
+    def test_a_detail_ats_retitle_is_decided_and_gets_its_body_after_a_crash(self):
+        adapter = DetailAdapter(self.conn, [detail_ok(self.jobs)])
+        self.read(None, adapter=adapter)
+        self.assertNotIn("s1", adapter.body_calls)
+        retitled = [*self.jobs[:3], detail_job("s1", "Software Engineer I", "2026-10-21")]
+        adapter.results = [detail_ok(retitled), detail_ok(retitled)]
+        with mock.patch.object(ingest, "decide_postings", side_effect=RuntimeError("crash in the decide")):
+            with self.assertRaises(RuntimeError):
+                self.read(None, at(1), adapter=adapter)
+        self.read(None, at(1.1), adapter=adapter)
+        self.assertEqual(self.decision(self.key("s1"))["lane"], "engineering")
+        self.assertIn("s1", adapter.body_calls)
+        self.assertTrue(self.has_body("s1"))
+
+    def test_a_host_trip_during_the_backfill_keeps_the_read(self):
+        class TripsOnSecondBody(DetailAdapter):
+            def body(self, token, job):
+                if len(self.body_calls) == 1:
+                    raise HostTripped("myworkdayjobs.com")
+                return super().body(token, job)
+
+        adapter = TripsOnSecondBody(self.conn, [detail_ok(self.jobs)])
+        out = self.read(None, adapter=adapter)
+        self.assertEqual((out.result, out.tripped, out.bodies), ("ok", "myworkdayjobs.com", 1))
+        board = self.board()
+        self.assertEqual(board["last_read"], "ok")
+        self.assertEqual(board["ids_fingerprint"], ids_fingerprint(j.native_id for j in self.jobs))
+        self.assertIsNotNone(board["next_read_at"])
+        self.assertEqual(self.count("board_read"), 1)
+        self.assertTrue(self.has_body("e1"))
+        self.assertEqual(self.decision(self.key("e1"))["sponsorship"], "yes")  # the stored body was decided
 
     def test_no_transaction_is_open_during_any_request(self):
         def answer(method, url, headers, body):

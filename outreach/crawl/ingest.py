@@ -6,11 +6,13 @@ next read repairs. The order is what keeps the read contract:
 1. list the board (an adapter exception other than `HostTripped` or `RulesetNotCurrent` is an `error` read);
 2. for an `ok` read, diff the listing with the stored postings and find the list bodies that changed;
 2b. the first-read check of a name-only board (ruling 8), before any posting of the read is written;
-3. write the postings, then their bodies (`save_body` resets a replaced body's decision itself);
-4. decide the new, changed and body-updated postings, and every open one with no current decision or with a body
-   newer than its decision (what a crash between phases leaves);
+3. write the new and listed postings; then, in units of `decide_batch`, each changed posting's new fields and new
+   body together with its decision, so a crash can never leave a title, location or body newer than the decision on
+   it (`save_body` resets a replaced body's decision itself);
+4. decide every open posting with no current decision (a new posting a crash left undecided);
 5. close: `gone_from_board` after an `ok` read only, `board_empty_twice` on the second empty read in a row;
-6. fetch missing and due bodies one request at a time (`ok` and `unchanged` reads), storing each as it arrives;
+6. fetch missing and due bodies one request at a time (`ok` and `unchanged` reads), storing and deciding each as it
+   arrives; a tripped host ends the fetches, not the read;
 7. write the board state last: streaks, validators, `board_read`, review items and the next read time.
 
 Because the board state is the last write, a crash before it keeps the old validators and `last_read`: the next read
@@ -48,7 +50,9 @@ _RAW_ALIAS_SOURCES = ("fein", "ats", "linkedin")
 @dataclass(frozen=True)
 class ReadOutcome:
     """What one read did. `interval_s` is the new read interval, None after an `error` read (it keeps the old one).
-    The plan's `queued` field is gone: the crawler writes no queue row (ruling 2)."""
+    `tripped` is the host bucket whose breaker opened during the body fetches (the read itself still counts), so the
+    tick defers that bucket's other boards. The plan's `queued` field is gone: the crawler writes no queue row
+    (ruling 2)."""
     board_id: int
     result: str
     new: int
@@ -58,6 +62,7 @@ class ReadOutcome:
     decided: int
     bodies: int
     interval_s: int | None
+    tripped: str | None = None
 
 
 def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, run_id: int, now: str,
@@ -65,8 +70,9 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     """Read `board` once and write what the read says, in the phase order of this module's docstring.
 
     `board` is the row from `load_board`; the closing step and the board state both work from it, never from a reload.
-    `combiner` is the reader's (ruling 10) and goes to every decision. `HostTripped` and `RulesetNotCurrent`
-    propagate with the board state unwritten, so the caller can defer the board with no streak change.
+    `combiner` is the reader's (ruling 10) and goes to every decision. `HostTripped` from the list request and
+    `RulesetNotCurrent` propagate with the board state unwritten, so the caller can defer the board with no streak
+    change; `HostTripped` during the body fetches ends them and is reported in `ReadOutcome.tripped`.
     """
     if conn.in_transaction:
         raise ValueError("read_board sends requests, so it must start with no transaction open")
@@ -90,22 +96,18 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
         _check_doubtful(conn, board, result, now)
 
     if plan is not None:
-        # Phase 3: postings, then the bodies that changed.
-        ids = write_postings(conn, board, plan, now, batch_rows=cfg.batch_rows)
+        # Phase 3: new and listed postings; then each changed field or body with its decision, as one unit.
+        ids = write_postings(conn, board, DiffPlan(plan.new, (), plan.present, plan.reopen, ()), now,
+                             batch_rows=cfg.batch_rows)
         listed_with_body = {ids[j.native_id] for j in result.jobs if j.body and j.native_id in ids}
-        body_ids = []
-        for native_id, text in body_updates:
-            posting_id = ids.get(native_id)
-            if posting_id is not None:
-                save_body(conn, posting_id, text)
-                body_ids.append(posting_id)
-        new, changed, reopened, bodies = len(plan.new), len(plan.changed), len(plan.reopen), len(body_ids)
+        texts = {ids[nid]: text for nid, text in body_updates if nid in ids}
+        decided += _apply_changes(conn, board, plan.changed, texts, now, cfg, rules_cfg, combiner)
+        new, changed, reopened, bodies = len(plan.new), len(plan.changed), len(plan.reopen), len(texts)
         changed_ids = [pid for pid, _ in plan.changed]
-        any_change = bool(plan.new or plan.changed or plan.reopen or plan.gone or body_ids)
+        any_change = bool(plan.new or plan.changed or plan.reopen or plan.gone or texts)
 
-        # Phase 4: decisions for what changed, and for what a crash left undecided.
-        new_ids = [ids[j.native_id] for j in plan.new if j.native_id in ids]
-        decided += _decide(conn, [*new_ids, *changed_ids, *body_ids], board, cfg, rules_cfg, combiner)
+        # Phase 4: the new postings with no list body, and any a crash left undecided.
+        decided += _decide(conn, _undecided(conn, board), cfg, rules_cfg, combiner)
 
         # Phase 5a: a posting the ok read no longer lists is gone.
         closed = close_postings(conn, plan.gone, "gone_from_board", now, batch_rows=cfg.batch_rows)
@@ -120,11 +122,13 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
 
     # Phase 6: bodies the list did not carry, one request at a time, each stored as it arrives. An empty board lists
     # nothing to fetch, and an error read says nothing about its postings.
+    tripped = None
     if result.result in ("ok", "unchanged"):
-        fetched, replaced = _backfill(conn, adapter, board, cfg, now, changed_ids, listed_with_body)
-        bodies += len(fetched)
-        any_change = any_change or replaced
-        decided += _decide(conn, fetched, board, cfg, rules_cfg, combiner)
+        fill = _backfill(conn, adapter, board, cfg, now, changed_ids, listed_with_body, rules_cfg, combiner)
+        bodies += fill.stored
+        decided += fill.decided
+        any_change = any_change or fill.replaced
+        tripped = fill.tripped
 
     # Phase 7: the board state, last.
     if result.result == "error":
@@ -133,10 +137,11 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     else:
         interval_s = next_interval_s(last_new_age_s(conn, board, now), board.change_interval_s, any_change, cfg)
         next_read_at = add_seconds(now, interval_s)
-    write_board_state(conn, board, result, run_id=run_id, now=now, open_postings=len(_open_ids(conn, board)),
+    open_now = len(_open_ids(conn, board)) if result.result == "unchanged" else 0  # used for unchanged only
+    write_board_state(conn, board, result, run_id=run_id, now=now, open_postings=open_now,
                       next_read_at=next_read_at, interval_s=interval_s)
     return ReadOutcome(board_id=board.board_id, result=result.result, new=new, changed=changed, reopened=reopened,
-                       closed=closed, decided=decided, bodies=bodies, interval_s=interval_s)
+                       closed=closed, decided=decided, bodies=bodies, interval_s=interval_s, tripped=tripped)
 
 
 def _list(adapter: Adapter, board: BoardRow) -> ReadResult:
@@ -173,14 +178,21 @@ def _body_updates(conn: sqlite3.Connection, board: BoardRow, existing: dict[str,
 
 def _before_first_good_read(conn: sqlite3.Connection, board: BoardRow) -> bool:
     """True while the board has had no `ok`, `empty` or `unchanged` read: never read, or only errors so far. An
-    error carries no name and no jobs, so the ruling 8 check waits for the first read that does."""
+    error carries no name and no jobs, so the ruling 8 check waits for the first read that does.
+
+    Signs of a good read: an empty run the errors sit in (`empty_streak`), a kept `board_read` row, or a `read_state`
+    event to a good state (events are never pruned, `board_read` keeps 10 rows). Postings are no sign: an import
+    may have put them on a board that was never read."""
     if board.last_read is None:
         return True
     if board.last_read != "error":
         return False
+    if board.empty_streak > 0:
+        return False
     seen = conn.execute(
-        "SELECT EXISTS (SELECT 1 FROM posting WHERE board_id = ?) "
-        "OR EXISTS (SELECT 1 FROM board_read WHERE board_id = ? AND result IN ('ok', 'empty', 'unchanged'))",
+        "SELECT EXISTS (SELECT 1 FROM board_read WHERE board_id = ? AND result IN ('ok', 'empty', 'unchanged')) "
+        "OR EXISTS (SELECT 1 FROM event WHERE entity = 'board' AND entity_id = ? AND kind = 'read_state' "
+        "AND json_extract(detail, '$.to') IN ('ok', 'empty', 'unchanged'))",
         (board.board_id, board.board_id)).fetchone()[0]
     return not seen
 
@@ -209,9 +221,10 @@ def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResul
     why = []
     if result.board_name and name_key(result.board_name) not in _company_name_keys(conn, board.company_id):
         why.append(f'the board calls itself "{result.board_name}", which is none of the names of "{company}"')
-    if len(result.jobs) > DOUBTFUL_JOBS and conn.execute(
+    jobs = len({j.native_id for j in result.jobs})
+    if jobs > DOUBTFUL_JOBS and conn.execute(
             "SELECT 1 FROM evidence WHERE company_id = ? AND fact = 'lca' LIMIT 1", (board.company_id,)).fetchone():
-        why.append(f"it lists {len(result.jobs)} jobs, more than {DOUBTFUL_JOBS} for a company that files 25 or "
+        why.append(f"it lists {jobs} jobs, more than {DOUBTFUL_JOBS} for a company that files 25 or "
                    "fewer LCAs")
     if not why:
         return
@@ -230,31 +243,55 @@ def _open_ids(conn: sqlite3.Connection, board: BoardRow) -> list[int]:
         (board.board_id,))]
 
 
-def _needs_decision(conn: sqlite3.Connection, board: BoardRow) -> list[int]:
-    """Open postings of the board with no current decision, or whose body was stored after their decision was made:
-    what a crash between a write and its decision leaves behind."""
+def _undecided(conn: sqlite3.Connection, board: BoardRow) -> list[int]:
+    """Open postings of the board with no current decision: the new ones, and any a crash left undecided. A changed
+    field or body never needs this sweep, because it is written in one unit with its decision."""
     return [r[0] for r in conn.execute(
-        "SELECT p.posting_id FROM posting p "
-        "LEFT JOIN current_decision d ON d.posting_id = p.posting_id "
-        "LEFT JOIN posting_body b ON b.posting_id = p.posting_id "
-        "WHERE p.board_id = ? AND p.closed_at IS NULL "
-        "AND (d.posting_id IS NULL OR (b.fetched_at IS NOT NULL AND d.decided_at < b.fetched_at)) "
-        "ORDER BY p.posting_id", (board.board_id,))]
+        "SELECT p.posting_id FROM posting p LEFT JOIN current_decision d ON d.posting_id = p.posting_id "
+        "WHERE p.board_id = ? AND p.closed_at IS NULL AND d.posting_id IS NULL ORDER BY p.posting_id",
+        (board.board_id,))]
 
 
-def _decide(conn: sqlite3.Connection, posting_ids: list[int], board: BoardRow, cfg: CrawlConfig, rules_cfg,
-            combiner) -> int:
-    ids = list(dict.fromkeys([*posting_ids, *_needs_decision(conn, board)]))
-    if not ids:
+def _decide(conn: sqlite3.Connection, posting_ids: list[int], cfg: CrawlConfig, rules_cfg, combiner) -> int:
+    if not posting_ids:
         return 0
-    return len(decide_postings(conn, ids, batch=cfg.decide_batch, rules_cfg=rules_cfg, combiner=combiner))
+    return len(decide_postings(conn, posting_ids, batch=cfg.decide_batch, rules_cfg=rules_cfg, combiner=combiner))
+
+
+def _apply_changes(conn: sqlite3.Connection, board: BoardRow, changed: tuple[tuple[int, JobRef], ...],
+                   texts: dict[int, str], now: str, cfg: CrawlConfig, rules_cfg, combiner) -> int:
+    """Write each changed posting's listed fields and each new body, and decide those postings, `decide_batch`
+    postings per unit: the write and its decision commit together or not at all. Returns how many were decided."""
+    fields = dict(changed)
+    targets = list(dict.fromkeys([*fields, *texts]))
+    decided = 0
+    for start in range(0, len(targets), cfg.decide_batch):
+        batch = targets[start:start + cfg.decide_batch]
+        with atomic(conn, "posting_change"):
+            moved = tuple((pid, fields[pid]) for pid in batch if pid in fields)
+            if moved:
+                write_postings(conn, board, DiffPlan((), moved, (), (), ()), now, batch_rows=cfg.batch_rows)
+            for pid in batch:
+                if pid in texts:
+                    save_body(conn, pid, texts[pid])
+            decided += _decide(conn, batch, cfg, rules_cfg, combiner)
+    return decided
+
+
+@dataclass(frozen=True)
+class _Backfill:
+    stored: int  # bodies stored that were new or different
+    replaced: bool  # one of them replaced a stored body
+    decided: int
+    tripped: str | None  # the bucket whose breaker opened, when one did
 
 
 def _backfill(conn: sqlite3.Connection, adapter: Adapter, board: BoardRow, cfg: CrawlConfig, now: str,
-              changed_ids: list[int], listed_with_body: set[int]) -> tuple[list[int], bool]:
+              changed_ids: list[int], listed_with_body: set[int], rules_cfg, combiner) -> _Backfill:
     """Fetch up to `cfg.detail_per_read` bodies: missing ones first, then the re-fetches of ruling 6 (a changed
     listing, or a level-fit engineering body `body_refetch_days` old). A body the list carried this read is not
-    fetched again. Returns the postings whose stored body changed, and whether any of them replaced a body."""
+    fetched again. Each body that is new or different is stored and decided in one unit as it arrives. A tripped host
+    ends the fetches and is reported; what was stored stays."""
     wanted = missing_body_ids(conn, board, cfg.detail_per_read)
     room = cfg.detail_per_read - len(wanted)
     if room > 0:
@@ -262,15 +299,21 @@ def _backfill(conn: sqlite3.Connection, adapter: Adapter, board: BoardRow, cfg: 
         again = refetch_body_ids(conn, board, [i for i in changed_ids if i not in skip], now, cfg.body_refetch_days,
                                  room + len(skip))
         wanted += [w for w in again if w[0] not in skip][:room]
-    stored: list[int] = []
+    stored = decided = 0
     replaced = False
 
     def keep(posting_id: int, text: str) -> None:
-        nonlocal replaced
-        before = stored_sha(conn, posting_id)
-        if save_body(conn, posting_id, text) != before:
-            stored.append(posting_id)
-            replaced = replaced or before is not None
+        nonlocal stored, decided, replaced
+        with atomic(conn, "fetched_body"):
+            before = stored_sha(conn, posting_id)
+            if save_body(conn, posting_id, text) == before:
+                return
+            decided += _decide(conn, [posting_id], cfg, rules_cfg, combiner)
+        stored += 1
+        replaced = replaced or before is not None
 
-    fetch_bodies(conn, adapter, board, wanted, on_body=keep)
-    return stored, replaced
+    try:
+        fetch_bodies(conn, adapter, board, wanted, on_body=keep)
+    except HostTripped as e:
+        return _Backfill(stored, replaced, decided, e.bucket)
+    return _Backfill(stored, replaced, decided, None)

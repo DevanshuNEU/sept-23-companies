@@ -7,7 +7,7 @@ from pathlib import Path
 from outreach.net import FetchError
 from outreach.sources.base import Candidate
 from outreach.sources.capabilities import PostRecord
-from outreach.sources.hn import HnError, HnSource, Post, is_us, parse_post
+from outreach.sources.hn import HnError, HnSource, HnThreadNotOut, Post, is_us, parse_post
 from outreach.sources.jobs import run_discover
 from outreach.sources.lca import LcaSource
 from outreach.store import name_key
@@ -355,6 +355,15 @@ class ErrorsTest(unittest.TestCase):
         with self.assertRaises(HnError) as ctx:
             self.discover(fixture_client(), "2027-01")
         self.assertIn("2027-01", str(ctx.exception))
+
+    def test_this_months_thread_missing_is_not_out_yet_and_never_last_months(self):
+        client = fixture_client()  # the listing ends with October
+        source = HnSource(client)
+        self.assertTrue(source.thread_out("2026-10"))
+        self.assertFalse(source.thread_out("2026-11"))
+        with self.assertRaises(HnThreadNotOut):
+            self.discover(client, "2026-11")
+        self.assertEqual([u for u in client.requests if "/items/" in u], [])
 
     def test_since_older_than_the_listing_when_the_page_is_full_raises(self):
         search = {"hits": [{"objectID": str(OCT - i), "title": "Ask HN: Freelancer? Seeking freelancer? (October 2026)",

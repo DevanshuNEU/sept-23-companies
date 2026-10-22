@@ -193,20 +193,8 @@ def _fetch_formd(root: Path, factory: ClientFactory, *, only_if_newer: bool = Fa
 
 # --- run-due ----------------------------------------------------------------------------------------------------
 
-def _hn_skip_reason(conn: sqlite3.Connection, now: str) -> str | None:
-    """Why HN is not due (None when it is): an ok discover run this month that read `hn`, or the 1st of the month."""
-    month_start = now[:7] + "-01T00:00:00Z"
-    done = conn.execute("SELECT 1 FROM job_run WHERE job = 'discover' AND status = 'ok' AND started_at >= ? "
-                        "AND json_extract(summary, '$.hn') IS NOT NULL", (month_start,)).fetchone()
-    if done:
-        return "HN was read this month"
-    if now[8:10] == "01":  # the thread is posted on the 1st, after this job runs: reading now would read last month's
-        return "the new month's thread is not out yet (tomorrow)"
-    return None
-
-
 def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict]:
-    """Everything that is due: HN once a month, Form D when SEC has a newer data set, then resolve and find-boards.
+    """Everything that is due: HN's thread for this month (read again on each run, once it is out), Form D when SEC has a newer data set, then resolve and find-boards.
 
     Every step runs even when an earlier one failed. The exit code is 1 when any step is `partial` or `failed`. LCA is
     not here: it is a by-hand quarterly `fetch lca` and `discover lca`.
@@ -221,10 +209,11 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
             _say(f"run-due {name} failed: {describe_error(err)}")
 
     def hn() -> dict:
-        reason = _hn_skip_reason(conn, utcnow())
-        if reason:
-            return {"status": "skipped", "reason": reason}
-        status, payload = _discover(conn, HnSource(factory("declared")))
+        month = utcnow()[:7]  # this month's thread, never "the latest": on the 1st or 2nd it may not be out yet
+        source = HnSource(factory("declared"))
+        if not source.thread_out(month):
+            return {"status": "skipped", "reason": f"the {month} thread is not out yet"}
+        status, payload = _discover(conn, source, since=month)  # a later run the same month reads it again: no new rows
         return {"status": status, "run_id": payload["run_id"]}
 
     def formd() -> dict:

@@ -24,7 +24,7 @@ from outreach.sources.formd import SEC_USER_AGENT
 from outreach.store import connect, finish_job, start_job, writes
 from tests.fakes import FakeClient, status_response, text_response
 from tests.test_formd import DATASET, routes as formd_routes
-from tests.test_hn import fixture_client
+from tests.test_hn import NOV, OCT, fixture_client, november_client
 from tests.test_jobs_find_boards import STAPPLY, careers_routes
 from tests.test_lca_source import FILES
 
@@ -308,27 +308,56 @@ class RunDueTest(CliCase):
         self.assertEqual((self.sources / "formd" / "last_read.txt").read_text(encoding="utf-8").strip(), "2026q3")
         self.assertTrue([u for u in self.client.requests if u.endswith("/careers")])  # careers checks were on
 
-    def test_second_run_the_same_month_does_only_resolve_and_find_boards(self):
+    def test_a_later_run_the_same_month_rereads_hn_and_writes_nothing_new(self):
         self.due()
+        conn = self.conn()
+        before = (count(conn, "SELECT count(*) FROM company"), count(conn, "SELECT count(*) FROM evidence"),
+                  count(conn, "SELECT count(*) FROM company_source WHERE source_name = 'hn'"),
+                  count(conn, "SELECT count(*) FROM event"))
         hn_calls = sum(u.startswith("https://hn.algolia.com") for u in self.client.requests)
         formd_zips = self.client.requests.count(FORMD_Q3)
         again = self.due()
-        self.assertEqual(again["steps"]["hn"]["status"], "skipped")
+        self.assertEqual(again["steps"]["hn"]["status"], "ok")
+        self.assertGreater(sum(u.startswith("https://hn.algolia.com") for u in self.client.requests), hn_calls)
         self.assertEqual(again["steps"]["formd"]["status"], "skipped")
         self.assertEqual((again["steps"]["resolve"]["status"], again["steps"]["find_boards"]["status"]),
                          ("ok", "ok"))
-        self.assertEqual(sum(u.startswith("https://hn.algolia.com") for u in self.client.requests), hn_calls)
         self.assertEqual(self.client.requests.count(FORMD_Q3), formd_zips)  # not downloaded again
+        after = (count(conn, "SELECT count(*) FROM company"), count(conn, "SELECT count(*) FROM evidence"),
+                 count(conn, "SELECT count(*) FROM company_source WHERE source_name = 'hn'"),
+                 count(conn, "SELECT count(*) FROM event"))
+        self.assertEqual(after, before)
 
-    def test_an_ok_hn_run_by_hand_this_month_counts(self):
-        self.ok("discover", "hn")
-        self.assertEqual(self.due()["steps"]["hn"]["status"], "skipped")
+    def test_last_months_thread_is_never_read_as_this_months(self):
+        # The fixture listing holds September and October only. On the 2nd of November the new thread is not out:
+        # the latest thread (October's) must not be read as November's.
+        with mock.patch.object(cli, "utcnow", lambda: "2026-11-02T06:30:00Z"):
+            report = self.due()
+        step = report["steps"]["hn"]
+        self.assertEqual(step["status"], "skipped")
+        self.assertIn("2026-11", step["reason"])
+        self.assertNotIn("run_id", step)
+        self.assertEqual([u for u in self.client.requests if "/items/" in u], [])  # no thread was read
+        conn = self.conn()
+        self.assertEqual(count(conn, "SELECT count(*) FROM job_run WHERE job = 'discover' AND "
+                                     "json_extract(summary, '$.hn') IS NOT NULL"), 0)
+        self.assertEqual(report["status"], "ok")  # a skipped step is not a failure
 
-    def test_last_months_hn_run_does_not_count(self):
-        self.ok("discover", "hn")
-        self.conn().execute("UPDATE job_run SET started_at = '2026-09-28T06:30:00Z', finished_at = "
-                            "'2026-09-28T06:31:00Z' WHERE json_extract(summary, '$.hn') IS NOT NULL")
-        self.assertEqual(self.due()["steps"]["hn"]["status"], "ok")
+    def test_once_the_new_thread_exists_it_is_read(self):
+        routes = all_routes()
+        routes.update(november_client().routes)
+        self.client = FakeClient(routes)
+        with mock.patch.object(cli, "utcnow", lambda: "2026-11-02T06:30:00Z"):
+            report = self.due()
+            self.assertEqual(report["steps"]["hn"]["status"], "ok")
+            self.assertTrue([u for u in self.client.requests if u.endswith(f"/items/{NOV}")])
+            self.assertFalse([u for u in self.client.requests if u.endswith(f"/items/{OCT}")])  # only this month's
+            conn = self.conn()
+            posts = count(conn, "SELECT count(*) FROM company_source WHERE source_name = 'hn'")
+            self.assertGreater(posts, 0)
+            again = self.due()  # a later run the same month reads it again and finds nothing new
+        self.assertEqual(again["steps"]["hn"]["status"], "ok")
+        self.assertEqual(count(conn, "SELECT count(*) FROM company_source WHERE source_name = 'hn'"), posts)
 
     def test_a_failed_hn_run_this_month_is_tried_again(self):
         conn = self.conn()
@@ -338,12 +367,6 @@ class RunDueTest(CliCase):
 
     def test_another_source_this_month_is_not_an_hn_run(self):
         self.assertEqual(self.due()["steps"]["hn"]["status"], "ok")  # the LCA discover run in setUp is not HN's
-
-    def test_hn_waits_for_the_thread_on_the_first_of_the_month(self):
-        with mock.patch.object(cli, "utcnow", lambda: "2026-11-01T06:30:00Z"):
-            report = self.due()
-        self.assertEqual(report["steps"]["hn"]["status"], "skipped")
-        self.assertIn("thread", report["steps"]["hn"]["reason"])
 
     def test_formd_is_skipped_until_a_newer_set_is_out(self):
         folder = self.sources / "formd"

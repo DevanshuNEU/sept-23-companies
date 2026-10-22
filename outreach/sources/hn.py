@@ -47,7 +47,7 @@ from outreach.sources.capabilities import PostRecord
 from outreach.sources.keys import classify_domain, registrable_domain
 from outreach.store import iso_utc, name_key
 
-__all__ = ["HnError", "HnConfig", "HnSource", "Post", "load_hn_config", "parse_post", "is_us", "plain_text",
+__all__ = ["HnError", "HnThreadNotOut", "HnConfig", "HnSource", "Post", "load_hn_config", "parse_post", "is_us", "plain_text",
            "SEARCH_URL"]
 
 CONFIG_PATH = Path(__file__).with_name("hn.toml")
@@ -77,6 +77,11 @@ class HnError(Exception):
     """The HN source could not give an answer: a bad HTTP status, a body that is not the expected JSON, a month with no
     thread, or a thread with nothing in it. The message names the URL and what was wrong. (A transport failure is the
     client's `FetchError` and passes through unchanged.)"""
+
+
+class HnThreadNotOut(HnError):
+    """No "Who is hiring?" thread from the month asked for (`since`) on: it is not posted yet, or `since` is in the
+    future."""
 
 
 @dataclass(frozen=True)
@@ -423,7 +428,8 @@ class _Pass:
 
 class HnSource:
     """Companies that posted in "Who is hiring?". `discover(since)` takes `since` as `YYYY-MM`: every thread from that
-    month on, oldest first; the default is the latest thread. A whole pass is read before the first candidate is
+    month on, oldest first; with no `since` it is the latest thread, whatever month that is (a caller that means "this
+    month's" passes `since` and so gets `HnThreadNotOut` until that month's thread is out). A whole pass is read before the first candidate is
     yielded, so a failed thread never leaves a half month behind. `posts()` and `summary()` describe the pass
     `discover` just ran (no second fetch); `posts()` raises before any pass has finished."""
     name = "hn"
@@ -441,6 +447,16 @@ class HnSource:
             raise ValueError(f"since {since!r} is not YYYY-MM")
         self._pass = self._read(since)
         yield from self._pass.candidates
+
+    def thread_out(self, since: str) -> bool:
+        """True when a thread from `since` (`YYYY-MM`) on is listed. One search request; nothing else is read."""
+        if not _SINCE.match(since):
+            raise ValueError(f"since {since!r} is not YYYY-MM")
+        try:
+            self._threads(since)
+        except HnThreadNotOut:
+            return False
+        return True
 
     def posts(self) -> list[PostRecord]:
         if self._pass is None:
@@ -497,7 +513,7 @@ class HnSource:
                           f"(back to {min(listed)[0]}-{min(listed)[1]:02d}): the listing cannot cover it")
         chosen = [t for t in found if t[0] >= want]
         if not chosen:
-            raise HnError(f"no 'Who is hiring?' thread from {since} on")
+            raise HnThreadNotOut(f"no 'Who is hiring?' thread from {since} on")
         return chosen
 
     def _comments(self, thread_id: int) -> list[dict]:

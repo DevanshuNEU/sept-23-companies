@@ -19,7 +19,7 @@ from outreach.sources.stapply import StapplyDirectory
 from outreach.sources.tiers import promote
 from outreach.store import add_alias, append_event
 from tests.fakes import FakeClient, status_response
-from tests.storetest import every_ats_has_an_adapter, fresh_store, seed_company, table_marks
+from tests.storetest import planned_adapters, fresh_store, seed_company, table_marks
 from tests.test_hn import fixture_client
 from tests.test_lca_source import FILES
 
@@ -33,7 +33,7 @@ def count(conn, sql, *args):
 
 class FindBoardsBase(unittest.TestCase):
     def setUp(self):
-        every_ats_has_an_adapter(self)
+        planned_adapters(self)
         self.conn = fresh_store()
         run_discover(self.conn, [LcaSource(FILES), HnSource(fixture_client())])
         self.directory = StapplyDirectory.load(STAPPLY)
@@ -313,9 +313,7 @@ class CareersStepTest(FindBoardsBase):
         add_by_hand(self.conn, name="Gemco Labs", reason="a friend works there", domain="gemco.example",
                     ats="gem:gemco")
         routes = careers_routes(**{"https://gemco.example/careers": CAREERS / "plain_page.html"})
-        adapters = types.SimpleNamespace(supported_ats=lambda: {"greenhouse", "lever", "ashby", "workday"})
-        with mock.patch.dict(sys.modules, {"outreach.crawl.ats": adapters}):
-            _, report = self.run_careers(routes)
+        _, report = self.run_careers(routes)  # the pinned set: Gem has no adapter in the plan
         watched = self.watched()
         self.assertEqual(watched["Gemco Labs"]["url"], "https://gemco.example/careers")  # Gem has no adapter
         self.assertEqual(sorted(watched), ["Gemco Labs", "Mesh Systems"])  # a Greenhouse board gets none
@@ -357,9 +355,7 @@ class CareersStepTest(FindBoardsBase):
         add_by_hand(self.conn, name="Icims Works", reason="a friend works there",
                     ats="icims:careers-icimsworks.icims.com")
         add_by_hand(self.conn, name="Corner Stone Works", reason="a friend works there", ats="cornerstone:cornerworks")
-        adapters = types.SimpleNamespace(supported_ats=lambda: {"greenhouse", "lever", "ashby", "workday"})
-        with mock.patch.dict(sys.modules, {"outreach.crawl.ats": adapters}):
-            _, report = self.run_careers()
+        _, report = self.run_careers()
         self.assertEqual(self.watched()["Icims Works"]["url"], "https://careers-icimsworks.icims.com")
         self.assertNotIn("Corner Stone Works", self.watched())
         self.assertEqual(report.unreadable_boards, 1)

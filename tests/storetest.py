@@ -15,7 +15,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from outreach.crawl.base import BOARD_ATS
 from outreach.install import install
 from outreach.store import connect
 from outreach.store.timefmt import utcnow
@@ -37,14 +36,23 @@ def fresh_store() -> sqlite3.Connection:
     return connect(path)
 
 
-def every_ats_has_an_adapter(case: unittest.TestCase) -> None:
-    """For the test's length, `outreach.crawl.ats.supported_ats()` names every ATS the schema allows.
+# The 14 ATSs the crawler plan builds an adapter for (#21). The other board.ats values (gem, icims, cornerstone and
+# so on) have none, so #31 gives a company that only has those a watched careers page.
+PLANNED_ADAPTERS = frozenset({
+    "greenhouse", "lever", "ashby", "smartrecruiters", "workday", "workable", "oracle_orc", "rippling", "breezy",
+    "pinpoint", "teamtailor", "recruitee", "bamboohr", "jazzhr"})
 
-    #31's last find_boards pass gives a company whose boards all lack an adapter a watched page, which reads the
-    careers page. Tests of the other steps route no such page, so they pin the set to "everything is readable"
-    (the end state of #21) and leave that pass out of the picture; the tests of the pass set the set themselves.
+
+def planned_adapters(case: unittest.TestCase) -> None:
+    """For the test's length, `outreach.crawl.ats.supported_ats()` names the 14 `PLANNED_ADAPTERS`.
+
+    The crawler is built one adapter at a time, so the real set grows with every task and a #31 test that depended on
+    it would change with each. Pinning the plan's end state keeps #31's last find_boards pass (a company whose boards
+    all lack an adapter gets a watched page, which reads its careers page) the same in every task. The test must
+    route the careers pages of the companies that pass reaches. A test of the pass that needs another set patches
+    `sys.modules` itself, inside this pin.
     """
-    fake = types.SimpleNamespace(supported_ats=lambda: BOARD_ATS)
+    fake = types.SimpleNamespace(supported_ats=lambda: PLANNED_ADAPTERS)
     patch = mock.patch.dict(sys.modules, {"outreach.crawl.ats": fake})
     patch.start()
     case.addCleanup(patch.stop)

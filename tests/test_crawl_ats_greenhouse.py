@@ -6,6 +6,8 @@ from pathlib import Path
 from outreach.crawl.ats import ADAPTERS, adapter_for, supported_ats
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
 from outreach.crawl.base import Validators, ids_fingerprint
+from outreach.crawl.config import load_crawl_config
+from outreach.crawl.polite import HostTripped, bucket_for
 from outreach.net import FetchError, Response
 from tests.contracts import check_adapter
 from tests.fakes import FakeClient, json_response, status_response, text_response
@@ -198,3 +200,43 @@ class GreenhouseTests(unittest.TestCase):
     def test_a_good_eu_board_that_is_empty_is_empty(self):
         r, _ = read({US: status_response(404), EU: ok(EMPTY)})
         self.assertEqual(r.result, "empty")
+
+    def test_a_list_that_does_not_match_meta_total_is_an_error(self):
+        # A short list would close real postings as gone_from_board, so a count that disagrees is never ok or empty.
+        r, _ = read({US: json_response({"jobs": [], "meta": {"total": 50}})})
+        self.assertEqual((r.result, r.http_status, r.error), ("error", 200, "list length does not match meta.total"))
+        r, _ = read({US: json_response({"jobs": fixture_jobs()[:1], "meta": {"total": 50}})})
+        self.assertEqual((r.result, r.http_status, r.jobs), ("error", 200, ()))
+
+    def test_meta_total_that_is_missing_or_not_a_number_is_not_checked(self):
+        for meta in (None, {}, {"total": None}, {"total": "3"}, {"total": True}, "x"):
+            r, _ = read({US: json_response({"jobs": fixture_jobs(), "meta": meta})})
+            self.assertEqual(r.result, "ok", repr(meta))
+        r, _ = read({US: json_response({"jobs": fixture_jobs()})})
+        self.assertEqual(r.result, "ok")
+
+    def test_the_total_is_compared_with_the_list_as_sent_not_after_dedupe(self):
+        jobs = fixture_jobs()
+        jobs.append(dict(jobs[0]))
+        r, _ = read({US: json_response({"jobs": jobs, "meta": {"total": 4}})})
+        self.assertEqual(r.result, "ok")
+
+    def test_a_bad_first_published_falls_back_to_updated_at(self):
+        jobs = fixture_jobs()[:1]
+        jobs[0]["first_published"] = "2026-02-30T00:00:00Z"
+        r, _ = read({US: json_response({"jobs": jobs})})
+        self.assertEqual(r.jobs[0].posted_on, "2026-10-01")
+
+    def test_a_tripped_host_propagates_from_the_us_request_and_from_the_eu_hop(self):
+        client = FakeClient({US: HostTripped("greenhouse.io")})
+        with self.assertRaises(HostTripped):
+            GreenhouseAdapter(client).list("acme", Validators())
+        client = FakeClient({US: status_response(404), EU: HostTripped("greenhouse.io")})
+        with self.assertRaises(HostTripped):
+            GreenhouseAdapter(client).list("acme", Validators())
+        self.assertEqual(client.requests, [US, EU])
+
+    def test_both_greenhouse_api_hosts_share_one_polite_bucket(self):
+        cfg = load_crawl_config()
+        self.assertEqual(bucket_for("boards-api.greenhouse.io", cfg), "greenhouse.io")
+        self.assertEqual(bucket_for("boards-api.eu.greenhouse.io", cfg), "greenhouse.io")

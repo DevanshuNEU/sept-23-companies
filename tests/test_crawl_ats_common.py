@@ -1,4 +1,5 @@
 """Adapter plumbing shared by every ATS (issue #21, Task 4)."""
+import itertools
 import unittest
 
 from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token
@@ -6,6 +7,7 @@ from outreach.crawl.base import JobRef, ReadResult, Validators, ids_fingerprint
 from outreach.crawl.polite import HostTripped
 from outreach.net import FetchError, Response
 from tests.fakes import FakeClient, json_response, status_response, text_response
+from tests.storetest import fresh_store, seed_company
 
 URL = "https://example.test/list"
 
@@ -59,6 +61,8 @@ class FetchListTests(unittest.TestCase):
         client = FakeClient({URL: status_response(304)})
         got = fetch_list(client, URL, Validators())
         self.assertEqual((got.result, got.http_status), ("error", 304))
+        self.assertIn("no If-None-Match", got.error)
+        self.assertNotIn("redirect", got.error)
 
     def test_other_statuses_are_errors_with_the_status(self):
         for status in (302, 403, 404, 429, 500, 204, 201):
@@ -159,3 +163,31 @@ class D10Tests(unittest.TestCase):
     def test_nothing_usable_is_none(self):
         for value in (None, "", 0, "soon", "99999999999999999999999", True, [], {}):
             self.assertIsNone(d10(value), repr(value))
+
+    def test_an_impossible_date_is_none(self):
+        for value in ("2026-02-30", "2026-13-45", "2026-00-10", "0000-01-01", "2026-02-30T10:00:00Z"):
+            self.assertIsNone(d10(value), value)
+
+    def test_a_number_that_is_not_an_epoch_is_none(self):
+        # Only 10 digits (seconds) or 13 (milliseconds) are an epoch; a year or a compact date is not.
+        for value in ("2026", "20261021", "202610211", "17600000000", "176000000000000", 2026, 20261021, -1760000000):
+            self.assertIsNone(d10(value), repr(value))
+
+    def test_a_float_epoch(self):
+        self.assertEqual(d10(1760000000.5), "2025-10-09")
+        self.assertEqual(d10(1760000000000.0), "2025-10-09")
+        self.assertIsNone(d10(float("nan")))
+        self.assertIsNone(d10(float("inf")))
+
+    def test_every_output_is_a_date_the_store_accepts(self):
+        conn = fresh_store()
+        company = seed_company(conn)
+        counter = itertools.count()
+        for value in ("2026-09-15T10:21:33-04:00", "2026-09-15", 1760000000, 1760000000000, "1760000000",
+                      1760000000.5, "2026-02-28", "2024-02-29"):
+            out = d10(value)
+            self.assertIsNotNone(out, repr(value))
+            conn.execute(
+                "INSERT INTO posting(company_id, source_key, title, posted_on, first_seen_at, last_seen_at) "
+                "VALUES (?, ?, 'x', ?, '2026-10-22T00:00:00Z', '2026-10-22T00:00:00Z')",
+                (company, f"url:d10-{next(counter)}", out))

@@ -43,6 +43,8 @@ def fetch_list(client: HttpClient, url: str, validators: Validators, *, headers:
     if resp.status == 304 and conditional:
         return ReadResult("unchanged", (), validators, http_status=304)
     if resp.status != 200:
+        if resp.status == 304:
+            return read_error(f"unexpected 304 (no If-None-Match was sent) from {url}", status=304)
         kind = "redirect" if 300 <= resp.status < 400 else "HTTP"
         return read_error(f"{kind} {resp.status} from {url}", status=resp.status)
     return resp
@@ -78,24 +80,31 @@ def finish_list(jobs: Iterable[JobRef], resp: Response, validators: Validators, 
     return ReadResult("ok", tuple(unique), Validators(etag=etag, ids_fingerprint=fingerprint), board_name=board_name)
 
 
-_ISO_DATE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def d10(value) -> str | None:
-    """An ISO date prefix, or epoch seconds or milliseconds, as YYYY-MM-DD; None when it is neither."""
+    """A real calendar date as YYYY-MM-DD, or None.
+
+    Takes an ISO date or timestamp (its first 10 characters must be a real date), or an epoch of exactly 10 digits
+    (seconds) or 13 (milliseconds) as an int, a float or a digit string. A year, "20261021" or "2026-02-30" is None,
+    so the value is always one the store's `posted_on` check accepts.
+    """
     if isinstance(value, bool) or not value:
         return None
-    if isinstance(value, (int, float)):
-        text = str(int(value)) if value == value and abs(value) != float("inf") else ""
-    else:
-        text = str(value)
-    m = _ISO_DATE.match(text)
-    if m:
-        return m.group(1)
-    if not text.isdigit():
+    if isinstance(value, float):
+        if value != value or abs(value) == float("inf"):
+            return None
+        value = int(value)
+    text = str(value).strip() if isinstance(value, (str, int)) else ""
+    if _ISO_DATE.match(text):
+        try:
+            return datetime.date.fromisoformat(text[:10]).isoformat()
+        except ValueError:
+            return None
+    if not (text.isascii() and text.isdigit() and len(text) in (10, 13)):
         return None
-    n = int(text)
-    seconds = n / 1000 if n > 1e11 else n
+    seconds = int(text) / 1000 if len(text) == 13 else int(text)
     try:
         return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%d")
     except (OverflowError, OSError, ValueError):

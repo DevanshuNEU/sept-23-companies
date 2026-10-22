@@ -48,7 +48,7 @@ def _parse(job: object) -> JobRef | None:
     content = job.get("content")
     body = html_to_text(html.unescape(content)) if isinstance(content, str) else ""
     return JobRef(native_id=native_id, title=title, url=_text(job.get("absolute_url")), location=_location(job),
-                  country=None, posted_on=d10(job.get("first_published") or job.get("updated_at")),
+                  country=None, posted_on=d10(job.get("first_published")) or d10(job.get("updated_at")),
                   body=body or None)
 
 
@@ -78,6 +78,10 @@ class GreenhouseAdapter:
         raw = data.get("jobs") if isinstance(data, dict) else None
         if not isinstance(raw, list):
             return read_error("the 200 answer has no jobs list", status=resp.status)
+        meta = data.get("meta")
+        total = meta.get("total") if isinstance(meta, dict) else None
+        if isinstance(total, int) and not isinstance(total, bool) and total != len(raw):
+            return read_error("list length does not match meta.total", status=resp.status)
         jobs: list[JobRef] = []
         for item in raw:
             job = _parse(item)

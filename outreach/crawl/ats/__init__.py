@@ -1,0 +1,24 @@
+"""The ATS adapters and the one registry that maps an ATS name to its adapter (#21)."""
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from outreach.crawl.ats.greenhouse import GreenhouseAdapter
+from outreach.crawl.base import Adapter
+from outreach.net import HttpClient
+
+__all__ = ["ADAPTERS", "adapter_for", "supported_ats"]
+
+# Each adapter task adds one line.
+ADAPTERS: dict[str, Callable[[HttpClient], Adapter]] = {
+    "greenhouse": GreenhouseAdapter,
+}
+
+
+def adapter_for(ats: str, client: HttpClient) -> Adapter | None:
+    factory = ADAPTERS.get(ats)
+    return factory(client) if factory else None
+
+
+def supported_ats() -> frozenset[str]:
+    return frozenset(ADAPTERS)

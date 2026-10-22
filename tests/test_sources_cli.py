@@ -24,6 +24,7 @@ from outreach.sources.formd import SEC_USER_AGENT
 from outreach.sources.stapply import MANIFEST_URL
 from outreach.store import connect, finish_job, start_job, writes
 from tests.fakes import FakeClient, status_response, text_response
+from tests.storetest import every_ats_has_an_adapter
 from tests.test_formd import DATASET, routes as formd_routes
 from tests.test_hn import NOV, OCT, fixture_client, november_client
 from tests.test_jobs_find_boards import STAPPLY, careers_routes
@@ -70,6 +71,7 @@ def all_routes(**careers_overrides) -> dict:
 
 class CliCase(unittest.TestCase):
     def setUp(self):
+        every_ats_has_an_adapter(self)
         folder = Path(tempfile.mkdtemp(prefix="outreach-cli-test-"))
         self.addCleanup(shutil.rmtree, folder, True)
         self.db = folder / "outreach.db"

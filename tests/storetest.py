@@ -8,9 +8,14 @@ import hashlib
 import itertools
 import shutil
 import sqlite3
+import sys
 import tempfile
+import types
+import unittest
 from pathlib import Path
+from unittest import mock
 
+from outreach.crawl.base import BOARD_ATS
 from outreach.install import install
 from outreach.store import connect
 from outreach.store.timefmt import utcnow
@@ -30,6 +35,19 @@ def fresh_store() -> sqlite3.Connection:
     path = str(Path(folder) / "outreach.db")
     install(path)
     return connect(path)
+
+
+def every_ats_has_an_adapter(case: unittest.TestCase) -> None:
+    """For the test's length, `outreach.crawl.ats.supported_ats()` names every ATS the schema allows.
+
+    #31's last find_boards pass gives a company whose boards all lack an adapter a watched page, which reads the
+    careers page. Tests of the other steps route no such page, so they pin the set to "everything is readable"
+    (the end state of #21) and leave that pass out of the picture; the tests of the pass set the set themselves.
+    """
+    fake = types.SimpleNamespace(supported_ats=lambda: BOARD_ATS)
+    patch = mock.patch.dict(sys.modules, {"outreach.crawl.ats": fake})
+    patch.start()
+    case.addCleanup(patch.stop)
 
 
 def seed_company(conn: sqlite3.Connection, name: str = "Acme") -> int:

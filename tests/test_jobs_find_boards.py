@@ -1,5 +1,6 @@
 """The find_boards job (#31 Tasks 14 and 15): alias boards, the stapply lookup, tiers and the report, on the LCA and HN
 fixtures after run_discover."""
+import importlib
 import json
 import sys
 import types
@@ -7,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from outreach.crawl.base import BOARD_ATS
 from outreach.sources.boards import BoardRef, add_board
 from outreach.sources.byhand import add_by_hand
 from outreach.sources.careers import CareersChecker
@@ -17,7 +19,7 @@ from outreach.sources.stapply import StapplyDirectory
 from outreach.sources.tiers import promote
 from outreach.store import add_alias, append_event
 from tests.fakes import FakeClient, status_response
-from tests.storetest import fresh_store, seed_company, table_marks
+from tests.storetest import every_ats_has_an_adapter, fresh_store, seed_company, table_marks
 from tests.test_hn import fixture_client
 from tests.test_lca_source import FILES
 
@@ -31,6 +33,7 @@ def count(conn, sql, *args):
 
 class FindBoardsBase(unittest.TestCase):
     def setUp(self):
+        every_ats_has_an_adapter(self)
         self.conn = fresh_store()
         run_discover(self.conn, [LcaSource(FILES), HnSource(fixture_client())])
         self.directory = StapplyDirectory.load(STAPPLY)
@@ -317,6 +320,29 @@ class CareersStepTest(FindBoardsBase):
         self.assertEqual(watched["Gemco Labs"]["url"], "https://gemco.example/careers")  # Gem has no adapter
         self.assertEqual(sorted(watched), ["Gemco Labs", "Mesh Systems"])  # a Greenhouse board gets none
         self.assertEqual((report.adapter_unknown, report.unreadable_boards), (0, 0))
+
+    def test_the_real_adapter_set_decides_which_boards_are_unread(self):
+        # No stand-in: whatever `outreach.crawl.ats.supported_ats()` says today. Rule 9 of #31 follows it.
+        sys.modules.pop("outreach.crawl.ats")  # drop the stand-in setUp pinned; the real package imports fresh
+        supported = importlib.import_module("outreach.crawl.ats").supported_ats()
+        slug_atses = BOARD_ATS - {"workday", "oracle_orc", "icims"}
+        unread = sorted(slug_atses - supported)[0]  # an ATS with no adapter yet
+        self.assertIn("greenhouse", supported)
+        add_by_hand(self.conn, name="Unread Co", reason="a friend works there", domain="unread.example",
+                    ats=f"{unread}:unreadco")
+        add_by_hand(self.conn, name="Read Co", reason="a friend works there", domain="read.example",
+                    ats="greenhouse:readco")
+        # Every fixture company whose board has no adapter is checked too; their sites answer 404 here.
+        routes = careers_routes(**{"https://unread.example/careers": CAREERS / "plain_page.html"})
+        for host in ("orchard.io", "tidepoolapps.com"):
+            routes.setdefault(f"https://{host}/careers", status_response(404))
+            routes.setdefault(f"https://{host}/", status_response(404))
+        _, report = self.run_careers(routes)
+        watched = self.watched()
+        self.assertEqual(watched["Unread Co"]["url"], "https://unread.example/careers")
+        self.assertNotIn("Read Co", watched)  # its Greenhouse board has an adapter: no page, no request
+        self.assertNotIn("https://read.example/careers", self.client.requests)
+        self.assertEqual(report.adapter_unknown, 0)
 
     def test_adapter_module_absent_skips_the_unread_board_step_and_counts_it(self):
         add_by_hand(self.conn, name="Gemco Labs", reason="a friend works there", domain="gemco.example",

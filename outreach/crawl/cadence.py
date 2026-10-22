@@ -18,7 +18,9 @@ from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["next_interval_s", "error_backoff_s", "add_seconds", "last_new_age_s", "plan_company_ids", "due_boards"]
 
-_MAX_DOUBLINGS = 40  # 2 ** 40 floors is far past any ceiling; this only keeps a huge streak from building a huge int
+# Ruling 5: an erroring board waits 6, 12, then 24 hours and stays at 24. The 7-day ceiling is for quiet boards only.
+ERROR_BACKOFF_CAP_S = 86400
+_MAX_DOUBLINGS = 40  # 2 ** 40 floors is far past any cap; this only keeps a huge streak from building a huge int
 
 
 def _parse(ts: str) -> datetime:
@@ -35,9 +37,10 @@ def next_interval_s(age_since_new_s: float, prev_interval_s: int | None, changed
 
 
 def error_backoff_s(error_streak: int, cfg: CrawlConfig) -> int:
-    """Seconds to wait after the `error_streak`-th error in a row: the floor, doubled each time, up to the ceiling."""
+    """Seconds to wait after the `error_streak`-th error in a row: the floor, doubled each time, capped at 24 hours (and
+    never above the ceiling)."""
     doublings = min(max(error_streak, 1) - 1, _MAX_DOUBLINGS)
-    return min(cfg.ceiling_s, cfg.floor_s * 2 ** doublings)
+    return min(cfg.ceiling_s, max(cfg.floor_s, min(ERROR_BACKOFF_CAP_S, cfg.floor_s * 2 ** doublings)))
 
 
 def add_seconds(ts: str, seconds: int) -> str:

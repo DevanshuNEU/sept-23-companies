@@ -12,7 +12,7 @@ CONFIG_PATH = Path(__file__).with_name("config.toml")
 
 _INT_KEYS = ("floor_s", "ceiling_s", "age_divisor", "defer_s", "max_bytes", "max_redirects", "breaker_failures",
              "batch_rows", "decide_batch", "detail_per_read", "boards_per_tick", "tick_budget_s", "top_companies",
-             "watch_interval_s", "watch_per_tick", "watch_min_text_chars", "stale_after_months")
+             "watch_interval_s", "watch_per_tick", "watch_min_text_chars", "stale_after_months", "body_refetch_days")
 _NUM_KEYS = ("timeout_s", "default_host_interval_s")
 
 
@@ -39,6 +39,7 @@ class CrawlConfig:
     watch_per_tick: int
     watch_min_text_chars: int
     stale_after_months: int
+    body_refetch_days: int
 
 
 def _is_number(v: object) -> bool:

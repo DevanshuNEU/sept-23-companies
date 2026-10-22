@@ -37,6 +37,9 @@ watch_min_text_chars = 200
 # A posting older than this many months is stale (1 to 60). Never a hide and never a close.
 stale_after_months = 12
 
+# A level-fit engineering posting's body is fetched again after this many days (ruling 6).
+body_refetch_days = 30
+
 [host_interval_s]
 "greenhouse.io" = 0.25
 "lever.co" = 0.25

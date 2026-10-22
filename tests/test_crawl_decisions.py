@@ -103,6 +103,67 @@ class DecidePostingsTests(DecisionTestCase):
         row = self.current_rows(ids)[0]
         self.assertEqual((row["provisional"], row["reader_version"]), (1, None))
 
+    def final(self, pid):
+        self.conn.execute("UPDATE decision SET provisional = 0, reader_version = 'v1' WHERE posting_id = ?", (pid,))
+
+    def state(self, pid):
+        return tuple(self.conn.execute("SELECT provisional, reader_version FROM current_decision WHERE posting_id = ?",
+                                       (pid,)).fetchone())
+
+    def test_a_location_change_re_decides_provisional_when_there_is_no_combiner(self):
+        (pid,) = self.postings(1)
+        decide_postings(self.conn, [pid], batch=100)
+        self.final(pid)
+        self.conn.execute("UPDATE posting SET location = 'Berlin, Germany' WHERE posting_id = ?", (pid,))
+        decide_postings(self.conn, [pid], batch=100)
+        self.assertEqual(self.state(pid), (1, None))
+
+    def test_a_title_change_re_decides_provisional_when_there_is_no_combiner(self):
+        (pid,) = self.postings(1)
+        decide_postings(self.conn, [pid], batch=100)
+        self.final(pid)
+        self.conn.execute("UPDATE posting SET title = 'Account Executive' WHERE posting_id = ?", (pid,))
+        got = decide_postings(self.conn, [pid], batch=100)
+        self.assertEqual(got[pid].lane, "not_engineering")
+        self.assertEqual(self.state(pid), (1, None))
+
+    def test_only_the_batch_postings_are_reset(self):
+        a, b = self.postings(2)
+        decide_postings(self.conn, [a, b], batch=100)
+        self.final(a)
+        self.final(b)
+        decide_postings(self.conn, [a], batch=100)
+        self.assertEqual((self.state(a), self.state(b)), ((1, None), (0, "v1")))
+
+    def test_ids_are_decided_once_each(self):
+        ids = self.postings(2)
+        calls = []
+        real = decide_postings.__globals__["decide_and_store"]
+
+        def spy(conn, posting_id, **kw):
+            calls.append(posting_id)
+            return real(conn, posting_id, **kw)
+
+        with mock.patch.dict(decide_postings.__globals__, {"decide_and_store": spy}):
+            got = decide_postings(self.conn, [ids[0], ids[1], ids[0]], batch=2)
+        self.assertEqual(calls, ids)
+        self.assertEqual(set(got), set(ids))
+
+    def test_a_combiner_may_leave_a_row_final(self):
+        # The combiner (#32) owns the row's provisional and reader_version; with one, nothing here resets them.
+        (pid,) = self.postings(1)
+        real = decide_postings.__globals__["decide_and_store"]
+
+        def with_combiner(conn, posting_id, **kw):
+            decision = real(conn, posting_id, cfg=kw.get("cfg"))
+            conn.execute("UPDATE decision SET provisional = 0, reader_version = 'rv' WHERE posting_id = ?",
+                         (posting_id,))
+            return decision
+
+        with mock.patch.dict(decide_postings.__globals__, {"decide_and_store": with_combiner}):
+            decide_postings(self.conn, [pid], batch=1, combiner=object())
+        self.assertEqual(self.state(pid), (0, "rv"))
+
 
 class ResetProvisionalTests(DecisionTestCase):
     def test_reset_provisional_after_a_final_decision(self):

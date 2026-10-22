@@ -44,9 +44,12 @@ class IntervalTests(unittest.TestCase):
     def test_a_change_never_raises_the_interval_above_base(self):
         self.assertEqual(next_interval_s(14 * DAY, 100 * DAY, True, CFG), 151200)
 
-    def test_backoff_doubles_to_the_ceiling(self):
-        self.assertEqual([error_backoff_s(n, CFG) for n in (1, 2, 3, 8)], [21600, 43200, 86400, 604800])
-        self.assertEqual(error_backoff_s(100000, CFG), 604800)
+    def test_backoff_doubles_from_the_floor(self):
+        self.assertEqual([error_backoff_s(n, CFG) for n in (1, 2, 3)], [21600, 43200, 86400])
+
+    def test_backoff_stays_at_24_hours_after_the_third_error(self):
+        # Ruling 5: 6, 12, 24 hours, then it stays 24. The ceiling (7 days) is for the change interval only.
+        self.assertEqual([error_backoff_s(n, CFG) for n in (4, 8, 100000)], [86400, 86400, 86400])
 
     def test_backoff_treats_a_streak_below_one_as_one(self):
         self.assertEqual(error_backoff_s(0, CFG), 21600)

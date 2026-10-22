@@ -43,6 +43,11 @@ class AddBoardTest(unittest.TestCase):
         self.assertEqual(json.loads(event["detail"]),
                          {"via": "careers_page", "matched_on": "https://acme.example/careers"})
 
+    def test_add_board_event_actor_defaults_to_crawler_and_can_be_given(self):
+        add_board(self.conn, self.acme, BoardRef("greenhouse", "acme"), **KW)
+        add_board(self.conn, self.acme, BoardRef("lever", "acme"), actor="devanshu", **{**KW, "found_by": "hand"})
+        self.assertEqual([e["actor"] for e in self.events()], ["crawler", "devanshu"])
+
     def test_add_board_records_found_by(self):
         for i, found_by in enumerate(("stapply_name", "slug_probe", "careers_page", "import", "hand")):
             with self.subTest(found_by=found_by):

@@ -52,11 +52,12 @@ class BoardRef:
 
 
 def add_board(conn: sqlite3.Connection, company_id: int, ref: BoardRef, *, via: str, matched_on: str,
-              found_by: str) -> Literal["added", "exists", "conflict"]:
+              found_by: str, actor: str = "crawler") -> Literal["added", "exists", "conflict"]:
     """Attach a board to a company.
 
     `added`: a new `board` row (with `found_by`), the alias `<ats>:<token>` (source `ats`) and a `board` / `found`
-    event (actor `crawler`, detail `via` and `matched_on`, key `board-found:<ats>:<token>`), as one unit.
+    event (actor `actor`, default `crawler`; detail `via` and `matched_on`; key `board-found:<ats>:<token>`), as one
+    unit.
     `exists`: the board row already belongs to this company (or to one merged into or from it): nothing is written,
     and `found_by` is never upgraded (the first finder stands). An `ats` alias with no board row behind it, this
     company's or its merge chain's, does not count as the board: the row is added and the alias is kept.
@@ -83,7 +84,7 @@ def add_board(conn: sqlite3.Connection, company_id: int, ref: BoardRef, *, via: 
                 if cur.rowcount:
                     if claim is None:  # else the alias is already ours (or our merge chain's)
                         add_alias(conn, company_id, alias, "ats")
-                    append_event(conn, entity="board", kind="found", actor="crawler", entity_id=cur.lastrowid,
+                    append_event(conn, entity="board", kind="found", actor=actor, entity_id=cur.lastrowid,
                                  company_id=company_id, detail={"via": via, "matched_on": matched_on},
                                  idempotency_key=f"board-found:{ref.ats}:{token}")
                     return "added"

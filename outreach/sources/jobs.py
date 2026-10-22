@@ -29,7 +29,7 @@ from outreach.store import (append_event, describe_error, finish_job, is_shared_
                             start_job, transaction, utcnow)
 
 __all__ = ["SourceReport", "run_discover", "run_resolve", "store_name_lookup", "POST_TEXT_CAP", "FindBoardsReport",
-           "run_find_boards"]
+           "run_find_boards", "register_source"]
 
 MIN_LOOKUPS_FOR_ALL_FAILED = 3  # one or two failed lookups prove nothing; three of three is a pattern
 

@@ -40,7 +40,7 @@ class Best:
     location: str
     posted_on: str | None
     last_seen_on: str
-    board_state: str    # read_ok, read_failed, never_read or no_board
+    board_state: str    # read_ok, read_empty, read_failed, never_read or no_board
     provisional: bool   # the decision's flag
     stale_reason: str = ""  # empty for a live posting
 
@@ -65,12 +65,13 @@ def role_sort_key(b: Best) -> tuple:
 
 
 def _board_state(last_read: str | None, has_board: bool) -> str:
-    """A board's state for the grades. An `empty` read is neither a good listing nor a failure: it reads as not
-    read, the low grade (its postings are stale anyway)."""
+    """A board's state for the grades. An `empty` read is a good read that listed nothing (ruling 2026-10-22)."""
     if not has_board:
         return "no_board"
     if last_read in ("ok", "unchanged"):
         return "read_ok"
+    if last_read == "empty":
+        return "read_empty"
     if last_read == "error":
         return "read_failed"
     return "never_read"
@@ -84,8 +85,9 @@ def _lane(d) -> str:
 
 def company_board_states(conn: sqlite3.Connection, canon: dict[int, int]) -> dict[int, str]:
     """Per surviving company with an active board: `read_ok` when any board last read ok or unchanged, else
-    `read_failed` when any errored, else `never_read`. A company with no active board is absent (`no_board`)."""
-    rank = {"read_ok": 0, "read_failed": 1, "never_read": 2}
+    `read_empty` when any read empty (a good read that listed nothing), else `read_failed` when any errored, else
+    `never_read`. A company with no active board is absent (`no_board`)."""
+    rank = {"read_ok": 0, "read_empty": 1, "read_failed": 2, "never_read": 3}
     out: dict[int, str] = {}
     for company_id, last_read in conn.execute("SELECT company_id, last_read FROM board WHERE active = 1"):
         cid = canon.get(company_id, company_id)

@@ -168,6 +168,24 @@ class NoGoTests(Store):
         rows = self.conn.execute("SELECT lifted_at IS NOT NULL FROM no_go").fetchall()
         self.assertEqual([r[0] for r in rows], [1])
 
+    def test_a_lifted_no_go_of_any_reason_cancels_the_size_hide(self):
+        rs.no_go(self.conn, self.co, "over_300", lifted=True)
+        rs.evidence(self.conn, self.co, "size", value="400+", num_low=400, confidence="confirmed")
+        self.assertEqual(self.inputs()[self.co].no_go, "lifted")
+        self.assertIsNone(self.hide_for())  # he put it back on the list: shown and ranked, never hidden
+        other = seed_company(self.conn, "Other reason")
+        rs.no_go(self.conn, other, "agency", lifted=True)
+        rs.evidence(self.conn, other, "headcount", value="900", num_low=900, confidence="confirmed")
+        self.assertIsNone(decide_hide(self.inputs()[other], CFG))
+
+    def test_an_active_no_go_set_after_a_lift_hides_again(self):
+        rs.no_go(self.conn, self.co, "over_300", lifted=True)
+        rs.evidence(self.conn, self.co, "size", value="400+", num_low=400, confidence="confirmed")
+        rs.no_go(self.conn, self.co, "said_no")
+        hide = self.hide_for()
+        self.assertEqual(hide.kind, "no_go")
+        self.assertIn("said no", hide.reason)
+
     def test_a_lifted_no_go_on_a_merged_away_duplicate_blocks_the_write_for_the_survivor(self):
         dup = seed_company(self.conn, "Acme Inc")
         rs.no_go(self.conn, dup, lifted=True)

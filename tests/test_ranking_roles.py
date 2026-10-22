@@ -276,6 +276,38 @@ class GradeTests(Store):
         self.assertEqual(self.role(url).confidence.level, "low")  # no board: roles unknown, not absent
 
 
+class EmptyReadTests(Store):
+    def test_an_empty_last_read_grades_no_live_role_medium_not_unread(self):
+        co = seed_company(self.conn, "Empty")
+        b = rs.board(self.conn, co, last_read="empty")
+        self.add("ng", company_id=co, board_id=b, citizenship=1)  # stale and hidden, so listed nowhere
+        self.assertEqual(company_board_states(self.conn, canonical_ids(self.conn))[co], "read_empty")
+        r = self.role(co)
+        self.assertEqual((r.best, r.stale), (None, ()))
+        self.assertEqual((r.confidence.level, r.confidence.basis),
+                         ("medium", "the board listed no roles at its last read"))
+        self.assertNotIn("not read", r.confidence.basis)
+
+    def test_board_state_order_is_ok_then_empty_then_failed_then_never_read(self):
+        a, b, c = (seed_company(self.conn, n) for n in "abc")
+        rs.board(self.conn, a, last_read="empty")
+        rs.board(self.conn, a, last_read="ok")
+        rs.board(self.conn, b, last_read="error")
+        rs.board(self.conn, b, last_read="empty")
+        rs.board(self.conn, c, last_read=None)
+        states = company_board_states(self.conn, canonical_ids(self.conn))
+        self.assertEqual((states[a], states[b], states[c]), ("read_ok", "read_empty", "never_read"))
+
+    def test_a_posting_on_an_empty_board_carries_that_state(self):
+        b = rs.board(self.conn, self.co, last_read="empty")
+        self.add("ng", board_id=b, last_seen_at="2026-10-18T08:00:00Z")
+        r = self.role()
+        self.assertEqual(r.stale[0].board_state, "read_empty")
+        self.assertEqual(r.confidence.level, "medium")  # stale by absence only
+        live = self.roles(stale={})[self.co]  # the same posting if it were not stale
+        self.assertEqual((live.best.board_state, live.confidence.level), ("read_empty", "medium"))
+
+
 class BoardStateTests(Store):
     def test_company_board_states_cover_the_four_cases(self):
         ok, unchanged, failed, never, none = (seed_company(self.conn, n) for n in ("ok", "un", "err", "nev", "none"))

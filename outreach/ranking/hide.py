@@ -3,13 +3,13 @@
 Hidden only with evidence. `outreach.rules.passes()` is the posting-level half and is called, never restated; this
 module adds the company level, in the order of the plan's Decisions:
 
-1. an active `no_go` row;
+1. an active `no_go` row; else a lifted one cancels every hide below, whatever its reason (he put the company
+   back on the list on purpose: it stays shown and ranked, and only a new active row hides it again);
 2. size over `hide.size_over` with evidence of a trusted confidence (`size`, else `headcount`);
 3. a sponsorship refusal: an open, live (not stale) engineering posting on a trusted board, not outside the US,
-   whose decision says `sponsorship = 'no'`. It hides nothing when the company has a lifted no-go (he took it off
-   the list) or when another open live trusted posting says `yes` or `opt_only` (ruling 9: the postings disagree).
-   It is final when a refusal's decision is final (`provisional = 0`); else the company is "hidden, pending
-   reader" and nothing is written.
+   whose decision says `sponsorship = 'no'`. It hides nothing when another open live trusted posting says `yes`
+   or `opt_only` (ruling 9: the postings disagree). It is final when a refusal's decision is final
+   (`provisional = 0`); else the company is "hidden, pending reader" and nothing is written.
 
 A stale posting neither refuses nor sponsors (ruling 2026-10-22), and a posting on a doubtful board counts for
 nothing (ruling 7). Unknown size is neutral: no evidence never hides.
@@ -152,13 +152,15 @@ def decide_hide(inputs: HideInputs, cfg: RankerConfig) -> Hide | None:
     """The company's hide, or None to show it. Pure."""
     if inputs.no_go == "active":
         return Hide("no_go", f"On the no-go list: {inputs.no_go_reason.replace('_', ' ')}", False)
+    if inputs.no_go == "lifted":
+        return None  # lifted by hand: never hidden by a computed rule (controller ruling)
     over = cfg.hide["size_over"]
     s = inputs.size
     if s is not None and s.confidence in cfg.hide["size_confidences"] and s.low > over:
         span = f"{s.low} to {s.high}" if s.high is not None else f"{s.low} or more"
         source = f", {s.source_ref}" if s.source_ref else ""
         return Hide("over_size", _one_line(f"Over {over} people: {span} ({s.confidence} evidence{source})"), False)
-    if not inputs.refusals or inputs.no_go == "lifted" or inputs.sponsors:
+    if not inputs.refusals or inputs.sponsors:
         return None
     final = [r for r in inputs.refusals if not r.provisional]
     chosen = final[0] if final else inputs.refusals[0]

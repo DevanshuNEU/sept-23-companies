@@ -143,6 +143,8 @@ class GradeRoleTests(unittest.TestCase):
             (dict(board_state="never_read", posted_known=True), "low",
              "board not read by this system yet, listing is from an import dated 2026-10-01"),
             (dict(board_state="no_board", posted_known=True), "low", "posting is not from a board read"),
+            (dict(board_state="read_empty", posted_known=True), "medium",
+             "the board listed no roles at its last read, last listed 2026-10-01"),
         )
         for kw, level, basis in cases:
             with self.subTest(**kw):
@@ -157,7 +159,9 @@ class GradeRoleTests(unittest.TestCase):
         cases = (("read_ok", "high", "board read ok, no matching posting listed"),
                  ("read_failed", "medium", "board read failed, roles unknown"),
                  ("never_read", "low", "board not read yet, roles unknown"),
-                 ("no_board", "low", "no board found yet: roles are unknown, not absent"))
+                 ("no_board", "low", "no board found yet: roles are unknown, not absent"),
+                 # an empty read is a good read (ruling 2026-10-22): medium, never "not read yet"
+                 ("read_empty", "medium", "the board listed no roles at its last read"))
         for state, level, basis in cases:
             with self.subTest(state=state):
                 got = grade_no_role(company_board_state=state, stale_kinds=(), stale_reason="x")

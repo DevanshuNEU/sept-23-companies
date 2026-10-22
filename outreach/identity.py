@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 
 from outreach.rules.rebuild import record_evidence
 from outreach.sources.base import Candidate, describe_error
-from outreach.sources.keys import classify_domain, normalize_fein, registrable_domain, shared_count
+from outreach.sources.keys import US_STATES, classify_domain, normalize_fein, registrable_domain, shared_count
 from outreach.store import add_alias, append_event, is_shared_key, name_key, transaction, utcnow
 
 __all__ = ["BASES", "CONFIDENCE", "ITEM_CONFIDENCES", "MIN_NAME_KEY", "Resolution", "Match", "follow_merged",
@@ -64,13 +64,6 @@ MIN_NAME_KEY = 4  # shorter name keys ("ace", "ibm") never match by name
 _NAME_SOURCES = ("name", "hand", "import", "crawl", "merge", "dba", "legal_name", "formd")
 _RAW_SOURCES = ("fein", "ats", "linkedin")
 _NAME_ALIAS_SOURCE = {"formd": "formd"}  # the alias source of the candidate's name, by source; default `name`
-# The 50 states, DC and the territories. "Berlin, DE" cannot be told from Delaware, so DE stays.
-US_STATES = frozenset("""
-AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI
-SC SD TN TX UT VT VA WA WV WI WY DC PR GU VI AS MP
-""".split())
-
-
 @dataclass(frozen=True)
 class Resolution:
     company_id: int
@@ -133,6 +126,10 @@ def company_state(conn: sqlite3.Connection, company_id: int) -> str | None:
 
 
 def _candidate_state(cand: Candidate) -> str | None:
+    """`cand.state` (matching only, never written) when the source gave one, else the state of the candidate's
+    non-`guess` hq drafts."""
+    if cand.state:
+        return cand.state
     return _one_state(d.value for d in cand.evidence if d.fact == "hq" and d.confidence != "guess")
 
 

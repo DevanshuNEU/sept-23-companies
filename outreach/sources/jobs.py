@@ -178,6 +178,9 @@ def run_discover(conn: sqlite3.Connection, sources: Sequence[Source], *, creates
             problems.append(f"{candidates} candidates failed in {name}")
         if len(report.failed) > candidates:
             problems.append(f"{len(report.failed) - candidates} posts failed in {name}")
+        lookups, lookup_errors = report.notes.get("fetches", 0), report.notes.get("fetch_errors", 0)
+        if lookups and lookup_errors == lookups:  # a blocked or broken SEC: every lookup failed, not a stray one
+            problems.append(f"{lookups} SEC lookups failed in {name}")
     if sources and len(errors) == len(sources):
         status = "failed"
     elif problems:

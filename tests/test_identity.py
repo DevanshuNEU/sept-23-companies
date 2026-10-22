@@ -144,6 +144,33 @@ class StrongMatchTest(Base):
                          (a.company_id, False, "name_state", "likely", 0))
         self.assertEqual(self.count("SELECT COUNT(*) FROM company"), 1)
 
+    def test_candidate_state_is_used_when_there_is_no_hq_draft(self):
+        a = self.resolve(cand("Acme, Inc.", state="NY", city="New York"))
+        same = Candidate(name="Acme Inc", domain=None, keys={}, source_ref="formd:1", state="NY")
+        b = self.resolve(same, source="formd", creates=False)
+        self.assertEqual((b.company_id, b.basis), (a.company_id, "name_state"))
+        other = Candidate(name="Acme Inc", domain=None, keys={}, source_ref="formd:2", state="TX")
+        self.assertEqual(find_company(self.conn, other, source_name="formd"),
+                         Match(strong=(), weak=((a.company_id, "name"),)))
+        self.assertIsNone(self.resolve(other, source="formd", creates=False))
+
+    def test_candidate_state_comes_before_an_hq_draft(self):
+        a = self.resolve(cand("Acme, Inc.", state="NY", city="New York"))
+        c = Candidate(name="Acme Inc", domain=None, keys={}, source_ref="formd:1", state="NY",
+                      evidence=(hq("Austin, TX"),))
+        self.assertEqual(find_company(self.conn, c, source_name="formd").strong, ((a.company_id, "name_state"),))
+
+    def test_candidate_state_is_never_written_as_evidence(self):
+        self.resolve(Candidate(name="Acme, Inc.", domain=None, keys={}, source_ref="lca:acme", state="NY"))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM evidence"), 0)
+        self.assertIsNone(company_state(self.conn, 1))
+
+    def test_a_guess_hq_draft_alone_gives_no_state(self):
+        a = self.resolve(cand("Acme, Inc.", state="NY", city="New York"))
+        c = cand("Acme Inc", state="NY", city="New York", ref="formd:1", hq_confidence="guess", kind="formd")
+        self.assertEqual(find_company(self.conn, c, source_name="formd").strong, ())
+        self.assertEqual(find_company(self.conn, c, source_name="formd").weak, ((a.company_id, "name"),))
+
     def test_conflicting_strong_keys_attach_first_and_raise_item(self):
         alpha = self.resolve(cand("Alpha", fein="111111111"))
         beta = self.resolve(cand("Beta", domain="beta.com"))

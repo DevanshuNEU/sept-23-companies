@@ -10,8 +10,10 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from outreach.identity import company_state, find_company
 from outreach.net import FetchError, SpacedClient
 from outreach.sources import formd
+from outreach.sources.base import Candidate
 from outreach.sources.formd import SEC_USER_AGENT, FormDSource, sec_headers
 from outreach.sources.jobs import run_discover, store_name_lookup
 from outreach.sources.lca import LcaSource
@@ -24,8 +26,8 @@ from tests.test_lca_source import FILES
 
 DATASET = Path(__file__).parent / "fixtures" / "formd"
 SEC = "https://data.sec.gov/submissions/CIK{}.json"
-ORCHARD, NIMBUS, MESH, CLEARPATH, FUND, UNKNOWN, LUMEN, _TEST, _GARBLED, TORONTO = (
-    f"{n:010d}" for n in range(1000001, 1000011))
+ORCHARD, NIMBUS, MESH, CLEARPATH, FUND, UNKNOWN, LUMEN, _TEST, _GARBLED, TORONTO, FLAG_FUND = (
+    f"{n:010d}" for n in range(1000001, 1000012))
 FETCHED = {ORCHARD, NIMBUS, MESH, CLEARPATH, UNKNOWN, LUMEN, TORONTO}  # every readable non-fund issuer
 
 
@@ -92,8 +94,14 @@ class ReadTest(unittest.TestCase):
         cands = by_cik(s)
         self.assertNotIn(FUND, cands)
         self.assertNotIn("Acme Growth Fund LP", {c.name for c in cands.values()})
-        self.assertEqual(s.summary()["funds_skipped"], 1)
+        self.assertEqual(s.summary()["funds_skipped"], 2)
         self.assertNotIn(SEC.format(FUND), s.client.inner.requests)
+
+    def test_a_filing_marked_as_a_pooled_investment_fund_is_skipped_whatever_its_industry(self):
+        """Flag Fund Ventures says "Other Technology" but ISPOOLEDINVESTMENTFUNDTYPE is true."""
+        s = make()
+        self.assertNotIn(FLAG_FUND, by_cik(s))
+        self.assertNotIn(SEC.format(FLAG_FUND), s.client.inner.requests)
 
     def test_only_the_primary_issuer_is_read(self):
         names = {c.name for c in make().discover()}
@@ -145,17 +153,26 @@ class ReadTest(unittest.TestCase):
 
     def test_candidate_shape(self):
         c = by_cik(make())[ORCHARD]
-        self.assertEqual((c.name, c.domain, c.keys, c.source_ref),
-                         ("Orchard, Inc.", None, {"formd_cik": ORCHARD}, f"formd:{ORCHARD}"))
+        self.assertEqual((c.name, c.domain, c.keys, c.source_ref, c.state),
+                         ("Orchard, Inc.", None, {"formd_cik": ORCHARD}, f"formd:{ORCHARD}", "NY"))
         hq = [e for e in c.evidence if e.fact == "hq"]
         self.assertEqual(len(hq), 1)
         self.assertEqual((hq[0].value, hq[0].confidence, hq[0].source_kind, hq[0].source_ref, hq[0].observed_on),
-                         ("New York, NY", "estimate", "formd", "0001000001-26-000002", "2026-09-10"))
+                         ("New York, NY", "guess", "formd", "0001000001-26-000002", "2026-09-10"))
         self.assertEqual({e.fact for e in c.evidence}, {"funding", "hq"})
 
-    def test_only_a_us_state_is_an_hq(self):
+    def test_only_a_us_state_is_a_state_or_an_hq(self):
         c = by_cik(make())[TORONTO]
         self.assertEqual({e.fact for e in c.evidence}, {"funding"})
+        self.assertIsNone(c.state)
+
+    def test_the_issuer_state_is_a_matching_state_and_its_hq_is_only_a_guess(self):
+        """The filing address is not headquarters, so the hq never counts for matching or for the company's state."""
+        for c in make().discover():
+            for e in c.evidence:
+                if e.fact == "hq":
+                    self.assertEqual(e.confidence, "guess", c.name)
+                    self.assertTrue(e.value.endswith(f", {c.state}") or e.value == c.state, c.name)
 
     def test_no_size_stage_or_headcount_is_ever_drafted(self):
         for c in make().discover():
@@ -171,7 +188,7 @@ class ReadTest(unittest.TestCase):
     def test_summary_counts(self):
         s = make()
         list(s.discover())
-        self.assertEqual(s.summary(), {"filings": 11, "issuers": 7, "funds_skipped": 1, "test_filings": 1,
+        self.assertEqual(s.summary(), {"filings": 12, "issuers": 7, "funds_skipped": 2, "test_filings": 1,
                                        "unreadable": 1, "fetches": 7, "fetch_errors": 0})
         list(s.discover(since="2026-09-30"))
         self.assertEqual(s.summary()["issuers"], 1)  # a pass reports itself, not a running total
@@ -432,6 +449,20 @@ class EndToEndTest(unittest.TestCase):
             "SELECT json_extract(detail, '$.basis') FROM event WHERE company_id = ? AND kind = 'matched'",
             (self.company("Nimbus Robotics, Inc."),)).fetchone()[0], "fein")
 
+    def test_a_fein_attach_leaves_the_companys_state_alone(self):
+        """Nimbus is CA by LCA; the TX filing address must not make its state ambiguous or change it."""
+        nimbus = self.company("Nimbus Robotics, Inc.")
+        self.assertEqual(company_state(self.conn, nimbus), "CA")
+        self.assertEqual(self.conn.execute(
+            "SELECT value, confidence FROM evidence WHERE company_id = ? AND fact = 'hq' AND source_kind = 'formd'",
+            (nimbus,)).fetchall()[0][1], "guess")
+        self.assertEqual(self.conn.execute(
+            "SELECT COUNT(*) FROM evidence WHERE company_id = ? AND fact = 'hq' AND confidence <> 'guess'",
+            (nimbus,)).fetchone()[0], 1)
+        # a later name-only candidate in CA still finds Nimbus by name and state
+        later = Candidate(name="Nimbus Robotics", domain=None, keys={}, source_ref="hn:nimbus", state="CA")
+        self.assertEqual(find_company(self.conn, later, source_name="hn").strong, ((nimbus, "name_state"),))
+
     def test_weak_name_other_state_is_dropped(self):
         """Mesh Systems Inc in TX against the CA company: no evidence, no item, no link, and it is counted."""
         self.assertEqual(self.fundings("Mesh Systems Inc"), [])
@@ -478,6 +509,26 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual((r.attached, r.created, r.evidence_added, r.items_raised, r.skipped_unmatched),
                          (2, 0, 0, 0, 5))
 
+    def test_a_run_where_every_sec_lookup_failed_is_partial_and_says_so(self):
+        conn = fresh_store()
+        run_discover(conn, [LcaSource(FILES)])
+        client = FakeClient(routes(**{c: FetchError("network", "blocked") for c in FETCHED}))
+        run_id, reports = run_discover(conn, [make(client)])
+        r = reports["formd"]
+        self.assertEqual((r.notes["fetches"], r.notes["fetch_errors"], r.error), (5, 5, ""))
+        row = conn.execute("SELECT status, error FROM job_run WHERE run_id = ?", (run_id,)).fetchone()
+        self.assertEqual(row["status"], "partial")
+        self.assertIn("5 SEC lookups failed", row["error"])
+        self.assertEqual(r.attached, 1)  # by name, Orchard still lands
+
+    def test_a_run_with_no_sec_lookups_is_not_a_failed_lookup_run(self):
+        conn = fresh_store()
+        run_discover(conn, [LcaSource(FILES)])
+        run_id, reports = run_discover(conn, [make(FakeClient({}), name_lookup=lambda key: False)])
+        self.assertEqual(reports["formd"].notes["fetches"], 0)
+        self.assertEqual(conn.execute("SELECT status, error FROM job_run WHERE run_id = ?", (run_id,)).fetchone()[:],
+                         ("ok", ""))
+
     def test_a_sec_fetch_error_keeps_the_filing_without_fein(self):
         conn = fresh_store()
         run_discover(conn, [LcaSource(FILES)])
@@ -487,8 +538,8 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(r.notes["fetch_errors"], 1)
         self.assertEqual(r.error, "")
         self.assertEqual((r.attached, r.skipped_unmatched), (1, 6))  # Orchard by name still works; Nimbus has no key
-        row = conn.execute("SELECT status, summary FROM job_run WHERE run_id = ?", (run_id,)).fetchone()
-        self.assertNotEqual(row["status"], "failed")
+        row = conn.execute("SELECT status, error, summary FROM job_run WHERE run_id = ?", (run_id,)).fetchone()
+        self.assertEqual((row["status"], row["error"]), ("ok", ""))  # one failure of five is a count, not a problem
         self.assertEqual(json.loads(row["summary"])["formd"]["notes"]["fetch_errors"], 1)
         self.assertEqual(conn.execute(
             "SELECT COUNT(*) FROM evidence WHERE fact = 'funding' AND company_id = ?",

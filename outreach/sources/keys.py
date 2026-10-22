@@ -3,6 +3,12 @@ import re
 from collections.abc import Sequence
 from typing import Literal
 
+# The 50 states, DC and the territories. "Berlin, DE" cannot be told from Delaware, so DE stays.
+US_STATES = frozenset("""
+AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI
+SC SD TN TX UT VT VA WA WV WI WY DC PR GU VI AS MP
+""".split())
+
 DomainKind = Literal["company", "free", "peo", "platform"]
 
 

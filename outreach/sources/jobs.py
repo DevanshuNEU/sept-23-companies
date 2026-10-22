@@ -16,11 +16,12 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 
 from outreach import identity
+from outreach.identity import StoreResolveReport, resolve_store
 from outreach.sources.base import Source
 from outreach.sources.tiers import register_source, set_work_tier
 from outreach.store import finish_job, iso_utc, mark_shared_key, start_job, transaction
 
-__all__ = ["SourceReport", "run_discover", "POST_TEXT_CAP"]
+__all__ = ["SourceReport", "run_discover", "run_resolve", "POST_TEXT_CAP"]
 
 POST_TEXT_CAP = 20_000
 
@@ -157,3 +158,20 @@ def run_discover(conn: sqlite3.Connection, sources: Sequence[Source], *, creates
         status = "ok"
     finish_job(conn, run_id, status, {name: asdict(r) for name, r in reports.items()}, "; ".join(problems))
     return run_id, reports
+
+
+def run_resolve(conn: sqlite3.Connection) -> tuple[int, StoreResolveReport]:
+    """The `resolve` job: `identity.resolve_store` under one `job_run`. Returns the run id and the report.
+
+    Status `ok`, or `partial` when any item failed (each is in the report and the error text). A pass that cannot run
+    at all is recorded `failed` with its error and the error is raised: never an empty report.
+    """
+    run_id = start_job(conn, "resolve")
+    try:
+        report = resolve_store(conn)
+    except BaseException as err:
+        finish_job(conn, run_id, "failed", {}, _describe(err))
+        raise
+    error = f"{len(report.failed)} failed: " + "; ".join(report.failed[:5]) if report.failed else ""
+    finish_job(conn, run_id, "partial" if report.failed else "ok", asdict(report), error)
+    return run_id, report

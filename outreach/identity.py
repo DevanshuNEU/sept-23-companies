@@ -39,8 +39,9 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from outreach.rules.rebuild import record_evidence
 from outreach.sources.base import Candidate
@@ -48,7 +49,8 @@ from outreach.sources.keys import classify_domain, normalize_fein, registrable_d
 from outreach.store import add_alias, append_event, is_shared_key, name_key, transaction, utcnow
 
 __all__ = ["BASES", "CONFIDENCE", "ITEM_CONFIDENCES", "MIN_NAME_KEY", "Resolution", "Match", "follow_merged",
-           "company_state", "find_company", "resolve_candidate", "raise_merge_candidate"]
+           "company_state", "find_company", "resolve_candidate", "raise_merge_candidate", "StoreResolveReport",
+           "resolve_store"]
 
 BASES = ("source_ref", "fein", "domain", "name_state", "ambiguous_repeat", "created")
 CONFIDENCE = {"source_ref": "certain", "fein": "certain", "domain": "strong", "name_state": "likely",
@@ -140,9 +142,17 @@ def _usable_fein(conn: sqlite3.Connection, cand: Candidate) -> str | None:
     return fein if fein and not is_shared_key(conn, "fein", fein) else None
 
 
-def _domain_shared(conn: sqlite3.Connection, domain: str) -> bool:
+def _shared_form(conn: sqlite3.Connection, domain: str) -> str | None:
+    """The shared_key domain that covers `domain`: the domain itself, else its registrable root; None when neither
+    is shared."""
+    if is_shared_key(conn, "domain", domain):
+        return domain
     root = registrable_domain(domain)
-    return is_shared_key(conn, "domain", domain) or (root is not None and is_shared_key(conn, "domain", root))
+    return root if root is not None and is_shared_key(conn, "domain", root) else None
+
+
+def _domain_shared(conn: sqlite3.Connection, domain: str) -> bool:
+    return _shared_form(conn, domain) is not None
 
 
 def _bare(domain: str | None) -> str | None:
@@ -498,3 +508,93 @@ def resolve_candidate(conn: sqlite3.Connection, cand: Candidate, *, source_name:
         evidence = record_evidence(conn, company_id, drafts, actor="source")
     return Resolution(company_id=company_id, created=created, basis=basis, confidence=CONFIDENCE[basis],
                       aliases_added=len(aliases), evidence_added=evidence, items_raised=items)
+
+
+@dataclass
+class StoreResolveReport:
+    pairs_raised: int = 0  # new `merge_candidate` items
+    size_checks_raised: int = 0  # new `size_check` items
+    failed: list[str] = field(default_factory=list)  # one entry per item that could not be written
+
+
+def _family_feins(conn: sqlite3.Connection, company_id: int) -> set[str]:
+    """Every valid non-shared FEIN alias of the company or of a company merged into it."""
+    return {key for (key,) in conn.execute(
+        "WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT c.company_id FROM company c "
+        "JOIN family f ON c.merged_into = f.id) "
+        "SELECT alias_key FROM company_alias WHERE source = 'fein' AND company_id IN (SELECT id FROM family)",
+        (company_id,)) if normalize_fein(key) == key and not is_shared_key(conn, "fein", key)}
+
+
+def _shared_count(conn: sqlite3.Connection, domain: str, holders: int) -> int:
+    """How many other employers use the shared domain: what the source that marked it saw (its reason starts
+    "<n> employers", large filers that were never imported included), at least the other stored holders."""
+    row = conn.execute("SELECT reason FROM shared_key WHERE kind = 'domain' AND value = ?", (domain,)).fetchone()
+    seen = re.match(r"(\d+) employers", row[0]) if row else None
+    return max(holders - 1, int(seen.group(1)) - 1 if seen else 0)
+
+
+def _describe(err: BaseException) -> str:
+    return f"{type(err).__name__}: {err}"
+
+
+def resolve_store(conn: sqlite3.Connection) -> StoreResolveReport:
+    """A pass over the stored companies with no source input (#31 Task 9). It never changes `merged_into`, never moves
+    a row and never hides a company: merging two stored companies is Devanshu's confirm action (#16).
+
+    (a) Two live companies (not merged, not removed) holding the same `domain` evidence, at a confidence above
+    `guess`, that is a company domain and not a shared key raise one `merge_candidate`, basis `domain` (confidence
+    strong), or `fein_conflict+domain` (weak) when each holds a valid FEIN and the two differ. Three or more holders
+    link through the lowest id, one item each, so the ambiguity stays bounded like a name tie. The pair rule is
+    `raise_merge_candidate`'s: a pair that has an item, open or resolved, gets no second one.
+
+    (b) Each live company holding a domain that is a shared key (any confidence; a subdomain counts through its
+    registrable root) raises one `size_check` item (`raised_by 'source'`, `evidence_key shared-domain:<domain>`,
+    reason naming the basis and the confidence): a subsidiary's size is its own and unknown, never the parent's.
+
+    Each item is its own transaction. One that fails is listed in `failed` and the pass goes on.
+    """
+    report = StoreResolveReport()
+    unshared: dict[str, set[int]] = {}
+    shared: dict[str, set[int]] = {}
+    for cid, value, confidence in conn.execute(
+            "SELECT e.company_id, e.value, e.confidence FROM evidence e JOIN company c USING (company_id) "
+            "WHERE e.fact = 'domain' AND c.merged_into IS NULL AND c.status <> 'removed' "
+            "ORDER BY e.company_id, e.evidence_id").fetchall():
+        domain = _bare(value)
+        form = _shared_form(conn, domain)
+        if form is not None:
+            shared.setdefault(form, set()).add(cid)
+        elif confidence != "guess" and classify_domain(domain) == "company":
+            unshared.setdefault(domain, set()).add(cid)
+    for domain, holders in sorted(unshared.items()):
+        anchor, *rest = sorted(holders)
+        for other in rest:
+            try:
+                with _atomic(conn):
+                    ours, theirs = _family_feins(conn, anchor), _family_feins(conn, other)
+                    if ours and theirs and not ours & theirs:
+                        basis, detail = ("fein_conflict+domain",
+                                         f"both hold the domain {domain}, but their FEINs differ "
+                                         f"({', '.join(sorted(ours))} and {', '.join(sorted(theirs))})")
+                    else:
+                        basis, detail = "domain", f"both hold the domain {domain}"
+                    report.pairs_raised += raise_merge_candidate(conn, anchor, other, basis, detail)
+            except (sqlite3.Error, ValueError, LookupError) as err:
+                report.failed.append(f"companies #{anchor} and #{other} ({domain}): {_describe(err)}")
+    for domain, holders in sorted(shared.items()):
+        for cid in sorted(holders):
+            try:
+                with _atomic(conn):
+                    name = conn.execute("SELECT name FROM company WHERE company_id = ?", (cid,)).fetchone()[0]
+                    others = _shared_count(conn, domain, len(holders))
+                    reason = (f"{name} (#{cid}). Basis shared_domain, confidence weak: shares {domain} with "
+                              f"{others} other employers: it may be a subsidiary; size unknown")
+                    cur = conn.execute(
+                        "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+                        "VALUES ('size_check', ?, ?, ?, 'source', ?) ON CONFLICT DO NOTHING",
+                        (cid, reason, f"shared-domain:{domain}", utcnow()))
+                    report.size_checks_raised += cur.rowcount
+            except (sqlite3.Error, ValueError, LookupError) as err:
+                report.failed.append(f"company #{cid} ({domain}): {_describe(err)}")
+    return report

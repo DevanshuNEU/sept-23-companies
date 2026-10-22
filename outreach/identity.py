@@ -18,11 +18,16 @@ What becomes one company:
 4. Two or more `name_state` hits and no FEIN or domain hit is ambiguous: no merge, one item against each hit
    (basis `ambiguous_name_state`), never a guess at the lower id. The company made for it writes its name keys
    weak, so it never becomes one more hit. A later ambiguous candidate with no usable FEIN attaches to the
-   lowest-id such company with its name key and state (basis `ambiguous_repeat`, `likely`, no new item): the
-   ambiguity adds one company, not one per candidate.
+   lowest-id such company with its name key and state (basis `ambiguous_repeat`, `likely`), and that company gets an
+   `ambiguous_name_state` item against each current hit it is not yet linked to: the ambiguity adds one company,
+   not one per candidate. A candidate with a usable FEIN or domain that matched nothing never takes the repeat (it
+   may be one more employer), and a non-creating source gets None instead. Merging the tie company into one of the
+   hits reopens the tie (the next name-only record makes a new tie company); resolving its items as not the same
+   keeps it.
 5. Weak matches never merge. With `creates` the candidate becomes a new company and one item is raised per weak
-   match; without, the result is None. A name key raises at most one name item, against its lowest-id live owner,
-   so the sixth company with one name raises one item, not five.
+   match; without, the result is None. A name key raises at most one name item: against the lowest-id live owner
+   in the candidate's state when there is one, else against the lowest-id owner. So the sixth company with one name
+   raises one item, not five.
 
 Every match states its basis and confidence: in the `Resolution`, in the company event (`created`, `matched` or
 `aliases_added`, which also lists the aliases written) and in every item's reason. Nothing is copied between
@@ -259,14 +264,13 @@ def _find(conn: sqlite3.Connection, cand: Candidate, source_name: str) -> tuple[
             kept.append(hit)
     ambiguous = []
     if len(kept) >= 2 and all(h.basis == "name_state" for h in kept):
-        repeat = None if fein else _ambiguous_repeat(conn, [h.key for h in kept], state)
-        if repeat is not None:
-            kept = [repeat]
-        else:
-            ambiguous = [_Hit(h.company_id, "ambiguous_name_state", h.key,
-                              f"the same name ({h.key}) and state ({state}) as {len(kept)} companies, so which one "
-                              "it is is unclear") for h in kept]
-            kept = []
+        # A usable FEIN or domain that matched nothing says this may be one more employer: its own company.
+        repeat = None if (fein or domain) else _ambiguous_repeat(conn, [h.key for h in kept], state)
+        ambiguous = [_Hit(h.company_id, "ambiguous_name_state", h.key,
+                          f"the same name ({h.key}) and state ({state}) as {len(kept)} companies, so which one "
+                          "it is is unclear") for h in kept]
+        # On a repeat the tie company is linked to every current hit (one item per pair, so most repeats raise none).
+        kept = [repeat] if repeat is not None else []
     return kept, _distinct(vetoed + ambiguous + weak, {h.company_id for h in kept})
 
 
@@ -435,6 +439,8 @@ def resolve_candidate(conn: sqlite3.Connection, cand: Candidate, *, source_name:
             raise ValueError(f"source {source_name!r} is not registered")
         strong, weak = _find(conn, cand, source_name)
         label = f"{source_name} record {cand.source_ref} ({cand.name})"
+        if strong and strong[0].basis == "ambiguous_repeat" and not creates:
+            return None  # a non-creating source never attaches on the tie company's guess
         if strong:
             first = strong[0]
             company_id, basis, created = first.company_id, first.basis, False

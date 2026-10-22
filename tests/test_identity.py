@@ -681,8 +681,8 @@ class ReviewRound2Test(Base):
         self.assertNotEqual(table_marks(self.conn)["company_name_key"], before["company_name_key"])
 
 
-class ReviewRound3Test(Base):
-    """Review round 3 of Task 7: ambiguity is bounded to one extra company. Each test was red before its fix."""
+class AmbiguityBase(Base):
+    """Helpers for the ambiguity tests: the FEIN-split "Acme Corp" TX pair and five name-only records."""
     sources = Base.sources + ("yc", "wf")
 
     def pair(self):
@@ -696,6 +696,10 @@ class ReviewRound3Test(Base):
 
     def pairs(self):
         return [(i["company_id"], int(i["evidence_key"])) for i in self.items()]
+
+
+class ReviewRound3Test(AmbiguityBase):
+    """Review round 3 of Task 7: ambiguity is bounded to one extra company. Each test was red before its fix."""
 
     def test_p1_ambiguity_adds_one_company_and_two_items(self):
         self.pair()
@@ -736,6 +740,7 @@ class ReviewRound3Test(Base):
         self.assertEqual((first.company_id, first.created), (3, True))
         keyed = self.resolve(cand("Acme Corp", fein="333333333", state="TX", ref="wf:k"), source="wf")
         self.assertEqual((keyed.company_id, keyed.created, keyed.basis), (4, True, "created"))
+        self.assertEqual(self.count("SELECT strong FROM company_name_key WHERE company_id = 4"), 0)
         again = self.resolve(cand("Acme Corp", state="TX", ref="hn:b"), source="hn")
         self.assertEqual((again.company_id, again.basis), (3, "ambiguous_repeat"))
 
@@ -748,6 +753,87 @@ class ReviewRound3Test(Base):
         self.assertEqual(self.pairs(), [(1, 2), (2, 3), (1, 3)])
         self.assertIn("Basis name,", items[1]["reason"])  # the one name item: the TX owner
         self.assertIn("Basis alias:name,", items[2]["reason"])  # the alias still belongs to #1
+
+
+class ReviewRound4Test(AmbiguityBase):
+    """Review round 4 of Task 7: holes in ambiguous_repeat. The I tests were red before their fix; the merge-order
+    tests pin behavior that already held."""
+
+    def tie(self):
+        """The P1 tie: the FEIN-split pair (1, 2) and the ambiguity company C (3)."""
+        self.pair()
+        c = self.resolve(cand("Acme Corp", state="TX", city="Dallas", kind="other", ref="hn:first"), source="hn")
+        self.assertEqual((c.company_id, c.created), (3, True))
+
+    def test_a_candidate_with_an_unmatched_domain_never_takes_the_repeat(self):  # I1
+        self.tie()
+        made = [self.resolve(cand("Acme Corp", state="TX", domain=d, kind="hn", ref=f"hn:{d}"), source="hn")
+                for d in ("acmetx.com", "acme-robots.io")]
+        self.assertEqual([(m.company_id, m.created, m.basis) for m in made],
+                         [(4, True, "created"), (5, True, "created")])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM evidence WHERE fact = 'domain' AND company_id = 3"), 0)
+        self.assertEqual([tuple(r) for r in self.conn.execute(
+            "SELECT company_id, strong FROM company_name_key ORDER BY company_id")],
+            [(1, 1), (2, 1), (3, 0), (4, 0), (5, 0)])
+
+    def test_a_non_creating_source_never_takes_the_repeat(self):  # I2
+        self.tie()
+        funding = EvidenceDraft("funding", json.dumps({"amount_usd": 1000000, "filed_on": "2026-03-01",
+                                                       "kind": "form_d"}, sort_keys=True), "confirmed", "formd",
+                                "0001-26-000009", observed_on="2026-03-01")
+        before = table_marks(self.conn)
+        self.assertIsNone(self.resolve(cand("Acme Corp", state="TX", kind="formd", ref="formd:acme",
+                                            evidence=(funding,)), source="formd", creates=False))
+        self.assertEqual(table_marks(self.conn), before)
+
+    def test_a_repeat_links_the_tie_company_to_every_current_hit(self):  # I3
+        self.tie()
+        third = self.resolve(cand("Acme Corp", fein="333333333", state="TX", ref="lca:acmecorp#333333333"))
+        self.assertEqual((third.company_id, third.created), (4, True))
+        self.assertEqual(self.count("SELECT strong FROM company_name_key WHERE company_id = 4"), 1)
+        self.assertEqual(find_company(self.conn, cand("Acme Corp", state="TX", ref="yc:x"), source_name="yc"),
+                         Match(strong=((3, "ambiguous_repeat"),),
+                               weak=((1, "ambiguous_name_state"), (2, "ambiguous_name_state"),
+                                     (4, "ambiguous_name_state"))))
+        repeat = self.resolve(cand("Acme Corp", state="TX", ref="yc:x"), source="yc")
+        self.assertEqual((repeat.company_id, repeat.basis, repeat.items_raised), (3, "ambiguous_repeat", 1))
+        self.assertIn((3, 4), self.pairs())
+        self.assertIn("Basis ambiguous_name_state", self.items()[-1]["reason"])
+        later = [self.resolve(cand("Acme Corp", state="TX", ref=f"wf:{n}"), source="wf") for n in range(3)]
+        self.assertEqual([(r.company_id, r.items_raised) for r in later], [(3, 0)] * 3)
+
+    def merge(self, old, new):
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
+                          "WHERE company_id = ?", (new, old))
+
+    def run_all(self):
+        self.pair()
+        for src, c in self.name_only():
+            self.resolve(c, source=src)
+
+    def test_tie_company_merged_into_a_hit_reopens_the_tie_once(self):  # M5
+        self.run_all()
+        self.merge(3, 1)
+        nxt = self.resolve(cand("Acme Corp", state="TX", ref="yc:after"), source="yc")
+        self.assertEqual((nxt.company_id, nxt.created), (4, True))
+        self.run_all()
+        before = table_marks(self.conn)
+        self.run_all()
+        self.resolve(cand("Acme Corp", state="TX", ref="yc:after"), source="yc")
+        self.assertEqual(table_marks(self.conn), before)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM company"), 4)
+
+    def test_a_hit_merged_into_the_tie_company_keeps_it(self):  # M5
+        self.run_all()
+        self.merge(1, 3)
+        nxt = self.resolve(cand("Acme Corp", state="TX", ref="yc:after"), source="yc")
+        self.assertEqual((nxt.company_id, nxt.created, nxt.basis), (3, False, "ambiguous_repeat"))
+        self.run_all()
+        before = table_marks(self.conn)
+        self.run_all()
+        self.resolve(cand("Acme Corp", state="TX", ref="yc:after"), source="yc")
+        self.assertEqual(table_marks(self.conn), before)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM company"), 3)
 
 
 if __name__ == "__main__":

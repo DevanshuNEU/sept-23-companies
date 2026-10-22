@@ -6,24 +6,53 @@ company; a company with no row (an HN post, a by-hand company, anything no tiere
 """
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 
-from outreach.store import append_event, utcnow
+from outreach.store import append_event, transaction, utcnow
 
 __all__ = ["set_work_tier", "effective_tier", "promote", "register_source"]
 
 
+@contextlib.contextmanager
+def _atomic(conn: sqlite3.Connection):
+    """The row write and its event land together: a transaction of their own, or a savepoint inside the caller's."""
+    if not conn.in_transaction:
+        with transaction(conn):
+            yield
+        return
+    conn.execute("SAVEPOINT work_tier_write")
+    try:
+        yield
+    except BaseException:
+        if conn.in_transaction:  # SQLite may have rolled back the whole transaction already
+            conn.execute("ROLLBACK TO work_tier_write")
+            conn.execute("RELEASE work_tier_write")
+        raise
+    conn.execute("RELEASE work_tier_write")
+
+
 def set_work_tier(conn: sqlite3.Connection, company_id: int, tier: int, reason: str, source_version: str) -> bool:
     """Set the tier a source assigned. Writes only when the tier or the reason changed (a re-run changes nothing,
-    not even `set_at`); returns whether it wrote. `promoted` is never touched. `sqlite3.IntegrityError` for a tier
-    outside 1 to 3 or a blank reason."""
-    cur = conn.execute(
-        "INSERT INTO work_tier(company_id, tier, reason, source_version, set_at) VALUES (?, ?, ?, ?, ?) "
-        "ON CONFLICT(company_id) DO UPDATE SET tier = excluded.tier, reason = excluded.reason, "
-        "source_version = excluded.source_version, set_at = excluded.set_at "
-        "WHERE work_tier.tier != excluded.tier OR work_tier.reason != excluded.reason",
-        (company_id, tier, reason, source_version, utcnow()))
-    return cur.rowcount > 0
+    not even `set_at`); returns whether it wrote. A write appends a `tier_changed` event (actor `source`) holding the
+    old tier (None for a first one), the new tier, the reason and the source version. `promoted` is never touched.
+    `sqlite3.IntegrityError` for a tier outside 1 to 3 or a blank reason. The row and its event are one unit: a
+    transaction when none is open, else a savepoint in the caller's."""
+    with _atomic(conn):
+        old = conn.execute("SELECT tier FROM work_tier WHERE company_id = ?", (company_id,)).fetchone()
+        cur = conn.execute(
+            "INSERT INTO work_tier(company_id, tier, reason, source_version, set_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(company_id) DO UPDATE SET tier = excluded.tier, reason = excluded.reason, "
+            "source_version = excluded.source_version, set_at = excluded.set_at "
+            "WHERE work_tier.tier != excluded.tier OR work_tier.reason != excluded.reason",
+            (company_id, tier, reason, source_version, utcnow()))
+        if cur.rowcount == 0:
+            return False
+        append_event(conn, entity="company", kind="tier_changed", actor="source", entity_id=company_id,
+                     company_id=company_id,
+                     detail={"from": old["tier"] if old else None, "to": tier, "reason": reason,
+                             "version": source_version})
+        return True
 
 
 def effective_tier(conn: sqlite3.Connection, company_id: int) -> int:
@@ -37,16 +66,17 @@ def effective_tier(conn: sqlite3.Connection, company_id: int) -> int:
 def promote(conn: sqlite3.Connection, company_id: int, actor: str) -> None:
     """Work this company as tier 1 whatever a source says. Sets `promoted` and appends one event; promoting a
     company already promoted writes nothing. A company with no tier row gets one (tier 1, reason naming the actor),
-    so a later source run that says tier 3 still cannot take the promotion away."""
+    so a later source run that says tier 3 still cannot take the promotion away. Atomic like `set_work_tier`."""
     now = utcnow()
-    conn.execute(
-        "INSERT INTO work_tier(company_id, tier, promoted, reason, source_version, set_at) "
-        "VALUES (?, 1, 0, ?, '', ?) ON CONFLICT(company_id) DO NOTHING",
-        (company_id, f"promoted by {actor}", now))
-    cur = conn.execute("UPDATE work_tier SET promoted = 1 WHERE company_id = ? AND promoted = 0", (company_id,))
-    if cur.rowcount:
-        append_event(conn, entity="company", kind="promoted", actor=actor, entity_id=company_id,
-                     company_id=company_id)
+    with _atomic(conn):
+        conn.execute(
+            "INSERT INTO work_tier(company_id, tier, promoted, reason, source_version, set_at) "
+            "VALUES (?, 1, 0, ?, '', ?) ON CONFLICT(company_id) DO NOTHING",
+            (company_id, f"promoted by {actor}", now))
+        cur = conn.execute("UPDATE work_tier SET promoted = 1 WHERE company_id = ? AND promoted = 0", (company_id,))
+        if cur.rowcount:
+            append_event(conn, entity="company", kind="promoted", actor=actor, entity_id=company_id,
+                         company_id=company_id)
 
 
 def register_source(conn: sqlite3.Connection, name: str, version: str, run_id: int) -> None:

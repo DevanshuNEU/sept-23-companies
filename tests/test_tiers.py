@@ -1,9 +1,11 @@
 """Work tiers (#31 Task 8): the stored tier, the effective tier and a promotion no later run takes back."""
+import json
 import sqlite3
 import unittest
+from unittest import mock
 
 from outreach.sources.tiers import effective_tier, promote, register_source, set_work_tier
-from outreach.store import start_job
+from outreach.store import start_job, transaction
 from tests.storetest import fresh_store, seed_company
 
 
@@ -29,6 +31,49 @@ class TierTest(unittest.TestCase):
         self.assertTrue(set_work_tier(self.conn, self.company, 1, "low staffing risk", "lca-1-bbbb"))
         self.assertEqual(self.row()["reason"], "low staffing risk")
 
+    def tier_events(self):
+        return [(r["actor"], r["entity"], r["entity_id"], json.loads(r["detail"])) for r in self.conn.execute(
+            "SELECT * FROM event WHERE kind = 'tier_changed' AND company_id = ? ORDER BY event_id", (self.company,))]
+
+    def test_a_changed_tier_appends_one_event(self):
+        set_work_tier(self.conn, self.company, 3, "excluded", "v1")
+        self.assertEqual(self.tier_events(), [("source", "company", self.company, {
+            "from": None, "to": 3, "reason": "excluded", "version": "v1"})])
+        set_work_tier(self.conn, self.company, 1, "cleared", "v2")
+        events = self.tier_events()
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[1][3], {"from": 3, "to": 1, "reason": "cleared", "version": "v2"})
+
+    def test_an_unchanged_rerun_appends_no_event(self):
+        set_work_tier(self.conn, self.company, 3, "excluded", "v1")
+        set_work_tier(self.conn, self.company, 3, "excluded", "v2")
+        self.assertEqual(len(self.tier_events()), 1)
+
+    def test_set_work_tier_alone_is_atomic(self):
+        with mock.patch("outreach.sources.tiers.append_event", side_effect=sqlite3.OperationalError("disk")):
+            with self.assertRaises(sqlite3.OperationalError):
+                set_work_tier(self.conn, self.company, 3, "excluded", "v1")
+        self.assertIsNone(self.row())
+        self.assertFalse(self.conn.in_transaction)
+
+    def test_promote_alone_is_atomic(self):
+        with mock.patch("outreach.sources.tiers.append_event", side_effect=sqlite3.OperationalError("disk")):
+            with self.assertRaises(sqlite3.OperationalError):
+                promote(self.conn, self.company, "devanshu")
+        self.assertIsNone(self.row())  # neither the inserted row nor the flag stays
+        self.assertFalse(self.conn.in_transaction)
+
+    def test_inside_a_callers_transaction_a_failure_undoes_only_itself(self):
+        other = seed_company(self.conn, "Other")
+        with transaction(self.conn):
+            set_work_tier(self.conn, other, 2, "kept", "v1")
+            with mock.patch("outreach.sources.tiers.append_event", side_effect=sqlite3.OperationalError("disk")):
+                with self.assertRaises(sqlite3.OperationalError):
+                    set_work_tier(self.conn, self.company, 3, "lost", "v1")
+        self.assertIsNone(self.row())
+        self.assertEqual(self.conn.execute("SELECT tier FROM work_tier WHERE company_id = ?", (other,)).fetchone()[0],
+                         2)
+
     def test_a_tier_outside_1_to_3_or_a_blank_reason_is_refused(self):
         with self.assertRaises(sqlite3.IntegrityError):
             set_work_tier(self.conn, self.company, 4, "why", "v")
@@ -50,15 +95,15 @@ class TierTest(unittest.TestCase):
         set_work_tier(self.conn, self.company, 3, "excluded again", "v2")
         self.assertEqual(self.row()["promoted"], 1)
         self.assertEqual(effective_tier(self.conn, self.company), 1)
-        events = self.conn.execute("SELECT kind, actor, company_id FROM event WHERE company_id = ?",
-                                   (self.company,)).fetchall()
+        events = self.conn.execute("SELECT kind, actor, company_id FROM event WHERE company_id = ? "
+                                   "AND kind = 'promoted'", (self.company,)).fetchall()
         self.assertEqual([tuple(e) for e in events], [("promoted", "devanshu", self.company)])
 
     def test_promote_twice_appends_one_event(self):
         set_work_tier(self.conn, self.company, 3, "excluded", "v1")
         promote(self.conn, self.company, "devanshu")
         promote(self.conn, self.company, "devanshu")
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM event").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM event WHERE kind = 'promoted'").fetchone()[0], 1)
 
     def test_promote_before_any_source_ran_survives_a_tier_3(self):
         promote(self.conn, self.company, "devanshu")

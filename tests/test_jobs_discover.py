@@ -78,6 +78,8 @@ class DiscoverTest(unittest.TestCase):
                          (1, 1, 0, ""))
         summary = json.loads(job(self.conn)["summary"])
         self.assertEqual(summary, {"fake": asdict(report)})
+        self.assertEqual(summary["fake"]["version"], "fake-1")
+        self.assertEqual(report.version, "fake-1")
 
     def test_since_reaches_the_source(self):
         source = FakeSource("fake", [])
@@ -154,11 +156,13 @@ class DiscoverTest(unittest.TestCase):
         self.assertEqual(report.error, "")
         self.assertEqual(count(self.conn, "company"), 2)
         self.assertEqual(job(self.conn)["status"], "partial")
+        self.assertEqual(job(self.conn)["error"], "1 candidates failed in fake")
 
     def test_a_value_error_from_a_candidate_is_listed_and_the_run_goes_on(self):
         source = FakeSource("fake", [cand("Acme Robotics", ""), cand("Birch Labs", "f:2")])
         _, reports = run_discover(self.conn, [source])
         self.assertEqual(len(reports["fake"].failed), 1)
+        self.assertTrue(reports["fake"].failed[0].startswith("Acme Robotics: "))  # no source_ref: listed by name
         self.assertEqual(count(self.conn, "company"), 1)
 
     def test_a_failed_tier_write_rolls_the_whole_candidate_back(self):
@@ -205,6 +209,89 @@ class DiscoverTest(unittest.TestCase):
         rows = self.conn.execute("SELECT c.name, t.tier, t.reason, t.source_version FROM work_tier t "
                                  "JOIN company c USING (company_id)").fetchall()
         self.assertEqual([tuple(r) for r in rows], [("Acme Robotics", 3, "excluded: body shop", "fake-1")])
+
+    def test_a_summary_failure_after_a_clean_discover_is_a_source_error(self):
+        class BadSummary(FakeSource):
+            def summary(self):
+                raise KeyError("summary lost")
+
+        _, reports = run_discover(self.conn, [BadSummary("fake", [cand("Acme Robotics", "f:1")])])
+        self.assertIn("summary lost", reports["fake"].error)
+        self.assertEqual(count(self.conn, "company"), 1)  # the candidate landed before the summary was asked for
+        self.assertEqual(job(self.conn)["status"], "failed")
+
+    def test_a_summary_failure_hides_nothing_when_discover_already_raised(self):
+        class BadSummary(FakeSource):
+            def summary(self):
+                raise KeyError("summary lost")
+
+        _, reports = run_discover(self.conn, [BadSummary("fake", [RuntimeError("feed went away")])])
+        self.assertIn("feed went away", reports["fake"].error)
+        self.assertNotIn("summary lost", reports["fake"].error)
+
+    def test_same_name_sources_one_failing_is_partial_not_failed(self):
+        bad = FakeSource("dup", [OSError("first broke")])
+        good = FakeSource("dup", [cand("Acme Robotics", "d:1")])
+        _, reports = run_discover(self.conn, [bad, good])
+        self.assertEqual(list(reports), ["dup"])
+        self.assertEqual(job(self.conn)["status"], "partial")
+        self.assertEqual(count(self.conn, "company"), 1)
+
+    def test_same_name_sources_both_failing_keep_both_errors(self):
+        _, reports = run_discover(self.conn, [FakeSource("dup", [OSError("first broke")]),
+                                              FakeSource("dup", [OSError("second broke")])])
+        self.assertIn("first broke", reports["dup"].error)
+        self.assertIn("second broke", reports["dup"].error)
+        self.assertEqual(job(self.conn)["status"], "failed")
+        self.assertIn("first broke", job(self.conn)["error"])
+        self.assertIn("second broke", job(self.conn)["error"])
+
+    def test_a_source_that_errors_midway_keeps_its_companies_and_writes_its_posts_on_a_rerun(self):
+        post = PostRecord("hn:acme", "https://example.com/p1", None, "Acme hires", False)
+        broken = PostFake("hn", [cand("Acme Robotics", "hn:acme"), RuntimeError("feed went away")], [post])
+        _, reports = run_discover(self.conn, [broken])
+        self.assertEqual((reports["hn"].candidates, count(self.conn, "company")), (1, 1))
+        self.assertEqual(reports["hn"].posts, 0)
+        self.assertEqual(count(self.conn, "company_post"), 0)
+        self.assertEqual(job(self.conn)["status"], "failed")
+        whole = PostFake("hn", [cand("Acme Robotics", "hn:acme")], [post])
+        _, again = run_discover(self.conn, [whole])
+        self.assertEqual((again["hn"].posts, again["hn"].attached, count(self.conn, "company")), (1, 1, 1))
+
+    def test_a_type_error_from_a_candidate_ends_that_source_with_an_error_and_the_others_run(self):
+        real = identity.resolve_candidate
+
+        def broken(conn, c, **kw):
+            if c.source_ref == "a:2":
+                raise TypeError("bad shape")
+            return real(conn, c, **kw)
+
+        first = FakeSource("first", [cand("Acme Robotics", "a:1"), cand("Birch Labs", "a:2"),
+                                     cand("Cedar Works", "a:3")])
+        second = FakeSource("second", [cand("Delta Systems", "b:1")])
+        with mock.patch.object(identity, "resolve_candidate", broken):
+            _, reports = run_discover(self.conn, [first, second])
+        self.assertIn("bad shape", reports["first"].error)
+        self.assertEqual(reports["first"].candidates, 2)
+        self.assertEqual(reports["second"].error, "")
+        self.assertEqual(sorted(r[0] for r in self.conn.execute("SELECT name FROM company")),
+                         ["Acme Robotics", "Delta Systems"])
+        self.assertEqual(job(self.conn)["status"], "partial")
+
+    def test_a_type_error_from_the_tier_call_ends_that_source_with_an_error(self):
+        class BadTier(FakeSource):
+            def work_tier(self, ref):
+                raise TypeError("tier lookup broke")
+
+        _, reports = run_discover(self.conn, [BadTier("fake", [cand("Acme Robotics", "f:1")])])
+        self.assertIn("tier lookup broke", reports["fake"].error)
+        self.assertEqual(count(self.conn, "company"), 0)  # the candidate's transaction rolled back
+        self.assertEqual(job(self.conn)["status"], "failed")
+
+    def test_creates_true_overrides_a_source_that_sets_false(self):
+        source = FakeSource("fake", [cand("Birch Labs", "f:1")], creates_companies=False)
+        _, reports = run_discover(self.conn, [source], creates={"fake": True})
+        self.assertEqual((reports["fake"].created, count(self.conn, "company")), (1, 1))
 
 
 class LcaFixtureTest(unittest.TestCase):
@@ -319,8 +406,11 @@ class PostsTest(unittest.TestCase):
         with mock.patch.object(identity, "resolve_candidate", flaky):
             _, reports = run_discover(self.conn, [source])
         self.assertEqual(reports["hn"].posts, 2)
-        # only the failed candidate is listed: posts of it and of an unknown ref are skipped, not attempted
-        self.assertEqual(len(reports["hn"].failed), 1)
+        # the failed candidate is listed once; its post is skipped. A post of a ref never yielded is listed too.
+        self.assertEqual(len(reports["hn"].failed), 2)
+        self.assertTrue(any(f.startswith("hn:birch: ") for f in reports["hn"].failed))
+        self.assertIn("post https://news.ycombinator.com/item?id=4: unknown source_ref", reports["hn"].failed)
+        self.assertEqual(job(self.conn)["status"], "partial")
         self.assertEqual(self.posts(), [
             ("https://news.ycombinator.com/item?id=1", "Acme Robotics", 1, "2026-10-01T12:00:00Z",
              "Acme Robotics: email me at jobs@acme.io", "hn"),
@@ -345,6 +435,16 @@ class PostsTest(unittest.TestCase):
         run_discover(self.conn, [source])
         self.assertEqual(job(self.conn)["status"], "partial")
         self.assertEqual(len(self.posts()), 1)
+
+    def test_a_post_time_that_cannot_be_read_is_listed_and_the_others_still_land(self):
+        source = PostFake("hn", [cand("Acme Robotics", "hn:acme")],
+                          [PostRecord("hn:acme", "https://example.com/bad", "not a time", "x", False),
+                           PostRecord("hn:acme", "https://example.com/ok", None, "fine", False)])
+        _, reports = run_discover(self.conn, [source])
+        self.assertEqual(len(reports["hn"].failed), 1)
+        self.assertIn("https://example.com/bad", reports["hn"].failed[0])
+        self.assertEqual(len(self.posts()), 1)
+        self.assertEqual(job(self.conn)["error"], "1 posts failed in hn")
 
     def test_an_unmatched_candidate_of_a_no_create_source_writes_no_post(self):
         source = PostFake("hn", [cand("Birch Labs", "hn:birch")],

@@ -4,6 +4,10 @@ One `job_run` row of job `discover`. A source that raises is an error in its own
 (error is not empty: a source that fails before yielding anything is never "0 candidates, ok"). A candidate that
 fails on the store or on its own data is listed in `failed` and the run goes on. Each candidate is one transaction:
 its company, aliases, evidence, work tier and source link land together or not at all.
+
+A source that errors partway keeps the companies it already resolved, and its posts are not written until a re-run:
+`posts()` describes a finished pass. `source.last_run_id` names the latest run that used the source, so it changes on
+every re-run by design; the table holds one row per source, not a history.
 """
 from __future__ import annotations
 
@@ -32,7 +36,11 @@ class SourceReport:
     posts: int = 0
     failed: list[str] = field(default_factory=list)
     error: str = ""
+    version: str = ""  # the source version this run used (also in `source.version`)
     notes: dict[str, int] = field(default_factory=dict)  # the source's own summary(), such as the LCA fy_mismatch
+
+
+POST_FAILURE = "post "  # a `failed` entry for a post starts with this; a candidate's starts with its source_ref
 
 
 def _describe(err: BaseException) -> str:
@@ -43,6 +51,7 @@ def _discover_one(conn: sqlite3.Connection, source: Source, run_id: int, creates
                   report: SourceReport) -> None:
     """Everything for one source; raises on a source-level failure (the caller records it)."""
     register_source(conn, source.name, source.version, run_id)
+    report.version = source.version
     shared = getattr(source, "shared_keys", None)
     if shared is not None:
         keys = shared()
@@ -51,9 +60,12 @@ def _discover_one(conn: sqlite3.Connection, source: Source, run_id: int, creates
                 mark_shared_key(conn, key.kind, key.value, key.reason)
     tier_of = getattr(source, "work_tier", None)
     resolved: dict[str, int] = {}  # source_ref -> company id, for the candidates that resolved
+    yielded: set[str] = set()
+    in_flight = True  # an error is on its way out unless the loop finishes
     try:
         for cand in source.discover(since):
             report.candidates += 1
+            yielded.add(cand.source_ref)
             try:
                 with transaction(conn):
                     res = identity.resolve_candidate(conn, cand, source_name=source.name, creates=creates)
@@ -62,7 +74,7 @@ def _discover_one(conn: sqlite3.Connection, source: Source, run_id: int, creates
                         if tier is not None:
                             set_work_tier(conn, res.company_id, tier[0], tier[1], source.version)
             except (sqlite3.Error, ValueError) as err:
-                report.failed.append(f"{cand.source_ref}: {err}")
+                report.failed.append(f"{cand.source_ref or cand.name}: {err}")
                 continue
             if res is None:
                 report.skipped_unmatched += 1
@@ -72,24 +84,31 @@ def _discover_one(conn: sqlite3.Connection, source: Source, run_id: int, creates
             report.attached += not res.created
             report.items_raised += res.items_raised
             report.evidence_added += res.evidence_added
+        in_flight = False
     finally:
         summary = getattr(source, "summary", None)
         if summary is not None:
             try:
                 report.notes = dict(summary())
-            except Exception:  # the load that failed is the error already being recorded
-                pass
+            except Exception:
+                if not in_flight:  # a clean pass whose summary fails is a source error; never hide it
+                    raise
+                # else the failure already on its way out is the one to report
     posts = getattr(source, "posts", None)
     if posts is not None:
-        _write_posts(conn, source.name, posts(), resolved, report)
+        _write_posts(conn, source.name, posts(), resolved, yielded, report)
 
 
-def _write_posts(conn: sqlite3.Connection, source_name: str, posts, resolved: dict[str, int],
+def _write_posts(conn: sqlite3.Connection, source_name: str, posts, resolved: dict[str, int], yielded: set[str],
                  report: SourceReport) -> None:
-    """One `company_post` row per post of a candidate that resolved; a post seen before adds nothing."""
+    """One `company_post` row per post of a candidate that resolved; a post seen before adds nothing. A post of a
+    candidate that failed or went unmatched is skipped (the candidate is already counted); a post whose
+    `source_ref` was never yielded is listed in `failed`."""
     for post in posts:
         company_id = resolved.get(post.source_ref)
         if company_id is None:
+            if post.source_ref not in yielded:
+                report.failed.append(f"{POST_FAILURE}{post.url}: unknown source_ref")
             continue
         try:
             posted_at = iso_utc(post.posted_at) if post.posted_at else None
@@ -98,7 +117,7 @@ def _write_posts(conn: sqlite3.Connection, source_name: str, posts, resolved: di
                 "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(source_name, url) DO NOTHING",
                 (company_id, source_name, post.url, posted_at, post.text[:POST_TEXT_CAP], int(bool(post.asks_email))))
         except (sqlite3.Error, ValueError) as err:
-            report.failed.append(f"post {post.url}: {err}")
+            report.failed.append(f"{POST_FAILURE}{post.url}: {err}")
             continue
         report.posts += cur.rowcount
 
@@ -113,20 +132,28 @@ def run_discover(conn: sqlite3.Connection, sources: Sequence[Source], *, creates
     """
     run_id = start_job(conn, "discover")
     reports: dict[str, SourceReport] = {}
+    errors: list[tuple[str, str]] = []  # one per source that errored, in run order (names may repeat)
     for source in sources:
         report = reports.setdefault(source.name, SourceReport())
         may_create = (creates or {}).get(source.name, getattr(source, "creates_companies", True))
         try:
             _discover_one(conn, source, run_id, may_create, since, report)
         except Exception as err:  # a source failing must not stop the others; it is reported, never swallowed
-            report.error = _describe(err)
-    errored = {name: r.error for name, r in reports.items() if r.error}
-    if sources and len(errored) == len(reports):
+            text = _describe(err)
+            report.error = "; ".join(t for t in (report.error, text) if t)
+            errors.append((source.name, text))
+    problems = [f"{name}: {text}" for name, text in errors]
+    for name, report in reports.items():
+        candidates = sum(not f.startswith(POST_FAILURE) for f in report.failed)
+        if candidates:
+            problems.append(f"{candidates} candidates failed in {name}")
+        if len(report.failed) > candidates:
+            problems.append(f"{len(report.failed) - candidates} posts failed in {name}")
+    if sources and len(errors) == len(sources):
         status = "failed"
-    elif errored or any(r.failed for r in reports.values()):
+    elif problems:
         status = "partial"
     else:
         status = "ok"
-    finish_job(conn, run_id, status, {name: asdict(r) for name, r in reports.items()},
-               "; ".join(f"{name}: {text}" for name, text in errored.items()))
+    finish_job(conn, run_id, status, {name: asdict(r) for name, r in reports.items()}, "; ".join(problems))
     return run_id, reports

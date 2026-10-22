@@ -12,7 +12,7 @@ every re-run by design; the table holds one row per source, not a history.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 
 from outreach import identity
@@ -21,7 +21,7 @@ from outreach.sources.base import Source, describe_error
 from outreach.sources.tiers import register_source, set_work_tier
 from outreach.store import finish_job, iso_utc, mark_shared_key, start_job, transaction
 
-__all__ = ["SourceReport", "run_discover", "run_resolve", "POST_TEXT_CAP"]
+__all__ = ["SourceReport", "run_discover", "run_resolve", "store_name_lookup", "POST_TEXT_CAP"]
 
 POST_TEXT_CAP = 20_000
 
@@ -41,6 +41,35 @@ class SourceReport:
     notes: dict[str, int] = field(default_factory=dict)  # the source's own summary(), such as the LCA fy_mismatch
 
 
+_RAW_ALIAS_SOURCES = ("fein", "ats", "linkedin")  # aliases that are not names
+_MIN_RELATED = identity.MIN_NAME_KEY
+
+
+def store_name_lookup(conn: sqlite3.Connection) -> Callable[[str], bool]:
+    """A `name_lookup` for sources that fetch more about an issuer only when the store might know it (Form D).
+
+    True when a stored name key (a `company_name_key` row, or an alias that is a name) equals the key, is a prefix
+    of it ("nimbusrobotics" for "nimbusroboticsholdings": the SEC name often adds a word) or starts with it
+    ("orchardlabs" for "orchard"). A key under 4 characters never matches, as in identity. A false yes costs one
+    request; a false no would lose the FEIN path, so this errs wide. It reads the store at each call, so companies
+    added while the source runs count.
+    """
+    def lookup(key: str) -> bool:
+        if len(key) < _MIN_RELATED:
+            return False
+        prefixes = [key[:n] for n in range(_MIN_RELATED, len(key) + 1)]
+        marks = ", ".join("?" for _ in prefixes)
+        raw = ", ".join("?" for _ in _RAW_ALIAS_SOURCES)
+        upper = key + "~"  # above every character a name key holds ([a-z0-9])
+        return conn.execute(
+            f"SELECT 1 FROM company_name_key WHERE name_key IN ({marks}) OR (name_key >= ? AND name_key < ?) "
+            f"UNION ALL SELECT 1 FROM company_alias WHERE source NOT IN ({raw}) "
+            f"AND (alias_key IN ({marks}) OR (alias_key >= ? AND alias_key < ?)) LIMIT 1",
+            (*prefixes, key, upper, *_RAW_ALIAS_SOURCES, *prefixes, key, upper)).fetchone() is not None
+
+    return lookup
+
+
 POST_FAILURE = "post "  # a `failed` entry for a post starts with this; a candidate's starts with its source_ref
 
 
@@ -49,6 +78,9 @@ def _discover_one(conn: sqlite3.Connection, source: Source, run_id: int, creates
     """Everything for one source; raises on a source-level failure (the caller records it)."""
     register_source(conn, source.name, source.version, run_id)
     report.version = source.version
+    bind = getattr(source, "bind_name_lookup", None)
+    if bind is not None:
+        bind(store_name_lookup(conn))
     shared = getattr(source, "shared_keys", None)
     if shared is not None:
         keys = shared()

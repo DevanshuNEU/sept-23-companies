@@ -52,12 +52,15 @@ wordpress.com squarespace.com
 lever.co greenhouse.io ashbyhq.com workable.com bamboohr.com smartrecruiters.com jobvite.com icims.com
 myworkdayjobs.com workday.com recruitee.com breezy.hr teamtailor.com personio.de personio.com wellfound.com
 angel.co indeed.com glassdoor.com welcometothejungle.com
+vercel.app netlify.app herokuapp.com pages.dev web.app firebaseapp.com appspot.com webflow.io myshopify.com
+framer.website carrd.co onrender.com fly.dev replit.app azurewebsites.net cloudfront.net amazonaws.com blogspot.com
+gitbook.io
 """.split())
 
 
 def classify_domain(domain: str) -> DomainKind:
     """`free` (public mailbox providers), `peo` (payroll and employer-of-record hosts), `platform` (code hosts,
-    social sites, job boards and ATS hosts), else `company`. A host such as `mail.gmail.com` is reduced first."""
+    social sites, job boards, ATS hosts and hosting suffixes such as `vercel.app`), else `company`. A host such as `mail.gmail.com` is reduced first."""
     d = registrable_domain(domain) or (domain or "").strip().lower()
     if d in FREE_MAIL or ("." in d and d.partition(".")[0] in _FREE_FIRST_LABEL):
         return "free"

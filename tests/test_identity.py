@@ -299,10 +299,13 @@ class WeakMatchTest(Base):
                          Match(strong=(), weak=((tx.company_id, "name"),)))
         no_state = self.resolve(cand("Mesh Systems", ref="hn:mesh"), source="hn")
         self.assertEqual((no_state.created, no_state.items_raised), (True, 1))
-        self.assert_one_item(tx.company_id, no_state.company_id, "Basis name,", "unknown")
+        self.assertEqual((tx.company_id, no_state.company_id), (1, 2))
+        self.assert_one_item(1, 2, "Basis name,", "unknown here and TX there")
         # A guess hq on the candidate is not a state either.
+        # Both earlier Mesh Systems companies hold the name now, so this one is weak against each.
         guess = self.resolve(cand("Mesh Systems", state="TX", hq_confidence="guess", ref="hn:mesh2"), source="hn")
-        self.assertEqual((guess.created, guess.items_raised), (True, 1))
+        self.assertEqual((guess.company_id, guess.created, guess.items_raised), (3, True, 2))
+        self.assertEqual([(i["company_id"], i["evidence_key"]) for i in self.items()], [(1, "2"), (1, "3"), (2, "3")])
         # And a company with no state never matches a candidate that has one.
         stateless = self.resolve(cand("Quartzline", ref="hn:q"), source="hn")
         later = self.resolve(cand("Quartzline", state="TX"))
@@ -458,6 +461,148 @@ class HelpersTest(Base):
         self.assertEqual((table_marks(self.conn), self.conn.total_changes), (before, changes))
         self.assertEqual(find_company(self.conn, cand("Acme", domain="acme.com", state="TX"), source_name="lca"),
                          Match(strong=((1, "source_ref"),), weak=()))
+
+
+class ReviewFixTest(Base):
+    """Review round 1 of Task 7: each test here was red before its fix."""
+
+    def test_fein_veto_reads_feins_of_companies_merged_into_the_hit(self):  # I1
+        a = self.resolve(cand("Acme Robotics", fein="111111111", state="TX"))
+        k = self.resolve(cand("Kestrel", state="TX"))
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
+                          "WHERE company_id = ?", (k.company_id, a.company_id))
+        c = self.resolve(cand("Acme Robotics", fein="222222222", state="TX", ref="t:acme-robotics-2"))
+        self.assertEqual((c.company_id, c.created, c.items_raised), (3, True, 1))
+        self.assert_one_item(2, 3, "Basis fein_conflict+name_state", "111111111", "222222222")
+        self.assertEqual(self.count("SELECT company_id FROM company_alias WHERE alias_key = '222222222'"), 3)
+
+    def test_a_name_shared_by_two_companies_matches_the_one_in_the_same_state(self):  # I2
+        tx = self.resolve(cand("Acme Robotics", state="TX", ref="lca:tx"))
+        ca = self.resolve(cand("Acme Robotics", state="CA", city="San Jose", ref="lca:ca"))
+        self.assertEqual((tx.company_id, ca.company_id, ca.created), (1, 2, True))
+        self.assertEqual([tuple(r) for r in self.conn.execute(
+            "SELECT name_key, company_id FROM company_name_key ORDER BY company_id")],
+            [("acmerobotics", 1), ("acmerobotics", 2)])
+        self.assertEqual(find_company(self.conn, cand("Acme Robotics", state="CA", ref="hn:x"), source_name="hn"),
+                         Match(strong=((2, "name_state"),), weak=((1, "name"),)))
+        more = [self.resolve(cand("Acme Robotics", state="CA", city="Oakland", ref=r, kind="hn"), source="hn")
+                for r in ("hn:ar1", "hn:ar2")]
+        self.assertEqual([(m.company_id, m.created, m.basis, m.items_raised) for m in more],
+                         [(2, False, "name_state", 0)] * 2)
+        hit = self.resolve(cand("Acme Robotics", state="CA", ref="formd:ar", kind="formd"), source="formd",
+                           creates=False)
+        self.assertEqual((hit.company_id, hit.basis), (2, "name_state"))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM company"), 2)
+        self.assert_one_item(1, 2, "Basis name,")
+        self.assertIn("company_name_key", table_marks(self.conn))
+        before = table_marks(self.conn)
+        self.resolve(cand("Acme Robotics", state="CA", city="San Jose", ref="lca:ca"))
+        self.assertEqual(table_marks(self.conn), before)
+
+    def test_name_keys_under_four_characters_are_not_stored(self):  # I2
+        self.resolve(cand("Ace", legal_name="Ace Widgets", dba="Acme", state="TX"))
+        self.assertEqual({r[0] for r in self.conn.execute("SELECT name_key FROM company_name_key")},
+                         {"acewidgets", "acme"})
+
+    def test_hosting_domains_never_match_or_store(self):  # I3
+        made = [self.resolve(cand(n, domain=d)) for n, d in (("Acme", "acme.vercel.app"), ("Beta", "beta.vercel.app"),
+                                                             ("Gamma", "vercel.app"), ("Delta", "vercel.app"))]
+        self.assertEqual([m.company_id for m in made], [1, 2, 3, 4])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM evidence WHERE fact = 'domain'"), 0)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM review_item"), 0)
+
+    def test_state_must_be_a_us_state_dc_or_territory(self):  # M1
+        cases = {"London, UK": None, "Toronto, ON": None, "Remote, US": None, "Berlin, DE": "DE",
+                 "San Juan, PR": "PR", "Washington, DC": "DC", "Hagatna, GU": "GU", "Austin, TX": "TX", "ZZ": None}
+        for value, state in cases.items():
+            res = self.resolve(cand(f"Co {value}", evidence=(hq(value),), ref=f"t:{value}"))
+            self.assertEqual(company_state(self.conn, res.company_id), state, value)
+        a = self.resolve(cand("Northstar Labs", evidence=(hq("London, UK"),)))
+        b = self.resolve(cand("Northstar Labs", evidence=(hq("Leeds, UK"),), ref="t:northstar-2"))
+        self.assertNotEqual(a.company_id, b.company_id)
+
+    def test_a_name_with_a_non_ascii_letter_is_never_a_strong_name_key(self):  # M2
+        a = self.resolve(cand("東京 Robotics", state="TX", ref="t:tokyo"))
+        b = self.resolve(cand("大阪 Robotics", state="TX", ref="t:osaka"))
+        self.assertEqual((a.company_id, b.company_id, b.created, b.items_raised), (1, 2, True, 1))
+        self.assert_one_item(1, 2, "Basis name,")
+        c = self.resolve(cand("Café Labs", state="TX", ref="t:cafe-1"))
+        d = self.resolve(cand("Café Labs", state="TX", ref="t:cafe-2"))
+        self.assertEqual((d.created, d.items_raised), (True, 1))
+        self.assertNotEqual(c.company_id, d.company_id)
+        # An ASCII legal name on the same candidate is still a strong key.
+        e = self.resolve(cand("Café Labs", legal_name="Cafe Labs Inc", state="TX", ref="t:cafe-3"))
+        f = self.resolve(cand("Cafe Labs", state="TX", ref="t:cafe-4"))
+        self.assertEqual((f.company_id, f.basis), (e.company_id, "name_state"))
+
+    def test_a_full_rollback_by_sqlite_does_not_hide_the_real_error(self):  # M3
+        def roll_back_everything(conn, *args, **kw):
+            conn.execute("ROLLBACK")
+            raise sqlite3.IntegrityError("the real error")
+        self.conn.execute("BEGIN")
+        with mock.patch.object(identity, "record_evidence", side_effect=roll_back_everything):
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "the real error"):
+                self.resolve(cand("Acme", state="TX"))
+        self.assertFalse(self.conn.in_transaction)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM company"), 0)
+
+    def test_raise_merge_candidate_follows_merges(self):  # M4
+        a, b, c = (self.resolve(cand(n)).company_id for n in ("Alpha", "Beta", "Gamma"))
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'm', merged_into = ? "
+                          "WHERE company_id = ?", (b, a))
+        self.assertFalse(raise_merge_candidate(self.conn, a, b, "domain", "already one"))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM review_item"), 0)
+        self.assertTrue(raise_merge_candidate(self.conn, c, a, "domain", "a is b now"))
+        self.assert_one_item(b, c, "Beta (#2)", "Gamma (#3)")
+
+    def test_www_is_stripped_for_matching_and_storing(self):  # M5
+        a = self.resolve(cand("Acme", domain="acme.com"))
+        b = self.resolve(cand("Acme Labs", domain="www.acme.com", ref="hn:al"), source="hn")
+        self.assertEqual((b.company_id, b.basis), (a.company_id, "domain"))
+        c = self.resolve(cand("Zeta", domain="www.zeta.io"))
+        self.assertEqual([r[0] for r in self.conn.execute(
+            "SELECT value FROM evidence WHERE fact = 'domain' AND company_id = ?", (c.company_id,))], ["zeta.io"])
+        d = self.resolve(cand("Zeta Two", domain="zeta.io"))
+        self.assertEqual((d.company_id, d.basis), (c.company_id, "domain"))
+
+    def test_formd_name_alias_has_source_formd(self):  # M7
+        self.resolve(cand("Nimbus", fein="111111111", state="CA"))
+        res = self.resolve(cand("Nimbus Holdings", fein="111111111", ref="formd:9"), source="formd", creates=False)
+        self.assertEqual((res.basis, res.aliases_added), ("fein", 1))
+        self.assertIn(("nimbusholdings", 1, "formd"), self.aliases())
+
+    def test_new_aliases_on_a_known_record_append_aliases_added(self):  # M7
+        self.resolve(cand("Acme", state="TX"))
+        res = self.resolve(cand("Acme", state="TX", dba="Acme Widgets"))
+        self.assertEqual((res.basis, res.aliases_added), ("source_ref", 1))
+        detail = json.loads(self.conn.execute(
+            "SELECT detail FROM event WHERE kind = 'aliases_added'").fetchone()[0])
+        self.assertEqual((detail["basis"], detail["confidence"], detail["aliases"]),
+                         ("source_ref", "certain", [["dba", "Acme Widgets"]]))
+        before = table_marks(self.conn)
+        self.resolve(cand("Acme", state="TX", dba="Acme Widgets"))
+        self.assertEqual(table_marks(self.conn), before)
+
+    def test_strong_and_weak_together(self):  # M7
+        a = self.resolve(cand("Alpha", fein="111111111", state="TX"))
+        b = self.resolve(cand("Bright Labs", state="CA"))
+        res = self.resolve(cand("Bright Labs", fein="111111111", state="TX", ref="t:bl-tx"))
+        self.assertEqual(find_company(self.conn, cand("Bright Labs", fein="111111111", state="TX", ref="hn:q"),
+                                      source_name="hn"),
+                         Match(strong=((a.company_id, "fein"),), weak=((b.company_id, "name"),)))
+        self.assertEqual((res.company_id, res.basis, res.items_raised), (a.company_id, "fein", 1))
+        self.assert_one_item(1, 2, "Basis name,", "TX here and CA there")
+
+    def test_two_domain_hits_are_ordered_by_id(self):  # M7
+        ids = [self.resolve(cand(n)).company_id for n in ("Alpha", "Beta")]
+        for cid in reversed(ids):
+            record_evidence(self.conn, cid, [dom("shared-by-two.com", "estimate", "website", f"w{cid}")])
+        c = cand("Gamma", domain="shared-by-two.com")
+        self.assertEqual(find_company(self.conn, c, source_name="lca"),
+                         Match(strong=((1, "domain"), (2, "domain")), weak=()))
+        res = self.resolve(c)
+        self.assertEqual((res.company_id, res.basis, res.items_raised), (1, "domain", 1))
+        self.assert_one_item(1, 2, "Basis domain+domain", "confidence strong")
 
 
 if __name__ == "__main__":

@@ -54,6 +54,16 @@ class KeysTest(unittest.TestCase):
                   "bamboohr.com"):
             self.assertEqual(classify_domain(d), "platform", d)
 
+    def test_hosting_suffixes_are_platforms_with_their_subdomains(self):
+        hosts = ("vercel.app", "netlify.app", "herokuapp.com", "pages.dev", "web.app", "firebaseapp.com",
+                 "appspot.com", "webflow.io", "myshopify.com", "framer.website", "carrd.co", "onrender.com",
+                 "fly.dev", "replit.app", "azurewebsites.net", "cloudfront.net", "amazonaws.com", "blogspot.com",
+                 "gitbook.io", "github.io")
+        for host in hosts:
+            for d in (host, f"acme.{host}", f"www.acme.{host}", f"a.b.{host}"):
+                self.assertEqual(classify_domain(d), "platform", d)
+        self.assertEqual(classify_domain("acmevercel.app"), "company")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -73,12 +73,14 @@ def seed_touch(conn: sqlite3.Connection, company_id: int, email: str) -> int:
     return cur.lastrowid
 
 
-MARKED_TABLES = ("company", "company_alias", "company_source", "evidence", "board", "review_item", "event",
+MARKED_TABLES = ("company", "company_alias", "company_name_key", "company_source", "evidence", "board", "review_item", "event",
                  "watched_page", "work_tier", "company_post", "shared_key")
+
+_LAST = {"company_name_key": "company_id"}  # a WITHOUT ROWID table: its highest company id stands in for max rowid
 
 
 def table_marks(conn: sqlite3.Connection) -> dict[str, tuple[int, int]]:
-    """(row count, max rowid) for each table a source run can write. Idempotency tests compare two snapshots: equal
+    """(row count, max rowid; the highest company id for a WITHOUT ROWID table) for each table a source run can write. Idempotency tests compare two snapshots: equal
     means nothing was added or deleted (an update in place, such as `company_source.last_seen_at`, keeps both)."""
-    return {t: tuple(conn.execute(f"SELECT COUNT(*), coalesce(MAX(rowid), 0) FROM {t}").fetchone())
+    return {t: tuple(conn.execute(f"SELECT COUNT(*), coalesce(MAX({_LAST.get(t, 'rowid')}), 0) FROM {t}").fetchone())
             for t in MARKED_TABLES}

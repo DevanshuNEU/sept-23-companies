@@ -107,7 +107,9 @@ _QUERY = (
     "SELECT p.posting_id, p.company_id, p.board_id, p.title, p.location, p.pay, p.posted_on, p.first_seen_at, "
     "p.last_seen_at, b.board_id IS NOT NULL AS has_board, b.last_read, d.posting_id IS NOT NULL AS decided, "
     "d.provisional, " + ", ".join(f"d.{c}" for c in _DECISION_COLUMNS) + " "
-    "FROM posting p LEFT JOIN current_decision d ON d.posting_id = p.posting_id "
+    # Looked up by key under the current ruleset: a join through the current_decision view is scanned once per posting.
+    "FROM posting p LEFT JOIN decision d ON d.posting_id = p.posting_id "
+    "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
     "LEFT JOIN board b ON b.board_id = p.board_id WHERE p.closed_at IS NULL ORDER BY p.posting_id")
 
 
@@ -149,6 +151,9 @@ def load_roles(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
         if best is not None:
             grade = grade_role(board_state=best.board_state, posted_known=best.posted_on is not None,
                                last_seen_on=best.last_seen_on)
+        elif g["undecided"]:  # an open posting nobody has decided might be a live role: roles are unknown
+            n = g["undecided"]
+            grade = Confidence("low", f"{n} open {'posting' if n == 1 else 'postings'} not decided yet, roles unknown")
         else:
             newest = min(stale_list, key=lambda b: (b.age_days is None, b.age_days or 0, -b.posting_id),
                          default=None)

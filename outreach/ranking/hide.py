@@ -35,6 +35,12 @@ HIDE_KINDS = ("no_go", "over_size", "no_sponsorship")
 _SPONSORS = ("yes", "opt_only")
 _CONFIDENCE_RANK = {"confirmed": 0, "estimate": 1, "guess": 2}
 _QUOTE_MAX = 200
+# Decisions are joined by key under the current ruleset, not through the current_decision view, which is a scan.
+_DECISION_QUERY = (
+    "SELECT p.posting_id, p.company_id, p.board_id, d.lane, d.us, d.sponsorship, d.sponsorship_quote, "
+    "d.provisional FROM posting p JOIN decision d ON d.posting_id = p.posting_id "
+    "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
+    "WHERE p.closed_at IS NULL AND d.sponsorship IN ('no', 'yes', 'opt_only') ORDER BY p.posting_id")
 
 
 def posting_visible(d: Decision) -> bool:
@@ -107,10 +113,7 @@ def load_hide_inputs(conn: sqlite3.Connection, canon: dict[int, int], doubtful: 
 
     refusals: dict[int, list[Refusal]] = {}
     sponsors: dict[int, list[int]] = {}
-    for r in conn.execute(
-            "SELECT p.posting_id, p.company_id, p.board_id, d.lane, d.us, d.sponsorship, d.sponsorship_quote, "
-            "d.provisional FROM posting p JOIN current_decision d ON d.posting_id = p.posting_id "
-            "WHERE p.closed_at IS NULL AND d.sponsorship IN ('no', 'yes', 'opt_only') ORDER BY p.posting_id"):
+    for r in conn.execute(_DECISION_QUERY):
         if r["board_id"] in doubtful or r["posting_id"] in stale:
             continue  # an untrusted or stale posting is neither a refusal nor a sponsor
         cid = owner(r["company_id"])

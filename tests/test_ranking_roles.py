@@ -359,3 +359,42 @@ class BoardStateTests(Store):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UndecidedGradeTests(Store):
+    def test_open_postings_with_no_decision_grade_live_role_low(self):
+        rs.posting(self.conn, self.co, NG, board_id=self.board)
+        r = self.role()
+        self.assertEqual((r.best, r.undecided), (None, 1))
+        self.assertEqual((r.confidence.level, r.confidence.basis), ("low", "1 open posting not decided yet, roles unknown"))
+        rs.posting(self.conn, self.co, NG, board_id=self.board)
+        self.assertEqual(self.role().confidence.basis, "2 open postings not decided yet, roles unknown")
+
+    def test_a_live_best_posting_keeps_its_own_grade_when_others_are_undecided(self):
+        self.add("ng")
+        rs.posting(self.conn, self.co, NG, board_id=self.board)
+        r = self.role()
+        self.assertEqual((r.undecided, r.confidence.level), (1, "high"))
+
+    def test_undecided_postings_beat_a_stale_only_grade(self):
+        self.add("ng", posted_on="2016-03-02")
+        rs.posting(self.conn, self.co, NG, board_id=self.board)
+        r = self.role()
+        self.assertEqual((r.best, len(r.stale)), (None, 1))
+        self.assertEqual(r.confidence.level, "low")
+
+
+class QueryPlanTests(Store):
+    def plan(self, sql: str) -> list[str]:
+        return [row["detail"] for row in self.conn.execute("EXPLAIN QUERY PLAN " + sql)]
+
+    def test_the_roles_query_looks_decisions_up_by_key_not_by_scanning_a_view(self):
+        from outreach.ranking.roles import _QUERY
+        for line in self.plan(_QUERY):
+            self.assertFalse(line.startswith("SCAN d") or "MATERIALIZE" in line or "current_decision" in line, line)
+        self.assertTrue(any(line.startswith("SEARCH d USING") for line in self.plan(_QUERY)), self.plan(_QUERY))
+
+    def test_the_hide_query_never_scans_the_decision_side(self):
+        from outreach.ranking.hide import _DECISION_QUERY
+        for line in self.plan(_DECISION_QUERY):
+            self.assertFalse(line.startswith("SCAN d") or "MATERIALIZE" in line or "current_decision" in line, line)

@@ -10,10 +10,11 @@ _LABELS = {"new_grad": "new grad", "early_career": "early career", "swe1": "SWE 
            "open": "open level"}
 
 
-def _posted(days: int | None) -> str:
+def _posted(days: int | None, dated: bool) -> str:
     if days is None:
         return ""
-    return ", posted today" if days == 0 else ", posted 1 day ago" if days == 1 else f", posted {days} days ago"
+    when = "today" if days == 0 else "1 day ago" if days == 1 else f"{days} days ago"
+    return f", {'posted' if dated else 'first seen'} {when}"
 
 
 class LiveRole:
@@ -28,7 +29,7 @@ class LiveRole:
         if lane is None:
             return Assessment(0.0, self._no_role(facts), grade)
         bonus = 0.0
-        if facts.best_role_age_days is not None:
+        if facts.best_role_age_days is not None and facts.best_dated:  # an age from first seen earns no bonus
             for limit, extra in zip(self.params["fresh_days"], self.params["fresh_bonus"]):
                 if facts.best_role_age_days <= limit:
                     bonus = extra
@@ -36,7 +37,7 @@ class LiveRole:
         label = "intern" if lane == "intern_junior" else _LABELS.get(facts.best_level_tier, "engineering")
         title = f": {clean_text(facts.best_title)}" if facts.best_title else ""
         return Assessment(round(min(1.0, self.params[lane] + bonus), 4),
-                          f"Open {label} role{title}{_posted(facts.best_role_age_days)}", grade)
+                          f"Open {label} role{title}{_posted(facts.best_role_age_days, facts.best_dated)}", grade)
 
     @staticmethod
     def _no_role(facts: RankFacts) -> str:

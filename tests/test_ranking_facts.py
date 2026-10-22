@@ -29,8 +29,11 @@ def ago(days: int) -> str:
     return (TODAY - timedelta(days=days)).isoformat()
 
 
-def lca(fy: int, jr: int = 0, level1: int = 0, software: int = 0) -> str:
-    return json.dumps({"fy": fy, "software": software, "jr": jr, "level1": level1, "newemp_jr": 0})
+def lca(fy: int, jr: int = 0, level1: int = 0, software: int = 0, median: int | None = None) -> str:
+    row = {"fy": fy, "software": software, "jr": jr, "level1": level1, "newemp_jr": 0}
+    if median is not None:
+        row["median_jr_wage"] = median
+    return json.dumps(row)
 
 
 def funding(filed_on: str) -> str:
@@ -78,6 +81,9 @@ class Store(unittest.TestCase):
 
     def size(self, low, high=None, *, fact="size", **kw) -> int:
         return self.ev(fact, f"{low}", num_low=low, num_high=high if high is not None else low, **kw)
+
+    def hq(self, value: str, *, company_id=None, confidence="confirmed") -> int:
+        return self.ev("hq", value, company_id=company_id, confidence=confidence)
 
     def person(self, role_kind="engineer", name="Jane Doe", *, company_id=None) -> int:
         return self.conn.execute(
@@ -256,6 +262,131 @@ class FactsTests(Store):
         self.add("ng", location="Boston, MA", pay="$140,000 - $150,000", posted_on=ago(3))
         f = self.one()
         self.assertEqual((f.pay_level, f.pay_basis), (2, "posted"))
+
+    def test_the_lca_median_wage_gives_a_level_everywhere_it_is_the_same(self):
+        self.ev("lca", lca(2026, jr=12, level1=12, median=300_000))  # level I share says 1; the wage says 4
+        f = self.one()
+        self.assertEqual((f.pay_level, f.pay_basis), (4, "lca"))
+        self.assertEqual(f.pay_note, "LCA median junior wage $300,000 in every listed area: level 4")
+        self.assertEqual(f.grade("pay_level").level, "medium")  # 12 filings: medium, never high
+
+    def test_the_lca_median_wage_uses_the_area_of_the_hq_state(self):
+        self.ev("lca", lca(2026, jr=4, level1=4, median=140_000))
+        self.hq("Austin, TX")
+        f = self.one()
+        self.assertEqual((f.pay_level, f.pay_basis), (2, "lca"))
+        self.assertEqual(f.pay_note, "LCA median junior wage $140,000 in Austin: level 2")
+        self.assertEqual(f.grade("pay_level").level, "low")  # 4 filings
+        ca = self.company("California")
+        self.ev("lca", lca(2026, jr=4, median=170_000), company_id=ca)  # level 1 in San Jose, 2 in San Francisco
+        self.hq("CA", company_id=ca)  # both areas hold CA: the lower level
+        self.assertEqual(self.load()[ca].pay_level, 1)
+
+    def test_an_ambiguous_median_wage_with_no_usable_hq_falls_back_to_the_level_one_share(self):
+        self.ev("lca", lca(2026, jr=10, level1=8, median=140_000))  # level 1 in San Jose, 2 in Boston
+        f = self.one()
+        self.assertEqual((f.pay_level, f.pay_basis), (1, "lca"))
+        self.assertIn("8 of 10", f.pay_note)
+        guess = self.company("Guessed hq")
+        self.ev("lca", lca(2026, jr=10, level1=8, median=140_000), company_id=guess)
+        self.hq("TX", company_id=guess, confidence="guess")  # a guess is not a usable hq
+        self.assertIn("8 of 10", self.load()[guess].pay_note)
+        two = self.company("Two states")
+        self.ev("lca", lca(2026, jr=10, level1=8, median=140_000), company_id=two)
+        self.hq("TX", company_id=two)
+        self.hq("CA", company_id=two, confidence="estimate")
+        self.assertIn("8 of 10", self.load()[two].pay_note)
+
+    def test_a_median_wage_in_an_unlisted_hq_state_is_not_read(self):
+        self.ev("lca", lca(2026, jr=10, level1=8, median=300_000))
+        self.hq("Miami, FL")
+        f = self.one()
+        self.assertEqual((f.pay_level, f.pay_basis), (1, "lca"))
+        self.assertIn("8 of 10", f.pay_note)
+
+    def test_an_lca_row_without_the_median_behaves_as_before(self):
+        self.ev("lca", lca(2026, jr=15, level1=2))
+        self.hq("TX")
+        f = self.one()
+        self.assertEqual((f.pay_level, f.pay_basis), (2, "lca"))
+        self.assertIn("2 of 15", f.pay_note)
+
+    def test_the_median_comes_from_the_newest_counted_row_that_has_one(self):
+        self.ev("lca", lca(2025, jr=3, median=300_000))
+        self.ev("lca", lca(2026, jr=3))  # newest year has no median
+        self.ev("lca", lca(2024, jr=3, median=100_000))  # not a recent year
+        f = self.one()
+        self.assertEqual((f.pay_level, f.pay_basis), (4, "lca"))
+        self.assertIn("$300,000", f.pay_note)
+        both = self.company("Two medians")
+        self.ev("lca", lca(2025, jr=3, median=300_000), company_id=both)
+        self.ev("lca", lca(2026, jr=3, median=100_000), company_id=both)
+        self.assertIn("$100,000", self.load()[both].pay_note)  # the newer year wins
+
+    def test_a_posted_range_beats_the_lca_median(self):
+        self.add("ng", location="Boston, MA", pay="$140,000 - $150,000")
+        self.ev("lca", lca(2026, jr=12, median=300_000))
+        f = self.one()
+        self.assertEqual((f.pay_level, f.pay_basis), (2, "posted"))
+
+    def test_pay_is_read_only_from_the_best_postings_lane(self):
+        self.add("ng", location="Boston, MA", posted_on=ago(1))  # the best posting has no pay
+        self.add("intern", location="Boston, MA", pay="$140,000 - $150,000", posted_on=ago(2))
+        f = self.one()
+        self.assertEqual(f.lanes, ("level_role", "intern_junior"))
+        self.assertEqual((f.pay_level, f.pay_basis), (None, ""))
+        senior = self.company("Same lane")
+        self.add("senior", company_id=senior, board_id=None, location="Boston, MA", posted_on=ago(1))
+        self.add("senior", company_id=senior, board_id=None, location="Boston, MA", pay="$140,000 - $150,000",
+                 posted_on=ago(2))
+        self.assertEqual(self.load()[senior].pay_level, 2)  # another posting of the same lane still counts
+
+    def test_an_undated_posting_is_marked_undated(self):
+        self.add("ng", posted_on=None, first_seen_at="2026-10-01T08:00:00Z")
+        f = self.one()
+        self.assertEqual((f.best_role_age_days, f.best_dated), (20, False))
+        dated = self.company("Dated")
+        self.add("ng", company_id=dated, board_id=None, posted_on=ago(4))
+        self.assertEqual((self.load()[dated].best_role_age_days, self.load()[dated].best_dated), (4, True))
+        self.assertTrue(self.company("None") and self.load()[self.co].best_dated is False)
+
+    def test_an_hn_post_at_the_window_edge_counts_and_one_day_past_it_does_not(self):
+        days = default_ranker_config().ranker["hn_post_days"]
+        edge, past = self.company("Edge"), self.company("Past")
+        self.hn_post(days, company_id=edge)
+        self.hn_post(days + 1, company_id=past)
+        got = self.load()
+        self.assertEqual(got[edge].reach_via, "hn_post")
+        self.assertEqual(got[past].reach_via, "")
+
+    def test_an_hn_post_dated_after_today_is_not_counted(self):
+        future = self.company("Future")
+        self.hn_post(-3, company_id=future)
+        self.assertEqual(self.load()[future].reach_via, "")
+
+    def test_the_worst_work_tier_among_merged_duplicates_counts(self):
+        dup = self.company("Acme Staffing")
+        self.tier(1, promoted=1, reason="builds product")
+        self.tier(3, promoted=0, reason="places contractors", company_id=dup)
+        rs.merge(self.conn, dup, self.co)
+        f = self.one()
+        self.assertEqual((f.work_tier, f.work_promoted), (3, False))
+        self.assertIn("places contractors", f.grade("staffing_risk").basis)
+
+    def test_a_tied_work_tier_is_not_promoted_unless_every_row_is(self):
+        dup = self.company("Acme Two")
+        self.tier(3, promoted=1, reason="promoted by hand")
+        self.tier(3, promoted=0, reason="places contractors", company_id=dup)
+        rs.merge(self.conn, dup, self.co)
+        self.assertEqual((self.one().work_tier, self.one().work_promoted), (3, False))
+
+    def test_a_fiscal_year_recorded_on_two_merged_companies_counts_once_with_the_newest_row(self):
+        dup = self.company("Acme Inc")
+        self.ev("lca", lca(2026, jr=9, level1=9), recorded_at="2026-08-01T08:00:00Z")
+        self.ev("lca", lca(2026, jr=3, level1=1), company_id=dup, recorded_at="2026-09-15T08:00:00Z")
+        rs.merge(self.conn, dup, self.co)
+        f = self.one()
+        self.assertEqual((f.lca_jr_recent, f.lca_level1_recent), (3, 1))  # the newest row only, never the sum
 
     def test_reach(self):
         eng, rec, banned, hn, old_hn = (self.company(n) for n in ("Eng", "Recruiter", "Banned", "HN", "Old HN"))

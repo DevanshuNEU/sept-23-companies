@@ -74,6 +74,16 @@ class LiveRoleTests(unittest.TestCase):
         self.assertTrue(self.value(lanes=("level_role",), best_role_age_days=0, best_title="T").reason.endswith("posted today"))
         self.assertTrue(self.value(lanes=("level_role",), best_role_age_days=1, best_title="T").reason.endswith("posted 1 day ago"))
 
+    def test_an_undated_posting_says_first_seen_and_gets_no_freshness_bonus(self):
+        got = self.value(lanes=("level_role",), best_role_age_days=3, best_dated=False, best_title="T",
+                         best_level_tier="new_grad")
+        self.assertAlmostEqual(got.value, 0.7)
+        self.assertEqual(got.reason, "Open new grad role: T, first seen 3 days ago")
+        today = self.value(lanes=("level_role",), best_role_age_days=0, best_dated=False, best_title="T")
+        self.assertTrue(today.reason.endswith("first seen today"), today.reason)
+        one = self.value(lanes=("level_role",), best_role_age_days=1, best_dated=False, best_title="T")
+        self.assertTrue(one.reason.endswith("first seen 1 day ago"), one.reason)
+
     def test_live_role_reason_survives_a_dashed_title(self):
         got = self.value(lanes=("level_role",), best_role_age_days=3, best_level_tier="new_grad",
                          best_title=f"Software Engineer {EN} New Grad {EM} Boston")

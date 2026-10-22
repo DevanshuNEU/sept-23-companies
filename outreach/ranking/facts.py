@@ -19,9 +19,10 @@ from outreach.ranking.common import age_days, clean_text
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import (Confidence, grade_evidence, grade_no_role, grade_pay, grade_reach,
                                          grade_sponsor, weaker)
-from outreach.ranking.pay import Area, lca_pay_level, pay_level
+from outreach.ranking.pay import Area, lca_pay_level, level_at, pay_level
 from outreach.ranking.roles import Best, Roles, company_board_states
 from outreach.ranking.types import CompanyFacts
+from outreach.sources.keys import US_STATES
 
 __all__ = ["SHARED_DOMAIN_FLAG", "RankFacts", "recent_fiscal_years", "load_facts"]
 
@@ -39,6 +40,7 @@ class RankFacts(CompanyFacts):
     best_title: str = ""
     best_level_tier: str | None = None
     best_sponsorship: str | None = None  # yes, opt_only, unclear or silent; None with no live posting
+    best_dated: bool = True              # False when the posting has no posted date: its age is from first seen
     pay_basis: str = ""                  # posted, lca or empty
     pay_note: str = ""
     weak_flags: tuple[str, ...] = ()     # reasons to doubt the company is small
@@ -78,6 +80,29 @@ def _fact_key(r: sqlite3.Row) -> tuple:
     hand-locked first (the newest of those), then confirmed over estimate over guess, then the newest."""
     return (r["locked"], r["recorded_at"] if r["locked"] else "", -_CONFIDENCE_RANK.get(r["confidence"], 3),
             r["recorded_at"], r["evidence_id"])
+
+
+def _hq_state(value: str) -> str | None:
+    """The US state of an hq value, "City, ST" or a bare "ST", else None."""
+    part = value.rpartition(",")[2].strip()
+    return part if part in US_STATES else None
+
+
+def _median_level(wage: int, hq_state: str | None, wages: tuple[Area, ...]) -> tuple[int, str] | None:
+    """The wage level of an LCA median junior wage. With a usable hq state: the areas that hold that state, and the
+    lowest level across them. With none: only when every listed area gives the same level. Else None (the caller
+    falls back to the level I share). A state no listed area holds is outside the table, so it is neutral."""
+    if hq_state is not None:
+        areas = [a for a in wages if hq_state in a.states]
+        if not areas:
+            return None
+        level, where = min(level_at(wage, a) for a in areas), " and ".join(a.name for a in areas)
+    else:
+        levels = {level_at(wage, a) for a in wages}
+        if len(levels) != 1:
+            return None
+        level, where = levels.pop(), "every listed area"
+    return level, f"LCA median junior wage ${wage:,} in {where}: level {level}"
 
 
 def _is_large(stage: str | None, size_low: int | None, small: dict) -> bool:
@@ -134,6 +159,13 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
         if cid not in funding or key > funding[cid][0]:
             funding[cid] = (key, r, filed)
 
+    # The hq state, from hq evidence that is not a guess (as identity reads it); two states that disagree are no state.
+    hq_states: dict[int, set[str]] = {}
+    for r in conn.execute("SELECT company_id, value FROM evidence WHERE fact = 'hq' AND confidence <> 'guess'"):
+        state = _hq_state(r["value"])
+        if state is not None:
+            hq_states.setdefault(owner(r["company_id"]), set()).add(state)
+
     shared = {r[0] for r in conn.execute("SELECT value FROM shared_key WHERE kind = 'domain'")}
     shared_cids = {owner(r["company_id"]) for r in conn.execute("SELECT company_id, value FROM evidence "
                                                                 "WHERE fact = 'domain'") if r["value"] in shared}
@@ -155,13 +187,16 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
                           "AND posted_at IS NOT NULL"):
         age = age_days(r["posted_at"], today)
         cid = owner(r["company_id"])
-        if age is not None and (cid not in hn or age < hn[cid]):
+        if age is None or r["posted_at"][:10] > today.isoformat():  # a post dated after today is not evidence
+            continue
+        if cid not in hn or age < hn[cid]:
             hn[cid] = age
 
     tiers: dict[int, sqlite3.Row] = {}
     for r in conn.execute("SELECT company_id, tier, promoted, reason FROM work_tier ORDER BY company_id"):
         cid = owner(r["company_id"])
-        if cid not in tiers or r["company_id"] == cid:  # the survivor's own row wins over a duplicate's
+        # The worst tier among the merged duplicates counts: the higher tier, and unpromoted over promoted.
+        if cid not in tiers or (r["tier"], not r["promoted"]) > (tiers[cid]["tier"], not tiers[cid]["promoted"]):
             tiers[cid] = r
     watched = {owner(r[0]) for r in conn.execute("SELECT company_id FROM watched_page")}
     states = company_board_states(conn, canon, doubtful)
@@ -202,11 +237,17 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
         # Pay: the first visible live posting (best first) with a readable range in a listed area, else the
         # employer's junior LCA history.
         pay_basis, pay_note, level, straddles = "", "", None, False
-        for posting in (rl.visible if rl else ()):
+        for posting in (b for b in (rl.visible if rl else ()) if b.lane == best.lane):
             found = pay_level(posting.pay, posting.location, wages, basis)
             if found is not None:
                 pay_basis, pay_note, level, straddles = "posted", found.note, found.level, found.at_min != found.at_mid
                 break
+        if level is None:  # the LCA median wage of the newest counted year that has one, then the level I share
+            median = next((d["median_jr_wage"] for _k, _r, d in reversed(counted) if d.get("median_jr_wage")), None)
+            hq = hq_states.get(cid, set())
+            found_median = _median_level(median, next(iter(hq)) if len(hq) == 1 else None, wages) if median else None
+            if found_median is not None:
+                pay_basis, level, pay_note = "lca", found_median[0], found_median[1]
         if level is None:
             history = lca_pay_level(jr, level1, min_filings=ranker["lca_wage_min_filings"])
             if history is not None:
@@ -248,7 +289,7 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             staffing_risk=_value(row(cid, "staffing_risk")), lca_jr_recent=jr, lca_level1_recent=level1,
             pay_level=level, size_low=size_low, size_high=size_high, stage=stage, funded_months_ago=months,
             reachable_person=bool(reach_via), name=name, best_title=best.title if best else "",
-            best_level_tier=best.level_tier if best else None, best_sponsorship=best.sponsorship if best else None,
+            best_level_tier=best.level_tier if best else None, best_dated=best.posted_on is not None if best else True, best_sponsorship=best.sponsorship if best else None,
             pay_basis=pay_basis, pay_note=pay_note, weak_flags=tuple(flags),
             size_confidence=size_row["confidence"] if size_row else None, work_tier=work_tier,
             work_promoted=promoted, reach_via=reach_via, reach_note=reach_note,

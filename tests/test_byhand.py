@@ -5,9 +5,11 @@ import sqlite3
 import unittest
 from unittest import mock
 
+from outreach.rules.facts import EvidenceDraft
+from outreach.rules.rebuild import record_evidence
 from outreach.sources.byhand import ByHandSource, HandAdd, HandEntry, add_by_hand
 from outreach.sources.tiers import effective_tier
-from outreach.store import add_alias, mark_shared_key, name_key, transaction
+from outreach.store import add_alias, mark_shared_key, name_key, transaction, utcnow
 from tests.contracts import check_source
 from tests.storetest import fresh_store, seed_company, table_marks
 
@@ -29,7 +31,8 @@ class AddByHandTest(unittest.TestCase):
 
     def test_add_creates_company_with_locked_domain_and_event(self):
         got = self.add("Acme Robotics", "Dana at Acme said they hire new grads", domain="acme.com", state="MA")
-        self.assertEqual(got, HandAdd(company_id=got.company_id, created=True, basis="created", items_raised=0))
+        self.assertEqual(got, HandAdd(company_id=got.company_id, created=True, basis="created", items_raised=0,
+                                      status="candidate"))
         company = self.conn.execute("SELECT * FROM company WHERE company_id = ?", (got.company_id,)).fetchone()
         self.assertEqual((company["name"], company["status"]), ("Acme Robotics", "candidate"))
         by_fact = {e["fact"]: e for e in self.evidence(got.company_id)}
@@ -45,11 +48,11 @@ class AddByHandTest(unittest.TestCase):
                          ("company", got.company_id, got.company_id, "devanshu"))
         self.assertEqual(json.loads(event["detail"]), {"reason": reason})
         self.assertEqual(event["idempotency_key"],
-                         f"hand:{name_key('Acme Robotics')}:{hashlib.sha256(reason.encode()).hexdigest()[:12]}")
+                         f"hand:{name_key('Acme Robotics')}@acme.com:{hashlib.sha256(reason.encode()).hexdigest()[:12]}")
         source = self.conn.execute("SELECT * FROM source WHERE source_name = 'hand'").fetchone()
         self.assertEqual(source["version"], "hand-1")
         link = self.conn.execute("SELECT * FROM company_source WHERE company_id = ?", (got.company_id,)).fetchone()
-        self.assertEqual((link["source_name"], link["source_ref"]), ("hand", "hand:acmerobotics"))
+        self.assertEqual((link["source_name"], link["source_ref"]), ("hand", "hand:acmerobotics@acme.com"))
 
     def test_blank_reason_raises(self):
         for reason in ("", "   ", "\n\t"):
@@ -77,14 +80,39 @@ class AddByHandTest(unittest.TestCase):
         got = self.add("Capital Works", state=" dc ")
         self.assertEqual([e["value"] for e in self.evidence(got.company_id)], ["DC"])
 
-    def test_claude_actor_is_refused_until_a_source_kind_exists(self):
-        # The schema has no source kind for Claude research, and Claude's adds must never be locked hand facts.
+    def test_an_unknown_actor_is_refused(self):
         before = table_marks(self.conn)
         with self.assertRaises(ValueError):
-            self.add(actor="claude", domain="acme.com")
-        self.assertEqual(table_marks(self.conn), before)
-        with self.assertRaises(ValueError):
             self.add(actor="sender")
+        self.assertEqual(table_marks(self.conn), before)
+
+    def test_claude_add_is_a_guess_with_no_locked_fact_and_no_promotion(self):
+        got = self.add("Acme Robotics", "found on a funding post", domain="acme.com", state="MA", actor="claude")
+        self.assertTrue(got.created)
+        rows = {e["fact"]: e for e in self.evidence(got.company_id)}
+        self.assertEqual(set(rows), {"domain", "hq"})
+        for row in rows.values():
+            self.assertEqual((row["locked"], row["confidence"], row["source_kind"]), (0, "guess", "other"))
+        self.assertEqual((rows["domain"]["value"], rows["hq"]["value"]), ("acme.com", "MA"))
+        self.assertEqual(rows["domain"]["quote"], "found on a funding post")
+        (event,) = self.hand_events()
+        self.assertEqual((event["actor"], json.loads(event["detail"])), ("claude", {"reason": "found on a funding post"}))
+        self.assertIsNone(self.conn.execute(
+            "SELECT 1 FROM work_tier WHERE company_id = ?", (got.company_id,)).fetchone())
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM event WHERE kind = 'promoted'").fetchone()[0], 0)
+
+    def test_claude_add_twice_writes_nothing_new(self):
+        self.add("Acme Robotics", "found on a post", domain="acme.com", state="MA", actor="claude")
+        before = table_marks(self.conn)
+        self.add("Acme Robotics", "found on a post", domain="acme.com", state="MA", actor="claude")
+        self.assertEqual(table_marks(self.conn), before)
+
+    def test_claude_guess_never_overrides_a_locked_fact(self):
+        first = self.add("Acme Robotics", domain="acme.com", state="MA")
+        self.add("Acme Robotics", "claude saw it too", domain="acme.com", state="CA", actor="claude")
+        hq = self.conn.execute("SELECT value, locked FROM company_fact WHERE company_id = ? AND fact = 'hq'",
+                               (first.company_id,)).fetchone()
+        self.assertEqual((hq["value"], hq["locked"]), ("MA", 1))
 
     def test_existing_domain_returns_the_existing_company(self):
         first = self.add("Acme Robotics", domain="acme.com")
@@ -102,6 +130,65 @@ class AddByHandTest(unittest.TestCase):
         first = self.add("Acme")
         got = self.add("Acme, Inc.", "added again from a post")
         self.assertEqual((got.company_id, got.created, got.basis), (first.company_id, False, "source_ref"))
+
+    def test_ref_is_domain_then_state_then_bare_name(self):
+        refs = [c.source_ref for c in ByHandSource([
+            HandEntry("Acme", "r", domain="acme.com", state="TX"), HandEntry("Acme", "r", state="TX"),
+            HandEntry("Acme", "r")]).discover()]
+        self.assertEqual(refs, ["hand:acme@acme.com", "hand:acme@TX", "hand:acme"])
+
+    def test_a_name_with_a_non_ascii_letter_uses_a_hashed_ref(self):
+        refs = [c.source_ref for c in ByHandSource([
+            HandEntry("Caf\u00e9 Labs", "r"), HandEntry("Caf Labs", "r")]).discover()]
+        self.assertTrue(refs[0].startswith("hand:sha256:"), refs[0])
+        self.assertNotEqual(refs[0], refs[1])
+
+    def test_same_name_in_two_states_is_two_companies_and_one_item(self):
+        tx = self.add("Acme", domain="acme-tx.com", state="TX")
+        ca = self.add("Acme", domain="acme-ca.com", state="CA")
+        self.assertNotEqual(tx.company_id, ca.company_id)
+        self.assertEqual((ca.created, ca.basis, ca.items_raised), (True, "created", 1))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item").fetchone()[0], 1)
+        rows = {(e["fact"], e["value"]) for e in self.evidence(tx.company_id)}
+        self.assertEqual(rows, {("domain", "acme-tx.com"), ("hq", "TX")})
+        # both events survive: the idempotency key names the record, not just the name
+        self.assertEqual(len(self.hand_events()), 2)
+
+    def test_same_name_in_the_same_state_is_a_name_state_match(self):
+        first = self.add("Acme Corp", domain="acme-tx.com", state="TX")
+        got = self.add("Acme", "heard of it again", state="TX")
+        self.assertEqual((got.company_id, got.created, got.basis), (first.company_id, False, "name_state"))
+
+    def test_a_hand_domain_owned_by_another_company_attaches_by_domain(self):
+        other = seed_company(self.conn, "Zenith")
+        record_evidence(self.conn, other, [EvidenceDraft("domain", "zenith.io", "confirmed", "website")])
+        got = self.add("Zenith Systems", domain="zenith.io", state="OR")
+        self.assertEqual((got.company_id, got.created, got.basis), (other, False, "domain"))
+
+    def test_the_winning_locked_value_decides_whether_a_repeat_is_written(self):
+        # TX, then CA, then TX again: the last add must end on TX, not be skipped because TX was once locked.
+        first = self.add("Acme", "first", domain="acme.com", state="TX")
+        self.add("Acme", "second", domain="acme.com", state="CA")
+        self.add("Acme", "third", domain="acme.com", state="TX")
+        hq = self.conn.execute("SELECT value FROM company_fact WHERE company_id = ? AND fact = 'hq'",
+                               (first.company_id,)).fetchone()
+        self.assertEqual(hq["value"], "TX")
+        self.assertEqual(sum(1 for e in self.evidence(first.company_id) if e["fact"] == "hq"), 3)
+        # and the same winning value again adds no row
+        self.add("Acme", "fourth", domain="acme.com", state="TX")
+        self.assertEqual(sum(1 for e in self.evidence(first.company_id) if e["fact"] == "hq"), 3)
+
+    def test_a_removed_company_is_returned_with_nothing_written(self):
+        first = self.add("Acme Robotics", domain="acme.com")
+        now = utcnow()
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'not a fit', status_at = ? "
+                          "WHERE company_id = ?", (now, first.company_id))
+        before = table_marks(self.conn)
+        for actor in ("devanshu", "claude"):
+            got = self.add("Acme Labs", "a new reason", domain="acme.com", state="MA", actor=actor)
+            self.assertEqual((got.company_id, got.created, got.basis, got.status, got.items_raised),
+                             (first.company_id, False, "domain", "removed", 0))
+        self.assertEqual(table_marks(self.conn), before)
 
     def test_weak_name_creates_company_and_item(self):
         # Identity refuses hand drafts, so a by-hand candidate has no state at resolve time and a name already known
@@ -186,7 +273,8 @@ class AddByHandTest(unittest.TestCase):
         self.assertEqual((source.name, source.schedule, source.version), ("hand", "on_demand", "hand-1"))
         got = check_source(self, source)
         self.assertEqual([c.name for c in got], ["Acme Robotics", "Orbit Labs"])
-        self.assertEqual([c.source_ref for c in got], ["hand:acmerobotics", "hand:orbitlabs"])
+        self.assertEqual([c.source_ref for c in got], ["hand:acmerobotics@acme.com", "hand:orbitlabs"])
+        self.assertEqual([c.state for c in got], ["MA", None])
         self.assertEqual(got[0].keys, {"ats": "greenhouse:acme"})
         self.assertEqual(got[0].domain, "acme.com")
         self.assertEqual(got[0].evidence, ())  # hand evidence is written by add_by_hand, never by identity

@@ -44,18 +44,27 @@ def _step_down(level: int, cfg: SendConfig) -> int:
     return min(level, max(level - cfg.ramp_step, cfg.ramp_floor))
 
 
+def _close_outcome(conn: sqlite3.Connection, day: date, cfg: SendConfig) -> tuple[str | None, str]:
+    """How a day with no outcome yet closes: `warning` (note `bounce rate`) when it had sends and the 3-day bounce
+    rate warns, `clean` when it had sends and does not, else no outcome and the note `no sends`."""
+    if signals.sends_on(conn, day, cfg) == 0:
+        return None, "no sends"
+    if signals.bounce_rate_warns(signals.bounce_rate_3d(conn, day, cfg), cfg):
+        return "warning", "bounce rate"
+    return "clean", ""
+
+
 def limit_for(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> int:
     """Read only: the start limit day `d` gets from the latest `send_day` row before it. 20 with no row. After a
     clean day it is one level up (to the ceiling); after a warning or hard block, one level down (to the floor);
-    after a day with no sends, the same. A day that is still open counts as clean when it had sends."""
+    after a day with no sends, the same. A day still open is judged as it would close (`_close_outcome`)."""
     prev = conn.execute("SELECT * FROM send_day WHERE day < ? ORDER BY day DESC LIMIT 1",
                         (d.isoformat(),)).fetchone()
     if prev is None:
         return cfg.ramp_start
     outcome = prev["outcome"]
-    if outcome is None and prev["closed_at"] is None and signals.sends_on(conn, date.fromisoformat(prev["day"]),
-                                                                          cfg) > 0:
-        outcome = "clean"
+    if outcome is None and prev["closed_at"] is None:
+        outcome = _close_outcome(conn, date.fromisoformat(prev["day"]), cfg)[0]
     if outcome == "clean":
         return _step_up(prev["send_limit"], cfg)
     if outcome in ("warning", "hard_block"):
@@ -92,7 +101,8 @@ def _ensure_row(conn: sqlite3.Connection, d: date, cfg: SendConfig, now: str) ->
 
 def open_day(conn: sqlite3.Connection, now: datetime, cfg: SendConfig) -> DayState | None:
     """Close every earlier open day, then open today. A closed day keeps `warning` or `hard_block`, else becomes
-    `clean` when it had sends, else stays NULL with the note `no sends`. Today's row gets `limit_for` and is
+    `clean` when it had sends and the 3-day bounce rate is under 2%, `warning` (note `bounce rate`) when it is not,
+    else stays NULL with the note `no sends`. Today's row gets `limit_for` and is
     written only when today is a business day (None on a weekend or holiday). Safe to call on every tick."""
     today = cal.ny_date(now, cfg)
     stamp = now.astimezone(timezone.utc).strftime(ISO_FMT)
@@ -100,11 +110,10 @@ def open_day(conn: sqlite3.Connection, now: datetime, cfg: SendConfig) -> DaySta
                             (today.isoformat(),)).fetchall():
         if old["outcome"] in ("warning", "hard_block"):
             conn.execute("UPDATE send_day SET closed_at = ? WHERE day = ?", (stamp, old["day"]))
-        elif signals.sends_on(conn, date.fromisoformat(old["day"]), cfg) > 0:
-            conn.execute("UPDATE send_day SET closed_at = ?, outcome = 'clean' WHERE day = ?", (stamp, old["day"]))
         else:
-            conn.execute("UPDATE send_day SET closed_at = ?, outcome_note = 'no sends' WHERE day = ?",
-                         (stamp, old["day"]))
+            outcome, note = _close_outcome(conn, date.fromisoformat(old["day"]), cfg)
+            conn.execute("UPDATE send_day SET closed_at = ?, outcome = ?, outcome_note = ? WHERE day = ?",
+                         (stamp, outcome, note, old["day"]))
     if not cal.is_business_day(today, cfg):
         return None
     return _state(conn, _ensure_row(conn, today, cfg, stamp), cfg)

@@ -55,30 +55,32 @@ def sends_on(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> int:
     return conn.execute("SELECT COUNT(*) FROM message WHERE sent_at >= ? AND sent_at < ?", (start, end)).fetchone()[0]
 
 
-def _bounces_on(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> int:
-    start, end = cal.ny_day_bounds(d, cfg)
-    return conn.execute("SELECT COUNT(*) FROM touch WHERE bounced_at >= ? AND bounced_at < ?",
-                        (start, end)).fetchone()[0]
-
-
 def bounce_rate_3d(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> float:
     """Bounces over sends across the last `cfg.bounce_days` New York dates that had at least one send, up to and
-    including `d` (weekend dates count when something was sent). Bounces are touches with `bounced_at` on those
-    dates; sends are every message sent on them. 0.0 when nothing was sent."""
+    including `d` (weekend dates count when something was sent). Sends are every message sent on those dates.
+    Bounces are touches with `bounced_at` anywhere from the start of the earliest of those dates to the end of
+    `d`: a delayed notice that arrives on a date with no sends (Saturday, for a Friday send) still counts.
+    0.0 when nothing was sent."""
     first = conn.execute("SELECT MIN(sent_at) FROM message WHERE sent_at IS NOT NULL").fetchone()[0]
     if first is None:
         return 0.0
     earliest = cal.ny_date(as_datetime(first), cfg)
-    sent = bounced = found = 0
-    day = d
+    sent = found = 0
+    day, window_start = d, d
     while day >= earliest and found < cfg.bounce_days:
         n = sends_on(conn, day, cfg)
         if n:
             found += 1
             sent += n
-            bounced += _bounces_on(conn, day, cfg)
+            window_start = day
         day -= timedelta(days=1)
-    return bounced / sent if sent else 0.0
+    if not sent:
+        return 0.0
+    start = cal.ny_day_bounds(window_start, cfg)[0]
+    end = cal.ny_day_bounds(d, cfg)[1]
+    bounced = conn.execute("SELECT COUNT(*) FROM touch WHERE bounced_at >= ? AND bounced_at < ?",
+                           (start, end)).fetchone()[0]
+    return bounced / sent
 
 
 def bounce_rate_warns(rate: float, cfg: SendConfig) -> bool:

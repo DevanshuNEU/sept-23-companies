@@ -129,6 +129,27 @@ class RampTest(Base):
         ramp.open_day(self.db, ny(1), CFG)
         self.assertEqual(self.row(d(0))["outcome"], "clean")
 
+    def test_a_day_is_not_clean_when_the_three_day_bounce_rate_warns(self):
+        put_day(self.db, d(0), 50)
+        mon = self.sends(ny(0, 10), 20)
+        bounce(self.db, mon[0], ny(0, 15))  # 1 in 20: 5%
+        self.assertEqual(ramp.limit_for(self.db, d(1), CFG), 40)  # the open Monday is not clean
+        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, 40)
+        self.assertEqual(self.row(d(0))["outcome"], "warning")
+        self.assertEqual(self.row(d(0))["outcome_note"], "bounce rate")
+        self.sends(ny(1, 10), 20)  # Tuesday has no bounce, but the 3-day rate is 1 in 40: 2.5%
+        self.assertEqual(ramp.limit_for(self.db, d(2), CFG), 30)
+        self.assertEqual(ramp.open_day(self.db, ny(2), CFG).start_limit, 30)
+        self.assertEqual(self.row(d(1))["outcome"], "warning")
+        self.assertEqual(self.row(d(1))["outcome_note"], "bounce rate")
+
+    def test_a_day_under_the_bounce_rate_still_closes_clean(self):
+        put_day(self.db, d(0), 50)
+        mon = self.sends(ny(0, 10), 51)
+        bounce(self.db, mon[0], ny(0, 15))
+        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, 60)
+        self.assertEqual(self.row(d(0))["outcome"], "clean")
+
     def test_weekend_has_no_row(self):
         for n in (5, 6):
             self.assertIsNone(ramp.open_day(self.db, ny(n), CFG))
@@ -265,10 +286,20 @@ class BounceRateTest(Base):
         bounce(self.db, friday[0], ny(4, 15))
         self.assertEqual(signals.bounce_rate_3d(self.db, d(4), CFG), 1 / 30)
 
-    def test_a_bounce_on_a_day_with_no_sends_is_not_counted(self):
+    def test_a_bounce_arriving_on_a_day_with_no_sends_is_counted(self):
+        # A delayed DSN on Saturday for a Friday send: the date had no sends, the bounce still counts.
+        touches = self.sends(ny(4, 10), 10)
+        bounce(self.db, touches[0], ny(5, 10))
+        self.assertEqual(signals.bounce_rate_3d(self.db, d(5), CFG), 1 / 10)
+        self.assertEqual(signals.bounce_rate_3d(self.db, d(4), CFG), 0.0)
+
+    def test_a_bounce_before_the_window_is_not_counted(self):
         touches = self.sends(ny(0, 10), 10)
-        bounce(self.db, touches[0], ny(1, 10))  # Tuesday: nothing was sent that day
-        self.assertEqual(signals.bounce_rate_3d(self.db, d(1), CFG), 0.0)
+        self.sends(ny(4, 10), 10)
+        self.sends(ny(3, 10), 10)
+        self.sends(ny(2, 10), 10)
+        bounce(self.db, touches[0], ny(1, 10))  # Tuesday: before Wednesday, the first window date
+        self.assertEqual(signals.bounce_rate_3d(self.db, d(4), CFG), 0.0)
 
     def test_follow_ups_count_as_sends(self):
         person = seed_email_person(self.db, self.company, "Fo", "fo@acme.co")

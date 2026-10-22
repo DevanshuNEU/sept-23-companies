@@ -49,7 +49,8 @@ class ClassifyTest(unittest.TestCase):
 
     def test_delay_notice_is_not_a_bounce(self):
         # The old BOUNCE_SUBJ regex matches "delivery status notification", so it would call this a bounce.
-        for subject in ("Delivery Status Notification (Delay)", "Delayed: Hello", "Mail delivery delayed"):
+        for subject in ("Delivery Status Notification (Delay)", "Delayed Mail (still being retried)",
+                        "Warning: message 1abc-0002 delayed 24 hours"):
             with self.subTest(subject=subject):
                 got = classify(dsn(subject=subject, x_failed_recipients="priya@acme.co"), ACCOUNT)
                 self.assertEqual(got.kind, "delay")
@@ -60,9 +61,36 @@ class ClassifyTest(unittest.TestCase):
                            "couldn't be found. 550 5.1.1", x_failed_recipients="Priya@Acme.co"), ACCOUNT)
         self.assertEqual(got, Inbound(kind="bounce", dsn_class="hard", failed_recipient="priya@acme.co"))
 
-    def test_bounce_by_subject_from_an_odd_sender(self):
-        got = classify(meta(from_addr="noreply@acme.co", subject="Undeliverable: Hello"), ACCOUNT)
-        self.assertEqual(got.kind, "bounce")
+    def test_bounce_by_subject_from_an_odd_sender_needs_a_machine_header(self):
+        odd = dict(from_addr="noreply@acme.co", subject="Undeliverable: Hello")
+        self.assertEqual(classify(meta(**odd, auto_submitted="auto-replied"), ACCOUNT).kind, "bounce")
+        self.assertEqual(classify(meta(**odd, x_failed_recipients="priya@acme.co"), ACCOUNT).kind, "bounce")
+        self.assertEqual(classify(meta(**odd), ACCOUNT).kind, "human")
+
+    def test_a_human_reply_about_a_delivery_failure_is_not_a_bounce(self):
+        for subject in ("Re: Delivery failure question", "Delivery failure question", "Fwd: Undelivered mail"):
+            with self.subTest(subject=subject):
+                self.assertEqual(classify(meta(subject=subject), ACCOUNT).kind, "human")
+
+    def test_a_bounce_whose_echoed_subject_says_delayed_is_still_a_bounce(self):
+        got = classify(dsn("550 5.1.1 does not exist", subject="Undeliverable: Your delayed rollout",
+                           x_failed_recipients="priya@acme.co"), ACCOUNT)
+        self.assertEqual((got.kind, got.dsn_class), ("bounce", "hard"))
+        self.assertEqual(classify(dsn(subject="Undeliverable: Your delayed rollout"), ACCOUNT).kind, "bounce")
+
+    def test_a_delay_subject_with_a_hard_or_policy_reading_is_a_bounce(self):
+        for snippet in ("550 5.1.1 does not exist", "550 5.7.511 banned sender"):
+            with self.subTest(snippet=snippet):
+                got = classify(dsn(snippet, subject="Delivery Status Notification (Delay)"), ACCOUNT)
+                self.assertEqual(got.kind, "bounce")
+
+    def test_dotted_and_plus_variants_of_his_own_gmail_address_are_ours(self):
+        for sender in ("devanshu.rajesh@gmail.com", "Devanshu <devanshurajesh+jobs@gmail.com>",
+                       "d.e.v.anshurajesh@googlemail.com"):
+            with self.subTest(sender=sender):
+                self.assertEqual(classify(meta(from_addr=sender), ACCOUNT).kind, "ours")
+        self.assertEqual(classify(meta(from_addr="devanshurajesh@acme.co"), ACCOUNT).kind, "human")
+        self.assertEqual(classify(meta(from_addr="devanshurajesh2@gmail.com"), ACCOUNT).kind, "human")
 
     def test_bounce_with_no_snippet_is_unknown_and_still_a_bounce(self):
         got = classify(dsn(""), ACCOUNT)
@@ -137,14 +165,20 @@ class MatchUnthreadedTest(unittest.TestCase):
                 self.assertIsNone(match_unthreaded(dsn(subject=near), self.TRACKED, self.SUBJECTS))
 
     def test_the_longer_of_two_matching_subjects_wins(self):
-        subjects = {"Quick question": 1, "Quick question about Acme": 2}
-        got = match_unthreaded(dsn(subject="Undeliverable: Quick question about Acme"), self.TRACKED, subjects)
+        subjects = {"Quick question about it": 1, "Quick question about it at Acme": 2}
+        got = match_unthreaded(dsn(subject="Undeliverable: Quick question about it at Acme"),
+                               self.TRACKED, subjects)
         self.assertEqual(got, 2)
 
     def test_newsletter_is_other_only_when_untracked(self):
         news = meta(from_addr="Weekly <news@list.example>", subject="This week in Python")
         self.assertEqual(classify(news, ACCOUNT).kind, "human")
         self.assertIsNone(match_unthreaded(news, self.TRACKED, self.SUBJECTS))
+
+    def test_a_short_sent_subject_matches_only_the_whole_subject(self):
+        subjects = {"Hi there": 5}
+        self.assertIsNone(match_unthreaded(dsn(subject="Undeliverable: Hi there, Priya"), {}, subjects))
+        self.assertEqual(match_unthreaded(dsn(subject="Hi there"), {}, subjects), 5)
 
     def test_an_empty_sent_subject_never_matches(self):
         self.assertIsNone(match_unthreaded(dsn(subject="anything"), {}, {"": 5}))

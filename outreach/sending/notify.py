@@ -27,7 +27,7 @@ def mac_notifier(title: str, text: str) -> None:
         return
     script = f"display notification {_quote(text)} with title {_quote(title)}"
     try:
-        subprocess.run(["osascript", "-e", script], check=False, capture_output=True, timeout=10)
+        subprocess.run(["osascript", "-e", script], check=False, capture_output=True, timeout=2)
     except (OSError, subprocess.SubprocessError):
         pass
 

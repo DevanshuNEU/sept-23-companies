@@ -6,6 +6,7 @@ import itertools
 import sqlite3
 
 from outreach.rules import rebuild
+from outreach.store import append_event, start_job
 from outreach.store.timefmt import utcnow
 
 _keys = itertools.count(1)
@@ -98,11 +99,25 @@ def evidence(conn: sqlite3.Connection, company_id: int, fact: str, *, value: str
 
 
 def no_go(conn: sqlite3.Connection, company_id: int, reason: str = "no_sponsorship", *, lifted: bool = False,
-          source: str = "devanshu") -> int:
-    now = utcnow()
+          source: str = "devanshu", created_at: str = "2026-09-01T08:00:00Z",
+          lifted_at: str = "2026-10-01T08:00:00Z") -> int:
+    """A company no-go row created at `created_at`, lifted at `lifted_at` when `lifted`."""
     return conn.execute(
         "INSERT INTO no_go(company_id, reason, source, created_at, lifted_at, lift_reason) VALUES (?, ?, ?, ?, ?, ?)",
-        (company_id, reason, source, now, now if lifted else None, "he said yes" if lifted else None)).lastrowid
+        (company_id, reason, source, created_at, lifted_at if lifted else None,
+         "he said yes" if lifted else None)).lastrowid
+
+
+def board_read(conn: sqlite3.Connection, board_id: int, result: str, at: str = "2026-10-20T08:00:00Z") -> None:
+    """One kept board_read row (with its crawl job run)."""
+    run_id = start_job(conn, "crawl")
+    conn.execute("INSERT INTO board_read(board_id, run_id, at, result, error) VALUES (?, ?, ?, ?, ?)",
+                 (board_id, run_id, at, result, "boom" if result == "error" else ""))
+
+
+def read_state_event(conn: sqlite3.Connection, board_id: int, to: str) -> None:
+    append_event(conn, entity="board", kind="read_state", actor="crawler", entity_id=board_id,
+                 detail={"from": None, "to": to})
 
 
 def flag_board(conn: sqlite3.Connection, company_id: int, board_id: int,

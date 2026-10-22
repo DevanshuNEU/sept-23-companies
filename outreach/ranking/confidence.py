@@ -118,7 +118,8 @@ def grade_evidence(*, confidence: str | None, locked: bool, source_kind: str | N
 
 
 # read_empty: the last read succeeded and listed nothing, a good read (ruling 2026-10-22), not an unread board.
-_BOARD_STATES = ("read_ok", "read_empty", "read_failed", "never_read", "no_board")
+# unconfirmed: every active board of the company is doubtful (a board match not checked yet, or flagged).
+_BOARD_STATES = ("read_ok", "read_empty", "read_failed", "never_read", "unconfirmed", "no_board")
 
 
 def _check_board_state(state: str) -> None:
@@ -137,6 +138,8 @@ def grade_role(*, board_state: str, posted_known: bool, last_seen_on: str) -> Co
         return Confidence("medium", f"the board listed no roles at its last read, last listed {last_seen_on}")
     if board_state == "read_failed":
         return Confidence("medium", f"last board read failed, last listed {last_seen_on}")
+    if board_state == "unconfirmed":
+        return Confidence("low", "board not confirmed yet")
     if board_state == "never_read":
         return Confidence("low", f"board not read by this system yet, listing is from an import dated {last_seen_on}")
     return Confidence("low", "posting is not from a board read")
@@ -154,6 +157,7 @@ def grade_no_role(*, company_board_state: str, stale_kinds: tuple[str, ...], sta
         "read_empty": Confidence("medium", "the board listed no roles at its last read"),
         "read_failed": Confidence("medium", "board read failed, roles unknown"),
         "never_read": Confidence("low", "board not read yet, roles unknown"),
+        "unconfirmed": Confidence("low", "its only board is not confirmed yet"),
         "no_board": Confidence("low", "no board found yet: roles are unknown, not absent"),
     }[company_board_state]
 

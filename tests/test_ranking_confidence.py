@@ -161,7 +161,8 @@ class GradeRoleTests(unittest.TestCase):
                  ("never_read", "low", "board not read yet, roles unknown"),
                  ("no_board", "low", "no board found yet: roles are unknown, not absent"),
                  # an empty read is a good read (ruling 2026-10-22): medium, never "not read yet"
-                 ("read_empty", "medium", "the board listed no roles at its last read"))
+                 ("read_empty", "medium", "the board listed no roles at its last read"),
+                 ("unconfirmed", "low", "its only board is not confirmed yet"))
         for state, level, basis in cases:
             with self.subTest(state=state):
                 got = grade_no_role(company_board_state=state, stale_kinds=(), stale_reason="x")

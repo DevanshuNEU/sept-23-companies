@@ -181,7 +181,7 @@ class NoGoTests(Store):
     def test_an_active_no_go_set_after_a_lift_hides_again(self):
         rs.no_go(self.conn, self.co, "over_300", lifted=True)
         rs.evidence(self.conn, self.co, "size", value="400+", num_low=400, confidence="confirmed")
-        rs.no_go(self.conn, self.co, "said_no")
+        rs.no_go(self.conn, self.co, "said_no", created_at="2026-10-05T08:00:00Z")
         hide = self.hide_for()
         self.assertEqual(hide.kind, "no_go")
         self.assertIn("said no", hide.reason)
@@ -202,15 +202,34 @@ class NoGoTests(Store):
         self.assertEqual((hide.kind, hide.provisional), ("no_go", False))
         self.assertIn("defence contractor", hide.reason)
 
-    def test_an_active_no_go_beats_a_lifted_one(self):
-        rs.no_go(self.conn, self.co, "agency", lifted=True)
-        rs.no_go(self.conn, self.co, "said_no")
+    def test_an_active_no_go_counts_only_when_set_after_the_latest_lift(self):
+        rs.no_go(self.conn, self.co, "agency", lifted=True, lifted_at="2026-10-01T08:00:00Z")
+        rs.no_go(self.conn, self.co, "said_no", created_at="2026-10-02T08:00:00Z")
         self.assertEqual(self.inputs()[self.co].no_go, "active")
         self.assertIn("said no", self.hide_for().reason)
-        later = seed_company(self.conn, "Later")
-        rs.no_go(self.conn, later, "said_no")
-        rs.no_go(self.conn, later, "agency", lifted=True)  # a lifted row written after the active one
-        self.assertEqual(self.inputs()[later].no_go, "active")
+        older = seed_company(self.conn, "Older")
+        rs.no_go(self.conn, older, "said_no", created_at="2026-09-01T08:00:00Z")
+        rs.no_go(self.conn, older, "agency", lifted=True, lifted_at="2026-10-01T08:00:00Z")
+        self.assertEqual(self.inputs()[older].no_go, "lifted")  # the lift is newer: he put it back on the list
+        same = seed_company(self.conn, "Same second")
+        rs.no_go(self.conn, same, "said_no", created_at="2026-10-01T08:00:00Z")
+        rs.no_go(self.conn, same, "agency", lifted=True, lifted_at="2026-10-01T08:00:00Z")
+        self.assertEqual(self.inputs()[same].no_go, "lifted")  # a tie is not "after"
+
+    def test_a_lift_on_the_survivor_is_not_undone_by_an_older_active_row_on_a_duplicate(self):
+        dup = seed_company(self.conn, "Acme Inc")
+        rs.no_go(self.conn, dup, "no_sponsorship", source="rules", created_at="2026-09-01T08:00:00Z")
+        rs.no_go(self.conn, self.co, "no_sponsorship", lifted=True, lifted_at="2026-10-01T08:00:00Z")
+        rs.merge(self.conn, dup, self.co)
+        got = self.inputs()[self.co]
+        self.assertEqual(got.no_go, "lifted")
+        self.assertIsNone(decide_hide(got, CFG))
+        newer = seed_company(self.conn, "Acme Labs")
+        rs.no_go(self.conn, newer, "said_no", created_at="2026-10-10T08:00:00Z")
+        rs.merge(self.conn, newer, self.co)
+        got = self.inputs()[self.co]
+        self.assertEqual((got.no_go, got.no_go_reason), ("active", "said_no"))
+        self.assertEqual(decide_hide(got, CFG).kind, "no_go")
 
 
 class TrustedBoardTests(Store):
@@ -243,6 +262,35 @@ class TrustedBoardTests(Store):
                 self.assertEqual(decide_hide(self.inputs()[co], CFG).kind, "no_sponsorship")
                 rs.flag_board(self.conn, co, b)
                 self.assertIsNone(decide_hide(self.inputs()[co], CFG))
+
+    def test_a_guessed_board_whose_first_reads_errored_is_still_doubtful(self):
+        for found_by in ("stapply_name", "slug_probe"):
+            with self.subTest(found_by=found_by):
+                co = seed_company(self.conn, f"err {found_by}")
+                b = rs.board(self.conn, co, found_by=found_by, last_read="error", error_streak=2)
+                pid = rs.posting(self.conn, co, board_id=b)
+                rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote=REFUSE, provisional=0)
+                rs.board_read(self.conn, b, "error")
+                self.assertIn(b, doubtful_board_ids(self.conn))
+                self.assertIsNone(decide_hide(self.inputs()[co], CFG))
+        signs = (lambda b: rs.board_read(self.conn, b, "ok"), lambda b: rs.board_read(self.conn, b, "unchanged"),
+                 lambda b: rs.read_state_event(self.conn, b, "empty"), lambda b: rs.read_state_event(self.conn, b, "ok"))
+        for i, sign in enumerate(signs):
+            with self.subTest(sign=i):
+                co = seed_company(self.conn, f"seen {i}")
+                b = rs.board(self.conn, co, found_by="stapply_name", last_read="error")
+                rs.read_state_event(self.conn, b, "error")  # an error event is no sign of a good read
+                self.assertIn(b, doubtful_board_ids(self.conn))
+                sign(b)
+                self.assertNotIn(b, doubtful_board_ids(self.conn))
+        streak = rs.board(self.conn, self.co, found_by="slug_probe", last_read="error", empty_streak=1)
+        self.assertNotIn(streak, doubtful_board_ids(self.conn))  # errors after an empty read: it was read once
+
+    def test_an_inactive_board_counts_for_nothing(self):
+        b = rs.board(self.conn, self.co, active=0)
+        self.refusal(board_id=b)
+        self.assertIn(b, doubtful_board_ids(self.conn))
+        self.assertIsNone(self.hide_for())
 
     def test_an_import_board_never_read_is_trusted(self):
         b = rs.board(self.conn, self.co, found_by="import", last_read=None)
@@ -335,7 +383,7 @@ class MergedTests(Store):
         rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote=REFUSE, provisional=0)
         self.assertEqual(self.hide_for().posting_id, pid)
 
-    def test_canonical_ids_follow_a_chain_and_survive_a_cycle(self):
+    def test_canonical_ids_follow_a_chain_and_refuse_a_cycle(self):
         a, b = seed_company(self.conn, "A"), seed_company(self.conn, "B")
         rs.merge(self.conn, a, b)
         rs.merge(self.conn, b, self.co)
@@ -344,9 +392,8 @@ class MergedTests(Store):
         x, y = seed_company(self.conn, "X"), seed_company(self.conn, "Y")
         rs.merge(self.conn, x, y)
         rs.merge(self.conn, y, x)
-        canon = canonical_ids(self.conn)
-        self.assertEqual(canon[x], canon[y])
-        self.assertIn(canon[x], (x, y))
+        with self.assertRaisesRegex(ValueError, "merged_into loops"):
+            canonical_ids(self.conn)  # like identity.live_company: a loop is a store error, never a silent pick
 
     def test_every_surviving_company_has_inputs(self):
         other = seed_company(self.conn, "Quiet")

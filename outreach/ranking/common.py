@@ -19,8 +19,7 @@ _DASHES = {0x2013: "-", 0x2014: "-"}
 
 
 def canonical_ids(conn: sqlite3.Connection) -> dict[int, int]:
-    """Every company_id to the end of its `merged_into` chain. A cycle (A into B into A) never loops: every member
-    of the cycle maps to its smallest id, so the members still agree."""
+    """Every company_id to the end of its `merged_into` chain. A cycle (A into B into A) raises ValueError."""
     nxt = {cid: into for cid, into in conn.execute("SELECT company_id, merged_into FROM company")}
     out: dict[int, int] = {}
     for start in nxt:
@@ -32,9 +31,8 @@ def canonical_ids(conn: sqlite3.Connection) -> dict[int, int]:
             if cur in out:
                 end = out[cur]
                 break
-            if cur in seen:  # a cycle: stop at the first repeat
-                end = min(path[path.index(cur):])
-                break
+            if cur in seen:  # a store error, as in outreach.identity.live_company: never pick a survivor silently
+                raise ValueError(f"merged_into loops back to company {cur} from {start}")
             seen.add(cur)
             path.append(cur)
             into = nxt.get(cur)
@@ -49,12 +47,22 @@ def canonical_ids(conn: sqlite3.Connection) -> dict[int, int]:
 
 def doubtful_board_ids(conn: sqlite3.Connection) -> frozenset[int]:
     """Boards whose postings count for nothing: an open crawler `flagged` item that says the board match is
-    doubtful, or a board found by name or slug that has not had its first read (so #21 has not checked it)."""
+    doubtful; a board found by name or slug before its first good read (so #21 has not checked it); and an
+    inactive board (the crawler no longer reads it)."""
     marks = ", ".join("?" for _ in UNREAD_DOUBTFUL_FOUND_BY)
+    # "Before its first good read" restates outreach/crawl/ingest.py _before_first_good_read: never read, or only
+    # errors so far (last read an error, no empty run under it, no kept good board_read row and no read_state event
+    # to a good state). An error carries no name and no jobs, so #21's check waits for a good read, and so do we.
     rows = conn.execute(
         "SELECT board_id FROM review_item WHERE kind = 'flagged' AND raised_by = 'crawler' AND state = 'open' "
         "AND board_id IS NOT NULL AND reason LIKE ? "
-        f"UNION SELECT board_id FROM board WHERE found_by IN ({marks}) AND last_read IS NULL",
+        "UNION SELECT board_id FROM board WHERE active = 0 "
+        f"UNION SELECT b.board_id FROM board b WHERE b.found_by IN ({marks}) AND (b.last_read IS NULL OR "
+        "(b.last_read = 'error' AND b.empty_streak = 0 "
+        "AND NOT EXISTS (SELECT 1 FROM board_read r WHERE r.board_id = b.board_id "
+        "AND r.result IN ('ok', 'empty', 'unchanged')) "
+        "AND NOT EXISTS (SELECT 1 FROM event e WHERE e.entity = 'board' AND e.entity_id = b.board_id "
+        "AND e.kind = 'read_state' AND json_extract(e.detail, '$.to') IN ('ok', 'empty', 'unchanged'))))",
         (BOARD_DOUBTFUL_PREFIX + "%", *UNREAD_DOUBTFUL_FOUND_BY)).fetchall()
     return frozenset(r[0] for r in rows)
 

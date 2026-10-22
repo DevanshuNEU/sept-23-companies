@@ -151,6 +151,29 @@ class TrustTests(Store):
         r = self.role()
         self.assertEqual((r.best, r.ignored), (None, 1))
 
+    def test_postings_on_an_inactive_board_are_not_roles(self):
+        b = rs.board(self.conn, self.co, active=0)
+        self.add("ng", board_id=b)
+        r = self.role()
+        self.assertEqual((r.best, r.ignored, r.open_count, r.lanes), (None, 1, 0, ()))
+
+    def test_a_company_whose_only_board_is_doubtful_grades_no_role_low(self):
+        rs.flag_board(self.conn, self.co, self.board)
+        self.add("ng")
+        canon, doubtful = canonical_ids(self.conn), doubtful_board_ids(self.conn)
+        self.assertEqual(company_board_states(self.conn, canon, doubtful)[self.co], "unconfirmed")
+        c = self.role().confidence
+        self.assertEqual((c.level, c.basis), ("low", "its only board is not confirmed yet"))
+        guessed = seed_company(self.conn, "Guessed")
+        b = rs.board(self.conn, guessed, found_by="stapply_name", last_read=None)
+        self.add("ng", company_id=guessed, board_id=b)
+        self.assertEqual(self.role(guessed).confidence.level, "low")
+        both = seed_company(self.conn, "Both")
+        rs.flag_board(self.conn, both, rs.board(self.conn, both))
+        rs.board(self.conn, both, last_read="ok")
+        self.add("ng", company_id=both, board_id=None, us="no")
+        self.assertEqual(self.role(both).confidence.level, "high")  # a confirmed board read ok and listed nothing
+
     def test_merged_away_company_postings_credit_the_survivor(self):
         dup = seed_company(self.conn, "Acme Inc")
         pid = self.add("ng", company_id=dup)
@@ -281,7 +304,7 @@ class EmptyReadTests(Store):
         co = seed_company(self.conn, "Empty")
         b = rs.board(self.conn, co, last_read="empty")
         self.add("ng", company_id=co, board_id=b, citizenship=1)  # stale and hidden, so listed nowhere
-        self.assertEqual(company_board_states(self.conn, canonical_ids(self.conn))[co], "read_empty")
+        self.assertEqual(company_board_states(self.conn, canonical_ids(self.conn), frozenset())[co], "read_empty")
         r = self.role(co)
         self.assertEqual((r.best, r.stale), (None, ()))
         self.assertEqual((r.confidence.level, r.confidence.basis),
@@ -295,7 +318,7 @@ class EmptyReadTests(Store):
         rs.board(self.conn, b, last_read="error")
         rs.board(self.conn, b, last_read="empty")
         rs.board(self.conn, c, last_read=None)
-        states = company_board_states(self.conn, canonical_ids(self.conn))
+        states = company_board_states(self.conn, canonical_ids(self.conn), frozenset())
         self.assertEqual((states[a], states[b], states[c]), ("read_ok", "read_empty", "never_read"))
 
     def test_a_posting_on_an_empty_board_carries_that_state(self):
@@ -321,7 +344,7 @@ class BoardStateTests(Store):
         dup = seed_company(self.conn, "dup")
         rs.board(self.conn, dup, last_read="ok")
         rs.merge(self.conn, dup, never)
-        states = company_board_states(self.conn, canonical_ids(self.conn))
+        states = company_board_states(self.conn, canonical_ids(self.conn), frozenset())
         self.assertEqual(states[self.co], "read_ok")
         self.assertEqual(states[ok], "read_ok")
         self.assertEqual(states[unchanged], "read_ok")
@@ -331,7 +354,7 @@ class BoardStateTests(Store):
         self.assertNotIn(dup, states)
         lone = seed_company(self.conn, "lone")
         rs.board(self.conn, lone, last_read=None)
-        self.assertEqual(company_board_states(self.conn, canonical_ids(self.conn))[lone], "never_read")
+        self.assertEqual(company_board_states(self.conn, canonical_ids(self.conn), frozenset())[lone], "never_read")
 
 
 if __name__ == "__main__":

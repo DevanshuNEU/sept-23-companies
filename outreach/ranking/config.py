@@ -102,6 +102,19 @@ def _check_confidence(c: dict) -> None:
             raise ValueError(f"[confidence] {key} must be a whole number of at least 1, got {c[key]!r}")
 
 
+_HIDE_CONFIDENCES = ("confirmed", "estimate")
+
+
+def _check_hide(h: dict) -> None:
+    """The size hide may never hide more than #9 allows: over 300 people, on confirmed or estimated evidence."""
+    over = h["size_over"]
+    if not isinstance(over, int) or isinstance(over, bool) or over < 300:
+        raise ValueError(f"[hide] size_over must be a whole number of at least 300, got {over!r}")
+    conf = h["size_confidences"]
+    if not isinstance(conf, list) or not all(isinstance(c, str) and c in _HIDE_CONFIDENCES for c in conf):
+        raise ValueError(f"[hide] size_confidences must be a list of {_HIDE_CONFIDENCES}, got {conf!r}")
+
+
 def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
     path = Path(path)
     raw = path.read_bytes()
@@ -118,6 +131,7 @@ def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
             raise ValueError(f"[weights] {name} must be a finite number above 0, got {w!r}")
     _check_bottom_weights(data)
     _check_confidence(data["confidence"])
+    _check_hide(data["hide"])
     others = {k: v for k, v in data.items() if k not in ("ranker", "weights", "hide")}
     return RankerConfig(ranker=data["ranker"], weights=weights, hide=data["hide"], sections=others, raw=raw)
 

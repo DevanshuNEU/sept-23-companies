@@ -326,6 +326,20 @@ class ConfigTests(unittest.TestCase):
                     _load_edited(self, *edits)
         _load_edited(self, ("confidence", "factor_low", "0.85"))  # equal to medium is allowed
 
+    def test_the_hide_size_limit_and_confidences_are_checked(self):
+        for edits in ((("hide", "size_over", "299"),), (("hide", "size_over", "true"),),
+                      (("hide", "size_over", '"300"'),), (("hide", "size_over", "300.5"),),
+                      (("hide", "size_confidences", '["confirmed", "guess"]'),),
+                      (("hide", "size_confidences", '"confirmed"'),),
+                      (("hide", "size_confidences", '["Confirmed"]'),)):
+            with self.subTest(edits=edits):
+                with self.assertRaises(ValueError):
+                    _load_edited(self, *edits)
+        self.assertEqual(_load_edited(self, ("hide", "size_over", "500")).hide["size_over"], 500)
+        self.assertEqual(_load_edited(self, ("hide", "size_confidences", '["confirmed"]')).hide["size_confidences"],
+                         ["confirmed"])
+        _load_edited(self, ("hide", "size_confidences", "[]"))  # never hide by size: allowed
+
     def test_confidence_shares_and_counts_are_checked(self):
         for key, value in (("rank_high_share", "0.0"), ("rank_high_share", "1.0"), ("rank_low_share", "0.0"),
                            ("rank_low_share", "1.5"), ("reason_count", "0"), ("reason_count", "2.5"),

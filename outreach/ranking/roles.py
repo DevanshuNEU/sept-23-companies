@@ -1,8 +1,9 @@
 """Visible postings, the best posting and the role lanes per company (#6, design section 8, ruling 2026-10-22).
 
-A visible posting is open, decided under the current ruleset, on a trusted board, not stale, and `posting_visible`
-accepts it. It earns a lane: `level_role` (engineering, level ok), `intern_junior` (an intern posting that is not
-student-only) or `any_us_role` (engineering, level not ok). Task 5 decides which earned lanes a company holds.
+A visible posting is open, decided under the current ruleset, on a trusted board (not doubtful, not inactive), not
+stale, and `posting_visible` accepts it. It earns a lane: `level_role` (engineering, level ok), `intern_junior` (an
+intern posting that is not student-only) or `any_us_role` (engineering, level not ok). Task 5 decides which earned
+lanes a company holds.
 
 A stale posting (from `outreach.crawl.stale.load_stale`, never re-derived here) that would be visible goes to
 `Roles.stale` only: no lane, never the best posting, not in `visible` and not in `open_count`. A stale posting that
@@ -83,15 +84,17 @@ def _lane(d) -> str:
     return "level_role" if d.level_ok else "any_us_role"
 
 
-def company_board_states(conn: sqlite3.Connection, canon: dict[int, int]) -> dict[int, str]:
-    """Per surviving company with an active board: `read_ok` when any board last read ok or unchanged, else
-    `read_empty` when any read empty (a good read that listed nothing), else `read_failed` when any errored, else
-    `never_read`. A company with no active board is absent (`no_board`)."""
-    rank = {"read_ok": 0, "read_empty": 1, "read_failed": 2, "never_read": 3}
+def company_board_states(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozenset[int]) -> dict[int, str]:
+    """Per surviving company with an active board, from its trusted boards: `read_ok` when any last read ok or
+    unchanged, else `read_empty` when any read empty (a good read that listed nothing), else `read_failed` when any
+    errored, else `never_read`. A company whose active boards are all doubtful is `unconfirmed`; one with no active
+    board is absent (`no_board`)."""
+    rank = {"read_ok": 0, "read_empty": 1, "read_failed": 2, "never_read": 3, "unconfirmed": 4}
     out: dict[int, str] = {}
-    for company_id, last_read in conn.execute("SELECT company_id, last_read FROM board WHERE active = 1"):
+    for board_id, company_id, last_read in conn.execute(
+            "SELECT board_id, company_id, last_read FROM board WHERE active = 1"):
         cid = canon.get(company_id, company_id)
-        state = _board_state(last_read, True)
+        state = "unconfirmed" if board_id in doubtful else _board_state(last_read, True)
         if cid not in out or rank[state] < rank[out[cid]]:
             out[cid] = state
     return out
@@ -137,7 +140,7 @@ def load_roles(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             stale_reason=stale[pid].reason if is_stale else "")
         g["stale" if is_stale else "visible"].append(best)
 
-    states = company_board_states(conn, canon) if groups else {}
+    states = company_board_states(conn, canon, doubtful) if groups else {}
     out: dict[int, Roles] = {}
     for cid, g in groups.items():
         visible = tuple(sorted(g["visible"], key=role_sort_key))

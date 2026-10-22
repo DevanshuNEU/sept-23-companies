@@ -64,6 +64,8 @@ MIN_NAME_KEY = 4  # shorter name keys ("ace", "ibm") never match by name
 _NAME_SOURCES = ("name", "hand", "import", "crawl", "merge", "dba", "legal_name", "formd")
 _RAW_SOURCES = ("fein", "ats", "linkedin")
 _NAME_ALIAS_SOURCE = {"formd": "formd"}  # the alias source of the candidate's name, by source; default `name`
+
+
 @dataclass(frozen=True)
 class Resolution:
     company_id: int

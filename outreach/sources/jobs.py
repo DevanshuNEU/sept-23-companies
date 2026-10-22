@@ -23,6 +23,8 @@ from outreach.store import finish_job, iso_utc, mark_shared_key, start_job, tran
 
 __all__ = ["SourceReport", "run_discover", "run_resolve", "store_name_lookup", "POST_TEXT_CAP"]
 
+MIN_LOOKUPS_FOR_ALL_FAILED = 3  # one or two failed lookups prove nothing; three of three is a pattern
+
 POST_TEXT_CAP = 20_000
 
 
@@ -70,6 +72,15 @@ def store_name_lookup(conn: sqlite3.Connection) -> Callable[[str], bool]:
     return lookup
 
 
+def _store_link_check(conn: sqlite3.Connection, source_name: str) -> Callable[[str], bool]:
+    """Whether a `company_source` row already links the source's record: nothing more to look up about it."""
+    def linked(source_ref: str) -> bool:
+        return conn.execute("SELECT 1 FROM company_source WHERE source_name = ? AND source_ref = ?",
+                            (source_name, source_ref)).fetchone() is not None
+
+    return linked
+
+
 POST_FAILURE = "post "  # a `failed` entry for a post starts with this; a candidate's starts with its source_ref
 
 
@@ -81,6 +92,9 @@ def _discover_one(conn: sqlite3.Connection, source: Source, run_id: int, creates
     bind = getattr(source, "bind_name_lookup", None)
     if bind is not None:
         bind(store_name_lookup(conn))
+    bind_link = getattr(source, "bind_link_check", None)
+    if bind_link is not None:
+        bind_link(_store_link_check(conn, source.name))
     shared = getattr(source, "shared_keys", None)
     if shared is not None:
         keys = shared()
@@ -179,8 +193,11 @@ def run_discover(conn: sqlite3.Connection, sources: Sequence[Source], *, creates
         if len(report.failed) > candidates:
             problems.append(f"{len(report.failed) - candidates} posts failed in {name}")
         lookups, lookup_errors = report.notes.get("fetches", 0), report.notes.get("fetch_errors", 0)
-        if lookups and lookup_errors == lookups:  # a blocked or broken SEC: every lookup failed, not a stray one
-            problems.append(f"{lookups} SEC lookups failed in {name}")
+        if lookups >= MIN_LOOKUPS_FOR_ALL_FAILED and lookup_errors == lookups:  # every one failed: a pattern
+            problems.append(f"{lookups} lookups failed in {name}")
+        unreadable = report.notes.get("unreadable", 0)
+        if unreadable:  # Form D's count of filings that did not read; a stray one is fine, never silent
+            problems.append(f"{unreadable} unreadable Form D filings")
     if sources and len(errors) == len(sources):
         status = "failed"
     elif problems:

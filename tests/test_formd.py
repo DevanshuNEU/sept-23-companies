@@ -9,7 +9,9 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
+from outreach import identity
 from outreach.identity import company_state, find_company
 from outreach.net import FetchError, SpacedClient
 from outreach.sources import formd
@@ -26,7 +28,7 @@ from tests.test_lca_source import FILES
 
 DATASET = Path(__file__).parent / "fixtures" / "formd"
 SEC = "https://data.sec.gov/submissions/CIK{}.json"
-ORCHARD, NIMBUS, MESH, CLEARPATH, FUND, UNKNOWN, LUMEN, _TEST, _GARBLED, TORONTO, FLAG_FUND = (
+ORCHARD, NIMBUS, MESH, CLEARPATH, FUND, UNKNOWN, LUMEN, _TEST, _UNUSED, TORONTO, FLAG_FUND = (
     f"{n:010d}" for n in range(1000001, 1000012))
 FETCHED = {ORCHARD, NIMBUS, MESH, CLEARPATH, UNKNOWN, LUMEN, TORONTO}  # every readable non-fund issuer
 
@@ -49,6 +51,43 @@ def by_cik(source, since=None):
 
 def funding(cand):
     return [(json.loads(e.value), e) for e in cand.evidence if e.fact == "funding"]
+
+
+def edit_tsv(folder, member, change):
+    """Rewrite one TSV of a copied data set: `change(row_dict, row_number)` edits each data row in place."""
+    path = folder / member
+    lines = path.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split("\t")
+    out = [lines[0]]
+    for n, line in enumerate(lines[1:]):
+        cells = line.split("\t")
+        cells += [""] * (len(header) - len(cells))
+        row = dict(zip(header, cells))
+        change(row, n)
+        out.append("\t".join(row[h] for h in header))
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def break_dates(folder, how_many):
+    """Make the date of the first `how_many` non-test filings unreadable (the SEC's format changing, say)."""
+    done = []
+
+    def change(row, n):
+        if row["TESTORLIVE"] != "TEST" and len(done) < how_many:
+            row["FILING_DATE"] = "AUG/14/2026"
+            done.append(n)
+
+    edit_tsv(folder, "FORMDSUBMISSION.tsv", change)
+
+
+class RedirectSpy(FakeClient):
+    def __init__(self, routes_):
+        super().__init__(routes_)
+        self.follow = []
+
+    def get(self, url, headers=None, *, follow_redirects=False):
+        self.follow.append(follow_redirects)
+        return super().get(url, headers, follow_redirects=follow_redirects)
 
 
 def copy_dataset(tc):
@@ -110,13 +149,11 @@ class ReadTest(unittest.TestCase):
                                  "Clearpath Holdings LLC", "Unknown Startup Inc", "Lumen Apps Holdings Inc",
                                  "Toronto Cloud Corp"})
 
-    def test_a_test_filing_and_an_unreadable_date_are_not_yielded_and_are_counted(self):
+    def test_a_test_filing_is_not_yielded_and_is_counted(self):
         s = make()
-        names = {c.name for c in s.discover()}
-        self.assertNotIn("Test Filing Corp", names)
-        self.assertNotIn("Garbled Date Inc", names)
+        self.assertNotIn("Test Filing Corp", {c.name for c in s.discover()})
         summary = s.summary()
-        self.assertEqual((summary["test_filings"], summary["unreadable"]), (1, 1))
+        self.assertEqual((summary["test_filings"], summary["unreadable"]), (1, 0))
 
     def test_funding_value_and_kind(self):
         orchard = by_cik(make())[ORCHARD]
@@ -188,8 +225,9 @@ class ReadTest(unittest.TestCase):
     def test_summary_counts(self):
         s = make()
         list(s.discover())
-        self.assertEqual(s.summary(), {"filings": 12, "issuers": 7, "funds_skipped": 2, "test_filings": 1,
-                                       "unreadable": 1, "fetches": 7, "fetch_errors": 0})
+        self.assertEqual(s.summary(), {"filings": 11, "issuers": 7, "funds_skipped": 2, "test_filings": 1,
+                                       "unreadable": 0, "bad_amounts": 0, "fetches": 7, "fetch_errors": 0,
+                                       "lookups_stopped": 0})
         list(s.discover(since="2026-09-30"))
         self.assertEqual(s.summary()["issuers"], 1)  # a pass reports itself, not a running total
 
@@ -210,10 +248,16 @@ class SecRequestsTest(unittest.TestCase):
             self.assertEqual(headers, {"User-Agent": SEC_USER_AGENT})
         self.assertEqual({u for _, u, _, _ in client.calls}, {SEC.format(c) for c in FETCHED})
 
-    def test_nothing_is_fetched_for_a_fund_a_test_filing_or_an_unreadable_row(self):
+    def test_nothing_is_fetched_for_a_fund_or_a_test_filing(self):
         client = FakeClient(routes())
         list(make(client).discover())
-        self.assertFalse({SEC.format(c) for c in (FUND, _TEST, _GARBLED)} & set(client.requests))
+        self.assertFalse({SEC.format(c) for c in (FUND, FLAG_FUND, _TEST)} & set(client.requests))
+
+    def test_follow_redirects_is_never_asked_for(self):
+        client = RedirectSpy(routes())
+        list(make(client).discover())
+        self.assertEqual(len(client.follow), 7)
+        self.assertEqual(set(client.follow), {False})
 
     def test_one_fetch_per_issuer_whatever_its_filing_count(self):
         client = FakeClient(routes())
@@ -367,7 +411,7 @@ class DatasetTest(unittest.TestCase):
         s = make(dataset=folder)
         got = by_cik(s)
         self.assertNotIn(MESH, got)
-        self.assertEqual(s.summary()["unreadable"], 3)  # the garbled date and these two
+        self.assertEqual(s.summary()["unreadable"], 2)
 
 
 class StoreLookupTest(unittest.TestCase):
@@ -472,15 +516,6 @@ class EndToEndTest(unittest.TestCase):
             (f"formd:{MESH}",)).fetchone())
         self.assertEqual(self.report.skipped_unmatched, 5)
 
-    def test_shared_ein_never_attaches(self):
-        """ein 333333333 is a PEO's FEIN, marked shared by LCA: "Clearpath Holdings LLC" joins none of its clients."""
-        self.assertIn(SEC.format(CLEARPATH), self.client.requests)  # the ein was read
-        for client_name in ("Clearpath Inc", "Greenfield AI Inc", "Sundial Health Inc"):
-            self.assertEqual(self.fundings(client_name), [], client_name)
-        self.assertEqual(self.conn.execute(
-            "SELECT COUNT(*) FROM company_alias WHERE alias_key = '333333333'").fetchone()[0], 0)
-        self.assertEqual(self.items(), 0)
-
     def test_blank_ein_is_ignored(self):
         self.assertIn(SEC.format(LUMEN), self.client.requests)
         self.assertEqual(self.fundings("Lumen Apps Inc"), [])
@@ -518,7 +553,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual((r.notes["fetches"], r.notes["fetch_errors"], r.error), (5, 5, ""))
         row = conn.execute("SELECT status, error FROM job_run WHERE run_id = ?", (run_id,)).fetchone()
         self.assertEqual(row["status"], "partial")
-        self.assertIn("5 SEC lookups failed", row["error"])
+        self.assertIn("5 lookups failed in formd", row["error"])
         self.assertEqual(r.attached, 1)  # by name, Orchard still lands
 
     def test_a_run_with_no_sec_lookups_is_not_a_failed_lookup_run(self):
@@ -585,6 +620,211 @@ class EndToEndTest(unittest.TestCase):
                                       (a,)).fetchone()[0], 1)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM evidence WHERE fact = 'funding' AND company_id = ?",
                                       (b,)).fetchone()[0], 0)
+
+
+class UnreadableTest(unittest.TestCase):
+    def test_every_date_changed_raises_it_is_not_a_quiet_period(self):
+        folder = copy_dataset(self)
+        break_dates(folder, 99)
+        with self.assertRaisesRegex(TabularError, r"no readable.*10 of 10"):
+            list(make(dataset=folder).discover())
+
+    def test_the_error_comes_before_the_since_filter(self):
+        folder = copy_dataset(self)
+        break_dates(folder, 99)
+        with self.assertRaises(TabularError):
+            list(make(dataset=folder).discover(since="2030-01-01"))
+
+    def test_a_submission_type_that_is_not_d_or_d_a_is_unreadable_too(self):
+        folder = copy_dataset(self)
+        edit_tsv(folder, "FORMDSUBMISSION.tsv", lambda row, n: row.update(SUBMISSIONTYPE="D/X"))
+        with self.assertRaisesRegex(TabularError, r"10 of 10"):
+            list(make(dataset=folder).discover())
+
+    def test_more_than_half_unreadable_raises_and_half_does_not(self):
+        folder = copy_dataset(self)
+        break_dates(folder, 6)
+        with self.assertRaisesRegex(TabularError, r"6 of 10"):
+            list(make(dataset=folder).discover())
+        folder = copy_dataset(self)
+        break_dates(folder, 5)
+        s = make(dataset=folder)
+        list(s.discover())
+        self.assertEqual(s.summary()["unreadable"], 5)
+
+    def test_a_data_set_of_only_test_filings_raises(self):
+        folder = copy_dataset(self)
+        edit_tsv(folder, "FORMDSUBMISSION.tsv", lambda row, n: row.update(TESTORLIVE="TEST"))
+        with self.assertRaisesRegex(TabularError, r"no readable"):
+            list(make(dataset=folder).discover())
+
+    def test_one_bad_row_is_counted_and_the_job_is_partial(self):
+        folder = copy_dataset(self)
+        break_dates(folder, 1)
+        conn = fresh_store()
+        run_id, reports = run_discover(conn, [make(dataset=folder)])
+        r = reports["formd"]
+        self.assertEqual((r.error, r.notes["unreadable"]), ("", 1))
+        self.assertGreater(r.candidates, 0)
+        row = conn.execute("SELECT status, error FROM job_run WHERE run_id = ?", (run_id,)).fetchone()
+        self.assertEqual(row["status"], "partial")
+        self.assertIn("1 unreadable Form D filings", row["error"])
+
+    def test_a_clean_run_has_no_unreadable_problem(self):
+        conn = fresh_store()
+        run_id, _ = run_discover(conn, [make()])
+        self.assertEqual(conn.execute("SELECT status, error FROM job_run WHERE run_id = ?", (run_id,)).fetchone()[:],
+                         ("ok", ""))
+
+
+class AmountTest(unittest.TestCase):
+    def amounts(self, **by_accession):
+        folder = copy_dataset(self)
+        edit_tsv(folder, "OFFERING.tsv", lambda row, n: row.update(
+            TOTALAMOUNTSOLD=by_accession.get(row["ACCESSIONNUMBER"], row["TOTALAMOUNTSOLD"])))
+        s = make(dataset=folder)
+        return by_cik(s), s
+
+    def test_an_amount_that_is_not_ascii_digits_is_null_and_counted(self):
+        got, s = self.amounts(**{"0001000001-26-000001": "4.5M", "0001000003-26-000001": "\u0664\u0665\u0660",
+                                 "0001000002-26-000001": "1,000"})
+        self.assertEqual([d["amount_usd"] for d, _ in funding(got[ORCHARD])], [None, 6500000])
+        self.assertEqual(funding(got[MESH])[0][0]["amount_usd"], None)
+        self.assertEqual(s.summary()["bad_amounts"], 3)
+
+    def test_blank_and_indefinite_are_null_and_not_counted(self):
+        got, s = self.amounts(**{"0001000001-26-000001": "Indefinite", "0001000003-26-000001": ""})
+        self.assertEqual(funding(got[ORCHARD])[0][0]["amount_usd"], None)
+        self.assertEqual(funding(got[MESH])[0][0]["amount_usd"], None)
+        self.assertEqual(s.summary()["bad_amounts"], 0)
+
+    def test_a_decimal_amount_rounds_to_whole_dollars(self):
+        got, _ = self.amounts(**{"0001000001-26-000001": "4500000.60"})
+        self.assertEqual(funding(got[ORCHARD])[0][0]["amount_usd"], 4500001)
+
+
+class LookupPolicyTest(unittest.TestCase):
+    def test_five_blocked_answers_in_a_row_stop_the_lookups_but_not_the_issuers(self):
+        blocked = {c: status_response(429 if i % 2 else 403) for i, c in enumerate((ORCHARD, NIMBUS, MESH, CLEARPATH,
+                                                                                  UNKNOWN))}
+        client = FakeClient(routes(**blocked))
+        s = make(client)
+        got = by_cik(s)
+        self.assertEqual(len(got), 7)  # every issuer still yields, by name
+        self.assertEqual(len(client.requests), 5)
+        self.assertNotIn(SEC.format(LUMEN), client.requests)
+        self.assertNotIn(SEC.format(TORONTO), client.requests)
+        summary = s.summary()
+        self.assertEqual((summary["fetches"], summary["fetch_errors"], summary["lookups_stopped"]), (5, 5, 2))
+        self.assertEqual(got[LUMEN].keys, {"formd_cik": LUMEN})
+
+    def test_a_good_answer_resets_the_count(self):
+        pattern = {ORCHARD: 429, NIMBUS: 403, MESH: 429, CLEARPATH: 403, LUMEN: 429, TORONTO: 429}  # UNKNOWN is a 200
+        client = FakeClient(routes(**{c: status_response(code) for c, code in pattern.items()}))
+        s = make(client)
+        list(s.discover())
+        self.assertEqual(len(client.requests), 7)
+        self.assertEqual(s.summary()["lookups_stopped"], 0)
+
+    def test_a_503_or_a_transport_error_does_not_count_toward_the_stop(self):
+        client = FakeClient(routes(**{c: (status_response(503) if i % 2 else FetchError("timeout", "slow"))
+                                      for i, c in enumerate((ORCHARD, NIMBUS, MESH, CLEARPATH, UNKNOWN, LUMEN))}))
+        s = make(client)
+        list(s.discover())
+        self.assertEqual((len(client.requests), s.summary()["lookups_stopped"]), (7, 0))
+
+    def test_the_stop_is_per_pass(self):
+        blocked = {c: status_response(429) for c in (ORCHARD, NIMBUS, MESH, CLEARPATH, UNKNOWN)}
+        client = FakeClient(routes(**blocked))
+        s = make(client)
+        list(s.discover())
+        list(s.discover())
+        self.assertEqual(s.summary()["fetches"], 5)  # the second pass tried again, and stopped again at five
+        self.assertEqual(len(client.requests), 10)
+
+    def test_an_issuer_already_linked_by_source_ref_is_not_looked_up(self):
+        client = FakeClient(routes())
+        linked = {f"formd:{ORCHARD}", f"formd:{NIMBUS}"}
+        got = by_cik(make(client, is_linked=lambda ref: ref in linked))
+        self.assertEqual(len(got), 7)
+        self.assertEqual({u for u in client.requests}, {SEC.format(c) for c in FETCHED - {ORCHARD, NIMBUS}})
+        self.assertNotIn("fein", got[NIMBUS].keys)
+
+    def test_the_discover_job_binds_the_store_link_check(self):
+        conn = fresh_store()
+        run_discover(conn, [LcaSource(FILES)])
+        run_discover(conn, [make(FakeClient(routes()))])
+        second = FakeClient(routes())
+        _, reports = run_discover(conn, [make(second)])
+        # Orchard and Nimbus were attached (linked) on the first run; Mesh, Clearpath and Lumen were not
+        self.assertEqual(set(second.requests), {SEC.format(c) for c in (MESH, CLEARPATH, LUMEN)})
+        self.assertEqual(reports["formd"].attached, 2)
+
+    def test_an_explicit_link_check_is_not_replaced_by_the_store_one(self):
+        conn = fresh_store()
+        run_discover(conn, [LcaSource(FILES)])
+        run_discover(conn, [make(FakeClient(routes()))])  # links Orchard and Nimbus
+        client = FakeClient(routes())
+        run_discover(conn, [make(client, is_linked=lambda ref: False)])
+        self.assertEqual(set(client.requests), {SEC.format(c) for c in (ORCHARD, NIMBUS, MESH, CLEARPATH, LUMEN)})
+
+    def test_the_all_failed_status_needs_three_lookups(self):
+        for keys, status in ((("orchard", "nimbusroboticsholdings"), "ok"),
+                             (("orchard", "nimbusroboticsholdings", "meshsystems"), "partial")):
+            with self.subTest(lookups=len(keys)):
+                conn = fresh_store()
+                run_discover(conn, [LcaSource(FILES)])
+                client = FakeClient(routes(**{c: FetchError("network", "blocked") for c in FETCHED}))
+                run_id, reports = run_discover(conn, [make(client, name_lookup=lambda key, keys=keys: key in keys)])
+                self.assertEqual(reports["formd"].notes["fetches"], len(keys))
+                self.assertEqual(reports["formd"].notes["fetch_errors"], len(keys))
+                row = conn.execute("SELECT status, error FROM job_run WHERE run_id = ?", (run_id,)).fetchone()
+                self.assertEqual(row["status"], status)
+                if status == "partial":
+                    self.assertIn("3 lookups failed in formd", row["error"])
+                else:
+                    self.assertEqual(row["error"], "")
+
+
+class SharedEinTest(unittest.TestCase):
+    """ein 333333333 is a PEO's FEIN, marked shared by LCA. A stale fein alias on one client (written before the key
+    was marked, or by hand) makes this a real test: only the shared-key check stands between Form D and that company."""
+
+    def setUp(self):
+        self.conn = fresh_store()
+        run_discover(self.conn, [LcaSource(FILES)])
+        self.assertIsNotNone(self.conn.execute(
+            "SELECT 1 FROM shared_key WHERE kind = 'fein' AND value = '333333333'").fetchone())
+        self.client_id = self.conn.execute("SELECT company_id FROM company WHERE name = 'Clearpath Inc'").fetchone()[0]
+        self.assertTrue(add_alias(self.conn, self.client_id, "333333333", "fein"))
+
+    def run_formd(self):
+        self.client = FakeClient(routes())
+        return run_discover(self.conn, [make(self.client)])[1]["formd"]
+
+    def funding_rows(self):
+        return self.conn.execute("SELECT COUNT(*) FROM evidence WHERE fact = 'funding'").fetchone()[0]
+
+    def test_shared_ein_never_attaches(self):
+        report = self.run_formd()
+        self.assertIn(SEC.format(CLEARPATH), self.client.requests)  # the ein was read and offered as a key
+        for name in ("Clearpath Inc", "Greenfield AI Inc", "Sundial Health Inc"):
+            self.assertEqual(self.conn.execute(
+                "SELECT COUNT(*) FROM evidence e JOIN company c USING (company_id) "
+                "WHERE e.fact = 'funding' AND c.name = ?", (name,)).fetchone()[0], 0, name)
+        self.assertIsNone(self.conn.execute(
+            "SELECT 1 FROM company_source WHERE source_name = 'formd' AND source_ref = ?",
+            (f"formd:{CLEARPATH}",)).fetchone())
+        self.assertEqual(report.created, 0)
+
+    def test_without_the_shared_check_it_would_attach(self):
+        """The same run with identity's shared-key check bypassed: the funding lands on the PEO client. This is what
+        makes test_shared_ein_never_attaches able to fail."""
+        with mock.patch.object(identity, "is_shared_key", return_value=False):
+            self.run_formd()
+        self.assertEqual(self.conn.execute(
+            "SELECT COUNT(*) FROM evidence WHERE fact = 'funding' AND company_id = ?", (self.client_id,)
+        ).fetchone()[0], 1)
 
 
 if __name__ == "__main__":

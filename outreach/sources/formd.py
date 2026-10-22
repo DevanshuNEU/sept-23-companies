@@ -33,12 +33,16 @@ Per-source policy:
   (identity's rule; a PEO's `ein` joins none of its clients). A failed lookup (a transport error, a non-200 answer,
   a body that is not a JSON object) drops that issuer's `fein` key, is counted in `fetch_errors` and never drops the
   filing; `summary()` carries the count to the job summary, and a run where every lookup failed is `partial` (the discover
-  job says "<n> SEC lookups failed"). A redirect is not followed.
+  job says "<n> lookups failed in formd" once at least 3 were made). An issuer already linked by source_ref is not
+  looked up again, and after 5 consecutive 403 or 429 answers no more lookups are made in that pass (counted as
+  `lookups_stopped`; the remaining issuers still yield, by name). A redirect is never followed.
 - Every request to SEC carries the User-Agent `SEC_USER_AGENT` (SEC's access policy asks for contact details; the
   contact is approved for SEC hosts only). `sec_headers` returns it for SEC's own hosts and nothing for any other
   host. Requests go through a `SpacedClient` at about one a second.
 - Error is not empty: a data set that cannot be read, lacks a column or a file, has a file with a header and no rows,
-  or whose files share no accession numbers raises a `TabularError`. A quiet period (nothing filed since `since`) is
+  whose files share no accession numbers, or in which no non-test filing is readable or more than half are not
+  (a changed date format, say) raises a `TabularError`. A few unreadable rows stay a count (`unreadable`), and the
+  discover job makes the run `partial` for them. A quiet period (nothing filed since `since`) is
   not an error.
 """
 from __future__ import annotations
@@ -52,7 +56,7 @@ import re
 import zipfile
 import zlib
 from collections.abc import Callable, Iterator, Mapping
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 from typing import TextIO
 from urllib.parse import urlsplit
@@ -73,7 +77,9 @@ _SUBMISSIONS = "https://data.sec.gov/submissions/CIK{}.json"
 _MONTHS = {m: i for i, m in enumerate("JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split(), 1)}
 _SEC_DATE = re.compile(r"(\d{1,2})-([A-Za-z]{3})-(\d{4})")
 _ISO_DATE = re.compile(r"(\d{4}-\d{2}-\d{2})(?:$|[T ])")
-_AMOUNT = re.compile(r"\d+(?:\.\d+)?")
+_AMOUNT = re.compile(r"[0-9]+(?:\.[0-9]+)?")  # ASCII digits only: \d would take Arabic-Indic and other scripts
+_CIK = re.compile(r"[0-9]{1,10}")
+_BLOCK_LIMIT = 5  # consecutive 403 or 429 answers after which no more SEC lookups are made in a pass
 _KINDS = {"D": "form_d", "D/A": "form_d_amendment"}
 _FUND = "pooled investment fund"
 
@@ -104,14 +110,12 @@ def parse_filing_date(text: str) -> str | None:
         return None
 
 
-def _amount(text: str) -> int | None:
+def _amount(text: str) -> tuple[int | None, bool]:
+    """(whole dollars or None, whether the text was neither blank, "Indefinite" nor a number)."""
     text = (text or "").strip()
-    if not _AMOUNT.fullmatch(text):
-        return None  # blank, "Indefinite" or anything else that is not a dollar figure
-    try:
-        return int(Decimal(text).to_integral_value())
-    except InvalidOperation:  # pragma: no cover - the pattern already admits only decimals
-        return None
+    if _AMOUNT.fullmatch(text):
+        return int(Decimal(text).to_integral_value()), False
+    return None, bool(text) and text.lower() != "indefinite"
 
 
 @contextlib.contextmanager
@@ -189,32 +193,44 @@ class FormDSource:
     max_member_bytes = 1024 ** 3  # a quarter is about 30 MB unpacked; over this the member is refused unread
 
     def __init__(self, dataset: Path, client: HttpClient, name_lookup: Callable[[str], bool] | None = None, *,
-                 interval_s: float = 1.0):
+                 interval_s: float = 1.0, is_linked: Callable[[str], bool] | None = None):
         """`dataset` is the quarterly zip or a folder of its files. `name_lookup(name_key)` says whether an issuer
         is worth an SEC lookup (default: always); the discover job binds a store-backed one unless one is given
-        here. `interval_s` spaces requests to data.sec.gov (SEC allows 10 a second; about 1 is asked)."""
+        here. `is_linked(source_ref)` says the store already knows the issuer (no lookup is made for it; default: never,
+        and the discover job binds a store-backed one unless one is given). `interval_s` spaces requests to
+        data.sec.gov (SEC allows 10 a second; about 1 is asked)."""
         if interval_s < 0:
             raise ValueError("interval_s cannot be negative")
         self.dataset = Path(dataset)
         self.client = SpacedClient(client, per_host={"data.sec.gov": interval_s})
         self._explicit_lookup = name_lookup is not None
         self.name_lookup: Callable[[str], bool] = name_lookup or (lambda key: True)
+        self._explicit_link = is_linked is not None
+        self.is_linked: Callable[[str], bool] = is_linked or (lambda ref: False)
+        self._blocked = 0
         self._summary = self._fresh_summary()
 
     @staticmethod
     def _fresh_summary() -> dict[str, int]:
-        return {"filings": 0, "issuers": 0, "funds_skipped": 0, "test_filings": 0, "unreadable": 0, "fetches": 0,
-                "fetch_errors": 0}
+        return {"filings": 0, "issuers": 0, "funds_skipped": 0, "test_filings": 0, "unreadable": 0, "bad_amounts": 0,
+                "fetches": 0, "fetch_errors": 0, "lookups_stopped": 0}
 
     def bind_name_lookup(self, lookup: Callable[[str], bool]) -> None:
         """Used by the discover job: a store-backed lookup, unless the caller gave one at construction."""
         if not self._explicit_lookup:
             self.name_lookup = lookup
 
+    def bind_link_check(self, is_linked: Callable[[str], bool]) -> None:
+        """Used by the discover job: a store-backed check, unless the caller gave one at construction."""
+        if not self._explicit_link:
+            self.is_linked = is_linked
+
     def summary(self) -> dict[str, int]:
         """What the latest `discover` pass saw: filings (rows read), issuers (yielded), funds_skipped, test_filings,
-        unreadable (rows with no usable date, type, issuer, CIK or name), fetches (SEC lookups made) and
-        fetch_errors (lookups that failed; each dropped only its issuer's `fein`)."""
+        unreadable (rows with no usable date, type, issuer, CIK or name), bad_amounts (amounts sold that were
+        neither blank, "Indefinite" nor a number: read as null), fetches (SEC lookups made), fetch_errors (lookups
+        that failed; each dropped only its issuer's `fein`) and lookups_stopped (issuers not looked up because SEC
+        kept answering 403 or 429)."""
         return dict(self._summary)
 
     # --- reading -------------------------------------------------------------------------------------------
@@ -246,31 +262,42 @@ class FormDSource:
         self._summary = summary = self._fresh_summary()
         submissions, offerings, issuers = self._load()
         summary["filings"] = len(submissions)
-        groups: dict[str, dict] = {}
+        self._blocked = 0
+        readable = []  # (filed, accession, kind, issuer row, offering row) for every non-test filing that reads
+        non_test = 0
         for acc, sub in submissions.items():
             if sub[_TEST_COLUMN].upper() == "TEST":
                 summary["test_filings"] += 1
                 continue
+            non_test += 1
             filed = parse_filing_date(sub["FILING_DATE"])
             kind = _KINDS.get(sub["SUBMISSIONTYPE"].upper())
-            if filed is None or kind is None:
-                summary["unreadable"] += 1
-                continue
-            if floor is not None and filed < floor:
-                continue
             issuer, offering = issuers.get(acc), offerings.get(acc)
-            if issuer is None or offering is None:
+            if filed is None or kind is None or issuer is None or offering is None:
                 summary["unreadable"] += 1
+                continue
+            readable.append((filed, acc, kind, issuer, offering))
+        unreadable = non_test - len(readable)
+        if not readable or unreadable * 2 > non_test:
+            # Before the since filter: a format change must never read as a quiet period.
+            lead = "no readable Form D filing: " if not readable else ""
+            raise TabularError(f"{self.dataset.name}: {lead}{unreadable} of {non_test} non-test filings are "
+                               "unreadable (a date, type or join that does not read)")
+        groups: dict[str, dict] = {}
+        for filed, acc, kind, issuer, offering in readable:
+            if floor is not None and filed < floor:
                 continue
             if offering["INDUSTRYGROUPTYPE"].lower() == _FUND or offering[_POOLED_COLUMN].lower() == "true":
                 summary["funds_skipped"] += 1
                 continue
             cik, name = issuer["CIK"], issuer["ENTITYNAME"]
-            if not cik.isdigit() or len(cik) > 10 or not name:
+            if not _CIK.fullmatch(cik) or not name:
                 summary["unreadable"] += 1
                 continue
+            amount, bad = _amount(offering["TOTALAMOUNTSOLD"])
+            summary["bad_amounts"] += bad
             group = groups.setdefault(cik.zfill(10), {"filings": [], "latest": None})
-            group["filings"].append((filed, acc, kind, _amount(offering["TOTALAMOUNTSOLD"])))
+            group["filings"].append((filed, acc, kind, amount))
             if group["latest"] is None or (filed, acc) > group["latest"][:2]:
                 group["latest"] = (filed, acc, name, issuer["CITY"], issuer["STATEORCOUNTRY"].upper())
         for cik, group in groups.items():
@@ -292,11 +319,15 @@ class FormDSource:
             hq = f"{city.title()}, {us_state}" if city else us_state
             evidence.append(EvidenceDraft("hq", hq, "guess", "formd", latest_acc, observed_on=latest_date))
         keys = {"formd_cik": cik}
-        if self.name_lookup(name_key(name)):
-            fein = self._fein(cik)
-            if fein:
-                keys["fein"] = fein
-        return Candidate(name=name, domain=None, keys=keys, evidence=tuple(evidence), source_ref=f"formd:{cik}",
+        source_ref = f"formd:{cik}"
+        if not self.is_linked(source_ref) and self.name_lookup(name_key(name)):
+            if self._blocked >= _BLOCK_LIMIT:
+                self._summary["lookups_stopped"] += 1
+            else:
+                fein = self._fein(cik)
+                if fein:
+                    keys["fein"] = fein
+        return Candidate(name=name, domain=None, keys=keys, evidence=tuple(evidence), source_ref=source_ref,
                          state=us_state)
 
     # --- SEC lookup ----------------------------------------------------------------------------------------
@@ -307,6 +338,7 @@ class FormDSource:
         self._summary["fetches"] += 1
         try:
             response = self.client.get(url, sec_headers(url))
+            self._blocked = self._blocked + 1 if response.status in (403, 429) else 0
             if response.status != 200:
                 raise FetchError("network", f"{url}: HTTP {response.status}")
             doc = response.json()

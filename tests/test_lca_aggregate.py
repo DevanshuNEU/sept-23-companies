@@ -258,15 +258,36 @@ class WageTest(Base):
         self.assertEqual(s.median_jr_wage, 124800)
 
     def test_median_wage_is_none_without_a_usable_wage(self):
-        for wage, unit in (("", ""), ("", "Year"), ("5000", "Month"), ("x", "Year"), ("0", "Year"), ("-5", "Year"),
-                           ("nan", "Year"), ("inf", "Hour"), ("100000", "")):
+        for wage, unit in (("", ""), ("", "Year"), ("100000", ""), ("100000", "Decade"), ("100000", "Fortnight"),
+                           ("x", "Year"), ("0", "Year"), ("-5", "Year"), ("nan", "Year"), ("inf", "Hour")):
             p = self.write([{"WAGE_RATE_OF_PAY_FROM": wage, "WAGE_UNIT_OF_PAY": unit}])
             self.assertIsNone(load_employers([p])["acme"].fy[2025].median_jr_wage, (wage, unit))
         self.assertIsNone(load_employers([Q1])["riverside university"].fy[2025].median_jr_wage)
 
+    def test_every_pay_unit_is_annualized(self):
+        for wage, unit, want in (("104000", "Year", 104000), ("50", "Hour", 104000), ("2000", "Week", 104000),
+                                 ("4000", "Bi-Weekly", 104000), ("8000", "Month", 96000),
+                                 ("2000", "week", 104000), ("4000", "BI-WEEKLY", 104000),
+                                 ("4000", "Biweekly", 104000), ("8000", " Month ", 96000)):
+            p = self.write([{"WAGE_RATE_OF_PAY_FROM": wage, "WAGE_UNIT_OF_PAY": unit}])
+            self.assertEqual(load_employers([p])["acme"].fy[2025].median_jr_wage, want, (wage, unit))
+
+    def test_wages_outside_ten_thousand_to_two_million_are_skipped_never_clamped(self):
+        for wage, unit, want in (("9999", "Year", None), ("10000", "Year", 10000), ("2000000", "Year", 2000000),
+                                 ("2000001", "Year", None), ("50", "Year", None), ("4", "Hour", None),
+                                 ("800", "Month", None), ("1e306", "Hour", None), ("1e308", "Year", None),
+                                 ("1e306", "Month", None)):
+            p = self.write([{"WAGE_RATE_OF_PAY_FROM": wage, "WAGE_UNIT_OF_PAY": unit}])
+            self.assertEqual(load_employers([p])["acme"].fy[2025].median_jr_wage, want, (wage, unit))
+
+    def test_an_absurd_wage_does_not_disturb_the_others(self):
+        p = self.write([{"WAGE_RATE_OF_PAY_FROM": "1e306", "WAGE_UNIT_OF_PAY": "Hour"},
+                        {"WAGE_RATE_OF_PAY_FROM": "100000"}])
+        self.assertEqual(load_employers([p])["acme"].fy[2025].median_jr_wage, 100000)
+
     def test_unusable_wages_are_skipped_not_counted_as_zero(self):
         p = self.write([{"WAGE_RATE_OF_PAY_FROM": "100000"}, {"WAGE_RATE_OF_PAY_FROM": "5000",
-                                                              "WAGE_UNIT_OF_PAY": "Month"},
+                                                              "WAGE_UNIT_OF_PAY": "Decade"},
                         {"WAGE_RATE_OF_PAY_FROM": ""}])
         self.assertEqual(load_employers([p])["acme"].fy[2025].median_jr_wage, 100000)
 
@@ -295,6 +316,90 @@ class WageTest(Base):
         for v in list(s.evidence().values()) + list(none.values()):
             self.assertIs(type(v), int)
             self.assertGreaterEqual(v, 0)
+
+
+class SplitByFeinTest(Base):
+    def test_same_normalized_name_with_two_feins_is_two_employers(self):
+        p = self.write([{"EMPLOYER_NAME": "Acme Inc", "EMPLOYER_FEIN": "11-1111111", "EMPLOYER_STATE": "NV",
+                         "PW_WAGE_LEVEL": "I", "EMPLOYER_POC_EMAIL": "a@acme.io"},
+                        {"EMPLOYER_NAME": "Acme Inc", "EMPLOYER_FEIN": "11-1111111", "EMPLOYER_STATE": "NV",
+                         "PW_WAGE_LEVEL": "II", "EMPLOYER_POC_EMAIL": "a@acme.io"},
+                        {"EMPLOYER_NAME": "ACME, LLC", "EMPLOYER_FEIN": "22-2222222", "EMPLOYER_STATE": "TX",
+                         "PW_WAGE_LEVEL": "III", "EMPLOYER_POC_EMAIL": "b@acmetexas.com",
+                         "DECISION_DATE": "2025-02-01"}])
+        emps = load_employers([p])
+        self.assertEqual(sorted(emps), ["acme#111111111", "acme#222222222"])
+        a, b = emps["acme#111111111"], emps["acme#222222222"]
+        self.assertEqual((a.legal_name, a.fein, a.state, a.domain, a.fy[2025].total, a.fy[2025].jr),
+                         ("Acme Inc", "111111111", "NV", "acme.io", 2, 2))
+        self.assertEqual((b.legal_name, b.fein, b.state, b.domain, b.fy[2025].total, b.fy[2025].jr,
+                          b.fy[2025].last_decision), ("ACME, LLC", "222222222", "TX", "acmetexas.com", 1, 0,
+                                                       "2025-02-01"))
+        self.assertEqual(a.feins_seen, ("111111111", "222222222"))
+        self.assertEqual(b.feins_seen, a.feins_seen)
+        self.assertEqual(a.key, "acme#111111111")
+
+    def test_us_bank_and_another_bank_never_blend(self):
+        p = self.write([{"EMPLOYER_NAME": "US Bank", "EMPLOYER_FEIN": "31-0000001", "SOC_CODE": "15-1252"},
+                        {"EMPLOYER_NAME": "US Bank", "EMPLOYER_FEIN": "31-0000001"},
+                        {"EMPLOYER_NAME": "Bank, Inc.", "EMPLOYER_FEIN": "55-0000002", "SOC_CODE": "13-2011"}])
+        emps = load_employers([p])
+        self.assertEqual(len(emps), 2)
+        by_name = {e.legal_name: e for e in emps.values()}
+        self.assertEqual(by_name["US Bank"].fy[2025].total, 2)
+        self.assertEqual(by_name["Bank, Inc."].fy[2025].total, 1)
+        self.assertEqual(by_name["Bank, Inc."].fy[2025].software, 0)
+
+    def test_rows_without_a_fein_join_the_most_frequent_fein(self):
+        p = self.write([{"EMPLOYER_FEIN": "11-1111111"}, {"EMPLOYER_FEIN": "11-1111111"},
+                        {"EMPLOYER_FEIN": "22-2222222"}, {"EMPLOYER_FEIN": ""}, {"EMPLOYER_FEIN": "000000000"}])
+        emps = load_employers([p])
+        self.assertEqual({k: e.fy[2025].total for k, e in emps.items()},
+                         {"acme#111111111": 4, "acme#222222222": 1})
+
+    def test_most_frequent_fein_ties_break_alphabetically(self):
+        p = self.write([{"EMPLOYER_FEIN": "22-2222222"}, {"EMPLOYER_FEIN": "11-1111111"}, {"EMPLOYER_FEIN": ""}])
+        emps = load_employers([p])
+        self.assertEqual({k: e.fy[2025].total for k, e in emps.items()},
+                         {"acme#111111111": 2, "acme#222222222": 1})
+
+    def test_split_counts_merge_across_years_per_fein(self):
+        a = self.write([{"EMPLOYER_FEIN": "11-1111111"}, {"EMPLOYER_FEIN": "22-2222222"}], "FY2025_Q1.csv")
+        b = self.write([{"EMPLOYER_FEIN": "11-1111111"}], "FY2026_Q1.csv")
+        emps = load_employers([a, b])
+        self.assertEqual({fy: s.total for fy, s in emps["acme#111111111"].fy.items()}, {2025: 1, 2026: 1})
+        self.assertEqual(set(emps["acme#222222222"].fy), {2025})
+
+    def test_same_fein_under_different_names_stays_two_employers_with_the_one_fein(self):
+        emps = load_employers([Q1])
+        self.assertEqual(emps["clearpath"].fein, emps["greenfield ai"].fein)
+        self.assertEqual(emps["clearpath"].feins_seen, ("333333333",))
+
+    def test_one_fein_or_none_gives_the_plain_key_and_feins_seen(self):
+        emps = load_employers([Q1])
+        self.assertEqual(emps["nimbus robotics"].feins_seen, ("111111111",))
+        self.assertEqual(emps["depco systems"].feins_seen, ())
+        self.assertEqual(emps["lumen apps"].feins_seen, ())
+        self.assertFalse(any("#" in k for k in emps))
+
+
+class FyMismatchTest(Base):
+    def test_rows_dated_outside_the_fiscal_year_are_counted_not_refused(self):
+        p = self.write([{"DECISION_DATE": "2024-10-01"}, {"DECISION_DATE": "2025-09-30"},
+                        {"DECISION_DATE": "2024-09-30"}, {"DECISION_DATE": "2025-10-01"},
+                        {"DECISION_DATE": ""}, {"DECISION_DATE": "soon"}])
+        emps = load_employers([p])
+        self.assertEqual(emps.fy_mismatch, 2)
+        self.assertEqual(emps.summary["fy_mismatch"], 2)
+        self.assertEqual(emps["acme"].fy[2025].total, 6)  # still aggregated
+
+    def test_fixtures_are_all_inside_their_year(self):
+        emps = load_employers([Q1, Q2])
+        self.assertEqual(emps.fy_mismatch, 0)
+
+    def test_the_count_is_over_every_row_read_including_ones_that_do_not_count(self):
+        p = self.write([{"DECISION_DATE": "2023-05-05", "CASE_STATUS": "Denied"}, {}])
+        self.assertEqual(load_employers([p]).fy_mismatch, 1)
 
 
 class FileOddityTest(Base):

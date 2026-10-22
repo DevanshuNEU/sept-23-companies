@@ -8,7 +8,11 @@ The counts must be exact and explainable, so every rule is a plain filter:
 - Then only H-1B rows with status Certified, Certified - Withdrawn or Certified-Withdrawn count.
 - `software` is a row whose SOC (first seven characters) is in SOFT_SOC. `jr` is a software row at wage level I or
   II, `level1` at level I, `newemp_jr` a `jr` row with NEW_EMPLOYMENT above zero.
-- Employers are grouped by `norm_employer`, the same rule the research script used, so its counts reproduce.
+- Employers are grouped by `norm_employer`, the same rule the research script used, so its counts reproduce. A
+  group holding more than one valid FEIN is split into one employer per FEIN (two companies that normalize alike are
+  never blended); rows with no valid FEIN join the group's most frequent FEIN.
+- A median wage uses a wage annualized from its unit (Year x1, Hour x2080, Week x52, Bi-Weekly x26, Month x12) and
+  skips anything outside 10,000 to 2,000,000 USD a year, never clamping.
 
 A whole run is read before anything is returned, so a damaged file raises (a TabularError from the reader) and
 never yields a partial or empty answer. One fiscal year is held in memory at a time.
@@ -37,7 +41,8 @@ SOFT_SOC = frozenset(("15-1252", "15-1253", "15-1211", "15-1221", "15-1242", "15
                       "15-2051"))
 COMPUTER_SOC = ("17-2061", "17-2072")  # with every `15-` code, the computer_share numerator
 CERTIFIED = frozenset(("certified", "certified - withdrawn", "certified-withdrawn"))
-HOURS_PER_YEAR = 2080
+PERIODS_PER_YEAR = {"year": 1, "hour": 2080, "week": 52, "bi-weekly": 26, "biweekly": 26, "month": 12}
+MIN_WAGE, MAX_WAGE = 10_000, 2_000_000  # a yearly figure outside this is a typo or a wrong unit, never data
 
 
 def fiscal_year_of(path: Path) -> int:
@@ -129,6 +134,7 @@ class Employer:
     domain: str | None
     domain_kind: str
     fy: dict[int, FyStats]
+    feins_seen: tuple[str, ...] = ()  # the distinct valid FEINs of the name group, sorted (more than one: split)
 
 
 class _Filing(NamedTuple):
@@ -164,18 +170,19 @@ def _yes(text: str) -> bool:
 
 
 def _annual_wage(wage: str, unit: str) -> float | None:
-    """The annualized wage: a `Year` wage as is, `Hour` times 2080, any other unit or an unreadable or non-positive
-    wage None."""
-    kind = unit.strip().lower()
-    if kind not in ("year", "hour"):
+    """The annualized wage, or None. The unit must be one of PERIODS_PER_YEAR, the wage a finite number, and the
+    yearly figure within MIN_WAGE to MAX_WAGE; anything else is skipped, never clamped."""
+    periods = PERIODS_PER_YEAR.get(unit.strip().lower())
+    if periods is None:
         return None
     try:
         v = float(wage.replace(",", "").replace("$", "").strip())
     except ValueError:
         return None
-    if not math.isfinite(v) or v <= 0:
+    if not math.isfinite(v):
         return None
-    return v * (HOURS_PER_YEAR if kind == "hour" else 1)
+    yearly = v * periods
+    return yearly if MIN_WAGE <= yearly <= MAX_WAGE else None  # inf fails the comparison too
 
 
 def _poc(r: dict[str, str]) -> tuple[str, str]:
@@ -214,15 +221,20 @@ def _filing(r: dict[str, str]) -> _Filing | None:
         domain=domain, kind=kind)
 
 
-def _read_year(paths: Sequence[Path]) -> dict[str, tuple[str, _Filing | None]]:
+def _read_year(paths: Sequence[Path], fy: int, summary: Counter) -> dict[str, tuple[str, _Filing | None]]:
     """case -> (decision date, filing or None). A row is kept in the map even when it is not countable, so a later
-    withdrawal or denial of the same case cancels the earlier certification."""
+    withdrawal or denial of the same case cancels the earlier certification. Every row read whose decision date is
+    readable but outside the fiscal year (Oct 1 of fy-1 to Sep 30 of fy) is counted in `summary['fy_mismatch']`; it
+    is still aggregated."""
     cases: dict[str, tuple[str, _Filing | None]] = {}
+    first, last = f"{fy - 1}-10-01", f"{fy}-09-30"
     seq = 0
     for path in paths:
         for r in read_rows(path, COLUMNS):
             seq += 1
             date = parse_decision_date(r["DECISION_DATE"]) or ""
+            if date and not first <= date <= last:
+                summary["fy_mismatch"] += 1
             case = r["CASE_NUMBER"].strip() or f"\0{seq}"  # a row with no case number cannot duplicate anything
             held = cases.get(case)
             if held is not None and held[0] > date:
@@ -306,7 +318,22 @@ def _stats(fy: int, y: _Year) -> FyStats:
         willful=y.willful, secondary=y.secondary, median_jr_wage=_median_whole(y.wages))
 
 
-def _employer(key: str, acc: _Acc) -> Employer:
+def _merge(into: _Acc, other: _Acc) -> None:
+    for name in ("names", "dbas", "feins", "cities", "states", "naics", "domains", "kinds"):
+        getattr(into, name).update(getattr(other, name))
+    for fy, o in other.years.items():
+        y = into.years.setdefault(fy, _Year())
+        for name in ("total", "software", "jr", "level1", "newemp_jr", "newemp_soft", "computer", "multi",
+                     "secondary"):
+            setattr(y, name, getattr(y, name) + getattr(o, name))
+        y.dependent = y.dependent or o.dependent
+        y.willful = y.willful or o.willful
+        y.last = max(y.last, o.last)
+        y.states |= o.states
+        y.wages.extend(o.wages)
+
+
+def _employer(key: str, acc: _Acc, feins_seen: tuple[str, ...]) -> Employer:
     if acc.domains:
         domain, kind = _top(acc.domains), "company"
     else:
@@ -314,7 +341,7 @@ def _employer(key: str, acc: _Acc) -> Employer:
     return Employer(
         key=key, legal_name=_top(acc.names), dba=_top(acc.dbas), fein=_top(acc.feins) or None,
         city=_top(acc.cities), state=_top(acc.states), naics=_top(acc.naics), domain=domain, domain_kind=kind,
-        fy={fy: _stats(fy, y) for fy, y in sorted(acc.years.items())})
+        fy={fy: _stats(fy, y) for fy, y in sorted(acc.years.items())}, feins_seen=feins_seen)
 
 
 def _employer_key(name: str) -> str:
@@ -323,19 +350,57 @@ def _employer_key(name: str) -> str:
     return norm_employer(name) or re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
 
 
-def load_employers(paths: Sequence[Path]) -> dict[str, Employer]:
+def _rows(acc: _Acc) -> int:
+    return sum(y.total for y in acc.years.values())
+
+
+class Employers(dict):
+    """The employers by key, plus a `summary` Counter of what the load saw: `fy_mismatch` is the number of rows read
+    whose decision date is outside their file's fiscal year (counted, still aggregated)."""
+
+    def __init__(self, employers: dict[str, Employer], summary: Counter):
+        super().__init__(employers)
+        self.summary = summary
+
+    @property
+    def fy_mismatch(self) -> int:
+        return self.summary["fy_mismatch"]
+
+
+def load_employers(paths: Sequence[Path]) -> Employers:
     """Every employer with at least one counted filing, large ones included, keyed by `norm_employer`. Files are
     grouped by the fiscal year in their name and each year is deduplicated on its own. Reads every file fully before
     returning: a TabularError (damage, missing columns, no data rows) propagates, never a partial result. No files
-    at all is a ValueError, never an empty answer."""
+    at all is a ValueError, never an empty answer.
+
+    A name group with more than one valid FEIN becomes one Employer per FEIN, keyed `<name>#<fein>`, each with its
+    own legal name, counts, domain and decisions; rows with no valid FEIN join the group's most frequent FEIN (ties
+    alphabetical). The same FEIN under different names stays several employers: payroll providers share FEINs, and
+    `mark_shared_key` deals with that later. `feins_seen` lists the group's valid FEINs on every member."""
     if not paths:
         raise ValueError("no LCA files given")
     by_year: dict[int, list[Path]] = {}
     for p in paths:
         by_year.setdefault(fiscal_year_of(Path(p)), []).append(Path(p))
-    accs: dict[str, _Acc] = {}
+    summary: Counter = Counter()
+    groups: dict[str, dict[str, _Acc]] = {}  # name key -> valid FEIN ('' for none) -> accumulator
     for fy in sorted(by_year):
-        for date, filing in _read_year(by_year[fy]).values():
+        for date, filing in _read_year(by_year[fy], fy, summary).values():
             if filing is not None:
-                _add(accs.setdefault(_employer_key(filing.name), _Acc()), fy, date, filing)
-    return {key: _employer(key, accs[key]) for key in sorted(accs)}
+                by_fein = groups.setdefault(_employer_key(filing.name), {})
+                _add(by_fein.setdefault(filing.fein, _Acc()), fy, date, filing)
+    out: dict[str, Employer] = {}
+    for key in sorted(groups):
+        by_fein = groups[key]
+        feins = tuple(sorted(f for f in by_fein if f))
+        none = by_fein.pop("", None)
+        if not feins:
+            out[key] = _employer(key, none, ())
+            continue
+        if none is not None:
+            top = min(feins, key=lambda f: (-_rows(by_fein[f]), f))
+            _merge(by_fein[top], none)
+        for fein in feins:
+            out[key if len(feins) == 1 else f"{key}#{fein}"] = _employer(
+                key if len(feins) == 1 else f"{key}#{fein}", by_fein[fein], feins)
+    return Employers(dict(sorted(out.items())), summary)

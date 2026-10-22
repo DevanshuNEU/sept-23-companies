@@ -66,13 +66,14 @@ class ReadOutcome:
 
 
 def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, run_id: int, now: str,
-               cfg: CrawlConfig, rules_cfg=None, combiner=None) -> ReadOutcome:
+               cfg: CrawlConfig, rules_cfg=None, combiner=None, bucket: str | None = None) -> ReadOutcome:
     """Read `board` once and write what the read says, in the phase order of this module's docstring.
 
     `board` is the row from `load_board`; the closing step and the board state both work from it, never from a reload.
     `combiner` is the reader's (ruling 10) and goes to every decision. `HostTripped` from the list request and
     `RulesetNotCurrent` propagate with the board state unwritten, so the caller can defer the board with no streak
-    change; `HostTripped` during the body fetches ends them and is reported in `ReadOutcome.tripped`.
+    change; `HostTripped` during the body fetches ends them and is reported in `ReadOutcome.tripped`. `bucket` is the
+    host bucket the list request went to (the tick knows it); it goes to the board state for the host ruling.
     """
     if conn.in_transaction:
         raise ValueError("read_board sends requests, so it must start with no transaction open")
@@ -139,7 +140,7 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
         next_read_at = add_seconds(now, interval_s)
     open_now = len(_open_ids(conn, board)) if result.result == "unchanged" else 0  # used for unchanged only
     write_board_state(conn, board, result, run_id=run_id, now=now, open_postings=open_now,
-                      next_read_at=next_read_at, interval_s=interval_s)
+                      next_read_at=next_read_at, interval_s=interval_s, bucket=bucket)
     return ReadOutcome(board_id=board.board_id, result=result.result, new=new, changed=changed, reopened=reopened,
                        closed=closed, decided=decided, bodies=bodies, interval_s=interval_s, tripped=tripped)
 

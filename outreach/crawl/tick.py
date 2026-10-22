@@ -11,9 +11,13 @@ Every request goes through one `PoliteClient`. An outage is not a finding about 
   streak change;
 - an `error` read is held back until the end of the tick. The tick also counts, per host bucket, error reads in a
   row that the polite breaker does not see as host failures (a challenge page or another wrong-shape 200, a blanket
-  401 or 400; a 404 or 410 is about the board and is not counted). When that count reaches `breaker_failures` the
-  tick trips the bucket itself. At the end, every held error from a bucket that tripped either way becomes a
-  deferral too; the rest are written as the error reads they are.
+  401 or 400; a 404 or 410 is about the board and is not counted), from boards whose last read was good only. When
+  that count reaches `breaker_failures` the tick trips the bucket itself. At the end, a held error from a bucket that
+  tripped either way becomes a deferral when that board's last read was good (`ok`, `unchanged` or `empty`): a board
+  that read fine and now fails with its whole host is caught in the outage. A never-read or already-erroring board's
+  error is written as the error read it is, so a handful of broken boards that sort together can never trip their
+  bucket tick after tick, defer each other forever and starve the healthy boards behind them; they back off 6, 12,
+  24 hours, spread out, and reach their own items (or the host's one item, hostblock.py).
 
 A board whose ingest raises (our bug, not the board's error) is recorded as `failed`, keeps its streaks and waits
 the backoff its next error would get; the job then ends `partial`. `PRAGMA wal_checkpoint(PASSIVE)` runs after
@@ -55,6 +59,8 @@ LOCK_NAME = "crawl.lock"
 PLAN_TZ = ZoneInfo("America/New_York")
 # An error read with one of these statuses is about the board (moved, closed), never a sign the host is down.
 _BOARD_STATUSES = frozenset({404, 410})
+# A board whose last read was one of these can be caught in an outage; any other board's error is its own.
+_GOOD_LAST = frozenset({"ok", "unchanged", "empty"})
 _MAX_ERROR_LINES = 20  # board failures named in job_run.error; the count is always complete
 
 
@@ -222,34 +228,35 @@ class _Pass:
             self.seen.add(bucket)
         if result.result == "error":
             self.held.append(_Held(board, adapter, result, now, bucket))
-            if bucket is not None and result.http_status not in _BOARD_STATUSES:
+            if bucket is not None and board.last_read in _GOOD_LAST and result.http_status not in _BOARD_STATUSES:
                 self.error_run[bucket] = self.error_run.get(bucket, 0) + 1
                 if self.error_run[bucket] >= self.cfg.breaker_failures:
                     self._trip(bucket)
             return
         if bucket is not None:
             self.error_run[bucket] = 0
-        self._ingest(board, _Listed(adapter, result), now)
+        self._ingest(board, _Listed(adapter, result), now, bucket)
 
     def finish(self) -> None:
-        """The held error reads: a deferral when their bucket tripped, else the error read they are."""
+        """The held error reads: a deferral when their bucket tripped and the board's last read was good, else the
+        error read they are."""
         self.down |= {b for b in self.seen if self.polite.tripped(b)}
         for h in self.held:
-            if h.bucket is not None and h.bucket in self.down:
+            if h.bucket is not None and h.bucket in self.down and h.board.last_read in _GOOD_LAST:
                 self._push(h.board, add_seconds(h.now, self.cfg.defer_s))
                 self.counts["deferred"] += 1
             else:
-                self._ingest(h.board, _Listed(h.adapter, h.result), h.now)
+                self._ingest(h.board, _Listed(h.adapter, h.result), h.now, h.bucket)
         self.held.clear()
 
     def _trip(self, bucket: str) -> None:
         self.down.add(bucket)
         self.seen.add(bucket)
 
-    def _ingest(self, board: BoardRow, adapter: Adapter, now: str) -> None:
+    def _ingest(self, board: BoardRow, adapter: Adapter, now: str, bucket: str | None) -> None:
         try:
             out = read_board(self.conn, board, adapter, run_id=self.run_id, now=now, cfg=self.cfg,
-                             rules_cfg=self.rules_cfg, combiner=self.combiner)
+                             rules_cfg=self.rules_cfg, combiner=self.combiner, bucket=bucket)
         except HostTripped as e:  # read_board ends its body fetches itself; kept so a trip can never fail a board
             self._rollback()
             self._trip(e.bucket)
@@ -369,7 +376,25 @@ def read_company_boards(conn: sqlite3.Connection, client: HttpClient, company_id
                         sleep: Callable[[float], None] = time.sleep) -> TickReport:
     """Read these companies' boards now, for a plan about to be built (#15, #13): `due_boards` with `force`, which
     skips `next_read_at` but keeps the floor and an erroring board's backoff. Its own `read_boards` run, the same
-    breaker rules as a tick, and no watched-page pass."""
+    breaker rules as a tick, and no watched-page pass. It takes the crawl lock itself (raising `AlreadyRunning` while
+    a tick holds it), so it never reads a board a tick is reading."""
+    with _store_lock(conn):
+        return _read_company_boards(conn, client, company_ids, cfg=cfg, rules_cfg=rules_cfg, combiner=combiner,
+                                    now_fn=now_fn, clock=clock, sleep=sleep)
+
+
+@contextlib.contextmanager
+def _store_lock(conn: sqlite3.Connection) -> Iterator[None]:
+    """`tick_lock` for the store file `conn` has open (an in-memory store has no file and needs no lock)."""
+    path = conn.execute("PRAGMA database_list").fetchone()[2]
+    if not path:
+        yield
+        return
+    with tick_lock(path):
+        yield
+
+
+def _read_company_boards(conn, client, company_ids, *, cfg, rules_cfg, combiner, now_fn, clock, sleep) -> TickReport:
     cfg = cfg or load_crawl_config()
     started = clock()
     ids = sorted(set(company_ids))

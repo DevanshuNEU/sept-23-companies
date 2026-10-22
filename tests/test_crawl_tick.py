@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.crawl import tick
+from outreach.crawl.base import JobRef, ReadResult, Validators, ids_fingerprint
 from outreach.crawl.cadence import add_seconds
 from outreach.crawl.config import load_crawl_config
 from outreach.crawl.ingest import read_board
@@ -244,6 +245,38 @@ class JobRunTests(TickCase):
         report = self.tick({gh("a1"): check, gh("a2"): check})
         self.assertEqual(report.ok, 2)
 
+    def test_no_transaction_is_open_during_a_detail_request(self):
+        # A detail-request ATS: the list carries no body and `body` asks for each one, inside read_board.
+        conn = self.conn
+
+        def check(method, url, headers, body):
+            assert not conn.in_transaction, f"a transaction is open during {url}"
+            return Response(200, url, b"Build robots. We sponsor visas.", {})
+
+        class Detail:
+            ats = "greenhouse"
+
+            def __init__(self, client):
+                self.client = client
+
+            def list(self, token, validators):
+                self.client.get(f"https://detail.example/{token}/list")
+                jobs = tuple(JobRef(f"{token}-{n}", "Software Engineer", f"https://detail.example/{token}/{n}",
+                                    "Boston, MA", "US", "2026-10-01", None) for n in range(3))
+                return ReadResult("ok", jobs, Validators("", ids_fingerprint(j.native_id for j in jobs)))
+
+            def body(self, token, job):
+                return self.client.get(job.url).text()
+
+        self.board("acme")
+        routes = {"https://detail.example/acme/list": check,
+                  **{f"https://detail.example/acme/{n}": check for n in range(3)}}
+        with mock.patch.object(tick, "adapter_for", lambda ats, client: Detail(client)):
+            report = self.tick(routes)
+        self.assertEqual(report.ok, 1)
+        self.assertEqual(len(self.client.requests), 4)
+        self.assertEqual(self.count("posting_body"), 3)
+
     def test_one_polite_client_serves_the_tick(self):
         built = []
 
@@ -364,23 +397,30 @@ class RulesetTests(TickCase):
 class BreakerTests(TickCase):
     """Review Focus 3: one ATS outage must not raise dozens of Needs-you items."""
 
+    def good_boards(self, n, prefix="g"):
+        """`n` Greenhouse boards whose last read, a day ago, was ok, all due now."""
+        ids = [self.board(f"{prefix}{i}") for i in range(n)]
+        for bid in ids:
+            self.read_before(bid, 86400, next_in=-60)
+        return ids
+
     def outage(self, answer, n=6, failures=3):
-        ids = [self.board(f"g{i}") for i in range(n)]
+        ids = self.good_boards(n)
         cfg = dataclasses.replace(self.cfg, breaker_failures=failures)
         report = self.tick({gh(f"g{i}"): answer for i in range(n)}, cfg=cfg)
         return ids, report
 
-    def assert_deferred(self, bid):
+    def assert_deferred(self, bid, last_read="ok"):
         row = self.row(bid)
         self.assertEqual((row["last_read"], row["error_streak"], row["next_read_at"]),
-                         (None, 0, at(self.cfg.defer_s)))
+                         (last_read, 0, at(self.cfg.defer_s)))
         self.assertEqual(self.reads(bid), [])
 
     def test_host_outage_defers_the_rest_without_streaks(self):
         ids, report = self.outage(status_response(503))
         self.assertEqual(len(self.client.requests), 3)  # the breaker opened after three: nothing more was sent
-        # The three error reads came from the bucket the breaker tripped, so they too are deferrals: an outage is
-        # not a finding about any one board.
+        # The three error reads came from the bucket the breaker tripped and from boards that read fine last time,
+        # so they too are deferrals: an outage is not a finding about any one board.
         for bid in ids:
             self.assert_deferred(bid)
         self.assertEqual((report.error, report.deferred, report.read), (0, 6, 0))
@@ -390,7 +430,7 @@ class BreakerTests(TickCase):
         self.assertEqual(json.loads(job["summary"])["tripped"], ["greenhouse.io"])
 
     def test_an_outage_over_many_ticks_raises_no_unreadable_item(self):
-        ids = [self.board(f"g{i}") for i in range(6)]
+        ids = self.good_boards(6)
         cfg = dataclasses.replace(self.cfg, breaker_failures=3)
         for n in range(5):
             self.client = FakeClient({gh(f"g{i}"): status_response(503) for i in range(6)})
@@ -443,14 +483,14 @@ class BreakerTests(TickCase):
     def test_a_good_read_between_wrong_shapes_resets_the_count(self):
         # Two challenge pages, a good board, two more: never three in a row, so these are four boards' own errors.
         for t in ("a", "b", "c", "d", "e"):
-            self.board(t)
+            self.read_before(self.board(t), 86400, next_in=-60)
         page = text_response("<html>Just a moment...</html>")
         routes = {gh("a"): page, gh("b"): page, gh("c"): ok(), gh("d"): page, gh("e"): page}
         report = self.tick(routes, cfg=dataclasses.replace(self.cfg, breaker_failures=3))
         self.assertEqual((report.ok, report.error, report.deferred, report.tripped), (1, 4, 0, ()))
 
     def test_an_outage_in_one_bucket_leaves_another_alone(self):
-        g = [self.board(f"g{i}") for i in range(4)]
+        g = self.good_boards(4)
         lv = self.board("lv", ats="lever")
         cfg = dataclasses.replace(self.cfg, breaker_failures=3)
         routes = {gh(f"g{i}"): status_response(503) for i in range(4)}
@@ -474,8 +514,122 @@ class BreakerTests(TickCase):
         self.assertEqual(self.client.requests, [gh("g0")])
         self.assertEqual(self.row(ids[0])["last_read"], "ok")  # the read itself counts
         for bid in ids[1:]:
-            self.assert_deferred(bid)
+            self.assert_deferred(bid, last_read=None)
         self.assertEqual((report.ok, report.deferred), (1, 2))
+
+
+    def ticks(self, routes, n, *, cfg=None, start=0, limit=None):
+        """`n` ticks 30 minutes apart from T0 + `start` ticks, each with its own client on `routes`."""
+        for k in range(start, start + n):
+            self.client = FakeClient(routes)
+            run_tick(self.conn, self.client, cfg=cfg or self.cfg, now_fn=lambda k=k: at(k * 1800), clock=self.clock,
+                     sleep=self.clock.sleep, limit=limit)
+            self.assertEqual(self.client.unrouted, [])
+
+    def test_bad_boards_never_starve_the_healthy_ones(self):
+        # C1: five never-read boards that answer 403 trip the breaker; the healthy boards behind them are deferred
+        # once and read on the next tick, and the bad boards are written as the errors they are.
+        bad = [self.board(f"bad{i}") for i in range(5)]
+        healthy = [self.board(f"ok{i}") for i in range(3)]
+        routes = {**{gh(f"bad{i}"): status_response(403) for i in range(5)},
+                  **{gh(f"ok{i}"): ok() for i in range(3)}}
+        self.ticks(routes, 2)
+        for bid in healthy:
+            self.assertEqual(self.row(bid)["last_read"], "ok")
+        for bid in bad:
+            self.assertGreaterEqual(self.row(bid)["error_streak"], 1)
+
+    def test_erroring_boards_with_wrong_shapes_never_trip_the_bucket(self):
+        # C1: boards already in an error streak do not count toward the tick's breaker, so five of them sorted
+        # together cannot defer each other, or the healthy boards behind them, tick after tick.
+        bad = [self.board(f"bad{i}") for i in range(5)]
+        for bid in bad:
+            self.read_before(bid, 86400, result="error", next_in=-86400, error_streak=1)
+        healthy = self.good_boards(3, prefix="ok")
+        page = text_response("<html>Just a moment...</html>")
+        routes = {**{gh(f"bad{i}"): page for i in range(5)}, **{gh(f"ok{i}"): ok() for i in range(3)}}
+        report = self.tick(routes)
+        self.assertEqual((report.tripped, report.deferred, report.error, report.ok), ((), 0, 5, 3))
+        self.ticks(routes, 2, start=1)
+        for bid in healthy:
+            self.assertEqual(self.row(bid)["last_read"], "ok")
+        for bid in bad:
+            self.assertEqual(self.row(bid)["error_streak"], 2)
+
+    def test_a_deferred_never_read_board_keeps_its_never_read_priority(self):
+        cfg = dataclasses.replace(self.cfg, breaker_failures=1)
+        old = self.board("old")  # made first, so a tie on board id would put it ahead
+        self.read_before(old, 5 * 86400, next_in=-4 * 86400)
+        fresh = self.board("fresh")
+        down = self.board("down")
+        self.read_before(down, 86400, next_in=-7200)
+        self.plan(self.company_of(down), 1)
+        # Tick 1: the plan board answers 503 and opens the breaker; the other two are deferred to the same time.
+        self.tick({gh("down"): status_response(503)}, cfg=cfg)
+        self.assertEqual(self.row(fresh)["next_read_at"], self.row(old)["next_read_at"])
+        self.assertIsNone(self.row(fresh)["last_read"])
+        # Tick 2: the never-read board still goes before the oldest due one.
+        self.client = FakeClient({gh(t): ok() for t in ("down", "fresh", "old")})
+        run_tick(self.conn, self.client, cfg=self.cfg, now_fn=lambda: at(1800), clock=self.clock)
+        self.assertEqual(self.client.requests, [gh("down"), gh("fresh"), gh("old")])
+
+
+class HostBlockTests(TickCase):
+    """The host ruling: an ATS that refuses the crawler for days raises one item, not one per board."""
+
+    def items(self, kind):
+        return self.conn.execute("SELECT * FROM review_item WHERE kind = ? ORDER BY review_id", (kind,)).fetchall()
+
+    def run_ticks(self, routes, n, *, start=0, limit=None):
+        for k in range(start, start + n):
+            self.client = FakeClient(routes)
+            run_tick(self.conn, self.client, cfg=self.cfg, now_fn=lambda k=k: at(k * 1800), clock=self.clock,
+                     sleep=self.clock.sleep, limit=limit)
+            self.assertEqual(self.client.unrouted, [])
+
+    def test_a_host_refusing_for_days_raises_one_item(self):
+        ids = []
+        for i in range(30):
+            bid = self.board(f"g{i}")
+            self.read_before(bid, 86400, next_in=i * 1800 - 1)  # one board comes due each tick
+            ids.append(bid)
+        self.run_ticks({gh(f"g{i}"): status_response(403) for i in range(30)}, 3 * 48, limit=1)
+        self.assertGreaterEqual(max(self.row(b)["error_streak"] for b in ids), 3)
+        self.assertEqual(self.items("board_unreadable"), [])
+        item, = self.items("flagged")
+        self.assertEqual(item["state"], "open")
+        self.assertTrue(item["evidence_key"].startswith("host-blocked:greenhouse.io"), item["evidence_key"])
+        self.assertTrue(item["reason"].startswith("greenhouse.io refused the crawler for "), item["reason"])
+        self.assertIn(f"boards since {T0[:10]}", item["reason"])
+        self.assertIn(item["board_id"], ids)
+        # The bucket's next good read clears it (the host is back; the next board due reads ok).
+        self.run_ticks({gh(f"g{i}"): ok() for i in range(30)}, 12, start=3 * 48, limit=1)
+        self.assertTrue(any(self.row(b)["last_read"] == "ok" for b in ids))
+        item, = self.items("flagged")
+        self.assertEqual((item["state"], item["resolution"]), ("resolved", "cleared"))
+        self.assertEqual(self.items("board_unreadable"), [])
+
+    def test_two_failing_boards_still_get_their_own_items(self):
+        bad = [self.board(f"bad{i}") for i in range(2)]
+        for bid in bad:
+            self.read_before(bid, 86400, next_in=-60)
+        # The only boards of the bucket, so no good read separates them: two is still under the host threshold.
+        routes = {gh(f"bad{i}"): status_response(403) for i in range(2)}
+        self.run_ticks(routes, 48)  # a day: 6, 12 hours of backoff, so a third error by hour 18
+        self.assertEqual(sorted(i["board_id"] for i in self.items("board_unreadable")), bad)
+        self.assertEqual(self.items("flagged"), [])
+
+    def test_a_good_read_in_the_bucket_keeps_per_board_items(self):
+        # Three boards failing, but another board of the bucket read fine after their streaks began: these are three
+        # broken boards, not a blocked host.
+        bad = [self.board(f"bad{i}") for i in range(3)]
+        for bid in bad:
+            self.read_before(bid, 86400, next_in=-60)
+        self.read_before(self.board("fine"), 86400, next_in=3600)
+        routes = {**{gh(f"bad{i}"): status_response(403) for i in range(3)}, gh("fine"): ok()}
+        self.run_ticks(routes, 48)
+        self.assertEqual(sorted(i["board_id"] for i in self.items("board_unreadable")), bad)
+        self.assertEqual(self.items("flagged"), [])
 
 
 class FailedBoardTests(TickCase):
@@ -577,6 +731,16 @@ class LockTests(unittest.TestCase):
         with tick_lock(store):  # released when the first one ended
             pass
 
+    def test_the_lock_is_released_after_an_exception_inside_it(self):
+        folder = tempfile.mkdtemp(prefix="outreach-tick-lock-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        store = Path(folder) / "outreach.db"
+        with self.assertRaises(RuntimeError):
+            with tick_lock(store):
+                raise RuntimeError("tick crashed")
+        with tick_lock(store):
+            pass
+
 
 class CompanyBoardsTests(TickCase):
     def test_read_company_boards_forces_the_floor_not_the_backoff(self):
@@ -599,6 +763,17 @@ class CompanyBoardsTests(TickCase):
         self.assertEqual(self.row(recent)["last_read_at"], at(-3600))
         self.assertEqual(self.row(failing)["last_read"], "error")
         self.assertIsNone(self.row(other)["last_read"])
+
+    def test_read_company_boards_takes_the_crawl_lock(self):
+        company = seed_company(self.conn, "Acme")
+        self.board("acme", company=company)
+        self.client = FakeClient({gh("acme"): ok()})
+        store = self.conn.execute("PRAGMA database_list").fetchone()["file"]
+        with tick_lock(store):
+            with self.assertRaises(AlreadyRunning):
+                read_company_boards(self.conn, self.client, [company], cfg=self.cfg, now_fn=lambda: T0)
+        self.assertEqual(self.client.requests, [])
+        self.assertEqual(self.jobs("read_boards"), [])
 
     def test_no_company_ids_reads_nothing(self):
         self.board("acme")

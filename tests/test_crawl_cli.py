@@ -100,6 +100,16 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(client.requests, [ACME])
 
+    def test_read_exits_1_while_a_tick_holds_the_lock(self):
+        acme = seed_company(self.conn, "Acme")
+        seed_board(self.conn, acme)
+        client = FakeClient({})
+        with tick_lock(self.path):
+            code, out, _ = self.run_cli(["read", "--company", str(acme)], client)
+        self.assertEqual(code, 1)
+        self.assertIn("another crawl holds", out)
+        self.assertEqual(client.requests, [])
+
     def test_probe_prints_the_result_and_touches_no_store(self):
         client = FakeClient({ACME: Response(200, "", JOBS, {"etag": '"A"'})})
         with mock.patch.object(cli, "connect") as opened:

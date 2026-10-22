@@ -13,6 +13,7 @@ was partial or failed, or the command failed (the message on stderr).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sqlite3
 import sys
 from collections.abc import Sequence
@@ -77,8 +78,9 @@ def _status(conn: sqlite3.Connection, run_id: int | None) -> str:
     return row["status"]
 
 
-def _locked_run(what: str, client: HttpClient | None, run) -> int:
-    """Open the store, take the crawl lock and call `run(conn, polite, cfg)`, which returns the report."""
+def _locked_run(what: str, client: HttpClient | None, run, *, lock: bool) -> int:
+    """Open the store and call `run(conn, polite, cfg)`, which returns the report; under the crawl lock when `lock`
+    (`read_company_boards` takes it itself)."""
     from outreach.crawl.config import load_crawl_config
     from outreach.crawl.tick import AlreadyRunning, tick_lock
 
@@ -87,7 +89,7 @@ def _locked_run(what: str, client: HttpClient | None, run) -> int:
     conn = connect(path)
     try:
         try:
-            with tick_lock(path):
+            with tick_lock(path) if lock else contextlib.nullcontext():
                 report = run(conn, _polite(client, cfg), cfg)
         except AlreadyRunning as e:
             print(f"{what}: {e}; nothing to do")
@@ -101,13 +103,13 @@ def _locked_run(what: str, client: HttpClient | None, run) -> int:
 
 def _tick(client: HttpClient | None) -> int:
     from outreach.crawl.tick import run_tick
-    return _locked_run("tick", client, lambda conn, polite, cfg: run_tick(conn, polite, cfg=cfg))
+    return _locked_run("tick", client, lambda conn, polite, cfg: run_tick(conn, polite, cfg=cfg), lock=True)
 
 
 def _read(company_ids: list[int], client: HttpClient | None) -> int:
     from outreach.crawl.tick import read_company_boards
     return _locked_run("read", client,
-                       lambda conn, polite, cfg: read_company_boards(conn, polite, company_ids, cfg=cfg))
+                       lambda conn, polite, cfg: read_company_boards(conn, polite, company_ids, cfg=cfg), lock=False)
 
 
 def _probe(ats: str, token: str, client: HttpClient | None) -> int:

@@ -73,7 +73,8 @@ def due_boards(conn: sqlite3.Connection, now: str, *, supported: Collection[str]
     `supported`, and in `only_company_ids` when that is given. A board is due when its `next_read_at` is NULL or has
     passed. A board of a plan company is also due once its last read is `floor_s` old or older, unless that read was an
     `error` (an erroring board keeps its backoff). `force` ignores `next_read_at` but keeps the floor and the error
-    backoff. Order: plan companies, then never-read boards, then `next_read_at` ascending, then board id.
+    backoff. Order: plan companies, then never-read boards (`last_read` NULL, so a never-read board the tick deferred
+    keeps its place), then `next_read_at` ascending, then board id.
     """
     if limit < 1 or not supported or (only_company_ids is not None and not only_company_ids):
         return []
@@ -98,6 +99,6 @@ def due_boards(conn: sqlite3.Connection, now: str, *, supported: Collection[str]
         f"SELECT {columns} FROM board b JOIN company c ON c.company_id = b.company_id "
         "WHERE b.active = 1 AND c.status NOT IN ('closed', 'removed') AND c.merged_into IS NULL "
         f"AND b.ats IN (SELECT value FROM json_each(:supported)) {only}AND {eligible} "
-        "ORDER BY b.company_id IN (SELECT value FROM json_each(:plan)) DESC, (b.next_read_at IS NULL) DESC, "
+        "ORDER BY b.company_id IN (SELECT value FROM json_each(:plan)) DESC, (b.last_read IS NULL) DESC, "
         "b.next_read_at, b.board_id LIMIT :limit", params).fetchall()
     return [BoardRow(*r) for r in rows]

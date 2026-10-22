@@ -10,6 +10,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from outreach.crawl.base import ReadResult
+from outreach.crawl.hostblock import clear_host_block, host_blocked
 from outreach.crawl.streaks import Streaks, needs_review, next_streaks
 from outreach.store import append_event, atomic
 
@@ -53,7 +54,8 @@ def load_board(conn: sqlite3.Connection, board_id: int) -> BoardRow:
 
 
 def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadResult, *, run_id: int, now: str,
-                      open_postings: int, next_read_at: str, interval_s: int | None) -> Streaks:
+                      open_postings: int, next_read_at: str, interval_s: int | None,
+                      bucket: str | None = None) -> Streaks:
     """Record one read of `board` as one unit (its own BEGIN IMMEDIATE transaction, or a savepoint in the caller's).
 
     Validators: `ok` stores the result's; `unchanged` and `error` keep the stored ones (an error result carries
@@ -64,6 +66,9 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
     empty run (an error inside the run neither ends it nor raises the item again). An `ok` or `unchanged` read clears
     both when open; an `empty` read clears only `board_unreadable`. The `read_state` event is appended when the state
     flips, with `ok` and `unchanged` as one state. Returns the new streaks.
+
+    With the read's host `bucket` (the tick passes it), the host ruling applies (hostblock.py): a `board_unreadable`
+    that is one of many on a host refusing the crawler becomes the host's one item, and a good read clears that item.
     """
     streaks = next_streaks(board.last_read, board.empty_streak, board.error_streak, board.streak_since,
                            result.result, now)
@@ -90,6 +95,8 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
             "DELETE FROM board_read WHERE board_id = ? AND run_id NOT IN ("
             "SELECT run_id FROM board_read WHERE board_id = ? ORDER BY at DESC, run_id DESC LIMIT ?)",
             (board.board_id, board.board_id, BOARD_READS_KEPT))
+        if bucket and result.result != "error":
+            clear_host_block(conn, bucket, now)
         if result.result in ("ok", "unchanged"):
             _clear(conn, board.board_id, ("board_unreadable", "board_empty"), now)
         elif result.result == "empty":
@@ -97,7 +104,7 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
             if board.empty_streak == 0:  # this read starts the empty run
                 _raise(conn, board, "board_empty", streaks.streak_since, now,
                        board_empty_reason(board, streaks.empty_streak, now))
-        if needs_review(streaks.error_streak):
+        if needs_review(streaks.error_streak) and not (bucket and host_blocked(conn, board.ats, bucket, now)):
             _raise(conn, board, "board_unreadable", streaks.streak_since, now,
                    f"The {board.ats} board {board.token} could not be read {streaks.error_streak} times in a row "
                    f"since {streaks.streak_since[:10]}. Its postings stay open. Last error: {error}")

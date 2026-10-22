@@ -11,18 +11,21 @@ every re-run by design; the table holds one row per source, not a history.
 """
 from __future__ import annotations
 
+import importlib
 import sqlite3
 from collections.abc import Callable, Sequence
+from datetime import datetime, timedelta
 from dataclasses import asdict, dataclass, field
 
 from outreach import identity
 from outreach.identity import StoreResolveReport, resolve_store
 from outreach.sources.base import Source, describe_error
 from outreach.sources.boards import BoardRef, add_board
+from outreach.sources.careers import CareersChecker, CareersResult
 from outreach.sources.keys import classify_domain, registrable_domain
 from outreach.sources.stapply import StapplyDirectory
 from outreach.sources.tiers import effective_tier, register_source, set_work_tier
-from outreach.store import finish_job, is_shared_key, iso_utc, mark_shared_key, start_job, transaction, utcnow
+from outreach.store import append_event, finish_job, is_shared_key, iso_utc, mark_shared_key, start_job, transaction, utcnow
 
 __all__ = ["SourceReport", "run_discover", "run_resolve", "store_name_lookup", "POST_TEXT_CAP", "FindBoardsReport",
            "run_find_boards"]
@@ -254,6 +257,16 @@ class FindBoardsReport:
     from_stapply: int = 0  # boards made from a stapply list match
     skipped_tier3: int = 0
     conflicts: int = 0  # boards another company already holds (one merge item per pair)
+    from_careers: int = 0  # boards made from a careers page naming exactly one
+    watched_pages: int = 0  # watched pages added (a careers page with no board, or no crawler adapter for the boards)
+    careers_checked: int = 0  # companies whose careers page was fetched this run
+    careers_none: int = 0  # definite "no careers page": marked, not fetched again for 30 days
+    careers_errors: int = 0  # fetch errors, 5xx and 429: nothing concluded, no marker, asked again next run
+    careers_skipped: int = 0  # the company's only domain is a shared key (a parent's portal)
+    domain_missing: int = 0  # tier 1 companies with no usable domain: one item each
+    ambiguous_boards: int = 0  # a careers page naming two or more boards: none added, the page is watched instead
+    adapter_unknown: int = 0  # companies not checked for a crawler adapter: `outreach.crawl.ats` does not exist yet
+    unreadable_boards: int = 0  # boards with no adapter and no page to watch: nobody reads these companies
     bad_aliases: list[str] = field(default_factory=list)  # "<company id>: <alias>": an `ats` alias that is no board
     failed: list[str] = field(default_factory=list)
     version: str = ""  # the stapply version used, "" when no directory was given
@@ -346,15 +359,160 @@ def _stapply_boards(conn: sqlite3.Connection, company_id: int, name: str, direct
     return added
 
 
+CAREERS_RECHECK_DAYS = 30
+
+
+def _supported_adapters() -> frozenset[str] | None:
+    """The ATS names with a crawler adapter, or None while `outreach.crawl.ats` does not exist (#21)."""
+    try:
+        return frozenset(importlib.import_module("outreach.crawl.ats").supported_ats())
+    except (ImportError, AttributeError):
+        return None
+
+
+def _watch(conn: sqlite3.Connection, company_id: int, url: str, report: FindBoardsReport) -> None:
+    """A watched page, due now (no fingerprint, no fetch time), unless the company already has one."""
+    report.watched_pages += conn.execute(
+        "INSERT INTO watched_page(company_id, url) VALUES (?, ?) ON CONFLICT(company_id) DO NOTHING",
+        (company_id, url)).rowcount
+
+
+def _checked_recently(conn: sqlite3.Connection, company_id: int) -> bool:
+    cutoff = (datetime.strptime(utcnow(), "%Y-%m-%dT%H:%M:%SZ") - timedelta(days=CAREERS_RECHECK_DAYS)
+              ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return conn.execute("SELECT 1 FROM event WHERE company_id = ? AND kind = 'careers_checked' AND at > ?",
+                        (company_id, cutoff)).fetchone() is not None
+
+
+class _Careers:
+    """One run's careers checks: the limit, the results already fetched, and what each answer leaves behind."""
+
+    def __init__(self, conn: sqlite3.Connection, checker: CareersChecker | None, max_checks: int,
+                 report: FindBoardsReport):
+        self.conn, self.checker, self.max_checks, self.report = conn, checker, max_checks, report
+        self.results: dict[int, CareersResult] = {}
+
+    def check(self, company_id: int, domain: str) -> CareersResult | None:
+        """The careers result, fetched once per run. None when no check was made: no checker, the company was
+        marked "no page" in the last 30 days, or the run's limit is used up. A `none` answer leaves the marker (an
+        event, one per month); an `error` only counts, so the next run asks again."""
+        if self.checker is None:
+            return None
+        if company_id in self.results:
+            return self.results[company_id]
+        if self.report.careers_checked >= self.max_checks or _checked_recently(self.conn, company_id):
+            return None
+        result = self.results[company_id] = self.checker.check(domain)
+        self.report.careers_checked += 1
+        if result.kind == "none":
+            self.report.careers_none += 1
+            append_event(self.conn, entity="company", kind="careers_checked", actor="crawler", entity_id=company_id,
+                         company_id=company_id, detail={"result": "none"},
+                         idempotency_key=f"careers-checked:{company_id}:{utcnow()[:7]}")
+        elif result.kind == "error":
+            self.report.careers_errors += 1
+        return result
+
+    def no_domain(self, company_id: int, shared: list[str]) -> None:
+        """A company with no usable domain: skipped for a shared one (an event), else a tier 1 company raises a
+        `domain_missing` item (a lower tier raises nothing)."""
+        if self.checker is None:
+            return
+        if shared:
+            self.report.careers_skipped += 1
+            append_event(self.conn, entity="company", kind="careers_skipped", actor="crawler", entity_id=company_id,
+                         company_id=company_id, detail={"domain": shared[0]},
+                         idempotency_key=f"careers-skipped:{company_id}:{shared[0]}")
+        elif effective_tier(self.conn, company_id) == 1:
+            self.report.domain_missing += self.conn.execute(
+                "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+                "VALUES ('domain_missing', ?, ?, 'no-usable-domain', 'crawler', ?) ON CONFLICT DO NOTHING",
+                (company_id, "No company domain is known, so its careers page cannot be checked for a board.",
+                 utcnow())).rowcount
+
+
+def _careers_boards(conn: sqlite3.Connection, company_id: int, name: str, careers: _Careers,
+                    report: FindBoardsReport) -> int:
+    """Step 2: the careers page of a company with no board. Exactly one board on the page is added; two or more
+    add none (which one is the company's cannot be told) and a page with none is watched. Returns boards added."""
+    usable, shared = _company_domains(conn, company_id)
+    if not usable:
+        careers.no_domain(company_id, shared)
+        return 0
+    result = careers.check(company_id, usable[0])
+    if result is None or result.kind in ("none", "error"):
+        return 0
+    if result.kind == "boards" and len(result.boards) == 1:
+        ref = result.boards[0]
+        with transaction(conn):
+            added = add_board(conn, company_id, ref, via="careers", matched_on=result.page_url or "",
+                              found_by="careers_page")
+            if added == "added":
+                now = utcnow()
+                conn.execute(
+                    "INSERT INTO company_source(company_id, source_name, source_ref, first_seen_at, last_seen_at) "
+                    "VALUES (?, 'careers', ?, ?, ?) ON CONFLICT DO NOTHING",
+                    (company_id, f"{ref.ats}:{ref.token}", now, now))
+        report.conflicts += added == "conflict"
+        if added == "added":
+            report.from_careers += 1
+            return 1
+    elif result.kind == "boards":
+        report.ambiguous_boards += 1
+    if result.page_url:  # a page with no board, an ambiguous one, or a board another company holds
+        _watch(conn, company_id, result.page_url, report)
+    return 0
+
+
+def _unread_boards(conn: sqlite3.Connection, careers: _Careers, report: FindBoardsReport) -> None:
+    """Companies whose active boards all lack a crawler adapter and which have no watched page get one, so they are
+    never silently unread: the careers page, else an iCIMS board's public host, else nothing (`unreadable_boards`).
+    A company whose careers check errored is left for the next run. While `outreach.crawl.ats` does not exist every
+    such company is counted in `adapter_unknown` and left alone."""
+    companies = [r for r in _live_companies(
+        conn, "EXISTS (SELECT 1 FROM board b WHERE b.company_id = c.company_id AND b.active = 1) AND NOT EXISTS "
+              "(SELECT 1 FROM watched_page w WHERE w.company_id = c.company_id)")
+        if effective_tier(conn, r["company_id"]) != 3]
+    supported = _supported_adapters()
+    if supported is None:
+        report.adapter_unknown += len(companies)
+        return
+    for row in companies:
+        company_id = row["company_id"]
+        boards = conn.execute("SELECT ats, token FROM board WHERE company_id = ? AND active = 1 ORDER BY board_id",
+                              (company_id,)).fetchall()
+        if any(b["ats"] in supported for b in boards):
+            continue
+        try:
+            usable, _ = _company_domains(conn, company_id)
+            result = careers.check(company_id, usable[0]) if usable else None
+            if result is not None and result.kind == "error":
+                continue  # nothing concluded: the next run asks again
+            url = result.page_url if result is not None and result.kind in ("page", "boards") else None
+            if url is None:
+                icims = next((b["token"] for b in boards if b["ats"] == "icims"), None)
+                url = f"https://{icims}" if icims else None
+            if url is None:
+                report.unreadable_boards += 1
+            else:
+                _watch(conn, company_id, url, report)
+        except (sqlite3.Error, ValueError) as err:
+            report.failed.append(f"#{company_id} {row['name']}: {describe_error(err)}")
+
+
 def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | None,
-                    careers: object | None = None, max_careers: int = 100) -> tuple[int, FindBoardsReport]:
+                    careers: CareersChecker | None = None, max_careers: int = 100) -> tuple[int, FindBoardsReport]:
     """The `find_boards` job: give each live company with no active board and no watched page its boards.
 
     Companies go in order of effective tier, then id; tier 3 is skipped unless promoted. Per company: (0) an `ats`
     alias with no board becomes one; (1) the stapply lookup (a name or slug match is `found_by` `stapply_name`, a
-    host match `import`). With no directory the lookup does not run, and the run is `partial` with that said: never a
-    quiet "nothing found". Returns the job run id and the report; status `partial` also covers any bad alias or
-    company that failed.
+    host match `import`); (2) only when 0 and 1 added nothing and `careers` is given, at most `max_careers`
+    companies a run: the careers page (see `_careers_boards`). With no directory the lookup does not run, and the run
+    is `partial` with that said: never a quiet "nothing found". A last pass gives every company whose boards have no
+    crawler adapter a watched page (see `_unread_boards`).
+
+    Returns the job run id and the report. Status `partial` also covers a bad alias, a company that failed and any
+    careers check that errored (those companies are asked again next run).
     """
     run_id = start_job(conn, "find_boards")
     report = FindBoardsReport()
@@ -365,6 +523,9 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
             report.version = directory.version
         else:
             problems.append("no stapply directory: the name lookup did not run")
+        if careers is not None:
+            register_source(conn, "careers", "careers-1", run_id)
+        step = _Careers(conn, careers, max_careers, report)
         for row in _live_companies(conn, NO_BOARD):
             company_id = row["company_id"]
             if effective_tier(conn, company_id) == 3:
@@ -375,8 +536,11 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
                 found = _alias_boards(conn, company_id, report)
                 if directory is not None:
                     found += _stapply_boards(conn, company_id, row["name"], directory, report)
+                if not found:
+                    _careers_boards(conn, company_id, row["name"], step, report)
             except (sqlite3.Error, ValueError) as err:
                 report.failed.append(f"#{company_id} {row['name']}: {describe_error(err)}")
+        _unread_boards(conn, step, report)
     except BaseException as err:
         try:
             finish_job(conn, run_id, "failed", asdict(report), describe_error(err))
@@ -387,5 +551,7 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
         problems.append(f"{len(report.bad_aliases)} ats aliases are not boards: " + ", ".join(report.bad_aliases[:5]))
     if report.failed:
         problems.append(f"{len(report.failed)} companies failed: " + "; ".join(report.failed[:5]))
+    if report.careers_errors:
+        problems.append(f"{report.careers_errors} careers checks errored (nothing concluded, asked again next run)")
     finish_job(conn, run_id, "partial" if problems else "ok", asdict(report), "; ".join(problems))
     return run_id, report

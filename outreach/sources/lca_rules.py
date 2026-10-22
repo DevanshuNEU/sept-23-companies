@@ -19,7 +19,7 @@ CONFIG_PATH = Path(__file__).with_name("lca.toml")
 
 REQUIRED = ("max_small_filings", "staffing_name_regex", "generic_name_regex", "it_services_naics",
             "staffing_naics_prefix", "cap_exempt_naics_prefixes", "cap_exempt_strong_name_regex",
-            "cap_exempt_weak_name_regex", "corporate_name_regex", "naics_tier_a_prefixes", "naics_tier_b_prefix")
+            "cap_exempt_weak_name_regex", "corporate_name_regex", "cap_exempt_override_naics_prefixes", "naics_tier_a_prefixes", "naics_tier_b_prefix")
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ class LcaConfig:
     it_services_naics: tuple[str, ...]
     staffing_naics_prefix: str
     cap_exempt_naics_prefixes: tuple[str, ...]
+    cap_exempt_override_naics_prefixes: tuple[str, ...]
     cap_exempt_strong_name_regex: re.Pattern
     cap_exempt_weak_name_regex: re.Pattern
     corporate_name_regex: re.Pattern
@@ -50,6 +51,7 @@ def load_lca_config(path: Path | None = None) -> LcaConfig:
         staffing_name_regex=rx("staffing_name_regex"), generic_name_regex=rx("generic_name_regex"),
         it_services_naics=tuple(data["it_services_naics"]), staffing_naics_prefix=data["staffing_naics_prefix"],
         cap_exempt_naics_prefixes=tuple(data["cap_exempt_naics_prefixes"]),
+        cap_exempt_override_naics_prefixes=tuple(data["cap_exempt_override_naics_prefixes"]),
         cap_exempt_strong_name_regex=rx("cap_exempt_strong_name_regex"),
         cap_exempt_weak_name_regex=rx("cap_exempt_weak_name_regex"),
         corporate_name_regex=rx("corporate_name_regex"),
@@ -137,6 +139,9 @@ def _cap_exempt(emp: Employer, cfg: LcaConfig) -> tuple[str | None, str]:
     strong = cfg.cap_exempt_strong_name_regex.search(name)
     if strong:
         return "likely", f"legal name has '{strong.group(0)}'"
+    override = next((p for p in cfg.cap_exempt_override_naics_prefixes if emp.naics.startswith(p)), None)
+    if override:
+        return "likely", f"NAICS {emp.naics} (strong signal, overrides the corporate-name veto)"
     naics = next((p for p in cfg.cap_exempt_naics_prefixes if emp.naics.startswith(p)), None)
     weak = cfg.cap_exempt_weak_name_regex.search(name)
     if not naics and not weak:
@@ -150,6 +155,7 @@ def _cap_exempt(emp: Employer, cfg: LcaConfig) -> tuple[str | None, str]:
 
 _MAY_BE_PRODUCT = {
     "secondary entity": "this rule can catch a real product company that places staff at customers",
+    "staffing word in name": "this rule matches plain substrings (consult, talent, resourc, workforce ...) and can catch a real product company",
     "body-shop profile": "this rule can catch a real product company on a computer-services NAICS",
 }
 

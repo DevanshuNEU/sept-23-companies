@@ -208,7 +208,7 @@ Fixture roster (rows are H-1B unless noted; columns are the 17 the loader reads 
 | Clearpath Inc, Greenfield AI Inc, Sundial Health Inc (CA, WA, MA; 513210, 541511, 513210; all FEIN 33-3333333; `clearpath.ai`, `greenfield.ai`, `sundial.health`) | 2 software I/II each | PEO shared FEIN |
 | Veltrix Pharma Inc, Veltrix Diagnostics Inc (NJ, 541715; both poc `@veltrix.com`) and Veltrix Corp (NJ, 541715; `@veltrix.com`, 30 filings, 3 software II) | 2 software II each | parent domain shared, large filer |
 | Mesh Systems Inc (CA, 511210, FEIN 55-5555555, `meshsys.com`) | 2 software I | name collisions |
-| Quill Data Services Inc (WA, 541512, `quilldata.io`) | 2 software I/II | medium risk |
+| Quill Data Services Inc (WA, 541512, `quilldata.io`) | 2 software I/II | body-shop profile (tier 3 by the written rule) |
 | Solo Dev Studio Inc (OR, 513210, poc `@gmail.com`) | 1 software I | free-mail domain |
 
 Q2 repeats `N3`'s CASE_NUMBER with a later decision date (2025-04-02) and level III.
@@ -255,7 +255,7 @@ Wage columns in the fixtures (annual unless noted): Nimbus N1 120000, N2 130000,
   - `test_risk_points_map_to_levels` (0, 1 low; 2 medium; 3 high and not excluded).
   - `test_cap_exempt_by_naics_and_by_name`.
   - `test_naics_tier` (513210 A, 541511 B, 722511 C).
-  - `test_work_tier_table` (the roster: Nimbus 1, Orchard 1, Riverside 1, Clearpath 1, Veltrix Pharma 1, Quill 2, a naics-C low-risk employer 2, a high-risk kept employer 2, a cap-exempt high-risk kept employer 2, Bridgeway 3, Depco 3, Lumen 3).
+  - `test_work_tier_table` (the roster: Nimbus 1, Orchard 1, Riverside 1, Clearpath 1, Veltrix Pharma 1, a medium-risk Quill-like employer built directly 2 (the fixture's Quill is the body-shop profile and is tier 3, asserted separately), a naics-C low-risk employer 2, a high-risk kept employer 2, a cap-exempt high-risk kept employer 2, Bridgeway 3, Depco 3, Lumen 3).
   - `test_qualifies_boundaries` (25 filings with 1 jr true; 26 false; 0 jr false).
   - `test_source_fy_picks_latest_qualifying_year`.
   - `test_config_regexes_match_the_research_samples` (`"Acme Staffing Solutions"` and `"Bluepeak Infotech"` match the staffing regex; `"Nimbus Robotics"` does not).
@@ -371,7 +371,7 @@ Wage columns in the fixtures (annual unless noted): Nimbus N1 120000, N2 130000,
     - `test_shared_keys_are_marked_before_the_first_candidate` (the fake records the order).
     - `test_one_failing_source_is_partial_and_the_others_land` (first source yields 2 candidates then raises; second yields 1: 3 companies stored, status `partial`, the error text in the summary).
     - `test_candidate_failure_is_counted_not_swallowed` (monkeypatch `identity.resolve_candidate` to raise `sqlite3.IntegrityError` for one candidate: it is in `failed` with the message, others stored, status `partial`).
-    - `test_lca_fixtures_store_the_expected_companies` (14 companies, name aliases for each, `fein` aliases for Nimbus, Orchard and Riverside and none for the three PEO clients, `lca` evidence rows per employer, work tiers Nimbus 1, Quill 2, Bridgeway 3).
+    - `test_lca_fixtures_store_the_expected_companies` (14 companies, name aliases for each, `fein` aliases for Nimbus, Orchard and Riverside and none for the three PEO clients, `lca` evidence rows per employer, work tiers Nimbus 1, Quill 3 (the fixture's Quill is the body-shop profile), Bridgeway 3).
     - `test_rerun_writes_nothing_new` (`table_marks` equal after a second `run_discover` on the same files; only `job_run` and `company_source.last_seen_at` change).
     - `test_shared_fein_clients_stay_separate_companies` (Review Focus 1, end to end).
     - `test_posts_are_written_after_the_candidate_resolves_and_once` (a fake `PostSource`: a post for a resolved candidate lands in `company_post` with its `asks_email`; a re-run adds none; a post whose candidate raised an error is not written).

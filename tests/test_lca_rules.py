@@ -72,7 +72,9 @@ class ExclusionTest(unittest.TestCase):
         for c in (classify25("EliseAI Inc", secondary=2), classify25("Codapt Technologies Inc", "541512", **BODY)):
             self.assertTrue(c.excluded)
             self.assertIn("real product company", c.work_reason)
-        self.assertNotIn("real product company", classify25("Acme Staffing Solutions").work_reason)
+        self.assertIn("real product company", classify25("Talent Robotics Inc").work_reason)
+        self.assertNotIn("real product company", classify25(naics="561320").work_reason)
+        self.assertNotIn("real product company", classify25(h1b_dependent=True).work_reason)
 
     def test_body_shop_needs_every_condition(self):
         name, naics = "Quill Data Services Inc", "541512"
@@ -87,6 +89,16 @@ class ExclusionTest(unittest.TestCase):
         for label, d in dropped:
             with self.subTest(dropped=label):
                 self.assertFalse(classify25(d["name"], d["naics"], **d["over"]).excluded)
+        boundary = [
+            ("computer_share 0.9 exactly", {**BODY, "computer_share": 0.9}, True),
+            ("jr_share_soft 0.8 exactly", {**BODY, "jr_share_soft": 0.8}, True),
+            ("multi_worksite_share 0.49 with 4 filings", {**BODY, "total": 4, "multi_worksite_share": 0.49}, False),
+            ("multi_worksite_share 0.5 with 4 filings", {**BODY, "total": 4, "multi_worksite_share": 0.5}, True),
+            ("5 filings exactly", {**BODY, "total": 5, "multi_worksite_share": 0.0}, True),
+        ]
+        for label, over, excluded in boundary:
+            with self.subTest(boundary=label):
+                self.assertEqual(classify25(name, naics, **over).excluded, excluded)
         # either roaming or 5 filings is enough
         self.assertTrue(classify25(name, naics, **{**BODY, "total": 4, "multi_worksite_share": 0.5}).excluded)
 
@@ -131,6 +143,11 @@ class RiskTest(unittest.TestCase):
         self.assertIn("3+ worksite states", pts(n_worksite_states=3, total=10))
         self.assertEqual(pts(n_worksite_states=3, total=11), "no staffing signals")
         self.assertIn("multi-worksite filings", pts(multi_worksite_share=0.5))
+        self.assertEqual(pts(multi_worksite_share=0.49), "no staffing signals")
+        self.assertEqual(pts(n_worksite_states=2, total=10), "no staffing signals")
+        self.assertEqual(pts(jr_share_soft=1, newemp_share_soft=0.69, software=4), "no staffing signals")
+        self.assertEqual(pts(computer_share=0.89, total=3), "no staffing signals")
+        self.assertIn("3+ worksite states", pts(n_worksite_states=4, total=1))
 
     def test_reason_lists_the_fired_signals(self):
         c = classify25("Quill Data Services Inc", "541512", total=2)
@@ -164,10 +181,32 @@ class CapExemptTest(unittest.TestCase):
                 with self.subTest(name=name, naics=naics):
                     c = classify25(name, naics)
                     self.assertIsNone(c.cap_exempt)
-        c = classify25("Lightcast Inc", "611310")
-        self.assertIsNone(c.cap_exempt)
-        self.assertIn("corporation", c.cap_reason)
-        self.assertIn("611310", c.cap_reason)
+
+    def test_naics_6113_and_622_override_the_corporate_name_veto(self):
+        for name, naics in (("Georgia Tech Research Corporation", "611310"), ("Foo Health Inc", "622110"),
+                            ("Lightcast Inc", "611310")):
+            with self.subTest(name=name, naics=naics):
+                c = classify25(name, naics)
+                self.assertEqual(c.cap_exempt, "likely")
+                self.assertIn(f"NAICS {naics}", c.cap_reason)
+                self.assertIn("overrides the corporate-name veto", c.cap_reason)
+        # the other cap-exempt prefixes stay vetoable
+        for naics in ("611110", "611210", "813210", "921110"):
+            with self.subTest(naics=naics):
+                c = classify25("Foo Group Inc", naics)
+                self.assertIsNone(c.cap_exempt)
+                self.assertIn(f"NAICS {naics}", c.cap_reason)
+                self.assertIn("corporation", c.cap_reason)
+        self.assertIsNone(classify25("Foo Group Inc", "611710").cap_exempt)
+
+    def test_more_company_forms_make_a_corporate_name(self):
+        for name in ("Foo Learning PC", "Foo Learning, P.C.", "Foo Learning PBC", "Foo Learning Pty",
+                     "Foo Learning GmbH"):
+            with self.subTest(name=name):
+                self.assertIsNone(classify25(name, "611210").cap_exempt)
+        # a form word inside a name is not a company form
+        self.assertEqual(classify25("Pc Hospital Group", "541715").cap_exempt, "likely")
+        self.assertEqual(classify25("Gmbh Research School", "611210").cap_exempt, "likely")
 
     def test_strong_word_wins_over_a_corporate_suffix(self):
         for name in ("Riverside University", "Georgetown College Inc", "Mercy Hospital, LLC",
@@ -310,6 +349,7 @@ class FixtureRosterTest(unittest.TestCase):
         # body-shop profile by the written rule, so it is tier 3 here. Its medium-risk tier 2 is tested with stats
         # built directly (test_work_tier_table).
         self.assertEqual(got["Quill Data Services Inc"].staffing_reason, "excluded: body-shop profile")
+        self.assertEqual(got["Quill Data Services Inc"].work_tier, 3)
 
 
 if __name__ == "__main__":

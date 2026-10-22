@@ -18,12 +18,15 @@ staffing_naics_prefix = "5613"
 # Likely cap-exempt (skips the H-1B lottery): education, hospital and nonprofit or public NAICS, or a name word.
 # This is only ever "likely": the LCA file cannot show nonprofit status.
 cap_exempt_naics_prefixes = ["6113", "6111", "6112", "6221", "6222", "6223", "8132", "8133", "8134", "8139", "9211", "9261", "9271"]
+# Colleges and universities (6113) and hospitals (622) are strong enough to stand against a corporate legal name:
+# the corporate-name veto does not apply to these prefixes. 6111, 6112, 81xx and 92xx stay vetoable.
+cap_exempt_override_naics_prefixes = ["6113", "622"]
 # A strong word counts even in a corporate name. A weak word counts only in a name with no company form.
 cap_exempt_strong_name_regex = '\buniversit(?:y|ies)\b|\bcollege\b|\bhospitals?\b|\binstitutes?\b'
 cap_exempt_weak_name_regex = '\bschool|health system|medical center|\bfoundation\b|county of|city of|state of'
 # A legal name ending in a company form (after dots, a dba tail and parentheses are dropped) is a corporation.
 # That vetoes the NAICS signal and the weak words: Lightcast, PowerSchool and Foundation Medicine are companies.
-corporate_name_regex = '\b(?:inc|incorporated|llc|llp|lp|pllc|corp|corporation|co|company|ltd|limited|plc)$'
+corporate_name_regex = '\b(?:inc|incorporated|llc|llp|lp|pllc|pc|pbc|corp|corporation|co|company|ltd|limited|plc|pty|gmbh)$'
 
 # Product likelihood: A = publishing, data, internet, R&D, hardware; B = computer services; C = anything else.
 naics_tier_a_prefixes = ["5112", "5132", "5182", "5191", "5192", "5417", "3341", "3342", "3344", "3345"]

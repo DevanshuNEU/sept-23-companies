@@ -7,6 +7,7 @@ from outreach.crawl.ats.ashby import AshbyAdapter
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
 from outreach.crawl.ats.lever import LeverAdapter
 from outreach.crawl.ats.smartrecruiters import SmartRecruitersAdapter
+from outreach.crawl.ats.workable import WorkableAdapter
 from outreach.crawl.ats.workday import WorkdayAdapter
 from outreach.crawl.base import Adapter
 from outreach.net import HttpClient
@@ -20,6 +21,7 @@ ADAPTERS: dict[str, Callable[[HttpClient], Adapter]] = {
     "ashby": AshbyAdapter,
     "smartrecruiters": SmartRecruitersAdapter,
     "workday": WorkdayAdapter,
+    "workable": WorkableAdapter,
 }
 
 

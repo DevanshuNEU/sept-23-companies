@@ -1,0 +1,26 @@
+{
+  "author": "whoishiring",
+  "children": [
+    {
+      "author": "user62000101",
+      "children": [],
+      "created_at": "2026-11-02T15:00:00.000Z",
+      "created_at_i": 0,
+      "id": 62000101,
+      "parent_id": 62000001,
+      "story_id": 62000001,
+      "text": "Mesh Systems | SWE | San Francisco | <a href=\"https:&#x2F;&#x2F;meshsystems.dev\" rel=\"nofollow\">https:&#x2F;&#x2F;meshsystems.dev</a><p>Still hiring. C++ and Go.",
+      "type": "comment"
+    }
+  ],
+  "created_at": "2026-11-02T15:00:00.000Z",
+  "created_at_i": 0,
+  "id": 62000001,
+  "parent_id": null,
+  "points": 300,
+  "story_id": 62000001,
+  "text": null,
+  "title": "Ask HN: Who is hiring? (November 2026)",
+  "type": "story",
+  "url": null
+}

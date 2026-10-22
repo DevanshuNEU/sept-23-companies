@@ -1,0 +1,63 @@
+{
+  "hits": [
+    {
+      "_tags": [
+        "story",
+        "author_whoishiring"
+      ],
+      "author": "whoishiring",
+      "created_at": "2026-10-01T15:00:05.000Z",
+      "objectID": "61000002",
+      "story_id": 61000002,
+      "title": "Ask HN: Who wants to be hired? (October 2026)"
+    },
+    {
+      "_tags": [
+        "story",
+        "author_whoishiring"
+      ],
+      "author": "whoishiring",
+      "created_at": "2026-10-01T15:00:00.000Z",
+      "objectID": "61000001",
+      "story_id": 61000001,
+      "title": "Ask HN: Who is hiring? (October 2026)"
+    },
+    {
+      "_tags": [
+        "story",
+        "author_whoishiring"
+      ],
+      "author": "whoishiring",
+      "created_at": "2026-09-01T15:00:10.000Z",
+      "objectID": "60000003",
+      "story_id": 60000003,
+      "title": "Ask HN: Freelancer? Seeking freelancer? (September 2026)"
+    },
+    {
+      "_tags": [
+        "story",
+        "author_whoishiring"
+      ],
+      "author": "whoishiring",
+      "created_at": "2026-09-01T15:00:05.000Z",
+      "objectID": "60000002",
+      "story_id": 60000002,
+      "title": "Ask HN: Who wants to be hired? (September 2026)"
+    },
+    {
+      "_tags": [
+        "story",
+        "author_whoishiring"
+      ],
+      "author": "whoishiring",
+      "created_at": "2026-09-01T15:00:00.000Z",
+      "objectID": "60000001",
+      "story_id": 60000001,
+      "title": "Ask HN: Who is hiring? (September 2026)"
+    }
+  ],
+  "hitsPerPage": 20,
+  "nbHits": 5,
+  "nbPages": 1,
+  "page": 0
+}

@@ -1,0 +1,43 @@
+# HN "Who is hiring" settings (#31 Task 12). Read by outreach/sources/hn.py. Editing a list changes the source version.
+#
+# The US filter hides a post only when its header names a place outside the US and no US marker. A header that names
+# no place at all is kept: an unknown location is never grounds to hide.
+
+# A name of more than this many words is not a company name (the post is counted as unparsed).
+max_name_words = 5
+
+# Non-US places and regions. Case blind, whole words ("Berlin" does not match "Berlinale").
+non_us_places = [
+  "London", "United Kingdom", "England", "Scotland", "Wales", "Berlin", "Munich", "Hamburg", "Germany", "Europe",
+  "Canada", "Toronto", "Vancouver", "Montreal", "Ottawa", "Calgary", "India", "Bangalore", "Bengaluru", "Hyderabad",
+  "Pune", "Mumbai", "Delhi", "Chennai", "Gurgaon", "Gurugram", "France", "Paris", "Amsterdam", "Netherlands",
+  "Spain", "Barcelona", "Madrid", "Lisbon", "Portugal", "Ireland", "Dublin", "Poland", "Warsaw", "Krakow", "Italy",
+  "Milan", "Belgium", "Brussels", "Austria", "Vienna", "Prague", "Czech", "Hungary", "Budapest", "Greece", "Athens",
+  "Israel", "Tel Aviv", "Australia", "Sydney", "Melbourne", "New Zealand", "Auckland", "Singapore", "Japan", "Tokyo",
+  "Brazil", "Mexico", "Argentina", "Colombia", "Chile", "Costa Rica", "Latin America", "Switzerland", "Zurich",
+  "Sweden", "Stockholm", "Denmark", "Copenhagen", "Norway", "Oslo", "Finland", "Helsinki", "Estonia", "Tallinn",
+  "Romania", "Bucharest", "Ukraine", "Kyiv", "Turkey", "Istanbul", "Dubai", "Nigeria", "Lagos", "Kenya", "Nairobi",
+  "South Africa", "Cape Town", "Egypt", "China", "Beijing", "Shanghai", "Hong Kong", "Taiwan", "Korea", "Seoul",
+  "Vietnam", "Philippines", "Indonesia", "Pakistan", "EMEA", "APAC", "LATAM", "DACH", "GMT", "CET",
+]
+# Short codes, matched with the case as written (so "us" in "join us" and "EU" inside "EUV" never count).
+non_us_codes = ["UK", "EU", "GB", "UAE"]
+
+# US markers.
+us_codes = ["US", "USA", "U.S.", "U.S.A."]
+# A city written as a code. These also count as an hq when they are a header segment.
+us_city_codes = ["NYC", "SF", "DC"]
+us_phrases = ["United States", "Bay Area"]
+us_places = [
+  "New York", "San Francisco", "Seattle", "Boston", "Austin", "Chicago", "Los Angeles", "Denver", "Atlanta",
+  "Portland", "San Diego", "Miami", "Washington DC", "Pittsburgh", "Philadelphia", "Dallas", "Houston", "Boulder",
+  "Raleigh", "Durham", "Minneapolis", "San Jose", "Oakland", "Brooklyn", "Palo Alto", "Mountain View", "Menlo Park",
+  "Redwood City", "Sunnyvale", "Santa Monica", "Salt Lake City", "Nashville", "Phoenix", "Detroit", "Baltimore",
+  "Charlotte", "Columbus", "Madison", "Ann Arbor", "Providence", "Honolulu",
+]
+# ", XX" after a place is a US state code. These also read as a country code ("Toronto, CA", "Berlin, DE"), so when
+# the header names a non-US place they are not a US marker.
+ambiguous_state_codes = ["CA", "IN", "DE", "IL", "CO", "AR", "ID", "MA"]
+
+# A post asks for email when its text holds an address or one of these phrases (case blind).
+email_phrases = ["email me", "send your resume to", "send your cv to", "reach out at"]

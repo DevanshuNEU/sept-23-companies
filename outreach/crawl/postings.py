@@ -20,6 +20,8 @@ __all__ = ["source_key", "native_id_of", "Existing", "load_existing", "DiffPlan"
 
 # Closes the crawler made, which a later listing undoes. Any other close (hand, page_closed, imported_closed) stands.
 REOPENABLE = ("gone_from_board", "board_empty_twice")
+# The write-time recheck: open, or closed by the crawler. REOPENABLE is a fixed tuple of plain words.
+_WRITABLE = "(closed_at IS NULL OR close_reason IN (%s))" % ", ".join(f"'{r}'" for r in REOPENABLE)
 _CLOSE_REASONS = ("gone_from_board", "board_empty_twice", "page_closed", "hand", "imported_closed")
 
 
@@ -63,7 +65,13 @@ class DiffPlan:
 
 
 def plan_diff(existing: dict[str, Existing], jobs: Sequence[JobRef], ats: str, token: str) -> DiffPlan:
-    """The changes one `ok` read makes. A job id listed twice counts once (the first listing)."""
+    """The changes one `ok` read makes. A job id listed twice counts once (the first listing).
+
+    An `ok` read always lists at least one job, so an empty `jobs` raises ValueError: read as a listing, it would
+    mark every open posting gone. An empty board closes its postings only through the streak rule.
+    """
+    if not jobs:
+        raise ValueError("an ok read lists at least one job; an empty board closes only on the streak rule")
     new: list[JobRef] = []
     changed: list[tuple[int, JobRef]] = []
     present: list[int] = []
@@ -96,8 +104,8 @@ def write_postings(conn: sqlite3.Connection, board: BoardRow, plan: DiffPlan, no
     same plan inserts nothing twice (`ON CONFLICT(source_key) DO NOTHING`, then the ids are selected).
 
     `posted_on` is set only where it is NULL. `last_seen_at` never moves back and so never falls before
-    `first_seen_at`. A reopen applies only while the posting is still closed for a reason the board can undo, so a
-    hand close made between the diff and this write stands.
+    `first_seen_at`. Every update of an existing posting applies only while it is open or closed for a reason the
+    board can undo, so a hand close made between the diff and this write stands, untouched.
     """
     if batch_rows < 1:
         raise ValueError("batch_rows must be at least 1")
@@ -131,15 +139,14 @@ def write_postings(conn: sqlite3.Connection, board: BoardRow, plan: DiffPlan, no
                 if job is not None:
                     conn.execute(
                         "UPDATE posting SET title = ?, location = ?, country = ?, url = ?, "
-                        "posted_on = coalesce(posted_on, ?) WHERE posting_id = ?",
+                        f"posted_on = coalesce(posted_on, ?) WHERE posting_id = ? AND {_WRITABLE}",
                         (job.title, job.location, job.country, job.url, job.posted_on, pid))
                 if pid in present or pid in reopen:
                     conn.execute("UPDATE posting SET last_seen_at = max(last_seen_at, first_seen_at, ?) "
-                                 "WHERE posting_id = ?", (now, pid))
+                                 f"WHERE posting_id = ? AND {_WRITABLE}", (now, pid))
                 if pid in reopen:
-                    conn.execute(
-                        "UPDATE posting SET closed_at = NULL, close_reason = NULL WHERE posting_id = ? "
-                        f"AND close_reason IN ({_marks(REOPENABLE)})", (pid, *REOPENABLE))
+                    conn.execute("UPDATE posting SET closed_at = NULL, close_reason = NULL "
+                                 f"WHERE posting_id = ? AND closed_at IS NOT NULL AND {_WRITABLE}", (pid,))
             if old:
                 for key, pid in conn.execute(
                         f"SELECT source_key, posting_id FROM posting WHERE posting_id IN ({_marks(old)})", old):

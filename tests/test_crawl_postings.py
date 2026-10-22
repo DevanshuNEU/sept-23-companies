@@ -143,15 +143,38 @@ class PostingTests(unittest.TestCase):
         self.assertEqual(self.row("1")["posted_on"], "2026-09-01")
         self.assertEqual(self.row("2")["posted_on"], "2026-10-15")  # was NULL, so it is filled
 
+    def test_last_seen_never_moves_back(self):
+        self.sync([job("1")], T1)
+        self.sync([job("1")], T3)
+        self.sync([job("1")], T2)
+        r = self.row("1")
+        self.assertEqual((r["first_seen_at"], r["last_seen_at"]), (T1, T3))
+
+    def test_a_posting_hand_closed_after_the_diff_is_not_touched(self):
+        self.sync([job("1")], T1)
+        plan = plan_diff(load_existing(self.conn, self.board_id), [job("1", "Renamed")], "greenhouse", "acme")
+        self.assertEqual(len(plan.changed), 1)
+        self.conn.execute("UPDATE posting SET closed_at = ?, close_reason = 'hand' WHERE source_key = ?",
+                          (T1, source_key("greenhouse", "acme", "1")))
+        write_postings(self.conn, self.board, plan, T2, batch_rows=2000)
+        r = self.row("1")
+        self.assertEqual((r["title"], r["last_seen_at"], r["close_reason"]), ("Software Engineer", T1, "hand"))
+
     def test_last_seen_never_before_first_seen(self):
         self.sync([job("1")], T2)
         self.sync([job("1")], T1)  # a clock that went back
         r = self.row("1")
         self.assertEqual((r["first_seen_at"], r["last_seen_at"]), (T2, T2))
 
+    def test_an_empty_job_list_is_refused(self):
+        self.sync([job("1")], T1)
+        with self.assertRaises(ValueError):
+            plan_diff(load_existing(self.conn, self.board_id), [], "greenhouse", "acme")
+        self.assertIsNone(self.row("1")["closed_at"])
+
     def test_postings_are_never_deleted(self):
         self.sync([job("1")], T1)
-        self.sync([], T2)
+        close_postings(self.conn, [self.row("1")["posting_id"]], "board_empty_twice", T2, batch_rows=2000)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM posting").fetchone()[0], 1)
         with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute("DELETE FROM posting")

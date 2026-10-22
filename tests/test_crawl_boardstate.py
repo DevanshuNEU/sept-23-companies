@@ -190,12 +190,36 @@ class BoardStateTests(unittest.TestCase):
         self.read(EMPTY)
         self.assertEqual([(i["kind"], i["state"]) for i in self.items()], [("board_empty", "open")])
 
+    def test_a_resolved_board_empty_is_not_raised_again_inside_the_same_empty_run(self):
+        self.read(EMPTY)
+        self.conn.execute("UPDATE review_item SET state = 'resolved', resolution = 'marked_ok', resolved_at = ? "
+                          "WHERE board_id = ?", (at(1), self.board))
+        self.read(ERROR)
+        self.read(EMPTY)  # the empty run goes on (an error does not reset it): the postings close, no new item
+        self.assertEqual([(i["kind"], i["state"]) for i in self.items()], [("board_empty", "resolved")])
+        # An ok read ends the run; the next empty starts a new one and raises a new item.
+        self.read(OK)
+        self.read(EMPTY)
+        self.assertEqual([i["state"] for i in self.items()], ["resolved", "open"])
+
+    def test_the_board_empty_reason_says_whether_postings_closed(self):
+        from outreach.crawl.boardstate import board_empty_reason
+        board = load_board(self.conn, self.board)
+        self.assertIn("close if the next read is empty", board_empty_reason(board, 1, at(1)))
+        self.assertIn("its postings closed", board_empty_reason(board, 2, at(1)))
+
+    def test_found_by_is_loaded_and_has_no_default(self):
+        self.assertEqual(load_board(self.conn, self.board).found_by, "import")
+        fields = {f.name: f for f in __import__("dataclasses").fields(BoardRow)}
+        self.assertIs(fields["found_by"].default, __import__("dataclasses").MISSING)
+
     def test_event_only_when_the_state_changed(self):
         for r in (OK, OK, ERROR, ERROR, UNCHANGED, UNCHANGED, OK):
             self.read(r)
         rows = self.conn.execute("SELECT entity, entity_id, company_id, kind, actor, detail FROM event "
                                  "WHERE entity = 'board' AND kind = 'read_state' ORDER BY event_id").fetchall()
-        self.assertEqual(len(rows), 4)  # none to ok, ok to error, error to unchanged, unchanged to ok
+        # none to ok, ok to error, error to unchanged; ok and unchanged are one state, so unchanged to ok is none.
+        self.assertEqual(len(rows), 3)
         self.assertEqual({(r[0], r[1], r[2], r[3], r[4]) for r in rows},
                          {("board", self.board, self.company, "read_state", "crawler")})
         self.assertIn('"to": "error"', rows[1]["detail"])

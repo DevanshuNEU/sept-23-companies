@@ -86,7 +86,9 @@ class SourcesE2E(CliCase):
             ("domain_missing", "PrairieLearn", "open"),  # the draft counted Solo Dev alone
             # a tier 1 company whose only domain is the shared veltrix.com raises one too
             ("domain_missing", "Veltrix Diagnostics Inc", "open"), ("domain_missing", "Veltrix Pharma Inc", "open"),
-            ("domain_missing", "Veltrix Bio", "open")]))
+            ("domain_missing", "Veltrix Bio", "open"),
+            # tier 1, no board and a definite "no careers page" (404 on both requests)
+            ("flagged", "Greenfield AI Inc", "open"), ("flagged", "Sundial Health Inc", "open")]))
         (merge,) = conn.execute("SELECT reason FROM review_item WHERE kind = 'merge_candidate'").fetchall()
         self.assertIn("Mesh Systems Inc", merge["reason"])
         self.assertIn(f"#{by_name['Mesh Systems']}", merge["reason"])

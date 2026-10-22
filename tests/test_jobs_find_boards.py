@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from outreach.sources.boards import BoardRef, add_board
 from outreach.sources.byhand import add_by_hand
 from outreach.sources.careers import CareersChecker
 from outreach.sources.hn import HnSource
@@ -432,6 +433,60 @@ class CareersStepTest(FindBoardsBase):
         self.run_careers()
         self.assertEqual(count(self.conn, "SELECT count(*) FROM review_item WHERE kind = 'domain_missing' AND "
                                           "company_id = ?", cid), 0)
+
+    def flagged(self, name=None):
+        sql, args = "SELECT i.*, c.name FROM review_item i JOIN company c USING (company_id) WHERE i.kind = 'flagged'", []
+        if name is not None:
+            sql, args = sql + " AND c.name = ?", [name]
+        return [dict(r) for r in self.conn.execute(sql + " ORDER BY i.review_id", args)]
+
+    def demote_quill(self):  # the LCA's tier 3, no longer promoted: the one tier 1 "none" company is Sundial
+        self.conn.execute("UPDATE work_tier SET promoted = 0, tier = 2 WHERE company_id = ?",
+                          (self.company("Quill Data Services Inc"),))
+
+    def test_a_tier_1_company_with_no_careers_page_raises_one_item_and_a_rerun_adds_none(self):
+        self.demote_quill()
+        _, report = self.run_careers()
+        (item,) = self.flagged()
+        self.assertEqual((item["name"], item["raised_by"], item["evidence_key"], item["state"]),
+                         ("Sundial Health Inc", "crawler", "no-board-no-careers", "open"))
+        self.assertEqual(item["reason"], "No job board or careers page found at sundial.health. "
+                                         "Add a board or a careers link by hand.")
+        self.assertEqual(report.no_careers_flagged, 1)
+        with mock.patch("outreach.sources.jobs.CAREERS_RECHECK_DAYS", 0):  # the marker has lapsed: asked again
+            _, again = self.run_careers()
+        self.assertIn("https://sundial.health/careers", self.client.requests)
+        self.assertEqual(again.no_careers_flagged, 0)  # the same item is not raised twice
+        self.assertEqual(len(self.flagged()), 1)
+        _, third = self.run_careers()  # the marker holds: nothing is fetched, nothing is raised
+        self.assertNotIn("https://sundial.health/careers", self.client.requests)
+        self.assertEqual((third.no_careers_flagged, len(self.flagged())), (0, 1))
+
+    def test_a_tier_2_company_with_no_careers_page_raises_no_item(self):
+        self.demote_quill()
+        self.conn.execute("UPDATE work_tier SET tier = 2 WHERE company_id = ?", (self.company("Sundial Health Inc"),))
+        _, report = self.run_careers()
+        self.assertEqual(self.flagged(), [])
+        self.assertEqual(report.no_careers_flagged, 0)
+        self.assertEqual(len(self.events("careers_checked", "Sundial Health Inc")), 1)  # today's marker, as before
+        self.assertEqual(len(self.events("careers_checked", "Quill Data Services Inc")), 1)
+
+    def test_a_careers_error_raises_no_item(self):
+        routes = careers_routes(**{"https://sundial.health/careers": status_response(503)})
+        self.demote_quill()
+        _, report = self.run_careers(routes)
+        self.assertEqual(self.flagged(), [])  # Greenfield (503) and Sundial (503) both errored
+        self.assertEqual(report.no_careers_flagged, 0)
+
+    def test_a_company_that_later_gets_a_board_keeps_the_item(self):
+        self.demote_quill()
+        self.run_careers()
+        sundial = self.company("Sundial Health Inc")
+        add_board(self.conn, sundial, BoardRef("lever", "sundial"), via="hand", matched_on="", found_by="hand")
+        self.assertEqual(count(self.conn, "SELECT count(*) FROM board WHERE company_id = ?", sundial), 1)
+        self.run_careers()
+        (item,) = self.flagged("Sundial Health Inc")
+        self.assertEqual(item["state"], "open")  # #16 settles it
 
     def test_max_careers_limit(self):
         _, report = self.run_careers(max_careers=2)

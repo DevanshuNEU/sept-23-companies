@@ -265,6 +265,7 @@ class FindBoardsReport:
     careers_errors: int = 0  # fetch errors, 5xx and 429: nothing concluded, no marker, asked again next run
     careers_skipped: int = 0  # the company's only domain is a shared key (a parent's portal)
     domain_missing: int = 0  # tier 1 companies with no usable domain: one item each
+    no_careers_flagged: int = 0  # tier 1 companies with no board and a definite "no careers page": one item each
     ambiguous_boards: int = 0  # a careers page naming two or more boards: none added, the page is watched instead
     adapter_unknown: int = 0  # companies not checked for a crawler adapter: `outreach.crawl.ats` does not exist yet
     unreadable_boards: int = 0  # boards with no adapter and no page to watch: nobody reads these companies
@@ -456,6 +457,13 @@ def _careers_boards(conn: sqlite3.Connection, company_id: int, name: str, career
         careers.no_domain(company_id, shared)
         return 0
     result = careers.check(company_id, usable[0])
+    if result is not None and result.kind == "none" and effective_tier(conn, company_id) == 1:
+        # Nobody would ever read this company (no board, no page to watch): say so once, never silently unread.
+        report.no_careers_flagged += conn.execute(
+            "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+            "VALUES ('flagged', ?, ?, 'no-board-no-careers', 'crawler', ?) ON CONFLICT DO NOTHING",
+            (company_id, f"No job board or careers page found at {usable[0]}. "
+                         "Add a board or a careers link by hand.", utcnow())).rowcount
     if result is None or result.kind in ("none", "error"):
         return 0
     if result.kind == "boards" and len(result.boards) == 1:

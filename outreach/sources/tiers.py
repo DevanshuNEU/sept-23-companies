@@ -6,30 +6,11 @@ company; a company with no row (an HN post, a by-hand company, anything no tiere
 """
 from __future__ import annotations
 
-import contextlib
 import sqlite3
 
-from outreach.store import append_event, transaction, utcnow
+from outreach.store import append_event, atomic, utcnow
 
 __all__ = ["set_work_tier", "effective_tier", "promote", "register_source"]
-
-
-@contextlib.contextmanager
-def _atomic(conn: sqlite3.Connection):
-    """The row write and its event land together: a transaction of their own, or a savepoint inside the caller's."""
-    if not conn.in_transaction:
-        with transaction(conn):
-            yield
-        return
-    conn.execute("SAVEPOINT work_tier_write")
-    try:
-        yield
-    except BaseException:
-        if conn.in_transaction:  # SQLite may have rolled back the whole transaction already
-            conn.execute("ROLLBACK TO work_tier_write")
-            conn.execute("RELEASE work_tier_write")
-        raise
-    conn.execute("RELEASE work_tier_write")
 
 
 def set_work_tier(conn: sqlite3.Connection, company_id: int, tier: int, reason: str, source_version: str) -> bool:
@@ -38,7 +19,7 @@ def set_work_tier(conn: sqlite3.Connection, company_id: int, tier: int, reason: 
     old tier (None for a first one), the new tier, the reason and the source version. `promoted` is never touched.
     `sqlite3.IntegrityError` for a tier outside 1 to 3 or a blank reason. The row and its event are one unit: a
     transaction when none is open, else a savepoint in the caller's."""
-    with _atomic(conn):
+    with atomic(conn, "work_tier_write"):
         old = conn.execute("SELECT tier FROM work_tier WHERE company_id = ?", (company_id,)).fetchone()
         cur = conn.execute(
             "INSERT INTO work_tier(company_id, tier, reason, source_version, set_at) VALUES (?, ?, ?, ?, ?) "
@@ -68,7 +49,7 @@ def promote(conn: sqlite3.Connection, company_id: int, actor: str) -> None:
     company already promoted writes nothing. A company with no tier row gets one (tier 1, reason naming the actor),
     so a later source run that says tier 3 still cannot take the promotion away. Atomic like `set_work_tier`."""
     now = utcnow()
-    with _atomic(conn):
+    with atomic(conn, "work_tier_write"):
         conn.execute(
             "INSERT INTO work_tier(company_id, tier, promoted, reason, source_version, set_at) "
             "VALUES (?, 1, 0, ?, '', ?) ON CONFLICT(company_id) DO NOTHING",

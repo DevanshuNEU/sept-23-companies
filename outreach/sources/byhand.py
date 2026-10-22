@@ -13,7 +13,6 @@ merge. Devanshu merges the two with one click if they are the same.
 """
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import hashlib
 import sqlite3
@@ -28,7 +27,7 @@ from outreach.sources.base import Candidate
 from outreach.sources.boards import BoardRef
 from outreach.sources.hn import _ref_key
 from outreach.sources.tiers import promote, set_work_tier
-from outreach.store import append_event, transaction, utcnow
+from outreach.store import append_event, atomic, utcnow
 
 __all__ = ["HandEntry", "ByHandSource", "HandAdd", "add_by_hand"]
 
@@ -108,25 +107,6 @@ class HandAdd:
     status: str  # the company's status; `removed` means nothing was written
 
 
-@contextlib.contextmanager
-def _atomic(conn: sqlite3.Connection):
-    """Resolve, evidence, event, tier and alias land together: a transaction of their own, or a savepoint in the
-    caller's."""
-    if not conn.in_transaction:
-        with transaction(conn):
-            yield
-        return
-    conn.execute("SAVEPOINT add_by_hand")
-    try:
-        yield
-    except BaseException:
-        if conn.in_transaction:  # SQLite may have rolled back the whole transaction already
-            conn.execute("ROLLBACK TO add_by_hand")
-            conn.execute("RELEASE add_by_hand")
-        raise
-    conn.execute("RELEASE add_by_hand")
-
-
 def _locked_fact(conn: sqlite3.Connection, company_id: int, fact: str, value: str, source_ref: str,
                  quote: str) -> bool:
     """Write one locked hand evidence row unless the company's winning locked row for that fact already holds the
@@ -176,7 +156,7 @@ def add_by_hand(conn: sqlite3.Connection, *, name: str, reason: str, domain: str
     if actor == "claude":
         cand = dataclasses.replace(cand, state=None)  # a guess never drives a name and state merge; the ref keeps it
     reason_text = entry.reason.strip()
-    with _atomic(conn):
+    with atomic(conn, "add_by_hand"):
         match = find_company(conn, cand, source_name=SOURCE_NAME)
         if match.strong:
             hit_id, hit_basis = match.strong[0]

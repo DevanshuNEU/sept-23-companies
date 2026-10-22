@@ -6,14 +6,13 @@ normalizes and validates on construction, so a malformed token never reaches a r
 """
 from __future__ import annotations
 
-import contextlib
 import sqlite3
 from dataclasses import dataclass
 from typing import Literal
 
 from outreach.crawl.base import BOARD_ATS, valid_token
 from outreach.identity import follow_merged, raise_merge_candidate
-from outreach.store import add_alias, append_event, transaction, utcnow
+from outreach.store import add_alias, append_event, atomic, utcnow
 
 __all__ = ["SUPPORTED_ATS", "FOUND_BY", "BoardRef", "normalize_token", "add_board"]
 
@@ -52,24 +51,6 @@ class BoardRef:
         object.__setattr__(self, "token", normalize_token(self.ats, self.token))
 
 
-@contextlib.contextmanager
-def _atomic(conn: sqlite3.Connection):
-    """The row, alias and event land together: a transaction of their own, or a savepoint in the caller's."""
-    if not conn.in_transaction:
-        with transaction(conn):
-            yield
-        return
-    conn.execute("SAVEPOINT add_board")
-    try:
-        yield
-    except BaseException:
-        if conn.in_transaction:  # SQLite may have rolled back the whole transaction already
-            conn.execute("ROLLBACK TO add_board")
-            conn.execute("RELEASE add_board")
-        raise
-    conn.execute("RELEASE add_board")
-
-
 def add_board(conn: sqlite3.Connection, company_id: int, ref: BoardRef, *, via: str, matched_on: str,
               found_by: str) -> Literal["added", "exists", "conflict"]:
     """Attach a board to a company.
@@ -90,7 +71,7 @@ def add_board(conn: sqlite3.Connection, company_id: int, ref: BoardRef, *, via: 
         raise ValueError(f"ATS {ref.ats!r} is not a supported board ATS")
     token = normalize_token(ref.ats, ref.token)  # a BoardRef changed after construction is still checked
     alias = f"{ref.ats}:{token}"
-    with _atomic(conn):
+    with atomic(conn, "add_board"):
         owner = _board_owner(conn, ref.ats, token)
         if owner is None:
             # No board row. The alias only tells whether another company already claims the board.

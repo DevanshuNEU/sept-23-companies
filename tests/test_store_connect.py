@@ -259,6 +259,15 @@ class ConnectTests(StoreTestCase):
         self.assertEqual(conn.execute("SELECT count(*) FROM company").fetchone()[0], 0)
         self.assertFalse(conn.in_transaction)
 
+    def test_transaction_keeps_the_original_error_when_sqlite_already_rolled_back(self):
+        conn = connect(self.installed())
+        self.addCleanup(conn.close)
+        with self.assertRaises(ZeroDivisionError):
+            with transaction(conn):
+                conn.execute("ROLLBACK")  # what SQLite does itself on a full disk or an interrupt
+                1 / 0
+        self.assertFalse(conn.in_transaction)
+
 
 class InstallMainTests(StoreTestCase):
     def test_install_main_prints_version(self):

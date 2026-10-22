@@ -37,7 +37,6 @@ size. Everything for one candidate is one transaction (a savepoint inside a call
 """
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import sqlite3
 from dataclasses import dataclass, field
@@ -45,7 +44,7 @@ from dataclasses import dataclass, field
 from outreach.rules.rebuild import record_evidence
 from outreach.sources.base import Candidate, describe_error
 from outreach.sources.keys import US_STATES, classify_domain, normalize_fein, registrable_domain, shared_count
-from outreach.store import add_alias, append_event, is_shared_key, name_key, transaction, utcnow
+from outreach.store import add_alias, append_event, atomic, is_shared_key, name_key, utcnow
 
 __all__ = ["BASES", "CONFIDENCE", "ITEM_CONFIDENCES", "MIN_NAME_KEY", "Resolution", "Match", "follow_merged",
            "company_state", "find_company", "resolve_candidate", "raise_merge_candidate", "StoreResolveReport",
@@ -360,24 +359,6 @@ def raise_merge_candidate(conn: sqlite3.Connection, a: int, b: int, basis: str, 
     return cur.rowcount == 1
 
 
-@contextlib.contextmanager
-def _atomic(conn: sqlite3.Connection):
-    """One candidate's writes: its own transaction, or a savepoint inside the caller's, undone on any error."""
-    if not conn.in_transaction:
-        with transaction(conn):
-            yield
-        return
-    conn.execute("SAVEPOINT identity_candidate")
-    try:
-        yield
-    except BaseException:
-        if conn.in_transaction:  # SQLite may have rolled back the whole transaction (a full disk, an interrupt)
-            conn.execute("ROLLBACK TO identity_candidate")
-            conn.execute("RELEASE identity_candidate")
-        raise
-    conn.execute("RELEASE identity_candidate")
-
-
 def _alias_key(value: str, source: str) -> str:
     return value.lower() if source in _RAW_SOURCES else name_key(value)
 
@@ -453,7 +434,7 @@ def resolve_candidate(conn: sqlite3.Connection, cand: Candidate, *, source_name:
         raise ValueError("hand evidence is written locked by its own writer, not through identity")
     if not cand.source_ref:
         raise ValueError(f"candidate {cand.name!r} has no source_ref")
-    with _atomic(conn):
+    with atomic(conn, "identity_candidate"):
         if conn.execute("SELECT 1 FROM source WHERE source_name = ?", (source_name,)).fetchone() is None:
             raise ValueError(f"source {source_name!r} is not registered")
         strong, weak = _find(conn, cand, source_name)
@@ -570,7 +551,7 @@ def resolve_store(conn: sqlite3.Connection) -> StoreResolveReport:
         for other in rest:
             try:
                 report.attempted += 1
-                with _atomic(conn):
+                with atomic(conn, "identity_candidate"):
                     # Two live companies never share a FEIN alias (alias_key is unique), so two known FEINs differ.
                     ours, theirs = _family_feins(conn, anchor), _family_feins(conn, other)
                     if ours and theirs:
@@ -586,7 +567,7 @@ def resolve_store(conn: sqlite3.Connection) -> StoreResolveReport:
         for cid in sorted(holders):
             try:
                 report.attempted += 1
-                with _atomic(conn):
+                with atomic(conn, "identity_candidate"):
                     name = conn.execute("SELECT name FROM company WHERE company_id = ?", (cid,)).fetchone()[0]
                     others = _others_phrase(conn, domain, len(holders))
                     reason = (f"{name} (#{cid}). Basis shared_domain, confidence weak: shares {domain} with "

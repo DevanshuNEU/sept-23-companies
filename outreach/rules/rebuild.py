@@ -12,11 +12,10 @@ first, then crawls.
 checkout) and prints the flip report.
 """
 import argparse
-import contextlib
 import sqlite3
 from dataclasses import dataclass, field
 
-from outreach.store import append_event, connect, finish_job, start_job, transaction, utcnow
+from outreach.store import append_event, atomic, connect, finish_job, start_job, transaction, utcnow
 
 from .config import Config, load_config
 from .decide import Decision, PostingInput, decide, passes
@@ -232,30 +231,13 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
     return FlipReport(version, previous, decided, **flips, skipped=skipped)
 
 
-@contextlib.contextmanager
-def _atomic(conn: sqlite3.Connection):
-    """A write unit: the caller's transaction (under a savepoint, so a failure undoes only this unit) or its own."""
-    if not conn.in_transaction:
-        with transaction(conn):
-            yield
-        return
-    conn.execute("SAVEPOINT rules_unit")
-    try:
-        yield
-    except BaseException:
-        conn.execute("ROLLBACK TO rules_unit")
-        conn.execute("RELEASE rules_unit")
-        raise
-    conn.execute("RELEASE rules_unit")
-
-
 def decide_and_store(conn: sqlite3.Connection, posting_id: int, *, cfg: Config | None = None) -> Decision:
     """Decide one posting and upsert its row under the store's current ruleset. What the crawler calls per posting.
 
     Raises RulesetNotCurrent when the store's current version is not this code's. Joins the caller's transaction
     when there is one.
     """
-    with _atomic(conn):
+    with atomic(conn, "rules_unit"):
         row = conn.execute("SELECT ruleset_version FROM ruleset WHERE is_current = 1").fetchone()
         if row is None or row[0] != ruleset_version():
             raise RulesetNotCurrent("ruleset changed; run: uv run python -m outreach.rules.rebuild")
@@ -281,7 +263,7 @@ def record_evidence(conn: sqlite3.Connection, company_id: int, drafts: list[Evid
     """
     if any(d.source_kind == "hand" for d in drafts):
         raise ValueError("hand evidence is written locked by edits and the import, not by the rules")
-    with _atomic(conn):
+    with atomic(conn, "rules_unit"):
         added = []
         for d in drafts:
             cur = conn.execute(

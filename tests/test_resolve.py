@@ -360,7 +360,7 @@ class ResolveJobTest(ResolveBase):
     def test_every_item_failing_is_failed_not_partial(self):
         self.seed_mixed()
         with mock.patch.object(identity, "raise_merge_candidate", side_effect=sqlite3.IntegrityError("no")), \
-                mock.patch.object(identity, "_atomic", side_effect=sqlite3.IntegrityError("no")):
+                mock.patch.object(identity, "atomic", side_effect=sqlite3.IntegrityError("no")):
             run_id, report = run_resolve(self.conn)
         self.assertEqual((report.attempted, len(report.failed)), (3, 3))
         self.assertEqual(self.conn.execute("SELECT status FROM job_run WHERE run_id = ?", (run_id,)).fetchone()[0],

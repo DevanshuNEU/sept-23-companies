@@ -1,0 +1,30 @@
+# LCA staffing filter, likely cap-exempt tag and work tiers (#31 Task 5). Read by outreach/sources/lca_rules.py.
+# Ported from the research script (docs/research/2026-10-20-lca-small-junior-employers.md), with one change:
+# a corporate legal name is not likely cap-exempt unless it also carries a strong word (see the cap_exempt keys).
+# Regexes are matched case-insensitively. Literal strings: no escaping needed for backslashes.
+
+# A fiscal year's employer is small when its total certified H-1B filings are 1 to this many.
+max_small_filings = 25
+
+# Name words that mark a staffing or consulting firm (hard exclusion), and generic tech words (a risk point, and
+# half of the body-shop test). Matched against the legal name plus its normalized key.
+staffing_name_regex = 'consult|staffing|infotech|info tech|infosoft|infosys|\bpvt\b|private limited|outsourc|manpower|recruit|placement|workforce|talent|\bit services\b|technosoft|\bsoft ?tech|\bitech\b|\bit solutions\b|\bsoftware solutions\b|global services|systems integrat|resourc'
+generic_name_regex = 'solution|system|technolog|tech\b|soft|global|services|\bit\b|info|digital|data'
+
+# NAICS: computer-services codes (risk point and body-shop test), employment services (hard exclusion).
+it_services_naics = ["541511", "541512", "541513", "541519"]
+staffing_naics_prefix = "5613"
+
+# Likely cap-exempt (skips the H-1B lottery): education, hospital and nonprofit or public NAICS, or a name word.
+# This is only ever "likely": the LCA file cannot show nonprofit status.
+cap_exempt_naics_prefixes = ["6113", "6111", "6112", "6221", "6222", "6223", "8132", "8133", "8134", "8139", "9211", "9261", "9271"]
+# A strong word counts even in a corporate name. A weak word counts only in a name with no company form.
+cap_exempt_strong_name_regex = '\buniversit(?:y|ies)\b|\bcollege\b|\bhospitals?\b|\binstitutes?\b'
+cap_exempt_weak_name_regex = '\bschool|health system|medical center|\bfoundation\b|county of|city of|state of'
+# A legal name ending in a company form (after dots, a dba tail and parentheses are dropped) is a corporation.
+# That vetoes the NAICS signal and the weak words: Lightcast, PowerSchool and Foundation Medicine are companies.
+corporate_name_regex = '\b(?:inc|incorporated|llc|llp|lp|pllc|corp|corporation|co|company|ltd|limited|plc)$'
+
+# Product likelihood: A = publishing, data, internet, R&D, hardware; B = computer services; C = anything else.
+naics_tier_a_prefixes = ["5112", "5132", "5182", "5191", "5192", "5417", "3341", "3342", "3344", "3345"]
+naics_tier_b_prefix = "5415"

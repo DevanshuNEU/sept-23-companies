@@ -71,3 +71,14 @@ def seed_touch(conn: sqlite3.Connection, company_id: int, email: str) -> int:
         (person_id, now, now),
     )
     return cur.lastrowid
+
+
+MARKED_TABLES = ("company", "company_alias", "company_source", "evidence", "board", "review_item", "event",
+                 "watched_page", "work_tier", "company_post", "shared_key")
+
+
+def table_marks(conn: sqlite3.Connection) -> dict[str, tuple[int, int]]:
+    """(row count, max rowid) for each table a source run can write. Idempotency tests compare two snapshots: equal
+    means nothing was added or deleted (an update in place, such as `company_source.last_seen_at`, keeps both)."""
+    return {t: tuple(conn.execute(f"SELECT COUNT(*), coalesce(MAX(rowid), 0) FROM {t}").fetchone())
+            for t in MARKED_TABLES}

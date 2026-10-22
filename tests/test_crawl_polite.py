@@ -3,7 +3,7 @@ import unittest
 
 from outreach.crawl.config import load_crawl_config
 from outreach.crawl.polite import HostTripped, PoliteClient, bucket_for
-from outreach.net import FetchError, HttpClient
+from outreach.net import FetchError, Response
 from tests.fakes import FakeClient, json_response, status_response
 
 CFG = load_crawl_config()
@@ -35,12 +35,6 @@ def make(routes):
 
 
 class PoliteClientTests(unittest.TestCase):
-    def test_it_is_an_http_client(self):
-        polite, _, _ = make({})
-        for name in ("get", "post", "download"):
-            self.assertTrue(callable(getattr(polite, name)))
-        self.assertTrue(hasattr(HttpClient, "get"))
-
     def test_polite_sets_the_declared_user_agent(self):
         polite, inner, _ = make({GH: json_response({})})
         polite.get(GH, {"user-agent": "something else", "Accept": "application/json"})
@@ -146,6 +140,113 @@ class PoliteClientTests(unittest.TestCase):
             for _ in range(len(routes)):
                 polite.get(GH)
             self.assertFalse(polite.tripped("greenhouse.io"))
+
+    def test_polite_three_requests_to_one_host_accumulate_spacing(self):
+        polite, _, clock = make({GH: [json_response({})] * 3})
+        for _ in range(3):
+            polite.get(GH)
+        gap = CFG.host_interval_s["greenhouse.io"]
+        self.assertEqual(clock.slept, [gap, gap])
+        self.assertAlmostEqual(clock.now, 1000.0 + 2 * gap)
+
+    def test_polite_a_tripped_bucket_raises_without_sleeping(self):
+        polite, _, clock = make({GH: status_response(429), GH2: json_response({})})
+        polite.get(GH)
+        with self.assertRaises(HostTripped):
+            polite.get(GH2)
+        self.assertEqual(clock.slept, [])
+
+    def test_polite_401_and_408_leave_the_count_unchanged(self):
+        n = CFG.breaker_failures - 1
+        for odd in (401, 408, 400):
+            routes = [status_response(500)] * n + [status_response(odd)] + [status_response(500)]
+            polite, _, _ = make({GH: routes})
+            for _ in range(len(routes)):
+                polite.get(GH)
+            self.assertTrue(polite.tripped("greenhouse.io"), odd)
+            polite, _, _ = make({GH: routes[:n + 1]})
+            for _ in range(n + 1):
+                polite.get(GH)
+            self.assertFalse(polite.tripped("greenhouse.io"), odd)
+
+    def test_polite_follows_a_redirect_chain_across_hosts(self):
+        hop1 = Response(301, GH, b"", {"location": LEVER})
+        hop2 = Response(302, LEVER, b"", {"location": "/v0/postings/final"})
+        final = "https://api.lever.co/v0/postings/final"
+        polite, inner, clock = make({GH: hop1, LEVER: hop2, final: json_response({"ok": 1})})
+        r = polite.get(GH, {"Authorization": "secret", "Accept": "application/json"}, follow_redirects=True)
+        self.assertEqual(r.status, 200)
+        self.assertEqual(inner.requests, [GH, LEVER, final])
+        self.assertEqual(clock.slept, [CFG.host_interval_s["lever.co"]])  # hop 3 waits behind hop 2, same bucket
+        # the inner client is never asked to follow, so every hop passed through the wrapper
+        self.assertEqual(inner.unrouted, [])
+        # a cross-host hop does not carry the caller's own headers
+        self.assertEqual(inner.calls[0][2]["Authorization"], "secret")
+        self.assertNotIn("Authorization", inner.calls[1][2])
+        self.assertEqual(inner.calls[1][2]["User-Agent"], CFG.user_agent)
+
+    def test_polite_does_not_follow_unless_asked(self):
+        polite, inner, _ = make({GH: Response(301, GH, b"", {"location": LEVER})})
+        self.assertEqual(polite.get(GH).status, 301)
+        self.assertEqual(inner.requests, [GH])
+
+    def test_polite_stops_after_three_hops(self):
+        urls = [f"https://jobs.example.org/{i}" for i in range(6)]
+        routes = {u: Response(302, u, b"", {"location": urls[i + 1]}) for i, u in enumerate(urls[:-1])}
+        polite, inner, _ = make(routes)
+        r = polite.get(urls[0], follow_redirects=True)
+        self.assertEqual(r.status, 302)
+        self.assertEqual(inner.requests, urls[:4])  # the first request and three hops
+
+    def test_polite_a_redirect_into_a_tripped_bucket_is_refused(self):
+        polite, inner, _ = make({GH: status_response(429), LEVER: Response(301, LEVER, b"", {"location": GH2})})
+        polite.get(GH)
+        with self.assertRaises(HostTripped) as ctx:
+            polite.get(LEVER, follow_redirects=True)
+        self.assertEqual(ctx.exception.bucket, "greenhouse.io")
+        self.assertEqual(inner.requests, [GH, LEVER])
+
+    def test_polite_download_counts_statuses_like_get(self):
+        import tempfile
+        from pathlib import Path
+        n = CFG.breaker_failures - 1
+        with tempfile.TemporaryDirectory() as d:
+            dest = Path(d) / "x"
+
+            def run(statuses):
+                polite, _, _ = make({GH: [status_response(c) for c in statuses]})
+                for _ in statuses:
+                    try:
+                        polite.download(GH, dest)
+                    except FetchError:
+                        pass
+                return polite
+
+            self.assertTrue(run([429]).tripped("greenhouse.io"))
+            self.assertTrue(run([500] * CFG.breaker_failures).tripped("greenhouse.io"))
+            self.assertTrue(run([403] * CFG.breaker_failures).tripped("greenhouse.io"))
+            for reset in (404, 410):
+                self.assertFalse(run([500] * n + [reset] + [500] * n).tripped("greenhouse.io"), reset)
+            # other 4xx change nothing
+            self.assertTrue(run([500] * n + [401, 500]).tripped("greenhouse.io"))
+            self.assertFalse(run([500] * n + [401]).tripped("greenhouse.io"))
+
+    def test_polite_download_too_large_is_not_a_host_failure(self):
+        import tempfile
+        from pathlib import Path
+        polite, _, _ = make({GH: [FetchError("too_large", "over limit")] * (CFG.breaker_failures * 2)})
+        with tempfile.TemporaryDirectory() as d:
+            for _ in range(CFG.breaker_failures * 2):
+                with self.assertRaises(FetchError):
+                    polite.download(GH, Path(d) / "x")
+        self.assertFalse(polite.tripped("greenhouse.io"))
+
+    def test_polite_a_too_large_get_is_not_a_host_failure(self):
+        polite, _, _ = make({GH: [FetchError("too_large", "over limit")] * (CFG.breaker_failures * 2)})
+        for _ in range(CFG.breaker_failures * 2):
+            with self.assertRaises(FetchError):
+                polite.get(GH)
+        self.assertFalse(polite.tripped("greenhouse.io"))
 
     def test_polite_a_404_is_not_a_failure(self):
         polite, _, _ = make({GH: [status_response(404)] * (CFG.breaker_failures * 2)})

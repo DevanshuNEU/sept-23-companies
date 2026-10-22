@@ -20,6 +20,22 @@ class HtmlToTextTests(unittest.TestCase):
             self.assertEqual(html_to_text(f"a<{tag}>b</{tag}>c"), "a\nb\nc", tag)
         self.assertEqual(html_to_text("a<br>b<br/>c"), "a\nb\nc")
 
+    def test_table_cells_do_not_run_words_together(self):
+        self.assertEqual(html_to_text("<table><tr><td>Visa</td><td>No sponsorship</td></tr></table>"),
+                         "Visa\nNo sponsorship")
+        self.assertEqual(html_to_text("<tr><th>a</th><th>b</th></tr>"), "a\nb")
+
+    def test_definition_lists_do_not_run_words_together(self):
+        self.assertEqual(html_to_text("<dl><dt>Pay</dt><dd>$100k</dd></dl>"), "Pay\n$100k")
+
+    def test_more_block_tags_break_lines(self):
+        for tag in ("blockquote", "pre", "article", "header", "footer", "table", "dl", "dd", "dt", "td", "th"):
+            self.assertEqual(html_to_text(f"a<{tag}>b</{tag}>c"), "a\nb\nc", tag)
+
+    def test_hr_breaks_lines(self):
+        self.assertEqual(html_to_text("above<hr>below"), "above\nbelow")
+        self.assertEqual(html_to_text("above<hr/>below"), "above\nbelow")
+
     def test_script_style_and_comments_are_dropped(self):
         markup = ("<p>Hi</p><script>var x = 'secret';</script><style>p { color: red }</style>"
                   "<noscript>enable js</noscript><!-- hidden note --><p>There</p>")

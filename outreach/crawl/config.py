@@ -1,6 +1,7 @@
 """Loads outreach/crawl/config.toml into a validated CrawlConfig (#21)."""
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +45,10 @@ def _is_number(v: object) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _is_positive(v: object) -> bool:
+    return _is_number(v) and math.isfinite(v) and v > 0
+
+
 def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     path = Path(path)
     data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -59,26 +64,25 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     if not isinstance(data["user_agent"], str) or not data["user_agent"].strip():
         raise ValueError("user_agent must be a non-empty string")
     hosts = data["host_interval_s"]
-    if not isinstance(hosts, dict) or not all(_is_number(v) and v >= 0 for v in hosts.values()):
-        raise ValueError("host_interval_s must map host suffixes to non-negative seconds")
+    if not isinstance(hosts, dict) or not all(_is_positive(v) for v in hosts.values()):
+        raise ValueError("host_interval_s must map host suffixes to finite seconds above 0")
 
     if "@" in data["user_agent"]:
         raise ValueError("user_agent must not carry an email address")
-    if data["floor_s"] <= 0 or data["floor_s"] > data["ceiling_s"]:
-        raise ValueError(f"floor_s ({data['floor_s']}) must be above 0 and at most ceiling_s ({data['ceiling_s']})")
-    if data["age_divisor"] < 1:
-        raise ValueError("age_divisor must be at least 1")
+    for key in _INT_KEYS:
+        if key != "max_redirects" and key != "batch_rows" and key != "stale_after_months" and data[key] <= 0:
+            raise ValueError(f"{key} must be positive, got {data[key]}")
+    if data["max_redirects"] < 0:
+        raise ValueError(f"max_redirects must not be negative, got {data['max_redirects']}")
+    if data["floor_s"] > data["ceiling_s"]:
+        raise ValueError(f"floor_s ({data['floor_s']}) must be at most ceiling_s ({data['ceiling_s']})")
     if not 2000 <= data["batch_rows"] <= 5000:
         raise ValueError(f"batch_rows must be 2000 to 5000, got {data['batch_rows']}")
     if not 1 <= data["stale_after_months"] <= 60:
         raise ValueError(f"stale_after_months must be 1 to 60, got {data['stale_after_months']}")
-    for key in ("defer_s", "max_bytes", "max_redirects", "breaker_failures", "decide_batch", "detail_per_read",
-                "boards_per_tick", "tick_budget_s", "top_companies", "watch_interval_s", "watch_per_tick",
-                "watch_min_text_chars"):
-        if data[key] < 0 or (key in ("breaker_failures", "decide_batch", "max_bytes") and data[key] < 1):
-            raise ValueError(f"{key} must be positive, got {data[key]}")
-    if data["timeout_s"] <= 0 or data["default_host_interval_s"] < 0:
-        raise ValueError("timeout_s must be above 0 and default_host_interval_s must not be negative")
+    for key in _NUM_KEYS:
+        if not _is_positive(data[key]):
+            raise ValueError(f"{key} must be a finite number above 0, got {data[key]!r}")
 
     kwargs = {k: data[k] for k in (*_INT_KEYS, *_NUM_KEYS, "user_agent")}
     kwargs["host_interval_s"] = {k.lower(): float(v) for k, v in hosts.items()}

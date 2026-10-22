@@ -37,17 +37,17 @@ class CrawlConfigTests(unittest.TestCase):
         self.assertEqual(len(cfg.host_interval_s), 14)
 
     def test_floor_above_ceiling_is_refused(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "floor_s"):
             _load_with(floor_s=700000)
 
     def test_batch_rows_outside_2000_to_5000_is_refused(self):
         for n in (1999, 5001):
-            with self.assertRaises(ValueError, msg=str(n)):
+            with self.assertRaisesRegex(ValueError, "batch_rows must be 2000 to 5000"):
                 _load_with(batch_rows=n)
         self.assertEqual(_load_with(batch_rows=5000).batch_rows, 5000)
 
     def test_user_agent_with_an_email_is_refused(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "user_agent must not carry an email"):
             _load_with(user_agent='"outreach-crawler/1.0 (me@example.com)"')
 
     def test_missing_key_is_named(self):
@@ -69,10 +69,40 @@ class CrawlConfigTests(unittest.TestCase):
 
     def test_stale_after_months_outside_1_to_60_is_refused(self):
         for n in (0, 61):
-            with self.assertRaises(ValueError, msg=str(n)):
+            with self.assertRaisesRegex(ValueError, "stale_after_months must be 1 to 60"):
                 _load_with(stale_after_months=n)
         self.assertEqual(_load_with(stale_after_months=60).stale_after_months, 60)
         self.assertEqual(_load_with(stale_after_months=1).stale_after_months, 1)
+
+    def test_counts_that_must_be_positive_refuse_zero(self):
+        for key in ("defer_s", "max_bytes", "breaker_failures", "decide_batch", "detail_per_read", "boards_per_tick",
+                    "tick_budget_s", "top_companies", "watch_interval_s", "watch_per_tick", "watch_min_text_chars",
+                    "age_divisor", "floor_s"):
+            for bad in (0, -1):
+                with self.assertRaisesRegex(ValueError, f"{key} must be positive"):
+                    _load_with(**{key: bad})
+
+    def test_zero_redirects_is_allowed_but_negative_is_not(self):
+        self.assertEqual(_load_with(max_redirects=0).max_redirects, 0)
+        with self.assertRaisesRegex(ValueError, "max_redirects"):
+            _load_with(max_redirects=-1)
+
+    def test_float_values_must_be_finite_and_positive(self):
+        for key in ("timeout_s", "default_host_interval_s"):
+            for bad in ("nan", "inf", "-inf", "0", "0.0", "-1.5"):
+                with self.assertRaisesRegex(ValueError, f"{key} must be a finite number above 0"):
+                    _load_with(**{key: bad})
+
+    def test_a_host_interval_must_be_finite_and_positive(self):
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        for bad in ("nan", "inf", "0", "-1"):
+            broken = text.replace('"greenhouse.io" = 0.25', f'"greenhouse.io" = {bad}')
+            self.assertNotEqual(broken, text)
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "config.toml"
+                p.write_text(broken, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "host_interval_s"):
+                    load_crawl_config(p)
 
 
 if __name__ == "__main__":

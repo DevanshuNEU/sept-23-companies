@@ -6,6 +6,7 @@ that bucket's boards with no streak change (a tripped bucket is an outage, not a
 """
 from __future__ import annotations
 
+import re
 import time
 import urllib.parse
 from collections.abc import Mapping
@@ -34,6 +35,20 @@ def bucket_for(host: str, cfg: CrawlConfig) -> str:
         if (host == suffix or host.endswith("." + suffix)) and len(suffix) > len(best):
             best = suffix
     return best or host
+
+
+_REDIRECTS = (301, 302, 303, 307, 308)
+_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
+
+
+def _host(url: str) -> str:
+    return (urllib.parse.urlsplit(url).hostname or "").lower()
+
+
+def _status_of(e: FetchError) -> int | None:
+    """The HTTP status a failed download reports in its message ("<url>: HTTP 404"), else None."""
+    m = _HTTP_STATUS.search(str(e))
+    return int(m.group(1)) if m else None
 
 
 def _bucket_of_url(url: str, cfg: CrawlConfig) -> str:
@@ -83,22 +98,47 @@ class PoliteClient:
             self._failures[bucket] = 0
         # any other 4xx says nothing about the host: the count stays where it is
 
-    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
+    def _failed_fetch(self, bucket: str, e: FetchError) -> None:
+        """Count a FetchError. A too_large body is the page's size, not the host's health. A status carried in the
+        message (a failed download) counts as the same status on get."""
+        if e.kind == "too_large":
+            return
+        status = _status_of(e)
+        if status is not None:
+            self._judge(bucket, status)
+        else:
+            self._failed(bucket)
+
+    def _get_once(self, url: str, headers: Mapping[str, str] | None) -> Response:
         bucket = self._begin(url)
         try:
-            r = self.inner.get(url, self._headers(headers), follow_redirects=follow_redirects)
-        except FetchError:
-            self._failed(bucket)
+            r = self.inner.get(url, self._headers(headers))
+        except FetchError as e:
+            self._failed_fetch(bucket, e)
             raise
         self._judge(bucket, r.status)
+        return r
+
+    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
+        """Redirects are followed here, never by the inner client, so each hop is spaced and counted in its own
+        host's bucket. A hop to another host does not carry the caller's headers (the User-Agent is added again)."""
+        r = self._get_once(url, headers)
+        hops = 0
+        while follow_redirects and r.status in _REDIRECTS and r.headers.get("location") and hops < self.cfg.max_redirects:
+            hops += 1
+            target = urllib.parse.urljoin(url, r.headers["location"])
+            if _host(target) != _host(url):
+                headers = {}
+            url = target
+            r = self._get_once(url, headers)
         return r
 
     def post(self, url: str, body: bytes, headers: Mapping[str, str] | None = None) -> Response:
         bucket = self._begin(url)
         try:
             r = self.inner.post(url, body, self._headers(headers))
-        except FetchError:
-            self._failed(bucket)
+        except FetchError as e:
+            self._failed_fetch(bucket, e)
             raise
         self._judge(bucket, r.status)
         return r
@@ -107,8 +147,8 @@ class PoliteClient:
         bucket = self._begin(url)
         try:
             n = self.inner.download(url, dest, self._headers(headers))
-        except FetchError:
-            self._failed(bucket)
+        except FetchError as e:
+            self._failed_fetch(bucket, e)
             raise
         self._failures[bucket] = 0
         return n

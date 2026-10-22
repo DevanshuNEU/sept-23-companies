@@ -11,7 +11,8 @@ __all__ = ["html_to_text"]
 
 _SKIP = frozenset({"script", "style", "noscript"})
 # Tags that end a line, so the rules' sentence splitter sees a stop between list items and paragraphs.
-_BREAKS = frozenset({"p", "br", "li", "div", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "section"})
+_BREAKS = frozenset({"p", "br", "li", "div", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "section",
+                     "td", "th", "dt", "dd", "table", "dl", "blockquote", "hr", "pre", "article", "header", "footer"})
 
 _HSPACE = re.compile(r"[^\S\n]+")  # spaces, tabs and no-break spaces, never a line break
 _BLANKS = re.compile(r"\n{3,}")

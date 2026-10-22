@@ -2,8 +2,9 @@
 
 `{token}.breezy.hr/json` answers a top-level list, sends an ETag and answers 304 to If-None-Match. A tenant with no
 careers site answers a 302 to the marketing page: the list request never follows redirects, so that is `error`, not an
-empty board (Review Focus 2). The list carries no text, so `body()` reads the position page (redirects followed) and
-takes the element with class `description`; a page without one raises instead of storing nothing.
+empty board (Review Focus 2). The list carries no text, so `body()` reads the position page and
+takes the element with class `description`;
+redirects are followed by `body()` itself (three hops at most, and only while the target stays on the tenant host); a page without one raises instead of storing nothing.
 
 The token becomes a host label, so it must be one: letters, digits and inner hyphens. A posting's own URL is used only
 when it is an https address on the tenant's host; otherwise it is `https://{token}.breezy.hr/p/{id}`, so `body()` can
@@ -26,6 +27,8 @@ _LIST = "https://{token}.breezy.hr/json"
 _POSITION = "https://{token}.breezy.hr/p/{id}"
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
+_REDIRECTS = frozenset({301, 302, 303, 307, 308})
+_MAX_HOPS = 3
 _VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"})
 
 
@@ -163,7 +166,15 @@ class BreezyAdapter:
         description block raises, so the caller counts a failed fetch instead of storing an empty body."""
         if not _valid(token) or not _on_tenant_host(token, job.url):
             raise ValueError(f"cannot fetch {job.url!r} from {token!r}")
-        resp = self.client.get(job.url, follow_redirects=True)
+        url = job.url
+        for hop in range(_MAX_HOPS + 1):
+            resp = self.client.get(url)
+            if resp.status not in _REDIRECTS:
+                break
+            # Followed here, not by the client: a hop that leaves the tenant host (the marketing page) is a failure.
+            url = urllib.parse.urljoin(url, resp.headers.get("location", ""))
+            if hop == _MAX_HOPS or not _on_tenant_host(token, url):
+                raise ValueError(f"position {job.native_id} redirects to {url!r}, which is not read")
         if resp.status != 200:
             raise ValueError(f"HTTP {resp.status} for position {job.native_id}")
         text = _description(resp.text())

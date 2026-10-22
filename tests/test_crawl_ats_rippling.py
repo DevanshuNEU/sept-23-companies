@@ -109,10 +109,32 @@ class RipplingListTests(unittest.TestCase):
         r, _ = read({URL: json_response(payload)})
         self.assertEqual(r.result, "error")
 
-    def test_the_title_falls_back_to_title_and_the_id_to_uuid(self):
-        r, _ = read({URL: json_response([{"uuid": "abc-1", "title": "Engineer"}])})
+    def test_the_id_is_the_uuid_first_then_id_and_the_title_falls_back_to_title(self):
+        r, _ = read({URL: json_response([{"uuid": "abc-1", "id": "other-9", "title": "Engineer"}])})
         self.assertEqual((r.jobs[0].native_id, r.jobs[0].title), ("abc-1", "Engineer"))
         self.assertEqual(r.jobs[0].url, "https://ats.rippling.com/acme/jobs/abc-1")
+        r, _ = read({URL: json_response([{"id": "other-9", "name": "Engineer"}])})
+        self.assertEqual(r.jobs[0].native_id, "other-9")
+        # A uuid that is present but unsafe is an error, not a reason to fall back to the id.
+        r, _ = read({URL: json_response([{"uuid": "a b", "id": "other-9", "name": "Engineer"}])})
+        self.assertEqual(r.result, "error")
+
+    def test_an_object_that_says_more_postings_exist_is_an_error(self):
+        two = jobs()[:2]
+        for name, extra in {"totalItems": {"totalItems": 3}, "total": {"total": 40}, "count": {"count": 3},
+                            "totalPages": {"totalPages": 2}, "totalPages many": {"totalPages": 9},
+                            "hasMore": {"hasMore": True}, "next": {"next": "https://api.rippling.com/x?page=2"},
+                            "next cursor": {"next": "abc"}}.items():
+            for key in ("items", "jobs"):
+                r, _ = read({URL: json_response(dict({key: two}, **extra))})
+                self.assertEqual((r.result, r.jobs), ("error", ()), f"{key} {name}")
+
+    def test_an_object_whose_counts_match_is_ok(self):
+        two = jobs()[:2]
+        for extra in ({"totalItems": 2, "total": 2, "count": 2, "totalPages": 1, "hasMore": False, "next": None},
+                      {"totalItems": 1, "next": ""}, {"totalPages": 0}, {"total": "many", "next": []}):
+            r, _ = read({URL: json_response(dict({"items": two}, **extra))})
+            self.assertEqual((r.result, len(r.jobs)), ("ok", 2), extra)
 
     def test_a_numeric_id_is_text(self):
         r, _ = read({URL: json_response([{"id": 42, "name": "Engineer"}])})
@@ -155,12 +177,12 @@ class RipplingBodyTests(unittest.TestCase):
     def job(self, job_id=IDS[0]):
         return JobRef(job_id, "x", "", "", None, None, None)
 
-    def test_body_joins_company_and_role(self):
+    def test_body_puts_the_role_before_the_company(self):
         client = FakeClient({self.DETAIL_URL: DETAIL})
         text = RipplingAdapter(client).body("acme", self.job())
         self.assertEqual(client.requests, [self.DETAIL_URL])
-        self.assertEqual(text, "Acme builds warehouse robots.\nYou will build services.\nShip & learn\n"
-                               "We sponsor visas for the right person.")
+        self.assertEqual(text, "You will build services.\nShip & learn\nWe sponsor visas for the right person.\n"
+                               "Acme builds warehouse robots.")
         self.assertNotIn("<", text)
 
     def test_body_with_one_part_or_none(self):

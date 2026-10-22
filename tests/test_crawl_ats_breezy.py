@@ -207,7 +207,7 @@ class BreezyBodyTests(unittest.TestCase):
     def test_breezy_body_from_description_block(self):
         text, client = self.body(text_response(PAGE))
         self.assertEqual(client.requests, [JOB_URL])
-        self.assertEqual(client.follow, [True])
+        self.assertEqual(client.follow, [False])
         self.assertEqual(lines(text), ["We are hiring a new grad engineer.", "Build services", "Ship & learn",
                                        "We sponsor visas for the right person."])
         for other in ("Acme Robotics", "Apply", "Powered by", "<"):
@@ -246,6 +246,48 @@ class BreezyBodyTests(unittest.TestCase):
                           "</div>", "<p>After</p>", "</body>", "</html>"])
         self.assertEqual(lines(self.body(text_response(page.replace("\n", "\r\n")))[0]), ["Line one", "Line two"])
         self.assertEqual(lines(self.body(text_response(page))[0]), ["Line one", "Line two"])
+
+    def test_a_redirect_to_the_marketing_site_raises(self):
+        for location in ("https://breezy.hr/", "https://evil.example.com/p/1", "http://acme.breezy.hr/p/1",
+                         "https://other.breezy.hr/p/1", "https://acme.breezy.hr.evil.com/p/1",
+                         "https://acme.breezy.hr@evil.com/p/1", "//evil.example.com/p/1"):
+            client = FollowClient({JOB_URL: Response(302, "", b"", {"location": location})})
+            with self.assertRaises(ValueError, msg=location):
+                BreezyAdapter(client).body("acme", job_at())
+            self.assertEqual(client.requests, [JOB_URL], location)
+            self.assertEqual(client.follow, [False])
+
+    def test_a_relative_same_host_redirect_is_followed_and_returns_the_text(self):
+        moved = "https://acme.breezy.hr/p/a1b2c3d4e5f6"
+        client = FollowClient({
+            moved: Response(301, "", b"", {"location": "/p/a1b2c3d4e5f6-software-engineer-new-grad"}),
+            JOB_URL: text_response(PAGE)})
+        text = BreezyAdapter(client).body("acme", job_at(moved))
+        self.assertEqual(client.requests, [moved, JOB_URL])
+        self.assertEqual(client.follow, [False, False])
+        self.assertIn("We are hiring a new grad engineer.", text)
+
+    def test_at_most_three_redirect_hops_are_followed(self):
+        hops = [f"https://acme.breezy.hr/p/h{n}" for n in range(6)]
+        routes = {hops[n]: Response(302, "", b"", {"location": hops[n + 1]}) for n in range(5)}
+        routes[hops[5]] = text_response(PAGE)
+        client = FollowClient(routes)
+        with self.assertRaises(ValueError):
+            BreezyAdapter(client).body("acme", job_at(hops[0]))
+        self.assertEqual(client.requests, hops[:4])
+        three = {hops[n]: Response(302, "", b"", {"location": hops[n + 1]}) for n in range(3)}
+        three[hops[3]] = text_response(PAGE)
+        client = FollowClient(three)
+        self.assertIn("new grad", BreezyAdapter(client).body("acme", job_at(hops[0])))
+
+    def test_a_redirect_with_no_location_or_a_loop_raises(self):
+        client = FollowClient({JOB_URL: status_response(302)})
+        with self.assertRaises(ValueError):
+            BreezyAdapter(client).body("acme", job_at())
+        client = FollowClient({JOB_URL: Response(302, "", b"", {"location": JOB_URL})})
+        with self.assertRaises(ValueError):
+            BreezyAdapter(client).body("acme", job_at())
+        self.assertLessEqual(len(client.requests), 4)
 
     def test_a_url_off_the_tenant_host_makes_no_request(self):
         for url in ("https://evil.example.com/p/1", "http://acme.breezy.hr/p/1", "https://acme.breezy.hr.evil.com/p",

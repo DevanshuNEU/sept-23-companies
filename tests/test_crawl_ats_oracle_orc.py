@@ -139,6 +139,19 @@ class OracleListTests(unittest.TestCase):
         self.assertEqual((r.result, r.jobs), ("error", ()))
         self.assertEqual(client.requests, [U0])
 
+    def test_the_caps_are_pinned_at_ten_thousand_rows_over_fifty_pages(self):
+        def big(total):
+            routes = {}
+            for n in range(50):
+                ids = [str(n * 200 + k) for k in range(200)]
+                routes[page_url(n * 200)] = json_response(envelope(total, [row(i) for i in ids]))
+            return routes
+
+        r, client = read(big(10_000))
+        self.assertEqual((r.result, len(r.jobs), len(client.requests)), ("ok", 10_000, 50))
+        r, client = read(big(10_001))
+        self.assertEqual((r.result, r.jobs, len(client.requests)), ("error", (), 1))
+
     def test_the_page_loop_is_bounded(self):
         total = 2_000
         counter = iter(range(10 ** 6))

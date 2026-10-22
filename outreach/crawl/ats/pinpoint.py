@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import html
 import re
+import urllib.parse
 
-from outreach.crawl.ats._common import fetch_list, finish_list, json_body, read_error, safe_token
+from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token
 from outreach.crawl.base import JobRef, ReadResult, Validators
 from outreach.crawl.text import html_to_text
 from outreach.net import HttpClient
@@ -21,6 +22,7 @@ __all__ = ["PinpointAdapter"]
 
 _LIST = "https://{token}.pinpointhq.com/postings.json"
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
+_POSTING_URL = "https://{token}.pinpointhq.com/en/postings/{id}"
 _WEB_URL = re.compile(r"https?://[^\s]+")
 
 
@@ -47,7 +49,7 @@ def _body(description) -> str | None:
     return html_to_text(html.unescape(description)) or None
 
 
-def _parse(item: object) -> JobRef | None:
+def _parse(token: str, item: object) -> JobRef | None:
     """One posting, or None when it lacks an id or a title."""
     if not isinstance(item, dict):
         return None
@@ -55,8 +57,10 @@ def _parse(item: object) -> JobRef | None:
     if not native_id or not title:
         return None
     url = _text(item.get("url"))
-    return JobRef(native_id=native_id, title=title, url=url if _WEB_URL.fullmatch(url) else "",
-                  location=_location(item.get("location")), country=None, posted_on=None,
+    if not _WEB_URL.fullmatch(url):
+        url = _POSTING_URL.format(token=token, id=urllib.parse.quote(native_id, safe=""))
+    return JobRef(native_id=native_id, title=title, url=url, location=_location(item.get("location")),
+                  country=None, posted_on=d10(item.get("first_published_at")),
                   body=_body(item.get("description")))
 
 
@@ -80,7 +84,7 @@ class PinpointAdapter:
             return read_error("the 200 answer is not an object with a data list", status=resp.status)
         jobs: list[JobRef] = []
         for item in postings:
-            job = _parse(item)
+            job = _parse(token, item)
             if job is None:
                 return read_error("a posting has no id or no title", status=resp.status)
             jobs.append(job)

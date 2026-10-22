@@ -58,7 +58,7 @@ class PinpointTests(unittest.TestCase):
         self.assertEqual(r.result, "ok")
         self.assertEqual(
             [(j.native_id, j.title, j.url, j.location, j.country, j.posted_on) for j in r.jobs],
-            [(IDS[0], "Software Engineer, New Grad", BASE + "1", "San Francisco, CA", None, None),
+            [(IDS[0], "Software Engineer, New Grad", BASE + "1", "San Francisco, CA", None, "2026-09-21"),
              (IDS[1], "Account Executive", BASE + "2", "London, England", None, None),
              (IDS[2], "Data Engineer", BASE + "3", "", None, None)])
         self.assertEqual(r.jobs[0].body, "We are hiring a new grad engineer.\nBuild services\nShip & learn\n"
@@ -139,13 +139,32 @@ class PinpointTests(unittest.TestCase):
             r, _ = read({URL: json_response({"data": payload})})
             self.assertEqual(r.jobs[0].location, expected, value)
 
+    def test_first_published_at_is_a_real_date_or_none(self):
+        for value, expected in (("2026-09-21T10:00:00.000Z", "2026-09-21"), ("2026-09-21", "2026-09-21"),
+                                ("2026-02-30", None), ("30+ days ago", None), ("", None), (None, None), (7, None)):
+            payload = data()[:1]
+            payload[0]["first_published_at"] = value
+            r, _ = read({URL: json_response({"data": payload})})
+            self.assertEqual(r.jobs[0].posted_on, expected, value)
+        payload = data()[:1]
+        del payload[0]["first_published_at"]
+        r, _ = read({URL: json_response({"data": payload})})
+        self.assertIsNone(r.jobs[0].posted_on)
+
     def test_the_posting_url_is_kept_only_as_a_web_address(self):
-        for value, expected in ((BASE + "1", BASE + "1"), ("javascript:alert(1)", ""), ("", ""), (None, ""),
-                                (7, "")):
+        fallback = "https://acme.pinpointhq.com/en/postings/2410001"
+        for value, expected in ((BASE + "1", BASE + "1"), ("javascript:alert(1)", fallback), ("", fallback),
+                                (None, fallback), (7, fallback)):
             payload = data()[:1]
             payload[0]["url"] = value
             r, _ = read({URL: json_response({"data": payload})})
             self.assertEqual(r.jobs[0].url, expected, value)
+        payload = data()[:1]
+        del payload[0]["url"]
+        r, _ = read({URL: json_response({"data": payload})})
+        self.assertEqual(r.jobs[0].url, fallback)
+        r, _ = read({URL: json_response({"data": [{"id": "a b/../c", "title": "E"}]})})
+        self.assertEqual(r.jobs[0].url, "https://acme.pinpointhq.com/en/postings/a%20b%2F..%2Fc")
 
     def test_description_forms(self):
         cases = [("&lt;p&gt;Plain &amp;amp; simple&lt;/p&gt;", "Plain & simple"), ("<p>Already markup</p>", "Already markup"),

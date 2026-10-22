@@ -17,6 +17,8 @@ The counts must be exact and explainable, so every rule is a plain filter:
 A whole run is read before anything is returned, so a damaged file raises (a TabularError from the reader) and
 never yields a partial or empty answer. One fiscal year is held in memory at a time.
 """
+from __future__ import annotations
+
 import dataclasses
 import datetime
 import hashlib
@@ -27,13 +29,16 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Sequence
+from typing import TYPE_CHECKING, NamedTuple, Sequence
 
 from outreach.rules.facts import EvidenceDraft
 from outreach.sources.base import Candidate
 from outreach.sources.capabilities import SharedKey
 from outreach.sources.keys import classify_domain, normalize_fein, registrable_domain
 from outreach.sources.tabular import EmptyTable, read_rows
+
+if TYPE_CHECKING:
+    from outreach.sources.lca_rules import LcaConfig
 
 COLUMNS = [
     "CASE_NUMBER", "CASE_STATUS", "DECISION_DATE", "VISA_CLASS", "SOC_CODE", "PW_WAGE_LEVEL", "NEW_EMPLOYMENT",
@@ -421,7 +426,7 @@ def _config_version(cfg) -> str:
 
 
 class _Loaded(NamedTuple):
-    employers: "Employers"
+    employers: Employers
     candidates: tuple[Candidate, ...]
     shared: tuple[SharedKey, ...]
     tiers: dict[str, tuple[int, str]]
@@ -437,7 +442,7 @@ class LcaSource:
     name = "lca"
     schedule = "quarterly"
 
-    def __init__(self, paths: Sequence[Path], config=None):
+    def __init__(self, paths: Sequence[Path], config: LcaConfig | None = None):
         from outreach.sources.lca_rules import load_lca_config  # lca_rules imports this module: no top-level cycle
         self.paths = [Path(p) for p in paths]
         self.config = config if config is not None else load_lca_config()
@@ -458,16 +463,13 @@ class LcaSource:
         excluded (staffing-excluded among those) and cap_exempt (tagged likely among those)."""
         return dict(self._load().summary)
 
-    def _employers(self) -> "Employers":
-        return self._load().employers
-
     def _load(self) -> _Loaded:
         if self._loaded is None:
             self._loaded = self._build()
         return self._loaded
 
     def _build(self) -> _Loaded:
-        from outreach.sources.lca_rules import classify, qualifies, source_fy
+        from outreach.sources.lca_rules import classify, source_fy
         cfg = self.config
         employers = load_employers(self.paths)
         if not employers:
@@ -499,8 +501,9 @@ class LcaSource:
         return _Loaded(employers, tuple(candidates), tuple(shared), tiers, summary)
 
 
-def _shared_keys(employers: "Employers") -> list[SharedKey]:
-    """Every FEIN and every company-kind domain used by more than one employer, large ones counted, sorted."""
+def _shared_keys(employers: Employers) -> list[SharedKey]:
+    """Every FEIN and every company-kind domain used by more than one employer, large ones counted, sorted. The reason
+    counts employer groups and lists up to 5 distinct legal names (a FEIN-split pair shares one name)."""
     users: dict[tuple[str, str], list[str]] = {}
     for emp in employers.values():
         fein = normalize_fein(emp.fein)
@@ -508,7 +511,7 @@ def _shared_keys(employers: "Employers") -> list[SharedKey]:
             users.setdefault(("fein", fein), []).append(emp.legal_name)
         if emp.domain and emp.domain_kind == "company":
             users.setdefault(("domain", emp.domain), []).append(emp.legal_name)
-    return [SharedKey(kind, value, f"{len(names)} employers: {', '.join(sorted(names)[:5])}")
+    return [SharedKey(kind, value, f"{len(names)} employers: {', '.join(sorted(set(names))[:5])}")
             for (kind, value), names in sorted(users.items()) if len(names) > 1]
 
 
@@ -521,8 +524,8 @@ def _candidate(emp: Employer, fy: int, verdict, shared_feins: set[str], shared_d
                                   quote=verdict.staffing_reason))
     if verdict.cap_exempt == "likely":
         evidence.append(EvidenceDraft("cap_exempt", "likely", "estimate", "lca", ref, quote=verdict.cap_reason))
-    hq = ", ".join(part for part in (emp.city.title(), emp.state) if part)
-    if hq:
+    if emp.state:  # "City, ST" or bare "ST"; a bare city is not an hq (the company's state could not be read)
+        hq = f"{emp.city.title()}, {emp.state}" if emp.city else emp.state
         evidence.append(EvidenceDraft("hq", hq, "estimate", "lca", ref))
     domain = emp.domain if emp.domain_kind == "company" else None
     if domain:

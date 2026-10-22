@@ -2,14 +2,17 @@
 import csv
 import dataclasses
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from outreach.sources.base import Candidate
 from outreach.sources.capabilities import SharedKey
+from outreach.sources import lca as lca_module
 from outreach.sources.lca import COLUMNS, LcaSource
-from outreach.sources.lca_rules import load_lca_config
+from outreach.sources.lca_rules import CONFIG_PATH, load_lca_config
 from outreach.sources.tabular import EmptyTable, MissingColumns
 from tests.contracts import check_source
 from tests.test_lca_aggregate import BASE
@@ -127,11 +130,13 @@ class FixtureTest(unittest.TestCase):
 
     def test_load_happens_once(self):
         source = LcaSource(FILES)
-        source.shared_keys()
-        source.work_tier("lca:nimbus robotics")
-        first = list(source.discover())
-        self.assertIs(source._employers(), source._employers())
-        self.assertEqual(first, list(source.discover(since="2020-01-01")))  # since is ignored
+        with mock.patch.object(lca_module, "load_employers", wraps=lca_module.load_employers) as loader:
+            source.shared_keys()
+            source.work_tier("lca:nimbus robotics")
+            first = list(source.discover())
+            source.summary()
+            self.assertEqual(first, list(source.discover(since="2020-01-01")))  # since is ignored
+        self.assertEqual(loader.call_count, 1)
 
 
 class VersionTest(unittest.TestCase):
@@ -142,8 +147,17 @@ class VersionTest(unittest.TestCase):
         self.assertNotEqual(a.version, b.version)
         self.assertEqual(a.version, c.version)
 
+    def test_version_changes_with_a_regex_but_not_with_a_comment(self):
+        a = LcaSource(FILES)
+        regex = dataclasses.replace(CFG, staffing_name_regex=re.compile("consult|extra", re.I))
+        self.assertNotEqual(a.version, LcaSource(FILES, regex).version)
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "lca.toml"
+            copy.write_text("# a new comment\n" + CONFIG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+            self.assertEqual(a.version, LcaSource(FILES, load_lca_config(copy)).version)
 
-class ErrorTest(unittest.TestCase):
+
+class TempFiles(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -160,6 +174,8 @@ class ErrorTest(unittest.TestCase):
                 w.writerow([row.get(h, "") for h in header])
         return path
 
+
+class ErrorTest(TempFiles):
     def test_bad_file_raises_on_first_item(self):
         header = [h for h in COLUMNS if h != "SOC_CODE"]
         source = LcaSource([self.write([{}], header=header)])
@@ -197,6 +213,85 @@ class ErrorTest(unittest.TestCase):
     def test_no_files_is_an_error(self):
         with self.assertRaises(ValueError):
             list(LcaSource([]).discover())
+
+
+def rows_for(name, n, **over):
+    """n rows of one employer (a junior software filing each), numbered by name."""
+    return [{"CASE_NUMBER": f"{name}-{i}", "EMPLOYER_NAME": name, **over} for i in range(n)]
+
+
+class MultiYearTest(TempFiles):
+    """Files for FY2024 and FY2025: the qualifying year is the latest one in which the employer is small."""
+    FY24 = {"DECISION_DATE": "45352"}  # 2024-03-01, inside FY2024
+
+    def setUp(self):
+        super().setUp()
+        bigco = {"EMPLOYER_POC_EMAIL": "hr@bigco.io", "NAICS_CODE": "541715"}
+        smallco = {"EMPLOYER_POC_EMAIL": "hr@smallco.io", "NAICS_CODE": "541715"}
+        fy24 = (rows_for("Bigco Inc", 3, **bigco, **self.FY24)
+                + rows_for("Smallco Inc", 2, **smallco, **self.FY24, **{"H-1B_DEPENDENT": "Yes"}))
+        fy25 = (rows_for("Bigco Inc", 30, **bigco, **{"H-1B_DEPENDENT": "Yes"})
+                + rows_for("Smallco Inc", 2, **smallco))
+        self.source = LcaSource([self.write(fy24, "LCA_Disclosure_Data_FY2024_Q1.csv"),
+                                 self.write(fy25, "LCA_Disclosure_Data_FY2025_Q1.csv")])
+        self.cands = by_ref(self.source)
+
+    def test_large_now_but_small_before_is_classified_on_the_small_year(self):
+        c = self.cands["lca:bigco"]
+        lca = facts(c)["lca"]
+        self.assertEqual([e.source_ref for e in lca], ["lca:FY24", "lca:FY25"])
+        self.assertEqual([json.loads(e.value)["fy"] for e in lca], [2024, 2025])
+        (risk,) = facts(c)["staffing_risk"]
+        self.assertEqual((risk.source_ref, risk.value), ("lca:FY24", "low"))  # FY25 says H-1B dependent
+        self.assertEqual(self.source.work_tier("lca:bigco")[0], 1)
+
+    def test_small_in_both_years_is_classified_on_the_latest(self):
+        c = self.cands["lca:smallco"]
+        self.assertEqual([e.source_ref for e in facts(c)["lca"]], ["lca:FY24", "lca:FY25"])
+        (risk,) = facts(c)["staffing_risk"]
+        self.assertEqual((risk.source_ref, risk.value), ("lca:FY25", "low"))  # FY24 says H-1B dependent
+        self.assertEqual(self.source.work_tier("lca:smallco")[0], 1)
+
+
+class SummaryTest(TempFiles):
+    def test_a_row_dated_outside_its_fiscal_year_is_counted(self):
+        rows = [{"CASE_NUMBER": "in"}, {"CASE_NUMBER": "out", "DECISION_DATE": "45352"}]  # 2024-03-01 in a FY2025 file
+        source = LcaSource([self.write(rows)])
+        self.assertEqual(source.summary()["fy_mismatch"], 1)
+
+
+class SharedKeyTest(TempFiles):
+    def test_the_reason_lists_five_sorted_names_and_counts_all(self):
+        names = ["Golf Inc", "Echo Inc", "Alpha Inc", "Foxtrot Inc", "Bravo Inc", "Delta Inc", "Charlie Inc"]
+        rows = [r for n in names for r in rows_for(n, 1, EMPLOYER_FEIN="99-9999999", EMPLOYER_POC_EMAIL="x@one.io")]
+        shared = {k.kind: k for k in LcaSource([self.write(rows)]).shared_keys()}
+        expected = "7 employers: Alpha Inc, Bravo Inc, Charlie Inc, Delta Inc, Echo Inc"
+        self.assertEqual(shared["fein"].reason, expected)
+        self.assertEqual(shared["domain"].reason, expected)
+
+    def test_a_fein_split_pair_keeps_its_domain_shared_and_names_it_once(self):
+        rows = (rows_for("Acme Inc", 2, EMPLOYER_FEIN="11-1111111", EMPLOYER_POC_EMAIL="x@acme.io")
+                + rows_for("Acme Inc", 1, EMPLOYER_FEIN="22-2222222", EMPLOYER_POC_EMAIL="x@acme.io"))
+        source = LcaSource([self.write(rows)])
+        (shared,) = source.shared_keys()
+        self.assertEqual((shared.kind, shared.value, shared.reason), ("domain", "acme.io", "2 employers: Acme Inc"))
+        cands = by_ref(source)
+        self.assertEqual(sorted(cands), ["lca:acme#111111111", "lca:acme#222222222"])
+        for ref, fein in (("lca:acme#111111111", "111111111"), ("lca:acme#222222222", "222222222")):
+            c = cands[ref]
+            self.assertEqual(c.keys["fein"], fein)  # each FEIN is its own and not shared
+            self.assertEqual(c.domain, "acme.io")
+            self.assertEqual(facts(c)["domain"][0].confidence, "guess")
+
+
+class HqTest(TempFiles):
+    def test_hq_needs_a_state(self):
+        rows = (rows_for("Withcity Inc", 1, EMPLOYER_CITY="reno", EMPLOYER_STATE="NV")
+                + rows_for("Stateonly Inc", 1, EMPLOYER_CITY="", EMPLOYER_STATE="OR")
+                + rows_for("Cityonly Inc", 1, EMPLOYER_CITY="Boise", EMPLOYER_STATE=""))
+        cands = by_ref(LcaSource([self.write(rows)]))
+        hq = {ref: [e.value for e in facts(c).get("hq", [])] for ref, c in cands.items()}
+        self.assertEqual(hq, {"lca:withcity": ["Reno, NV"], "lca:stateonly": ["OR"], "lca:cityonly": []})
 
 
 if __name__ == "__main__":

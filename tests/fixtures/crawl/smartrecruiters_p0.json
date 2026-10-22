@@ -1,0 +1,32 @@
+{
+  "offset": 0,
+  "limit": 100,
+  "totalFound": 3,
+  "content": [
+    {
+      "id": "743999000111222",
+      "uuid": "6c1c1b0e-3f0a-4a7e-9f0e-2b8f6a1d0001",
+      "name": "Software Engineer, New Grad",
+      "refNumber": "REF-1001",
+      "company": {"identifier": "AcmeRobotics", "name": "Acme Robotics"},
+      "releasedDate": "2026-09-30T14:12:11.000Z",
+      "location": {"city": "Boston", "region": "MA", "country": "us", "remote": false,
+                   "fullLocation": "Boston, MA, United States"},
+      "department": {"label": "Engineering"},
+      "typeOfEmployment": {"id": "permanent", "label": "Full-time"},
+      "ref": "https://api.smartrecruiters.com/v1/companies/acme/postings/743999000111222",
+      "language": {"code": "en", "label": "English"}
+    },
+    {
+      "id": "743999000111333",
+      "uuid": "6c1c1b0e-3f0a-4a7e-9f0e-2b8f6a1d0002",
+      "name": "Account Executive",
+      "refNumber": "REF-1002",
+      "company": {"identifier": "AcmeRobotics", "name": "Acme Robotics"},
+      "releasedDate": "2026-10-05T09:00:00.000Z",
+      "location": {"country": "gb", "remote": true},
+      "department": {"label": "Sales"},
+      "ref": "https://api.smartrecruiters.com/v1/companies/acme/postings/743999000111333"
+    }
+  ]
+}

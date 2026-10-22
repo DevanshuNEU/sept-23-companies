@@ -107,6 +107,20 @@ class AddByHandTest(unittest.TestCase):
         self.add("Acme Robotics", "found on a post", domain="acme.com", state="MA", actor="claude")
         self.assertEqual(table_marks(self.conn), before)
 
+    def test_claude_state_never_drives_a_name_state_match(self):
+        first = self.add("Acme Corp", domain="acme-tx.com", state="TX")
+        got = self.add("Acme", "claude saw it in Texas", state="TX", actor="claude")
+        self.assertNotEqual(got.company_id, first.company_id)
+        self.assertEqual((got.created, got.basis, got.items_raised), (True, "created", 1))
+        (item,) = self.conn.execute("SELECT * FROM review_item").fetchall()
+        self.assertEqual(item["kind"], "merge_candidate")
+        # the state is still stored (as a guess) and still part of the record key
+        rows = {(e["fact"], e["value"], e["confidence"]) for e in self.evidence(got.company_id)}
+        self.assertEqual(rows, {("hq", "TX", "guess")})
+        ref = self.conn.execute("SELECT source_ref FROM company_source WHERE company_id = ?",
+                                (got.company_id,)).fetchone()[0]
+        self.assertEqual(ref, "hand:acme@TX")
+
     def test_claude_guess_never_overrides_a_locked_fact(self):
         first = self.add("Acme Robotics", domain="acme.com", state="MA")
         self.add("Acme Robotics", "claude saw it too", domain="acme.com", state="CA", actor="claude")

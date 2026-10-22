@@ -14,6 +14,7 @@ merge. Devanshu merges the two with one click if they are the same.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import hashlib
 import sqlite3
 from collections.abc import Iterator, Sequence
@@ -161,7 +162,8 @@ def add_by_hand(conn: sqlite3.Connection, *, name: str, reason: str, domain: str
     value), and sets the work tier to 1 (`by hand`) and promotes it, so a later source run cannot lower it.
 
     Claude's add writes them through `record_evidence` as `guess`, unlocked, source kind `other`, and promotes
-    nothing: a locked fact is only ever Devanshu's own.
+    nothing: a locked fact is only ever Devanshu's own. Its state is not given to identity for matching (the
+    record key still has it), so the same name in the same state is a weak match, never `name_state`.
 
     A company that is `removed` (the one the candidate resolves to) is returned with `status="removed"` and nothing
     is written or promoted.
@@ -171,6 +173,8 @@ def add_by_hand(conn: sqlite3.Connection, *, name: str, reason: str, domain: str
     entry = HandEntry(name=name, reason=reason, domain=domain, state=state, ats=ats)
     (cand,) = ByHandSource([entry]).discover()  # Candidate validates the domain
     bare = _bare(cand.domain)
+    if actor == "claude":
+        cand = dataclasses.replace(cand, state=None)  # a guess never drives a name and state merge; the ref keeps it
     reason_text = entry.reason.strip()
     with _atomic(conn):
         match = find_company(conn, cand, source_name=SOURCE_NAME)

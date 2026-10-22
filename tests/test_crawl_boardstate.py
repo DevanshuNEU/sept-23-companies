@@ -202,6 +202,28 @@ class BoardStateTests(unittest.TestCase):
         self.read(EMPTY)
         self.assertEqual([i["state"] for i in self.items()], ["resolved", "open"])
 
+    def test_the_empty_read_that_closes_updates_the_open_board_empty_reason(self):
+        self.read(OK)
+        self.read(EMPTY)
+        first, = self.items("board_empty")
+        self.assertIn("close if the next read is empty", first["reason"])
+        self.read(ERROR)  # an error inside the run changes nothing
+        self.assertIn("close if the next read is empty", self.items("board_empty")[0]["reason"])
+        self.read(EMPTY)
+        item, = self.items("board_empty")
+        self.assertEqual(item["state"], "open")
+        self.assertIn("its postings closed", item["reason"])
+        self.assertNotIn("close if the next read is empty", item["reason"])
+        self.assertEqual(item["revision"], first["revision"] + 1)
+
+    def test_a_resolved_board_empty_keeps_its_reason_on_the_closing_read(self):
+        self.read(EMPTY)
+        self.conn.execute("UPDATE review_item SET state = 'resolved', resolution = 'marked_ok', resolved_at = ? "
+                          "WHERE board_id = ?", (at(1), self.board))
+        before = self.items("board_empty")[0]["reason"]
+        self.read(EMPTY)
+        self.assertEqual(self.items("board_empty")[0]["reason"], before)
+
     def test_the_board_empty_reason_says_whether_postings_closed(self):
         from outreach.crawl.boardstate import board_empty_reason
         board = load_board(self.conn, self.board)

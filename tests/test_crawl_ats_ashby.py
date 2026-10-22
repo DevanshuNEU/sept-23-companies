@@ -103,6 +103,15 @@ class AshbyTests(unittest.TestCase):
             r, _ = read({URL: board(jobs)})
             self.assertIsNone(r.jobs[0].country, address)
 
+    def test_an_unreadable_published_date_falls_back_to_updated_at(self):
+        jobs = fixture()["jobs"][:1]
+        for published in ("not a date", "2026-02-30", 5):
+            with self.subTest(published=published):
+                jobs[0]["publishedAt"] = published
+                jobs[0]["updatedAt"] = "2026-10-05T01:02:03.000+00:00"
+                r, _ = read({URL: board(jobs)})
+                self.assertEqual(r.jobs[0].posted_on, "2026-10-05")
+
     def test_empty_board_is_empty(self):
         r, _ = read({URL: ok(EMPTY)})
         self.assertEqual((r.result, r.jobs, r.validators), ("empty", (), Validators()))

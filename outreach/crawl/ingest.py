@@ -40,12 +40,15 @@ from outreach.rules.config import default_config
 from outreach.rules.title import classify_title
 from outreach.store import atomic, body_sha256, describe_error, name_key
 
-__all__ = ["ReadOutcome", "read_board", "list_board", "DOUBTFUL_JOBS"]
+__all__ = ["ReadOutcome", "read_board", "list_board", "full_read_due", "DOUBTFUL_JOBS", "FULL_READ_AFTER_S"]
 
 # Ruling 8: every LCA company files 25 or fewer, so a board listing more jobs than this is likely another company's.
 DOUBTFUL_JOBS = 300
 # Boards found by a name match or a slug guess: either can belong to another company with the same name.
 GUESSED_BOARDS = ("stapply_name", "slug_probe")
+# The weekly full read: once no posting of a board has been listed for this long, the list goes out with no
+# validators, so an ETag or id-fingerprint `unchanged` cannot hide a retitle under the same ids or a later page.
+FULL_READ_AFTER_S = 7 * 86400
 # Alias sources that hold a raw key, not a name key (identity.py's _RAW_SOURCES).
 _RAW_ALIAS_SOURCES = ("fein", "ats", "linkedin")
 
@@ -80,7 +83,7 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     """
     if conn.in_transaction:
         raise ValueError("read_board sends requests, so it must start with no transaction open")
-    result = list_board(adapter, board)
+    result = list_board(adapter, board, full=full_read_due(conn, board, now))
     title_cfg = rules_cfg if rules_cfg is not None else default_config()
     new = changed = reopened = closed = decided = bodies = 0
     any_change = False
@@ -148,12 +151,21 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
                        closed=closed, decided=decided, bodies=bodies, interval_s=interval_s, tripped=tripped)
 
 
-def list_board(adapter: Adapter, board: BoardRow) -> ReadResult:
+def full_read_due(conn: sqlite3.Connection, board: BoardRow, now: str) -> bool:
+    """True when the board's newest `last_seen_at` is over `FULL_READ_AFTER_S` old (only an `ok` read that lists a
+    posting touches it, so a week of `unchanged` reads gets here). A board with no postings has nothing to refresh."""
+    newest = conn.execute("SELECT max(last_seen_at) FROM posting WHERE board_id = ?", (board.board_id,)).fetchone()[0]
+    return newest is not None and newest < add_seconds(now, -FULL_READ_AFTER_S)
+
+
+def list_board(adapter: Adapter, board: BoardRow, *, full: bool = False) -> ReadResult:
     """The adapter's answer; any failure of the adapter itself is an `error` read (one board's bug never stops a
     tick), except a tripped host and a ruleset change, which say nothing about the board. The tick calls this itself
-    first, so it can hold an error read back until it knows whether the host was down (Task 12)."""
+    first, so it can hold an error read back until it knows whether the host was down (Task 12). `full` (the weekly
+    full read, `full_read_due`) sends no validators, so the answer cannot be `unchanged`."""
+    validators = Validators() if full else Validators(board.etag, board.ids_fingerprint)
     try:
-        return adapter.list(board.token, Validators(board.etag, board.ids_fingerprint))
+        return adapter.list(board.token, validators)
     except (HostTripped, RulesetNotCurrent):
         raise
     except Exception as e:

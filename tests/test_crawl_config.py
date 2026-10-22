@@ -67,6 +67,9 @@ class CrawlConfigTests(unittest.TestCase):
     def test_shipped_stale_after_months_is_twelve(self):
         self.assertEqual(load_crawl_config().stale_after_months, 12)
 
+    def test_shipped_outage_grace_is_one_day(self):
+        self.assertEqual(load_crawl_config().outage_grace_s, 86400)
+
     def test_shipped_body_refetch_days_is_thirty(self):
         self.assertEqual(load_crawl_config().body_refetch_days, 30)
 
@@ -80,7 +83,7 @@ class CrawlConfigTests(unittest.TestCase):
     def test_counts_that_must_be_positive_refuse_zero(self):
         for key in ("defer_s", "max_bytes", "breaker_failures", "decide_batch", "detail_per_read", "boards_per_tick",
                     "tick_budget_s", "top_companies", "watch_interval_s", "watch_per_tick", "watch_min_text_chars",
-                    "age_divisor", "floor_s", "body_refetch_days"):
+                    "age_divisor", "floor_s", "body_refetch_days", "outage_grace_s"):
             for bad in (0, -1):
                 with self.assertRaisesRegex(ValueError, f"{key} must be positive"):
                     _load_with(**{key: bad})

@@ -1,13 +1,16 @@
 """`python -m outreach.crawl <command>`: the board crawler from launchd and by hand (#21, Task 13).
 
-- `tick`: one 30-minute tick (the due boards, the daily slug probe, then the due watched pages) under the crawl lock. Another tick holding
+- `tick`: one 30-minute tick under the crawl lock: the due boards, then the daily slug probe (the first tick of each
+  New York day, up to 50 companies with no board), then the due watched pages. The one log line carries all three,
+  as does the tick's `read_boards` job summary (`probe`, `probe_error`, `watch`, `watch_error`). Another tick holding
   the lock is not an error: it prints so and exits 0.
 - `read --company ID [ID ...]`: read these companies' boards now (floor kept, an erroring board's backoff kept).
 - `probe ATS TOKEN`: one list request through the polite client, no store access. Prints the result, the job count,
   the ETag and the first five titles: how a token or an adapter's shape is checked on first use.
-- `probe-slugs [--limit N]`: for up to N companies with no board (default 50, the daily tick step's size), try the slugs their names suggest on
-  Greenhouse, Lever and Ashby and add each `ok` hit as a `slug_probe` board (at most 12 requests a company). Takes
-  the crawl lock, so it never overlaps a tick.
+- `probe-slugs [--limit N]`: for up to N companies with no board (default 50, the daily tick step's size), try the
+  slugs their names suggest on Greenhouse, Lever and Ashby and add each `ok` hit as a `slug_probe` board (at most 12
+  requests a company). Takes the crawl lock, so it never overlaps a tick. The tick runs the same pass once a day, so
+  this is for a first run or a larger batch by hand.
 
 Every command calls `live_checkout.require_live` before it opens anything: they send real requests (and `tick` and
 `read` write the live store), so they run only from the live checkout. Exit code: 0 when the run was `ok`, 1 when it
@@ -35,7 +38,7 @@ _TITLES_SHOWN = 5
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m outreach.crawl", description="The board crawler (#21).")
     sub = p.add_subparsers(dest="command", required=True)
-    sub.add_parser("tick", help="read the due boards, then the due watched careers pages")
+    sub.add_parser("tick", help="read the due boards, then the daily slug probe and the due watched careers pages")
     read = sub.add_parser("read", help="read these companies' boards now")
     read.add_argument("--company", type=int, nargs="+", required=True, metavar="ID")
     probe = sub.add_parser("probe", help="list one board without touching the store")
@@ -142,8 +145,9 @@ def _probe(ats: str, token: str, client: HttpClient | None) -> int:
         _say(f"no adapter for {ats!r}; the crawler reads: {', '.join(sorted(supported_ats()))}")
         return 1
     result = adapter.list(token, Validators())
+    name = f", board name {result.board_name!r}" if result.board_name else ""
     print(f"{ats} {token}: {result.result}, {len(result.jobs)} jobs, http {result.http_status or '-'}, "
-          f"etag {result.validators.etag or '-'}" + (f", board name {result.board_name!r}" if result.board_name else ""))
+          f"etag {result.validators.etag or '-'}{name}")
     if result.error:
         print(f"  error: {result.error}")
     for job in result.jobs[:_TITLES_SHOWN]:

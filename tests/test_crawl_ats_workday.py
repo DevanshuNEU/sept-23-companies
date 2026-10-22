@@ -386,8 +386,8 @@ class WorkdayTests(unittest.TestCase):
         self.assertEqual(client.requests, [url])
         self.assertEqual(
             text,
-            "Start date: 2026-11-02\nLocations: Boston, MA; New York, NY\nBuild services & ship them.\nWrite code\nReview code\n"
-            "We sponsor visas for the right person.")
+            "Start date: 2026-11-02\nLocations: Boston, MA; New York, NY\nBuild services & ship them.\n"
+            "Write code\nReview code\nWe sponsor visas for the right person.")
         self.assertNotIn("<", text)
 
     def test_body_location_line_keeps_the_us_signal_of_a_multi_location_row(self):

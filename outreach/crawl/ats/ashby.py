@@ -39,7 +39,7 @@ def _parse(job: dict) -> JobRef | None:
     if not native_id or not title:
         return None
     return JobRef(native_id=native_id, title=title, url=_text(job.get("jobUrl")), location=_text(job.get("location")),
-                  country=_country(job), posted_on=d10(job.get("publishedAt") or job.get("updatedAt")),
+                  country=_country(job), posted_on=d10(job.get("publishedAt")) or d10(job.get("updatedAt")),
                   body=_body(job))
 
 

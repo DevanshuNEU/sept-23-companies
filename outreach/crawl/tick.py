@@ -13,11 +13,17 @@ Every request goes through one `PoliteClient`. An outage is not a finding about 
   row that the polite breaker does not see as host failures (a challenge page or another wrong-shape 200, a blanket
   401 or 400; a 404 or 410 is about the board and is not counted), from boards whose last read was good only. When
   that count reaches `breaker_failures` the tick trips the bucket itself. At the end, a held error from a bucket that
-  tripped either way becomes a deferral when that board's last read was good (`ok`, `unchanged` or `empty`): a board
-  that read fine and now fails with its whole host is caught in the outage. A never-read or already-erroring board's
-  error is written as the error read it is, so a handful of broken boards that sort together can never trip their
-  bucket tick after tick, defer each other forever and starve the healthy boards behind them; they back off 6, 12,
-  24 hours, spread out, and reach their own items (or the host's one item, hostblock.py).
+  tripped either way becomes a deferral when that board is shielded: its last read was good (`ok`, `unchanged` or
+  `empty`) and is younger than `outage_grace_s`. A board that read fine and now fails with its whole host is caught
+  in the outage. A never-read or already-erroring board's error is written as the error read it is, so a handful of
+  broken boards that sort together can never trip their bucket tick after tick, defer each other forever and starve
+  the healthy boards behind them; they back off 6, 12, 24 hours, spread out, and reach their own items (or the
+  host's one item, hostblock.py). The grace does the same for a host that blocks for good: after a day its boards'
+  errors are written, so the host reaches Needs you instead of being deferred forever.
+- a well-formed `empty` read from a shielded board that has open postings is held too. When `MASS_EMPTY_BOARDS` or
+  more of them come from one bucket in one tick, that is an outage (an API answering an empty list for everyone), not
+  that many boards emptied at once: they become deferrals, so nothing closes and no `board_empty` item is raised.
+  Fewer are written as the empty reads they are, and the two-empties rule applies.
 
 A board whose ingest raises (our bug, not the board's error) is recorded as `failed`, keeps its streaks and waits
 the backoff its next error would get; the job then ends `partial`. `PRAGMA wal_checkpoint(PASSIVE)` runs after
@@ -28,6 +34,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import importlib
+import json
 import os
 import sqlite3
 import time
@@ -43,7 +50,7 @@ from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
 from outreach.crawl.boardstate import BoardRow
 from outreach.crawl.cadence import add_seconds, due_boards, error_backoff_s, plan_company_ids
 from outreach.crawl.config import CrawlConfig, load_crawl_config
-from outreach.crawl.ingest import list_board, read_board
+from outreach.crawl.ingest import full_read_due, list_board, read_board
 from outreach.crawl.polite import HostTripped, PoliteClient, bucket_for
 from outreach.crawl.probe import PROBE_LIMIT, ProbeReport, probe_slugs
 from outreach.crawl.watch import WatchReport, watch_pages
@@ -62,14 +69,17 @@ PLAN_TZ = ZoneInfo("America/New_York")
 _BOARD_STATUSES = frozenset({404, 410})
 # A board whose last read was one of these can be caught in an outage; any other board's error is its own.
 _GOOD_LAST = frozenset({"ok", "unchanged", "empty"})
+# Empty reads of boards with open postings, from one bucket in one tick, that make a mass-empty outage.
+MASS_EMPTY_BOARDS = 5
 _MAX_ERROR_LINES = 20  # board failures named in job_run.error; the count is always complete
 
 
 @dataclass(frozen=True)
 class TickReport:
-    """What one tick did; everything but the watch fields is also the `read_boards` job summary. `read` counts the
-    boards whose read was recorded (ok, empty, error, unchanged); `deferred` the boards put off with no read
-    recorded; `tripped` the host buckets the breaker stopped. The plan's `queued` is gone (ruling 2)."""
+    """What one tick did, and the `read_boards` job summary (`tripped` a list, `probe` and `watch` objects or null).
+    `read` counts the boards whose read was recorded (ok, empty, error, unchanged); `deferred` the boards put off
+    with no read recorded; `tripped` the host buckets the breaker stopped or that read a mass empty. The plan's
+    `queued` is gone (ruling 2)."""
     run_id: int | None
     rebuilt: bool
     read: int = 0
@@ -206,6 +216,8 @@ class _Pass:
         self.seen: set[str] = set()
         self.error_run: dict[str, int] = {}  # error reads in a row per bucket that the breaker does not count
         self.held: list[_Held] = []
+        self.held_empty: list[_Held] = []
+        self.empties: dict[str, int] = {}  # held empty reads per bucket
         self.errors: list[str] = []
         self.failed_ids: list[int] = []
         self.stopped = False
@@ -220,7 +232,7 @@ class _Pass:
         if adapter is None:  # due_boards selects supported ATSs only
             return
         try:
-            result = list_board(adapter, board)
+            result = list_board(adapter, board, full=full_read_due(self.conn, board, now))
         except HostTripped as e:
             self._trip(e.bucket)
             self._push(board, add_seconds(now, self.cfg.defer_s))
@@ -238,19 +250,42 @@ class _Pass:
             return
         if bucket is not None:
             self.error_run[bucket] = 0
+        if result.result == "empty" and bucket is not None and self._shielded(board, now) and self._has_open(board):
+            self.held_empty.append(_Held(board, adapter, result, now, bucket))
+            self.empties[bucket] = self.empties.get(bucket, 0) + 1
+            return
         self._ingest(board, _Listed(adapter, result), now, bucket)
 
     def finish(self) -> None:
-        """The held error reads: a deferral when their bucket tripped and the board's last read was good, else the
-        error read they are."""
+        """The held reads. An error: a deferral when its bucket tripped and the board is shielded, else the error read
+        it is. An empty: a deferral when its bucket gave `MASS_EMPTY_BOARDS` or more, else the empty read it is."""
         self.down |= {b for b in self.seen if self.polite.tripped(b)}
         for h in self.held:
-            if h.bucket is not None and h.bucket in self.down and h.board.last_read in _GOOD_LAST:
-                self._push(h.board, add_seconds(h.now, self.cfg.defer_s))
-                self.counts["deferred"] += 1
+            if h.bucket is not None and h.bucket in self.down and self._shielded(h.board, h.now):
+                self._defer(h)
+            else:
+                self._ingest(h.board, _Listed(h.adapter, h.result), h.now, h.bucket)
+        for h in self.held_empty:
+            if self.empties[h.bucket] >= MASS_EMPTY_BOARDS:
+                self._trip(h.bucket)
+                self._defer(h)
             else:
                 self._ingest(h.board, _Listed(h.adapter, h.result), h.now, h.bucket)
         self.held.clear()
+        self.held_empty.clear()
+
+    def _defer(self, h: _Held) -> None:
+        self._push(h.board, add_seconds(h.now, self.cfg.defer_s))
+        self.counts["deferred"] += 1
+
+    def _shielded(self, board: BoardRow, now: str) -> bool:
+        """An outage may hold this board's read back: its last read was good and is younger than the grace."""
+        return (board.last_read in _GOOD_LAST and board.last_read_at is not None
+                and board.last_read_at > add_seconds(now, -self.cfg.outage_grace_s))
+
+    def _has_open(self, board: BoardRow) -> bool:
+        return self.conn.execute("SELECT 1 FROM posting WHERE board_id = ? AND closed_at IS NULL LIMIT 1",
+                                 (board.board_id,)).fetchone() is not None
 
     def _trip(self, bucket: str) -> None:
         self.down.add(bucket)
@@ -363,6 +398,18 @@ def _probe_step(conn: sqlite3.Connection, run: _Pass, cfg: CrawlConfig, now_fn, 
     return report, ""
 
 
+def _add_passes(conn: sqlite3.Connection, report: TickReport) -> None:
+    """Put the probe and watch passes into the tick's `read_boards` summary, so the health view reads one row: each
+    pass's counts (null when it did not run) and its error text."""
+    passes = {"probe": asdict(report.probe) if report.probe is not None else None, "probe_error": report.probe_error,
+              "watch": asdict(report.watch) if report.watch is not None else None, "watch_error": report.watch_error}
+    with atomic(conn, "tick_summary"):
+        row = conn.execute("SELECT summary FROM job_run WHERE run_id = ?", (report.run_id,)).fetchone()
+        summary = {**json.loads(row[0]), **passes}
+        conn.execute("UPDATE job_run SET summary = ? WHERE run_id = ?", (json.dumps(summary, sort_keys=True),
+                                                                          report.run_id))
+
+
 def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig | None = None, rules_cfg=None,
              combiner=None, now_fn: Callable[[], str] = utcnow, clock: Callable[[], float] = time.monotonic,
              sleep: Callable[[float], None] = time.sleep, limit: int | None = None) -> TickReport:
@@ -391,12 +438,13 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
         probe, probe_error = _probe_step(conn, run, cfg, now_fn, clock, started)
         report = replace(report, probe=probe, probe_error=probe_error)
         try:
-            watched = watch_pages(conn, run.client(), cfg=cfg, now_fn=now_fn)
+            report = replace(report, watch=watch_pages(conn, run.client(), cfg=cfg, now_fn=now_fn))
         except Exception as e:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            return replace(report, watch_error=describe_error(e))
-        return replace(report, watch=watched)
+            report = replace(report, watch_error=describe_error(e))
+        _add_passes(conn, report)
+        return report
     finally:
         _checkpoint(conn)
 

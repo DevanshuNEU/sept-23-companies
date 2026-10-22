@@ -409,6 +409,48 @@ class GreenhouseFlowTests(IngestTestCase):
         self.assertEqual(board["next_read_at"], add_seconds(at(1), out.interval_s))
         self.assertEqual(self.conn.execute("SELECT postings FROM board_read WHERE result = 'unchanged'").fetchone()[0], 3)
 
+    def test_a_week_without_a_listing_sends_no_validators(self):
+        # The weekly full read: once the newest last_seen_at is over 7 days old, the list goes out with no ETag, so a
+        # retitle under the same ids or a change past the first page is seen.
+        self.read(ok())
+        self.read(status_response(304), at(6))  # 6 days: the ETag still goes out
+        self.assertEqual(self.client.calls[0][2].get("If-None-Match"), '"A"')
+        out = self.read(ok(etag='"A"'), at(7.5))
+        self.assertNotIn("If-None-Match", self.client.calls[0][2])
+        self.assertEqual(out.result, "ok")
+        self.assertEqual(self.posting(SWE)["last_seen_at"], at(7.5))
+        self.read(status_response(304), at(8))  # listed again half a day ago: back to the ETag
+        self.assertEqual(self.client.calls[0][2].get("If-None-Match"), '"A"')
+
+    def test_a_week_without_a_listing_finds_a_retitle_under_the_same_ids(self):
+        jobs = [detail_job("w1", "Software Engineer", "2026-10-01"), detail_job("w2", "Data Engineer", "2026-10-01")]
+        retitled = [detail_job("w1", "Software Engineer, New Grad", "2026-10-01"), jobs[1]]
+
+        class Fingerprint(DetailAdapter):
+            """A fingerprint ATS: the same ids as last time read `unchanged`, whatever the titles say."""
+
+            def __init__(self, conn, listing):
+                super().__init__(conn, [])
+                self.listing, self.seen = listing, []
+
+            def list(self, token, validators):
+                self.seen.append(validators)
+                fp = ids_fingerprint(j.native_id for j in self.listing)
+                if validators.ids_fingerprint == fp:
+                    return ReadResult("unchanged", (), validators)
+                return detail_ok(self.listing)
+
+        self.read(None, adapter=Fingerprint(self.conn, jobs))
+        stored = self.board()["ids_fingerprint"]
+        quiet = Fingerprint(self.conn, retitled)
+        self.assertEqual(self.read(None, at(6), adapter=quiet).result, "unchanged")
+        self.assertEqual(quiet.seen[0].ids_fingerprint, stored)
+        weekly = Fingerprint(self.conn, retitled)
+        out = self.read(None, at(7.5), adapter=weekly)
+        self.assertEqual(weekly.seen, [Validators()])
+        self.assertEqual((out.result, out.changed), ("ok", 1))
+        self.assertEqual(self.posting("w1")["title"], "Software Engineer, New Grad")
+
     def test_a_changed_body_is_redecided_and_made_provisional(self):
         self.read(ok())
         swe = self.pid(SWE)

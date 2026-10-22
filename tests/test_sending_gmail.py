@@ -30,7 +30,7 @@ from outreach.sending.mail import GmailError, HistoryExpired, MessageMeta, Outgo
 
 ACCOUNT = "devanshurajesh@gmail.com"
 SECRET = "ya29.tok-secret-abc"
-BAD_IDS = ("a1@gmail.com", "<a1@gmail.com> <a2@gmail.com>", "<a1@b@gmail.com>", "<a 1@gmail.com>", "<@gmail.com>")
+from tests.test_sending_fakegmail import BAD_IDS, GOOD_IDS  # noqa: E402  one list for both clients
 
 
 def outgoing(to="founder@sendwell.example", subject="Backend role at Sendwell", *, message_id="<a1@gmail.com>",
@@ -93,7 +93,7 @@ class SentFolder:
 class NoNetwork(unittest.TestCase):
     def setUp(self):
         def refuse(*a, **k):
-            raise AssertionError("a test tried to reach the network or open a browser")
+            raise tests.NetworkUsedInTest("a test tried to reach the network or open a browser")
         for target in ("urllib.request.urlopen", "webbrowser.open"):
             patcher = mock.patch(target, side_effect=refuse)
             patcher.start()
@@ -334,6 +334,11 @@ class MimeTest(unittest.TestCase):
                 with self.subTest(bad=bad, m=m), self.assertRaises(ValueError):
                     gmail.build_mime(m)
 
+    def test_dot_atom_message_ids_are_accepted(self):
+        for good in GOOD_IDS:
+            with self.subTest(good=good):
+                self.assertEqual(self.parse(outgoing(message_id=good))["Message-ID"], good)
+
     def test_references_fall_back_to_in_reply_to(self):
         msg = self.parse(outgoing(subject="Re: x", in_reply_to="<a1@gmail.com>", references=()))
         self.assertEqual((msg["In-Reply-To"], msg["References"]), ("<a1@gmail.com>", "<a1@gmail.com>"))
@@ -396,6 +401,23 @@ class ClientCallsTest(NoNetwork):
         self.assertEqual(cm.exception.kind, "message_id_rewritten")
         self.assertFalse(cm.exception.retryable)
         self.assertEqual(cm.exception.sent, Sent("g1", "th1", "<CAgmail123@mail.gmail.com>"))
+
+    def test_the_client_refuses_the_same_ids_as_the_fake(self):
+        client, t = self.client(self.gmail_that_keeps())
+        for bad in BAD_IDS:
+            with self.subTest(bad=bad), self.assertRaises(GmailError) as cm:
+                client.send(outgoing(message_id=bad))
+            self.assertEqual(cm.exception.kind, "bad_request")
+        self.assertEqual(t.requests, [])
+
+    def test_a_readback_without_a_message_id_still_reports_the_send(self):
+        # No header is no evidence of a rewrite: like a failed check, the send is reported as sent.
+        def handler(method, path, body, query):
+            if method == "POST":
+                return {"id": "g1", "threadId": "th1"}
+            return {"id": "g1", "threadId": "th1", "internalDate": "1", "payload": {"headers": []}}
+        client, _ = self.client(handler)
+        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<a1@gmail.com>"))
 
     def test_a_failed_readback_still_reports_the_send(self):
         # The send succeeded; only the check failed. Raising would make it look unclear for no reason.

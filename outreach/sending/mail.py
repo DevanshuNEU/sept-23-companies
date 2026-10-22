@@ -164,8 +164,10 @@ def classify_http(status: int, body: str) -> str:
     return "server"
 
 
-# One Message-ID: <local@domain>, no spaces, brackets or second @ inside (make_msgid's shape).
-MESSAGE_ID = re.compile(r"^<[^<>\s@]+@[^<>\s@]+>$")
+# One Message-ID: <dot-atom@dot-atom>, RFC 5322 dot-atom ASCII on both sides (make_msgid's shape). Anything else
+# (non-ASCII, quotes, parentheses, control characters, empty or doubled dots) is refused before it is claimed.
+_ATOM = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
+MESSAGE_ID = re.compile(rf"<{_ATOM}(?:\.{_ATOM})*@{_ATOM}(?:\.{_ATOM})*>")
 
 
 def normalise_message_id(value: str | None) -> str:
@@ -219,12 +221,12 @@ def check_outgoing(m: Outgoing) -> None:
         raise ValueError("an email goes to exactly one address")
     if "@" not in (m.from_addr or ""):
         raise ValueError("from_addr is not an address")
-    if not MESSAGE_ID.match(m.message_id or ""):
+    if not MESSAGE_ID.fullmatch(m.message_id or ""):
         raise ValueError("message_id is empty or not one Message-ID")
-    if m.in_reply_to is not None and not MESSAGE_ID.match(m.in_reply_to):
+    if m.in_reply_to is not None and not MESSAGE_ID.fullmatch(m.in_reply_to):
         raise ValueError("in_reply_to is not one Message-ID")
     for ref in m.references:
-        if not MESSAGE_ID.match(ref or ""):
+        if not MESSAGE_ID.fullmatch(ref or ""):
             raise ValueError("references holds something that is not one Message-ID")
     if not (m.subject or "").strip() or not (m.body or "").strip():
         raise ValueError("subject and body must not be empty")
@@ -258,8 +260,10 @@ class MailClient(Protocol):
     def find_sent(self, rfc_message_id: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
         """Look in Sent for the message with exactly this Message-ID (never by To or Subject).
 
-        `not_before_ms` is the claim time; `send_returned_ms` is when the failed send call returned (after a crash
-        with no record of that, the claim time). Both are the Mac's clock. A hit is (Sent, True) at any time. A miss
+        `not_before_ms` is the claim time; `send_returned_ms` is when the failed send call returned. After a crash
+        with no record of that, pass the time the stale `sending` row was first found (recorded when it moves to
+        `send_unknown`), never the claim time: the Mac can sleep between the claim and the send. Both are the
+        Mac's clock. A hit is (Sent, True) at any time. A miss
         is (None, True), proof the email did not go out, only when the scan reached a page whose last dated message
         is older than the claim less CLOCK_SKEW_MS, or the end of Sent, and it began at least `settle_minutes`
         after the send returned. Any other miss is (None, False).

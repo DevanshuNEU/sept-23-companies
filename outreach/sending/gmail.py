@@ -356,6 +356,8 @@ class GmailClient(MailClient):
         except GmailError:
             return sent
         actual = normalise_message_id(stored.get("message-id"))
+        if not actual:
+            return sent                     # no header is no evidence of a rewrite: the same as a failed check
         if actual != normalise_message_id(m.message_id):
             raise GmailError("message_id_rewritten", None, "Gmail stored the email under another Message-ID",
                              sent=Sent(sent.gmail_message_id, sent.thread_id, actual))

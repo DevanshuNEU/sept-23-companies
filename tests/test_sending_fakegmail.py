@@ -12,7 +12,11 @@ from outreach.sending.mail import (RETRYABLE, GmailError, HistoryExpired, MailCl
 ACCOUNT = "devanshurajesh@gmail.com"
 START = datetime(2026, 11, 10, 14, 0, tzinfo=timezone.utc)
 # Malformed Message-IDs: no brackets, two ids, two @, a space, an empty local part.
-BAD_IDS = ("a1@gmail.com", "<a1@gmail.com> <a2@gmail.com>", "<a1@b@gmail.com>", "<a 1@gmail.com>", "<@gmail.com>")
+BAD_IDS = ("a1@gmail.com", "<a1@gmail.com> <a2@gmail.com>", "<a1@b@gmail.com>", "<a 1@gmail.com>", "<@gmail.com>",
+           # Outside RFC 5322 dot-atom ASCII: a non-ASCII letter, a quote, parentheses, a NUL, a bare dot.
+           "<\u00e9t\u00e9@gmail.com>", '<"a1"@gmail.com>', "<a(1)@gmail.com>", "<a1\x00@gmail.com>", "<a1.@gmail.com>",
+           "<a1@gmail..com>", "<a1@gmail.com>\n")
+GOOD_IDS = ("<177.1.2@gmail.com>", "<a!#$%&'*+/=?^_`{|}~-z@x-y.example>", "<CAgmail123@mail.gmail.com>")
 
 
 def outgoing(to="founder@sendwell.example", subject="Backend role at Sendwell", *, message_id="<a1@gmail.com>",
@@ -97,6 +101,12 @@ class FakeGmailTest(unittest.TestCase):
                     self.gmail.send(m)
                 self.assertEqual(cm.exception.kind, "bad_request")
         self.assertEqual(self.gmail.sent, [])
+
+    def test_dot_atom_message_ids_are_accepted(self):
+        for i, good in enumerate(GOOD_IDS):
+            with self.subTest(good=good):
+                self.gmail.send(outgoing(to=f"p{i}@co.example", message_id=good))
+        self.assertEqual(len(self.gmail.sent), len(GOOD_IDS))
 
     def test_a_rewritten_message_id_is_its_own_error_and_still_counts_as_sent(self):
         self.gmail.rewrite_message_ids = True

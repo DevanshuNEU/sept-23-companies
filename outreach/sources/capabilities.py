@@ -17,3 +17,17 @@ class SharedKeySource(Protocol):
 
 class TieredSource(Protocol):
     def work_tier(self, source_ref: str) -> tuple[int, str] | None: ...
+
+
+@dataclass(frozen=True)
+class PostRecord:
+    """One post a source kept for a candidate (an HN "who is hiring" comment): `source_ref` is the candidate's."""
+    source_ref: str
+    url: str
+    posted_at: str | None
+    text: str
+    asks_email: bool
+
+
+class PostSource(Protocol):
+    def posts(self) -> list[PostRecord]: ...

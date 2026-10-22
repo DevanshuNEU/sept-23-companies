@@ -17,7 +17,10 @@ The counts must be exact and explainable, so every rule is a plain filter:
 A whole run is read before anything is returned, so a damaged file raises (a TabularError from the reader) and
 never yields a partial or empty answer. One fiscal year is held in memory at a time.
 """
+import dataclasses
 import datetime
+import hashlib
+import json
 import math
 import re
 import sys
@@ -26,8 +29,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Sequence
 
+from outreach.rules.facts import EvidenceDraft
+from outreach.sources.base import Candidate
+from outreach.sources.capabilities import SharedKey
 from outreach.sources.keys import classify_domain, normalize_fein, registrable_domain
-from outreach.sources.tabular import read_rows
+from outreach.sources.tabular import EmptyTable, read_rows
 
 COLUMNS = [
     "CASE_NUMBER", "CASE_STATUS", "DECISION_DATE", "VISA_CLASS", "SOC_CODE", "PW_WAGE_LEVEL", "NEW_EMPLOYMENT",
@@ -404,3 +410,129 @@ def load_employers(paths: Sequence[Path]) -> Employers:
             out[key if len(feins) == 1 else f"{key}#{fein}"] = _employer(
                 key if len(feins) == 1 else f"{key}#{fein}", by_fein[fein], feins)
     return Employers(dict(sorted(out.items())), summary)
+
+
+def _config_version(cfg) -> str:
+    """The first 8 hex digits of sha256 over every setting (regexes by pattern), so any config edit changes it and a
+    comment or spacing edit in lca.toml does not."""
+    plain = {f.name: getattr(cfg, f.name) for f in dataclasses.fields(cfg)}
+    text = json.dumps(plain, sort_keys=True, default=lambda v: v.pattern if hasattr(v, "pattern") else list(v))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+class _Loaded(NamedTuple):
+    employers: "Employers"
+    candidates: tuple[Candidate, ...]
+    shared: tuple[SharedKey, ...]
+    tiers: dict[str, tuple[int, str]]
+    summary: dict[str, int]
+
+
+class LcaSource:
+    """Small software employers from DOL LCA files, one candidate per employer with a qualifying fiscal year
+    (staffing-excluded ones included, stored with `staffing_risk` high, never dropped). The files are the input, so
+    `discover(since)` ignores `since`. Nothing is read until the first call; the load runs once and is shared by
+    `discover`, `shared_keys`, `work_tier` and `summary`. A load that finds no employers, or none that qualify, raises
+    EmptyTable: an empty stream is never an answer. No evidence here says anything about company size."""
+    name = "lca"
+    schedule = "quarterly"
+
+    def __init__(self, paths: Sequence[Path], config=None):
+        from outreach.sources.lca_rules import load_lca_config  # lca_rules imports this module: no top-level cycle
+        self.paths = [Path(p) for p in paths]
+        self.config = config if config is not None else load_lca_config()
+        self.version = f"lca-1-{_config_version(self.config)}"
+        self._loaded: _Loaded | None = None
+
+    def discover(self, since: str | None = None):
+        yield from self._load().candidates
+
+    def shared_keys(self) -> list[SharedKey]:
+        return list(self._load().shared)
+
+    def work_tier(self, source_ref: str) -> tuple[int, str] | None:
+        return self._load().tiers.get(source_ref)
+
+    def summary(self) -> dict[str, int]:
+        """fy_mismatch (rows dated outside their file's fiscal year), employers (loaded), qualifying (yielded),
+        excluded (staffing-excluded among those) and cap_exempt (tagged likely among those)."""
+        return dict(self._load().summary)
+
+    def _employers(self) -> "Employers":
+        return self._load().employers
+
+    def _load(self) -> _Loaded:
+        if self._loaded is None:
+            self._loaded = self._build()
+        return self._loaded
+
+    def _build(self) -> _Loaded:
+        from outreach.sources.lca_rules import classify, qualifies, source_fy
+        cfg = self.config
+        employers = load_employers(self.paths)
+        if not employers:
+            raise EmptyTable(f"{len(self.paths)} LCA file(s) read but no employers found: no certified H-1B "
+                             "filing with an employer name")
+        shared = _shared_keys(employers)
+        shared_feins = {k.value for k in shared if k.kind == "fein"}
+        shared_domains = {k.value for k in shared if k.kind == "domain"}
+        candidates, tiers = [], {}
+        excluded = cap_exempt = 0
+        for emp in employers.values():
+            fy = source_fy(emp, cfg)
+            if fy is None:
+                continue
+            verdict = classify(emp, fy, cfg)
+            cand = _candidate(emp, fy, verdict, shared_feins, shared_domains)
+            candidates.append(cand)
+            tiers[cand.source_ref] = (verdict.work_tier, verdict.work_reason)
+            excluded += verdict.excluded
+            cap_exempt += verdict.cap_exempt == "likely"
+        if not candidates:
+            software = sum(s.software for e in employers.values() for s in e.fy.values())
+            seen = (f"{software} software filing(s) among them" if software
+                    else "no software filings among them")
+            raise EmptyTable(f"{len(employers)} employer(s) loaded but none qualifies (1 to {cfg.max_small_filings} "
+                             f"certified filings in a fiscal year with at least one junior software filing); {seen}")
+        summary = {"fy_mismatch": employers.fy_mismatch, "employers": len(employers),
+                   "qualifying": len(candidates), "excluded": excluded, "cap_exempt": cap_exempt}
+        return _Loaded(employers, tuple(candidates), tuple(shared), tiers, summary)
+
+
+def _shared_keys(employers: "Employers") -> list[SharedKey]:
+    """Every FEIN and every company-kind domain used by more than one employer, large ones counted, sorted."""
+    users: dict[tuple[str, str], list[str]] = {}
+    for emp in employers.values():
+        fein = normalize_fein(emp.fein)
+        if fein:
+            users.setdefault(("fein", fein), []).append(emp.legal_name)
+        if emp.domain and emp.domain_kind == "company":
+            users.setdefault(("domain", emp.domain), []).append(emp.legal_name)
+    return [SharedKey(kind, value, f"{len(names)} employers: {', '.join(sorted(names)[:5])}")
+            for (kind, value), names in sorted(users.items()) if len(names) > 1]
+
+
+def _candidate(emp: Employer, fy: int, verdict, shared_feins: set[str], shared_domains: set[str]) -> Candidate:
+    ref = f"lca:FY{fy % 100:02d}"
+    evidence = [EvidenceDraft("lca", json.dumps(s.evidence(), sort_keys=True, separators=(",", ":")), "confirmed",
+                              "lca", f"lca:FY{year % 100:02d}", observed_on=s.last_decision or None)
+                for year, s in emp.fy.items() if s.software >= 1]
+    evidence.append(EvidenceDraft("staffing_risk", verdict.staffing_risk, "estimate", "lca", ref,
+                                  quote=verdict.staffing_reason))
+    if verdict.cap_exempt == "likely":
+        evidence.append(EvidenceDraft("cap_exempt", "likely", "estimate", "lca", ref, quote=verdict.cap_reason))
+    hq = ", ".join(part for part in (emp.city.title(), emp.state) if part)
+    if hq:
+        evidence.append(EvidenceDraft("hq", hq, "estimate", "lca", ref))
+    domain = emp.domain if emp.domain_kind == "company" else None
+    if domain:
+        evidence.append(EvidenceDraft("domain", domain, "guess" if domain in shared_domains else "estimate", "lca",
+                                      ref))
+    keys = {"legal_name": emp.legal_name}
+    if emp.dba:
+        keys["dba"] = emp.dba
+    fein = normalize_fein(emp.fein)
+    if fein and fein not in shared_feins:
+        keys["fein"] = fein
+    return Candidate(name=emp.dba or emp.legal_name, domain=domain, keys=keys, evidence=tuple(evidence),
+                     source_ref="lca:" + emp.key)

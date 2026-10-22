@@ -70,7 +70,7 @@ def score_company(facts: RankFacts, hide: Hide | None, signals: list[Signal], cf
         weight = float(cfg.weights[signal.name])
         raw = _round(weight * got.value)
         points = raw if raw <= 0 else _round(raw * factor(got.confidence, cfg))
-        values[signal.name] = Points(got.value, weight, raw, points, got.reason, got.confidence)
+        values[signal.name] = Points(float(got.value) + 0.0, weight, raw, points, got.reason, got.confidence)
 
     ranked = sorted(((n, p) for n, p in values.items() if p.raw_points != 0), key=lambda x: (-abs(x[1].points), x[0]))
     reasons = tuple(p.reason for _n, p in ranked)

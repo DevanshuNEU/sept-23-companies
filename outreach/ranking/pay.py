@@ -1,8 +1,9 @@
 """Pay text to an OFLC wage level (#6).
 
-`parse_pay` reads a posted salary or hourly range into annual dollars and refuses anything it cannot read with
-certainty. `pay_level` places it against the wage table for the posting's location. Nothing here invents a level:
-junk pay, another currency, a remote role or an unlisted city gives None, and the signal stays neutral.
+`parse_pay` reads one clear USD annual range and refuses everything else (unknown is neutral). `pay_level` places it
+against the wage table for the posting's location, and only for a location that names the area's state or an
+unambiguous metro. Nothing here invents a level: junk pay, another currency, a remote role or an unlisted city gives
+None, and the signal stays neutral.
 """
 from __future__ import annotations
 
@@ -26,8 +27,10 @@ _MAX_TEXT = 5_000  # a pay field is short; cap it so a hostile body cannot make 
 @dataclass(frozen=True)
 class Area:
     name: str
-    aliases: tuple[str, ...]
+    aliases: tuple[str, ...]  # city names: they count only with one of the area's states
     levels: tuple[int, int, int, int]
+    states: tuple[str, ...] = ()  # two letter codes
+    metro: tuple[str, ...] = ()  # names that are unambiguous without a state ("nyc", "bay area")
 
 
 @dataclass(frozen=True)
@@ -66,59 +69,83 @@ def load_wages(path: Path = WAGES_PATH) -> tuple[Area, ...]:
         aliases = tuple(str(a).lower() for a in row["aliases"])
         if not aliases:
             raise ValueError(f"area {name} has no aliases")
-        areas.append(Area(name=name, aliases=aliases, levels=levels))
+        states = tuple(str(x).upper() for x in row.get("states", ()))
+        if not states or not all(x in _US_STATES for x in states):
+            raise ValueError(f"area {name}: states must be US state codes, got {row.get('states')!r}")
+        metro = tuple(str(x).lower() for x in row.get("metro", ()))
+        areas.append(Area(name=name, aliases=aliases, levels=levels, states=states, metro=metro))
     return tuple(areas)
 
 
 _NUM = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
-_CUR = r"(?:(?<![A-Za-z])\$|(?<=US)\$|\bUSD\b)\s{0,2}"
+_CUR = r"(?:(?<![A-Za-z])(?:US)?\$|\bUSD\b)\s{0,2}"
 _K = r"(?:[kK](?![A-Za-z]))?"
 _SEP = r"\s{0,3}(?:[-\u2013\u2014]|to\b)\s{0,3}"
 _MONEY = re.compile(
     rf"{_CUR}(?P<n1>{_NUM})(?P<k1>{_K})(?:{_SEP}(?P<c2>{_CUR})?(?P<n2>{_NUM})(?P<k2>{_K}))?")
-_HOURLY_AFTER = re.compile(r"\s{0,2}(?:/\s{0,2}(?:hr|hour|h)\b|per\s+hour\b|an\s+hour\b|hourly\b)", re.IGNORECASE)
-_HOURLY_BEFORE = re.compile(r"hourly\W{0,3}$", re.IGNORECASE)
+# Anything that says the figure is not a plain US dollar annual salary, anywhere in the text.
+_NOT_ANNUAL = re.compile(
+    r"/\s{0,2}(?:hr|hour|h|mo|month|wk|week|day)\b"
+    r"|\b(?:per|an?|each)\s+(?:hour|hr|month|week|day)\b"
+    r"|\b(?:hourly|monthly|weekly|daily|biweekly|bi-weekly)\b", re.IGNORECASE)
+_NOT_USD = re.compile(
+    r"[£€¥₹]"
+    r"|\b(?:CAD|AUD|NZD|EUR|GBP|CHF|INR|SGD|JPY|CNY|RMB|MXN|BRL|SEK|NOK|DKK|PLN|ILS|AED|HKD|ZAR)\b"
+    r"|\b(?:euros?|pounds?|sterling|rupees?|yen|canadian|australian)\b", re.IGNORECASE)
+_FOREIGN_DOLLAR = re.compile(r"([A-Za-z]{1,3})\$")  # C$, CA$, A$, AU$, NZ$, HK$; "US$" is fine
+# Words that make a figure something other than base pay, checked in the range's own sentence.
+_NOT_BASE = re.compile(
+    r"\b(?:bonus(?:es)?|sign[- ]?on|signing|relocation|equity|stock|rsus?|stipend|tuition|raised|funding|commission"
+    r"|up\s+to)\b", re.IGNORECASE)
+_SENTENCE = re.compile(r"(?:[^\n.!?]|[.!?](?!\s|$))+")
 
 
 def _value(number: str, k: str) -> float:
     return float(number.replace(",", "")) * (1000 if k else 1)
 
 
-def parse_pay(text: str) -> PayRange | None:
-    """Annual dollars from posted pay, or None. Dollars only (a `$` or `USD`); an hourly marker multiplies by 2080;
-    `K` multiplies by 1000; one number gives low == high; a reversed range is swapped. A value under 20,000 or over
-    1,000,000 a year, a bare number, another currency or no number gives None."""
-    if not isinstance(text, str):
+def _range_ends(m: re.Match) -> tuple[float, float] | None:
+    """The two ends of a money match, scaled by K, or None when it is a single figure (or its second figure is a
+    stray small number such as the 3 in "$120,000 to 3 openings")."""
+    if m.group("n2") is None:
         return None
-    text = text[:_MAX_TEXT]
-    for m in _MONEY.finditer(text):
-        k1, k2 = m.group("k1"), m.group("k2")
-        first_end = m.end("k1") if k1 else m.end("n1")
-        hourly = bool(_HOURLY_BEFORE.search(text[max(0, m.start() - 12):m.start()]))
-        second = m.group("n2")
-        if second is not None:
-            hourly = hourly or bool(_HOURLY_AFTER.match(text, m.end()))
-            bare_small = not m.group("c2") and not k2 and _value(second, "") < 1000
-            if bare_small and not hourly:
-                second = None  # "$120,000 to 3 openings": the 3 is not a pay figure
-        else:
-            hourly = hourly or bool(_HOURLY_AFTER.match(text, first_end))
-        a = _value(m.group("n1"), k1)
-        if second is None:
-            b = a
-        else:
-            b = _value(second, k2)
-            if k2 and not k1 and a < 1000:
-                a *= 1000  # "$120-150K"
-            elif k1 and not k2 and b < 1000:
-                b *= 1000
-        if hourly:
-            a, b = a * _HOURS_PER_YEAR, b * _HOURS_PER_YEAR
-        if not (math.isfinite(a) and math.isfinite(b)):
-            continue
-        low, high = sorted((round(a), round(b)))
-        if _MIN_ANNUAL <= low and high <= _MAX_ANNUAL:
-            return PayRange(low, high)
+    k1, k2 = m.group("k1"), m.group("k2")
+    if not m.group("c2") and not k2 and _value(m.group("n2"), "") < 1000:
+        return None
+    a, b = _value(m.group("n1"), k1), _value(m.group("n2"), k2)
+    if k2 and not k1 and a < 1000:
+        a *= 1000  # "$120-150K"
+    elif k1 and not k2 and b < 1000:
+        b *= 1000
+    return a, b
+
+
+def parse_pay(text: str) -> PayRange | None:
+    """Annual dollars from exactly one clear USD annual range ("$A - $B", "$AK to $BK"), else None.
+
+    Both ends must be present with 20,000 <= A <= B <= 1,000,000. A single number, "up to X", more than one range
+    (pay zones), another currency, a per hour, month, week or day figure, a bonus, sign-on, relocation, equity,
+    stock, stipend, tuition, raised or funding word in the range's sentence, or text over the 5,000 character cap
+    (never truncated) gives None."""
+    if not isinstance(text, str) or len(text) > _MAX_TEXT:
+        return None
+    if _NOT_USD.search(text) or _NOT_ANNUAL.search(text):
+        return None
+    if any(m.group(1).upper() != "US" for m in _FOREIGN_DOLLAR.finditer(text)):
+        return None
+    matches = list(_MONEY.finditer(text))
+    ranges = [(m, ends) for m in matches if (ends := _range_ends(m)) is not None]
+    if len(ranges) != 1:
+        return None
+    found, (a, b) = ranges[0]
+    sentence = next(x for x in _SENTENCE.finditer(text) if x.start() <= found.start() < x.end())
+    if _NOT_BASE.search(sentence.group()):
+        return None
+    if any(m is not found and sentence.start() <= m.start() < sentence.end() for m in matches):
+        return None  # another figure in the same sentence: not clear which is the salary
+    low, high = math.floor(a + 0.5), math.floor(b + 0.5)
+    if _MIN_ANNUAL <= low <= high <= _MAX_ANNUAL:
+        return PayRange(low, high)
     return None
 
 
@@ -131,9 +158,60 @@ def level_at(annual: int, area: Area) -> int:
     return level
 
 
+_US_STATES = {
+    "AL": "alabama", "AK": "alaska", "AZ": "arizona", "AR": "arkansas", "CA": "california", "CO": "colorado",
+    "CT": "connecticut", "DE": "delaware", "DC": "district of columbia", "FL": "florida", "GA": "georgia",
+    "HI": "hawaii", "ID": "idaho", "IL": "illinois", "IN": "indiana", "IA": "iowa", "KS": "kansas", "KY": "kentucky",
+    "LA": "louisiana", "ME": "maine", "MD": "maryland", "MA": "massachusetts", "MI": "michigan", "MN": "minnesota",
+    "MS": "mississippi", "MO": "missouri", "MT": "montana", "NE": "nebraska", "NV": "nevada", "NH": "new hampshire",
+    "NJ": "new jersey", "NM": "new mexico", "NY": "new york", "NC": "north carolina", "ND": "north dakota",
+    "OH": "ohio", "OK": "oklahoma", "OR": "oregon", "PA": "pennsylvania", "RI": "rhode island",
+    "SC": "south carolina", "SD": "south dakota", "TN": "tennessee", "TX": "texas", "UT": "utah", "VT": "vermont",
+    "VA": "virginia", "WA": "washington", "WV": "west virginia", "WI": "wisconsin", "WY": "wyoming",
+}
+_STATE_CODE = re.compile(r"(?<![A-Za-z])(" + "|".join(_US_STATES) + r")(?![A-Za-z])")  # upper case only
+_STATE_NAME = re.compile(
+    r"(?<![a-z])(" + "|".join(sorted(map(re.escape, _US_STATES.values()), key=lambda n: (-len(n), n)))
+    + r")(?![a-z])", re.IGNORECASE)
+_NAME_TO_CODE = {name: code for code, name in _US_STATES.items()}
+_NON_US = re.compile(
+    r"(?<![a-z])(?:uk|u\.k\.|united kingdom|england|scotland|wales|northern ireland|ireland|canada|ontario|quebec"
+    r"|british columbia|alberta|india|germany|france|spain|italy|netherlands|poland|portugal|sweden|switzerland"
+    r"|israel|australia|new zealand|singapore|japan|china|brazil|mexico|argentina|colombia|costa rica|philippines"
+    r"|united arab emirates|uae|south africa|nigeria|kenya|egypt)(?![a-z])", re.IGNORECASE)
+_REMOTE = re.compile(r"(?<![a-z])(?:remote|anywhere)(?![a-z])", re.IGNORECASE)
+_WORKSITE_SPLIT = re.compile(r"[;|/\n\r]+|\s+(?:or|and)\s+|\s&\s", re.IGNORECASE)
+
+
+def _find_name(low: str, names: tuple[str, ...]) -> re.Match | None:
+    """The first of `names` (longest first) found in `low` as a whole word."""
+    for name in sorted(names, key=lambda n: (-len(n), n)):
+        m = re.search(rf"(?<![a-z]){re.escape(name)}(?![a-z])", low)
+        if m:
+            return m
+    return None
+
+
+def _site_matches(site: str, area: Area) -> bool:
+    """One worksite (one place, such as "Boston, MA"). An area's city counts only with one of the area's states; a
+    metro name counts alone. Another state or a non-US country makes the worksite unlisted for this area."""
+    low = site.lower()
+    metro = _find_name(low, area.metro)
+    city = metro or _find_name(low, area.aliases)
+    if city is None:
+        return False
+    rest = site[:city.start()] + " " + site[city.end():]  # the same offsets: `low` has the same length as `site`
+    states = {m.group(1) for m in _STATE_CODE.finditer(rest)}
+    states |= {_NAME_TO_CODE[m.group(1).lower()] for m in _STATE_NAME.finditer(rest)}
+    if _NON_US.search(_STATE_NAME.sub(" ", rest)):
+        return False
+    if states - set(area.states):
+        return False
+    return metro is not None or bool(states)
+
+
 def _matches(location: str, area: Area) -> bool:
-    loc = location.lower()
-    return any(re.search(rf"(?<![a-z]){re.escape(alias)}(?![a-z])", loc) for alias in area.aliases)
+    return any(_site_matches(site, area) for site in _WORKSITE_SPLIT.split(location))
 
 
 def _dollars(n: int) -> str:
@@ -147,7 +225,7 @@ def pay_level(pay_text: str, location: str, wages: tuple[Area, ...], basis: str 
     if basis not in ("midpoint", "minimum"):
         raise ValueError(f"basis must be 'midpoint' or 'minimum', got {basis!r}")
     pay = parse_pay(pay_text)
-    if pay is None or not isinstance(location, str):
+    if pay is None or not isinstance(location, str) or _REMOTE.search(location):
         return None
     matched = [a for a in wages if _matches(location, a)]
     if not matched:

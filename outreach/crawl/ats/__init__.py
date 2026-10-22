@@ -4,9 +4,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from outreach.crawl.ats.ashby import AshbyAdapter
+from outreach.crawl.ats.breezy import BreezyAdapter
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
 from outreach.crawl.ats.lever import LeverAdapter
 from outreach.crawl.ats.oracle_orc import OracleAdapter
+from outreach.crawl.ats.pinpoint import PinpointAdapter
 from outreach.crawl.ats.rippling import RipplingAdapter
 from outreach.crawl.ats.smartrecruiters import SmartRecruitersAdapter
 from outreach.crawl.ats.workable import WorkableAdapter
@@ -26,6 +28,8 @@ ADAPTERS: dict[str, Callable[[HttpClient], Adapter]] = {
     "workable": WorkableAdapter,
     "oracle_orc": OracleAdapter,
     "rippling": RipplingAdapter,
+    "breezy": BreezyAdapter,
+    "pinpoint": PinpointAdapter,
 }
 
 

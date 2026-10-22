@@ -18,10 +18,14 @@ from dataclasses import asdict, dataclass, field
 from outreach import identity
 from outreach.identity import StoreResolveReport, resolve_store
 from outreach.sources.base import Source, describe_error
-from outreach.sources.tiers import register_source, set_work_tier
-from outreach.store import finish_job, iso_utc, mark_shared_key, start_job, transaction
+from outreach.sources.boards import BoardRef, add_board
+from outreach.sources.keys import classify_domain, registrable_domain
+from outreach.sources.stapply import StapplyDirectory
+from outreach.sources.tiers import effective_tier, register_source, set_work_tier
+from outreach.store import finish_job, is_shared_key, iso_utc, mark_shared_key, start_job, transaction, utcnow
 
-__all__ = ["SourceReport", "run_discover", "run_resolve", "store_name_lookup", "POST_TEXT_CAP"]
+__all__ = ["SourceReport", "run_discover", "run_resolve", "store_name_lookup", "POST_TEXT_CAP", "FindBoardsReport",
+           "run_find_boards"]
 
 MIN_LOOKUPS_FOR_ALL_FAILED = 3  # one or two failed lookups prove nothing; three of three is a pattern
 
@@ -240,4 +244,148 @@ def run_resolve(conn: sqlite3.Connection) -> tuple[int, StoreResolveReport]:
     else:
         status = "partial"
     finish_job(conn, run_id, status, asdict(report), error)
+    return run_id, report
+
+
+@dataclass
+class FindBoardsReport:
+    considered: int = 0  # live companies with no active board and no watched page, tier 3 not counted
+    from_alias: int = 0  # boards made from an `ats` alias
+    from_stapply: int = 0  # boards made from a stapply list match
+    skipped_tier3: int = 0
+    conflicts: int = 0  # boards another company already holds (one merge item per pair)
+    bad_aliases: list[str] = field(default_factory=list)  # "<company id>: <alias>": an `ats` alias that is no board
+    failed: list[str] = field(default_factory=list)
+    version: str = ""  # the stapply version used, "" when no directory was given
+
+
+def _company_names(conn: sqlite3.Connection, company_id: int, name: str) -> list[str]:
+    names = [name]
+    names += [alias for (alias,) in conn.execute(
+        "SELECT alias FROM company_alias WHERE company_id = ? AND source IN ('legal_name', 'dba') ORDER BY alias_key",
+        (company_id,))]
+    return names
+
+
+def _shared_domain(conn: sqlite3.Connection, domain: str) -> bool:
+    root = registrable_domain(domain)
+    return is_shared_key(conn, "domain", domain) or (root is not None and is_shared_key(conn, "domain", root))
+
+
+def _company_domains(conn: sqlite3.Connection, company_id: int) -> tuple[list[str], list[str]]:
+    """(usable, shared): the company's company-class domains from `domain` evidence, best first (locked, then
+    confirmed, then the oldest row). Usable ones are not a shared key (a parent's portal, a PEO) and not a `guess`;
+    the shared ones are listed so a caller can tell "the only domain is shared" from "no domain"."""
+    usable: list[str] = []
+    shared: list[str] = []
+    for value, confidence in conn.execute(
+            "SELECT value, confidence FROM evidence WHERE company_id = ? AND fact = 'domain' "
+            "ORDER BY locked DESC, confidence = 'confirmed' DESC, evidence_id", (company_id,)):
+        domain = value[4:] if value.startswith("www.") and "." in value[4:] else value
+        if classify_domain(domain) != "company":
+            continue
+        if _shared_domain(conn, domain):
+            if domain not in shared:
+                shared.append(domain)
+        elif confidence != "guess" and domain not in usable:
+            usable.append(domain)
+    return usable, shared
+
+
+def _live_companies(conn: sqlite3.Connection, where: str) -> list[sqlite3.Row]:
+    """Live companies (candidate, backlog or working; not merged) matching `where`, by effective tier then id."""
+    rows = conn.execute(
+        "SELECT c.company_id, c.name FROM company c WHERE c.status IN ('candidate', 'backlog', 'working') "
+        "AND c.merged_into IS NULL AND " + where + " ORDER BY c.company_id").fetchall()
+    return sorted(rows, key=lambda r: (effective_tier(conn, r["company_id"]), r["company_id"]))
+
+
+NO_BOARD = ("NOT EXISTS (SELECT 1 FROM board b WHERE b.company_id = c.company_id AND b.active = 1) "
+            "AND NOT EXISTS (SELECT 1 FROM watched_page w WHERE w.company_id = c.company_id)")
+
+
+def _alias_boards(conn: sqlite3.Connection, company_id: int, report: FindBoardsReport) -> int:
+    """Step 0: every `ats` alias becomes a board (`found_by` hand for a by-hand company, else import). Returns the
+    boards added."""
+    found_by = "hand" if conn.execute("SELECT 1 FROM company_source WHERE company_id = ? AND source_name = 'hand'",
+                                      (company_id,)).fetchone() else "import"
+    added = 0
+    for (alias,) in conn.execute("SELECT alias FROM company_alias WHERE company_id = ? AND source = 'ats' "
+                                 "ORDER BY alias_key", (company_id,)).fetchall():
+        ats, _, token = alias.partition(":")
+        try:
+            ref = BoardRef(ats, token)
+        except ValueError:
+            report.bad_aliases.append(f"{company_id}: {alias}")
+            continue
+        result = add_board(conn, company_id, ref, via="alias", matched_on=alias, found_by=found_by)
+        report.from_alias += result == "added"
+        report.conflicts += result == "conflict"
+        added += result == "added"
+    return added
+
+
+def _stapply_boards(conn: sqlite3.Connection, company_id: int, name: str, directory: StapplyDirectory,
+                    report: FindBoardsReport) -> int:
+    """Step 1: the stapply lookup over the company's names and usable domain. Returns the boards added."""
+    usable, _ = _company_domains(conn, company_id)
+    added = 0
+    for hit in directory.lookup(_company_names(conn, company_id, name), usable[0] if usable else None):
+        found_by = "import" if hit.matched_on == "host" else "stapply_name"
+        with transaction(conn):
+            result = add_board(conn, company_id, hit.ref, via="stapply", matched_on=hit.matched_on, found_by=found_by)
+            if result == "added":
+                now = utcnow()
+                conn.execute(
+                    "INSERT INTO company_source(company_id, source_name, source_ref, first_seen_at, last_seen_at) "
+                    "VALUES (?, 'stapply', ?, ?, ?) ON CONFLICT DO NOTHING",
+                    (company_id, f"{hit.ref.ats}:{hit.ref.token}", now, now))
+        report.from_stapply += result == "added"
+        report.conflicts += result == "conflict"
+        added += result == "added"
+    return added
+
+
+def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | None,
+                    careers: object | None = None, max_careers: int = 100) -> tuple[int, FindBoardsReport]:
+    """The `find_boards` job: give each live company with no active board and no watched page its boards.
+
+    Companies go in order of effective tier, then id; tier 3 is skipped unless promoted. Per company: (0) an `ats`
+    alias with no board becomes one; (1) the stapply lookup (a name or slug match is `found_by` `stapply_name`, a
+    host match `import`). With no directory the lookup does not run, and the run is `partial` with that said: never a
+    quiet "nothing found". Returns the job run id and the report; status `partial` also covers any bad alias or
+    company that failed.
+    """
+    run_id = start_job(conn, "find_boards")
+    report = FindBoardsReport()
+    problems: list[str] = []
+    try:
+        if directory is not None:
+            register_source(conn, "stapply", directory.version, run_id)
+            report.version = directory.version
+        else:
+            problems.append("no stapply directory: the name lookup did not run")
+        for row in _live_companies(conn, NO_BOARD):
+            company_id = row["company_id"]
+            if effective_tier(conn, company_id) == 3:
+                report.skipped_tier3 += 1
+                continue
+            report.considered += 1
+            try:
+                found = _alias_boards(conn, company_id, report)
+                if directory is not None:
+                    found += _stapply_boards(conn, company_id, row["name"], directory, report)
+            except (sqlite3.Error, ValueError) as err:
+                report.failed.append(f"#{company_id} {row['name']}: {describe_error(err)}")
+    except BaseException as err:
+        try:
+            finish_job(conn, run_id, "failed", asdict(report), describe_error(err))
+        except Exception:
+            pass  # the original error is the one raised
+        raise
+    if report.bad_aliases:
+        problems.append(f"{len(report.bad_aliases)} ats aliases are not boards: " + ", ".join(report.bad_aliases[:5]))
+    if report.failed:
+        problems.append(f"{len(report.failed)} companies failed: " + "; ".join(report.failed[:5]))
+    finish_job(conn, run_id, "partial" if problems else "ok", asdict(report), "; ".join(problems))
     return run_id, report

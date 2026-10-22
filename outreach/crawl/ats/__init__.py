@@ -7,6 +7,7 @@ from outreach.crawl.ats.ashby import AshbyAdapter
 from outreach.crawl.ats.bamboohr import BambooHRAdapter
 from outreach.crawl.ats.breezy import BreezyAdapter
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
+from outreach.crawl.ats.jazzhr import JazzHRAdapter
 from outreach.crawl.ats.lever import LeverAdapter
 from outreach.crawl.ats.oracle_orc import OracleAdapter
 from outreach.crawl.ats.pinpoint import PinpointAdapter
@@ -36,6 +37,7 @@ ADAPTERS: dict[str, Callable[[HttpClient], Adapter]] = {
     "teamtailor": TeamtailorAdapter,
     "recruitee": RecruiteeAdapter,
     "bamboohr": BambooHRAdapter,
+    "jazzhr": JazzHRAdapter,
 }
 
 

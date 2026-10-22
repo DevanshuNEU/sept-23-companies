@@ -484,8 +484,9 @@ class ReviewFixTest(Base):
         self.assertEqual([tuple(r) for r in self.conn.execute(
             "SELECT name_key, company_id FROM company_name_key ORDER BY company_id")],
             [("acmerobotics", 1), ("acmerobotics", 2)])
+        # The one name item would go to the lowest owner in CA, the matched company itself: none.
         self.assertEqual(find_company(self.conn, cand("Acme Robotics", state="CA", ref="hn:x"), source_name="hn"),
-                         Match(strong=((2, "name_state"),), weak=((1, "name"),)))
+                         Match(strong=((2, "name_state"),), weak=()))
         more = [self.resolve(cand("Acme Robotics", state="CA", city="Oakland", ref=r, kind="hn"), source="hn")
                 for r in ("hn:ar1", "hn:ar2")]
         self.assertEqual([(m.company_id, m.created, m.basis, m.items_raised) for m in more],
@@ -678,6 +679,75 @@ class ReviewRound2Test(Base):
         self.conn.execute("DELETE FROM company_name_key WHERE name_key = 'alphalabs'")
         self.conn.execute("INSERT INTO company_name_key(name_key, company_id, strong) VALUES ('gammalabs', 1, 1)")
         self.assertNotEqual(table_marks(self.conn)["company_name_key"], before["company_name_key"])
+
+
+class ReviewRound3Test(Base):
+    """Review round 3 of Task 7: ambiguity is bounded to one extra company. Each test was red before its fix."""
+    sources = Base.sources + ("yc", "wf")
+
+    def pair(self):
+        for fein in ("111111111", "222222222"):
+            self.resolve(Candidate(name="Acme Corp", domain=None, keys={"fein": fein}, evidence=(hq("Austin, TX"),),
+                                   source_ref=f"lca:acmecorp#{fein}"))
+
+    def name_only(self):
+        return [(src, cand("Acme Corp", state="TX", city="Dallas", kind="other", ref=f"{src}:acme{n}"))
+                for n, src in enumerate(("hn", "yc", "wf", "hn", "hn"))]
+
+    def pairs(self):
+        return [(i["company_id"], int(i["evidence_key"])) for i in self.items()]
+
+    def test_p1_ambiguity_adds_one_company_and_two_items(self):
+        self.pair()
+        results = [self.resolve(c, source=src) for src, c in self.name_only()]
+        self.assertEqual([(r.company_id, r.created, r.basis, r.confidence, r.items_raised) for r in results],
+                         [(3, True, "created", "new", 2)] + [(3, False, "ambiguous_repeat", "likely", 0)] * 4)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM company"), 3)
+        self.assertEqual(self.pairs(), [(1, 2), (1, 3), (2, 3)])  # the pair's FEIN item, then the two ambiguity items
+        self.assertEqual([tuple(r) for r in self.conn.execute(
+            "SELECT company_id, strong FROM company_name_key ORDER BY company_id")], [(1, 1), (2, 1), (3, 0)])
+        before = table_marks(self.conn)
+        self.pair()
+        for src, c in self.name_only():
+            self.resolve(c, source=src)
+        self.assertEqual(table_marks(self.conn), before)
+
+    def test_p2_a_stateless_duplicate_that_learns_its_state_is_bounded_too(self):
+        self.pair()
+        stateless = self.resolve(cand("Acme Corp", ref="hn:stateless"), source="hn")
+        self.assertEqual((stateless.company_id, stateless.items_raised), (3, 1))
+        self.resolve(cand("Acme Corp", state="TX", ref="hn:stateless"), source="hn")  # it learns TX
+        results = [self.resolve(c, source=src) for src, c in self.name_only()]
+        self.assertEqual([(r.company_id, r.basis, r.items_raised) for r in results],
+                         [(4, "created", 3)] + [(4, "ambiguous_repeat", 0)] * 4)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM company"), 4)
+        self.assertEqual(self.pairs(), [(1, 2), (1, 3), (1, 4), (2, 4), (3, 4)])
+        before = table_marks(self.conn)
+        for src, c in self.name_only():
+            self.resolve(c, source=src)
+        self.assertEqual(table_marks(self.conn), before)
+
+    def test_an_ambiguous_candidate_with_a_fein_gets_its_own_company(self):
+        one = self.resolve(cand("Acme Corp", state="TX", ref="lca:one"))
+        two = self.resolve(cand("Acme Corp", ref="hn:two"), source="hn")
+        self.resolve(cand("Acme Corp", state="TX", ref="hn:two"), source="hn")
+        self.assertEqual((one.company_id, two.company_id), (1, 2))
+        first = self.resolve(cand("Acme Corp", state="TX", ref="yc:a"), source="yc")
+        self.assertEqual((first.company_id, first.created), (3, True))
+        keyed = self.resolve(cand("Acme Corp", fein="333333333", state="TX", ref="wf:k"), source="wf")
+        self.assertEqual((keyed.company_id, keyed.created, keyed.basis), (4, True, "created"))
+        again = self.resolve(cand("Acme Corp", state="TX", ref="hn:b"), source="hn")
+        self.assertEqual((again.company_id, again.basis), (3, "ambiguous_repeat"))
+
+    def test_one_name_item_goes_to_the_lowest_owner_in_the_candidates_state(self):
+        self.resolve(cand("Robotics Inc", state="CA", city="San Jose", ref="t:r-ca"))
+        self.resolve(cand("東京 Robotics", state="TX", ref="t:r-tokyo"))
+        res = self.resolve(cand("Robotics Inc", state="TX", ref="t:r-tx"))
+        self.assertEqual((res.company_id, res.created, res.items_raised), (3, True, 2))
+        items = self.items()
+        self.assertEqual(self.pairs(), [(1, 2), (2, 3), (1, 3)])
+        self.assertIn("Basis name,", items[1]["reason"])  # the one name item: the TX owner
+        self.assertIn("Basis alias:name,", items[2]["reason"])  # the alias still belongs to #1
 
 
 if __name__ == "__main__":

@@ -16,7 +16,10 @@ What becomes one company:
    strong match: LCA splits a same-name group by FEIN so two employers' counts never blend, and the name or the
    domain must not join them again. A vetoed company is treated as a weak match.
 4. Two or more `name_state` hits and no FEIN or domain hit is ambiguous: no merge, one item against each hit
-   (basis `ambiguous_name_state`), never a guess at the lower id.
+   (basis `ambiguous_name_state`), never a guess at the lower id. The company made for it writes its name keys
+   weak, so it never becomes one more hit. A later ambiguous candidate with no usable FEIN attaches to the
+   lowest-id such company with its name key and state (basis `ambiguous_repeat`, `likely`, no new item): the
+   ambiguity adds one company, not one per candidate.
 5. Weak matches never merge. With `creates` the candidate becomes a new company and one item is raised per weak
    match; without, the result is None. A name key raises at most one name item, against its lowest-id live owner,
    so the sixth company with one name raises one item, not five.
@@ -41,9 +44,9 @@ from outreach.store import add_alias, append_event, is_shared_key, name_key, tra
 __all__ = ["BASES", "CONFIDENCE", "ITEM_CONFIDENCES", "MIN_NAME_KEY", "Resolution", "Match", "follow_merged",
            "company_state", "find_company", "resolve_candidate", "raise_merge_candidate"]
 
-BASES = ("source_ref", "fein", "domain", "name_state", "created")
+BASES = ("source_ref", "fein", "domain", "name_state", "ambiguous_repeat", "created")
 CONFIDENCE = {"source_ref": "certain", "fein": "certain", "domain": "strong", "name_state": "likely",
-              "created": "new"}
+              "ambiguous_repeat": "likely", "created": "new"}
 # How sure an item is that its two companies are one, most sure first.
 ITEM_CONFIDENCES = ("certain", "strong", "likely", "weak")
 _ITEM_CONFIDENCE = {"source_ref": "certain", "fein": "certain", "domain": "strong", "name_state": "likely",
@@ -75,7 +78,8 @@ class Resolution:
 @dataclass(frozen=True)
 class Match:
     """Company ids and bases, in priority order, one entry per company. `strong[0]` is the candidate's company;
-    `weak` never merges (basis `name`, or `fein_conflict+<basis>` for a strong match the FEIN veto stopped)."""
+    `weak` never merges: basis `name`, `fein_conflict+<basis>` for a strong match the FEIN veto stopped, or
+    `ambiguous_name_state` for each of two or more name and state hits with no FEIN or domain hit."""
     strong: tuple[tuple[int, str], ...]
     weak: tuple[tuple[int, str], ...]
 
@@ -233,8 +237,11 @@ def _find(conn: sqlite3.Connection, cand: Candidate, source_name: str) -> tuple[
             if ours_strong and theirs_strong and state is not None and state == company_state(conn, cid):
                 strong.append(_Hit(cid, "name_state", key))
                 matched.add(cid)
-        if owners and owners[0][0] not in matched:  # one name item per key, against its lowest-id owner
-            cid, theirs_strong = owners[0]
+        # One name item per key: against the lowest-id owner in the candidate's state, else the lowest-id owner.
+        in_state = [o for o in owners if state is not None and company_state(conn, o[0]) == state]
+        target = (in_state or owners or [None])[0]
+        if target is not None and target[0] not in matched:
+            cid, theirs_strong = target
             if ours_strong and theirs_strong:
                 why = (f"the same name ({key}), but the state is {state or 'unknown'} here and "
                        f"{company_state(conn, cid) or 'unknown'} there")
@@ -252,11 +259,36 @@ def _find(conn: sqlite3.Connection, cand: Candidate, source_name: str) -> tuple[
             kept.append(hit)
     ambiguous = []
     if len(kept) >= 2 and all(h.basis == "name_state" for h in kept):
-        ambiguous = [_Hit(h.company_id, "ambiguous_name_state", h.key,
-                          f"the same name ({h.key}) and state ({state}) as {len(kept)} companies, so which one it is "
-                          "is unclear") for h in kept]
-        kept = []
+        repeat = None if fein else _ambiguous_repeat(conn, [h.key for h in kept], state)
+        if repeat is not None:
+            kept = [repeat]
+        else:
+            ambiguous = [_Hit(h.company_id, "ambiguous_name_state", h.key,
+                              f"the same name ({h.key}) and state ({state}) as {len(kept)} companies, so which one "
+                              "it is is unclear") for h in kept]
+            kept = []
     return kept, _distinct(vetoed + ambiguous + weak, {h.company_id for h in kept})
+
+
+def _created_ambiguous(conn: sqlite3.Connection, company_id: int) -> bool:
+    """Whether the company was made by an ambiguous resolve: its `created` event lists an ambiguous_name_state
+    possible duplicate."""
+    return conn.execute(
+        "SELECT 1 FROM event e, json_each(e.detail, '$.possible_duplicates') d WHERE e.company_id = ? "
+        "AND e.entity = 'company' AND e.kind = 'created' AND json_extract(d.value, '$[1]') = 'ambiguous_name_state' "
+        "LIMIT 1", (company_id,)).fetchone() is not None
+
+
+def _ambiguous_repeat(conn: sqlite3.Connection, keys: list[str], state: str) -> _Hit | None:
+    """The lowest-id company made by an ambiguous resolve that holds one of the keys and has the state, or None."""
+    found = []
+    for key in dict.fromkeys(keys):
+        found += [(cid, key) for cid, _ in _name_owners(conn, key)
+                  if company_state(conn, cid) == state and _created_ambiguous(conn, cid)]
+    if not found:
+        return None
+    cid, key = min(found)
+    return _Hit(cid, "ambiguous_repeat", key)
 
 
 def find_company(conn: sqlite3.Connection, cand: Candidate, *, source_name: str) -> Match:
@@ -361,12 +393,14 @@ def _write_aliases(conn, company_id: int, cand: Candidate, source_name: str, lab
     return added, items
 
 
-def _write_name_keys(conn, company_id: int, cand: Candidate) -> None:
+def _write_name_keys(conn, company_id: int, cand: Candidate, *, weak_only: bool) -> None:
+    """One company_name_key row per name key; `weak_only` (a company made by an ambiguous resolve) writes every key
+    with strong 0, so that company never counts as a name and state hit."""
     conn.executemany(
         "INSERT INTO company_name_key(name_key, company_id, strong) VALUES (?, ?, ?) "
         "ON CONFLICT(name_key, company_id) DO UPDATE SET strong = max(strong, excluded.strong) "
         "WHERE excluded.strong > company_name_key.strong",
-        [(key, company_id, int(strong)) for key, strong in _name_keys(cand)])
+        [(key, company_id, 0 if weak_only else int(strong)) for key, strong in _name_keys(cand)])
 
 
 def _link(conn, company_id: int, source_name: str, source_ref: str) -> bool:
@@ -423,7 +457,9 @@ def resolve_candidate(conn: sqlite3.Connection, cand: Candidate, *, source_name:
             items += raise_merge_candidate(conn, company_id, hit.company_id, hit.basis, f"{label}: {hit.why}")
         aliases, alias_items = _write_aliases(conn, company_id, cand, source_name, label)
         items += alias_items
-        _write_name_keys(conn, company_id, cand)
+        weak_only = (any(h.basis == "ambiguous_name_state" for h in weak) if created
+                     else _created_ambiguous(conn, company_id))
+        _write_name_keys(conn, company_id, cand, weak_only=weak_only)
         new_link = _link(conn, company_id, source_name, cand.source_ref)
         detail = {"source": source_name, "source_ref": cand.source_ref, "basis": basis,
                   "confidence": CONFIDENCE[basis], "aliases": aliases}

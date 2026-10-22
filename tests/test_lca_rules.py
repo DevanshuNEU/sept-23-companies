@@ -190,6 +190,12 @@ class CapExemptTest(unittest.TestCase):
                 self.assertEqual(c.cap_exempt, "likely")
                 self.assertIn(f"NAICS {naics}", c.cap_reason)
                 self.assertIn("overrides the corporate-name veto", c.cap_reason)
+        for name, naics in (("Riverside Academy", "611310"), ("Mercy Care", "622110")):
+            with self.subTest(name=name, naics=naics):
+                c = classify25(name, naics)
+                self.assertEqual(c.cap_exempt, "likely")
+                self.assertIn(f"NAICS {naics} (strong signal)", c.cap_reason)
+                self.assertNotIn("veto", c.cap_reason)
         # the other cap-exempt prefixes stay vetoable
         for naics in ("611110", "611210", "813210", "921110"):
             with self.subTest(naics=naics):
@@ -204,9 +210,10 @@ class CapExemptTest(unittest.TestCase):
                      "Foo Learning GmbH"):
             with self.subTest(name=name):
                 self.assertIsNone(classify25(name, "611210").cap_exempt)
-        # a form word inside a name is not a company form
-        self.assertEqual(classify25("Pc Hospital Group", "541715").cap_exempt, "likely")
-        self.assertEqual(classify25("Gmbh Research School", "611210").cap_exempt, "likely")
+        # only the regex decides below (a vetoable code, no strong or weak word)
+        self.assertIsNone(classify25("Foo Learning Pc", "611210").cap_exempt)
+        self.assertEqual(classify25("Foo Learning Epc", "611210").cap_exempt, "likely")  # not on a word boundary
+        self.assertEqual(classify25("Pc Learning Group", "611210").cap_exempt, "likely")  # form word mid-name
 
     def test_strong_word_wins_over_a_corporate_suffix(self):
         for name in ("Riverside University", "Georgetown College Inc", "Mercy Hospital, LLC",

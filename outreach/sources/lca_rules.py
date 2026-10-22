@@ -141,7 +141,9 @@ def _cap_exempt(emp: Employer, cfg: LcaConfig) -> tuple[str | None, str]:
         return "likely", f"legal name has '{strong.group(0)}'"
     override = next((p for p in cfg.cap_exempt_override_naics_prefixes if emp.naics.startswith(p)), None)
     if override:
-        return "likely", f"NAICS {emp.naics} (strong signal, overrides the corporate-name veto)"
+        if _is_corporate(name, cfg):
+            return "likely", f"NAICS {emp.naics} (strong signal, overrides the corporate-name veto)"
+        return "likely", f"NAICS {emp.naics} (strong signal)"
     naics = next((p for p in cfg.cap_exempt_naics_prefixes if emp.naics.startswith(p)), None)
     weak = cfg.cap_exempt_weak_name_regex.search(name)
     if not naics and not weak:

@@ -16,12 +16,13 @@ import { QueryState } from '@/components/state-views';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { isMac, useHotkeys, type Binding } from '@/keyboard/hotkeys';
-import { useListNav } from '@/keyboard/list-nav';
+import { useListNav, type RowProps } from '@/keyboard/list-nav';
 import { formatLongDate } from '@/lib/format';
 import { openExternal, safeHref } from '@/lib/safe-href';
 import { useViewQuery } from '@/pending/pending';
 import { RemoveDialog } from '@/routes/proposals/remove-dialog';
 import { EmailRowPanel } from './email-row-panel';
+import { FinishPanel } from './finish-panel';
 import { FindSomeonePanel } from './find-someone-panel';
 import type { NoteEdit } from './note-editor';
 import { KeyHint, PersonPanel, type PanelActions } from './plan-panel';
@@ -55,12 +56,15 @@ const without = (rows: PlanRow[], entryId: Id): PlanRow[] => rows.map((r) => (r.
 
 function PlanHead({ plan }: { plan: PlanView }) {
   const { used, limit, hardUsed, hardLimit } = plan.linkedinMonth;
+  // Once nothing is left to do, the head says what carried over, as the finish line does (design 16.2).
+  const finished = plan.rows.length > 0 && plan.rows.every((r) => r.state !== 'todo');
+  const carried = finished ? plan.rows.filter((r) => r.state === 'skipped' && r.skipReason === 'carried').length : 0;
   return (
     <div className="flex flex-none items-end gap-4 border-b px-6 pt-5 pb-4">
       <div>
         <h2 className="text-xl leading-7 font-semibold tracking-[-0.01em]">{formatLongDate(plan.date)}</h2>
         {plan.notReady ? null : (
-          <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums">{`${plural(plan.total, 'person', 'people')}, ${plan.done} done`}</p>
+          <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums">{`${plural(plan.total, 'person', 'people')}, ${plan.done} done${carried > 0 ? `, ${carried} carried over` : ''}`}</p>
         )}
       </div>
       <div className="ml-auto flex items-center gap-2 text-[13px]">
@@ -116,8 +120,18 @@ function PlanWork({ plan }: { plan: PlanView }) {
       return row ? nameOf(row) : '';
     },
   });
-  const current = selected === null ? null : (byId.get(selected) ?? null);
   const allDone = rows.every((r) => r.state !== 'todo');
+
+  // The finish line takes the work panel the moment no row is to do (design 16.2) and stays until he picks a
+  // person on the rail. `id` is the row he was on, so a click on it still counts as picking. Arriving on a plan
+  // that is already finished with a person in the URL shows that person, as the link asked.
+  const [arrivedDone] = useState(allDone);
+  const [fin, setFin] = useState<{ id: Id | null; browsing: boolean } | null>(null);
+  if (!allDone && fin !== null) setFin(null);
+  else if (allDone && fin === null) setFin({ id: selected, browsing: arrivedDone && selected !== null });
+  else if (fin !== null && !fin.browsing && selected !== fin.id) setFin({ ...fin, browsing: true });
+  const showFinish = allDone && fin !== null && !fin.browsing;
+  const current = showFinish || selected === null ? null : (byId.get(selected) ?? null);
 
   const focusPanel = () => requestAnimationFrame(() => document.getElementById(headingId)?.focus());
   const moveOn = (row: PlanRow) => {
@@ -268,10 +282,24 @@ function PlanWork({ plan }: { plan: PlanView }) {
       );
   }
 
+  // With the finish line showing, no row is selected: the finish node is the one marked, as in the mockup.
+  const railProps = (id: Id): RowProps => {
+    const props = rowProps(id);
+    return {
+      ...props,
+      'aria-selected': showFinish ? false : props['aria-selected'],
+      'data-active': showFinish ? false : props['data-active'],
+      onClick: () => {
+        setFin((f) => (f === null ? f : { ...f, browsing: true }));
+        props.onClick();
+      },
+    };
+  };
+
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] max-[1100px]:grid-cols-1 max-[1100px]:overflow-y-auto">
       <div className="min-h-0 overflow-y-auto border-r px-3 pt-4 pb-6 max-[1100px]:overflow-visible max-[1100px]:border-r-0 max-[1100px]:border-b">
-        <DayRail rows={rows} rowProps={rowProps} tomorrow={plan.tomorrow} allDone={allDone} asOf={plan.asOf} />
+        <DayRail rows={rows} rowProps={railProps} tomorrow={plan.tomorrow} allDone={allDone} asOf={plan.asOf} />
         <div className="mx-3 mt-6 grid justify-items-start gap-2">
           <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="shift+c" onClick={copyAllHandoffs}>
             <Terminal aria-hidden />
@@ -289,8 +317,8 @@ function PlanWork({ plan }: { plan: PlanView }) {
           </Link>
         </div>
       </div>
-      <section aria-label="Selected person" className="min-w-0 overflow-y-auto px-8 pt-5 pb-12 max-[1100px]:overflow-visible">
-        {panel}
+      <section aria-label={showFinish ? 'Finish' : 'Selected person'} className="min-w-0 overflow-y-auto px-8 pt-5 pb-12 max-[1100px]:overflow-visible">
+        {showFinish ? <FinishPanel plan={plan} /> : panel}
       </section>
 
       <RemoveDialog

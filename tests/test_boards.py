@@ -2,6 +2,7 @@
 import json
 import sqlite3
 import unittest
+from unittest import mock
 
 from outreach.sources.boards import BoardRef, add_board, normalize_token
 from tests.storetest import fresh_store, seed_company
@@ -234,6 +235,22 @@ class AddBoardTest(unittest.TestCase):
         self.conn.execute("COMMIT")
         self.assertEqual(self.conn.execute("SELECT count(*) FROM company WHERE name = 'Early'").fetchone()[0], 1)
         self.assertEqual(self.counts(), (0, 0, 0, 0))
+
+    def test_a_late_failure_undoes_the_board_and_alias_but_not_the_callers_work(self):
+        self.conn.execute("BEGIN IMMEDIATE")
+        self.conn.execute("INSERT INTO company(name, status_at, created_at) VALUES "
+                          "('Early', '2026-10-21T00:00:00Z', '2026-10-21T00:00:00Z')")
+        with mock.patch("outreach.sources.boards.append_event", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                add_board(self.conn, self.acme, BoardRef("greenhouse", "acme"), **KW)
+        self.assertTrue(self.conn.in_transaction)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM board").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM company_alias").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM company WHERE name = 'Early'").fetchone()[0], 1)
+        # the savepoint is released: the same call works afterwards, in the same transaction
+        self.assertEqual(add_board(self.conn, self.acme, BoardRef("greenhouse", "acme"), **KW), "added")
+        self.conn.execute("COMMIT")
+        self.assertEqual(self.counts(), (1, 1, 1, 0))
 
     def test_exists_never_upgrades_found_by(self):
         ref = BoardRef("greenhouse", "acme")

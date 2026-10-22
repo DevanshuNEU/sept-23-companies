@@ -25,8 +25,11 @@ _VENDOR_HOSTS = frozenset("docs help support app login community info go develop
 _APP_PATHS = {"smartrecruiters": frozenset({"oneclick-ui", "ni"}), "workable": frozenset({"j"})}
 _WORKDAY_NOT_SITES = frozenset("wday login logout assets static api js css images authgwy favicon".split())
 
-_LOCALE = re.compile(r"[a-z]{2}(?:-[a-z]{2})?", re.I)  # xx or xx-XX
-_LEFT = r"(?<![\w-])"
+# A locale prefix is `xx-XX` or bare `en`, case as written (the region is upper case). Any other short segment is a
+# site or a slug: `/hr/` is a Workday site, `ats.rippling.com/ab-cd` is a slug.
+_LOCALE_RE = r"(?-i:en|[a-z]{2}-[A-Z]{2})"
+_LOCALE = re.compile(_LOCALE_RE.replace("(?-i:", "(?:"))
+_LEFT = r"(?<![\w%-])"
 _SLUG = r"(?P<token>[\w.%-]+)"  # trailing dots (the end of a sentence) are stripped after the match
 _SUB = _LEFT + r"(?P<token>[\w-]+)"
 _HOST_END = r"(?![\w-]|\.\w)"  # the host ends here: not `.com.evil.com`, not `.comx`
@@ -39,7 +42,7 @@ _PATTERNS = [
     ("ashby", _LEFT + r"jobs\.ashbyhq\.com/" + _SLUG, frozenset()),
     ("workable", _LEFT + r"apply\.workable\.com/" + _SLUG, _APP_PATHS["workable"]),
     ("smartrecruiters", _LEFT + r"(?:careers|jobs)\.smartrecruiters\.com/" + _SLUG, _APP_PATHS["smartrecruiters"]),
-    ("rippling", _LEFT + r"ats\.rippling\.com/(?:" + _LOCALE.pattern + r"/)?" + _SLUG, frozenset()),
+    ("rippling", _LEFT + r"ats\.rippling\.com/(?:" + _LOCALE_RE + r"/)?" + _SLUG, frozenset()),
     ("gem", _LEFT + r"jobs\.gem\.com/" + _SLUG, frozenset()),
     ("bamboohr", _SUB + r"\.bamboohr\.com" + _HOST_END, _VENDOR_HOSTS),
     ("jazzhr", _SUB + r"\.applytojob\.com" + _HOST_END, _VENDOR_HOSTS),
@@ -52,7 +55,7 @@ _COMPILED = [(ats, re.compile(pattern, re.I | re.A), skip) for ats, pattern, ski
 
 _WORKDAY = re.compile(
     _LEFT + r"(?P<tenant>[a-z0-9-]+)\.(?P<wd>wd[0-9]+)\.myworkdayjobs\.com/(?:wday/cxs/[a-z0-9_-]+/)?"
-    r"(?:" + _LOCALE.pattern + r"/)?(?P<site>[A-Za-z0-9_-]+)(?!\.?[\w-])", re.I | re.A)
+    r"(?:" + _LOCALE_RE + r"/)?(?P<site>[A-Za-z0-9_-]+)(?!\.?[\w-])", re.I | re.A)
 _ORACLE = re.compile(
     _LEFT + r"(?P<host>[a-z0-9][a-z0-9.-]*\.oraclecloud\.com)/hcmUI/CandidateExperience/[\w-]+/sites/"
     r"(?P<site>[A-Za-z0-9_-]+)(?!\.?[\w-])", re.I | re.A)
@@ -68,6 +71,15 @@ _UNSUPPORTED = [(host, re.compile(pattern, re.I | re.A)) for host, pattern in [
     ("notion.site", r"[a-z0-9-]+\.notion\.site"),
     ("linkedin.com", r"linkedin\.com/company/[\w-]+/jobs"),
 ]]
+
+
+_ESCAPES = re.compile(r"\\/|\\u002f|%2f", re.I)
+_COLONS = re.compile(r"\\u003a|%3a", re.I)
+
+
+def _decoded(text: str) -> str:
+    """Slashes and colons that JSON (`\\/`, `\\u002F`) or a URL (`%2F`, `%3A`) wrote as escapes, read as themselves."""
+    return _COLONS.sub(":", _ESCAPES.sub("/", text))
 
 
 def _cut_by_non_ascii(text: str, start: int, end: int) -> bool:
@@ -90,7 +102,7 @@ def _matches(text: str):
     for ats, pattern, skip in _COMPILED:
         for m in pattern.finditer(text):
             token = m.group("token").rstrip(".").lower()
-            if token in _GENERIC or token in skip or (ats == "rippling" and _LOCALE.fullmatch(token)):
+            if token in _GENERIC or token in skip or (ats == "rippling" and _LOCALE.fullmatch(m.group("token"))):
                 continue
             if _cut_by_non_ascii(text, m.start("token"), m.start("token") + len(m.group("token"))):
                 continue
@@ -119,9 +131,8 @@ def _matches(text: str):
 
 
 def detect_all(text: str) -> list[BoardRef]:
-    """Every distinct board the text names, in first-seen order. JSON-escaped slashes (`https:\\/\\/`) are read as
-    slashes."""
-    text = text.replace("\\/", "/")
+    """Every distinct board the text names, in first-seen order. JSON and URL escapes are decoded first."""
+    text = _decoded(text)
     found: list[BoardRef] = []
     for _, ref in sorted(_matches(text), key=lambda item: item[0]):
         if ref not in found:
@@ -137,7 +148,7 @@ def detect_ats(text: str) -> list[BoardRef]:
 def detect_unsupported(text: str) -> list[str]:
     """The platform host names the text links to that have no board reader (Jobvite, Paylocity, ADP, UKG, Notion,
     a LinkedIn jobs page), in first-seen order without duplicates. Never a board."""
-    text = text.replace("\\/", "/")
+    text = _decoded(text)
     seen: list[tuple[int, str]] = []
     for host, pattern in _UNSUPPORTED:
         m = pattern.search(text)

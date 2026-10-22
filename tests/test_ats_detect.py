@@ -207,6 +207,48 @@ class DetectAllTest(unittest.TestCase):
         self.assertEqual(detect_ats(self.TEXT), detect_all(self.TEXT)[:3])
 
 
+class LocaleRuleTest(unittest.TestCase):
+    """A locale prefix is `xx-XX` or bare `en`; any other short segment is a site or a slug."""
+
+    def test_workday_two_letter_sites_are_sites(self):
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/hr/jobs"), [("workday", "acme.wd3/hr")])
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/HR"), [("workday", "acme.wd3/HR")])
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en-US/HR/job/x"), [("workday", "acme.wd3/HR")])
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en-US/Ab"), [("workday", "acme.wd3/Ab")])
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en/Ab"), [("workday", "acme.wd3/Ab")])
+
+    def test_workday_a_lone_locale_is_not_a_site(self):
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en-US/"), [])
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en"), [])
+
+    def test_rippling_two_letter_and_xx_xx_slugs_are_read(self):
+        self.assertEqual(refs("https://ats.rippling.com/ab"), [("rippling", "ab")])
+        self.assertEqual(refs("https://ats.rippling.com/ab-cd"), [("rippling", "ab-cd")])
+        self.assertEqual(refs("https://ats.rippling.com/ab-cd/jobs"), [("rippling", "ab-cd")])
+        self.assertEqual(refs("https://ats.rippling.com/en-GB/ab/jobs"), [("rippling", "ab")])
+        self.assertEqual(refs("https://ats.rippling.com/en/ab-cd/jobs"), [("rippling", "ab-cd")])
+
+    def test_rippling_a_lone_locale_is_not_a_slug(self):
+        self.assertEqual(refs("https://ats.rippling.com/en-GB"), [])
+        self.assertEqual(refs("https://ats.rippling.com/en"), [])
+
+
+class EncodedTextTest(unittest.TestCase):
+    def test_percent_encoded_urls_are_decoded(self):
+        self.assertEqual(refs("https%3A%2F%2Facme.bamboohr.com%2Fcareers"), [("bamboohr", "acme")])
+        self.assertEqual(refs("u=https%3a%2f%2fjobs.lever.co%2Facme%2F1"), [("lever", "acme")])
+
+    def test_unicode_escaped_slashes_are_decoded(self):
+        self.assertEqual(refs("https:\\u002F\\u002Facme.bamboohr.com"), [("bamboohr", "acme")])
+        self.assertEqual(refs("https:\\u002f\\u002fboards.greenhouse.io\\u002facme"), [("greenhouse", "acme")])
+
+    def test_a_leftover_encoded_prefix_never_forms_a_token(self):
+        self.assertEqual(refs("%40acme.bamboohr.com"), [])
+        self.assertEqual(refs("x%2Dacme.bamboohr.com"), [])
+        self.assertEqual(refs("%2facme.bamboohr.com"), [("bamboohr", "acme")])
+        self.assertEqual(detect_unsupported("https%3A%2F%2Fjobs.jobvite.com%2Facme"), ["jobs.jobvite.com"])
+
+
 class DetectUnsupportedTest(unittest.TestCase):
     def test_unsupported_hosts_are_reported_not_returned(self):
         html = ('<a href="https://jobs.jobvite.com/acme/jobs">a</a>'

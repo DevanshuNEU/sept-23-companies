@@ -1,0 +1,16 @@
+{
+  "jobPostingInfo": {
+    "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    "title": "Software Engineer I",
+    "jobDescription": "<p>Build services &amp; ship them.</p><ul><li>Write code</li><li>Review code</li></ul><p>We sponsor visas for the right person.</p>",
+    "location": "Boston, MA",
+    "startDate": "2026-11-02",
+    "timeType": "Full time",
+    "jobReqId": "R-1001",
+    "jobPostingId": "Software-Engineer-I_R-1001",
+    "externalUrl": "https://acme.wd5.myworkdayjobs.com/Careers/job/Boston-MA/Software-Engineer-I_R-1001",
+    "country": {"descriptor": "United States of America", "id": "bc33aa3152ec42d4995f4791a106ed09"},
+    "canApply": true
+  },
+  "hiringOrganization": {"name": "Acme Robotics"}
+}

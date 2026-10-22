@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The crawl tick (#21): every 30 minutes, read the due boards within the tick budget, then the due watched careers
-  pages. A tick that starts while another still runs finds the crawl lock held and exits 0.
+  The crawl tick (#21): every 30 minutes, read the due boards within the tick budget, then (on the first tick of each
+  New York day) the slug probe for up to 50 companies with no board, then the due watched careers pages. One log line
+  per tick. A tick that starts while another still runs finds the crawl lock held and exits 0.
 
   StartInterval misses ticks while the Mac sleeps, and that is safe: nothing is lost, the next tick finds more boards
   due and reads them in a fixed order (today's plan first, then never read, then the oldest), leaving the rest due.

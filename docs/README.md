@@ -19,7 +19,7 @@ Decisions live in GitHub issue #9. This folder holds the design, plans, and the 
 | `launchd/com.devanshu.outreach-sources.plist.template` | The daily 06:30 `run-due` job; `{{LIVE_CHECKOUT}}` and `{{LOG_PATH}}` only; installed by #17's deploy tool, never by the repo |
 | `tests/test_sources_e2e.py`, `tests/test_sources_cli.py`, `tests/pipeline/stages_sources.py` | #31's three Done-when lines as tests (the store after the production order, a re-run, shared keys), the CLI on fake clients, and the `discover`, `resolve`, `find_boards` stages of the pipeline flow |
 | `superpowers/plans/2026-10-21-diff-crawler.md` | #21: board adapters, unchanged reads, bodies, cadence, watched careers pages, stale postings. Built; where the code differs from the plan text, the rulings at the top of the plan and the hand-offs below win |
-| `outreach/crawl/` (how to run) | `uv run python -m outreach.crawl --help` lists the commands: `tick` (the 30-minute job: due boards, then due watched pages), `read --company ID [ID ...]` (read these companies' boards now), `probe ATS TOKEN` (one list request, no store access: how a token or an adapter shape is checked) and `probe-slugs [--limit N]` (guess board slugs for companies with no board, add each hit as a `slug_probe` board). Every command sends real requests, so each runs only from the live checkout. Exit 0 when the run was `ok`, 1 when partial or failed. `tick` and `probe-slugs` take the crawl lock (`crawl.lock` beside the store); a second one prints so and does nothing |
+| `outreach/crawl/` (how to run) | `uv run python -m outreach.crawl --help` lists the commands: `tick` (the 30-minute job: due boards, then the daily slug probe on the first tick of each New York day, then due watched pages), `read --company ID [ID ...]` (read these companies' boards now), `probe ATS TOKEN` (one list request, no store access: how a token or an adapter shape is checked) and `probe-slugs [--limit N]` (guess board slugs for companies with no board, add each hit as a `slug_probe` board). Every command sends real requests, so each runs only from the live checkout. Exit 0 when the run was `ok`, 1 when partial or failed. `tick` and `probe-slugs` take the crawl lock (`crawl.lock` beside the store); a second one prints so and does nothing |
 | `outreach/crawl/ats/` | The 14 adapters (Greenhouse, Lever, Ashby, SmartRecruiters, Workday, Workable, Oracle, Rippling, Breezy, Pinpoint, Teamtailor, Recruitee, BambooHR, JazzHR) and `_common.py` (shared request and result helpers). Each one turns a response into a `ReadResult` and never reports a blocked or wrong-shape answer as `empty` |
 | `outreach/crawl/` (modules) | `config.toml` and `config.py` (every number, including `stale_after_months`), `polite.py` (per-host spacing and the circuit breaker), `text.py` (HTML to plain text), `streaks.py` and `boardstate.py` (the read contract and the board and `board_read` writes), `postings.py` (the diff, batched writes, closes), `bodies.py` and `decisions.py` (bodies and batched `decide_and_store`), `cadence.py` (`next_read_at`, error backoff, which boards are due), `ingest.py` (`read_board`: the phases for one board), `tick.py` (`run_tick`, `read_company_boards`, the lock, the budget), `hostblock.py` (one Needs-you item for a blocked host), `watch.py` (weekly careers pages), `stale.py` (`load_stale`, `Stale`), `probe.py` (slug guessing) |
 | `launchd/com.devanshu.outreach-crawl.plist.template` | The `tick` job, every 30 minutes; `{{LIVE_CHECKOUT}}` and `{{LOG_PATH}}` only; installed by #17's deploy tool, never by the repo. Label `com.devanshu.outreach-crawl` |
@@ -49,7 +49,9 @@ differs; the rulings at the top of `superpowers/plans/2026-10-21-diff-crawler.md
 changes `active`, `token` or `url`. The one exception is `probe-slugs`, which calls #31's `add_board` with
 `found_by = 'slug_probe'`. The crawler writes no `read_queue` row and has no reader version. It calls `classify_title`,
 `decide_and_store` and `rebuild` and never classifies anything itself. The `job_run.job` values it writes are
-`read_boards` and `watch_pages`, not `crawl`.
+`read_boards` and `watch_pages`, not `crawl`. The slug probe writes no `job_run`: it appends a `slug_probe_run` event
+(entity `source`, keyed `slug-probe-run:<New York date>`) once a day's pass completes, and one `slug_probed` event
+per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is not probed again for 30 days).
 
 **#6 ranking.**
 - Stale: `from outreach.crawl.stale import load_stale, Stale`. `load_stale(conn, today, *, max_age_months=None,
@@ -65,8 +67,10 @@ changes `active`, `token` or `url`. The one exception is `probe-slugs`, which ca
 - Doubtful boards: a board with `found_by` of `stapply_name` or `slug_probe` is doubtful until it has had a good read
   (`ok`, `empty` or `unchanged`) and its `flagged` item `board-doubtful:<board_id>` is resolved. Ignore such a board for
   ranking until then. The crawler raises the item on the first good read when the org name the board reports is none of
-  the company's names, or when a company with LCA evidence has a board of over 300 jobs. A board on an ATS that reports no org
-  name (Lever, Ashby) raises no item from the name test, so the `found_by` rule is the only guard there.
+  the company's names, or when a company with LCA evidence has a board of over 300 jobs. A `slug_probe` board whose
+  first good read reports no org name (every Lever and Ashby guess, and a Greenhouse guess with no `company_name`)
+  always raises it, so Devanshu confirms every guessed board. A `stapply_name` board with no org name raises it only
+  on the 300-job test.
 
 **#32 reader.**
 - The crawler stores each body and its `body_sha256` and nothing else. #32's sweep queues every stored body with no row
@@ -79,16 +83,25 @@ changes `active`, `token` or `url`. The one exception is `probe-slugs`, which ca
   `rebuild(conn, *, cfg, version, batch_size, progress)` have no such argument.
 - With no combiner given, the upsert must write `provisional = 1` and `reader_version = NULL`. Only a combiner may leave a
   row final. The crawler resets the current-ruleset row itself as a second guard.
+- "No combiner means `provisional = 1`" must cover `rules.rebuild` too. Today rebuild upserts every open posting and
+  keeps a row's old `provisional = 0` and `reader_version`; after a ruleset revert (a rebuild back to an earlier
+  version) the old rows come back final with no reader having agreed under that ruleset again. The crawler cannot
+  guard this one: rebuild writes the rows itself.
 - A posting that is stale by age may be skipped or read last. It is never a reason to refuse a reading.
 
 **#11 API and health view.**
 - `TickReport` (`outreach.crawl.tick`): `run_id`, `rebuilt`, `read`, `ok`, `empty`, `error`, `unchanged`, `deferred`,
-  `failed`, `new`, `closed`, `seconds`, `tripped` (host buckets the breaker stopped, sorted), `watch` (a `WatchReport` with
-  `baseline`, `unchanged`, `changed`, `unstable`, `error`, `deferred`) and `watch_error`. `read` counts boards whose read
-  was recorded; `deferred` counts boards put off with no read recorded.
+  `failed`, `new`, `closed`, `seconds`, `tripped` (host buckets the breaker stopped or that read a mass empty, sorted),
+  `watch` (a `WatchReport` with `baseline`, `unchanged`, `changed`, `unstable`, `error`, `deferred`), `watch_error`,
+  `probe` (a `ProbeReport` with `considered`, `probed`, `added`, `conflicts`, `name_mismatch`, `errors`; None when the
+  day's pass already ran or the budget was spent) and `probe_error`. `read` counts boards whose read was recorded;
+  `deferred` counts boards put off with no read recorded. A failed probe or watch pass is its `*_error` text and
+  never undoes the board reads.
 - `job_run` `read_boards`: one row per tick and one per `read_company_boards` call. The summary holds every
-  `TickReport` field except `watch` and `watch_error` (`tripped` is a list), plus `failed_boards` (board ids) when a board's
-  ingest raised. Status is `ok`, `partial` (a board failed or the run stopped) or `failed`. `error` names at most 20 failures.
+  `TickReport` field (`tripped` a list; `probe` and `watch` objects, or null when the pass did not run or failed, with
+  `probe_error` and `watch_error` beside them; a `read_company_boards` row has no probe or watch keys), plus
+  `failed_boards` (board ids) when a board's ingest raised. Status is `ok`, `partial` (a board failed or the run
+  stopped) or `failed`. `error` names at most 20 failures.
 - `job_run` `watch_pages`: its own row per tick, summary from `WatchReport`. `probe-slugs` writes no `job_run`.
 - Needs-you items the crawler raises, all with `raised_by = 'crawler'`: `board_unreadable` (three errors in a row),
   `board_empty` (first empty read), `careers_changed`, and `flagged` for a doubtful board (`board-doubtful:<board_id>`),
@@ -98,6 +111,12 @@ changes `active`, `token` or `url`. The one exception is `probe-slugs`, which ca
   error streaks that all began after that host's last good read. The reason names the host and how many boards are
   unread since when. The host's next good read clears it. Show it from the same place as the `tripped` list.
 - A failed read never closes a posting. A deferred board has no `board_read` row and no streak change.
+- Outages: a board whose last good read is under `outage_grace_s` (a day) old is held as a deferral when its host trips
+  the breaker, and when five or more boards of one host with open postings read a well-formed empty in one tick (a
+  mass empty closes nothing and raises no `board_empty`). After the grace the reads are written as they are, so a host
+  that blocks for good reaches Needs you as the one host-blocked item.
+- The weekly full read: a board none of whose postings has been listed for 7 days is read with no validators, so a
+  retitle under the same ids or a change past the first page shows up within a week.
 
 **#17 deploy.**
 - `launchd/com.devanshu.outreach-crawl.plist.template` (label `com.devanshu.outreach-crawl`, `StartInterval` 1800,
@@ -123,13 +142,12 @@ changes `active`, `token` or `url`. The one exception is `probe-slugs`, which ca
   - Also check how long the first tick takes to decide (the first Greenhouse pass decides about 13,000 postings, roughly 70 s of CPU in batches of 100), and that the host-blocked item and `tripped` look right when one host is made to fail on a scratch store.
 
 **Known gaps at hand-off.**
-- Slug probing runs only as `probe-slugs`. The tick does not run it, so #17's deploy runbook needs a daily step, or the
-  tick gets the daily pass (first tick after 06:00 New York, limit 50) in a later change.
-- A guessed `slug_probe` board on Lever or Ashby does not yet raise a "board match doubtful" item on its first read, so
-  Devanshu is not asked to confirm it. The plan's later ruling wants one; until it is built, #6 must keep such a board
-  doubtful on `found_by` alone.
-- Fingerprint adapters read `unchanged` on the same id set, so a retitle under the same ids is not re-decided until the ids change.
-- Body edits on detail-request ATSs (Workday, Oracle, SmartRecruiters, Rippling, BambooHR, JazzHR) go unseen after the first fetch.
+- Body edits on detail-request ATSs (Workday, Oracle, SmartRecruiters, Rippling, BambooHR, JazzHR) go unseen after the
+  first fetch, except through ruling 6's refetch (a changed title or date, and the monthly lane 1 refetch).
+- A retitle under the same ids on a fingerprint adapter is seen at the weekly full read, not at once.
+- A mass empty that lasts past the outage grace is written as empty reads: a day later its boards raise `board_empty`
+  items one by one and the second empty closes their postings.
+- A board's host bucket is not stored, so the host ruling groups boards by ATS (true for every adapter here).
 
 ## Evidence only
 

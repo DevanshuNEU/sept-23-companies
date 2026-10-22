@@ -250,12 +250,34 @@ describe('usePlanActions', () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it('logApplied on a row with nobody on it is refused before the role is looked at, and calls nothing', async () => {
+    const { client, rowOf, act: run } = await open();
+    const apply = vi.spyOn(client, 'logApplied');
+    expect(rowOf(5).role).not.toBeNull();
+    run((a) => a.logApplied(rowOf(5)));
+    await settle();
+    expect(screen.getByText('Not logged. Find someone at Cerebrium first. Press S to search.')).toBeInTheDocument();
+    await settle(10000);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('a press on a row that is no longer on the newest plan is refused', async () => {
+    const { client, rowOf, act: run } = await open();
+    const request = vi.spyOn(client, 'logRequest');
+    const gone: PlanRow = { ...rowOf(3), entryId: 999_999 };
+    run((a) => a.logRequest(gone));
+    await settle();
+    expect(screen.getByText("Not logged. Pylon's row is no longer on today's plan.")).toBeInTheDocument();
+    await settle(10000);
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('logRequest on a row with nobody on it or an email row says so and calls nothing', async () => {
     const { client, rowOf, act: run } = await open();
     const request = vi.spyOn(client, 'logRequest');
     run((a) => a.logRequest(rowOf(5)));
     await settle();
-    expect(screen.getByText('Find someone at Cerebrium first.')).toBeInTheDocument();
+    expect(screen.getByText('Not logged. Find someone at Cerebrium first. Press S to search.')).toBeInTheDocument();
     run((a) => a.logRequest(rowOf(7)));
     await settle();
     expect(screen.getByText('Review this email in the Outbox.')).toBeInTheDocument();

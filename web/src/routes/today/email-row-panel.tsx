@@ -5,7 +5,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { messageStatus } from '@/lib/status';
 import { useViewQuery } from '@/pending/pending';
-import { MAIN, CarriedOver, CompanyLink, PanelHead, PanelReason, QuietActions, type PanelActions } from './plan-panel';
+import { MAIN, CarriedOver, CompanyLink, PanelHead, PanelReason, QuietActions, SkippedLine, type PanelActions } from './plan-panel';
 
 /**
  * An email row (design 16.1): the company's draft in the Outbox with its status, and Review in Outbox as the one
@@ -75,7 +75,7 @@ export function EmailRowPanel({
         <span className="flex-1" />
         {todo ? <QuietActions actions={actions} /> : null}
       </div>
-      {row.state === 'skipped' ? <p className="text-[13px] text-muted-foreground">Carried to tomorrow. It is first on tomorrow&apos;s plan.</p> : null}
+      {row.state === 'skipped' ? <SkippedLine row={row} /> : null}
     </div>
   );
 }

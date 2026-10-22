@@ -29,7 +29,7 @@ export type PanelActions = {
 };
 
 /** The note editor's state for this row, and whether its newest save or Confirm line is still waiting. */
-export type NoteState = { edit: NoteEdit | null; saving: boolean };
+export type NoteState = { edit: NoteEdit | null; saving: boolean; unsaved: boolean; fieldId: string };
 
 const KIND: Record<RoleKind, string> = {
   engineer: 'Engineer',
@@ -162,9 +162,27 @@ export function QuietActions({ actions }: { actions: Pick<PanelActions, 'onCarry
   );
 }
 
+/** Why a skipped row left the day: carried to tomorrow, or removed as not a fit (with where to bring it back). */
+export function SkippedLine({ row }: { row: PlanRow }) {
+  if (row.skipReason === 'not_a_fit') {
+    return (
+      <p className="text-[13px] text-muted-foreground">
+        {`Not a fit. ${row.company.name} is on the No-go list, under Removed by you, where you can bring it back. `}
+        <Link
+          to="/no-go"
+          className="rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          Open the No-go list
+        </Link>
+      </p>
+    );
+  }
+  return <p className="text-[13px] text-muted-foreground">Carried to tomorrow. It is first on tomorrow&apos;s plan.</p>;
+}
+
 /** The calm last line of a row that is no longer to do. */
 export function ClosedLine({ row }: { row: PlanRow }) {
-  if (row.state === 'skipped') return <p className="text-[13px] text-muted-foreground">Carried to tomorrow. It is first on tomorrow&apos;s plan.</p>;
+  if (row.state === 'skipped') return <SkippedLine row={row} />;
   if (row.state !== 'done') return null;
   const times = row.steps.flatMap((s) => (s.at ? [s.at] : [])).sort();
   const last = times.at(-1);
@@ -256,6 +274,7 @@ export function PersonPanel({
           key={row.note.noteId}
           note={row.note}
           saving={note.saving}
+          unsaved={note.unsaved}
           onCopy={actions.onCopy}
           onEdit={actions.onEdit}
           onConfirm={actions.onConfirm}
@@ -265,6 +284,7 @@ export function PersonPanel({
                 note={row.note}
                 edit={note.edit}
                 name={person.person.name}
+                fieldId={note.fieldId}
                 onChange={actions.onEditChange}
                 onSave={actions.onSave}
                 onCancel={actions.onCancelEdit}

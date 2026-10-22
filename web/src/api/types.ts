@@ -225,6 +225,7 @@ export interface PlanRow {
   emailTouchId: Id | null;                                                           // channel 'email': the Outbox item
   steps: PlanStep[];                                                                 // linkedin_request: request, then apply when there is a role
   state: 'todo' | 'done' | 'skipped';                                                // derived
+  skipReason: 'carried' | 'not_a_fit' | null;                                        // derived: why a skipped row left the day (null unless skipped)
   carriedFrom: IsoDate | null; revision: Revision;
 }
 export interface PlanView {

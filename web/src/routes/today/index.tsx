@@ -9,19 +9,17 @@ import {
   type Id,
   type PlanRow,
   type PlanView,
-  type RemoveReason,
-  type ShellSummary,
   type StepKind,
 } from '@/api';
 import { DayRail } from '@/components/day-rail';
 import { QueryState } from '@/components/state-views';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useHotkeys, type Binding } from '@/keyboard/hotkeys';
+import { isMac, useHotkeys, type Binding } from '@/keyboard/hotkeys';
 import { useListNav } from '@/keyboard/list-nav';
 import { formatLongDate } from '@/lib/format';
 import { openExternal, safeHref } from '@/lib/safe-href';
-import { usePendingControls, usePendingWrite, useViewQuery } from '@/pending/pending';
+import { useViewQuery } from '@/pending/pending';
 import { RemoveDialog } from '@/routes/proposals/remove-dialog';
 import { EmailRowPanel } from './email-row-panel';
 import { FindSomeonePanel } from './find-someone-panel';
@@ -94,16 +92,14 @@ function PlanHead({ plan }: { plan: PlanView }) {
  * button.
  */
 function PlanWork({ plan }: { plan: PlanView }) {
-  const client = useClient();
   const navigate = useNavigate();
   const actions = usePlanActions();
-  const write = usePendingWrite();
-  const { isPending } = usePendingControls();
   const [pinned] = useState(() => plan.rows.find((r) => r.state === 'todo')?.entryId);
   const [edits, setEdits] = useState<ReadonlyMap<Id, NoteEdit>>(new Map());
   const [removing, setRemoving] = useState<PlanRow | null>(null);
   // The panel's heading takes focus after a save or a confirm, so focus never drops to the page.
   const headingId = useId();
+  const noteFieldId = `${headingId}-note`;
 
   const rows = plan.rows;
   const ids = rows.map((r) => r.entryId);
@@ -146,11 +142,17 @@ function PlanWork({ plan }: { plan: PlanView }) {
   const carry = (row: PlanRow) => {
     if (actions.skip(row)) moveOn(row);
   };
+  /** An open edit that differs from the saved note: Copy would copy the saved text, so it waits for Save. */
+  const unsavedEdit = (row: PlanRow): boolean => {
+    const draft = row.note ? edits.get(row.note.noteId) : undefined;
+    return draft !== undefined && row.note !== null && (draft.text !== row.note.text || draft.line !== row.note.reasonLine);
+  };
   const copyNote = (row: PlanRow) => {
     if (row.findSomeone) return void copy(row.findSomeone.handoff, 'Copied the handoff for Claude.');
     const note = row.note;
     if (!note) return void toast(row.channel === 'email' ? 'No note on this row. Review the email in the Outbox.' : 'No note on this row yet.');
     if (actions.noteSaving(note.noteId)) return void toast('Not copied. The note is saving, and the checks run again first.');
+    if (unsavedEdit(row)) return void toast(`Not copied. Save your edit first (${isMac() ? 'Cmd+S' : 'Ctrl+S'}), then copy.`);
     if (note.checks.length === 0) return void toast('Not copied. The checks have not run yet. Try again in a moment.');
     const blocks = note.checks.filter((c) => c.severity === 'block').length;
     if (blocks > 0) return void toast(`Not copied. ${plural(blocks, 'check blocks', 'checks block')} this note. Fix it, then copy.`);
@@ -172,6 +174,8 @@ function PlanWork({ plan }: { plan: PlanView }) {
     const note = row.note;
     if (!note) return void toast(row.findSomeone ? 'No note yet. Claude writes it once someone is found.' : 'No note on this row.');
     if (!edits.has(note.noteId)) setEdit(note.noteId, { text: note.text, line: note.reasonLine });
+    // Focus goes into the editor only when he starts an edit, never when he comes back to a row with a kept one.
+    requestAnimationFrame(() => document.getElementById(noteFieldId)?.focus());
   };
   const save = (row: PlanRow) => {
     const note = row.note;
@@ -197,24 +201,6 @@ function PlanWork({ plan }: { plan: PlanView }) {
   const open = (url: string | null | undefined, none: string) => {
     if (!openExternal(url)) toast(none);
   };
-  const notAFit = (row: PlanRow, reason: RemoveReason, note: string) => {
-    const { id, name } = row.company;
-    if (isPending(`remove:${id}`)) return;
-    const label = `Removed ${name}. Find it on the No-go list.`;
-    write({
-      id: `remove:${id}`,
-      label,
-      afterCommit: label,
-      immediate: true,
-      patches: [
-        { key: queryKeys.plan, apply: (p: PlanView) => p },
-        { key: queryKeys.shell, apply: (s: ShellSummary) => ({ ...s, noGoCount: s.noGoCount + 1 }) },
-      ],
-      commit: (o) => client.removeCompany(id, reason, note, row.company.revision, o),
-    });
-    if (row.entryId === selected) moveOn(row);
-  };
-
   const panelActions = (row: PlanRow): PanelActions => ({
     onLog: (kind) => log(row, kind),
     onCarry: () => carry(row),
@@ -248,7 +234,8 @@ function PlanWork({ plan }: { plan: PlanView }) {
     { keys: 'r', label: 'Log request sent', group, enabled: has, run: on((r) => log(r, 'request')) },
     { keys: 'p', label: 'Log applied', group, enabled: has, run: on((r) => log(r, 'apply')) },
     { keys: 'x', label: 'Carry to tomorrow', group, enabled: has, run: on(carry) },
-    { keys: 'n', label: 'Not a fit', group, enabled: has, run: on((r) => setRemoving(r)) },
+    // Only a row to do has a Not a fit button, so only a row to do answers n.
+    { keys: 'n', label: 'Not a fit', group, enabled: current?.state === 'todo', run: on((r) => setRemoving(r)) },
     { keys: 'mod+s', label: 'Save the note', group, enabled: editing, run: on(save) },
   ];
   // These act on the selected person, so a key right after j, k or a click waits for that move to render.
@@ -265,7 +252,12 @@ function PlanWork({ plan }: { plan: PlanView }) {
   if (current) {
     const a = panelActions(current);
     const note = current.note;
-    const state = { edit: note ? (edits.get(note.noteId) ?? null) : null, saving: note ? actions.noteSaving(note.noteId) : false };
+    const state = {
+      edit: note ? (edits.get(note.noteId) ?? null) : null,
+      saving: note ? actions.noteSaving(note.noteId) : false,
+      unsaved: unsavedEdit(current),
+      fieldId: noteFieldId,
+    };
     panel =
       current.channel === 'email' ? (
         <EmailRowPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} headingId={headingId} />
@@ -308,7 +300,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
           if (!o) setRemoving(null);
         }}
         onRemove={(reason, note) => {
-          if (removing) notAFit(removing, reason, note);
+          if (removing && actions.notAFit(removing, reason, note)) moveOn(removing);
         }}
       />
     </div>

@@ -20,8 +20,9 @@ function charCount(chars: number, max: number): { tone: Tone; text: string } {
 }
 
 /** One line for the foot: what the checks say, with an icon beside the words. */
-function checkSummary(note: NoteDraft, saving: boolean): { tone: 'ok' | Tone; text: string } {
+function checkSummary(note: NoteDraft, saving: boolean, unsaved: boolean): { tone: 'ok' | Tone; text: string } {
   if (saving) return { tone: 'idle', text: 'Saving. The checks run again before you can copy.' };
+  if (unsaved) return { tone: 'idle', text: 'Your edit is not saved. Copy waits for Save.' };
   if (note.checks.length === 0) return { tone: 'idle', text: 'The checks have not run yet. Copy waits for them.' };
   const blocks = note.checks.filter((c) => c.severity === 'block').length;
   const warns = note.checks.filter((c) => c.severity === 'warn').length;
@@ -69,6 +70,7 @@ export function NoteBlock({
   onConfirm,
   editing,
   saving = false,
+  unsaved = false,
   onFix,
 }: {
   note: NoteDraft;
@@ -79,19 +81,21 @@ export function NoteBlock({
   editing?: ReactNode;
   /** A save of this note is waiting to land: its checks are unknown. */
   saving?: boolean;
+  /** An open edit differs from the saved note: Copy would copy the saved text, so it waits for Save. */
+  unsaved?: boolean;
   /** Fix buttons on the checks; without it a check shows no fix. */
   onFix?: (fix: CheckFix) => void;
 }) {
   const ids = useId();
   const summaryId = `${ids}-checks`;
   const count = charCount(note.chars, note.maxChars);
-  const summary = checkSummary(note, saving);
+  const summary = checkSummary(note, saving, unsaved);
   const SummaryIcon = SUMMARY_ICON[summary.tone];
   const flagged = !saving && note.checks.some((c) => c.severity !== 'pass');
   const blocked = note.checks.some((c) => c.severity === 'block');
   // Copy runs only on a note whose checks are known and pass: not while a save is pending, not before any
   // check ran, never with a block.
-  const canCopy = !saving && note.checks.length > 0 && !blocked;
+  const canCopy = !saving && !unsaved && note.checks.length > 0 && !blocked;
   const asking = note.needsYourLine && !editing;
   const used = note.facts.filter((f) => f.inNote);
   const CountIcon = count.tone === 'bad' ? Ban : count.tone === 'warn' ? TriangleAlert : null;

@@ -23,6 +23,7 @@ import { ShortcutSheet } from './shortcut-sheet';
 
 const VIEW_TITLE: Record<string, string> = {
   today: 'Today',
+  proposals: 'All proposed companies',
   outbox: 'Outbox',
   linkedin: 'LinkedIn list',
   'needs-you': 'Needs you',

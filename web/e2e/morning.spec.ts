@@ -138,7 +138,7 @@ test('every view loads clean: no foreign host, no console error, no Send button'
   const foreign = watchRequests(page);
   const views: [string, string][] = [
     ['/today', 'Today'],
-    ['/proposals', 'Today'],
+    ['/proposals', 'All proposed companies'],
     ['/outbox', 'Outbox'],
     ['/linkedin', 'LinkedIn list'],
     ['/needs-you', 'Needs you'],
@@ -197,7 +197,7 @@ test('1280: no page or table scrolls sideways on Today, Proposals, Done and No-g
   await page.setViewportSize({ width: 1280, height: 800 });
   for (const [path, heading, ready] of [
     ['/today', 'Today', 'listbox'],
-    ['/proposals', 'Today', 'table'],
+    ['/proposals', 'All proposed companies', 'table'],
     ['/done', 'Done companies', 'table'],
     ['/no-go', 'No-go list', 'table'],
   ] as const) {

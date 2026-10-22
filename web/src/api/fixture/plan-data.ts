@@ -221,7 +221,7 @@ function buildRows(c: PlanCtx, mode: Mode): Built {
         searchUrl: searchUrl(spec.company), handoff: HANDOFF(spec.company, role?.title ?? 'an engineering role'),
       },
       emailTouchId: spec.channel === 'email' ? c.touch.marcus : null,
-      steps, state: isDone ? 'done' : 'todo',
+      steps, state: isDone ? 'done' : 'todo', skipReason: null,
       carriedFrom: spec.carriedFrom && !isDone ? spec.carriedFrom : null, revision: 1,
     };
   });

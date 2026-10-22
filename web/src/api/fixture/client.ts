@@ -330,6 +330,13 @@ export class FixtureClient implements OutreachClient {
       if (v.company.status === 'removed' || v.company.status === 'closed') throw notAllowed(`${v.company.name} is already ${v.company.status}`);
       const taken = this.takeEntry(companyId);
       if (taken) this.removedEntries.set(companyId, taken);
+      // Its row on today's plan leaves the day as not a fit, in place: handled, never done.
+      for (const row of this.db.plan.rows) {
+        if (row.company.id !== companyId || row.state !== 'todo') continue;
+        row.state = 'skipped';
+        row.skipReason = 'not_a_fit';
+        row.revision += 1;
+      }
       this.touchCompany(companyId, { status: 'removed' }, ['removed', note ? `Removed by you: ${note}` : 'Removed by you'], 'Removed by you');
       this.db.noGo.companies.unshift({ kind: 'removed', company: { ...refOf(v.company), revision: v.company.revision }, removeReason: reason, note, removedAt: this.now });
       this.countReason('removed', 1);
@@ -343,6 +350,12 @@ export class FixtureClient implements OutreachClient {
       const v = this.fresh(companyId, revision);
       this.db.noGo.companies = this.db.noGo.companies.filter((r) => r !== row);
       this.countReason('removed', -1);
+      for (const planRow of this.db.plan.rows) {
+        if (planRow.company.id !== companyId || planRow.skipReason !== 'not_a_fit') continue;
+        planRow.state = 'todo';
+        planRow.skipReason = null;
+        planRow.revision += 1;
+      }
       this.touchCompany(companyId, { status: 'backlog' }, ['restored', `Restored to the backlog: ${reason}`], 'Backlog');
       const kept = this.removedEntries.get(companyId);
       this.removedEntries.delete(companyId);
@@ -766,6 +779,7 @@ export class FixtureClient implements OutreachClient {
   private logStep(entryId: Id, kind: StepKind, key: string, check: (row: PlanRow) => void): PlanRow {
     const row = this.planRow(entryId);
     if (this.keys.has(key)) return row;
+    if (row.skipReason === 'not_a_fit') throw notAllowed(`${row.company.name} is on the No-go list`);
     if (row.state === 'skipped') throw notAllowed(`${row.company.name} is carried to tomorrow`);
     const step = row.steps.find((st) => st.kind === kind);
     if (!step) throw notAllowed(kind === 'request' ? 'This row has no request to log' : 'This row has no role to apply to');
@@ -809,6 +823,7 @@ export class FixtureClient implements OutreachClient {
       if (row.state === 'done') throw notAllowed(`${row.company.name} is already done`);
       if (row.state === 'skipped') return row;
       row.state = 'skipped';
+      row.skipReason = 'carried';
       row.revision += 1;
       const t = this.db.plan.tomorrow;
       t.total += 1;

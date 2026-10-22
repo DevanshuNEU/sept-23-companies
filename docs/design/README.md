@@ -865,6 +865,7 @@ someone"), the company, and a status word:
 | blue dot (info pair) | Logged | one step logged, one to go |
 | filled check | Done | every step logged |
 | half-filled circle | Carried over | carried to tomorrow; grey, never red |
+| half-filled circle | Not a fit | removed with Not a fit (the company is on the No-go list); stays in place, grey, takes no key |
 | dashed circle with a flag | Done for today | the finish node, with `Tomorrow: 7 people`; filled when the day is done |
 
 The line between two done nodes is drawn darker, so the distance travelled shows. A logged row stays where it is,
@@ -910,7 +911,7 @@ Proposals.
 | Log request sent | R | Logged: request sent to Lena Ortiz. | Z, 8 seconds |
 | Log applied | P | Logged: applied for Software Engineer I at Pylon. | Z |
 | Carry to tomorrow | X | Carried to tomorrow: Inngest. | Z |
-| Not a fit | N | the phase-1 remove dialog: Removed Pylon. Find it on the No-go list. | Z |
+| Not a fit | N | the phase-1 remove dialog: Removed Pylon. Find it on the No-go list. | None: a dialog action, it commits at once (phase 1). The row stays in place, reads Not a fit, and takes no key. |
 | Confirm line | Y | Confirmed your line. | Z |
 | Copy the note, the handoff | C, ⇧C | Copied the note. / Copied 1 handoff for Claude. | |
 | Answer the question | 1, 2, 3 | Logged: Kai Brennan accepted. | Z (Said no and Asked to stop log at once) |

@@ -1008,6 +1008,42 @@ describe('plan writes: skip, notes, wins, watch', () => {
     expect((await c.shell()).plan.done).toBe(2);
   });
 
+  it('rows start with no skip reason, and skipRow says the row was carried', async () => {
+    const c = client();
+    expect((await c.plan()).rows.every((r) => r.skipReason === null)).toBe(true);
+    const row = await rowAt(c, 4);
+    expect((await c.skipRow(row.entryId, row.revision, opt())).skipReason).toBe('carried');
+    expect((await rowAt(c, 4)).skipReason).toBe('carried');
+  });
+
+  it('removeCompany takes its plan row out of the day as not a fit, and restoreCompany puts it back', async () => {
+    const c = client();
+    const before = await c.plan();
+    const pylon = await rowAt(c, 3);
+    await c.removeCompany(pylon.company.id, 'not_a_fit', '', pylon.company.revision, opt());
+    const plan = await c.plan();
+    expect(plan.rows[2]).toMatchObject({ state: 'skipped', skipReason: 'not_a_fit' });
+    expect(plan.rows.map((r) => r.entryId)).toEqual(before.rows.map((r) => r.entryId));
+    expect(plan.done).toBe(2);
+    expect((await c.shell()).plan.done).toBe(2);
+    // A step on it is refused: the company is on the No-go list.
+    const refused = await rejection(c.logRequest(pylon.entryId, { personId: pylon.person?.person.id ?? 0, idempotencyKey: 'plan:x:request' }, pylon.revision, opt()));
+    expect(refused.code).toBe('not_allowed');
+    expect(refused.message).toBe('Pylon is on the No-go list');
+
+    const removed = (await c.noGo()).companies.flatMap((r) => (r.kind === 'removed' && r.company.id === pylon.company.id ? [r] : []))[0];
+    if (!removed) throw new Error('not removed');
+    await c.restoreCompany(pylon.company.id, 'Changed my mind', removed.company.revision, opt());
+    expect((await rowAt(c, 3))).toMatchObject({ state: 'todo', skipReason: null });
+  });
+
+  it('a done row stays done when its company is removed', async () => {
+    const c = client();
+    const dana = await rowAt(c, 1);
+    await c.removeCompany(dana.company.id, 'other', '', dana.company.revision, opt());
+    expect(await rowAt(c, 1)).toMatchObject({ state: 'done', skipReason: null });
+  });
+
   it('skipRow on a done row is not_allowed, and a stale revision conflicts', async () => {
     const c = client();
     const done = await rowAt(c, 1);

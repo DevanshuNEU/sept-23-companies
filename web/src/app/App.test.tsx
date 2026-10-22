@@ -26,6 +26,16 @@ describe('App routes for results', () => {
   });
 });
 
+describe('the proposals route', () => {
+  it('opens /proposals as All proposed companies, in the heading and the breadcrumb', async () => {
+    window.history.pushState({}, '', '/proposals');
+    render(<App client={new FixtureClient()} />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'All proposed companies' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'breadcrumb' })).toHaveTextContent('All proposed companies');
+    window.history.pushState({}, '', '/');
+  });
+});
+
 describe('route table', () => {
   const pathsOf = (list: typeof routes, parent = ''): string[] =>
     list.flatMap((r) => {

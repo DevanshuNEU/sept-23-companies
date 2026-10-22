@@ -10,6 +10,7 @@ import {
   type PlanRow,
   type PlanView,
   type PromptTouch,
+  type RemoveReason,
   type ReplyKind,
   type Revision,
   type ShellSummary,
@@ -86,6 +87,7 @@ let saves = 0;
 /** The newest save per note, per client, so the view can tell a note whose save has not landed yet. */
 const lastSave = new WeakMap<QueryClient, Map<Id, string>>();
 
+const removeId = (row: PlanRow) => `remove:${row.company.id}`;
 const cachedPlan = (queryClient: QueryClient) => queryClient.getQueryData<PlanView>(queryKeys.plan);
 const cachedRow = (queryClient: QueryClient, entryId: Id) => cachedPlan(queryClient)?.rows.find((r) => r.entryId === entryId);
 
@@ -143,6 +145,17 @@ export function usePlanActions() {
   const { isPending } = usePendingControls();
   const queryClient = useQueryClient();
 
+  /**
+   * Why a press on this row must do nothing, or null. The company was removed as not a fit (on screen, in the newest
+   * poll, or by a remove still on its way), or the newest plan no longer has the row.
+   */
+  const goneOrNoGo = (row: PlanRow, latest: PlanRow | undefined, what: 'Not logged' | 'Not carried'): string | null => {
+    const company = row.company.name;
+    if (row.skipReason === 'not_a_fit' || latest?.skipReason === 'not_a_fit' || isPending(removeId(row))) return `${what}. ${company} is on the No-go list.`;
+    if (cachedPlan(queryClient) && !latest) return `${what}. ${company}'s row is no longer on today's plan.`;
+    return null;
+  };
+
   /** True when the log was queued; a refused or repeated press returns false (and says why, unless it repeats). */
   const logStep = (row: PlanRow, kind: StepKind): boolean => {
     const { entryId } = row;
@@ -151,12 +164,15 @@ export function usePlanActions() {
     const company = row.company.name;
     // The sender and the reply reader log email, so no key logs anything on an email row.
     if (row.channel === 'email') return refuse('Review this email in the Outbox.');
+    // Nobody on the row yet: neither a request nor an application can be logged, whatever the role.
+    if (!row.person) return refuse(`Not logged. Find someone at ${company} first. Press S to search.`);
     // The row on screen against the newest poll: a key that lands before the view drew a changed row is refused.
     const latest = cachedRow(queryClient, entryId);
+    const gone = goneOrNoGo(row, latest, 'Not logged');
+    if (gone) return refuse(gone);
     let call: (revision: Revision, o: WriteOptions) => Promise<PlanRow>;
     const key = `plan:${entryId}:${kind}`;
     if (kind === 'request') {
-      if (!row.person) return refuse(`Find someone at ${company} first.`);
       const personId = row.person.person.id;
       if (latest && latest.person?.person.id !== personId) {
         const now = latest.person ? ` to ${latest.person.person.name}` : '';
@@ -209,6 +225,8 @@ export function usePlanActions() {
     const id = `skip:${entryId}`;
     if (isPending(id)) return false;
     const company = row.company.name;
+    const gone = goneOrNoGo(row, cachedRow(queryClient, entryId), 'Not carried');
+    if (gone) return refuse(gone);
     if (row.state === 'done') return refuse(`${company} is already done.`);
     if (row.state === 'skipped') return refuse(`${company} is already carried to tomorrow.`);
     const label = `Carried to tomorrow: ${company}.`;
@@ -216,7 +234,7 @@ export function usePlanActions() {
       id,
       label,
       afterCommit: `${label} ${ADD(company)}`,
-      patches: [planRowPatch(entryId, (r) => (r.state === 'todo' ? { ...r, state: 'skipped' } : r)), shellPatch()],
+      patches: [planRowPatch(entryId, (r) => (r.state === 'todo' ? { ...r, state: 'skipped', skipReason: 'carried' } : r)), shellPatch()],
       commit: (o) =>
         sendVersioned(queryClient, `plan:${entryId}`, row.revision, () => cachedRow(queryClient, entryId)?.revision, o, (revision) =>
           client.skipRow(entryId, revision, o),
@@ -322,6 +340,29 @@ export function usePlanActions() {
     });
   };
 
+  /**
+   * Not a fit: the company goes on the No-go list at once, with no Undo (a dialog action, phase 1 lead decision 2).
+   * Its row leaves the day in place, as not a fit, and the API says the same once the commit lands. True when queued.
+   */
+  const notAFit = (row: PlanRow, reason: RemoveReason, note: string): boolean => {
+    const id = removeId(row);
+    if (isPending(id)) return false;
+    if (row.state !== 'todo') return refuse(`${row.company.name} is not on today's list to do.`);
+    const label = `Removed ${row.company.name}. Find it on the No-go list.`;
+    write({
+      id,
+      label,
+      afterCommit: label,
+      immediate: true,
+      patches: [
+        planRowPatch(row.entryId, (r) => (r.state === 'todo' ? { ...r, state: 'skipped', skipReason: 'not_a_fit' } : r)),
+        shellPatch((s) => ({ ...s, noGoCount: s.noGoCount + 1 })),
+      ],
+      commit: (o) => client.removeCompany(row.company.id, reason, note, row.company.revision, o),
+    });
+    return true;
+  };
+
   /** True while the newest save of this note waits in its window or for its commit: its checks are unknown. */
   const noteSaving = (noteId: Id): boolean => {
     const id = lastSave.get(queryClient)?.get(noteId);
@@ -330,5 +371,5 @@ export function usePlanActions() {
   /** True while Confirm line for this note waits in its window or for its commit. */
   const confirming = (noteId: Id): boolean => isPending(`confirm:${noteId}`);
 
-  return { logRequest, logApplied, skip, saveNote, confirmReason, answer, seeWins, noteSaving, confirming };
+  return { logRequest, logApplied, skip, notAFit, saveNote, confirmReason, answer, seeWins, noteSaving, confirming };
 }

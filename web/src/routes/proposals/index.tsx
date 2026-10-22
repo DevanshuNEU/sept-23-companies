@@ -351,7 +351,7 @@ export default function TodayPage() {
   return (
     <div className="h-full min-h-0">
       {/* The view's name for the outline; the visible heading is the date. */}
-      <h1 className="sr-only">Today</h1>
+      <h1 className="sr-only">All proposed companies</h1>
       <QueryState
         query={today}
         skeleton={

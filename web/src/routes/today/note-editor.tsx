@@ -19,6 +19,7 @@ export function NoteEditor({
   note,
   edit,
   name,
+  fieldId,
   onChange,
   onSave,
   onCancel,
@@ -27,6 +28,8 @@ export function NoteEditor({
   edit: NoteEdit;
   /** The person the note is to, for the field's name. */
   name: string;
+  /** The text field's id: the view focuses it when he starts an edit, never on a remount. */
+  fieldId?: string;
   onChange: (edit: NoteEdit) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -42,8 +45,8 @@ export function NoteEditor({
         </div>
       ) : null}
       <Textarea
+        id={fieldId}
         aria-label={`Note to ${name}`}
-        autoFocus
         value={edit.text}
         onChange={(e) => onChange({ ...edit, text: e.target.value })}
         className="min-h-[120px] bg-background text-sm leading-[22px] md:text-sm"

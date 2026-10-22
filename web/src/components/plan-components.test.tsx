@@ -129,6 +129,14 @@ describe('DayRail', () => {
     expect(screen.getByRole('option', { name: '7. Mintlify by email, Done' })).toHaveTextContent('By email, reviewed');
   });
 
+  it('a row removed as not a fit reads Not a fit, not Carried over', () => {
+    const p = plan();
+    const rows = p.rows.map((r) => (r.position === 4 ? { ...r, state: 'skipped' as const, skipReason: 'not_a_fit' as const } : r));
+    render(rail({ ...p, rows }));
+    const box = screen.getByRole('listbox', { name: "Today's people" });
+    expect(within(box).getAllByRole('option')[3]).toHaveAccessibleName('4. Jonah Park at Inngest, Not a fit');
+  });
+
   it('clicking a row calls its onClick', () => {
     const p = plan();
     const onClick = vi.fn();
@@ -275,6 +283,15 @@ describe('NoteBlock', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm line' }));
     expect(calls.copy).not.toHaveBeenCalled();
     expect(calls.confirm).not.toHaveBeenCalled();
+  });
+
+  it('an unsaved edit makes Copy wait and says why', () => {
+    const calls = noteBlock(noteOf(plan(), 'Pylon'), { unsaved: true, editing: <textarea aria-label="Note to Lena Ortiz" defaultValue="draft" /> });
+    const copy = screen.getByRole('button', { name: 'Copy' });
+    expect(copy).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('Your edit is not saved. Copy waits for Save.');
+    fireEvent.click(copy);
+    expect(calls.copy).not.toHaveBeenCalled();
   });
 
   it('a waiting Copy keeps its focus: it is aria-disabled, never disabled', () => {

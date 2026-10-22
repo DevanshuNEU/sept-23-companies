@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { queryKeys, type PlanView } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture, type FixtureDb, type Scenario } from '@/api/fixture/data';
+import { isMac } from '@/keyboard/hotkeys';
 import { AppShell } from '@/shell/app-shell';
 import { renderWithApp } from '@/test/render';
 import TodayPage from './index';
@@ -207,6 +208,23 @@ describe('Today as a plan', () => {
     press('c');
     expect(await screen.findByText('Copied the handoff for Claude.')).toBeInTheDocument();
     expect(writeText).toHaveBeenCalledWith(cerebrium.findSomeone.handoff);
+  });
+
+  it('r and p on a find someone row log nothing and say how to start', async () => {
+    const { client } = await openPlan();
+    const request = vi.spyOn(client, 'logRequest');
+    const applied = vi.spyOn(client, 'logApplied');
+    fireEvent.click(option(5));
+    await screen.findByRole('heading', { level: 2, name: 'Find someone at Cerebrium' });
+    press('p');
+    expect(await screen.findByText('Not logged. Find someone at Cerebrium first. Press S to search.')).toBeInTheDocument();
+    toast.dismiss();
+    press('r');
+    await waitFor(() => expect(screen.getAllByText('Not logged. Find someone at Cerebrium first. Press S to search.').length).toBeGreaterThan(0));
+    expect(option(5)).toHaveAccessibleName('5. Find someone at Cerebrium, To do');
+    await leavePage();
+    expect(request).not.toHaveBeenCalled();
+    expect(applied).not.toHaveBeenCalled();
   });
 
   it('shift+c copies every handoff and toasts "Copied 1 handoff for Claude."', async () => {
@@ -449,6 +467,109 @@ describe('Today as a plan', () => {
     expect(remove.mock.calls[0]?.[1]).toBe('bigger_than_it_looks');
     await expect(remove.mock.results[0]?.value).resolves.toBeUndefined();
     expect(await screen.findByRole('heading', { level: 2, name: 'Jonah Park' })).toBeInTheDocument();
+  });
+
+  it('a removed row reads Not a fit, and r, p and x on it do nothing', async () => {
+    const { client } = await openPlan();
+    const request = vi.spyOn(client, 'logRequest');
+    const applied = vi.spyOn(client, 'logApplied');
+    const skip = vi.spyOn(client, 'skipRow');
+    press('n');
+    const dialog = await screen.findByRole('dialog', { name: 'Remove Pylon for good?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    // At once, before the commit lands: the row is out of the day, in place, with its own word.
+    expect(option(3)).toHaveAccessibleName('3. Lena Ortiz at Pylon, Not a fit');
+    expect(screen.getByText('7 people, 2 done')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Jonah Park' })).toBeInTheDocument();
+
+    fireEvent.click(option(3));
+    await screen.findByRole('heading', { level: 2, name: 'Lena Ortiz' });
+    expect(within(panel()).queryByRole('button', { name: 'Log request sent' })).not.toBeInTheDocument();
+    expect(within(panel()).getByText(/is on the No-go list/)).toBeInTheDocument();
+    press('r');
+    expect(await screen.findByText('Not logged. Pylon is on the No-go list.')).toBeInTheDocument();
+    toast.dismiss();
+    press('p');
+    await waitFor(() => expect(screen.getAllByText('Not logged. Pylon is on the No-go list.').length).toBeGreaterThan(0));
+    press('x');
+    expect(await screen.findByText('Not carried. Pylon is on the No-go list.')).toBeInTheDocument();
+    // Once the commit and the refetch land, the API says the same.
+    await waitFor(async () => expect((await client.plan()).rows[2]).toMatchObject({ state: 'skipped', skipReason: 'not_a_fit' }));
+    press('r');
+    await leavePage();
+    expect(request).not.toHaveBeenCalled();
+    expect(applied).not.toHaveBeenCalled();
+    expect(skip).not.toHaveBeenCalled();
+  });
+
+  it('the finish line is reached when the last row to do is removed', async () => {
+    const db = buildFixture();
+    for (const r of db.plan.rows.slice(2, 6)) {
+      r.state = 'skipped';
+      r.skipReason = 'carried';
+    }
+    await open({ db });
+    expect(await screen.findByRole('heading', { level: 2, name: 'Mintlify, by email' })).toBeInTheDocument();
+    const finish = () => document.querySelector('[data-finish]');
+    expect(finish()).toHaveAttribute('data-done', 'false');
+    press('n');
+    const dialog = await screen.findByRole('dialog', { name: 'Remove Mintlify for good?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(finish()).toHaveAttribute('data-done', 'true'));
+    expect(finish()).toHaveAttribute('aria-current', 'step');
+    expect(option(7)).toHaveAccessibleName('7. Mintlify by email, Not a fit');
+  });
+
+  it('n acts only on a row to do, like its button', async () => {
+    await openPlan();
+    fireEvent.click(option(1));
+    await screen.findByRole('heading', { level: 2, name: 'Dana Whitfield' });
+    expect(within(panel()).queryByRole('button', { name: 'Not a fit' })).not.toBeInTheDocument();
+    press('n');
+    await act(async () => {});
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('coming back to a row with a kept edit does not take focus into the editor', async () => {
+    const user = userEvent.setup();
+    await openPlan();
+    press('e');
+    const text = await within(panel()).findByRole('textbox', { name: 'Note to Lena Ortiz' });
+    await waitFor(() => expect(text).toHaveFocus());
+    await user.type(text, ' More.');
+    act(() => text.blur());
+    press('j');
+    await screen.findByRole('heading', { level: 2, name: 'Jonah Park' });
+    press('k');
+    await screen.findByRole('heading', { level: 2, name: 'Lena Ortiz' });
+    const again = within(panel()).getByRole('textbox', { name: 'Note to Lena Ortiz' });
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    });
+    expect(again).not.toHaveFocus();
+    // Pressing e again is a start, so it focuses the kept edit.
+    press('e');
+    await waitFor(() => expect(again).toHaveFocus());
+    expect((again as HTMLTextAreaElement).value).toMatch(/ More\.$/);
+  });
+
+  it('while an edit differs from the saved note, Copy waits and c says to save first', async () => {
+    const writeText = stubClipboard();
+    const user = userEvent.setup();
+    await openPlan();
+    press('e');
+    const text = await within(panel()).findByRole('textbox', { name: 'Note to Lena Ortiz' });
+    // An open editor with no change copies as before.
+    expect(within(noteRegion()).getByRole('button', { name: 'Copy' })).toHaveAttribute('aria-disabled', 'false');
+    await user.type(text, ' More.');
+    const copyButton = within(noteRegion()).getByRole('button', { name: 'Copy' });
+    expect(copyButton).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(copyButton);
+    act(() => text.blur());
+    press('c');
+    const save = isMac() ? 'Cmd+S' : 'Ctrl+S';
+    expect(await screen.findByText(`Not copied. Save your edit first (${save}), then copy.`)).toBeInTheDocument();
+    expect(writeText).not.toHaveBeenCalled();
   });
 
   it('weekend scenario shows "No plan on weekends." with tomorrow\'s preview', async () => {

@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, NamedTuple, Sequence
 from outreach.rules.facts import EvidenceDraft
 from outreach.sources.base import Candidate
 from outreach.sources.capabilities import SharedKey
-from outreach.sources.keys import classify_domain, normalize_fein, registrable_domain
+from outreach.sources.keys import classify_domain, normalize_fein, registrable_domain, shared_reason
 from outreach.sources.tabular import EmptyTable, read_rows
 
 if TYPE_CHECKING:
@@ -511,7 +511,7 @@ def _shared_keys(employers: Employers) -> list[SharedKey]:
             users.setdefault(("fein", fein), []).append(emp.legal_name)
         if emp.domain and emp.domain_kind == "company":
             users.setdefault(("domain", emp.domain), []).append(emp.legal_name)
-    return [SharedKey(kind, value, f"{len(names)} employers: {', '.join(sorted(set(names))[:5])}")
+    return [SharedKey(kind, value, shared_reason(len(names), names))
             for (kind, value), names in sorted(users.items()) if len(names) > 1]
 
 

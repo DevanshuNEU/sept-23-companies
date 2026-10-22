@@ -1,7 +1,7 @@
 """Key normalizers (#31 Task 4): FEIN, registrable domain, domain classes."""
 import unittest
 
-from outreach.sources.keys import classify_domain, normalize_fein, registrable_domain
+from outreach.sources.keys import classify_domain, normalize_fein, registrable_domain, shared_count, shared_reason
 
 
 class KeysTest(unittest.TestCase):
@@ -63,6 +63,25 @@ class KeysTest(unittest.TestCase):
             for d in (host, f"acme.{host}", f"www.acme.{host}", f"a.b.{host}"):
                 self.assertEqual(classify_domain(d), "platform", d)
         self.assertEqual(classify_domain("acmevercel.app"), "company")
+
+
+class SharedReasonTest(unittest.TestCase):
+    def test_round_trip(self):
+        for n in (2, 3, 7, 120):
+            self.assertEqual(shared_count(shared_reason(n, ["B Inc", "A Inc"])), n)
+
+    def test_the_text_counts_all_and_lists_five_sorted_distinct_names(self):
+        names = ["Golf Inc", "Echo Inc", "Alpha Inc", "Foxtrot Inc", "Bravo Inc", "Delta Inc", "Charlie Inc", "Echo Inc"]
+        self.assertEqual(shared_reason(8, names), "8 employers: Alpha Inc, Bravo Inc, Charlie Inc, Delta Inc, Echo Inc")
+        self.assertEqual(shared_reason(2, ["Acme Inc", "Acme Inc"]), "2 employers: Acme Inc")
+
+    def test_an_unreadable_reason_has_no_count(self):
+        for reason in ("", "shared by a few", "employers: A, B", "x2 employers: A", "2 companies: A, B"):
+            self.assertIsNone(shared_count(reason), reason)
+
+    def test_a_count_below_two_is_not_a_shared_key_and_reads_as_none(self):
+        self.assertIsNone(shared_count("1 employers: A"))
+        self.assertIsNone(shared_count("0 employers: A"))
 
 
 if __name__ == "__main__":

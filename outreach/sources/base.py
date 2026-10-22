@@ -8,12 +8,17 @@ from typing import Protocol
 
 from outreach.rules.rebuild import EvidenceDraft
 
-__all__ = ["Candidate", "EvidenceDraft", "Source", "KEY_NAMES"]
+__all__ = ["Candidate", "EvidenceDraft", "Source", "KEY_NAMES", "describe_error"]
 
 # `ats` is "<ats>:<token>"; the rest are the identifiers a source may know for a company.
 KEY_NAMES = frozenset({"fein", "dba", "legal_name", "ats", "linkedin", "formd_cik"})
 # An at sign, slash or colon (a URL, a scheme, a port, an email) or any whitespace is never part of a bare host.
 _NOT_A_HOST = re.compile(r"[@/:\s]")
+
+
+def describe_error(err: BaseException) -> str:
+    """`TypeError: text`: how a failure is written in a report, a `failed` list or `job_run.error`."""
+    return f"{type(err).__name__}: {err}"
 
 
 @dataclass(frozen=True)

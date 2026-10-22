@@ -125,11 +125,24 @@ class DuplicateDomainTest(ResolveBase):
         (item,) = self.items("merge_candidate")
         self.assertIn("Basis fein_conflict+domain, confidence weak", item["reason"])
 
-    def test_resolve_ignores_merged_and_removed_companies(self):
+    # The schema CHECK makes `merged_into` imply `status = 'removed'`, so the removed filter alone covers a merged
+    # company; resolve keeps both conditions, and these two tests pin each way a company leaves the live set.
+    def test_resolve_ignores_a_merged_company(self):
         a = self.company("Acme Robotics", "acme.io")
         b = self.company("Acme Labs", "acme.io")
-        c = self.company("Acme Gone", "acme.io")
         self.remove(b, into=a)
+        mark_shared_key(self.conn, "domain", "veltrix.com", "2 employers: A, B")
+        v = self.company("Veltrix Pharma", "veltrix.com")
+        v2 = self.company("Veltrix Merged", "veltrix.com")
+        self.remove(v2, into=v)
+        report = resolve_store(self.conn)
+        self.assertEqual((report.pairs_raised, report.size_checks_raised), (0, 1))
+        self.assertEqual([i["company_id"] for i in self.items("size_check")], [v])
+        self.assertEqual(self.items("merge_candidate"), [])
+
+    def test_resolve_ignores_a_removed_company(self):
+        self.company("Acme Robotics", "acme.io")
+        c = self.company("Acme Gone", "acme.io")
         self.remove(c)
         mark_shared_key(self.conn, "domain", "veltrix.com", "2 employers: A, B")
         v = self.company("Veltrix Gone", "veltrix.com")
@@ -137,6 +150,42 @@ class DuplicateDomainTest(ResolveBase):
         report = resolve_store(self.conn)
         self.assertEqual((report.pairs_raised, report.size_checks_raised), (0, 0))
         self.assertEqual(self.items("merge_candidate") + self.items("size_check"), [])
+
+    def test_a_fein_on_one_side_only_keeps_basis_domain(self):
+        a, b = self.company("Acme Robotics", "acme.io"), self.company("Acme Labs", "acme.io")
+        add_alias(self.conn, a, "111111111", "fein")
+        resolve_store(self.conn)
+        (item,) = self.items("merge_candidate")
+        self.assertIn("Basis domain, confidence strong", item["reason"])
+        self.assertNotIn("fein_conflict", item["reason"])
+
+    def test_a_shared_fein_does_not_count_as_a_conflict(self):
+        # Two companies cannot hold one FEIN alias (alias_key is unique), so "same FEIN" is not a reachable case; a
+        # shared FEIN is ignored like identity ignores it.
+        a, b = self.company("Acme Robotics", "acme.io"), self.company("Acme Labs", "acme.io")
+        add_alias(self.conn, a, "111111111", "fein")
+        add_alias(self.conn, b, "222222222", "fein")
+        mark_shared_key(self.conn, "fein", "222222222", "2 employers: A, B")
+        resolve_store(self.conn)
+        (item,) = self.items("merge_candidate")
+        self.assertIn("Basis domain, confidence strong", item["reason"])
+
+    def test_an_unshared_subdomain_is_not_paired_with_its_root(self):
+        # Identity matches a candidate's domain exactly, so resolve pairs only the same domain text.
+        self.company("Acme Robotics", "acme.io")
+        self.company("Acme Labs", "eng.acme.io")
+        self.assertEqual(resolve_store(self.conn).pairs_raised, 0)
+
+    def test_a_rerun_after_the_anchor_merges_away_links_the_rest_and_keeps_the_old_items(self):
+        a = self.company("Acme One", "acme.io")
+        b = self.company("Acme Two", "acme.io")
+        c = self.company("Acme Three", "acme.io")
+        resolve_store(self.conn)
+        self.remove(a, into=b)
+        report = resolve_store(self.conn)
+        self.assertEqual(report.pairs_raised, 1)
+        self.assertEqual({(i["company_id"], i["evidence_key"]) for i in self.items("merge_candidate")},
+                         {(a, str(b)), (a, str(c)), (b, str(c))})
 
     def test_a_resolved_pair_stays_resolved_and_raises_no_second_item(self):
         self.company("Acme Robotics", "acme.io")
@@ -170,6 +219,22 @@ class SizeCheckTest(ResolveBase):
         resolve_store(self.conn)
         (item,) = self.items("size_check")
         self.assertIn("shares veltrix.com with 2 other employers", item["reason"])
+
+    def test_more_stored_holders_than_the_source_counted_win(self):
+        for name in ("One", "Two", "Three"):
+            self.company(f"Veltrix {name}", "veltrix.com")
+        mark_shared_key(self.conn, "domain", "veltrix.com", "2 employers: Veltrix One, Veltrix Two")
+        resolve_store(self.conn)
+        for item in self.items("size_check"):
+            self.assertIn("shares veltrix.com with 2 other employers", item["reason"])
+
+    def test_an_unreadable_shared_reason_drops_the_number_and_never_prints_zero(self):
+        self.company("Solo", "solo.io")
+        mark_shared_key(self.conn, "domain", "solo.io", "seen on a few employers")
+        resolve_store(self.conn)
+        (item,) = self.items("size_check")
+        self.assertIn("shares solo.io with other employers: it may be a subsidiary; size unknown", item["reason"])
+        self.assertNotRegex(item["reason"], r"with \d+ other")
 
     def test_a_guess_domain_still_raises_a_size_check(self):
         self.company("Veltrix Pharma", "veltrix.com", confidence="guess")
@@ -242,7 +307,7 @@ class ResolveJobTest(ResolveBase):
                                 (run_id,)).fetchone()
         self.assertEqual((row["job"], row["status"], row["error"]), ("resolve", "ok", ""))
         self.assertIsNotNone(row["finished_at"])
-        self.assertEqual(json.loads(row["summary"]), {"pairs_raised": 1, "size_checks_raised": 2, "failed": []})
+        self.assertEqual(json.loads(row["summary"]), {"pairs_raised": 1, "size_checks_raised": 2, "attempted": 3, "failed": []})
         self.assertEqual((report.pairs_raised, report.size_checks_raised), (1, 2))
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM job_run WHERE job = 'resolve'").fetchone()[0], 1)
 
@@ -270,7 +335,6 @@ class ResolveJobTest(ResolveBase):
 
     def test_a_failure_on_one_size_check_is_listed_and_the_pass_goes_on(self):
         self.seed_mixed()
-        real = self.conn.execute
         bad = {"n": 0}
 
         class Wrapper:
@@ -292,6 +356,40 @@ class ResolveJobTest(ResolveBase):
         self.assertIn("size boom", report.failed[0])
         self.assertEqual(self.conn.execute("SELECT status FROM job_run WHERE run_id = ?", (run_id,))
                          .fetchone()[0], "partial")
+
+    def test_every_item_failing_is_failed_not_partial(self):
+        self.seed_mixed()
+        with mock.patch.object(identity, "raise_merge_candidate", side_effect=sqlite3.IntegrityError("no")), \
+                mock.patch.object(identity, "_atomic", side_effect=sqlite3.IntegrityError("no")):
+            run_id, report = run_resolve(self.conn)
+        self.assertEqual((report.attempted, len(report.failed)), (3, 3))
+        self.assertEqual(self.conn.execute("SELECT status FROM job_run WHERE run_id = ?", (run_id,)).fetchone()[0],
+                         "failed")
+
+    def test_some_items_already_present_and_the_rest_failing_is_partial_not_failed(self):
+        self.seed_mixed()
+        resolve_store(self.conn)
+        x = self.company("Beta One", "beta.io")
+        y = self.company("Beta Two", "beta.io")
+        real = identity.raise_merge_candidate
+
+        def flaky(conn, a, b, *args, **kw):
+            if {a, b} == {x, y}:
+                raise sqlite3.IntegrityError("no")
+            return real(conn, a, b, *args, **kw)
+
+        with mock.patch.object(identity, "raise_merge_candidate", flaky):
+            run_id, report = run_resolve(self.conn)
+        self.assertEqual((report.attempted, len(report.failed)), (4, 1))
+        self.assertEqual(self.conn.execute("SELECT status FROM job_run WHERE run_id = ?", (run_id,)).fetchone()[0],
+                         "partial")
+
+    def test_a_failing_finish_job_does_not_mask_the_original_error(self):
+        with mock.patch("outreach.sources.jobs.resolve_store", side_effect=sqlite3.OperationalError("disk gone")), \
+                mock.patch("outreach.sources.jobs.finish_job", side_effect=sqlite3.OperationalError("also gone")):
+            with self.assertRaises(sqlite3.OperationalError) as ctx:
+                run_resolve(self.conn)
+        self.assertIn("disk gone", str(ctx.exception))
 
     def test_a_pass_that_cannot_run_is_failed_in_job_run_and_raises(self):
         with mock.patch("outreach.sources.jobs.resolve_store", side_effect=sqlite3.OperationalError("disk gone")):

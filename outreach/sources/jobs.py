@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 
 from outreach import identity
 from outreach.identity import StoreResolveReport, resolve_store
-from outreach.sources.base import Source
+from outreach.sources.base import Source, describe_error
 from outreach.sources.tiers import register_source, set_work_tier
 from outreach.store import finish_job, iso_utc, mark_shared_key, start_job, transaction
 
@@ -42,10 +42,6 @@ class SourceReport:
 
 
 POST_FAILURE = "post "  # a `failed` entry for a post starts with this; a candidate's starts with its source_ref
-
-
-def _describe(err: BaseException) -> str:
-    return f"{type(err).__name__}: {err}"
 
 
 def _discover_one(conn: sqlite3.Connection, source: Source, run_id: int, creates: bool, since: str | None,
@@ -140,7 +136,7 @@ def run_discover(conn: sqlite3.Connection, sources: Sequence[Source], *, creates
         try:
             _discover_one(conn, source, run_id, may_create, since, report)
         except Exception as err:  # a source failing must not stop the others; it is reported, never swallowed
-            text = _describe(err)
+            text = describe_error(err)
             report.error = "; ".join(t for t in (report.error, text) if t)
             errors.append((source.name, text))
     problems = [f"{name}: {text}" for name, text in errors]
@@ -163,15 +159,25 @@ def run_discover(conn: sqlite3.Connection, sources: Sequence[Source], *, creates
 def run_resolve(conn: sqlite3.Connection) -> tuple[int, StoreResolveReport]:
     """The `resolve` job: `identity.resolve_store` under one `job_run`. Returns the run id and the report.
 
-    Status `ok`, or `partial` when any item failed (each is in the report and the error text). A pass that cannot run
-    at all is recorded `failed` with its error and the error is raised: never an empty report.
+    Status `ok`; `partial` when some items failed (each is in the report and the error text); `failed` when every
+    item failed. A pass that cannot run at all is recorded `failed` with its error and the error is raised: never an
+    empty report.
     """
     run_id = start_job(conn, "resolve")
     try:
         report = resolve_store(conn)
     except BaseException as err:
-        finish_job(conn, run_id, "failed", {}, _describe(err))
+        try:
+            finish_job(conn, run_id, "failed", {}, describe_error(err))
+        except Exception:
+            pass  # the run stays 'running' and the original error is the one raised; this one must not replace it
         raise
     error = f"{len(report.failed)} failed: " + "; ".join(report.failed[:5]) if report.failed else ""
-    finish_job(conn, run_id, "partial" if report.failed else "ok", asdict(report), error)
+    if not report.failed:
+        status = "ok"
+    elif len(report.failed) == report.attempted:
+        status = "failed"  # every item failed: nothing was raised, nothing was already there
+    else:
+        status = "partial"
+    finish_job(conn, run_id, status, asdict(report), error)
     return run_id, report

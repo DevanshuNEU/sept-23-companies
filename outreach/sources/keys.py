@@ -1,5 +1,6 @@
 """Key normalizers for identity (#31 Task 4): FEIN, registrable domain, and what kind of domain it is."""
 import re
+from collections.abc import Sequence
 from typing import Literal
 
 DomainKind = Literal["company", "free", "peo", "platform"]
@@ -70,3 +71,20 @@ def classify_domain(domain: str) -> DomainKind:
     if d in PLATFORM:
         return "platform"
     return "company"
+
+
+_SHARED_COUNT = re.compile(r"(\d+) employers")
+
+
+def shared_reason(n: int, names: Sequence[str]) -> str:
+    """The `shared_key.reason` text: how many employer groups use the key, and up to 5 of their distinct legal
+    names, sorted. LCA writes it (`n` counts groups, large filers included); `shared_count` reads it back."""
+    return f"{n} employers: {', '.join(sorted(set(names))[:5])}"
+
+
+def shared_count(reason: str) -> int | None:
+    """The employer count at the start of a `shared_reason` text; None when it is not there or is below 2 (a
+    shared key always has at least two employers, so anything less is unreadable, not a count)."""
+    m = _SHARED_COUNT.match(reason or "")
+    n = int(m.group(1)) if m else 0
+    return n if n >= 2 else None

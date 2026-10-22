@@ -39,13 +39,12 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import re
 import sqlite3
 from dataclasses import dataclass, field
 
 from outreach.rules.rebuild import record_evidence
-from outreach.sources.base import Candidate
-from outreach.sources.keys import classify_domain, normalize_fein, registrable_domain
+from outreach.sources.base import Candidate, describe_error
+from outreach.sources.keys import classify_domain, normalize_fein, registrable_domain, shared_count
 from outreach.store import add_alias, append_event, is_shared_key, name_key, transaction, utcnow
 
 __all__ = ["BASES", "CONFIDENCE", "ITEM_CONFIDENCES", "MIN_NAME_KEY", "Resolution", "Match", "follow_merged",
@@ -514,6 +513,7 @@ def resolve_candidate(conn: sqlite3.Connection, cand: Candidate, *, source_name:
 class StoreResolveReport:
     pairs_raised: int = 0  # new `merge_candidate` items
     size_checks_raised: int = 0  # new `size_check` items
+    attempted: int = 0  # items tried: new, already present or failed
     failed: list[str] = field(default_factory=list)  # one entry per item that could not be written
 
 
@@ -526,16 +526,15 @@ def _family_feins(conn: sqlite3.Connection, company_id: int) -> set[str]:
         (company_id,)) if normalize_fein(key) == key and not is_shared_key(conn, "fein", key)}
 
 
-def _shared_count(conn: sqlite3.Connection, domain: str, holders: int) -> int:
-    """How many other employers use the shared domain: what the source that marked it saw (its reason starts
-    "<n> employers", large filers that were never imported included), at least the other stored holders."""
+def _others_phrase(conn: sqlite3.Connection, domain: str, holders: int) -> str:
+    """"<n> other employers", or "other employers" when the source's count cannot be read (never "0": a shared key
+    always has another employer). n is what the source that marked the key saw (large filers never imported
+    included), at least the other stored holders."""
     row = conn.execute("SELECT reason FROM shared_key WHERE kind = 'domain' AND value = ?", (domain,)).fetchone()
-    seen = re.match(r"(\d+) employers", row[0]) if row else None
-    return max(holders - 1, int(seen.group(1)) - 1 if seen else 0)
-
-
-def _describe(err: BaseException) -> str:
-    return f"{type(err).__name__}: {err}"
+    seen = shared_count(row[0]) if row else None
+    if seen is None:
+        return "other employers"
+    return f"{max(holders - 1, seen - 1)} other employers"
 
 
 def resolve_store(conn: sqlite3.Connection) -> StoreResolveReport:
@@ -571,9 +570,11 @@ def resolve_store(conn: sqlite3.Connection) -> StoreResolveReport:
         anchor, *rest = sorted(holders)
         for other in rest:
             try:
+                report.attempted += 1
                 with _atomic(conn):
+                    # Two live companies never share a FEIN alias (alias_key is unique), so two known FEINs differ.
                     ours, theirs = _family_feins(conn, anchor), _family_feins(conn, other)
-                    if ours and theirs and not ours & theirs:
+                    if ours and theirs:
                         basis, detail = ("fein_conflict+domain",
                                          f"both hold the domain {domain}, but their FEINs differ "
                                          f"({', '.join(sorted(ours))} and {', '.join(sorted(theirs))})")
@@ -581,20 +582,21 @@ def resolve_store(conn: sqlite3.Connection) -> StoreResolveReport:
                         basis, detail = "domain", f"both hold the domain {domain}"
                     report.pairs_raised += raise_merge_candidate(conn, anchor, other, basis, detail)
             except (sqlite3.Error, ValueError, LookupError) as err:
-                report.failed.append(f"companies #{anchor} and #{other} ({domain}): {_describe(err)}")
+                report.failed.append(f"companies #{anchor} and #{other} ({domain}): {describe_error(err)}")
     for domain, holders in sorted(shared.items()):
         for cid in sorted(holders):
             try:
+                report.attempted += 1
                 with _atomic(conn):
                     name = conn.execute("SELECT name FROM company WHERE company_id = ?", (cid,)).fetchone()[0]
-                    others = _shared_count(conn, domain, len(holders))
+                    others = _others_phrase(conn, domain, len(holders))
                     reason = (f"{name} (#{cid}). Basis shared_domain, confidence weak: shares {domain} with "
-                              f"{others} other employers: it may be a subsidiary; size unknown")
+                              f"{others}: it may be a subsidiary; size unknown")
                     cur = conn.execute(
                         "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
                         "VALUES ('size_check', ?, ?, ?, 'source', ?) ON CONFLICT DO NOTHING",
                         (cid, reason, f"shared-domain:{domain}", utcnow()))
                     report.size_checks_raised += cur.rowcount
             except (sqlite3.Error, ValueError, LookupError) as err:
-                report.failed.append(f"company #{cid} ({domain}): {_describe(err)}")
+                report.failed.append(f"company #{cid} ({domain}): {describe_error(err)}")
     return report

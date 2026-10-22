@@ -12,6 +12,7 @@ from outreach.sources.base import Candidate
 from outreach.sources.capabilities import SharedKey
 from outreach.sources import lca as lca_module
 from outreach.sources.lca import COLUMNS, LcaSource
+from outreach.sources.keys import shared_count, shared_reason
 from outreach.sources.lca_rules import CONFIG_PATH, load_lca_config
 from outreach.sources.tabular import EmptyTable, MissingColumns
 from tests.contracts import check_source
@@ -98,6 +99,9 @@ class FixtureTest(unittest.TestCase):
         self.assertEqual(domain.reason,
                          "3 employers: Veltrix Corp, Veltrix Diagnostics Inc, Veltrix Pharma Inc")
         self.assertEqual(fein.reason, "3 employers: Clearpath Inc, Greenfield AI Inc, Sundial Health Inc")
+        # the producer and resolve's reader share one format: a change to it fails here
+        self.assertEqual((shared_count(domain.reason), shared_count(fein.reason)), (3, 3))
+        self.assertEqual(domain.reason, shared_reason(3, ["Veltrix Pharma Inc", "Veltrix Corp", "Veltrix Diagnostics Inc"]))
         for ref in ("lca:clearpath", "lca:greenfield ai", "lca:sundial health"):
             self.assertNotIn("fein", self.cands[ref].keys, ref)
         for ref in ("lca:veltrix diagnostics", "lca:veltrix pharma"):

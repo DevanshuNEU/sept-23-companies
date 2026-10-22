@@ -1,8 +1,11 @@
 """The careers page check (#31 Task 15): at most a careers page, a homepage and the page the homepage points to."""
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from outreach.net import FetchError, Response
+from outreach.net import USER_AGENT, FetchError, Response, UrllibClient
 from outreach.sources.boards import BoardRef
 from outreach.sources.careers import CareersChecker, CareersResult
 from tests.fakes import FakeClient, status_response
@@ -161,6 +164,59 @@ class CareersCheckerTest(unittest.TestCase):
                                               "https://relco.com/": home,
                                               "https://jobs.relco.com/open": page("plain_page.html")})
         self.assertEqual(result.kind, "page")
+
+
+
+class _Local(BaseHTTPRequestHandler):
+    seen: list[dict] = []
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        self.seen.append({k.lower(): v for k, v in self.headers.items()})
+        pages = {"/": b'<html><a href="/join-us">Join us</a></html>', "/join-us": b"<html>Open roles</html>"}
+        status, body = (200, pages[self.path]) if self.path in pages else (404, b"")
+        self.send_response(status)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class _ToLocal:
+    """The real declared-profile client, with every careers URL sent to a local server instead of the site."""
+
+    def __init__(self, port):
+        self.real, self.port = UrllibClient("declared"), port
+
+    def get(self, url, headers=None, *, follow_redirects=False):
+        parts = urlsplit(url)
+        got = self.real.get(f"http://127.0.0.1:{self.port}{parts.path or '/'}", headers,
+                            follow_redirects=follow_redirects)
+        return Response(got.status, url, got.body, got.headers)  # as if the site itself had answered
+
+
+class CareersRequestHeadersTest(unittest.TestCase):
+    def test_all_three_requests_carry_the_shared_user_agent_and_no_contact_address(self):
+        seen: list[dict] = []
+        handler = type("Handler", (_Local,), {"seen": seen})
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        result = CareersChecker(_ToLocal(server.server_address[1])).check("acme.com")
+        self.assertEqual(result.kind, "page")  # /careers 404, the homepage's link, the page: three requests
+        self.assertEqual(len(seen), 3)
+        for headers in seen:
+            self.assertEqual(headers["user-agent"], USER_AGENT)
+            self.assertFalse([v for v in headers.values() if "@" in v], headers)
+        self.assertNotIn("@", USER_AGENT)
+
+    def test_the_checker_adds_no_headers_of_its_own(self):
+        client = FakeClient({"https://acme.com/careers": status_response(404), "https://acme.com/": status_response(404)})
+        CareersChecker(client).check("acme.com")
+        self.assertEqual([headers for _, _, headers, _ in client.calls], [{}, {}])  # the client's profile decides
+
 
 
 if __name__ == "__main__":

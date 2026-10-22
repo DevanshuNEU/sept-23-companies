@@ -200,6 +200,15 @@ class OtherCommandsTest(CliCase):
         self.assertEqual(self.client.requests, [])
         self.assertGreater(report["report"]["from_stapply"], 0)
 
+    def test_careers_requests_use_the_declared_client_and_set_no_header_of_their_own(self):
+        self.ok("discover", "lca", "--files", *FILES)
+        self.ok("find-boards", "--max-careers", 5)
+        self.assertEqual({profile for profile, _ in self.factory_calls}, {"declared"})  # the shared User-Agent only
+        careers = [(url, headers) for _, url, headers, _ in self.client.calls if "/careers" in url]
+        self.assertTrue(careers)
+        for url, headers in careers:
+            self.assertEqual(headers, {}, url)  # no caller User-Agent, so no contact address can ride along
+
     def test_store_missing_exits_1_with_the_install_command(self):
         self.db.unlink()
         code, _, err = self.cli("resolve")

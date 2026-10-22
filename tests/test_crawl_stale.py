@@ -76,7 +76,7 @@ class PureRuleTests(unittest.TestCase):
 
     def test_reasons_have_no_dashes(self):
         r = reason(posted_on="2016-03-02", board_empty_streak=1)
-        self.assertFalse(set(r.reason) & {"–", "—"})
+        self.assertFalse(set(r.reason) & {chr(0x2013), chr(0x2014)})
         self.assertNotIn("-", r.reason.replace("2016-03-02", "").replace("2026-10-18", ""))
 
     def test_importing_stale_loads_no_adapter_or_http_module(self):

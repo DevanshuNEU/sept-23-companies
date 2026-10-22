@@ -94,9 +94,47 @@ class CareersCheckerTest(unittest.TestCase):
         self.assertIn("timeout", result.error)
 
     def test_an_unexpected_status_is_error(self):
-        for status in (204, 301, 302):
-            result, _ = self.check("odd.com", {"https://odd.com/careers": status_response(status)})
-            self.assertEqual(result.kind, "error", status)
+        for status in (204, 301, 302, 400, 401, 403, 408):  # a bot block is not "no careers page"
+            with self.subTest(status=status):
+                result, client = self.check("odd.com", {"https://odd.com/careers": status_response(status)})
+                self.assertEqual(result.kind, "error")
+                self.assertIn(str(status), result.error)
+                self.assertEqual(client.requests, ["https://odd.com/careers"])
+
+    def test_a_block_on_the_homepage_or_the_linked_page_is_error(self):
+        home = {"https://odd.com/careers": status_response(404)}
+        result, _ = self.check("odd.com", {**home, "https://odd.com/": status_response(403)})
+        self.assertEqual(result.kind, "error")
+        result, _ = self.check("odd.com", {**home, "https://odd.com/": page("home_links_join.html"),
+                                           "https://odd.com/join-us": status_response(403)})
+        self.assertEqual(result.kind, "error")
+
+    def test_410_is_as_definite_as_404(self):
+        result, _ = self.check("gone.com", {"https://gone.com/careers": status_response(410),
+                                             "https://gone.com/": status_response(410)})
+        self.assertEqual(result.kind, "none")
+        result, _ = self.check("gone.com", {"https://gone.com/careers": status_response(404),
+                                             "https://gone.com/": page("home_links_join.html"),
+                                             "https://gone.com/join-us": status_response(410)})
+        self.assertEqual(result.kind, "none")
+
+    def test_a_redirect_off_site_ignores_the_body(self):
+        body = b'<a href="https://boards.greenhouse.io/parentco">Parent jobs</a> <a href="https://jobs.jobvite.com/p">J</a>'
+        final = "https://parentco.com/careers"
+        result, client = self.check("acme.com", {"https://acme.com/careers": Response(200, final, body, {})})
+        self.assertEqual(result, CareersResult("page", (), final, (), ""))
+        self.assertEqual(len(client.requests), 1)
+
+    def test_a_redirect_straight_to_an_ats_host_still_counts_off_site(self):
+        result, _ = self.check("acme.com", {"https://acme.com/careers": Response(
+            200, "https://boards.greenhouse.io/acme", b"<html>other board links https://jobs.lever.co/zzz</html>", {})})
+        self.assertEqual((result.kind, result.boards), ("boards", (BoardRef("greenhouse", "acme"),)))
+
+    def test_a_redirect_to_a_subdomain_of_the_site_keeps_the_body(self):
+        body = b'<a href="https://boards.greenhouse.io/acme">Jobs</a>'
+        result, _ = self.check("acme.com", {"https://acme.com/careers": Response(
+            200, "https://careers.acme.com/", body, {})})
+        self.assertEqual((result.kind, result.boards), ("boards", (BoardRef("greenhouse", "acme"),)))
 
     def test_a_dead_linked_page_is_none(self):
         result, _ = self.check("clearpath.ai", {"https://clearpath.ai/careers": status_response(404),

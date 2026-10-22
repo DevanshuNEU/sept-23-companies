@@ -1,9 +1,9 @@
 """The careers page check (#31 Task 15, design 5.3 step 3): which boards a company's own careers page points to.
 
-`CareersChecker.check(domain)` makes at most three requests: `https://<domain>/careers`; when that is a 4xx other than
-429, the homepage; and the first same-site link on the homepage that looks like a jobs page. Only a definite answer
-is `none`. A fetch error, a 5xx, a 429 or any status it does not know is `error`: nothing is concluded, so the caller
-leaves no marker and asks again next run (error is not empty).
+`CareersChecker.check(domain)` makes at most three requests: `https://<domain>/careers`; when that is a 404 or 410,
+the homepage; and the first same-site link on the homepage that looks like a jobs page. Only a 404 or 410 is a
+definite `none`. A fetch error, a 5xx, a 429, a 403 or any other status is `error`: nothing is concluded, so the
+caller leaves no marker and asks again next run (error is not empty).
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ class CareersChecker:
         try:
             resp = self.client.get(careers_url, follow_redirects=True)
             if resp.status == 200:
-                return _read(resp, careers_url)
+                return _read(resp, careers_url, domain)
             if not _is_no(resp.status):
                 return _unexpected(resp, careers_url)
             home_url = f"https://{domain}/"
@@ -73,24 +73,27 @@ class CareersChecker:
                 return CareersResult("none")
             resp = self.client.get(link, follow_redirects=True)
             if resp.status == 200:
-                return _read(resp, link)
+                return _read(resp, link, domain)
             return CareersResult("none") if _is_no(resp.status) else _unexpected(resp, link)
         except FetchError as err:
             return CareersResult("error", error=str(err))
 
 
 def _is_no(status: int) -> bool:
-    """A 4xx other than 429 is the site answering that the page is not there (or not for us)."""
-    return 400 <= status < 500 and status != 429
+    """Only 404 and 410 say the page is not there. A 403, a 401 or a 400 may be a bot block: nothing concluded."""
+    return status in (404, 410)
 
 
 def _unexpected(resp: Response, url: str) -> CareersResult:
     return CareersResult("error", error=f"HTTP {resp.status} for {url}")
 
 
-def _read(resp: Response, requested: str) -> CareersResult:
+def _read(resp: Response, requested: str, domain: str) -> CareersResult:
+    """Detect on the page. When a redirect left the company's site (a parent's page, an ATS host) the body is not the
+    company's: only the final URL is read, so a redirect straight to a board still counts and nothing else does."""
     final = resp.url or requested
-    text = final + "\n" + resp.text()  # a redirect straight to a board shows in the final URL
+    on_site = _same_site((urllib.parse.urlsplit(final).hostname or "").lower(), domain)
+    text = final + "\n" + resp.text() if on_site else final
     boards, unsupported = detect_all(text), tuple(detect_unsupported(text))
     return CareersResult("boards" if boards else "page", tuple(boards), final, unsupported)
 

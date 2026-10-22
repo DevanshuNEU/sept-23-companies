@@ -125,6 +125,25 @@ class StapplyStepTest(FindBoardsBase):
         self.assertEqual(json.loads(event["detail"])["via"], "alias")
         self.assertEqual(report.from_alias, 2)
 
+    def test_the_stapply_lookup_runs_only_when_the_alias_gave_no_board(self):
+        cid = seed_company(self.conn, "Granite Peak Inc")
+        add_alias(self.conn, cid, "lever:zephyr", "ats")
+        _, report = self.run_job()
+        self.assertEqual(self.boards()[("lever", "zephyr")]["company_id"], cid)
+        self.assertNotIn(("lever", "granite-peak"), self.boards())  # the name match would have been a second board
+
+    def test_a_company_with_a_watched_page_but_no_board_still_gets_the_stapply_lookup(self):
+        granite = add_by_hand(self.conn, name="Granite Peak Inc", reason="a friend", domain="granitepeak.example")
+        orchid = add_by_hand(self.conn, name="Orchid Works", reason="a friend", domain="orchidworks.example")
+        for add in (granite, orchid):
+            self.conn.execute("INSERT INTO watched_page(company_id, url) VALUES (?, 'https://example.test/jobs')",
+                              (add.company_id,))
+        client = FakeClient(careers_routes())
+        _, report = self.run_job(careers=CareersChecker(client))
+        self.assertEqual(self.boards()[("lever", "granite-peak")]["company_id"], granite.company_id)
+        self.assertEqual([u for u in client.requests if "example" in u], [])  # never the careers page again
+        self.assertEqual(client.unrouted, [])
+
     def test_bad_alias_token_is_counted_not_fatal(self):
         cid = seed_company(self.conn, "Broken Alias Co")
         add_alias(self.conn, cid, "greenhouse:Bad%Token", "ats")
@@ -244,7 +263,7 @@ class CareersStepTest(FindBoardsBase):
         for name in ("Sundial Health Inc", "Quill Data Services Inc"):
             (marker,) = self.events("careers_checked", name)
             self.assertEqual(json.loads(marker["detail"]), {"result": "none"})
-            self.assertEqual(marker["idempotency_key"], f"careers-checked:{self.company(name)}:{marker['at'][:7]}")
+            self.assertEqual(marker["idempotency_key"], f"careers-checked:{self.company(name)}:{marker['at'][:10]}")
             self.assertEqual(marker["actor"], "crawler")
         greenfield = self.company("Greenfield AI Inc")
         self.assertEqual(count(self.conn, "SELECT count(*) FROM board WHERE company_id = ?", greenfield), 0)
@@ -400,14 +419,47 @@ class CareersStepTest(FindBoardsBase):
         self.assertEqual(report.careers_checked, 2)
         hosts = {u.split("/")[2] for u in self.client.requests}
         self.assertEqual(hosts, {"clearpath.ai", "greenfield.ai"})  # tier 1 in company order
-        self.run_careers(max_careers=2)  # next run: Greenfield again (it errored), then Quill (promoted, id order)
-        self.assertEqual({u.split("/")[2] for u in self.client.requests}, {"greenfield.ai", "quilldata.io"})
+        self.run_careers(max_careers=2)  # next run: the never-tried first (Quill, promoted, then Riverside)
+        self.assertEqual({u.split("/")[2] for u in self.client.requests}, {"quilldata.io", "riverside.edu"})
 
-    def test_rerun_writes_nothing_new(self):
+    def test_a_site_that_always_errors_moves_behind_the_others(self):
+        self.run_careers(max_careers=1)
+        self.assertEqual({u.split("/")[2] for u in self.client.requests}, {"clearpath.ai"})
+        self.run_careers(max_careers=1)  # Greenfield (id 4) is next in id order, and errors
+        self.assertEqual({u.split("/")[2] for u in self.client.requests}, {"greenfield.ai"})
+        self.run_careers(max_careers=1)  # now it has an attempt, so the never-tried come first
+        self.assertEqual({u.split("/")[2] for u in self.client.requests}, {"quilldata.io"})
+        errors = self.events("careers_error", "Greenfield AI Inc")
+        self.assertEqual(len(errors), 1)
+        self.assertEqual((errors[0]["actor"], json.loads(errors[0]["detail"])["error"]),
+                         ("crawler", "HTTP 503 for https://greenfield.ai/careers"))
+        self.assertEqual(self.events("careers_checked", "Greenfield AI Inc"), [])  # an error never blocks a retry
+
+    def test_the_none_marker_and_the_30_day_recheck_agree_at_the_end_of_a_month(self):
+        sundial = self.company("Sundial Health Inc")
+        # the marker an earlier month-keyed scheme wrote on the 1st; 30.5 days later is due again
+        append_event(self.conn, entity="company", kind="careers_checked", actor="crawler", entity_id=sundial,
+                     company_id=sundial, detail={"result": "none"}, at="2026-10-01T00:00:00Z",
+                     idempotency_key=f"careers-checked:{sundial}:2026-10")
+        with mock.patch("outreach.sources.jobs.utcnow", return_value="2026-10-31T12:00:00Z"):
+            self.run_careers()
+            self.assertIn("https://sundial.health/careers", self.client.requests)
+            markers = self.events("careers_checked", "Sundial Health Inc")
+            self.assertEqual(len(markers), 2)  # the new check is recorded, not lost to the old key
+            self.assertEqual(markers[1]["at"], "2026-10-31T12:00:00Z")
+            self.run_careers()
+            self.assertNotIn("https://sundial.health/careers", self.client.requests)  # and now it blocks again
+
+    def test_rerun_writes_nothing_new_but_the_attempt_record_of_a_failing_site(self):
         self.run_careers()
         before = table_marks(self.conn)
+        errors = len(self.events("careers_error"))
         self.run_careers()
-        self.assertEqual(table_marks(self.conn), before)
+        after = table_marks(self.conn)
+        self.assertEqual(len(self.events("careers_error")), errors + 1)  # Greenfield, tried again
+        self.assertEqual({t: m for t, m in after.items() if t != "event"},
+                         {t: m for t, m in before.items() if t != "event"})
+        self.assertEqual(after["event"][0], before["event"][0] + 1)
 
 
 if __name__ == "__main__":

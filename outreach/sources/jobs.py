@@ -313,8 +313,7 @@ def _live_companies(conn: sqlite3.Connection, where: str) -> list[sqlite3.Row]:
     return sorted(rows, key=lambda r: (effective_tier(conn, r["company_id"]), r["company_id"]))
 
 
-NO_BOARD = ("NOT EXISTS (SELECT 1 FROM board b WHERE b.company_id = c.company_id AND b.active = 1) "
-            "AND NOT EXISTS (SELECT 1 FROM watched_page w WHERE w.company_id = c.company_id)")
+NO_BOARD = "NOT EXISTS (SELECT 1 FROM board b WHERE b.company_id = c.company_id AND b.active = 1)"
 
 
 def _alias_boards(conn: sqlite3.Connection, company_id: int, report: FindBoardsReport) -> int:
@@ -377,6 +376,12 @@ def _watch(conn: sqlite3.Connection, company_id: int, url: str, report: FindBoar
         (company_id, url)).rowcount
 
 
+def _last_careers_attempt(conn: sqlite3.Connection, company_id: int) -> str:
+    """When the careers page was last tried (a check or an error), or "" when never: it sorts first."""
+    return conn.execute("SELECT coalesce(max(at), '') FROM event WHERE company_id = ? AND kind IN "
+                        "('careers_checked', 'careers_error')", (company_id,)).fetchone()[0]
+
+
 def _checked_recently(conn: sqlite3.Connection, company_id: int) -> bool:
     cutoff = (datetime.strptime(utcnow(), "%Y-%m-%dT%H:%M:%SZ") - timedelta(days=CAREERS_RECHECK_DAYS)
               ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -395,7 +400,8 @@ class _Careers:
     def check(self, company_id: int, domain: str) -> CareersResult | None:
         """The careers result, fetched once per run. None when no check was made: no checker, the company was
         marked "no page" in the last 30 days, or the run's limit is used up. A `none` answer leaves the marker (an
-        event, one per month); an `error` only counts, so the next run asks again."""
+        event, one per day); an `error` leaves a `careers_error` event that blocks nothing, so the next run asks
+        again."""
         if self.checker is None:
             return None
         if company_id in self.results:
@@ -404,13 +410,18 @@ class _Careers:
             return None
         result = self.results[company_id] = self.checker.check(domain)
         self.report.careers_checked += 1
+        now = utcnow()
         if result.kind == "none":
             self.report.careers_none += 1
             append_event(self.conn, entity="company", kind="careers_checked", actor="crawler", entity_id=company_id,
                          company_id=company_id, detail={"result": "none"},
-                         idempotency_key=f"careers-checked:{company_id}:{utcnow()[:7]}")
+                         at=now, idempotency_key=f"careers-checked:{company_id}:{now[:10]}")
         elif result.kind == "error":
+            # Not a conclusion and never a block: it only records the attempt, so the queue puts this company
+            # behind the ones not tried yet.
             self.report.careers_errors += 1
+            append_event(self.conn, entity="company", kind="careers_error", actor="crawler", entity_id=company_id,
+                         company_id=company_id, detail={"error": result.error}, at=now)
         return result
 
     def no_domain(self, company_id: int, shared: list[str]) -> None:
@@ -504,10 +515,12 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
                     careers: CareersChecker | None = None, max_careers: int = 100) -> tuple[int, FindBoardsReport]:
     """The `find_boards` job: give each live company with no active board and no watched page its boards.
 
-    Companies go in order of effective tier, then id; tier 3 is skipped unless promoted. Per company: (0) an `ats`
-    alias with no board becomes one; (1) the stapply lookup (a name or slug match is `found_by` `stapply_name`, a
-    host match `import`); (2) only when 0 and 1 added nothing and `careers` is given, at most `max_careers`
-    companies a run: the careers page (see `_careers_boards`). With no directory the lookup does not run, and the run
+    Companies with no active board go in order of effective tier, then id; tier 3 is skipped unless promoted. Per
+    company: (0) an `ats` alias with no board becomes one; (1) only when 0 added nothing, the stapply lookup (a name
+    or slug match is `found_by` `stapply_name`, a host match `import`); (2) only when 0 and 1 added nothing, the
+    company has no watched page and `careers` is given, at most `max_careers` companies a run, in the order of the
+    last careers attempt (oldest first, never tried first, then tier and id): the careers page (see
+    `_careers_boards`). A company with a watched page and no board still gets steps 0 and 1, never step 2. With no directory the lookup does not run, and the run
     is `partial` with that said: never a quiet "nothing found". A last pass gives every company whose boards have no
     crawler adapter a watched page (see `_unread_boards`).
 
@@ -526,6 +539,7 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
         if careers is not None:
             register_source(conn, "careers", "careers-1", run_id)
         step = _Careers(conn, careers, max_careers, report)
+        needs_careers: list[sqlite3.Row] = []
         for row in _live_companies(conn, NO_BOARD):
             company_id = row["company_id"]
             if effective_tier(conn, company_id) == 3:
@@ -534,12 +548,21 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
             report.considered += 1
             try:
                 found = _alias_boards(conn, company_id, report)
-                if directory is not None:
+                if directory is not None and not found:
                     found += _stapply_boards(conn, company_id, row["name"], directory, report)
-                if not found:
-                    _careers_boards(conn, company_id, row["name"], step, report)
+                if not found and not conn.execute("SELECT 1 FROM watched_page WHERE company_id = ?",
+                                                  (company_id,)).fetchone():
+                    needs_careers.append(row)
             except (sqlite3.Error, ValueError) as err:
                 report.failed.append(f"#{company_id} {row['name']}: {describe_error(err)}")
+        # The careers queue: the page tried longest ago first (never tried before any), then tier and id.
+        needs_careers.sort(key=lambda r: (_last_careers_attempt(conn, r["company_id"]),
+                                          effective_tier(conn, r["company_id"]), r["company_id"]))
+        for row in needs_careers:
+            try:
+                _careers_boards(conn, row["company_id"], row["name"], step, report)
+            except (sqlite3.Error, ValueError) as err:
+                report.failed.append(f"#{row['company_id']} {row['name']}: {describe_error(err)}")
         _unread_boards(conn, step, report)
     except BaseException as err:
         try:

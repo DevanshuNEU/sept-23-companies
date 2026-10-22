@@ -17,8 +17,9 @@ What becomes one company:
    domain must not join them again. A vetoed company is treated as a weak match.
 4. Two or more `name_state` hits and no FEIN or domain hit is ambiguous: no merge, one item against each hit
    (basis `ambiguous_name_state`), never a guess at the lower id. The company made for it writes its name keys
-   weak, so it never becomes one more hit. A later ambiguous candidate with no usable FEIN attaches to the
-   lowest-id such company with its name key and state (basis `ambiguous_repeat`, `likely`), and that company gets an
+   weak, so it never becomes one more hit. When the record had no usable FEIN and no usable domain, that company is
+   the tie company (`"tie": true` in its `created` event). A later ambiguous candidate with neither attaches to the
+   lowest-id tie company with its name key and state (basis `ambiguous_repeat`, `likely`), and that company gets an
    `ambiguous_name_state` item against each current hit it is not yet linked to: the ambiguity adds one company,
    not one per candidate. A candidate with a usable FEIN or domain that matched nothing never takes the repeat (it
    may be one more employer), and a non-creating source gets None instead. Merging the tie company into one of the
@@ -283,12 +284,20 @@ def _created_ambiguous(conn: sqlite3.Connection, company_id: int) -> bool:
         "LIMIT 1", (company_id,)).fetchone() is not None
 
 
+def _is_tie(conn: sqlite3.Connection, company_id: int) -> bool:
+    """Whether the company is a tie company: made by an ambiguous resolve of a record with no usable FEIN and no
+    usable domain (its `created` event has `"tie": true`). Only a tie company takes `ambiguous_repeat`."""
+    return conn.execute(
+        "SELECT 1 FROM event WHERE company_id = ? AND entity = 'company' AND kind = 'created' "
+        "AND json_extract(detail, '$.tie') = 1 LIMIT 1", (company_id,)).fetchone() is not None
+
+
 def _ambiguous_repeat(conn: sqlite3.Connection, keys: list[str], state: str) -> _Hit | None:
-    """The lowest-id company made by an ambiguous resolve that holds one of the keys and has the state, or None."""
+    """The lowest-id tie company that holds one of the keys and has the state, or None."""
     found = []
     for key in dict.fromkeys(keys):
         found += [(cid, key) for cid, _ in _name_owners(conn, key)
-                  if company_state(conn, cid) == state and _created_ambiguous(conn, cid)]
+                  if company_state(conn, cid) == state and _is_tie(conn, cid)]
     if not found:
         return None
     cid, key = min(found)
@@ -296,7 +305,8 @@ def _ambiguous_repeat(conn: sqlite3.Connection, keys: list[str], state: str) -> 
 
 
 def find_company(conn: sqlite3.Connection, cand: Candidate, *, source_name: str) -> Match:
-    """What the candidate matches, without writing anything."""
+    """What the candidate matches, without writing anything. An `ambiguous_repeat` strong hit is never attached for a
+    non-creating source: `resolve_candidate(creates=False)` returns None for it."""
     strong, weak = _find(conn, cand, source_name)
     return Match(tuple((h.company_id, h.basis) for h in strong), tuple((h.company_id, h.basis) for h in weak))
 
@@ -424,7 +434,8 @@ def resolve_candidate(conn: sqlite3.Connection, cand: Candidate, *, source_name:
                       actor: str = "system") -> Resolution | None:
     """Attach the candidate to its company or make a new one (status `candidate`), then write its aliases, its
     evidence (`record_evidence`, actor `source`; a `domain` draft that is not a company domain is dropped) and its
-    `company_source` row. None only when `creates` is false and nothing matched strongly; nothing is written then.
+    `company_source` row. None only when `creates` is false and nothing matched strongly, or the only strong hit is
+    an `ambiguous_repeat` (the tie company is a guess); nothing is written then.
 
     `actor` labels the company event. ValueError, before any write, for a `hand` evidence draft (hand evidence is
     written locked by its own writer), an empty `source_ref` or a source not registered in `source`. Any error
@@ -471,6 +482,9 @@ def resolve_candidate(conn: sqlite3.Connection, cand: Candidate, *, source_name:
                   "confidence": CONFIDENCE[basis], "aliases": aliases}
         if created:
             detail["possible_duplicates"] = [[h.company_id, h.basis] for h in weak]
+            if (any(h.basis == "ambiguous_name_state" for h in weak) and _usable_fein(conn, cand) is None
+                    and _usable_domain(conn, cand) is None):
+                detail["tie"] = True  # the one company later name-only records of this tie repeat into
             append_event(conn, entity="company", kind="created", actor=actor, entity_id=company_id,
                          company_id=company_id, detail=detail)
         elif new_link:

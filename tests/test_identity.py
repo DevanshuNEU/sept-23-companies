@@ -836,5 +836,32 @@ class ReviewRound4Test(AmbiguityBase):
         self.assertEqual(self.count("SELECT COUNT(*) FROM company"), 3)
 
 
+class ReviewRound5Test(AmbiguityBase):
+    """Review round 5 of Task 7: only a record with no usable FEIN and no usable domain makes the tie company. Red
+    before its fix."""
+
+    def test_a_keyed_ambiguous_company_is_never_the_tie_company(self):
+        self.pair()
+        keyed = self.resolve(cand("Acme Corp", state="TX", domain="acmetx.com", kind="hn", ref="hn:acmetx"),
+                             source="hn")
+        self.assertEqual((keyed.company_id, keyed.created), (3, True))
+        made = [self.resolve(cand("Acme Corp", state="TX", city="Dallas", kind="yc", ref=f"yc:{n}"), source="yc")
+                for n in range(3)]
+        self.assertEqual([(m.company_id, m.created, m.basis) for m in made],
+                         [(4, True, "created"), (4, False, "ambiguous_repeat"), (4, False, "ambiguous_repeat")])
+        self.assertEqual([r[0] for r in self.conn.execute(
+            "SELECT value FROM evidence WHERE fact = 'hq' AND company_id = 3")], ["Austin, TX"])
+        self.assertEqual([tuple(r) for r in self.conn.execute(
+            "SELECT company_id, strong FROM company_name_key ORDER BY company_id")], [(1, 1), (2, 1), (3, 0), (4, 0)])
+        ties = [json.loads(r[0]).get("tie") for r in self.conn.execute(
+            "SELECT detail FROM event WHERE kind = 'created' ORDER BY company_id")]
+        self.assertEqual(ties, [None, None, None, True])
+        before = table_marks(self.conn)
+        self.resolve(cand("Acme Corp", state="TX", domain="acmetx.com", kind="hn", ref="hn:acmetx"), source="hn")
+        for n in range(3):
+            self.resolve(cand("Acme Corp", state="TX", city="Dallas", kind="yc", ref=f"yc:{n}"), source="yc")
+        self.assertEqual(table_marks(self.conn), before)
+
+
 if __name__ == "__main__":
     unittest.main()

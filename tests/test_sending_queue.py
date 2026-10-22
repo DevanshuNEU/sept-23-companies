@@ -412,6 +412,74 @@ class HoldsAndStopsTest(Base):
                 self.assertIsNone(verdict.earliest_at)
 
 
+class HoldFamilyTest(Base):
+    def test_a_hold_on_a_merged_away_duplicate_holds_the_survivor_and_the_duplicate(self):
+        survivor = seed_company(self.db, "Survivor")
+        duplicate = seed_company(self.db, "Duplicate")
+        replier = self.person(company=duplicate)
+        seed_sent(self.db, replier, at=ny(1, 9))
+        self.db.execute("UPDATE company SET held_by_touch = ?, held_at = '2026-11-02T12:00:00Z' "
+                        "WHERE company_id = ?", (self.touch_of(replier), duplicate))
+        self.merge(duplicate, survivor)
+        _, at_survivor = self.approve(company=survivor)
+        _, at_duplicate = self.approve(company=duplicate)
+        verdicts = self.verdicts_at()
+        self.assertEqual(verdicts[at_survivor].reason, "company_held")
+        self.assertEqual(verdicts[at_duplicate].reason, "company_held")
+
+
+class NoAddressTest(Base):
+    def blank_email(self, person):
+        self.db.execute("UPDATE person SET email = NULL, added_by = 'import' WHERE person_id = ?", (person,))
+
+    def test_no_address_waits_and_says_so(self):
+        person, message = self.approve()
+        self.blank_email(person)
+        verdict = self.verdicts_at()[message]
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("no_address", None))
+        self.assertEqual(queue.REASON_TEXT["no_address"], "No email address for this person.")
+        self.assertIsNone(queue.pick(list(self.verdicts_at().values()), queue.load_queue(self.db)))
+
+    def test_no_address_waits_even_with_nothing_else_in_the_way(self):
+        person, message = self.approve(tz="Asia/Tokyo")
+        self.blank_email(person)
+        self.assertEqual(self.reason(message, ny(2, 8, 0)), "no_address")
+
+    def test_a_message_with_no_address_does_not_hold_a_recruiter(self):
+        _, recruiter = self.approve(role="recruiter")
+        engineer, message = self.approve(role="engineer")
+        self.blank_email(engineer)
+        verdicts = self.verdicts_at()
+        self.assertEqual(verdicts[message].reason, "no_address")
+        self.assertEqual(verdicts[recruiter].reason, "ready")
+
+
+class RecruiterRuleEdgeTest(Base):
+    def test_a_follow_up_that_is_not_due_does_not_hold_a_recruiter(self):
+        _, recruiter = self.approve(role="recruiter")
+        self.approve_followup("2026-11-20")
+        self.assertEqual(self.reason(recruiter), "ready")
+
+    def test_a_due_follow_up_still_holds_a_recruiter(self):
+        _, recruiter = self.approve(role="recruiter")
+        self.approve_followup("2026-11-02")
+        self.assertEqual(self.reason(recruiter), "recruiter_waits")
+
+
+class WindowEdgeTest(Base):
+    def test_tokyo_saturday_while_new_york_is_friday_waits_for_tokyo_monday(self):
+        now = ny(6, 20)  # Friday 20:00 in New York, Saturday 10:00 in Tokyo
+        _, message = self.approve(tz="Asia/Tokyo")
+        verdict = self.verdicts_at(now)[message]
+        self.assertEqual(verdict.reason, "window")
+        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 9, 8, 30, tzinfo=ZoneInfo("Asia/Tokyo")))
+
+    def test_16_30_exactly_is_inside_the_window_and_16_31_is_not(self):
+        _, message = self.approve()
+        self.assertEqual(self.reason(message, ny(2, 16, 30)), "ready")
+        self.assertEqual(self.reason(message, ny(2, 16, 31)), "window")
+
+
 class ReasonsTest(Base):
     def test_every_wait_has_an_earliest_time_or_is_a_stop(self):
         held = seed_company(self.db, "Held")
@@ -442,6 +510,8 @@ class ReasonsTest(Base):
         self.approve_followup("2026-11-05", company=seed_company(self.db, "Soon"))
         self.approve(company=seed_company(self.db, "Spaced"))
         self.approve(company=seed_company(self.db, "Fine"), tz="America/Los_Angeles")
+        nobody, _ = self.approve(company=seed_company(self.db, "Nobody"))
+        self.db.execute("UPDATE person SET email = NULL, added_by = 'import' WHERE person_id = ?", (nobody,))
         self.db.execute("UPDATE sender SET next_send_at = ? WHERE sender_id = 1", (stamp(MON + timedelta(minutes=3)),))
         seen = set()
         for now in (MON, ny(2, 16, 45), ny(7, 10)):
@@ -454,7 +524,7 @@ class ReasonsTest(Base):
                 else:
                     self.assertIsNone(verdict.earliest_at, verdict.reason)
         self.assertTrue({"company_held", "company_paused", "company_closed", "per_company_limit", "per_company_gap",
-                         "recruiter_waits", "bad_timezone", "window", "followup_not_due", "spacing",
+                         "recruiter_waits", "bad_timezone", "window", "no_address", "followup_not_due", "spacing",
                          "not_business_day", "ready"} <= seen, seen)
 
     def test_every_reason_is_one_plain_line(self):

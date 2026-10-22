@@ -6,7 +6,7 @@ it, so there is one copy of "which follow-ups are due".
 import sqlite3
 from datetime import date, timedelta
 
-__all__ = ["canonical_company", "company_map", "resolve_company", "due_followups"]
+__all__ = ["canonical_company", "company_map", "resolve_company", "held_survivors", "due_followups"]
 
 
 def canonical_company(conn: sqlite3.Connection, company_id: int) -> int:
@@ -41,10 +41,16 @@ def resolve_company(companies: dict[int, sqlite3.Row], company_id: int) -> list[
     return chain
 
 
+def held_survivors(companies: dict[int, sqlite3.Row]) -> set[int]:
+    """The surviving companies that are held: a survivor is held when any company that resolves to it has
+    `held_by_touch`, so a hold set on a duplicate before it was merged away still holds the survivor."""
+    return {resolve_company(companies, cid)[-1] for cid, row in companies.items() if row["held_by_touch"] is not None}
+
+
 def due_followups(conn: sqlite3.Connection, today: date, *, days_ahead: int = 0) -> list[int]:
     """The `message_id`s of `planned` rows due on or before `today + days_ahead`, oldest `due_on` first.
 
-    Only rows on a touch that is still `open` and whose first email was sent count, and only when the surviving
+    Only rows on a touch that is still `open`, whose first email was sent and which has its thread count, and only when the surviving
     company (through `merged_into`) is not held, `closed` or `removed`. A paused company still lists its due
     follow-ups: pausing is Devanshu's, and the sender holds the send, not the draft. Read only.
     """
@@ -52,14 +58,15 @@ def due_followups(conn: sqlite3.Connection, today: date, *, days_ahead: int = 0)
     rows = conn.execute(
         "SELECT m.message_id, p.company_id FROM message m "
         "JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
-        "WHERE m.state = 'planned' AND m.due_on <= ? AND t.state = 'open' AND t.first_sent_at IS NOT NULL "
+        "WHERE m.state = 'planned' AND m.due_on <= ? AND t.state = 'open' AND t.first_sent_at IS NOT NULL AND t.gmail_thread_id IS NOT NULL "
         "ORDER BY m.due_on, m.message_id", (horizon,)).fetchall()
     if not rows:
         return []
     companies = company_map(conn)
+    held = held_survivors(companies)
     due = []
     for row in rows:
-        survivor = companies[resolve_company(companies, row["company_id"])[-1]]
-        if survivor["held_by_touch"] is None and survivor["status"] not in ("closed", "removed"):
+        survivor_id = resolve_company(companies, row["company_id"])[-1]
+        if survivor_id not in held and companies[survivor_id]["status"] not in ("closed", "removed"):
             due.append(row["message_id"])
     return due

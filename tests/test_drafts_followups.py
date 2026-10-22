@@ -1,5 +1,8 @@
+import subprocess
+import sys
 import unittest
 from datetime import date
+from pathlib import Path
 
 from outreach.drafts.followups import canonical_company, due_followups
 from tests.sendtest import MON, bounce, seed_email_person, seed_message, seed_sent
@@ -83,6 +86,32 @@ class DueFollowupsTest(unittest.TestCase):
         self.db.execute("UPDATE company SET held_by_touch = ?, held_at = '2026-11-05T15:00:00Z' "
                         "WHERE company_id = ?", (self.touch_of(message), survivor))
         self.assertEqual(due_followups(self.db, TODAY), [])
+
+    def test_a_hold_on_a_merged_away_duplicate_holds_the_survivor_and_the_duplicate(self):
+        survivor = seed_company(self.db, "Survivor")
+        duplicate = seed_company(self.db, "Duplicate")
+        held = self.followup("2026-11-09", company=duplicate)
+        self.db.execute("UPDATE company SET held_by_touch = ?, held_at = '2026-11-05T15:00:00Z' "
+                        "WHERE company_id = ?", (self.touch_of(held), duplicate))
+        self.merge(duplicate, survivor)
+        at_survivor = self.followup("2026-11-09", company=survivor)
+        at_duplicate = self.followup("2026-11-09", company=duplicate)
+        self.assertEqual(due_followups(self.db, TODAY), [])
+        self.assertNotIn(at_survivor, due_followups(self.db, TODAY))
+        self.assertNotIn(at_duplicate, due_followups(self.db, TODAY))
+
+    def test_a_touch_with_no_thread_has_no_follow_up(self):
+        message = self.followup("2026-11-09")
+        self.db.execute("UPDATE touch SET origin = 'import', gmail_thread_id = NULL WHERE touch_id = ?",
+                        (self.touch_of(message),))
+        self.assertEqual(due_followups(self.db, TODAY), [])
+
+    def test_it_imports_without_the_sending_package(self):
+        code = ("import sys; import outreach.drafts.followups; "
+                "assert not [m for m in sys.modules if m.startswith('outreach.sending')], 'imported outreach.sending'")
+        root = Path(__file__).resolve().parent.parent
+        done = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_a_merged_duplicate_is_not_a_removed_company(self):
         survivor = seed_company(self.db, "Survivor")

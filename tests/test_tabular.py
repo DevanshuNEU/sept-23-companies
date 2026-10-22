@@ -1,6 +1,7 @@
 """The CSV and streaming xlsx reader (#31 Task 3). Fixture workbooks are built by tests/xlsxbuild.py."""
 import csv
 import tempfile
+import tracemalloc
 import unittest
 import zipfile
 from pathlib import Path
@@ -185,6 +186,79 @@ class TabularTest(unittest.TestCase):
         path.write_bytes(b"")
         with self.assertRaises(TabularError):
             self.read(path, ["NAME"])
+
+    def test_workbook_whose_first_listed_sheet_is_sheet2(self):
+        path = self.xlsx(HEADER, ROWS, first_is_sheet2=True)
+        self.assertEqual(self.read(path), [dict(zip(HEADER, r)) for r in ROWS])
+
+    def test_header_plus_rows_of_empty_values_is_empty_table(self):
+        empty = [["", "", "", ""], [None] * 4]
+        for kw in ({}, {"sparse": True}, {"inline": True}):
+            with self.assertRaises(EmptyTable, msg=str(kw)):
+                self.read(self.xlsx(HEADER, empty, name="ev.xlsx", **kw))
+        xml = (f'<?xml version="1.0"?><worksheet xmlns="{MAIN}"><sheetData>'
+               '<row r="1"><c r="A1" t="inlineStr"><is><t>CASE_NUMBER</t></is></c></row>'
+               '<row r="2"><c r="A2" t="inlineStr"><is><t></t></is></c><c r="B2"><v></v></c></row>'
+               '</sheetData></worksheet>')
+        with self.assertRaises(EmptyTable):
+            self.read(write_xlsx(self.dir / "ev2.xlsx", ["CASE_NUMBER"], [], sheet_xml=xml), ["CASE_NUMBER"])
+        with self.assertRaises(EmptyTable):
+            self.read(write_csv(self.dir / "ev.csv", HEADER, [["", "", "", ""]]))
+
+    def test_missing_or_unreadable_csv_raises_tabular_error(self):
+        with self.assertRaises(TabularError):
+            self.read(self.dir / "nope.csv")
+        folder = self.dir / "folder.csv"
+        folder.mkdir()
+        with self.assertRaises(TabularError):
+            self.read(folder)
+
+    def test_oversized_sheet_raises_naming_the_member(self):
+        path = self.xlsx(HEADER, ROWS * 50)
+        with self.assertRaises(TabularError) as ctx:
+            list(read_rows(path, ALL, max_member_bytes=2000))
+        self.assertIn("xl/worksheets/sheet1.xml", str(ctx.exception))
+        self.assertEqual(len(list(read_rows(path, ALL, max_member_bytes=10_000_000))), 100)
+
+    def test_oversized_shared_strings_raises_naming_the_member(self):
+        sst = (f'<?xml version="1.0"?><sst xmlns="{MAIN}">' + f"<si><t>{'y' * 100}</t></si>" * 100 + "</sst>")
+        path = write_xlsx(self.dir / "sst.xlsx", ["CASE_NUMBER"], [["a"]], inline=True, sst_xml=sst)
+        with self.assertRaises(TabularError) as ctx:
+            list(read_rows(path, ["CASE_NUMBER"], max_member_bytes=5000))
+        self.assertIn("xl/sharedStrings.xml", str(ctx.exception))
+
+    def test_streaming_a_large_sheet_does_not_grow_memory_per_row(self):
+        n = 200_000
+        body = "".join(f'<row r="{i}"><c r="A{i}" t="inlineStr"><is><t>x</t></is></c></row>' for i in range(2, n + 2))
+        xml = (f'<?xml version="1.0"?><worksheet xmlns="{MAIN}"><sheetData>'
+               f'<row r="1"><c r="A1" t="inlineStr"><is><t>CASE_NUMBER</t></is></c></row>{body}</sheetData></worksheet>')
+        path = write_xlsx(self.dir / "big.xlsx", ["CASE_NUMBER"], [], sheet_xml=xml)
+        del body, xml
+        count = 0
+        tracemalloc.start()
+        try:
+            for _ in read_rows(path, ["CASE_NUMBER"]):
+                count += 1
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(count, n)
+        self.assertLess(peak, 2_000_000, f"peak {peak} bytes for {n} rows")
+
+    def test_streaming_many_shared_strings_does_not_keep_si_shells(self):
+        n = 200_000
+        sst = (f'<?xml version="1.0"?><sst xmlns="{MAIN}" count="{n}" uniqueCount="{n}">'
+               + "<si><t>x</t></si>" * n + "</sst>")
+        path = write_xlsx(self.dir / "sst.xlsx", ["CASE_NUMBER"], [["a"]], inline=True, sst_xml=sst)
+        del sst
+        tracemalloc.start()
+        try:
+            rows = list(read_rows(path, ["CASE_NUMBER"]))
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(rows, [{"CASE_NUMBER": "a"}])
+        self.assertLess(peak, 3_000_000, f"peak {peak} bytes for {n} shared strings")
 
 
 if __name__ == "__main__":

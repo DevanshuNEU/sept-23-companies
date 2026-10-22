@@ -33,7 +33,8 @@ def _blank(value) -> bool:
     return value is None or value == ""
 
 
-def write_xlsx(path, header, rows, *, inline=False, sparse=False, sheet_xml=None) -> Path:
+def write_xlsx(path, header, rows, *, inline=False, sparse=False, sheet_xml=None, first_is_sheet2=False,
+               sst_xml=None) -> Path:
     """Write `header` then `rows` to one sheet. str is a shared string (an inline string with `inline=True`),
     int and float are numeric `<v>` cells without `t`, RichText is a rich shared string, None or '' is an empty
     cell. `sparse=True` omits empty cells the way Excel does. `sheet_xml` replaces the generated sheet (for
@@ -76,6 +77,17 @@ def write_xlsx(path, header, rows, *, inline=False, sparse=False, sheet_xml=None
         xml_rows.append(f'<row r="{number}">{"".join(cells)}</row>')
     sheet = sheet_xml or (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                           f'<worksheet xmlns="{MAIN}"><sheetData>{"".join(xml_rows)}</sheetData></worksheet>')
+    sheets = '<sheet name="Sheet1" sheetId="1" r:id="rId1"/>'
+    rels = ('<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+            'Target="worksheets/sheet1.xml"/>')
+    extra = {}
+    if first_is_sheet2:
+        sheets = '<sheet name="Data" sheetId="2" r:id="rId3"/><sheet name="Other" sheetId="1" r:id="rId1"/>'
+        rels += ('<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+                 'Target="worksheets/sheet2.xml"/>')
+        decoy = (f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="{MAIN}"><sheetData><row r="1">'
+                 '<c r="A1" t="inlineStr"><is><t>DECOY</t></is></c></row></sheetData></worksheet>')
+        extra = {"xl/worksheets/sheet2.xml": sheet, "xl/worksheets/sheet1.xml": decoy}
     parts = {
         "[Content_Types].xml": (
             '<?xml version="1.0" encoding="UTF-8"?>'
@@ -91,18 +103,19 @@ def write_xlsx(path, header, rows, *, inline=False, sparse=False, sheet_xml=None
             '</Relationships>'),
         "xl/workbook.xml": (
             f'<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="{MAIN}" xmlns:r="{REL}">'
-            '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+            f'<sheets>{sheets}</sheets></workbook>'),
         "xl/_rels/workbook.xml.rels": (
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            + rels +
             '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
             '</Relationships>'),
         "xl/worksheets/sheet1.xml": sheet,
-        "xl/sharedStrings.xml": (
+        "xl/sharedStrings.xml": sst_xml or (
             f'<?xml version="1.0" encoding="UTF-8"?><sst xmlns="{MAIN}" count="{len(shared)}" '
             f'uniqueCount="{len(shared)}">{"".join(shared)}</sst>'),
     }
+    parts.update(extra)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, body in parts.items():
             zf.writestr(name, body)

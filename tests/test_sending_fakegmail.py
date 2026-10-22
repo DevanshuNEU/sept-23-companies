@@ -1,0 +1,310 @@
+"""The mail client contract (`outreach.sending.mail`) and the scriptable fake Gmail every sending test uses.
+
+Nothing here reaches Gmail: FakeGmail and FakeClock are in-memory only.
+"""
+import unittest
+from datetime import datetime, timedelta, timezone
+
+from outreach.sending.fakegmail import FakeClock, FakeGmail
+from outreach.sending.mail import (RETRYABLE, GmailError, HistoryExpired, MailClient, MessageMeta, Outgoing, Sent,
+                                   classify_http)
+
+ACCOUNT = "devanshurajesh@gmail.com"
+START = datetime(2026, 11, 10, 14, 0, tzinfo=timezone.utc)
+
+
+def outgoing(to="founder@sendwell.example", subject="Backend role at Sendwell", *, message_id="<a1@gmail.com>",
+             thread_id=None, in_reply_to=None, references=()):
+    return Outgoing(to=to, subject=subject, body="Hi Sam,\n\nShort note.\n\nDevanshu", from_name="Devanshu C",
+                    from_addr=ACCOUNT, message_id=message_id, thread_id=thread_id, in_reply_to=in_reply_to,
+                    references=tuple(references))
+
+
+def ms(dt: datetime) -> int:
+    return int(dt.timestamp() * 1000)
+
+
+class FakeClockTest(unittest.TestCase):
+    def test_clock_advances_and_sets(self):
+        clock = FakeClock(START)
+        self.assertEqual(clock(), START)
+        clock.advance(minutes=5)
+        self.assertEqual(clock(), START + timedelta(minutes=5))
+        clock.set(START + timedelta(days=2))
+        self.assertEqual(clock(), START + timedelta(days=2))
+
+    def test_clock_refuses_a_naive_time(self):
+        with self.assertRaises(ValueError):
+            FakeClock(datetime(2026, 11, 10, 9, 0))
+        with self.assertRaises(ValueError):
+            FakeClock(START).set(datetime(2026, 11, 10, 9, 0))
+
+
+class FakeGmailTest(unittest.TestCase):
+    def setUp(self):
+        self.clock = FakeClock(START)
+        self.gmail = FakeGmail(clock=self.clock)
+
+    def test_fake_is_a_mail_client(self):
+        self.assertIsInstance(self.gmail, MailClient)
+
+    def test_send_assigns_ids_and_lands_in_sent(self):
+        sent = self.gmail.send(outgoing())
+        self.assertEqual(sent, Sent(gmail_message_id="m1", thread_id="t1", rfc_message_id="<a1@gmail.com>"))
+        self.assertEqual(len(self.gmail.sent), 1)
+        out, got, at = self.gmail.sent[0]
+        self.assertEqual((out.to, got, at), ("founder@sendwell.example", sent, START))
+        self.assertEqual([m.headers["message-id"] for m in self.gmail.sent_box], ["<a1@gmail.com>"])
+        meta = self.gmail.message("m1")
+        self.assertEqual(meta.labels, ("SENT",))
+        self.assertEqual(meta.to_addr, "founder@sendwell.example")
+        self.assertIn(ACCOUNT, meta.from_addr)
+        self.assertEqual(meta.internal_ms, ms(START))
+        second = self.gmail.send(outgoing(to="cto@other.example", subject="Hello", message_id="<a2@gmail.com>"))
+        self.assertEqual((second.gmail_message_id, second.thread_id), ("m2", "t2"))
+
+    def test_follow_up_with_thread_id_stays_in_the_thread(self):
+        first = self.gmail.send(outgoing())
+        self.clock.advance(days=9)
+        follow = self.gmail.send(outgoing(subject="Re: Backend role at Sendwell", message_id="<a2@gmail.com>",
+                                          thread_id=first.thread_id, in_reply_to=first.rfc_message_id,
+                                          references=(first.rfc_message_id,)))
+        self.assertEqual(follow.thread_id, first.thread_id)
+        thread = self.gmail.thread(first.thread_id)
+        self.assertEqual([m.gmail_message_id for m in thread], [first.gmail_message_id, follow.gmail_message_id])
+        self.assertEqual(thread[1].headers["in-reply-to"], "<a1@gmail.com>")
+        self.assertEqual(thread[1].headers["references"], "<a1@gmail.com>")
+
+    def test_follow_up_with_another_subject_starts_a_new_thread_as_gmail_does(self):
+        first = self.gmail.send(outgoing())
+        other = self.gmail.send(outgoing(subject="Something else", message_id="<a2@gmail.com>",
+                                         thread_id=first.thread_id, in_reply_to=first.rfc_message_id))
+        self.assertNotEqual(other.thread_id, first.thread_id)
+
+    def test_unknown_thread_id_is_a_bad_request_and_sends_nothing(self):
+        with self.assertRaises(GmailError) as cm:
+            self.gmail.send(outgoing(thread_id="t99"))
+        self.assertEqual((cm.exception.kind, cm.exception.status), ("bad_request", 404))
+        self.assertEqual(self.gmail.sent, [])
+
+    def test_bad_outgoing_is_refused_before_anything_goes_out(self):
+        for bad in (outgoing(to="a@x.example, b@y.example"), outgoing(message_id=""),
+                    outgoing(subject="Hi\r\nBcc: x@y.example")):
+            with self.subTest(bad=bad), self.assertRaises(GmailError) as cm:
+                self.gmail.send(bad)
+            self.assertEqual(cm.exception.kind, "bad_request")
+        self.assertEqual((self.gmail.sent, self.gmail.sent_box), ([], []))
+
+    def test_failed_send_sends_nothing(self):
+        self.gmail.fail_next_send(GmailError("rate_limit", 429, "slow down"))
+        with self.assertRaises(GmailError):
+            self.gmail.send(outgoing())
+        self.assertEqual((self.gmail.sent, self.gmail.sent_box), ([], []))
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START) - 1), (None, True))
+        # The script is used once: the next send goes through.
+        self.assertEqual(self.gmail.send(outgoing()).gmail_message_id, "m1")
+
+    def test_accepted_then_failed_counts_as_sent_and_is_in_sent(self):
+        self.gmail.fail_next_send(TimeoutError("read timed out"), accepted=True)
+        with self.assertRaises(TimeoutError):
+            self.gmail.send(outgoing())
+        self.assertEqual(len(self.gmail.sent), 1)
+        found, complete = self.gmail.find_sent("<a1@gmail.com>", ms(START))
+        self.assertTrue(complete)
+        self.assertEqual(found, self.gmail.sent[0][1])
+
+    def test_accepted_but_not_yet_in_sent_can_be_scripted(self):
+        self.gmail.fail_next_send(TimeoutError(), accepted=True, in_sent=False)
+        with self.assertRaises(TimeoutError):
+            self.gmail.send(outgoing())
+        self.assertEqual((len(self.gmail.sent), self.gmail.sent_box), (1, []))
+
+    def test_history_lists_only_new_messages_and_expires_on_request(self):
+        first = self.gmail.send(outgoing())
+        cursor = self.gmail.profile().history_id
+        self.assertEqual(self.gmail.history(cursor).added, ())
+        reply = self.gmail.deliver_reply(first, "Sam Lee <founder@sendwell.example>", snippet="Happy to chat")
+        noise = self.gmail.deliver_unrelated("news@letters.example", "Weekly digest")
+        page = self.gmail.history(cursor)
+        self.assertEqual([a.gmail_message_id for a in page.added], [reply.gmail_message_id, noise.gmail_message_id])
+        self.assertEqual(page.added[0].thread_id, first.thread_id)
+        self.assertIn("INBOX", page.added[0].labels)
+        self.assertEqual(page.history_id, self.gmail.profile().history_id)
+        self.assertGreater(int(page.history_id), int(cursor))
+        self.assertEqual(self.gmail.history(page.history_id).added, ())
+        self.gmail.expire_history()
+        with self.assertRaises(HistoryExpired):
+            self.gmail.history(page.history_id)
+        self.assertEqual(self.gmail.history(page.history_id).added, ())   # expiry is one call
+        with self.assertRaises(HistoryExpired):
+            self.gmail.history("")                                        # no cursor is no cursor
+
+    def test_reply_shape(self):
+        first = self.gmail.send(outgoing())
+        self.clock.advance(hours=3)
+        reply = self.gmail.deliver_reply(first, "founder@sendwell.example", headers={"Precedence": "bulk"},
+                                         snippet="Sure")
+        self.assertEqual(reply.thread_id, first.thread_id)
+        self.assertEqual(reply.subject, "Re: Backend role at Sendwell")
+        self.assertEqual(reply.to_addr, ACCOUNT)
+        self.assertEqual(reply.headers["in-reply-to"], first.rfc_message_id)
+        self.assertEqual(reply.headers["precedence"], "bulk")
+        self.assertEqual(reply.internal_ms, ms(START + timedelta(hours=3)))
+        self.assertEqual(self.gmail.message(reply.gmail_message_id), reply)
+        with self.assertRaises(ValueError):
+            self.gmail.deliver_reply(first, "x@y.example", headers={"X-Not-Read": "1"})
+
+    def test_auto_reply_shape(self):
+        first = self.gmail.send(outgoing())
+        auto = self.gmail.deliver_auto_reply(first, "founder@sendwell.example")
+        self.assertEqual((auto.subject, auto.thread_id), ("Automatic reply", first.thread_id))
+        self.assertEqual(auto.headers["auto-submitted"], "auto-replied")
+
+    def test_bounce_shapes(self):
+        first = self.gmail.send(outgoing())
+        hard = self.gmail.deliver_bounce(first)
+        self.assertEqual(hard.from_addr, "Mail Delivery Subsystem <mailer-daemon@googlemail.com>")
+        self.assertEqual(hard.subject, "Delivery Status Notification (Failure)")
+        self.assertEqual(hard.thread_id, first.thread_id)
+        self.assertEqual(hard.headers["x-failed-recipients"], "founder@sendwell.example")
+        self.assertIn("550 5.1.1", hard.snippet)
+        policy = self.gmail.deliver_bounce(first, dsn="policy")
+        self.assertIn("550 5.7.1", policy.snippet)
+        self.assertIn("unsolicited", policy.snippet)
+        limit = self.gmail.deliver_bounce(first, dsn="limit")
+        self.assertIn("You have reached a limit for sending mail", limit.snippet)
+        delay = self.gmail.deliver_bounce(first, dsn="delay")
+        self.assertIn("(Delay)", delay.subject)
+        self.assertNotIn("x-failed-recipients", delay.headers)
+        loose = self.gmail.deliver_bounce(first, threaded=False)
+        self.assertNotEqual(loose.thread_id, first.thread_id)
+        self.assertNotIn(loose.thread_id, {m.thread_id for m in self.gmail.sent_box})
+        self.assertEqual(loose.headers["x-failed-recipients"], "founder@sendwell.example")
+        self.assertNotIn("in-reply-to", loose.headers)
+
+    def test_find_sent_by_message_id_reports_a_complete_scan(self):
+        claim = START
+        target = self.gmail.send(outgoing())
+        for i in range(120):                       # many newer messages: more than two fake pages
+            self.clock.advance(minutes=1)
+            self.gmail.send(outgoing(to=f"p{i}@co.example", subject=f"s{i}", message_id=f"<n{i}@gmail.com>"))
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(claim)), (target, True))
+        # A miss that reached past the claim time is proof.
+        self.assertEqual(self.gmail.find_sent("<never@gmail.com>", ms(claim) + 1), (None, True))
+        # A miss that reached the end of Sent is proof too.
+        self.assertEqual(self.gmail.find_sent("<never@gmail.com>", 0), (None, True))
+
+    def test_find_sent_matches_by_message_id_only(self):
+        self.gmail.add_to_sent("founder@sendwell.example", "Backend role at Sendwell", message_id="<other@gmail.com>")
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", 0), (None, True))
+
+    def test_find_sent_with_a_page_cap_reports_incomplete(self):
+        self.gmail.send(outgoing())
+        for i in range(60):
+            self.clock.advance(minutes=1)
+            self.gmail.send(outgoing(to=f"p{i}@co.example", subject=f"s{i}", message_id=f"<n{i}@gmail.com>"))
+        self.gmail.find_sent_page_cap = 1           # one page of 50: the target is on page 2
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START)), (None, False))
+        self.gmail.find_sent_page_cap = 0
+        self.assertEqual(self.gmail.find_sent("<n59@gmail.com>", 0), (None, False))
+        self.gmail.find_sent_page_cap = None
+        self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", ms(START))[1], True)
+
+    def test_probe_sees_every_call(self):
+        seen = []
+        gmail = FakeGmail(clock=self.clock, probe=seen.append)
+        first = gmail.send(outgoing())
+        gmail.profile()
+        gmail.history("1")
+        gmail.message(first.gmail_message_id)
+        gmail.thread(first.thread_id)
+        gmail.find_sent(first.rfc_message_id, 0)
+        names = ["send", "profile", "history", "message", "thread", "find_sent"]
+        self.assertEqual(seen, names)
+        self.assertEqual(gmail.calls, names)
+        gmail.deliver_reply(first, "x@y.example")       # scripting is not a client call
+        self.assertEqual(seen, names)
+
+    def test_a_probe_that_raises_stops_the_call_before_it_does_anything(self):
+        def crash(name):
+            raise SystemExit("power cut")
+        gmail = FakeGmail(clock=self.clock, probe=crash)
+        with self.assertRaises(SystemExit):
+            gmail.send(outgoing())
+        self.assertEqual((gmail.sent, gmail.sent_box), ([], []))
+
+    def test_profile_names_the_account_and_can_fail(self):
+        self.assertEqual(self.gmail.profile().email, ACCOUNT)
+        other = FakeGmail(clock=self.clock, account="someone@else.com")
+        self.assertEqual(other.profile().email, "someone@else.com")
+        self.gmail.fail_profile(GmailError("auth", 401, "invalid credentials"))
+        for _ in range(2):                             # a dead token stays dead
+            with self.assertRaises(GmailError):
+                self.gmail.profile()
+        self.gmail.fail_profile(None)
+        self.assertEqual(self.gmail.profile().email, ACCOUNT)
+
+    def test_unknown_message_or_thread_is_a_404(self):
+        for call in (lambda: self.gmail.message("m404"), lambda: self.gmail.thread("t404")):
+            with self.assertRaises(GmailError) as cm:
+                call()
+            self.assertEqual(cm.exception.status, 404)
+
+    def test_message_meta_headers_are_only_the_listed_names(self):
+        first = self.gmail.send(outgoing())
+        for meta in (self.gmail.message(first.gmail_message_id), self.gmail.deliver_bounce(first)):
+            self.assertIsInstance(meta, MessageMeta)
+            self.assertLessEqual(set(meta.headers), {
+                "auto-submitted", "x-autoreply", "x-autorespond", "precedence", "x-auto-response-suppress",
+                "message-id", "in-reply-to", "references", "x-failed-recipients", "content-type"})
+
+
+class ClassifyHttpTest(unittest.TestCase):
+    def test_classify_http_table(self):
+        rows = [
+            (401, '{"error": {"message": "Invalid Credentials"}}', "auth"),
+            (403, '{"error": {"errors": [{"reason": "dailyLimitExceeded"}]}}', "daily_limit"),
+            (403, "You have reached a limit for sending mail", "daily_limit"),
+            (403, '{"error": {"errors": [{"reason": "userRateLimitExceeded"}]}}', "rate_limit"),
+            (403, '{"error": {"errors": [{"reason": "rateLimitExceeded"}]}}', "rate_limit"),
+            (403, '{"error": {"errors": [{"reason": "insufficientPermissions"}]}}', "auth"),
+            (403, '{"error": "invalid_grant"}', "auth"),
+            (403, '{"error": {"message": "Delegation denied"}}', "account_blocked"),
+            (403, "", "account_blocked"),
+            (429, "Too many concurrent requests for user", "rate_limit"),
+            (400, '{"error": {"message": "Invalid To header"}}', "bad_request"),
+            (404, "Requested entity was not found.", "bad_request"),
+            (500, "", "server"),
+            (503, "Backend Error", "server"),
+        ]
+        for status, body, kind in rows:
+            with self.subTest(status=status, body=body):
+                self.assertEqual(classify_http(status, body), kind)
+
+    def test_only_a_bad_request_is_the_message_own_fault(self):
+        kinds = {"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
+                 "timeout"}
+        self.assertEqual(kinds - RETRYABLE, {"bad_request"})
+        self.assertLessEqual(RETRYABLE, kinds)
+
+
+class GmailErrorTest(unittest.TestCase):
+    def test_detail_is_short_and_never_holds_a_bearer_token(self):
+        err = GmailError("auth", 401, "Authorization: Bearer ya29.secretvalue " + "x" * 400)
+        self.assertLessEqual(len(err.detail), 300)
+        self.assertNotIn("ya29", err.detail)
+        self.assertNotIn("ya29", str(err))
+        self.assertEqual((err.kind, err.status), ("auth", 401))
+
+    def test_detail_drops_token_fields(self):
+        err = GmailError("server", 500, '{"access_token": "abc123", "refresh_token": "1//zzz"}')
+        self.assertNotIn("abc123", err.detail)
+        self.assertNotIn("1//zzz", err.detail)
+
+    def test_unknown_kind_is_refused(self):
+        with self.assertRaises(ValueError):
+            GmailError("whatever", None, "")
+
+
+if __name__ == "__main__":
+    unittest.main()

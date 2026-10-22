@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from outreach.crawl.ats.ashby import AshbyAdapter
+from outreach.crawl.ats.bamboohr import BambooHRAdapter
 from outreach.crawl.ats.breezy import BreezyAdapter
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
 from outreach.crawl.ats.lever import LeverAdapter
@@ -34,6 +35,7 @@ ADAPTERS: dict[str, Callable[[HttpClient], Adapter]] = {
     "pinpoint": PinpointAdapter,
     "teamtailor": TeamtailorAdapter,
     "recruitee": RecruiteeAdapter,
+    "bamboohr": BambooHRAdapter,
 }
 
 

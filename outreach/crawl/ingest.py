@@ -39,7 +39,7 @@ from outreach.rules.config import default_config
 from outreach.rules.title import classify_title
 from outreach.store import atomic, body_sha256, describe_error, name_key
 
-__all__ = ["ReadOutcome", "read_board", "DOUBTFUL_JOBS"]
+__all__ = ["ReadOutcome", "read_board", "list_board", "DOUBTFUL_JOBS"]
 
 # Ruling 8: every LCA company files 25 or fewer, so a board listing more jobs than this is likely another company's.
 DOUBTFUL_JOBS = 300
@@ -76,7 +76,7 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     """
     if conn.in_transaction:
         raise ValueError("read_board sends requests, so it must start with no transaction open")
-    result = _list(adapter, board)
+    result = list_board(adapter, board)
     title_cfg = rules_cfg if rules_cfg is not None else default_config()
     new = changed = reopened = closed = decided = bodies = 0
     any_change = False
@@ -144,9 +144,10 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
                        closed=closed, decided=decided, bodies=bodies, interval_s=interval_s, tripped=tripped)
 
 
-def _list(adapter: Adapter, board: BoardRow) -> ReadResult:
+def list_board(adapter: Adapter, board: BoardRow) -> ReadResult:
     """The adapter's answer; any failure of the adapter itself is an `error` read (one board's bug never stops a
-    tick), except a tripped host and a ruleset change, which say nothing about the board."""
+    tick), except a tripped host and a ruleset change, which say nothing about the board. The tick calls this itself
+    first, so it can hold an error read back until it knows whether the host was down (Task 12)."""
     try:
         return adapter.list(board.token, Validators(board.etag, board.ids_fingerprint))
     except (HostTripped, RulesetNotCurrent):

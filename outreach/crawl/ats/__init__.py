@@ -11,6 +11,7 @@ from outreach.crawl.ats.oracle_orc import OracleAdapter
 from outreach.crawl.ats.pinpoint import PinpointAdapter
 from outreach.crawl.ats.rippling import RipplingAdapter
 from outreach.crawl.ats.smartrecruiters import SmartRecruitersAdapter
+from outreach.crawl.ats.teamtailor import TeamtailorAdapter
 from outreach.crawl.ats.workable import WorkableAdapter
 from outreach.crawl.ats.workday import WorkdayAdapter
 from outreach.crawl.base import Adapter
@@ -30,6 +31,7 @@ ADAPTERS: dict[str, Callable[[HttpClient], Adapter]] = {
     "rippling": RipplingAdapter,
     "breezy": BreezyAdapter,
     "pinpoint": PinpointAdapter,
+    "teamtailor": TeamtailorAdapter,
 }
 
 

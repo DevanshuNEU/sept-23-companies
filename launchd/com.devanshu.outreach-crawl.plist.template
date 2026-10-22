@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The crawl tick (#21): every 30 minutes, read the due boards within the tick budget, then the due watched careers
+  pages. A tick that starts while another still runs finds the crawl lock held and exits 0.
+
+  StartInterval misses ticks while the Mac sleeps, and that is safe: nothing is lost, the next tick finds more boards
+  due and reads them in a fixed order (today's plan first, then never read, then the oldest), leaving the rest due.
+
+  Placeholders, filled by the deploy tool (#17), which also installs this: {{LIVE_CHECKOUT}} is the live checkout,
+  {{LOG_PATH}} the log file. Nothing else is filled; the store is the default.
+
+  Not installed by the repo. To install by hand after filling it in:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.devanshu.outreach-crawl.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-crawl</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.crawl</string>
+    <string>tick</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>1800</integer>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

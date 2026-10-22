@@ -9,7 +9,7 @@ A list that may be incomplete is `error`, never `ok` (Review Focus 1). Workday l
 offsets wrap to page 1. A list that reports 2,000 or more is split by the `jobFamilyGroup` facet, each family read
 to its end and the postings joined by `externalPath`. The read is `error` ("list capped") when a family itself
 reports 2,000 or more, when the first page has no family facet, when the families together cover fewer postings than
-the total (a posting with no family would be missing), or when any page fails, comes back empty early or repeats a
+the total (a posting with no family would be missing, or two families overlap), or when any page fails, comes back empty early or repeats a
 posting. Workday sends no ETag, so an unchanged board is told by the fingerprint of the `externalPath` ids.
 """
 from __future__ import annotations
@@ -32,7 +32,8 @@ _LIST = "https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs"
 _DETAIL = "https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}{path}"
 _POSTING = "https://{tenant}.{wd}.myworkdayjobs.com/{site}{path}"
 _PATH = re.compile(r"(?:/[A-Za-z0-9_.%~(),+-]+)+")
-_RELATIVE = re.compile(r"posted\s+(?:(today)|(yesterday)|(\d+)\s+days?\s+ago)", re.IGNORECASE)
+_RELATIVE = re.compile(r"posted\s+(?:(today)|(yesterday)|(\d{1,2})\s+days?\s+ago)", re.IGNORECASE)
+_OLD = 30  # "Posted 30+ Days Ago" is the oldest bucket Workday names: no date at or past it
 
 
 def posted_on_from_relative(text: str, today: datetime.date) -> str | None:
@@ -43,14 +44,18 @@ def posted_on_from_relative(text: str, today: datetime.date) -> str | None:
     if not m:
         return None
     days = 0 if m.group(1) else 1 if m.group(2) else int(m.group(3))
-    try:
-        return (today - datetime.timedelta(days=days)).isoformat()
-    except OverflowError:
+    if days >= _OLD:
         return None
+    return (today - datetime.timedelta(days=days)).isoformat()
 
 
 def _text(value) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _valid_path(path: str) -> bool:
+    """An `externalPath` the detail request can use: `/` segments of URL-safe characters, no `.` or `..`."""
+    return bool(_PATH.fullmatch(path)) and not any(seg in (".", "..") for seg in path.split("/"))
 
 
 class _Listing:
@@ -124,8 +129,8 @@ class WorkdayAdapter:
         while True:
             for item in page:
                 path = _text(item.get("externalPath")) if isinstance(item, dict) else ""
-                if not path.startswith("/") or not _text(item.get("title")):
-                    return read_error("a posting has no externalPath or no title", status=resp.status)
+                if not _valid_path(path) or not _text(item.get("title")):
+                    return read_error("a posting has no usable externalPath or no title", status=resp.status)
                 if path in rows:
                     return read_error(f"posting {path} is listed twice (the pages wrapped or moved)",
                                       status=resp.status)
@@ -174,9 +179,10 @@ class WorkdayAdapter:
                                       status=resp.status)
                 covered += part.total
                 rows.update(part.rows)
-            if covered < first.total:
-                return read_error(f"list capped: the families cover {covered} of {first.total} postings",
-                                  status=resp.status)
+            # The families' own totals can add up while they overlap, so what counts is the union.
+            if len(rows) < first.total:
+                return read_error(f"list capped: the families cover {len(rows)} distinct postings "
+                                  f"({covered} counted) of {first.total}", status=resp.status)
         today = self._today or datetime.datetime.now(datetime.timezone.utc).date()
         jobs = [JobRef(native_id=path, title=_text(item.get("title")),
                        url=_POSTING.format(tenant=tenant, wd=wd, site=site, path=path),
@@ -195,8 +201,7 @@ class WorkdayAdapter:
         """`Start date: <date>` (when Workday gives one) then the description, or None when there is no description.
         A failed request or a wrong shape raises, so the caller counts a failed fetch."""
         path = job.native_id
-        if (not safe_token(self.ats, token) or not _PATH.fullmatch(path)
-                or any(seg in (".", "..") for seg in path.split("/"))):
+        if not safe_token(self.ats, token) or not _valid_path(path):
             raise ValueError(f"cannot fetch {path!r} from {token!r}")
         _, tenant, wd, site = self._parts(token)
         resp = self.client.get(_DETAIL.format(tenant=tenant, wd=wd, site=site, path=path),
@@ -212,4 +217,9 @@ class WorkdayAdapter:
         if not text:
             return None
         start = _text(info.get("startDate"))
-        return f"Start date: {start}\n{text}" if start else text
+        places = [_text(info.get("location"))]
+        extra = info.get("additionalLocations")
+        places += [_text(p) for p in extra] if isinstance(extra, list) else []
+        places = list(dict.fromkeys(p for p in places if p))
+        head = ([f"Start date: {start}"] if start else []) + ([f"Locations: {'; '.join(places)}"] if places else [])
+        return "\n".join(head + [text])

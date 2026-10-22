@@ -22,7 +22,7 @@ _LIST = "https://apply.workable.com/api/v1/widget/accounts/{token}?details=true"
 _MARKDOWN = "https://apply.workable.com/{token}/jobs/view/{shortcode}.md"
 _PUBLIC = "https://apply.workable.com/{token}/j/{shortcode}/"
 _SAFE_CODE = re.compile(r"[A-Za-z0-9_-]+")
-_HTML_START = re.compile(r"\s*(<!doctype\s+html|<html)", re.IGNORECASE)
+_NOT_MARKDOWN = ("{", "[", "<")  # JSON or HTML: an error document or a challenge page, not a posting
 
 
 def _text(value) -> str:
@@ -71,7 +71,9 @@ class WorkableAdapter:
             if job is None:
                 return read_error("a posting has no shortcode or no title", status=resp.status)
             jobs.append(job)
-        return finish_list(jobs, resp, validators, board_name=_text(data.get("name")))
+        # A retitle is a change a reader should see, so the fingerprint covers the title as well as the code.
+        keys = {job.native_id: f"{job.native_id}\t{job.title}" for job in reversed(jobs)}
+        return finish_list(jobs, resp, validators, fingerprint_ids=keys.values(), board_name=_text(data.get("name")))
 
     def body(self, token: str, job: JobRef) -> str | None:
         """The posting's markdown, or None when it is blank. A failed request, a redirect or an HTML page (a
@@ -81,7 +83,7 @@ class WorkableAdapter:
         resp = self.client.get(_MARKDOWN.format(token=token, shortcode=job.native_id))
         if resp.status != 200:
             raise ValueError(f"HTTP {resp.status} for posting {job.native_id}")
-        text = resp.text()
-        if _HTML_START.match(text):
-            raise ValueError(f"posting {job.native_id} answered a web page, not markdown")
-        return text.strip() or None
+        text = resp.text().lstrip("\ufeff").strip()
+        if text.startswith(_NOT_MARKDOWN):
+            raise ValueError(f"posting {job.native_id} answered JSON or a web page, not markdown")
+        return text or None

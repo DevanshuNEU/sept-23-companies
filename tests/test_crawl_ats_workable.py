@@ -17,6 +17,7 @@ LIST = (FIXTURES / "workable_list.json").read_bytes()
 EMPTY = (FIXTURES / "workable_empty.json").read_bytes()
 MD = (FIXTURES / "workable_md.txt").read_text()
 CODES = ["A1B2C3D4E5", "F6G7H8I9J0", "K1L2M3N4O5"]
+KEYS = [CODES[0] + "\tSoftware Engineer, New Grad", CODES[1] + "\tAccount Executive", CODES[2] + "\tData Engineer"]
 
 
 def jobs():
@@ -50,7 +51,7 @@ class WorkableTests(unittest.TestCase):
               "2026-10-03"),
              (CODES[2], "Data Engineer", "https://apply.workable.com/j/K1L2M3N4O5", "Toronto, Ontario, CA", "CA",
               "2026-08-29")])
-        self.assertEqual(r.validators, Validators(etag="", ids_fingerprint=ids_fingerprint(CODES)))
+        self.assertEqual(r.validators, Validators(etag="", ids_fingerprint=ids_fingerprint(KEYS)))
         self.assertEqual(r.board_name, "Acme Robotics")
 
     def test_list_bodies(self):
@@ -147,6 +148,14 @@ class WorkableTests(unittest.TestCase):
         self.assertEqual((again.result, again.jobs, again.validators), ("unchanged", (), r.validators))
         self.assertNotIn("if-none-match", {k.lower() for k in client.calls[0][2]})
 
+    def test_a_retitle_is_seen_by_the_fingerprint(self):
+        r, _ = read({URL: LIST})
+        data = jobs()
+        data["jobs"][0]["title"] = "Senior Software Engineer"
+        again, _ = read({URL: json_response(data)}, validators=r.validators)
+        self.assertEqual((again.result, len(again.jobs)), ("ok", 3))
+        self.assertEqual(again.jobs[0].title, "Senior Software Engineer")
+
     def test_a_new_shortcode_is_ok(self):
         r, _ = read({URL: LIST})
         data = jobs()
@@ -172,6 +181,16 @@ class WorkableTests(unittest.TestCase):
         self.assertEqual(client.requests, [MD_URL])
         self.assertEqual(text, MD.strip())
         self.assertIn("We sponsor visas for the right person.", text)
+
+    def test_a_non_markdown_body_is_refused(self):
+        job = JobRef(CODES[0], "t", "", "", None, None, None)
+        for name, text in {"json object": '{"error": "blocked"}', "json list": "[]", "html": "<html>x</html>",
+                           "fragment": "<div>Just a moment</div>", "bom then html": "\ufeff<!DOCTYPE html>",
+                           "space then json": "  \n {\"a\": 1}", "bom space json": "\ufeff \n[1]"}.items():
+            with self.assertRaises(ValueError, msg=name):
+                WorkableAdapter(FakeClient({MD_URL: text_response(text)})).body("acme", job)
+        ok = WorkableAdapter(FakeClient({MD_URL: text_response("\ufeff# Title\n\nText")})).body("acme", job)
+        self.assertEqual(ok, "# Title\n\nText")
 
     def test_an_empty_markdown_body_is_none(self):
         client = FakeClient({MD_URL: text_response("  \n")})

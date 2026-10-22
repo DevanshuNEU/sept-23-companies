@@ -91,11 +91,15 @@ class WorkdayTests(unittest.TestCase):
             "Posted 1 Day Ago": "2026-10-21",
             "Posted 5 Days Ago": "2026-10-17",
             "Posted 29 Days Ago": "2026-09-23",
+            "Posted 30 Days Ago": None,
+            "Posted 100 Days Ago": None,
+            "Posted 999 Days Ago": None,
             "  posted today ": "2026-10-22",
             "Posted 30+ Days Ago": None,
             "Posted 2 Months Ago": None,
             "Posted 0 Days Ago": "2026-10-22",
             "Posted 99999999 Days Ago": None,
+            "Posted 5000000 Days Ago": None,
             "": None,
             "Closed": None,
             "Posted Tomorrow": None,
@@ -185,6 +189,16 @@ class WorkdayTests(unittest.TestCase):
         # The unfiltered total says 2600; the families sum to 2600.
         r, _ = read({LIST_KEY: route})
         self.assertEqual((r.result, len(r.jobs)), ("ok", 2600))
+
+    def test_overlapping_families_that_sum_to_the_total_are_an_error(self):
+        # A holds 0-999 and B holds 980-1979: the totals add up to 2000 but the union is 1980, so 20 are missing.
+        pool = [posting(n) for n in range(1980)]
+        groups = {None: pool + [posting(n, 'X') for n in range(20)], ENG: pool[:1000], SALES: pool[980:]}
+        route = tenant(groups, facets=fx("workday_capped.json")["facets"])
+        r, _ = read({LIST_KEY: route})
+        self.assertEqual((r.result, r.jobs, r.validators), ("error", (), Validators()))
+        self.assertIn("capped", r.error)
+        self.assertIn("1980", r.error)
 
     def test_families_that_do_not_cover_the_total_are_an_error(self):
         # Postings with no family would be missing: 5 listed in the families, 2000 in the tenant.
@@ -305,6 +319,13 @@ class WorkdayTests(unittest.TestCase):
         r, _ = read({LIST_KEY: FetchError("network", "down")})
         self.assertEqual((r.result, r.http_status), ("error", None))
 
+    def test_a_path_the_body_fetch_would_refuse_makes_the_read_an_error(self):
+        for path in ("/job/x y", "/job/../../admin", "//evil.com/x", "/job/x?y=1", "/"):
+            data = json.loads(LIST)
+            data["jobPostings"][1]["externalPath"] = path
+            r, _ = read({LIST_KEY: json_response(data)})
+            self.assertEqual((r.result, r.jobs), ("error", ()), path)
+
     def test_posting_without_path_or_title_is_error(self):
         for key in ("externalPath", "title"):
             data = json.loads(LIST)
@@ -365,9 +386,26 @@ class WorkdayTests(unittest.TestCase):
         self.assertEqual(client.requests, [url])
         self.assertEqual(
             text,
-            "Start date: 2026-11-02\nBuild services & ship them.\nWrite code\nReview code\n"
+            "Start date: 2026-11-02\nLocations: Boston, MA; New York, NY\nBuild services & ship them.\nWrite code\nReview code\n"
             "We sponsor visas for the right person.")
         self.assertNotIn("<", text)
+
+    def test_body_location_line_keeps_the_us_signal_of_a_multi_location_row(self):
+        url = HOST + "/wday/cxs/acme/Careers" + PATHS[2]
+        job = JobRef(PATHS[2], "Data Engineer", "", "2 Locations", None, None, None)
+        cases = {
+            "both": ({"location": "Boston, MA", "additionalLocations": ["New York, NY", "Boston, MA", " "]},
+                     "Locations: Boston, MA; New York, NY\nHello there."),
+            "only extra": ({"additionalLocations": ["Austin, TX"]}, "Locations: Austin, TX\nHello there."),
+            "odd types": ({"location": 5, "additionalLocations": "Austin, TX"}, "Hello there."),
+            "none": ({}, "Hello there."),
+        }
+        for name, (extra, want) in cases.items():
+            info = dict(extra, jobDescription="<p>Hello there.</p>")
+            client = FakeClient({url: json_response({"jobPostingInfo": info})})
+            self.assertEqual(make(client).body(TOKEN, job), want, name)
+        client = FakeClient({url: json_response({"jobPostingInfo": {"location": "Boston, MA"}})})
+        self.assertIsNone(make(client).body(TOKEN, job))
 
     def test_body_without_a_start_date_is_the_description(self):
         url = HOST + "/wday/cxs/acme/Careers" + PATHS[0]

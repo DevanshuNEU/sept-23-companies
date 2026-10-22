@@ -194,6 +194,20 @@ class SmartRecruitersTests(unittest.TestCase):
             r, _ = read({P0_URL: resp})
             self.assertEqual((r.result, r.jobs), ("error", ()), name)
 
+    def test_a_total_over_50000_is_an_error_with_no_second_request(self):
+        data = p0()
+        data["totalFound"] = 50001
+        r, client = read({P0_URL: json_response(data)})
+        self.assertEqual((r.result, r.jobs), ("error", ()))
+        self.assertEqual(len(client.calls), 1)
+
+    def test_an_id_the_body_fetch_would_refuse_makes_the_read_an_error(self):
+        for bad in ("../x", "a b", "a/b", "x?y=1"):
+            data = p0()
+            data["content"][1]["id"] = bad
+            r, _ = read({P0_URL: json_response(data), P1_URL: json_response(p1())})
+            self.assertEqual((r.result, r.jobs), ("error", ()), bad)
+
     def test_http_failures_are_errors(self):
         for status in (403, 404, 429, 500, 302):
             r, _ = read({P0_URL: status_response(status)})

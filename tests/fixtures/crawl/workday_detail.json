@@ -4,6 +4,7 @@
     "title": "Software Engineer I",
     "jobDescription": "<p>Build services &amp; ship them.</p><ul><li>Write code</li><li>Review code</li></ul><p>We sponsor visas for the right person.</p>",
     "location": "Boston, MA",
+    "additionalLocations": ["New York, NY"],
     "startDate": "2026-11-02",
     "timeType": "Full time",
     "jobReqId": "R-1001",

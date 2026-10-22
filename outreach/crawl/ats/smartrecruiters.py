@@ -24,6 +24,7 @@ _DETAIL = "https://api.smartrecruiters.com/v1/companies/{token}/postings/{id}"
 _POSTING_URL = "https://jobs.smartrecruiters.com/{token}/{id}"
 _SECTIONS = ("companyDescription", "jobDescription", "qualifications", "additionalInformation")
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
+_MAX_TOTAL = 50_000  # no real board is larger; a bigger count is a wrong answer, not 500 requests to make
 
 
 def _text(value) -> str:
@@ -41,7 +42,7 @@ def _parse(token: str, item: object) -> JobRef | None:
     if not isinstance(item, dict):
         return None
     native_id, title = _native_id(item.get("id")), _text(item.get("name"))
-    if not native_id or not title:
+    if not _SAFE_ID.fullmatch(native_id) or not title:
         return None
     loc = item.get("location")
     loc = loc if isinstance(loc, dict) else {}
@@ -59,8 +60,10 @@ def _page(resp: Response) -> tuple[list, int] | ReadResult:
         return data
     content = data.get("content") if isinstance(data, dict) else None
     total = data.get("totalFound") if isinstance(data, dict) else None
-    if not isinstance(content, list) or isinstance(total, bool) or not isinstance(total, int) or total < 0:
+    if not isinstance(content, list) or isinstance(total, bool) or not isinstance(total, int):
         return read_error("the 200 answer has no content list and totalFound count", status=resp.status)
+    if not 0 <= total <= _MAX_TOTAL:
+        return read_error(f"totalFound {total} is outside 0 to {_MAX_TOTAL}", status=resp.status)
     return content, total
 
 

@@ -4,6 +4,7 @@
 smallest valid rows so each test states only what it is about.
 """
 import atexit
+import hashlib
 import itertools
 import shutil
 import sqlite3
@@ -73,14 +74,26 @@ def seed_touch(conn: sqlite3.Connection, company_id: int, email: str) -> int:
     return cur.lastrowid
 
 
-MARKED_TABLES = ("company", "company_alias", "company_name_key", "company_source", "evidence", "board", "review_item", "event",
-                 "watched_page", "work_tier", "company_post", "shared_key")
+MARKED_TABLES = ("company", "company_alias", "company_name_key", "company_source", "evidence", "board",
+                 "review_item", "event", "watched_page", "work_tier", "company_post", "shared_key")
 
-_LAST = {"company_name_key": "company_id"}  # a WITHOUT ROWID table: its highest company id stands in for max rowid
+
+def _rows_hash(conn: sqlite3.Connection, table: str, order: str) -> int:
+    """A stable 60-bit hash of every row in order, for a table with no rowid to mark."""
+    text = repr([tuple(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY {order}")])
+    return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:15], 16)
 
 
 def table_marks(conn: sqlite3.Connection) -> dict[str, tuple[int, int]]:
-    """(row count, max rowid; the highest company id for a WITHOUT ROWID table) for each table a source run can write. Idempotency tests compare two snapshots: equal
-    means nothing was added or deleted (an update in place, such as `company_source.last_seen_at`, keeps both)."""
-    return {t: tuple(conn.execute(f"SELECT COUNT(*), coalesce(MAX({_LAST.get(t, 'rowid')}), 0) FROM {t}").fetchone())
-            for t in MARKED_TABLES}
+    """(row count, max rowid) for each table a source run can write; for `company_name_key` (WITHOUT ROWID) the second
+    number is a hash of its ordered rows, so a delete plus an insert, or a changed `strong`, shows. Idempotency tests
+    compare two snapshots: equal means nothing was added or deleted (an update in place, such as
+    `company_source.last_seen_at`, keeps both)."""
+    marks = {}
+    for t in MARKED_TABLES:
+        if t == "company_name_key":
+            marks[t] = (conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0],
+                        _rows_hash(conn, t, "name_key, company_id"))
+        else:
+            marks[t] = tuple(conn.execute(f"SELECT COUNT(*), coalesce(MAX(rowid), 0) FROM {t}").fetchone())
+    return marks

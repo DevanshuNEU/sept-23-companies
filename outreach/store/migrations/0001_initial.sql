@@ -45,10 +45,12 @@ CREATE INDEX company_alias_company ON company_alias(company_id);
 
 -- Every name key of 4 or more characters a company is known by (its name, legal name and DBA), one row per company
 -- (#31). company_alias holds a key once, for its first owner, so two companies with one name need this table to be
--- told apart by state.
+-- told apart by state. strong is 0 when every name giving the key has a letter outside ASCII ("Ōura Health" keys
+-- as urahealth): such a key never matches by name and state.
 CREATE TABLE company_name_key (
   name_key   TEXT NOT NULL CHECK (length(name_key) >= 4 AND name_key NOT GLOB '*[^a-z0-9]*'),
   company_id INTEGER NOT NULL REFERENCES company(company_id),
+  strong     INTEGER NOT NULL CHECK (strong IN (0, 1)),
   PRIMARY KEY (name_key, company_id)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX company_name_key_company ON company_name_key(company_id);

@@ -302,10 +302,10 @@ class WeakMatchTest(Base):
         self.assertEqual((tx.company_id, no_state.company_id), (1, 2))
         self.assert_one_item(1, 2, "Basis name,", "unknown here and TX there")
         # A guess hq on the candidate is not a state either.
-        # Both earlier Mesh Systems companies hold the name now, so this one is weak against each.
+        # Both earlier Mesh Systems companies hold the name now; one name item per key, against the lowest id.
         guess = self.resolve(cand("Mesh Systems", state="TX", hq_confidence="guess", ref="hn:mesh2"), source="hn")
-        self.assertEqual((guess.company_id, guess.created, guess.items_raised), (3, True, 2))
-        self.assertEqual([(i["company_id"], i["evidence_key"]) for i in self.items()], [(1, "2"), (1, "3"), (2, "3")])
+        self.assertEqual((guess.company_id, guess.created, guess.items_raised), (3, True, 1))
+        self.assertEqual([(i["company_id"], i["evidence_key"]) for i in self.items()], [(1, "2"), (1, "3")])
         # And a company with no state never matches a candidate that has one.
         stateless = self.resolve(cand("Quartzline", ref="hn:q"), source="hn")
         later = self.resolve(cand("Quartzline", state="TX"))
@@ -464,7 +464,8 @@ class HelpersTest(Base):
 
 
 class ReviewFixTest(Base):
-    """Review round 1 of Task 7: each test here was red before its fix."""
+    """Review round 1 of Task 7. The I and M1 to M5 tests were red before their fix; the M7 tests add coverage of
+    behavior that already held."""
 
     def test_fein_veto_reads_feins_of_companies_merged_into_the_hit(self):  # I1
         a = self.resolve(cand("Acme Robotics", fein="111111111", state="TX"))
@@ -586,10 +587,10 @@ class ReviewFixTest(Base):
     def test_strong_and_weak_together(self):  # M7
         a = self.resolve(cand("Alpha", fein="111111111", state="TX"))
         b = self.resolve(cand("Bright Labs", state="CA"))
-        res = self.resolve(cand("Bright Labs", fein="111111111", state="TX", ref="t:bl-tx"))
         self.assertEqual(find_company(self.conn, cand("Bright Labs", fein="111111111", state="TX", ref="hn:q"),
                                       source_name="hn"),
                          Match(strong=((a.company_id, "fein"),), weak=((b.company_id, "name"),)))
+        res = self.resolve(cand("Bright Labs", fein="111111111", state="TX", ref="t:bl-tx"))
         self.assertEqual((res.company_id, res.basis, res.items_raised), (a.company_id, "fein", 1))
         self.assert_one_item(1, 2, "Basis name,", "TX here and CA there")
 
@@ -603,6 +604,80 @@ class ReviewFixTest(Base):
         res = self.resolve(c)
         self.assertEqual((res.company_id, res.basis, res.items_raised), (1, "domain", 1))
         self.assert_one_item(1, 2, "Basis domain+domain", "confidence strong")
+
+
+class ReviewRound2Test(Base):
+    """Review round 2 of Task 7. Each test was red before its fix."""
+
+    def name_keys(self):
+        return [tuple(r) for r in self.conn.execute(
+            "SELECT name_key, company_id, strong FROM company_name_key ORDER BY 1, 2")]
+
+    def test_a_stored_non_ascii_name_never_matches_strongly(self):
+        tokyo = self.resolve(cand("東京 Robotics", state="TX", ref="t:tokyo"))
+        robotics = self.resolve(cand("Robotics Inc", state="TX", ref="t:robotics"))
+        self.assertEqual((tokyo.company_id, robotics.company_id, robotics.created, robotics.items_raised),
+                         (1, 2, True, 1))
+        oura = self.resolve(cand("Ōura Health", state="CA", ref="t:oura"))
+        ura = self.resolve(cand("Ura Health", state="CA", ref="t:ura"))
+        self.assertEqual((oura.company_id, ura.company_id, ura.created, ura.items_raised), (3, 4, True, 1))
+        self.assertEqual([(i["company_id"], i["evidence_key"]) for i in self.items()], [(1, "2"), (3, "4")])
+        self.assertEqual(self.name_keys(), [("robotics", 1, 0), ("robotics", 2, 1), ("urahealth", 3, 0),
+                                            ("urahealth", 4, 1)])
+
+    def test_an_alias_with_a_non_ascii_letter_is_a_weak_owner(self):
+        now = "2026-10-21T00:00:00Z"
+        cid = self.conn.execute("INSERT INTO company(name, status_at, created_at) VALUES ('Ōmni Labs', ?, ?)",
+                                (now, now)).lastrowid
+        self.conn.execute("INSERT INTO company_alias(alias_key, company_id, alias, source, created_at) "
+                          "VALUES ('mnilabs', ?, 'Ōmni Labs', 'import', ?)", (cid, now))
+        record_evidence(self.conn, cid, [hq("Austin, TX")])
+        self.assertEqual(find_company(self.conn, cand("Mni Labs", state="TX"), source_name="lca"),
+                         Match(strong=(), weak=((cid, "name"),)))
+
+    def test_strong_flag_is_kept_at_its_highest(self):
+        self.resolve(cand("Café Labs", state="TX", ref="t:cafe"))
+        self.assertEqual(self.name_keys(), [("caflabs", 1, 0)])
+        self.resolve(cand("Café Labs", legal_name="Caf Labs", state="TX", ref="t:cafe"))
+        self.assertEqual(self.name_keys(), [("caflabs", 1, 1)])
+        self.resolve(cand("Café Labs", state="TX", ref="t:cafe"))
+        self.assertEqual(self.name_keys(), [("caflabs", 1, 1)])
+
+    def test_six_stateless_names_raise_one_item_each_against_the_lowest_id(self):
+        made = [self.resolve(cand("Mesh Systems", ref=f"hn:mesh{n}"), source="hn") for n in range(6)]
+        self.assertEqual([m.company_id for m in made], [1, 2, 3, 4, 5, 6])
+        self.assertEqual([m.items_raised for m in made], [0, 1, 1, 1, 1, 1])
+        self.assertEqual([(i["company_id"], i["evidence_key"]) for i in self.items()],
+                         [(1, str(n)) for n in range(2, 7)])
+
+    def test_two_name_state_hits_without_a_key_are_ambiguous(self):
+        for fein in ("111111111", "222222222"):
+            self.resolve(Candidate(name="Acme", domain=None, keys={"fein": fein}, evidence=(hq("Austin, TX"),),
+                                   source_ref=f"lca:acme#{fein}"))
+        self.assertEqual([(i["company_id"], i["evidence_key"]) for i in self.items()], [(1, "2")])
+        loose = cand("Acme", state="TX", ref="hn:acme", kind="hn")
+        self.assertEqual(find_company(self.conn, loose, source_name="hn"),
+                         Match(strong=(), weak=((1, "ambiguous_name_state"), (2, "ambiguous_name_state"))))
+        before = table_marks(self.conn)
+        self.assertIsNone(self.resolve(cand("Acme", state="TX", ref="formd:acme"), source="formd", creates=False))
+        self.assertEqual(table_marks(self.conn), before)
+        res = self.resolve(loose, source="hn")
+        self.assertEqual((res.company_id, res.created, res.basis, res.items_raised), (3, True, "created", 2))
+        items = self.items()
+        self.assertEqual([(i["company_id"], i["evidence_key"]) for i in items], [(1, "2"), (1, "3"), (2, "3")])
+        for item in items[1:]:
+            self.assertIn("Basis ambiguous_name_state, confidence likely", item["reason"])
+        # A FEIN hit settles it.
+        keyed = self.resolve(cand("Acme", fein="222222222", state="TX", ref="hn:acme2", kind="hn"), source="hn")
+        self.assertEqual((keyed.company_id, keyed.basis), (2, "fein"))
+
+    def test_table_marks_see_a_delete_plus_insert_in_company_name_key(self):
+        self.resolve(cand("Alpha Labs", state="TX"))
+        self.resolve(cand("Beta Labs", state="TX"))
+        before = table_marks(self.conn)
+        self.conn.execute("DELETE FROM company_name_key WHERE name_key = 'alphalabs'")
+        self.conn.execute("INSERT INTO company_name_key(name_key, company_id, strong) VALUES ('gammalabs', 1, 1)")
+        self.assertNotEqual(table_marks(self.conn)["company_name_key"], before["company_name_key"])
 
 
 if __name__ == "__main__":

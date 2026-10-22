@@ -7,15 +7,19 @@ What becomes one company:
 2. Otherwise the strong keys, in this order: `fein` (the 9 digits, an alias with source `fein`; confidence
    `certain`), `domain` (a `company`-class domain held in non-`guess` `domain` evidence; `strong`) and `name_state`
    (a name key of at least 4 characters from the name, `legal_name` or `dba`, held in `company_name_key` by a company
-   whose US state is the candidate's; `likely`; a name with a letter outside ASCII never matches this way). A key
-   recorded with `mark_shared_key` never matches (a subdomain of a shared domain is shared too). A leading `www.` is
-   dropped from the candidate's domain for matching and for its stored evidence. The first hit is the company; every other company found raises a `merge_candidate` item.
+   whose US state is the candidate's; `likely`). A name with a letter outside ASCII loses letters in its key, so it
+   is a strong key on neither side: `name_state` needs both the candidate's name and the stored one to be strong. A
+   key recorded with `mark_shared_key` never matches (a subdomain of a shared domain is shared too). A leading `www.`
+   is dropped from the candidate's domain for matching and for its stored evidence. The first hit is the company;
+   every other company found raises a `merge_candidate` item.
 3. Two valid non-shared FEINs that differ (the hit's own, or one of a company merged into it) veto every non-FEIN
-   strong match: LCA splits a same-name group by FEIN so
-   two employers' counts never blend, and the name or the domain must not join them again. A vetoed company is
-   treated as a weak match.
-4. Weak matches (the name with an unknown or different state, and vetoed companies) never merge. With `creates` the
-   candidate becomes a new company and one item is raised per weak match; without, the result is None.
+   strong match: LCA splits a same-name group by FEIN so two employers' counts never blend, and the name or the
+   domain must not join them again. A vetoed company is treated as a weak match.
+4. Two or more `name_state` hits and no FEIN or domain hit is ambiguous: no merge, one item against each hit
+   (basis `ambiguous_name_state`), never a guess at the lower id.
+5. Weak matches never merge. With `creates` the candidate becomes a new company and one item is raised per weak
+   match; without, the result is None. A name key raises at most one name item, against its lowest-id live owner,
+   so the sixth company with one name raises one item, not five.
 
 Every match states its basis and confidence: in the `Resolution`, in the company event (`created`, `matched` or
 `aliases_added`, which also lists the aliases written) and in every item's reason. Nothing is copied between
@@ -43,7 +47,7 @@ CONFIDENCE = {"source_ref": "certain", "fein": "certain", "domain": "strong", "n
 # How sure an item is that its two companies are one, most sure first.
 ITEM_CONFIDENCES = ("certain", "strong", "likely", "weak")
 _ITEM_CONFIDENCE = {"source_ref": "certain", "fein": "certain", "domain": "strong", "name_state": "likely",
-                    "name": "weak", "same_board": "strong"}
+                    "name": "weak", "same_board": "strong", "ambiguous_name_state": "likely"}
 _ALIAS_CONFIDENCE = {"fein": "certain", "ats": "strong", "linkedin": "strong"}  # any name-like alias: weak
 MIN_NAME_KEY = 4  # shorter name keys ("ace", "ibm") never match by name
 
@@ -159,15 +163,21 @@ def _name_keys(cand: Candidate) -> list[tuple[str, bool]]:
     return list(out.items())
 
 
-def _name_owners(conn: sqlite3.Connection, key: str) -> list[int]:
-    """Every live company known by the name key, by id: the company_name_key rows plus the alias owner (an alias
-    written by another writer has no company_name_key row)."""
+def _name_owners(conn: sqlite3.Connection, key: str) -> list[tuple[int, bool]]:
+    """(live company, strong) for every company known by the name key, by id: the company_name_key rows plus the
+    alias owner (an alias written by another writer has no company_name_key row; it is strong unless its text has a
+    letter outside ASCII). A company is strong when any of its rows is."""
+    owners: dict[int, bool] = {}
+    for cid, strong in conn.execute("SELECT company_id, strong FROM company_name_key WHERE name_key = ?", (key,)):
+        live = follow_merged(conn, cid)
+        owners[live] = owners.get(live, False) or bool(strong)
     marks = ", ".join("?" for _ in _NAME_SOURCES)
-    rows = conn.execute(
-        "SELECT company_id FROM company_name_key WHERE name_key = ? UNION "
-        f"SELECT company_id FROM company_alias WHERE alias_key = ? AND source IN ({marks})",
-        (key, key, *_NAME_SOURCES))
-    return sorted({follow_merged(conn, cid) for (cid,) in rows})
+    for cid, alias in conn.execute(
+            f"SELECT company_id, alias FROM company_alias WHERE alias_key = ? AND source IN ({marks})",
+            (key, *_NAME_SOURCES)):
+        live = follow_merged(conn, cid)
+        owners[live] = owners.get(live, False) or not _has_non_ascii_letter(alias)
+    return sorted(owners.items())
 
 
 def _conflicting_fein(conn: sqlite3.Connection, company_id: int, fein: str) -> str | None:
@@ -216,17 +226,21 @@ def _find(conn: sqlite3.Connection, cand: Candidate, source_name: str) -> tuple[
             "ORDER BY company_id", (domain,)))
     state = _candidate_state(cand)
     weak: list[_Hit] = []
-    for key, may_be_strong in _name_keys(cand):
-        for cid in _name_owners(conn, key):
-            theirs = company_state(conn, cid)
-            if may_be_strong and state is not None and state == theirs:
+    for key, ours_strong in _name_keys(cand):
+        owners = _name_owners(conn, key)
+        matched = set()
+        for cid, theirs_strong in owners:
+            if ours_strong and theirs_strong and state is not None and state == company_state(conn, cid):
                 strong.append(_Hit(cid, "name_state", key))
-            elif may_be_strong:
-                weak.append(_Hit(cid, "name", key, f"the same name ({key}), but the state is {state or 'unknown'} "
-                                                   f"here and {theirs or 'unknown'} there"))
+                matched.add(cid)
+        if owners and owners[0][0] not in matched:  # one name item per key, against its lowest-id owner
+            cid, theirs_strong = owners[0]
+            if ours_strong and theirs_strong:
+                why = (f"the same name ({key}), but the state is {state or 'unknown'} here and "
+                       f"{company_state(conn, cid) or 'unknown'} there")
             else:
-                weak.append(_Hit(cid, "name", key, f"the same name key ({key}) from a name with letters outside "
-                                                   "ASCII, which never matches strongly"))
+                why = f"the same name key ({key}), from a name with letters outside ASCII, which never matches strongly"
+            weak.append(_Hit(cid, "name", key, why))
     kept, vetoed = [], []
     for hit in _distinct(strong):
         other = _conflicting_fein(conn, hit.company_id, fein) if fein and hit.basis != "fein" else None
@@ -236,7 +250,13 @@ def _find(conn: sqlite3.Connection, cand: Candidate, source_name: str) -> tuple[
                                f"{other} there, so they are kept apart"))
         else:
             kept.append(hit)
-    return kept, _distinct(vetoed + weak, {h.company_id for h in kept})
+    ambiguous = []
+    if len(kept) >= 2 and all(h.basis == "name_state" for h in kept):
+        ambiguous = [_Hit(h.company_id, "ambiguous_name_state", h.key,
+                          f"the same name ({h.key}) and state ({state}) as {len(kept)} companies, so which one it is "
+                          "is unclear") for h in kept]
+        kept = []
+    return kept, _distinct(vetoed + ambiguous + weak, {h.company_id for h in kept})
 
 
 def find_company(conn: sqlite3.Connection, cand: Candidate, *, source_name: str) -> Match:
@@ -342,8 +362,11 @@ def _write_aliases(conn, company_id: int, cand: Candidate, source_name: str, lab
 
 
 def _write_name_keys(conn, company_id: int, cand: Candidate) -> None:
-    conn.executemany("INSERT INTO company_name_key(name_key, company_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
-                     [(key, company_id) for key, _ in _name_keys(cand)])
+    conn.executemany(
+        "INSERT INTO company_name_key(name_key, company_id, strong) VALUES (?, ?, ?) "
+        "ON CONFLICT(name_key, company_id) DO UPDATE SET strong = max(strong, excluded.strong) "
+        "WHERE excluded.strong > company_name_key.strong",
+        [(key, company_id, int(strong)) for key, strong in _name_keys(cand)])
 
 
 def _link(conn, company_id: int, source_name: str, source_ref: str) -> bool:

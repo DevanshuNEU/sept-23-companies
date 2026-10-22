@@ -60,7 +60,8 @@ gitbook.io
 
 def classify_domain(domain: str) -> DomainKind:
     """`free` (public mailbox providers), `peo` (payroll and employer-of-record hosts), `platform` (code hosts,
-    social sites, job boards, ATS hosts and hosting suffixes such as `vercel.app`), else `company`. A host such as `mail.gmail.com` is reduced first."""
+    social sites, job boards, ATS hosts and hosting suffixes such as `vercel.app`), else `company`. A host such as
+    `mail.gmail.com` is reduced first."""
     d = registrable_domain(domain) or (domain or "").strip().lower()
     if d in FREE_MAIL or ("." in d and d.partition(".")[0] in _FREE_FIRST_LABEL):
         return "free"

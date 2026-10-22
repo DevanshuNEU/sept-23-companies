@@ -62,6 +62,11 @@ angel.co indeed.com glassdoor.com welcometothejungle.com
 vercel.app netlify.app herokuapp.com pages.dev web.app firebaseapp.com appspot.com webflow.io myshopify.com
 framer.website carrd.co onrender.com fly.dev replit.app azurewebsites.net cloudfront.net amazonaws.com blogspot.com
 gitbook.io
+t.co goo.gl lnkd.in forms.gle ow.ly tinyurl.com buff.ly typeform.com tally.so airtable.com jotform.com
+techcrunch.com nytimes.com bloomberg.com wsj.com forbes.com reuters.com theverge.com wired.com venturebeat.com
+wikipedia.org crunchbase.com reddit.com youtu.be producthunt.com arxiv.org
+workatastartup.com gem.com pinpointhq.com applytojob.com jazzhr.com paylocity.com ultipro.com ukg.net ukg.com
+paycomonline.net oraclecloud.com
 """.split())
 
 

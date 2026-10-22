@@ -18,16 +18,17 @@ non_us_places = [
   "Sweden", "Stockholm", "Denmark", "Copenhagen", "Norway", "Oslo", "Finland", "Helsinki", "Estonia", "Tallinn",
   "Romania", "Bucharest", "Ukraine", "Kyiv", "Turkey", "Istanbul", "Dubai", "Nigeria", "Lagos", "Kenya", "Nairobi",
   "South Africa", "Cape Town", "Egypt", "China", "Beijing", "Shanghai", "Hong Kong", "Taiwan", "Korea", "Seoul",
-  "Vietnam", "Philippines", "Indonesia", "Pakistan", "EMEA", "APAC", "LATAM", "DACH", "GMT", "CET",
+  "Vietnam", "Philippines", "Indonesia", "Pakistan", "EMEA", "APAC", "LATAM", "DACH",
 ]
 # Short codes, matched with the case as written (so "us" in "join us" and "EU" inside "EUV" never count).
 non_us_codes = ["UK", "EU", "GB", "UAE"]
 
-# US markers.
+# US markers. Codes are matched with the case as written, phrases and places case blind. GMT and CET are not listed
+# above on purpose: GMT-8 to GMT-5 are US time zones.
 us_codes = ["US", "USA", "U.S.", "U.S.A."]
 # A city written as a code. These also count as an hq when they are a header segment.
-us_city_codes = ["NYC", "SF", "DC"]
-us_phrases = ["United States", "Bay Area"]
+us_city_codes = ["NYC", "SF", "DC", "LA"]
+us_phrases = ["United States", "Bay Area", "New Mexico"]
 us_places = [
   "New York", "San Francisco", "Seattle", "Boston", "Austin", "Chicago", "Los Angeles", "Denver", "Atlanta",
   "Portland", "San Diego", "Miami", "Washington DC", "Pittsburgh", "Philadelphia", "Dallas", "Houston", "Boulder",
@@ -35,9 +36,41 @@ us_places = [
   "Redwood City", "Sunnyvale", "Santa Monica", "Salt Lake City", "Nashville", "Phoenix", "Detroit", "Baltimore",
   "Charlotte", "Columbus", "Madison", "Ann Arbor", "Providence", "Honolulu",
 ]
-# ", XX" after a place is a US state code. These also read as a country code ("Toronto, CA", "Berlin, DE"), so when
-# the header names a non-US place they are not a US marker.
-ambiguous_state_codes = ["CA", "IN", "DE", "IL", "CO", "AR", "ID", "MA"]
+# ", XX" is a US state code. These also read as a country code ("Toronto, CA", "Berlin, DE", "Vientiane, LA"), so a
+# code on this list that comes straight after a non-US place is not a US marker. Anywhere else it is one.
+# MA (Morocco) is left off so that "Cambridge, MA or London" is kept.
+ambiguous_state_codes = ["CA", "IN", "DE", "IL", "CO", "AR", "ID", "LA"]
 
-# A post asks for email when its text holds an address or one of these phrases (case blind).
-email_phrases = ["email me", "send your resume to", "send your cv to", "reach out at"]
+# The first segment of a header is not a company name when it is one of these (case blind, punctuation ignored), or
+# when it is only a place from the lists above. The post's name then comes from a later segment, if one looks like
+# a name.
+reject_names = [
+  "remote", "onsite", "on-site", "hybrid", "full-time", "full time", "part-time", "part time", "intern", "interns",
+  "internship", "hiring", "now hiring", "we are hiring", "we're hiring", "yes", "hi", "hello", "thanks", "thank you",
+  "seeking work", "looking for work",
+]
+# Segments that are never a company name in the later-segment search.
+generic_segments = [
+  "eng", "swe", "sde", "visa", "visa sponsorship", "h1b", "equity", "salary", "contract", "w2", "usd",
+  # languages and tools that headers list
+  "python", "go", "golang", "rust", "java", "javascript", "typescript", "react", "node", "ruby", "rails", "kotlin",
+  "swift", "scala", "sql", "aws", "c++", "c#", "php", "elixir", "django", "flask", "kubernetes", "docker", "terraform",
+  "postgres", "llm", "llms", "ml", "ai", "k8s",
+]
+# A job title: a role word, and words that only describe a role. A segment made only of these words is a title, not a
+# name ("Senior Software Engineer"); "Lead Bank" is a name because "Bank" is in neither list. "<title> at <company>"
+# takes the company when the title holds a role word.
+role_words = ["engineer", "developer", "designer", "manager", "scientist", "lead", "head", "director", "intern",
+              "architect", "analyst", "researcher"]
+role_modifiers = [
+  "senior", "staff", "principal", "junior", "sr", "jr", "software", "backend", "back-end", "frontend", "front-end",
+  "full-stack", "fullstack", "full", "stack", "founding", "ml", "ai", "data", "product", "platform", "mobile", "ios",
+  "android", "web", "devops", "sre", "qa", "security", "embedded", "systems", "infrastructure", "machine", "learning",
+  "engineering", "design", "new", "grad", "entry", "level", "of", "and", "&", "swe", "sde", "eng",
+]
+
+# A post asks for email when its text holds an address, an address spelled "name at site dot com", or one of these
+# phrases as whole words (case blind; "email" also matches "e-mail"). Phrases in the second list count only with an
+# address straight after them.
+email_phrases = ["email me", "email us", "send your resume to", "send your cv to"]
+email_phrases_with_address = ["reach out at"]

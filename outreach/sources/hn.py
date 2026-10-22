@@ -6,9 +6,18 @@ place, and its links give a domain and an ATS board. A post with a non-US place 
 counted. Every kept post is also a `PostRecord`, so the discover job can store it in `company_post`.
 
 Identity stays safe by construction. The `hq` evidence is a `guess`, which identity never turns into a state. The
-domain is taken from the header's links (or from a body link whose name matches the company), reduced to its
-registrable domain the way the LCA source reduces a mailbox domain, and a hosting or social platform is never one.
-`source_ref` is `hn:<name key>`, stable across months, so a company is one company however often it posts.
+domain is taken from the header's links (or from a body link whose label is the company's name), reduced to its
+registrable domain the way the LCA source reduces a mailbox domain, and a platform (a host, a shortener, a form, a
+press or job site) is never one.
+
+`source_ref` is `hn:<name key>@<domain>` when a post gives a company domain, else `hn:<name key>`; a name with any
+non-ASCII letter uses `sha256:<16 hex>` of its NFC form for the key (the ASCII key would drop the letter and make
+"Muller" and "Mller" one company). The domain is in the ref so two companies that share a name stay two. Within one
+pass, a post with no domain joins the one domain candidate of its name; with several domain candidates it joins none
+(counted in `name_conflicts`, and it has no `PostRecord`). Across passes there is no such join: a repeat in a later
+month that leaves the link out is a name-only candidate `hn:<name key>`, which identity can only match weakly (a new
+company plus an item for him to merge). That cost is accepted: guessing which company a domain-less post means would
+be a silent merge.
 
 Error is not empty: an Algolia error, a non-200 answer, a body that is not the expected JSON, a month with no
 thread, or a thread with no readable comments raises `HnError`. A month whose comments hold no parsable post is a
@@ -21,6 +30,7 @@ import hashlib
 import json
 import re
 import tomllib
+import unicodedata
 import urllib.parse
 from dataclasses import dataclass
 from functools import cache
@@ -28,7 +38,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from outreach.identity import US_STATES
-from outreach.net import FetchError, HttpClient, UrllibClient
+from outreach.net import HttpClient, UrllibClient
 from outreach.rules.facts import EvidenceDraft
 from outreach.sources.ats_detect import detect_all
 from outreach.sources.base import Candidate
@@ -55,19 +65,18 @@ _SINCE = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
 # Spaced separators only: a hyphen with no spaces is part of a name. The dash characters are built, not typed.
 _SEP = re.compile(r"\s*\|\s*|\s+[" + chr(0x2014) + chr(0x2013) + r"-]\s+")
 _URL = re.compile(r"(?:https?://|www\.)\S+", re.I)
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_IS_HIRING = re.compile(r"\s+is\s+hiring\W*$", re.I)
+_AT_WORD = re.compile(r"^(.+?)\s+at\s+(.+)$", re.I)
 _PAREN = re.compile(r"\([^)]*\)")
 _NAME_BAD = re.compile(r"[:?!]")
 _SERIES = re.compile(r"\bseries\s+([a-z])\b", re.I)
 _SERIES_STAGE = {"a": "series_a", "b": "series_b", "c": "series_c", "d": "series_d"}
 
 
-class HnError(FetchError):
-    """A fetch that did not give a usable answer: a bad status, a body that is not the expected JSON, or an answer
-    with nothing in it. A `FetchError` so a caller that treats fetch failures alike treats this one the same."""
-
-    def __init__(self, message: str, kind: str = "network"):
-        super().__init__(kind, message)  # type: ignore[arg-type]
+class HnError(Exception):
+    """The HN source could not give an answer: a bad HTTP status, a body that is not the expected JSON, a month with no
+    thread, or a thread with nothing in it. The message names the URL and what was wrong. (A transport failure is the
+    client's `FetchError` and passes through unchanged.)"""
 
 
 @dataclass(frozen=True)
@@ -75,17 +84,47 @@ class HnConfig:
     max_name_words: int
     non_us_places: re.Pattern
     non_us_codes: re.Pattern
-    us_markers: re.Pattern  # US codes, city codes and phrases
+    us_markers: re.Pattern  # US codes and city codes, case as written
+    us_phrases: re.Pattern  # case blind
     us_places: re.Pattern
     us_city_codes: re.Pattern
     state_code: re.Pattern  # ", XX" for every state code
     ambiguous_state_codes: frozenset[str]
-    email_phrases: tuple[str, ...]
+    reject_names: frozenset[str]
+    generic_segments: frozenset[str]
+    role_words: frozenset[str]
+    role_vocabulary: frozenset[str]  # role words and the words that only describe a role
+    asks_email: re.Pattern
     digest: str  # the first 8 hex digits of sha256 over the settings: any edit changes the source version
 
 
 _REQUIRED = ("max_name_words", "non_us_places", "non_us_codes", "us_codes", "us_city_codes", "us_phrases", "us_places",
-             "ambiguous_state_codes", "email_phrases")
+             "ambiguous_state_codes", "reject_names", "generic_segments", "role_words", "role_modifiers",
+             "email_phrases", "email_phrases_with_address")
+_OBFUSCATED_TLD = "com|io|ai|org|net|co|dev|app|xyz|tech|me|us|so|sh"
+_AT = r"(?:\s*[\[(]at[\])]\s*|\s+at\s+)"
+_DOT = r"(?:\s*[\[(]dot[\])]\s*|\s+dot\s+)"
+_ADDRESS = (r"(?:[\w.+-]+@[\w-]+(?:\.[\w-]+)+"  # jobs@acme.io
+            r"|(?<![\w.@])[\w.+-]+" + _AT + r"[\w-]+(?:" + _DOT + r"[\w-]+)*" + _DOT + r"(?:" + _OBFUSCATED_TLD +
+            r")(?!\w))")  # jobs at acme dot com, jobs [at] acme [dot] io
+
+
+def _phrase(phrase: str) -> str:
+    """A phrase as a whole-word pattern: spaces are any whitespace, and `email` also matches `e-mail`."""
+    parts = [r"e-?mail" if w == "email" else re.escape(w) for w in phrase.lower().split()]
+    return r"(?<!\w)" + r"\s+".join(parts) + r"(?!\w)"
+
+
+def _asks_email_pattern(plain: list[str], with_address: list[str]) -> re.Pattern:
+    alternatives = [_ADDRESS, *(_phrase(p) for p in plain), *(_phrase(p) + r"\s*[:,]?\s*" + _ADDRESS
+                                                              for p in with_address)]
+    return re.compile("|".join(alternatives), re.I)
+
+
+def _norm(text: str) -> str:
+    """Case blind, typographic apostrophes plain, punctuation other than hyphens and apostrophes dropped."""
+    text = text.lower().replace(chr(0x2019), "'")
+    return _squash(re.sub(r"[^a-z0-9&'\s-]", " ", text))
 
 
 def _words(words, flags=0) -> re.Pattern:
@@ -106,11 +145,16 @@ def load_hn_config(path: Path | None = None) -> HnConfig:
     return HnConfig(
         max_name_words=int(data["max_name_words"]),
         non_us_places=_words(data["non_us_places"], re.I), non_us_codes=_words(data["non_us_codes"]),
-        us_markers=_words([*data["us_codes"], *data["us_city_codes"], *data["us_phrases"]]),
+        us_markers=_words([*data["us_codes"], *data["us_city_codes"]]),
+        us_phrases=_words(data["us_phrases"], re.I),
         us_places=_words(data["us_places"], re.I), us_city_codes=_words(data["us_city_codes"]),
         state_code=re.compile(r",\s*(" + states + r")(?![A-Za-z])"),
         ambiguous_state_codes=frozenset(data["ambiguous_state_codes"]),
-        email_phrases=tuple(p.lower() for p in data["email_phrases"]), digest=digest)
+        reject_names=frozenset(_norm(n) for n in data["reject_names"]),
+        generic_segments=frozenset(_norm(n) for n in data["generic_segments"]),
+        role_words=frozenset(_norm(w) for w in data["role_words"]),
+        role_vocabulary=frozenset(_norm(w) for w in [*data["role_words"], *data["role_modifiers"]]),
+        asks_email=_asks_email_pattern(data["email_phrases"], data["email_phrases_with_address"]), digest=digest)
 
 
 @cache
@@ -172,13 +216,15 @@ def plain_text(html: str) -> str:
 
 @dataclass(frozen=True)
 class Post:
-    """One parsed comment. `links` are the header's hrefs, `more_links` the rest of the comment's."""
+    """One parsed comment. `links` are the header's hrefs, `more_links` the rest of the comment's. `name_index` is
+    the header segment the name came from (0 unless the first segment was a title, a place or a remark)."""
     name: str
     header: str
     links: tuple[str, ...]
     stage: str | None
     location: str | None
     more_links: tuple[str, ...] = ()
+    name_index: int = 0
 
 
 def _stage(parens: list[str]) -> str | None:
@@ -196,13 +242,51 @@ def _stage(parens: list[str]) -> str | None:
     return None
 
 
-def _company_name(first: str, cfg: HnConfig) -> tuple[str | None, str | None]:
-    """(name, stage) from a header's first segment. The name has its parentheticals and any URL removed; it is None
-    when empty, over `max_name_words` words, or when it has a colon, a question mark or an exclamation mark."""
-    stage = _stage(re.findall(r"\(([^)]*)\)", first))
-    name = _squash(re.sub(r"[()]", "", _URL.sub(" ", _PAREN.sub(" ", first)))).strip(" ,;")
-    if not name or len(name.split()) > cfg.max_name_words or _NAME_BAD.search(name):
-        return None, stage
+def _is_place(text: str, cfg: HnConfig) -> bool:
+    """The whole text is one place or region from the lists (`NYC`, `London`, `United States`)."""
+    return any(p.fullmatch(text) for p in (cfg.non_us_places, cfg.non_us_codes, cfg.us_places, cfg.us_city_codes,
+                                           cfg.us_markers, cfg.us_phrases))
+
+
+def _words_of(text: str) -> list[str]:
+    return [w for w in _norm(text).split() if w]
+
+
+def _role_ish(text: str, cfg: HnConfig) -> bool:
+    """Only role words and words that describe one (`Senior Software Engineer`, `Backend`, `Head of Design`)."""
+    words = _words_of(text)
+    return bool(words) and all(w in cfg.role_vocabulary or w.rstrip("s") in cfg.role_vocabulary for w in words)
+
+
+def _has_role_word(text: str, cfg: HnConfig) -> bool:
+    return any(w in cfg.role_words or w.rstrip("s") in cfg.role_words for w in _words_of(text))
+
+
+def _segment_name(seg: str, cfg: HnConfig) -> tuple[str | None, str | None, str, bool]:
+    """(name, stage, status, is_hiring) for one header segment. Status `ok` (a name), `weak` (a title, a remark or
+    a place: try a later segment) or `bad` (empty, too long or has `:`, `?`, `!`). The name has its parentheticals
+    and any URL removed, a trailing `is hiring` dropped and, for `<title> at <company>`, only the company kept."""
+    stage = _stage(re.findall(r"\(([^)]*)\)", seg))
+    text = _squash(re.sub(r"[()]", "", _URL.sub(" ", _PAREN.sub(" ", seg)))).strip(" ,;")
+    stripped = _IS_HIRING.sub("", text)
+    hiring = stripped != text
+    text = stripped.strip(" ,;")
+    at = _AT_WORD.match(text)
+    if at and _has_role_word(at.group(1), cfg):
+        text = at.group(2).strip(" ,;")
+    if not text or len(text.split()) > cfg.max_name_words or _NAME_BAD.search(text):
+        return None, stage, "bad", hiring
+    if _norm(text) in cfg.reject_names or _is_place(text, cfg) or _role_ish(text, cfg):
+        return None, stage, "weak", hiring
+    return text, stage, "ok", hiring
+
+
+def _later_name(seg: str, cfg: HnConfig) -> tuple[str | None, str | None]:
+    """A name from a segment after a title or remark: it must look like one (a capital first, no comma, not a
+    generic word)."""
+    name, stage, status, _ = _segment_name(seg, cfg)
+    if status != "ok" or "," in name or not name[0].isupper() or _norm(name) in cfg.generic_segments:
+        return None, None
     return name, stage
 
 
@@ -216,42 +300,66 @@ def _location(segments: list[str], cfg: HnConfig) -> str | None:
 
 
 def parse_post(html: str, config: HnConfig | None = None) -> Post | None:
-    """The post in a comment's HTML, or None when its header is not a company header (chatter, a question, a name
-    over 5 words). The header is the text before the first paragraph break; the name is its first segment before
-    `|`, a spaced em dash, en dash or hyphen."""
+    """The post in a comment's HTML, or None when its header is not a company header. The header is the text before
+    the first paragraph break; the name is its first segment before `|`, a spaced em dash, en dash or hyphen.
+
+    When that segment is a title (`Senior Software Engineer`), a remark or a bare place (`Remote`, `NYC`), the name is
+    the first later segment that looks like one, else the post is unparsed. A header of one segment needs a second
+    signal (a parenthetical, a link, or `is hiring`): `Thanks A Lot` and `Looking For Work` are title case too.
+    """
     cfg = config or _default_config()
     blocks = _blocks(html)
     header = blocks[0]["text"]
     if not header:
         return None
     segments = [s.strip() for s in _SEP.split(header)]
-    name, stage = _company_name(segments[0], cfg)
+    name, stage, status, hiring = _segment_name(segments[0], cfg)
+    index = 0
+    if status == "weak":
+        for i, seg in enumerate(segments[1:], 1):
+            name, stage = _later_name(seg, cfg)
+            if name:
+                index = i
+                break
     if name is None:
         return None
-    if len(segments) == 1 and "(" not in header and not blocks[0]["links"] and not all(
-            any(ch.isupper() or ch.isdigit() for ch in word) for word in name.split()):
-        return None  # a bare header with no sign of being a name: a short lower-case remark, not a company
+    if len(segments) == 1 and "(" not in header and not blocks[0]["links"] and not hiring:
+        return None
     return Post(name=name, header=header, links=blocks[0]["links"], stage=stage,
-                location=_location(segments[1:], cfg),
-                more_links=tuple(link for b in blocks[1:] for link in b["links"]))
+                location=_location(segments[index + 1:], cfg),
+                more_links=tuple(link for b in blocks[1:] for link in b["links"]), name_index=index)
 
 
-def is_us(header: str, config: HnConfig | None = None) -> bool:
-    """False only when the header names a non-US place and no US marker. No place at all keeps the post. A state code
-    that also reads as a country code (`Toronto, CA`) is not a US marker next to a non-US place."""
+def _follows_non_us_place(text: str, pos: int, cfg: HnConfig) -> bool:
+    before = text[:pos].rstrip()
+    return any(m.end() == len(before) for m in cfg.non_us_places.finditer(before))
+
+
+def is_us(header: str, config: HnConfig | None = None, *, name_index: int = 0) -> bool:
+    """False only when a segment of the header, other than the name's, names a non-US place and no segment has a US
+    marker. A header with no other segment, or none that names a place, keeps the post: unknown is never grounds to
+    hide. `Canada Drives | Eng` is a US-neutral post (the name is not a location).
+
+    A state code that also reads as a country code (`CA`, `DE`, `IN`...) is a US marker unless it comes straight
+    after a non-US place (`Toronto, CA`, `Berlin, DE`); `Culver City, CA | London, UK` and `Irvine, CA or London` stay.
+    """
     cfg = config or _default_config()
-    text = _URL.sub(" ", header)
-    non_us = bool(cfg.non_us_places.search(text) or cfg.non_us_codes.search(text))
-    if not non_us:
-        return True
-    if cfg.us_markers.search(text) or cfg.us_places.search(text):
-        return True
-    return any(m.group(1) not in cfg.ambiguous_state_codes for m in cfg.state_code.finditer(text))
+    segments = _SEP.split(_URL.sub(" ", header))
+    non_us = us = False
+    for i, seg in enumerate(segments):
+        if i == name_index:
+            continue
+        non_us = non_us or bool(cfg.non_us_places.search(seg) or cfg.non_us_codes.search(seg))
+        us = us or bool(cfg.us_markers.search(seg) or cfg.us_phrases.search(seg) or cfg.us_places.search(seg))
+        for m in cfg.state_code.finditer(seg):
+            if not (m.group(1) in cfg.ambiguous_state_codes and _follows_non_us_place(seg, m.start(), cfg)):
+                us = True
+    return us or not non_us
 
 
 def _domain_of(url: str) -> str | None:
     """The registrable company domain of a link, or None for a mail link, an IP address, or a platform (a code host,
-    a social site, a job board, hosting such as vercel.app)."""
+    a social site, a job board, a shortener, a form, a press site, hosting such as vercel.app)."""
     try:
         parts = urllib.parse.urlsplit(url)
         host = parts.hostname or ""
@@ -271,17 +379,25 @@ def _post_domain(post: Post) -> str | None:
     key = name_key(post.name)
     if len(key) < 4:
         return None
-    for link in post.more_links:  # a body link counts only when its name is the company's (not a press link)
+    for link in post.more_links:  # a body link counts only when its label is the company's (not a press link)
         d = _domain_of(link)
         label = re.sub(r"[^a-z0-9]", "", d.split(".")[0]) if d else ""
-        if len(label) >= 4 and (label in key or key in label):
+        if label and (label == key or label.startswith(key) or (len(label) >= 5 and key.startswith(label))):
             return d
     return None
 
 
+def _ref_key(name: str) -> str:
+    """The name part of `source_ref`: the name key, or for a name with a non-ASCII letter `sha256:` and 16 hex digits of
+    the NFC, case-folded name (the name key would drop the letter, so `Muller` and `Mller` would collide)."""
+    nfc = unicodedata.normalize("NFC", name)
+    if any(ord(ch) > 127 and ch.isalpha() for ch in nfc):
+        return "sha256:" + hashlib.sha256(_squash(nfc).casefold().encode("utf-8")).hexdigest()[:16]
+    return name_key(nfc)
+
+
 def _asks_email(text: str, cfg: HnConfig) -> bool:
-    low = text.lower()
-    return bool(_EMAIL.search(text)) or any(p in low for p in cfg.email_phrases)
+    return bool(cfg.asks_email.search(text))
 
 
 # ---- the source ------------------------------------------------------------------------------------------------
@@ -418,7 +534,7 @@ class HnSource:
                 if post is None:
                     s["unparsed"] += 1
                     continue
-                if not is_us(post.header, cfg):
+                if not is_us(post.header, cfg, name_index=post.name_index):
                     s["non_us"] += 1
                     continue
                 s["kept"] += 1
@@ -429,30 +545,39 @@ class HnSource:
         return self._assemble(kept, s)
 
     def _assemble(self, kept: list[_Kept], s: dict[str, int]) -> _Pass:
+        """Candidates by ref. A name with no domain, or one, is one candidate (a domain-less post joins it); a name
+        with several domains is one candidate per domain and its domain-less posts join none."""
         cfg = self.config
-        by_key: dict[str, dict] = {}
-        records: list[PostRecord] = []
+        groups: dict[str, list[_Kept]] = {}
         for k in kept:
-            ref = "hn:" + name_key(k.post.name)
-            records.append(PostRecord(ref, k.url, k.posted_at, k.text, _asks_email(k.text, cfg)))
-            slot = by_key.get(ref)
-            if slot is None:
-                slot = by_key[ref] = {"name": k.post.name, "domain": None, "ats": None, "evidence": []}
-            if k.domain and slot["domain"] and k.domain != slot["domain"]:
-                s["name_conflicts"] += 1  # another company under the same name: its facts are not this one's
-                continue
-            slot["domain"] = slot["domain"] or k.domain
-            if slot["ats"] is None and k.boards:
-                slot["ats"] = f"{k.boards[0].ats}:{k.boards[0].token}"
-            quote = k.post.header[:QUOTE_CAP]
-            if k.domain:
-                slot["evidence"].append(EvidenceDraft("domain", k.domain, "estimate", "hn", k.url, quote))
-            if k.post.stage:
-                slot["evidence"].append(EvidenceDraft("stage", k.post.stage, "estimate", "hn", k.url, quote))
-            if k.post.location:
-                slot["evidence"].append(EvidenceDraft("hq", k.post.location, "guess", "hn", k.url, quote))
-        candidates = [Candidate(name=v["name"], domain=v["domain"], keys={"ats": v["ats"]} if v["ats"] else {},
-                                evidence=tuple(v["evidence"]), source_ref=ref) for ref, v in by_key.items()]
+            groups.setdefault(_ref_key(k.post.name), []).append(k)
+        candidates: list[Candidate] = []
+        ref_of: dict[int, str] = {}  # id of a kept post -> the ref of the candidate it belongs to
+        for key, posts in groups.items():
+            domains = list(dict.fromkeys(k.domain for k in posts if k.domain))
+            if len(domains) > 1:
+                buckets = {d: [k for k in posts if k.domain == d] for d in domains}
+                s["name_conflicts"] += sum(not k.domain for k in posts)
+            else:
+                buckets = {domains[0] if domains else None: posts}
+            for domain, members in buckets.items():
+                ref = f"hn:{key}@{domain}" if domain else f"hn:{key}"
+                evidence: list[EvidenceDraft] = []
+                for k in members:
+                    ref_of[id(k)] = ref
+                    quote = k.post.header[:QUOTE_CAP]
+                    if k.domain:
+                        evidence.append(EvidenceDraft("domain", k.domain, "estimate", "hn", k.url, quote))
+                    if k.post.stage:
+                        evidence.append(EvidenceDraft("stage", k.post.stage, "estimate", "hn", k.url, quote))
+                    if k.post.location:
+                        evidence.append(EvidenceDraft("hq", k.post.location, "guess", "hn", k.url, quote))
+                board = next((k.boards[0] for k in members if k.boards), None)
+                keys = {"ats": f"{board.ats}:{board.token}"} if board else {}
+                candidates.append(Candidate(name=members[0].post.name, domain=domain, keys=keys,
+                                            evidence=tuple(evidence), source_ref=ref))
+        records = [PostRecord(ref_of[id(k)], k.url, k.posted_at, k.text, _asks_email(k.text, cfg))
+                   for k in kept if id(k) in ref_of]
         return _Pass(candidates, records, s)
 
 

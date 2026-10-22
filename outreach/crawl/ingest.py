@@ -220,9 +220,15 @@ def _company_name_keys(conn: sqlite3.Connection, company_id: int) -> set[str]:
 
 def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResult, now: str) -> None:
     """Ruling 8: raise one `flagged` item when the board's org name is none of the company's names, or a company with
-    LCA evidence (a filer of 25 or fewer) has a board of over DOUBTFUL_JOBS jobs. Once per board: a repeat is a
-    no-op, so a resolved item stays resolved."""
+    LCA evidence (a filer of 25 or fewer) has a board of over DOUBTFUL_JOBS jobs. A `slug_probe` board whose read
+    names no org is always doubtful (Task 26a). Once per board: a repeat is a no-op, so a resolved item stays
+    resolved."""
     company = conn.execute("SELECT name FROM company WHERE company_id = ?", (board.company_id,)).fetchone()[0]
+    if board.found_by == "slug_probe" and not result.board_name:
+        # Nothing to compare the guess with (Lever and Ashby never say, a Greenhouse board may not): always doubtful.
+        _raise_doubtful(conn, board, now, "board match doubtful: found by a guessed slug; this board does not say "
+                                          "whose it is")
+        return
     why = []
     if result.board_name and name_key(result.board_name) not in _company_name_keys(conn, board.company_id):
         why.append(f'the board calls itself "{result.board_name}", which is none of the names of "{company}"')
@@ -235,6 +241,10 @@ def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResul
         return
     reason = (f"board match doubtful: the {board.ats} board {board.token} was matched to \"{company}\" "
               f"{'by a guessed slug' if board.found_by == 'slug_probe' else 'by name only'}, and {' and '.join(why)}.")
+    _raise_doubtful(conn, board, now, reason)
+
+
+def _raise_doubtful(conn: sqlite3.Connection, board: BoardRow, now: str, reason: str) -> None:
     with atomic(conn, "board_doubtful"):
         conn.execute(
             "INSERT INTO review_item(kind, company_id, board_id, reason, evidence_key, raised_by, created_at) "

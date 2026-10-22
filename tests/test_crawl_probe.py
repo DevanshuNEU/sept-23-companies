@@ -103,10 +103,10 @@ class ProbeCase(unittest.TestCase):
         self.addCleanup(self.conn.close)
         self.company = seed_company(self.conn, "Acme Robotics")
 
-    def probe(self, routes, ids=None, *, limit=10, client=None):
+    def probe(self, routes, ids=None, *, limit=10, client=None, now="2026-10-22T08:00:00Z"):
         self.client = client or FakeClient(routes)
         ids = [self.company] if ids is None else ids
-        return probe_slugs(self.conn, ids, self.client, limit=limit)
+        return probe_slugs(self.conn, ids, self.client, limit=limit, now=now)
 
     def boards(self, company=None):
         return self.conn.execute("SELECT * FROM board WHERE company_id = ? ORDER BY board_id",
@@ -232,6 +232,24 @@ class ProbeTests(ProbeCase):
         item, = self.conn.execute("SELECT * FROM review_item WHERE kind = 'merge_candidate'").fetchall()
         self.assertIn("same_board", item["reason"])
 
+    def test_a_name_mismatch_stops_the_other_atss_for_that_slug_and_counts_once(self):
+        routes = all_404("acmerobotics", "acme-robotics")
+        routes[gh("acmerobotics")] = ok(gh_board("Someone Else Entirely"))
+        routes[lever("acmerobotics")] = ok(LEVER_OK)  # would be added if Lever were asked about this slug
+        report = self.probe(routes)
+        self.assertEqual((report.added, report.name_mismatch), (0, 1))
+        self.assertEqual(self.count("board"), 0)
+        self.assertNotIn(lever("acmerobotics"), self.client.requests)
+        self.assertNotIn(ashby("acmerobotics"), self.client.requests)
+        self.assertIn(lever("acme-robotics"), self.client.requests)  # the next slug is still tried
+
+    def test_a_name_mismatch_is_counted_once_per_company(self):
+        routes = all_404("acmerobotics", "acme-robotics")
+        routes[gh("acmerobotics")] = ok(gh_board("Someone Else Entirely"))
+        routes[gh("acme-robotics")] = ok(gh_board("Someone Else Entirely"))
+        report = self.probe(routes)
+        self.assertEqual((report.added, report.name_mismatch), (0, 1))
+
     def test_name_mismatch_is_not_added(self):
         routes = all_404("acmerobotics", "acme-robotics")
         routes[gh("acmerobotics")] = ok(gh_board("Someone Else Entirely"))
@@ -240,7 +258,7 @@ class ProbeTests(ProbeCase):
         self.assertEqual(self.count("board"), 0)
         # An alias of the company is one of its names: the same org name is then a match.
         add_alias(self.conn, self.company, "Someone Else Entirely", "dba")
-        report = self.probe(routes)
+        report = self.probe(routes, now="2026-12-01T08:00:00Z")  # past the 30 days the first probe is remembered
         self.assertEqual((report.added, report.name_mismatch), (1, 0))
         self.assertEqual(self.boards()[0]["found_by"], "slug_probe")
 
@@ -300,21 +318,62 @@ class ProbeTests(ProbeCase):
         self.assertEqual(report.added, 0)
         self.assertEqual(report.probed, 1)
 
+    def events(self, company=None):
+        sql = "SELECT * FROM event WHERE kind = 'slug_probed'" + (" AND company_id = ?" if company else "")
+        return self.conn.execute(sql, (company,) if company else ()).fetchall()
+
     def test_rerun_writes_nothing_new(self):
         other = seed_company(self.conn, "Different Name Corp")
         seed_board(self.conn, other, "greenhouse", "betaworks")
         beta = seed_company(self.conn, "Beta Works")
         mismatch = seed_company(self.conn, "Gamma Works")
+        ids = [self.company, beta, mismatch]
         routes = all_404("acmerobotics", "acme-robotics", "betaworks", "beta-works", "gammaworks", "gamma-works")
         routes[gh("acmerobotics")] = [ok(gh_board())] * 2
         routes[gh("betaworks")] = [ok(gh_board("Beta Works"))] * 2
         routes[gh("gammaworks")] = [ok(gh_board("Nobody"))] * 2
-        first = self.probe(routes, [self.company, beta, mismatch])
+        first = self.probe(routes, ids)
         self.assertEqual((first.added, first.conflicts, first.name_mismatch), (1, 1, 1))
+        self.assertEqual(len(self.events()), 3)  # one slug_probed event per probed company
         before = self.snapshot()
-        second = self.probe(routes, [self.company, beta, mismatch])
-        self.assertEqual(second.added, 0)  # the company with a board is not asked again
-        self.assertEqual(self.snapshot(), before)  # the conflict raises no second item, the mismatch writes nothing
+        second = self.probe(routes, ids)
+        self.assertEqual(second, ProbeReport(0, 0, 0, 0, 0, 0))  # probed within 30 days: not asked again
+        self.assertEqual(self.client.requests, [])
+        self.assertEqual(self.snapshot(), before)
+        for company in ids:
+            self.assertEqual(len(self.events(company)), 1)
+
+    def test_the_probe_event_names_the_company_and_the_new_york_day(self):
+        self.probe({gh("acmerobotics"): ok(gh_board())}, now="2026-10-23T02:00:00Z")  # 22:00 on the 22nd in New York
+        event, = self.events()
+        self.assertEqual((event["entity"], event["entity_id"], event["company_id"], event["actor"]),
+                         ("company", self.company, self.company, "crawler"))
+        self.assertEqual(event["idempotency_key"], f"slug-probed:{self.company}:2026-10-22")
+        self.assertEqual(event["at"], "2026-10-23T02:00:00Z")
+
+    def test_a_company_is_probed_again_after_30_days(self):
+        routes = all_404("acmerobotics", "acme-robotics")
+        self.probe(routes, now="2026-10-01T12:00:00Z")
+        self.assertEqual(self.probe(routes, now="2026-10-30T12:00:00Z").probed, 0)  # 29 days
+        self.assertEqual(self.probe(routes, now="2026-10-31T12:00:01Z").probed, 1)  # over 30 days
+        self.assertEqual(len(self.events()), 2)  # a new New York day, a new key
+
+    def test_the_next_companies_are_probed_on_the_next_run(self):
+        names = ["Alpha Works", "Beta Works", "Gamma Works", "Delta Works"]
+        ids = [seed_company(self.conn, n) for n in names]
+        routes = all_404(*[n.lower().replace(" ", "") for n in names], *[n.lower().replace(" ", "-") for n in names])
+        first = self.probe(routes, ids, limit=3)
+        self.assertEqual((first.considered, first.probed), (4, 3))
+        second = self.probe(routes, ids, limit=3)
+        self.assertEqual((second.considered, second.probed), (1, 1))
+        self.assertTrue(any("deltaworks" in u for u in self.client.requests))
+        self.assertEqual(len(self.events()), 4)
+
+    def test_a_company_whose_hosts_were_all_tripped_is_not_remembered(self):
+        routes = {gh("acmerobotics"): HostTripped("greenhouse.io"), lever("acmerobotics"): HostTripped("lever.co"),
+                  ashby("acmerobotics"): HostTripped("ashbyhq.com")}
+        self.probe(routes)
+        self.assertEqual(self.events(), [])  # nothing was asked, so the next run asks
 
     def test_no_request_for_a_company_with_a_board(self):
         seed_board(self.conn, self.company, "workday", "acme.wd5/external")
@@ -322,11 +381,22 @@ class ProbeTests(ProbeCase):
         self.assertEqual((report.considered, report.probed), (0, 0))
         self.assertEqual(self.client.requests, [])
 
-    def test_an_inactive_board_is_not_a_board(self):
+    def test_a_company_with_an_inactive_board_row_is_not_probed(self):
         bid = seed_board(self.conn, self.company, "lever", "oldacme")
         self.conn.execute("UPDATE board SET active = 0 WHERE board_id = ?", (bid,))
-        report = self.probe(all_404("acmerobotics", "acme-robotics"))
-        self.assertEqual(report.probed, 1)
+        report = self.probe({})
+        self.assertEqual((report.considered, report.probed), (0, 0))
+        self.assertEqual(self.client.requests, [])
+
+    def test_a_board_that_appears_during_the_probe_is_not_joined_by_a_second(self):
+        def other_writer_adds_a_board(method, url, headers, body):
+            self.conn.execute("INSERT INTO board(company_id, ats, token, created_at) VALUES (?, 'workday', "
+                              "'acme.wd5/external', '2026-10-22T08:00:00Z')", (self.company,))
+            return ok(gh_board())
+
+        report = self.probe({gh("acmerobotics"): other_writer_adds_a_board})
+        self.assertEqual(report.added, 0)
+        self.assertEqual([b["ats"] for b in self.boards()], ["workday"])
 
     def test_a_company_with_only_a_watched_page_is_probed(self):
         self.conn.execute("INSERT INTO watched_page(company_id, url) VALUES (?, 'https://acme.example/careers')",

@@ -15,8 +15,11 @@ last tick. The registered callable runs one tick with the stage's default answer
 """
 from __future__ import annotations
 
+from unittest import mock
+
 from outreach.crawl.cadence import add_seconds
 from outreach.crawl.config import load_crawl_config
+from outreach.crawl.probe import ProbeReport
 from outreach.crawl.tick import TickReport, run_tick
 from outreach.net import Response
 from tests.fakes import FakeClient
@@ -90,8 +93,10 @@ class CrawlStage:
         self.ticks += 1
         clock = _Clock()
         self.client = FakeClient({list_url(): self.serve if answer is None else answer})
-        self.report = run_tick(self.conn, self.client, cfg=load_crawl_config(), now_fn=lambda: now, clock=clock,
-                               sleep=clock.sleep)
+        # The daily slug probe (Task 26a) is not this stage: it would ask the three ATSs about every board-less company.
+        with mock.patch("outreach.crawl.tick.probe_slugs", return_value=ProbeReport(0, 0, 0, 0, 0, 0)):
+            self.report = run_tick(self.conn, self.client, cfg=load_crawl_config(), now_fn=lambda: now, clock=clock,
+                                   sleep=clock.sleep)
         if self.client.unrouted:
             raise AssertionError(f"the read_boards stage asked for a URL it does not serve: {self.client.unrouted}")
         return self.report

@@ -7,6 +7,7 @@ from unittest import mock
 
 from outreach.crawl import ingest
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
+from outreach.crawl.ats.lever import LeverAdapter
 from outreach.crawl.base import JobRef, ReadResult, Validators, ids_fingerprint
 from outreach.crawl.boardstate import load_board
 from outreach.crawl.cadence import add_seconds
@@ -216,6 +217,33 @@ class DoubtfulBoardTests(IngestTestCase):
         self.set_found_by("slug_probe", bid)
         self.read(ok(), board_id=bid, url="https://boards-api.greenhouse.io/v1/boards/zeta/jobs?content=true")
         self.assertEqual(len(self.items("flagged")), 1)
+
+    def test_a_slug_probe_board_whose_read_names_no_org_always_raises_the_item(self):
+        # Lever and Ashby never say whose a board is, and a Greenhouse board may lack company_name: a guessed slug
+        # with no name to compare is doubtful until Devanshu looks.
+        reason = "board match doubtful: found by a guessed slug; this board does not say whose it is"
+        lever_url = "https://api.lever.co/v0/postings/acmelever?mode=json"
+        no_name = board_json(lambda jobs: [j.pop("company_name", None) for j in jobs])
+        cases = (("lever", "acmelever", lever_url, (FIXTURES / "lever_list.json").read_bytes(), LeverAdapter),
+                 ("greenhouse", "acmenoname", "https://boards-api.greenhouse.io/v1/boards/acmenoname/jobs?content=true",
+                  no_name, GreenhouseAdapter))
+        for ats, token, url, body, adapter in cases:
+            with self.subTest(ats=ats):
+                cid = seed_company(self.conn, "Acme Robotics")  # the name would match if the board gave one
+                bid = seed_board(self.conn, cid, ats, token)
+                self.set_found_by("slug_probe", bid)
+                client = FakeClient({url: ok(body)})
+                self.clock[0] = T0
+                read_board(self.conn, load_board(self.conn, bid), adapter(client), run_id=start_job(self.conn, "read_boards"),
+                           now=T0, cfg=self.cfg)
+                item, = self.conn.execute("SELECT * FROM review_item WHERE board_id = ?", (bid,)).fetchall()
+                self.assertEqual((item["kind"], item["raised_by"]), ("flagged", "crawler"))
+                self.assertEqual(item["reason"], reason)
+                self.assertEqual(item["evidence_key"], f"board-doubtful:{bid}")
+        # A name-only board with no org name still raises nothing: the rule is for guessed slugs.
+        self.set_found_by("stapply_name")
+        self.read(ok(no_name))
+        self.assertEqual([i["board_id"] for i in self.items("flagged")].count(self.board_id), 0)
 
     def test_a_host_matched_board_or_a_second_read_or_a_matching_name_raises_nothing(self):
         # A board found another way, with the same other org name: no item.

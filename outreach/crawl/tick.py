@@ -45,10 +45,11 @@ from outreach.crawl.cadence import add_seconds, due_boards, error_backoff_s, pla
 from outreach.crawl.config import CrawlConfig, load_crawl_config
 from outreach.crawl.ingest import list_board, read_board
 from outreach.crawl.polite import HostTripped, PoliteClient, bucket_for
+from outreach.crawl.probe import PROBE_LIMIT, ProbeReport, probe_slugs
 from outreach.crawl.watch import WatchReport, watch_pages
 from outreach.net import HttpClient, Response
 from outreach.rules import RulesetNotCurrent, rebuild, ruleset_version
-from outreach.store import atomic, describe_error, finish_job, start_job, utcnow
+from outreach.store import append_event, atomic, describe_error, finish_job, start_job, utcnow
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["TickReport", "AlreadyRunning", "LOCK_NAME", "tick_lock", "ensure_ruleset_current", "resolve_combiner",
@@ -84,6 +85,8 @@ class TickReport:
     tripped: tuple[str, ...] = ()
     watch: WatchReport | None = None  # the watched-page pass (its own `watch_pages` run); None when it did not run
     watch_error: str = ""
+    probe: ProbeReport | None = None  # the daily slug-probe pass; None when it did not run (or failed: `probe_error`)
+    probe_error: str = ""
 
 
 class AlreadyRunning(Exception):
@@ -327,7 +330,8 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
         raise
     report = TickReport(run_id=run_id, rebuilt=rebuilt, **run.counts, seconds=round(clock() - started, 3),
                         tripped=tuple(sorted(run.down)))
-    summary = {k: v for k, v in asdict(report).items() if k not in ("watch", "watch_error")}
+    summary = {k: v for k, v in asdict(report).items()
+               if k not in ("watch", "watch_error", "probe", "probe_error")}
     if run.failed_ids:
         summary["failed_boards"] = run.failed_ids
     status = "partial" if run.failed_ids or run.stopped else "ok"
@@ -335,12 +339,37 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
     return report, run
 
 
+def _probe_step(conn: sqlite3.Connection, run: _Pass, cfg: CrawlConfig, now_fn, clock, started: float
+                ) -> tuple[ProbeReport | None, str]:
+    """The daily slug probe (Task 26a): once per New York day, after the boards, through the tick's client and tripped
+    buckets, for up to `PROBE_LIMIT` companies with no board. Skipped once the budget is spent. The day is recorded
+    (a `slug_probe_run` event keyed by the date) only when the pass completed, so a failure is tried again on the next
+    tick; whatever it raises is returned as text and never touches the board reads."""
+    if run.stopped or clock() - started >= cfg.tick_budget_s:
+        return None, ""
+    now = now_fn()
+    key = f"slug-probe-run:{plan_date(now)}"
+    if conn.execute("SELECT 1 FROM event WHERE idempotency_key = ?", (key,)).fetchone():
+        return None, ""
+    try:
+        ids = [r[0] for r in conn.execute("SELECT company_id FROM company")]
+        report = probe_slugs(conn, ids, run.client(), limit=PROBE_LIMIT, cfg=cfg, now=now)
+        append_event(conn, entity="source", kind="slug_probe_run", actor="crawler", detail=asdict(report), at=now,
+                     idempotency_key=key)
+    except Exception as e:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        return None, describe_error(e)
+    return report, ""
+
+
 def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig | None = None, rules_cfg=None,
              combiner=None, now_fn: Callable[[], str] = utcnow, clock: Callable[[], float] = time.monotonic,
              sleep: Callable[[float], None] = time.sleep, limit: int | None = None) -> TickReport:
     """One tick: the ruleset check, the due boards (at most `limit or cfg.boards_per_tick`, within the budget), then
-    the watched-page pass (Task 14) through the same client and breaker, as its own `watch_pages` run. A failed watch
-    pass is reported in `watch_error` and leaves the board reads as they are. The caller holds `tick_lock`.
+    the daily slug probe (Task 26a, `probe`), then the watched-page pass (Task 14), both through the same client and
+    breaker; the watch pass is its own `watch_pages` run. A failed probe or watch pass is reported in `probe_error` or
+    `watch_error` and leaves the board reads as they are. The caller holds `tick_lock`.
 
     `combiner=None` means `resolve_combiner(conn)`. `clock` and `sleep` drive the budget and the polite spacing.
     """
@@ -359,6 +388,8 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
 
         report, run = _read_boards(conn, polite, select, cfg=cfg, rules_cfg=rules_cfg, combiner=combiner,
                                    now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt)
+        probe, probe_error = _probe_step(conn, run, cfg, now_fn, clock, started)
+        report = replace(report, probe=probe, probe_error=probe_error)
         try:
             watched = watch_pages(conn, run.client(), cfg=cfg, now_fn=now_fn)
         except Exception as e:

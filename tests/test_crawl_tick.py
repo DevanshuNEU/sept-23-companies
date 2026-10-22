@@ -20,6 +20,7 @@ from outreach.crawl.cadence import add_seconds
 from outreach.crawl.config import load_crawl_config
 from outreach.crawl.ingest import read_board
 from outreach.crawl.polite import PoliteClient
+from outreach.crawl.probe import ProbeReport
 from outreach.crawl.tick import (
     AlreadyRunning, TickReport, ensure_ruleset_current, read_company_boards, resolve_combiner, run_tick, tick_lock)
 from outreach.net import Response
@@ -68,7 +69,13 @@ class Clock:
 
 
 class TickCase(unittest.TestCase):
+    stub_probe = True  # the daily slug probe is its own tests' business (ProbeStepTests); the rest never see it
+
     def setUp(self):
+        if self.stub_probe:
+            patch = mock.patch.object(tick, "probe_slugs", return_value=ProbeReport(0, 0, 0, 0, 0, 0))
+            patch.start()
+            self.addCleanup(patch.stop)
         self.conn = fresh_store()
         self.addCleanup(self.conn.close)
         self.cfg = load_crawl_config()
@@ -716,6 +723,103 @@ class WatchPassTests(TickCase):
         report = read_company_boards(self.conn, self.client, [company], cfg=self.cfg, now_fn=lambda: T0)
         self.assertEqual(self.client.requests, [gh("acme")])
         self.assertIsNone(report.watch)
+
+
+def probe_404s(*slugs):
+    routes = {}
+    for slug in slugs:
+        routes[gh(slug)] = status_response(404)
+        routes[lever(slug)] = status_response(404)
+        routes[f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"] = status_response(404)
+    return routes
+
+
+class ProbeStepTests(TickCase):
+    """The daily slug probe (Task 26a): after the boards, before the watch pass, once per New York day."""
+    stub_probe = False
+
+    def setUp(self):
+        super().setUp()
+        self.company = seed_company(self.conn, "Acme Robotics")  # no board: a candidate for probing
+
+    def runs(self):
+        return self.conn.execute("SELECT * FROM event WHERE kind = 'slug_probe_run'").fetchall()
+
+    def test_the_tick_probes_once_a_day_with_the_counts_in_the_report(self):
+        routes = probe_404s("acmerobotics", "acme-robotics")
+        report = self.tick(routes)
+        self.assertEqual((report.probe.considered, report.probe.probed), (1, 1))
+        self.assertEqual(report.probe_error, "")
+        self.assertEqual(len(self.client.requests), 6)
+        run, = self.runs()
+        self.assertEqual(run["idempotency_key"], f"slug-probe-run:{TODAY}")
+        # The same day: no probe pass at all.
+        again = self.tick({})
+        self.assertIsNone(again.probe)
+        self.assertEqual(self.client.requests, [])
+        # The next New York day: the pass runs again (this company is remembered, so it asks nobody).
+        later = self.tick({}, now_fn=lambda: at(86400))
+        self.assertEqual(later.probe, ProbeReport(0, 0, 0, 0, 0, 0))
+        self.assertEqual(len(self.runs()), 2)
+
+    def test_the_probe_runs_after_the_boards_and_before_the_watch_pass(self):
+        self.board("acme")
+        self.conn.execute("INSERT INTO watched_page(company_id, url) VALUES (?, ?)", (self.company, PAGE))
+        routes = {gh("acme"): ok(), PAGE: text_response(CAREERS), **probe_404s("acmerobotics", "acme-robotics")}
+        self.tick(routes)
+        reqs = self.client.requests
+        self.assertEqual(reqs[0], gh("acme"))
+        self.assertEqual(reqs[-1], PAGE)
+        self.assertIn(gh("acmerobotics"), reqs[1:-1])
+
+    def test_the_probe_goes_through_the_tick_breaker(self):
+        # Two Greenhouse boards fail and trip that host: the probe asks Lever and Ashby, never Greenhouse.
+        self.board("g0")
+        self.board("g1")
+        cfg = dataclasses.replace(self.cfg, breaker_failures=2)
+        routes = {gh("g0"): status_response(503), gh("g1"): status_response(503),
+                  **{k: v for k, v in probe_404s("acmerobotics", "acme-robotics").items() if "greenhouse" not in k}}
+        report = self.tick(routes, cfg=cfg)
+        self.assertIn("greenhouse.io", report.tripped)
+        self.assertEqual(report.probe.probed, 1)
+        self.assertNotIn(gh("acmerobotics"), self.client.requests)
+        self.assertIn(lever("acmerobotics"), self.client.requests)
+
+    def test_a_probe_failure_is_reported_and_the_board_reads_stay(self):
+        self.board("acme")
+        with mock.patch.object(tick, "probe_slugs", side_effect=RuntimeError("probe bug")):
+            report = self.tick({gh("acme"): ok()})
+        self.assertEqual(report.ok, 1)
+        self.assertIsNone(report.probe)
+        self.assertIn("probe bug", report.probe_error)
+        self.assertEqual(self.jobs("read_boards")[0]["status"], "ok")
+        self.assertEqual(self.runs(), [])  # not recorded: the next tick tries again
+        self.assertEqual(report.watch.baseline + report.watch.unchanged + report.watch.error, 0)  # watch pass still ran
+
+    def test_the_probe_gets_the_limit_the_tick_clients_and_all_company_ids(self):
+        seen = {}
+
+        def spy(conn, ids, client, **kw):
+            seen.update(ids=sorted(ids), limit=kw["limit"], now=kw["now"], cfg=kw["cfg"])
+            return ProbeReport(1, 1, 0, 0, 0, 0)
+
+        with mock.patch.object(tick, "probe_slugs", spy):
+            report = self.tick({})
+        self.assertEqual(seen["ids"], [self.company])
+        self.assertEqual((seen["limit"], seen["now"]), (50, T0))
+        self.assertEqual(report.probe.probed, 1)
+
+    def test_no_probe_once_the_tick_budget_is_spent(self):
+        cfg = dataclasses.replace(self.cfg, tick_budget_s=0)
+        report = self.tick({}, cfg=cfg)
+        self.assertIsNone(report.probe)
+        self.assertEqual(self.runs(), [])
+
+    def test_read_company_boards_runs_no_probe(self):
+        self.client = FakeClient({})
+        report = read_company_boards(self.conn, self.client, [self.company], cfg=self.cfg, now_fn=lambda: T0)
+        self.assertIsNone(report.probe)
+        self.assertEqual(self.client.requests, [])
 
 
 class LockTests(unittest.TestCase):

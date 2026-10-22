@@ -1,11 +1,11 @@
 """`python -m outreach.crawl <command>`: the board crawler from launchd and by hand (#21, Task 13).
 
-- `tick`: one 30-minute tick (the due boards, then the due watched pages) under the crawl lock. Another tick holding
+- `tick`: one 30-minute tick (the due boards, the daily slug probe, then the due watched pages) under the crawl lock. Another tick holding
   the lock is not an error: it prints so and exits 0.
 - `read --company ID [ID ...]`: read these companies' boards now (floor kept, an erroring board's backoff kept).
 - `probe ATS TOKEN`: one list request through the polite client, no store access. Prints the result, the job count,
   the ETag and the first five titles: how a token or an adapter's shape is checked on first use.
-- `probe-slugs [--limit N]`: for up to N companies with no board (default 50), try the slugs their names suggest on
+- `probe-slugs [--limit N]`: for up to N companies with no board (default 50, the daily tick step's size), try the slugs their names suggest on
   Greenhouse, Lever and Ashby and add each `ok` hit as a `slug_probe` board (at most 12 requests a company). Takes
   the crawl lock, so it never overlaps a tick.
 
@@ -22,6 +22,7 @@ import sys
 from collections.abc import Sequence
 
 import live_checkout
+from outreach.crawl.probe import PROBE_LIMIT
 from outreach.net import FetchError, HttpClient, UrllibClient
 from outreach.store import StoreError, connect, db_path, describe_error
 
@@ -29,7 +30,6 @@ __all__ = ["main"]
 
 _EXPECTED = (ValueError, OSError, FetchError, StoreError, sqlite3.Error)
 _TITLES_SHOWN = 5
-_PROBE_LIMIT = 50
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -42,7 +42,7 @@ def _parser() -> argparse.ArgumentParser:
     probe.add_argument("ats")
     probe.add_argument("token")
     slugs = sub.add_parser("probe-slugs", help="guess board slugs for companies with no board")
-    slugs.add_argument("--limit", type=_positive, default=_PROBE_LIMIT, metavar="N")
+    slugs.add_argument("--limit", type=_positive, default=PROBE_LIMIT, metavar="N")
     return p
 
 
@@ -77,6 +77,12 @@ def _line(report) -> str:
         w = report.watch
         text += (f"; pages: baseline {w.baseline}, unchanged {w.unchanged}, changed {w.changed}, "
                  f"unstable {w.unstable}, error {w.error}, deferred {w.deferred}")
+    if report.probe is not None:
+        p = report.probe
+        text += (f"; slug probe: probed {p.probed}, added {p.added}, conflicts {p.conflicts}, "
+                 f"name mismatch {p.name_mismatch}, errors {p.errors}")
+    if report.probe_error:
+        text += f"; slug probe failed: {report.probe_error}"
     if report.watch_error:
         text += f"; watched pages failed: {report.watch_error}"
     return text

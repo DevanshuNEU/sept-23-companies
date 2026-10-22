@@ -6,9 +6,11 @@ copyright year or a "3 days ago" never counts as a change. A different fingerpri
 only a change both fetches agree on is stored and raised, so a page that rotates its content raises nothing.
 
 An error never concludes anything: a non-200, a transport failure, a challenge page or a page with no text (a
-JavaScript shell) leaves the fingerprint alone and only backs the page off. A JavaScript-only page raises a `flagged`
-"careers page unreadable" item at once, because it will never read; any other failure raises it on the third error in
-a row. The item is raised once per evidence key.
+JavaScript shell) leaves the fingerprint alone and only backs the page off. A page that has never read and comes back
+with no text raises a `flagged` "careers page unreadable" item at once; every other failure, including a short page
+on a page that read before, raises it on the third error in a row. The item is raised once per evidence key: a
+dismissed item stays dismissed, and the next usable read of the page clears an open one (resolution `cleared`), which
+a later run of failures reopens.
 
 No transaction is open during a request: every page is fetched first and written afterwards in one unit.
 """
@@ -44,7 +46,8 @@ _DATES = re.compile("|".join((
     r"\b(?:\d+|an?)\s+(?:minute|hour|day|week|month)s?\s+ago\b",                              # 3 days ago
 )))
 
-_CHALLENGE = ("just a moment", "enable javascript", "access denied", "captcha")
+_CHALLENGE = ("just a moment", "enable javascript", "access denied", "captcha", "checking your browser",
+              "verify you are human", "pardon our interruption")
 # A page with more text than this is a real page that happens to mention a captcha (a reCAPTCHA footer), not a
 # challenge page: a challenge page is a few lines.
 _CHALLENGE_MAX_CHARS = 2000
@@ -162,6 +165,8 @@ def _watch_one(conn: sqlite3.Connection, client: HttpClient, cfg: CrawlConfig, n
     except HostTripped:
         _write(conn, company_id, next_fetch_at=add_seconds(now_fn(), cfg.defer_s))
         return "deferred"
+    except Exception as e:  # one page must not end the pass: it counts as an error read and backs off
+        first = _Fetched("error", why=describe_error(e))
 
     now = now_fn()
     ordinary = add_seconds(now, cfg.watch_interval_s)
@@ -170,26 +175,27 @@ def _watch_one(conn: sqlite3.Connection, client: HttpClient, cfg: CrawlConfig, n
         wait = min(cfg.watch_interval_s, 86400 * 2 ** min(streak - 1, 30))
         with atomic(conn, "watch_error"):
             _write(conn, company_id, last_fetch_at=now, next_fetch_at=add_seconds(now, wait), error_streak=streak)
-            if first.kind == "javascript" or streak >= UNREADABLE_AFTER:
+            # A page that never read and has no text will not read next week either: flag it now. Otherwise wait.
+            if streak >= UNREADABLE_AFTER or (first.kind == "javascript" and not stored):
                 _flag_unreadable(conn, company_id, url, first.why, now)
         return "error"
     if not stored:
-        _write(conn, company_id, fingerprint=fp, last_fetch_at=now, next_fetch_at=ordinary, error_streak=0)
-        return "baseline"
-    if fp == stored:
-        _write(conn, company_id, last_fetch_at=now, next_fetch_at=ordinary, error_streak=0)
-        return "unchanged"
-    if second_fp != fp:
-        _write(conn, company_id, last_fetch_at=now, next_fetch_at=ordinary, error_streak=0)
-        return "unstable"
-    with atomic(conn, "watch_changed"):
-        _write(conn, company_id, fingerprint=fp, last_fetch_at=now, last_change_at=now, next_fetch_at=ordinary,
-               error_streak=0)
-        conn.execute(
-            "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
-            "VALUES ('careers_changed', ?, ?, ?, 'crawler', ?) ON CONFLICT DO NOTHING",
-            (company_id, f"Careers page changed: {url}", fp[:16], now))
-    return "changed"
+        outcome, columns = "baseline", {"fingerprint": fp}
+    elif fp == stored:
+        outcome, columns = "unchanged", {}
+    elif second_fp != fp:
+        outcome, columns = "unstable", {}
+    else:
+        outcome, columns = "changed", {"fingerprint": fp, "last_change_at": now}
+    with atomic(conn, "watch_read"):
+        _write(conn, company_id, last_fetch_at=now, next_fetch_at=ordinary, error_streak=0, **columns)
+        _clear_unreadable(conn, company_id, url, now)
+        if outcome == "changed":
+            conn.execute(
+                "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+                "VALUES ('careers_changed', ?, ?, ?, 'crawler', ?) ON CONFLICT DO NOTHING",
+                (company_id, f"Careers page changed: {url}", fp[:16], now))
+    return outcome
 
 
 def _write(conn: sqlite3.Connection, company_id: int, **columns: object) -> None:
@@ -197,10 +203,27 @@ def _write(conn: sqlite3.Connection, company_id: int, **columns: object) -> None
     conn.execute(f"UPDATE watched_page SET {names} WHERE company_id = ?", (*columns.values(), company_id))
 
 
+def _unreadable_key(company_id: int, url: str) -> str:
+    return f"careers-unreadable:{company_id}:{hashlib.sha256(url.encode('utf-8')).hexdigest()[:8]}"
+
+
 def _flag_unreadable(conn: sqlite3.Connection, company_id: int, url: str, why: str, now: str) -> None:
-    """Ruling 7: one `flagged` item per evidence key, so a dismissed item stays dismissed."""
-    key = f"careers-unreadable:{company_id}:{hashlib.sha256(url.encode('utf-8')).hexdigest()[:8]}"
+    """Ruling 7: one `flagged` item per evidence key, so a dismissed item stays dismissed. An item the crawler
+    itself cleared (the page read again) reopens, because the evidence key is the same for the page's next failure."""
+    key = _unreadable_key(company_id, url)
+    reason = f"careers page unreadable: {url} ({why})"
     conn.execute(
         "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
-        "VALUES ('flagged', ?, ?, ?, 'crawler', ?) ON CONFLICT DO NOTHING",
-        (company_id, f"careers page unreadable: {url} ({why})", key, now))
+        "VALUES ('flagged', ?, ?, ?, 'crawler', ?) ON CONFLICT DO NOTHING", (company_id, reason, key, now))
+    conn.execute(
+        "UPDATE review_item SET state = 'open', resolution = NULL, resolved_at = NULL, reason = ?, "
+        "revision = revision + 1 WHERE kind = 'flagged' AND company_id = ? AND evidence_key = ? "
+        "AND state = 'resolved' AND resolution = 'cleared'", (reason, company_id, key))
+
+
+def _clear_unreadable(conn: sqlite3.Connection, company_id: int, url: str, now: str) -> None:
+    """The page read: its open "unreadable" item no longer holds."""
+    conn.execute(
+        "UPDATE review_item SET state = 'resolved', resolution = 'cleared', resolved_at = ?, revision = revision + 1 "
+        "WHERE kind = 'flagged' AND company_id = ? AND evidence_key = ? AND state = 'open'",
+        (now, company_id, _unreadable_key(company_id, url)))

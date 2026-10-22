@@ -8,8 +8,10 @@ Why `board.empty_streak >= 1` is the whole "not on the board" test: after an `ok
 posting the board no longer lists (`gone_from_board`), after the second empty read it closes them all
 (`board_empty_twice`), and `unchanged` means the same ids. So the one state in which an open posting is absent from
 the latest successful read is a first `empty` read. `last_seen_at` is touched only by an `ok` read that lists the
-posting, so its date is the last day the board listed it. An `error` read leaves `empty_streak` and `last_seen_at`
-alone, so an error never makes a posting stale and an error after an empty keeps it stale.
+posting, so its date is the last day an `ok` read listed it; `unchanged` reads touch nothing, so the board may have
+listed the posting on later reads. That is why the text says "last listed <date> or later". An `error` read leaves
+`empty_streak` and `last_seen_at` alone, so an error never makes a posting stale and an error after an empty keeps it
+stale.
 
 This module only reads. Stale is never a hide and never a close, and it imports no adapter or HTTP code. Ranking,
 the daily plan and the web app import `load_stale` and `Stale` from here and never re-derive the rule.
@@ -58,10 +60,11 @@ def stale_reason(*, posted_on: str | None, last_seen_at: str, closed_at: str | N
     texts: list[str] = []
     if posted_on is not None and date.fromisoformat(posted_on) < months_before(today, max_age_months):
         kinds.append(STALE_OLD)
-        texts.append(f"posted {posted_on}, over {max_age_months} months")
+        unit = "month" if max_age_months == 1 else "months"
+        texts.append(f"posted {posted_on}, over {max_age_months} {unit}")
     if board_empty_streak is not None and board_empty_streak >= 1:
         kinds.append(STALE_NOT_ON_BOARD)
-        texts.append(f"not on the board since {last_seen_at[:10]}")
+        texts.append(f"not on the board at its latest read (last listed {last_seen_at[:10]} or later)")
     if not kinds:
         return None
     return Stale(tuple(kinds), "; ".join(texts))

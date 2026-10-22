@@ -119,13 +119,19 @@ class FingerprintTests(unittest.TestCase):
         self.assertFalse(usable_text(CHALLENGE, MIN_CHARS))
         long_challenge = "<p>Just a moment...</p>" + "<p>" + "Filler text about nothing at all. " * 20 + "</p>"
         self.assertFalse(usable_text(long_challenge, 50))
-        for phrase in ("Just a moment", "Enable JavaScript", "Access Denied", "captcha"):
+        for phrase in ("Just a moment", "Enable JavaScript", "Access Denied", "captcha", "Checking your browser",
+                       "Verify you are human", "Pardon our interruption"):
             self.assertFalse(usable_text(f"<p>{phrase} to continue.</p>" + "<p>padding words here</p>" * 3, 20), phrase)
 
     def test_a_long_real_page_that_mentions_recaptcha_in_its_footer_is_usable(self):
         footer = "<footer>This site is protected by reCAPTCHA.</footer>"
         self.assertTrue(usable_text(A.replace("</body>", footer + "</body>") + "<p>" + "More openings. " * 150 + "</p>",
                                     MIN_CHARS))
+
+    def test_a_long_real_page_with_a_human_check_notice_in_its_footer_is_usable(self):
+        notice = "<footer>Verify you are human when you apply. Checking your browser may take a moment.</footer>"
+        long_page = A.replace("</body>", notice + "</body>") + "<p>" + "More openings. " * 150 + "</p>"
+        self.assertTrue(usable_text(long_page, MIN_CHARS))
 
     def test_short_page_is_not_usable(self):
         self.assertFalse(usable_text("<p>Hello</p>", MIN_CHARS))
@@ -199,6 +205,43 @@ class WatchTests(WatchCase):
                          (page_fingerprint(A), None, 0))
         self.assertEqual(row["next_fetch_at"], at(2 * WEEK))
         self.assertEqual(self.items(), [])
+
+    def test_a_failing_second_fetch_concludes_nothing(self):
+        self.baseline()
+        fp = page_fingerprint(A)
+        for i, second in enumerate((status_response(500), FetchError("timeout", "slow"), page(CHALLENGE)), start=1):
+            with self.subTest(second=i):
+                self.conn.execute("UPDATE watched_page SET next_fetch_at = NULL")
+                report = self.run_at(i * WEEK, {URL: [page(CHANGED), second]})
+                self.assertEqual((report.error, report.changed, report.unstable), (1, 0, 0))
+                self.assertEqual(self.client.requests, [URL, URL])
+                row = self.row()
+                self.assertEqual((row["fingerprint"], row["last_change_at"], row["error_streak"]), (fp, None, i))
+                self.assertEqual(self.items(), [])
+
+    def test_a_host_tripping_on_the_second_fetch_concludes_nothing(self):
+        self.baseline()
+        report = self.run_at(WEEK, {URL: [page(CHANGED), HostTripped("acme.example")]})
+        self.assertEqual((report.deferred, report.changed, report.error), (1, 0, 0))
+        row = self.row()
+        self.assertEqual((row["fingerprint"], row["last_change_at"], row["error_streak"]),
+                         (page_fingerprint(A), None, 0))
+        self.assertEqual(row["next_fetch_at"], at(WEEK + self.cfg.defer_s))
+        self.assertEqual(self.items(), [])
+
+    def test_an_unexpected_exception_on_one_page_is_counted_and_the_pass_continues(self):
+        other = seed_company(self.conn, "Other")
+        other_url = "https://other.example/careers"
+        self.watch(other, other_url)
+        report = self.run_at(0, {URL: RuntimeError("parser blew up"), other_url: page(A)})
+        self.assertEqual((report.error, report.baseline), (1, 1))
+        self.assertEqual(self.client.requests, [URL, other_url])
+        bad = self.row()
+        self.assertEqual((bad["error_streak"], bad["fingerprint"]), (1, ""))
+        self.assertEqual(bad["next_fetch_at"], at(DAY))
+        self.assertEqual(self.row(other)["fingerprint"], page_fingerprint(A))
+        run = self.conn.execute("SELECT status FROM job_run WHERE job = 'watch_pages'").fetchone()
+        self.assertEqual(run["status"], "ok")
 
     def test_403_and_challenge_never_raise_a_change(self):
         self.baseline()
@@ -320,6 +363,13 @@ class UnreadablePageTests(WatchCase):
     def flagged(self):
         return self.items("flagged")
 
+    def new_page(self, stored_markup):
+        """Start this page over: no items, no streak, and the fingerprint of `stored_markup` (None: nothing stored)."""
+        self.conn.execute("DELETE FROM review_item")
+        fp = page_fingerprint(stored_markup) if stored_markup else ""
+        self.conn.execute("UPDATE watched_page SET fingerprint = ?, error_streak = 0, next_fetch_at = NULL, "
+                          "last_fetch_at = NULL, last_change_at = NULL", (fp,))
+
     def test_a_javascript_only_page_raises_one_flagged_item_at_once(self):
         report = self.run_at(0, {URL: page(JS_ONLY)})
         self.assertEqual(report.error, 1)
@@ -344,6 +394,65 @@ class UnreadablePageTests(WatchCase):
         item = self.flagged()[0]
         self.assertTrue(item["reason"].startswith("careers page unreadable"))
         self.assertEqual(self.items("careers_changed"), [])
+
+    def test_a_short_200_on_a_page_with_a_stored_fingerprint_waits_for_three_errors(self):
+        self.baseline()
+        for i in (1, 2, 3):
+            self.conn.execute("UPDATE watched_page SET next_fetch_at = NULL")
+            self.run_at(i * WEEK, {URL: page(JS_ONLY)})
+            self.assertEqual(len(self.flagged()), 0 if i < 3 else 1, f"after short page {i}")
+        self.assertEqual(self.row()["fingerprint"], page_fingerprint(A))
+
+    def test_the_next_usable_read_clears_the_open_item(self):
+        cases = {
+            "baseline": (None, [page(A)]),
+            "unchanged": (A, [page(A)]),
+            "changed": (A, [page(CHANGED), page(CHANGED)]),
+            "unstable": (A, [page(CHANGED), page(THIRD)]),
+        }
+        for name, (stored, answers) in cases.items():
+            with self.subTest(read=name):
+                self.new_page(stored)
+                bad = 3 if stored else 1  # a page that read before is flagged on the third error
+                for i in range(bad):
+                    self.conn.execute("UPDATE watched_page SET next_fetch_at = NULL")
+                    self.run_at(i * DAY, {URL: page(JS_ONLY)})
+                self.assertEqual([r["state"] for r in self.flagged()], ["open"])
+                self.conn.execute("UPDATE watched_page SET next_fetch_at = NULL")
+                self.run_at(bad * DAY, {URL: answers})
+                (item,) = self.flagged()
+                self.assertEqual((item["state"], item["resolution"], item["resolved_at"]),
+                                 ("resolved", "cleared", at(bad * DAY)))
+                self.assertEqual(item["revision"], 2)
+
+    def test_a_failed_read_does_not_clear_the_item(self):
+        self.run_at(0, {URL: page(JS_ONLY)})
+        self.conn.execute("UPDATE watched_page SET next_fetch_at = NULL")
+        self.run_at(DAY, {URL: status_response(500)})
+        self.assertEqual([r["state"] for r in self.flagged()], ["open"])
+
+    def test_clearing_touches_only_that_pages_item(self):
+        other = seed_company(self.conn, "Other")
+        other_url = "https://other.example/careers"
+        self.watch(other, other_url)
+        self.run_at(0, {URL: page(JS_ONLY), other_url: page(JS_ONLY)})
+        self.assertEqual(len(self.flagged()), 2)
+        self.conn.execute("UPDATE watched_page SET next_fetch_at = NULL")
+        self.run_at(DAY, {URL: page(A), other_url: page(JS_ONLY)})
+        states = {r["company_id"]: r["state"] for r in self.flagged()}
+        self.assertEqual(states, {self.company: "resolved", other: "open"})
+
+    def test_a_cleared_item_reopens_when_the_page_fails_again(self):
+        self.run_at(0, {URL: page(JS_ONLY)})
+        self.conn.execute("UPDATE watched_page SET next_fetch_at = NULL")
+        self.run_at(DAY, {URL: page(A)})
+        self.assertEqual([r["state"] for r in self.flagged()], ["resolved"])
+        for i in (2, 3, 4):  # a stored fingerprint now, so three errors in a row
+            self.conn.execute("UPDATE watched_page SET next_fetch_at = NULL")
+            self.run_at(i * DAY, {URL: page(JS_ONLY)})
+            self.assertEqual([r["state"] for r in self.flagged()], ["resolved" if i < 4 else "open"])
+        (item,) = self.flagged()
+        self.assertEqual((item["resolution"], item["resolved_at"]), (None, None))
 
     def test_a_dismissed_unreadable_item_stays_dismissed(self):
         self.run_at(0, {URL: page(JS_ONLY)})

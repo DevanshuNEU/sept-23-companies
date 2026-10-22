@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).parent / "fixtures" / "crawl"
 TODAY = date(2026, 10, 22)
 SEEN = "2026-10-18T08:00:00Z"
+NOT_ON_18 = "not on the board at its latest read (last listed 2026-10-18 or later)"
 
 
 def reason(**kw) -> Stale | None:
@@ -53,13 +54,17 @@ class PureRuleTests(unittest.TestCase):
                          Stale(("old",), "posted 2026-03-20, over 6 months"))
         self.assertIsNone(reason(posted_on="2026-05-20", max_age_months=6))
 
+    def test_one_month_is_singular(self):
+        self.assertEqual(reason(posted_on="2026-09-01", max_age_months=1), Stale(("old",), "posted 2026-09-01, over 1 month"))
+        self.assertEqual(reason(posted_on="2026-09-01", max_age_months=2), None)
+
     def test_no_posted_on_is_not_stale_by_age(self):
         self.assertIsNone(reason(posted_on=None))
         self.assertIsNone(reason(posted_on=None, board_empty_streak=0))
 
     def test_first_empty_read_state_is_not_on_the_board_with_the_last_seen_date(self):
         r = reason(board_empty_streak=1)
-        self.assertEqual(r, Stale(("not_on_board",), "not on the board since 2026-10-18"))
+        self.assertEqual(r, Stale(("not_on_board",), NOT_ON_18))
         self.assertEqual(r.kinds, (STALE_NOT_ON_BOARD,))
 
     def test_no_board_and_a_never_empty_board_have_no_absence_signal(self):
@@ -72,7 +77,7 @@ class PureRuleTests(unittest.TestCase):
     def test_both_reasons_are_joined_in_order(self):
         r = reason(posted_on="2016-03-02", board_empty_streak=1)
         self.assertEqual(r.kinds, ("old", "not_on_board"))
-        self.assertEqual(r.reason, "posted 2016-03-02, over 12 months; not on the board since 2026-10-18")
+        self.assertEqual(r.reason, "posted 2016-03-02, over 12 months; " + NOT_ON_18)
 
     def test_reasons_have_no_dashes(self):
         r = reason(posted_on="2016-03-02", board_empty_streak=1)
@@ -96,6 +101,10 @@ class PureRuleTests(unittest.TestCase):
 
 class StoreCase(unittest.TestCase):
     def setUp(self):
+        self.new_store()
+
+    def new_store(self):
+        """A fresh store with one company and one board (the previous one, if any, is closed with the test)."""
         self.conn = fresh_store()
         self.addCleanup(self.conn.close)
         self.company = seed_company(self.conn, "Acme")
@@ -148,7 +157,7 @@ class LoadStaleTests(StoreCase):
     def test_an_error_after_an_empty_keeps_the_postings_stale(self):
         p = self.add()
         self.board(last_read="error", empty=1, error=1)
-        self.assertEqual(load_stale(self.conn, TODAY), {p: Stale(("not_on_board",), "not on the board since 2026-10-18")})
+        self.assertEqual(load_stale(self.conn, TODAY), {p: Stale(("not_on_board",), NOT_ON_18)})
         self.assertIsNone(self.conn.execute("SELECT closed_at FROM posting WHERE posting_id = ?", (p,)).fetchone()[0])
 
     def test_unchanged_reads_do_not_make_postings_stale(self):
@@ -188,7 +197,7 @@ class LoadStaleTests(StoreCase):
         self.board(last_read="empty", empty=1)
         self.assertEqual(load_stale(self.conn, TODAY)[p],
                          Stale(("old", "not_on_board"),
-                               "posted 2016-03-02, over 12 months; not on the board since 2026-10-18"))
+                               "posted 2016-03-02, over 12 months; " + NOT_ON_18))
 
     def test_load_stale_filters_by_posting_and_company_and_returns_only_stale(self):
         other = seed_company(self.conn, "Beta")
@@ -298,7 +307,7 @@ class ThroughReadBoardTests(StoreCase):
         stale_now = load_stale(self.conn, self.today(at(2)))
         self.assertEqual(self.open_count(), 3)
         self.assertEqual(len(stale_now), 3)
-        self.assertEqual({s.reason for s in stale_now.values()}, {"not on the board since 2026-10-18"})
+        self.assertEqual({s.reason for s in stale_now.values()}, {NOT_ON_18})
         self.read(ok(EMPTY, None), at(3))
         self.assertEqual(self.open_count(), 0)
         self.assertEqual({r["close_reason"] for r in self.rows()}, {"board_empty_twice"})
@@ -331,7 +340,7 @@ class ThroughReadBoardTests(StoreCase):
         modern["jobs"][0]["updated_at"] = "2026-03-02T09:00:00-05:00"
         snapshots = []
         for body in (OLD2016, json.dumps(modern).encode("utf-8")):
-            self.setUp()
+            self.new_store()
             self.read(ok(body))
             snap = {
                 "posting": [tuple(r)[:2] + tuple(r)[3:8] + tuple(r)[9:] for r in

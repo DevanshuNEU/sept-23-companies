@@ -67,6 +67,15 @@ def seed_company(conn: sqlite3.Connection, name: str = "Acme") -> int:
     return cur.lastrowid
 
 
+def seed_board(conn: sqlite3.Connection, company_id: int, ats: str = "greenhouse", token: str = "acme") -> int:
+    """A never-read board for the company. Returns the board id."""
+    cur = conn.execute(
+        "INSERT INTO board(company_id, ats, token, created_at) VALUES (?, ?, ?, ?)",
+        (company_id, ats, token, utcnow()),
+    )
+    return cur.lastrowid
+
+
 def seed_posting(
     conn: sqlite3.Connection,
     company_id: int,

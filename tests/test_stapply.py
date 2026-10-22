@@ -191,6 +191,24 @@ class RefreshTest(unittest.TestCase):
         self.assertEqual(StapplyDirectory.refresh(client, self.folder), ["ashby.csv"])
         self.assertFalse((self.folder.parent / "evil.csv").exists())
 
+    def test_a_malformed_manifest_entry_is_skipped_and_counted_and_the_rest_still_refresh(self):
+        manifest = json.loads(manifest_body(self.files))
+        by = manifest["by_ats_companies"]
+        by["broken_no_sha"] = {"csv": url_of("broken_no_sha")}
+        by["broken_no_csv"] = {"sha256": "ab" * 32}
+        by["broken_text"] = "not an entry"
+        by["broken_null"] = None
+        by["../evil"] = {"csv": url_of("evil"), "sha256": "ab" * 32}
+        client = FakeClient({MANIFEST_URL: json.dumps(manifest).encode(),
+                             **{url_of(n): body for n, body in self.files.items()}})
+        updated = StapplyDirectory.refresh(client, self.folder)
+        self.assertEqual(sorted(updated), ["ashby.csv", "greenhouse.csv", "lever.csv"])
+        self.assertEqual(updated.skipped, 5)
+        self.assertEqual(client.unrouted, [])
+        self.assertTrue((self.folder / "manifest.json").is_file())  # the refresh finished
+        self.assertEqual(StapplyDirectory.refresh(FakeClient({MANIFEST_URL: json.dumps(manifest).encode()}),
+                                                  self.folder).skipped, 5)
+
     def test_refresh_uses_a_declared_user_agent(self):
         client = FakeClient({MANIFEST_URL: manifest_body({"ashby": self.files["ashby"]}),
                              url_of("ashby"): self.files["ashby"]})

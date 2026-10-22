@@ -21,6 +21,7 @@ from outreach.install import install
 from outreach.net import FetchError
 from outreach.sources import __main__ as cli
 from outreach.sources.formd import SEC_USER_AGENT
+from outreach.sources.stapply import MANIFEST_URL
 from outreach.store import connect, finish_job, start_job, writes
 from tests.fakes import FakeClient, status_response, text_response
 from tests.test_formd import DATASET, routes as formd_routes
@@ -296,17 +297,19 @@ class RunDueTest(CliCase):
     def setUp(self):
         super().setUp()
         self.ok("discover", "lca", "--files", *FILES)  # the quarterly by-hand step run-due never does
+        self.marker = self.sources / "stapply" / "refreshed_at.txt"
+        self.marker.write_text("2026-10-20T06:30:00Z\n", encoding="utf-8")  # refreshed 2 days ago: not due
 
     def due(self, *, code=0):
         got, out, err = self.cli("run-due")
         self.assertEqual(got, code, f"{out} {err}")
         return json.loads(out)
 
-    def test_run_due_runs_hn_formd_resolve_and_find_boards_in_order(self):
+    def test_run_due_runs_hn_formd_stapply_resolve_and_find_boards_in_order(self):
         report = self.due()
-        self.assertEqual(list(report["steps"]), ["hn", "formd", "resolve", "find_boards"])
+        self.assertEqual(list(report["steps"]), ["hn", "formd", "stapply", "resolve", "find_boards"])
         self.assertEqual({k: v["status"] for k, v in report["steps"].items()},
-                         {"hn": "ok", "formd": "ok", "resolve": "ok", "find_boards": "ok"})
+                         {"hn": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok"})
         self.assertEqual(report["status"], "ok")
         self.assertEqual(self.client.unrouted, [])
         conn = self.conn()
@@ -340,6 +343,7 @@ class RunDueTest(CliCase):
     def test_last_months_thread_is_never_read_as_this_months(self):
         # The fixture listing holds September and October only. On the 2nd of November the new thread is not out:
         # the latest thread (October's) must not be read as November's.
+        self.marker.write_text("2026-11-01T06:30:00Z\n", encoding="utf-8")  # the stapply lists are not due then
         with mock.patch.object(cli, "utcnow", lambda: "2026-11-02T06:30:00Z"):
             report = self.due()
         step = report["steps"]["hn"]
@@ -356,6 +360,7 @@ class RunDueTest(CliCase):
         routes = all_routes()
         routes.update(november_client().routes)
         self.client = FakeClient(routes)
+        self.marker.write_text("2026-11-01T06:30:00Z\n", encoding="utf-8")  # the stapply lists are not due then
         with mock.patch.object(cli, "utcnow", lambda: "2026-11-02T06:30:00Z"):
             report = self.due()
             self.assertEqual(report["steps"]["hn"]["status"], "ok")
@@ -377,6 +382,63 @@ class RunDueTest(CliCase):
     def test_another_source_this_month_is_not_an_hn_run(self):
         self.assertEqual(self.due()["steps"]["hn"]["status"], "ok")  # the LCA discover run in setUp is not HN's
 
+    def stapply_routes(self, **extra):
+        stapply = ROOT / "tests" / "fixtures" / "stapply"
+        routes = all_routes()
+        routes[MANIFEST_URL] = stapply / "manifest.json"
+        routes["https://storage.stapply.ai/jobhive/v1/ashby/companies.csv"] = stapply / "ashby.csv"
+        routes.update(extra)
+        self.client = FakeClient(routes)
+
+    def downloads(self):
+        return [u for u in self.client.requests if u.startswith("https://storage.stapply.ai/")]
+
+    def test_stapply_is_refreshed_when_the_last_refresh_is_7_days_old(self):
+        self.stapply_routes()
+        self.marker.write_text("2026-10-15T06:30:00Z\n", encoding="utf-8")  # exactly 7 days before NOW
+        report = self.due()
+        self.assertEqual(report["steps"]["stapply"]["status"], "ok")
+        self.assertEqual(self.downloads(), [MANIFEST_URL])  # every list is current: nothing else is downloaded
+        self.assertEqual(self.marker.read_text(encoding="utf-8").strip(), NOW)
+        self.assertEqual(self.due()["steps"]["stapply"]["status"], "skipped")  # and not again the next day
+
+    def test_stapply_is_skipped_when_refreshed_less_than_7_days_ago(self):
+        self.stapply_routes()
+        self.marker.write_text("2026-10-15T06:30:01Z\n", encoding="utf-8")
+        self.assertEqual(self.due()["steps"]["stapply"]["status"], "skipped")
+        self.assertEqual(self.downloads(), [])
+
+    def test_stapply_with_no_marker_is_due_and_downloads_only_a_changed_file(self):
+        self.stapply_routes()
+        self.marker.unlink()
+        (self.sources / "stapply" / "ashby.csv").write_bytes(b"name,slug,url\nold,old,u\n")  # stale
+        report = self.due()
+        self.assertEqual(report["steps"]["stapply"]["updated"], ["ashby.csv"])
+        self.assertEqual(sorted(self.downloads()), sorted([MANIFEST_URL,
+                                                            "https://storage.stapply.ai/jobhive/v1/ashby/companies.csv"]))
+        self.assertTrue(self.marker.is_file())
+
+    def test_a_malformed_manifest_entry_is_counted_and_never_stops_the_refresh(self):
+        stapply = ROOT / "tests" / "fixtures" / "stapply"
+        manifest = json.loads((stapply / "manifest.json").read_text(encoding="utf-8"))
+        manifest["by_ats_companies"]["broken"] = {"rows": 3}
+        self.stapply_routes(**{MANIFEST_URL: json.dumps(manifest).encode()})
+        self.marker.unlink()
+        report = self.due()
+        self.assertEqual((report["steps"]["stapply"]["status"], report["steps"]["stapply"]["skipped_entries"]),
+                         ("ok", 1))
+        self.assertEqual(report["status"], "ok")
+        self.assertTrue(self.marker.is_file())
+
+    def test_a_failed_stapply_refresh_leaves_the_marker_and_every_other_step_runs(self):
+        self.stapply_routes(**{MANIFEST_URL: FetchError("timeout", "slow")})
+        self.marker.write_text("2026-10-01T06:30:00Z\n", encoding="utf-8")
+        report = self.due(code=1)
+        self.assertEqual(report["steps"]["stapply"]["status"], "failed")
+        self.assertEqual(self.marker.read_text(encoding="utf-8").strip(), "2026-10-01T06:30:00Z")  # asked again
+        self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "stapply"},
+                         {"hn": "ok", "formd": "ok", "resolve": "ok", "find_boards": "ok"})
+
     def test_formd_is_skipped_until_a_newer_set_is_out(self):
         folder = self.sources / "formd"
         folder.mkdir()
@@ -394,7 +456,7 @@ class RunDueTest(CliCase):
         report = self.due(code=1)
         self.assertEqual(report["steps"]["hn"]["status"], "failed")
         self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "hn"},
-                         {"formd": "ok", "resolve": "ok", "find_boards": "ok"})
+                         {"formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok"})
         self.assertEqual(report["status"], "failed")
 
     def test_a_partial_step_exits_1_and_the_run_still_finishes(self):

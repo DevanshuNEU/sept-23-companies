@@ -24,7 +24,8 @@ from outreach.net import USER_AGENT, HttpClient
 from outreach.sources.boards import BoardRef, normalize_token
 from outreach.sources.keys import classify_domain, registrable_domain
 
-__all__ = ["MANIFEST_URL", "STAPPLY_ATS", "BoardHit", "StapplyDirectory", "board_match_key", "board_token"]
+__all__ = ["MANIFEST_URL", "STAPPLY_ATS", "BoardHit", "RefreshResult", "StapplyDirectory", "board_match_key",
+           "board_token"]
 
 MANIFEST_URL = "https://storage.stapply.ai/jobhive/v1/manifest.json"
 MAX_HITS = 3
@@ -99,6 +100,15 @@ class BoardHit:
     ref: BoardRef
     url: str
     matched_on: Literal["name", "slug", "host"]
+
+
+class RefreshResult(list):
+    """The file names `StapplyDirectory.refresh` updated, as a plain list; `skipped` counts the manifest entries it
+    could not use (no `csv` or `sha256`) and passed over."""
+
+    def __init__(self, updated=(), skipped: int = 0):
+        super().__init__(updated)
+        self.skipped = skipped
 
 
 _STRENGTH = {"host": 0, "name": 1, "slug": 2}  # a row found two ways is reported by the strongest
@@ -184,12 +194,14 @@ class StapplyDirectory:
         return sorted(found.values(), key=lambda h: self._order[(h.ref.ats, h.ref.token)])
 
     @staticmethod
-    def refresh(client: HttpClient, folder: Path) -> list[str]:
+    def refresh(client: HttpClient, folder: Path) -> RefreshResult:
         """Download the manifest and every list whose sha256 differs from the file in the folder (a missing file
         differs). Each download is checked against the manifest's hash before it replaces the old file, and the
         manifest is saved last, so the folder never holds a version that does not match its files. Returns the file
-        names updated. A transport failure raises `FetchError`; an HTTP error, a malformed manifest or a hash
-        mismatch raises `ValueError`. Nothing is half written."""
+        names updated (a list whose `skipped` counts the entries passed over). One manifest entry with no `csv` or
+        `sha256` is skipped and counted, never a reason to stop; the others are still read. A transport failure
+        raises `FetchError`; an HTTP error, a manifest with no lists or a hash mismatch raises `ValueError`. Nothing
+        is half written."""
         folder = Path(folder)
         headers = {"User-Agent": USER_AGENT}
         resp = client.get(MANIFEST_URL, headers, follow_redirects=True)
@@ -203,14 +215,16 @@ class StapplyDirectory:
         if not isinstance(lists, dict) or not isinstance(manifest.get("generated_at"), str):
             raise ValueError(f"{MANIFEST_URL} has no generated_at and by_ats_companies")
         folder.mkdir(parents=True, exist_ok=True)
-        updated: list[str] = []
+        updated = RefreshResult()
         for name, entry in lists.items():
             if not _LIST_NAME.fullmatch(name):
+                updated.skipped += 1
                 continue  # a list name is a file name here: never a path
             url, want = entry.get("csv") if isinstance(entry, dict) else None, \
                 entry.get("sha256") if isinstance(entry, dict) else None
             if not isinstance(url, str) or not isinstance(want, str):
-                raise ValueError(f"the manifest entry for {name!r} has no csv and sha256")
+                updated.skipped += 1
+                continue
             dest = folder / f"{name}.csv"
             if dest.is_file() and _sha256(dest) == want.lower():
                 continue

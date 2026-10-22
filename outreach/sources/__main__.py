@@ -16,6 +16,7 @@ import sys
 import tomllib
 from collections.abc import Callable, Sequence
 from dataclasses import asdict
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from outreach.net import FetchError, HttpClient, SpacedClient, UrllibClient
@@ -40,6 +41,9 @@ FORMD_PAGE_URL = "https://www.sec.gov/data-research/sec-markets-data/form-d-data
 _FORMD_LINK = re.compile(r'href="(/files/[^"]*/form-d-data-sets/(\d{4}q[1-4])_d\.zip)"')
 _FORMD_NAME = re.compile(r"(\d{4}q[1-4])_d")
 _FORMD_MARKER = "last_read.txt"
+_STAPPLY_MARKER = "refreshed_at.txt"  # when the last refresh of the stapply lists finished
+STAPPLY_REFRESH_DAYS = 7
+_TIME = "%Y-%m-%dT%H:%M:%SZ"
 RUN_DUE_MAX_CAREERS = 100
 
 ClientFactory = Callable[..., HttpClient]
@@ -158,8 +162,23 @@ def _fetch_lca(dest: Path, factory: ClientFactory) -> tuple[int, dict]:
 
 
 def _fetch_stapply(dest: Path, factory: ClientFactory) -> tuple[int, dict]:
-    updated = StapplyDirectory.refresh(factory("declared"), dest / "stapply")
-    return 0, {"folder": str(dest / "stapply"), "updated": updated}
+    folder = dest / "stapply"
+    updated = StapplyDirectory.refresh(factory("declared"), folder)
+    (folder / _STAPPLY_MARKER).write_text(utcnow() + "\n", encoding="utf-8")  # only a refresh that finished
+    return 0, {"folder": str(folder), "updated": list(updated), "skipped_entries": updated.skipped}
+
+
+def _stapply_due(root: Path, now: str) -> str | None:
+    """None when the lists are due (the last finished refresh is 7 or more days old, or there is none), else why
+    not."""
+    try:
+        last = (root / "stapply" / _STAPPLY_MARKER).read_text(encoding="utf-8").strip()
+        age = datetime.strptime(now, _TIME) - datetime.strptime(last, _TIME)
+    except (FileNotFoundError, ValueError):
+        return None
+    if age >= timedelta(days=STAPPLY_REFRESH_DAYS):
+        return None
+    return f"the lists were refreshed {last}"
 
 
 def _formd_latest(client: HttpClient) -> tuple[str, str]:
@@ -194,7 +213,8 @@ def _fetch_formd(root: Path, factory: ClientFactory, *, only_if_newer: bool = Fa
 # --- run-due ----------------------------------------------------------------------------------------------------
 
 def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict]:
-    """Everything that is due: HN's thread for this month (read again on each run, once it is out), Form D when SEC has a newer data set, then resolve and find-boards.
+    """Everything that is due: HN's thread for this month (read again on each run, once it is out), Form D when SEC
+    has a newer data set, the stapply lists weekly, then resolve and find-boards.
 
     Every step runs even when an earlier one failed. The exit code is 1 when any step is `partial` or `failed`. LCA is
     not here: it is a by-hand quarterly `fetch lca` and `discover lca`.
@@ -227,6 +247,14 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
             _mark_formd_read(root, info["latest"])
         return {"status": status, "run_id": payload["run_id"], "data_set": info["latest"]}
 
+    def stapply() -> dict:
+        root = sources_dir()
+        reason = _stapply_due(root, utcnow())
+        if reason:
+            return {"status": "skipped", "reason": reason}
+        _, payload = _fetch_stapply(root, factory)  # downloads only the files whose hash changed
+        return {"status": "ok", "updated": payload["updated"], "skipped_entries": payload["skipped_entries"]}
+
     def resolve() -> dict:
         status, payload = _resolve(conn)
         return {"status": status, "run_id": payload["run_id"]}
@@ -235,7 +263,8 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
         status, payload = _find_boards(conn, factory, RUN_DUE_MAX_CAREERS)
         return {"status": status, "run_id": payload["run_id"]}
 
-    for name, work in (("hn", hn), ("formd", formd), ("resolve", resolve), ("find_boards", find_boards)):
+    for name, work in (("hn", hn), ("formd", formd), ("stapply", stapply), ("resolve", resolve),
+                       ("find_boards", find_boards)):
         step(name, work)
     states = {s["status"] for s in steps.values()}
     status = "failed" if "failed" in states else "partial" if "partial" in states else "ok"
@@ -253,11 +282,12 @@ Commands:
   resolve                                    the identity pass: merge candidates and size checks
   find-boards [--max-careers N]              give companies their ATS boards (N careers pages at most)
   add --name N --reason R [--domain D] [--state ST] [--ats A:T]
-  run-due                                    what launchd runs daily: HN (once a month), Form D (when SEC has a
-                                             newer quarterly set), resolve, then find-boards --max-careers 100
+  run-due                                    what launchd runs daily: this month's HN thread (once it is out), Form D
+                                             (when SEC has a newer quarterly set), the stapply lists (weekly),
+                                             resolve, then find-boards --max-careers 100
 
 LCA is by hand, once a quarter when DOL posts a file: `fetch lca`, then `discover lca`, then `resolve` and
-`find-boards`. run-due never runs it. stapply lists are refreshed by hand with `fetch stapply`.
+`find-boards`. run-due never runs it. `fetch stapply` refreshes the stapply lists by hand; run-due does it when the last refresh is 7 days old.
 
 Exit code 0 when the job is ok, 1 when it is partial or failed (run-due: when any step is). Every command opens
 the store through `outreach.store.connect()`: the live store opens only from the live checkout.

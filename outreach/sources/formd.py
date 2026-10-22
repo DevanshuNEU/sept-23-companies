@@ -33,8 +33,8 @@ Per-source policy:
   (identity's rule; a PEO's `ein` joins none of its clients). A failed lookup (a transport error, a non-200 answer,
   a body that is not a JSON object) drops that issuer's `fein` key, is counted in `fetch_errors` and never drops the
   filing; `summary()` carries the count to the job summary, and a run where every lookup failed is `partial` (the discover
-  job says "<n> lookups failed in formd" once at least 3 were made). An issuer already linked by source_ref is not
-  looked up again, and after 5 consecutive 403 or 429 answers no more lookups are made in that pass (counted as
+  job says "<n> lookups failed in formd" once at least 3 were made). An issuer already linked by source_ref whose company
+  already holds a fein alias is not looked up again (a FEIN missed once is retried), and after 5 consecutive 403 or 429 answers no more lookups are made in that pass (counted as
   `lookups_stopped`; the remaining issuers still yield, by name). A redirect is never followed.
 - Every request to SEC carries the User-Agent `SEC_USER_AGENT` (SEC's access policy asks for contact details; the
   contact is approved for SEC hosts only). `sec_headers` returns it for SEC's own hosts and nothing for any other
@@ -193,11 +193,11 @@ class FormDSource:
     max_member_bytes = 1024 ** 3  # a quarter is about 30 MB unpacked; over this the member is refused unread
 
     def __init__(self, dataset: Path, client: HttpClient, name_lookup: Callable[[str], bool] | None = None, *,
-                 interval_s: float = 1.0, is_linked: Callable[[str], bool] | None = None):
+                 interval_s: float = 1.0, fein_known: Callable[[str], bool] | None = None):
         """`dataset` is the quarterly zip or a folder of its files. `name_lookup(name_key)` says whether an issuer
         is worth an SEC lookup (default: always); the discover job binds a store-backed one unless one is given
-        here. `is_linked(source_ref)` says the store already knows the issuer (no lookup is made for it; default: never,
-        and the discover job binds a store-backed one unless one is given). `interval_s` spaces requests to
+        here. `fein_known(source_ref)` says the store already holds the issuer's FEIN (no lookup is made for it; default:
+        never, and the discover job binds a store-backed one unless one is given). `interval_s` spaces requests to
         data.sec.gov (SEC allows 10 a second; about 1 is asked)."""
         if interval_s < 0:
             raise ValueError("interval_s cannot be negative")
@@ -205,8 +205,8 @@ class FormDSource:
         self.client = SpacedClient(client, per_host={"data.sec.gov": interval_s})
         self._explicit_lookup = name_lookup is not None
         self.name_lookup: Callable[[str], bool] = name_lookup or (lambda key: True)
-        self._explicit_link = is_linked is not None
-        self.is_linked: Callable[[str], bool] = is_linked or (lambda ref: False)
+        self._explicit_fein_known = fein_known is not None
+        self.fein_known: Callable[[str], bool] = fein_known or (lambda ref: False)
         self._blocked = 0
         self._summary = self._fresh_summary()
 
@@ -220,10 +220,10 @@ class FormDSource:
         if not self._explicit_lookup:
             self.name_lookup = lookup
 
-    def bind_link_check(self, is_linked: Callable[[str], bool]) -> None:
+    def bind_fein_known(self, fein_known: Callable[[str], bool]) -> None:
         """Used by the discover job: a store-backed check, unless the caller gave one at construction."""
-        if not self._explicit_link:
-            self.is_linked = is_linked
+        if not self._explicit_fein_known:
+            self.fein_known = fein_known
 
     def summary(self) -> dict[str, int]:
         """What the latest `discover` pass saw: filings (rows read), issuers (yielded), funds_skipped, test_filings,
@@ -320,7 +320,7 @@ class FormDSource:
             evidence.append(EvidenceDraft("hq", hq, "guess", "formd", latest_acc, observed_on=latest_date))
         keys = {"formd_cik": cik}
         source_ref = f"formd:{cik}"
-        if not self.is_linked(source_ref) and self.name_lookup(name_key(name)):
+        if not self.fein_known(source_ref) and self.name_lookup(name_key(name)):
             if self._blocked >= _BLOCK_LIMIT:
                 self._summary["lookups_stopped"] += 1
             else:

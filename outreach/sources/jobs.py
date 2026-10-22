@@ -72,13 +72,21 @@ def store_name_lookup(conn: sqlite3.Connection) -> Callable[[str], bool]:
     return lookup
 
 
-def _store_link_check(conn: sqlite3.Connection, source_name: str) -> Callable[[str], bool]:
-    """Whether a `company_source` row already links the source's record: nothing more to look up about it."""
-    def linked(source_ref: str) -> bool:
-        return conn.execute("SELECT 1 FROM company_source WHERE source_name = ? AND source_ref = ?",
-                            (source_name, source_ref)).fetchone() is not None
+def _store_fein_check(conn: sqlite3.Connection, source_name: str) -> Callable[[str], bool]:
+    """Whether the source's record is linked to a company that already holds a fein alias (from any source): there is
+    nothing more to look up about it. A linked company with no fein alias is not known, so a FEIN missed once (a
+    failed lookup) is looked up again."""
+    def known(source_ref: str) -> bool:
+        for (company_id,) in conn.execute("SELECT company_id FROM company_source WHERE source_name = ? AND "
+                                          "source_ref = ?", (source_name, source_ref)).fetchall():
+            ids = {company_id, identity.follow_merged(conn, company_id)}
+            marks = ", ".join("?" for _ in ids)
+            if conn.execute(f"SELECT 1 FROM company_alias WHERE source = 'fein' AND company_id IN ({marks})",
+                            tuple(ids)).fetchone():
+                return True
+        return False
 
-    return linked
+    return known
 
 
 POST_FAILURE = "post "  # a `failed` entry for a post starts with this; a candidate's starts with its source_ref
@@ -92,9 +100,9 @@ def _discover_one(conn: sqlite3.Connection, source: Source, run_id: int, creates
     bind = getattr(source, "bind_name_lookup", None)
     if bind is not None:
         bind(store_name_lookup(conn))
-    bind_link = getattr(source, "bind_link_check", None)
-    if bind_link is not None:
-        bind_link(_store_link_check(conn, source.name))
+    bind_fein = getattr(source, "bind_fein_known", None)
+    if bind_fein is not None:
+        bind_fein(_store_fein_check(conn, source.name))
     shared = getattr(source, "shared_keys", None)
     if shared is not None:
         keys = shared()

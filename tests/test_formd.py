@@ -742,30 +742,61 @@ class LookupPolicyTest(unittest.TestCase):
         self.assertEqual(s.summary()["fetches"], 5)  # the second pass tried again, and stopped again at five
         self.assertEqual(len(client.requests), 10)
 
-    def test_an_issuer_already_linked_by_source_ref_is_not_looked_up(self):
+    def test_an_issuer_whose_fein_the_store_knows_is_not_looked_up(self):
         client = FakeClient(routes())
         linked = {f"formd:{ORCHARD}", f"formd:{NIMBUS}"}
-        got = by_cik(make(client, is_linked=lambda ref: ref in linked))
+        got = by_cik(make(client, fein_known=lambda ref: ref in linked))
         self.assertEqual(len(got), 7)
         self.assertEqual({u for u in client.requests}, {SEC.format(c) for c in FETCHED - {ORCHARD, NIMBUS}})
         self.assertNotIn("fein", got[NIMBUS].keys)
 
-    def test_the_discover_job_binds_the_store_link_check(self):
+    def test_the_discover_job_binds_the_store_fein_check(self):
         conn = fresh_store()
         run_discover(conn, [LcaSource(FILES)])
         run_discover(conn, [make(FakeClient(routes()))])
         second = FakeClient(routes())
         _, reports = run_discover(conn, [make(second)])
-        # Orchard and Nimbus were attached (linked) on the first run; Mesh, Clearpath and Lumen were not
+        # Orchard and Nimbus were attached on the first run and hold a fein alias (from LCA); Mesh, Clearpath and
+        # Lumen were never attached
         self.assertEqual(set(second.requests), {SEC.format(c) for c in (MESH, CLEARPATH, LUMEN)})
         self.assertEqual(reports["formd"].attached, 2)
 
-    def test_an_explicit_link_check_is_not_replaced_by_the_store_one(self):
+    def test_a_linked_issuer_whose_company_has_no_fein_alias_is_looked_up_again(self):
+        """A FEIN missed once (the first lookup failed) is retried; only a known FEIN ends the lookups."""
+        conn = fresh_store()
+        run_discover(conn, [LcaSource(FILES)])
+        run_discover(conn, [make(FakeClient(routes()))])
+        conn.execute("DELETE FROM company_alias WHERE alias_key = '222222222' AND source = 'fein'")  # Orchard's
+        again = FakeClient(routes())
+        run_discover(conn, [make(again)])
+        self.assertEqual(set(again.requests), {SEC.format(c) for c in (ORCHARD, MESH, CLEARPATH, LUMEN)})
+        self.assertNotIn(SEC.format(NIMBUS), again.requests)  # linked and holding a fein: skipped
+
+    def test_a_fein_alias_from_any_source_counts_and_a_merged_company_is_followed(self):
+        conn = fresh_store()
+        run_discover(conn, [LcaSource(FILES)])
+        run_discover(conn, [make(FakeClient(routes()))])
+        orchard = conn.execute("SELECT company_id FROM company WHERE name = 'Orchard'").fetchone()[0]
+        conn.execute("DELETE FROM company_alias WHERE alias_key = '222222222' AND source = 'fein'")
+        add_alias(conn, orchard, "999999999", "fein")  # a hand or import FEIN, not LCA's
+        again = FakeClient(routes())
+        run_discover(conn, [make(again)])
+        self.assertNotIn(SEC.format(ORCHARD), again.requests)
+        # linked to a company that was merged into another: the live company's fein alias counts
+        other = seed_company(conn, "Orchard Holdings")
+        add_alias(conn, other, "888888888", "fein")
+        conn.execute("DELETE FROM company_alias WHERE alias_key = '999999999'")
+        conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' WHERE company_id = ?", (other, orchard))
+        third = FakeClient(routes())
+        run_discover(conn, [make(third)])
+        self.assertNotIn(SEC.format(ORCHARD), third.requests)
+
+    def test_an_explicit_fein_check_is_not_replaced_by_the_store_one(self):
         conn = fresh_store()
         run_discover(conn, [LcaSource(FILES)])
         run_discover(conn, [make(FakeClient(routes()))])  # links Orchard and Nimbus
         client = FakeClient(routes())
-        run_discover(conn, [make(client, is_linked=lambda ref: False)])
+        run_discover(conn, [make(client, fein_known=lambda ref: False)])
         self.assertEqual(set(client.requests), {SEC.format(c) for c in (ORCHARD, NIMBUS, MESH, CLEARPATH, LUMEN)})
 
     def test_the_all_failed_status_needs_three_lookups(self):

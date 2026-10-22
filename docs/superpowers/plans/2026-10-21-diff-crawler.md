@@ -138,7 +138,7 @@ Board discovery moved to #31 (sources). The old text about running `crawl_boards
 | `outreach/crawl/stale.py` | Create (Task 16a): `Stale`, `months_before`, `stale_reason`, `load_stale`; the one derivation of "stale", standard library only |
 | `outreach/crawl/__main__.py` | Create: `tick`, `read`, `probe`, `probe-slugs` |
 | `outreach/crawl/probe.py` | Create: `slug_candidates`, `probe_slugs` (Task 26a) |
-| `launchd/com.devanshu.outreach-crawl.plist` | Create: template, `StartInterval` 1800 |
+| `launchd/com.devanshu.outreach-crawl.plist.template` | Create: template, `StartInterval` 1800, `{{LIVE_CHECKOUT}}` and `{{LOG_PATH}}` only (#17's one convention) |
 | `tests/fixtures/crawl/` | Create: saved responses per ATS |
 | `tests/storetest.py` | Modify: `seed_board` |
 | `tests/test_crawl_*.py` | Create: one file per module above |
@@ -403,13 +403,13 @@ Fixtures are trimmed to 2 to 4 jobs and are built from the documented field list
 ## Task 13: Command line and the launchd template
 
 **Files:**
-- Create: `outreach/crawl/__main__.py`, `launchd/com.devanshu.outreach-crawl.plist`
+- Create: `outreach/crawl/__main__.py`, `launchd/com.devanshu.outreach-crawl.plist.template`
 - Modify: `outreach/crawl/__init__.py` (export `run_tick` and `read_company_boards` lazily, through a module-level `__getattr__`, so that `import outreach.crawl.stale` loads no adapter, `polite` or `outreach.net` module: ranking imports it, Task 16a)
 - Test: `tests/test_crawl_cli.py`
 
 **Interfaces:**
 - Produces: `main(argv: list[str] | None = None, *, root: str | None = None, live_root: str | None = None) -> int` with subcommands `tick` (open the store with `connect()`, take `tick_lock`, `run_tick`, then the watched-page pass of Task 14, print a one-line report; exit 0 when another tick holds the lock), `read --company ID [ID ...]` (`read_company_boards`), `probe ATS TOKEN` (one `adapter.list` through a `PoliteClient`, no store access, prints result kind, job count, ETag and the first 5 titles; this is how Devanshu confirms a token or an adapter shape on first use). Every subcommand calls `live_checkout.require_live(<what>, root, live_root)` first, before opening anything. The combiner comes from `resolve_combiner` (Task 12; the reader's `reader_combiner` through a lazy import, none when `outreach.reader` is absent); there is no reader version lookup, because the crawler writes no queue rows (ruling 2).
-- Produces the plist template: label `com.devanshu.outreach-crawl`, `StartInterval` 1800, program `/opt/homebrew/bin/python3 -m outreach.crawl tick` run from `/Users/devanshu/Desktop/Sept 23 Companies` in the same `zsh -c 'cd ... && PATH=... command >> log 2>&1'` shape as the other outreach jobs, logging to `~/Library/Application Support/outreach/crawl.out`. A comment says `StartInterval` misses ticks while the Mac sleeps and that is safe: the next tick finds more due.
+- Produces the plist template (as built): label `com.devanshu.outreach-crawl`, `StartInterval` 1800, program `{{LIVE_CHECKOUT}}/.venv/bin/python -m outreach.crawl tick` with `WorkingDirectory` `{{LIVE_CHECKOUT}}`, output to `{{LOG_PATH}}`. Those two placeholders are the only ones, and #17's deploy tool fills them. A comment says `StartInterval` misses ticks while the Mac sleeps and that is safe: the next tick finds more due.
 
 - [ ] **Step 1: Write the failing tests.** `test_tick_refuses_outside_the_live_checkout` (`main(["tick"], root=ROOT, live_root=<temp dir>)` raises `SystemExit` whose message contains "live checkout", and nothing is opened), `test_probe_refuses_outside_the_live_checkout`, `test_read_refuses_outside_the_live_checkout`, `test_plist_is_valid_and_runs_every_1800_seconds` (parse with `plistlib`; `StartInterval == 1800`; label as above), `test_plist_has_no_secrets_or_email` (no `@`).
 - [ ] **Step 2: Run** `uv run python -m unittest tests.test_crawl_cli -v`. Expected: FAIL.
@@ -648,7 +648,8 @@ The adapters below are independent of each other and of Tasks 7 to 16 once `_com
 1. Merge the PR, then in the live checkout `git pull --ff-only https://github.com/DevanshuNEU/sept-23-companies.git master` and run the tests there.
 2. The #30 schema change on a populated store outlasts the sender's 5 s busy timeout: stop the sender and API, run `uv run python -m outreach.install`, restart them (#17 part B runbook). Before #17 part B there is no live store and this step is empty.
 3. **Staging check (the #21 "after deploy" line):** copy a #17 part A import to a scratch path, then `OUTREACH_DB=<scratch> python -m outreach.crawl probe greenhouse <a known token>` once per ATS in use, then `OUTREACH_DB=<scratch> python -m outreach.crawl tick` and compare the report with the refresh's 788 companies of 2026-10-18 (boards read, `ok`, `empty`, `error` counts). Check that the first tick's decide time is acceptable (the first Greenhouse pass decides about 13,000 postings that only had 10% bodies: roughly 70 s of CPU, in batches of 100).
-4. Install the launchd job: copy `launchd/com.devanshu.outreach-crawl.plist` to `~/Library/LaunchAgents/`, `launchctl bootstrap gui/$(id -u) <path>`. Rollback is `launchctl bootout` and `git revert`.
+   Every `outreach.crawl` command calls `require_live`, so the staging run is made from the live checkout with `OUTREACH_DB` pointing at the scratch copy, never at the real store. The shapes that come from memory or from other scrapers are confirmed here: Workday `startDate` meaning and page totals; the Workable `.md` URL; whether the Rippling list is paged; Oracle's `limit` cap and what a wrong `siteNumber` returns; the Breezy `/p/{id}` fallback; Teamtailor; BambooHR (`/jobs/embed2.php`) and JazzHR shapes; and what Ashby answers for a nonexistent token (a 200 with no jobs would make slug probing read a guess as a board). Slug probing is `probe-slugs`, not part of the tick as built.
+4. Install the launchd job: #17's deploy tool fills `launchd/com.devanshu.outreach-crawl.plist.template` and writes it to `~/Library/LaunchAgents/com.devanshu.outreach-crawl.plist`, then `launchctl bootstrap gui/$(id -u) <path>`. Rollback is `launchctl bootout` and `git revert`.
 
 ## Open questions for Devanshu
 

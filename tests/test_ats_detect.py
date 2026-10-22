@@ -217,6 +217,15 @@ class LocaleRuleTest(unittest.TestCase):
         self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en-US/Ab"), [("workday", "acme.wd3/Ab")])
         self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en/Ab"), [("workday", "acme.wd3/Ab")])
 
+    def test_workday_a_lower_case_locale_is_a_locale_not_the_site(self):
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en-us/External"), [("workday", "acme.wd3/External")])
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/fr-ca/External/job/x"),
+                         [("workday", "acme.wd3/External")])
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en-us/"), [])
+        self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en-us"), [])
+        # the same shape stays a slug elsewhere: only Workday paths are lower-cased by the ATS
+        self.assertEqual(refs("https://ats.rippling.com/ab-cd"), [("rippling", "ab-cd")])
+
     def test_workday_a_lone_locale_is_not_a_site(self):
         self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en-US/"), [])
         self.assertEqual(refs("https://acme.wd3.myworkdayjobs.com/en"), [])

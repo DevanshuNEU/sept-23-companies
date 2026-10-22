@@ -25,10 +25,13 @@ _VENDOR_HOSTS = frozenset("docs help support app login community info go develop
 _APP_PATHS = {"smartrecruiters": frozenset({"oneclick-ui", "ni"}), "workable": frozenset({"j"})}
 _WORKDAY_NOT_SITES = frozenset("wday login logout assets static api js css images authgwy favicon".split())
 
-# A locale prefix is `xx-XX` or bare `en`, case as written (the region is upper case). Any other short segment is a
+# A locale prefix is `xx-XX` or bare `en`, case as written (the region is upper case; Workday also takes `xx-xx`). Any other short segment is a
 # site or a slug: `/hr/` is a Workday site, `ats.rippling.com/ab-cd` is a slug.
 _LOCALE_RE = r"(?-i:en|[a-z]{2}-[A-Z]{2})"
 _LOCALE = re.compile(_LOCALE_RE.replace("(?-i:", "(?:"))
+# Workday paths also come lower-cased (`/en-us/`), so there the region may be either case.
+_WORKDAY_LOCALE_RE = r"(?:(?-i:en)|[a-z]{2}-[a-z]{2})"
+_WORKDAY_LOCALE = re.compile(_WORKDAY_LOCALE_RE, re.I)
 _LEFT = r"(?<![\w%-])"
 _SLUG = r"(?P<token>[\w.%-]+)"  # trailing dots (the end of a sentence) are stripped after the match
 _SUB = _LEFT + r"(?P<token>[\w-]+)"
@@ -55,7 +58,7 @@ _COMPILED = [(ats, re.compile(pattern, re.I | re.A), skip) for ats, pattern, ski
 
 _WORKDAY = re.compile(
     _LEFT + r"(?P<tenant>[a-z0-9-]+)\.(?P<wd>wd[0-9]+)\.myworkdayjobs\.com/(?:wday/cxs/[a-z0-9_-]+/)?"
-    r"(?:" + _LOCALE_RE + r"/)?(?P<site>[A-Za-z0-9_-]+)(?!\.?[\w-])", re.I | re.A)
+    r"(?:" + _WORKDAY_LOCALE_RE + r"/)?(?P<site>[A-Za-z0-9_-]+)(?!\.?[\w-])", re.I | re.A)
 _ORACLE = re.compile(
     _LEFT + r"(?P<host>[a-z0-9][a-z0-9.-]*\.oraclecloud\.com)/hcmUI/CandidateExperience/[\w-]+/sites/"
     r"(?P<site>[A-Za-z0-9_-]+)(?!\.?[\w-])", re.I | re.A)
@@ -111,7 +114,8 @@ def _matches(text: str):
                 yield m.start(), ref
     for m in _WORKDAY.finditer(text):
         site = m.group("site")
-        if site.lower() in _WORKDAY_NOT_SITES or _LOCALE.fullmatch(site) or _cut_by_non_ascii(text, m.start(), m.end()):
+        if site.lower() in _WORKDAY_NOT_SITES or _WORKDAY_LOCALE.fullmatch(site) \
+                or _cut_by_non_ascii(text, m.start(), m.end()):
             continue
         ref = _try("workday", f"{m.group('tenant')}.{m.group('wd')}/{site}")
         if ref:

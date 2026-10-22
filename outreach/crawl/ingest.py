@@ -5,7 +5,8 @@ next read repairs. The order is what keeps the read contract:
 
 1. list the board (an adapter exception other than `HostTripped` or `RulesetNotCurrent` is an `error` read);
 2. for an `ok` read, diff the listing with the stored postings and find the list bodies that changed;
-2b. the first-read check of a name-only board (ruling 8), before any posting of the read is written;
+2b. the first-read check of a board matched by name or by a guessed slug (ruling 8), before any posting of the
+    read is written;
 3. write the new and listed postings; then, in units of `decide_batch`, each changed posting's new fields and new
    body together with its decision, so a crash can never leave a title, location or body newer than the decision on
    it (`save_body` resets a replaced body's decision itself);
@@ -43,6 +44,8 @@ __all__ = ["ReadOutcome", "read_board", "list_board", "DOUBTFUL_JOBS"]
 
 # Ruling 8: every LCA company files 25 or fewer, so a board listing more jobs than this is likely another company's.
 DOUBTFUL_JOBS = 300
+# Boards found by a name match or a slug guess: either can belong to another company with the same name.
+GUESSED_BOARDS = ("stapply_name", "slug_probe")
 # Alias sources that hold a raw key, not a name key (identity.py's _RAW_SOURCES).
 _RAW_ALIAS_SOURCES = ("fein", "ats", "linkedin")
 
@@ -93,7 +96,7 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
         body_updates = _body_updates(conn, board, existing, result.jobs, title_cfg)
 
     # Phase 2b: the first-read check, before any posting of this read is written.
-    if result.result in ("ok", "empty") and board.found_by == "stapply_name" and _before_first_good_read(conn, board):
+    if result.result in ("ok", "empty") and board.found_by in GUESSED_BOARDS and _before_first_good_read(conn, board):
         _check_doubtful(conn, board, result, now)
 
     if plan is not None:
@@ -230,8 +233,8 @@ def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResul
                    "fewer LCAs")
     if not why:
         return
-    reason = (f"board match doubtful: the {board.ats} board {board.token} was matched to \"{company}\" by name "
-              f"only, and {' and '.join(why)}.")
+    reason = (f"board match doubtful: the {board.ats} board {board.token} was matched to \"{company}\" "
+              f"{'by a guessed slug' if board.found_by == 'slug_probe' else 'by name only'}, and {' and '.join(why)}.")
     with atomic(conn, "board_doubtful"):
         conn.execute(
             "INSERT INTO review_item(kind, company_id, board_id, reason, evidence_key, raised_by, created_at) "

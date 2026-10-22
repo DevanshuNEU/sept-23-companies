@@ -5,6 +5,9 @@
 - `read --company ID [ID ...]`: read these companies' boards now (floor kept, an erroring board's backoff kept).
 - `probe ATS TOKEN`: one list request through the polite client, no store access. Prints the result, the job count,
   the ETag and the first five titles: how a token or an adapter's shape is checked on first use.
+- `probe-slugs [--limit N]`: for up to N companies with no board (default 50), try the slugs their names suggest on
+  Greenhouse, Lever and Ashby and add each `ok` hit as a `slug_probe` board (at most 12 requests a company). Takes
+  the crawl lock, so it never overlaps a tick.
 
 Every command calls `live_checkout.require_live` before it opens anything: they send real requests (and `tick` and
 `read` write the live store), so they run only from the live checkout. Exit code: 0 when the run was `ok`, 1 when it
@@ -26,6 +29,7 @@ __all__ = ["main"]
 
 _EXPECTED = (ValueError, OSError, FetchError, StoreError, sqlite3.Error)
 _TITLES_SHOWN = 5
+_PROBE_LIMIT = 50
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -37,7 +41,16 @@ def _parser() -> argparse.ArgumentParser:
     probe = sub.add_parser("probe", help="list one board without touching the store")
     probe.add_argument("ats")
     probe.add_argument("token")
+    slugs = sub.add_parser("probe-slugs", help="guess board slugs for companies with no board")
+    slugs.add_argument("--limit", type=_positive, default=_PROBE_LIMIT, metavar="N")
     return p
+
+
+def _positive(text: str) -> int:
+    n = int(text)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"{text} is not a positive number")
+    return n
 
 
 def _say(text: str) -> None:
@@ -132,6 +145,29 @@ def _probe(ats: str, token: str, client: HttpClient | None) -> int:
     return 1 if result.result == "error" else 0
 
 
+def _probe_slugs(limit: int, client: HttpClient | None) -> int:
+    from outreach.crawl.config import load_crawl_config
+    from outreach.crawl.probe import probe_slugs
+    from outreach.crawl.tick import AlreadyRunning, tick_lock
+
+    cfg = load_crawl_config()
+    path = db_path()
+    conn = connect(path)
+    try:
+        try:
+            with tick_lock(path):
+                ids = [r[0] for r in conn.execute("SELECT company_id FROM company")]
+                report = probe_slugs(conn, ids, _polite(client, cfg), limit=limit, cfg=cfg)
+        except AlreadyRunning as e:
+            print(f"probe-slugs: {e}; nothing to do")
+            return 1
+    finally:
+        conn.close()
+    print(f"probe-slugs: considered {report.considered}, probed {report.probed}, added {report.added}, "
+          f"conflicts {report.conflicts}, name mismatch {report.name_mismatch}, errors {report.errors}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_root: str | None = None,
          client: HttpClient | None = None) -> int:
     """Run one command and return the exit code. `root` and `live_root` default to this checkout and the live one;
@@ -140,13 +176,16 @@ def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_roo
     args = _parser().parse_args(argv)
     root = root or live_checkout.REPO_ROOT
     live_root = live_root or live_checkout.LIVE_ROOT
-    what = {"tick": "the crawl tick", "read": "reading boards", "probe": "probing a board"}[args.command]
+    what = {"tick": "the crawl tick", "read": "reading boards", "probe": "probing a board",
+            "probe-slugs": "probing company slugs"}[args.command]
     live_checkout.require_live(what, root, live_root)
     try:
         if args.command == "tick":
             return _tick(client)
         if args.command == "read":
             return _read(args.company, client)
+        if args.command == "probe-slugs":
+            return _probe_slugs(args.limit, client)
         return _probe(args.ats, args.token, client)
     except _EXPECTED as err:
         _say(f"error: {describe_error(err)}")

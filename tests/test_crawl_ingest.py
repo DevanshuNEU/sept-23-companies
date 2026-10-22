@@ -202,9 +202,24 @@ class DoubtfulBoardTests(IngestTestCase):
                 self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE board_id = ?",
                                                    (bid,)).fetchone()[0], 0)
 
+    def test_first_read_of_a_slug_probe_board_is_checked_like_a_name_only_board(self):
+        # A guessed slug can belong to another company with the same name (Task 26a ruling).
+        self.set_found_by("slug_probe")
+        self.read(ok())
+        item, = self.items("flagged")
+        self.assertTrue(item["reason"].startswith("board match doubtful"), item["reason"])
+        self.assertEqual(item["evidence_key"], f"board-doubtful:{self.board_id}")
+        self.assertIn("Acme Robotics", item["reason"])
+        # A matching org name raises nothing, and a second read is never a first read.
+        cid = seed_company(self.conn, "Acme Robotics")
+        bid = seed_board(self.conn, cid, "greenhouse", "zeta")
+        self.set_found_by("slug_probe", bid)
+        self.read(ok(), board_id=bid, url="https://boards-api.greenhouse.io/v1/boards/zeta/jobs?content=true")
+        self.assertEqual(len(self.items("flagged")), 1)
+
     def test_a_host_matched_board_or_a_second_read_or_a_matching_name_raises_nothing(self):
         # A board found another way, with the same other org name: no item.
-        for found_by in ("slug_probe", "careers_page", "import", "hand"):
+        for found_by in ("careers_page", "import", "hand"):
             with self.subTest(found_by=found_by):
                 self.conn.execute("UPDATE board SET found_by = ?, last_read = NULL, last_read_at = NULL, "
                                   "streak_since = NULL, etag = '' WHERE board_id = ?", (found_by, self.board_id))

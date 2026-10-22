@@ -31,3 +31,16 @@ corporate_name_regex = '\b(?:inc|incorporated|llc|llp|lp|pllc|pc|pbc|corp|corpor
 # Product likelihood: A = publishing, data, internet, R&D, hardware; B = computer services; C = anything else.
 naics_tier_a_prefixes = ["5112", "5132", "5182", "5191", "5192", "5417", "3341", "3342", "3344", "3345"]
 naics_tier_b_prefix = "5415"
+
+# The files `python -m outreach.sources fetch lca` downloads (DOL answers a bare client with 403: the browser profile
+# is used). Not part of the classification settings: lca_rules.py ignores this table, so the source version does not
+# change when a URL does. Each file name carries its fiscal year. FY2026 Q3 is cumulative (October 2025 to June 2026);
+# when DOL posts a newer file, add its URL here by hand.
+[downloads]
+urls = [
+  "https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q1.xlsx",
+  "https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q2.xlsx",
+  "https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q3.xlsx",
+  "https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs/LCA_Disclosure_Data_FY2025_Q4.xlsx",
+  "https://www.dol.gov//media/LCA_Disclosure_Data_FY2026_Q3.xlsx",
+]

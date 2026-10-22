@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The sources job (#31): HN once a month, Form D when SEC posts a newer quarterly set, then resolve and
+  find-boards, every day at 06:30 (a run missed during sleep fires on wake). `run-due` runs every step even when
+  one fails, and exits 1 when any step is partial or failed.
+
+  Placeholders, filled by the deploy tool (#17), which also installs this: {{LIVE_CHECKOUT}} is the live checkout,
+  {{LOG_PATH}} the log file. Nothing else is filled; the store and the sources folder are the defaults.
+
+  Not installed by the repo. To install by hand after filling it in:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.devanshu.outreach-sources.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-sources</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.sources</string>
+    <string>run-due</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

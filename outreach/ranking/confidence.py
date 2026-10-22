@@ -7,6 +7,7 @@ reader confirmed reads `high` without an observed source.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -14,13 +15,21 @@ from datetime import date
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.types import SignalValue
 
-__all__ = ["LEVELS", "Confidence", "Assessment", "RankReason", "weaker", "down_one", "grade_evidence", "grade_role",
+__all__ = ["LEVELS", "scrub_text", "Confidence", "Assessment", "RankReason", "weaker", "down_one", "grade_evidence", "grade_role",
            "grade_no_role", "grade_sponsor", "grade_pay", "grade_reach", "factor", "rank_confidence",
            "build_rank_reason"]
 
 LEVELS = ("low", "medium", "high")
 _DASHES = (chr(0x2013), chr(0x2014))
+_DASH_RUN = re.compile(r"\s*[" + "".join(_DASHES) + r"]+\s*")
+_SPACE_RUN = re.compile(r"\s+")
 _SHARE_EPS = 1e-9  # the share thresholds are inclusive; float sums must not flip a boundary case
+
+
+def scrub_text(text: str) -> str:
+    """Reason text is one plain line: an em or en dash becomes a spaced hyphen, any run of whitespace (newlines and
+    tabs too) becomes one space, and the ends are trimmed. A posting title with a dash cannot reach a reason."""
+    return _SPACE_RUN.sub(" ", _DASH_RUN.sub(" - ", text)).strip()
 
 
 @dataclass(frozen=True)
@@ -42,11 +51,20 @@ class Assessment(SignalValue):
     """A signal's value and reason plus how sure it is. Still a `SignalValue`, so `check_signal` accepts it."""
     confidence: Confidence
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not isinstance(self.confidence, Confidence):
+            raise ValueError(f"an assessment needs a Confidence, got {self.confidence!r}")
+        object.__setattr__(self, "reason", scrub_text(self.reason))
+
 
 @dataclass(frozen=True)
 class RankReason:
     text: str
     confidence: Confidence
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "text", scrub_text(self.text))
 
     @property
     def line(self) -> str:
@@ -94,6 +112,8 @@ def grade_evidence(*, confidence: str | None, locked: bool, source_kind: str | N
     seen = _as_date(observed_on)
     if seen is not None and (today - seen).days > old_days:
         graded = down_one(graded, f"observed {seen.isoformat()}, over {old_days} days old")
+    elif seen is None and observed_on:  # a date was recorded but cannot be read: keep the level, say so
+        graded = Confidence(graded.level, f"{graded.basis}, observed date unknown")
     return graded
 
 
@@ -173,8 +193,21 @@ def factor(c: Confidence, cfg: RankerConfig) -> float:
     return cfg.section("confidence")[f"factor_{c.level}"]
 
 
-def _percent(share: float) -> int:
-    return math.floor(share * 100 + 0.5)
+def _percents(shares: Sequence[float]) -> list[int]:
+    """Whole percents that sum to 100, by largest remainder (ties go to the earlier share). A share above zero never
+    shows as 0%: it takes one point from the largest."""
+    exact = [x * 100 for x in shares]
+    out = [math.floor(x + _SHARE_EPS) for x in exact]
+    by_remainder = sorted(range(len(out)), key=lambda i: (-(exact[i] - out[i]), i))
+    for i in by_remainder[:100 - sum(out)]:
+        out[i] += 1
+    for i, x in enumerate(shares):
+        if x > _SHARE_EPS and out[i] == 0:
+            donor = max(range(len(out)), key=lambda j: (out[j], -j))
+            if out[donor] > 1:
+                out[donor] -= 1
+                out[i] = 1
+    return out
 
 
 def rank_confidence(parts: Mapping[str, tuple[float, Confidence]], cfg: RankerConfig) -> Confidence:
@@ -196,8 +229,8 @@ def rank_confidence(parts: Mapping[str, tuple[float, Confidence]], cfg: RankerCo
         level = "high"
     else:
         level = "medium"
-    medium, low = _percent(share["medium"]), _percent(share["low"])
-    basis = f"{100 - medium - low}% of the points rest on high-confidence facts"
+    high, medium, low = _percents([share["high"], share["medium"], share["low"]])
+    basis = f"{high}% of the points rest on high-confidence facts"
     if medium:
         basis += f", {medium}% on medium-confidence facts"
     if low:
@@ -209,5 +242,6 @@ def rank_confidence(parts: Mapping[str, tuple[float, Confidence]], cfg: RankerCo
 def build_rank_reason(reasons: Sequence[str], confidence: Confidence, cfg: RankerConfig) -> RankReason:
     """The first `reason_count` reasons joined by "; ", or "No signal has evidence yet"."""
     count = cfg.section("confidence")["reason_count"]
-    text = "; ".join(reasons[:count]) if reasons else "No signal has evidence yet"
+    clean = [r for r in (scrub_text(r) for r in reasons) if r]
+    text = "; ".join(clean[:count]) if clean else "No signal has evidence yet"
     return RankReason(text=text, confidence=confidence)

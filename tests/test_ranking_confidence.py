@@ -4,6 +4,7 @@ from datetime import date
 
 from outreach.ranking.config import default_ranker_config
 from outreach.ranking.confidence import (LEVELS, Assessment, Confidence, RankReason, build_rank_reason, down_one,
+                                         scrub_text,
                                          factor, grade_evidence, grade_no_role, grade_pay, grade_reach, grade_role,
                                          grade_sponsor, rank_confidence, weaker)
 from outreach.ranking.types import CompanyFacts, SignalValue
@@ -103,6 +104,22 @@ class GradeEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence(confidence="estimate", observed_on="2024-01-02").level, "low")
         fresh = evidence(observed_on="2026-01-02")
         self.assertEqual((fresh.level, fresh.basis), ("high", "size from careers_page, confirmed"))
+
+    def test_a_locked_row_that_is_old_drops_one_level_too(self):
+        got = evidence(confidence="guess", locked=True, observed_on="2024-01-02")
+        self.assertEqual((got.level, got.basis), ("medium", "size set by hand, observed 2024-01-02, over 365 days old"))
+        fresh = evidence(confidence="guess", locked=True, observed_on="2026-10-01")
+        self.assertEqual((fresh.level, fresh.basis), ("high", "size set by hand"))
+
+    def test_an_unparseable_observed_date_keeps_the_level_and_says_so(self):
+        for bad in ("last spring", "2026-13-45", "??"):
+            with self.subTest(observed_on=bad):
+                got = evidence(observed_on=bad)
+                self.assertEqual((got.level, got.basis), ("high", "size from careers_page, confirmed, observed date unknown"))
+        self.assertEqual(evidence(observed_on=None).basis, "size from careers_page, confirmed")
+        self.assertEqual(evidence(observed_on="").basis, "size from careers_page, confirmed")
+        locked = evidence(locked=True, observed_on="last spring")
+        self.assertEqual((locked.level, locked.basis), ("high", "size set by hand, observed date unknown"))
 
     def test_the_old_cutoff_is_strictly_more_than_old_days(self):
         exactly = date.fromordinal(TODAY.toordinal() - 365).isoformat()
@@ -258,6 +275,103 @@ class RankConfidenceTests(unittest.TestCase):
                  "f": (0.1, HIGH), "g": (0.1, MEDIUM), "h": (0.1, MEDIUM), "i": (0.1, MEDIUM)}
         # high share is 0.7 of 1.0, give or take float noise: the boundary is inclusive
         self.assertEqual(rank_confidence(parts, CFG).level, "high")
+
+
+class RankPercentTests(unittest.TestCase):
+    @staticmethod
+    def _percents(basis: str) -> list[int]:
+        import re
+        return [int(n) for n in re.findall(r"(\d+)%", basis)]
+
+    def test_percents_always_sum_to_one_hundred_and_are_never_negative(self):
+        import itertools
+        import random
+        rng = random.Random(6)
+        cases = [{"a": (1, HIGH), "b": (1, MEDIUM), "c": (1, LOW)}, {"a": (133, HIGH), "b": (67, LOW)},
+                 {"a": (1000, HIGH), "b": (3, MEDIUM)}, {"a": (1000, HIGH), "b": (3, MEDIUM), "c": (3, LOW)},
+                 {"a": (1, HIGH), "b": (1, HIGH), "c": (1, MEDIUM)}, {"a": (0.5, HIGH), "b": (0.5, LOW)}]
+        for _ in range(300):
+            cases.append({f"s{i}": (rng.choice((-1, 1)) * rng.random() * rng.choice((1, 10, 200)),
+                                    rng.choice((HIGH, MEDIUM, LOW))) for i in range(rng.randint(1, 8))})
+        for parts in cases:
+            got = rank_confidence(parts, CFG)
+            if not any(p for p, _c in parts.values()):
+                continue
+            nums = self._percents(got.basis)
+            self.assertEqual(sum(nums), 100, (parts, got.basis))
+            self.assertTrue(all(n >= 0 for n in nums), got.basis)
+
+    def test_a_half_point_share_rounds_by_largest_remainder(self):
+        # 133 high and 67 low is 66.5% and 33.5%: round-half-up on each gives 67 + 34 = 101.
+        got = rank_confidence({"a": (133, HIGH), "b": (67, LOW)}, CFG)
+        nums = self._percents(got.basis)
+        self.assertEqual(sum(nums), 100)
+        self.assertEqual(nums, [67, 33])  # a tie in the remainders goes to the higher level first
+
+    def test_a_small_share_is_not_hidden_by_rounding(self):
+        got = rank_confidence({"live_role": (1000, HIGH), "everify": (3, MEDIUM)}, CFG)
+        self.assertEqual(got.level, "high")
+        self.assertEqual(got.basis, "99% of the points rest on high-confidence facts, 1% on medium-confidence facts")
+        got = rank_confidence({"live_role": (1000, HIGH), "small": (3, LOW)}, CFG)
+        self.assertEqual(got.basis, "99% of the points rest on high-confidence facts, 1% on guesses or missing "
+                                    "data (small)")
+        got = rank_confidence({"live_role": (1000, HIGH), "everify": (3, MEDIUM), "small": (3, LOW)}, CFG)
+        self.assertEqual(self._percents(got.basis), [98, 1, 1])
+
+    def test_a_pure_group_is_one_hundred(self):
+        self.assertEqual(rank_confidence({"a": (5, MEDIUM)}, CFG).basis,
+                         "0% of the points rest on high-confidence facts, 100% on medium-confidence facts")
+
+
+class ScrubTests(unittest.TestCase):
+    def test_scrub_replaces_dashes_and_newlines(self):
+        em, en = chr(0x2014), chr(0x2013)
+        self.assertEqual(scrub_text(f"Senior {em} Backend"), "Senior - Backend")
+        self.assertEqual(scrub_text(f"Senior {en} Backend"), "Senior - Backend")
+        self.assertEqual(scrub_text(f"Senior{em}Backend"), "Senior - Backend")
+        self.assertEqual(scrub_text(f"a  {em}  b {en}{en} c"), "a - b - c")
+        self.assertEqual(scrub_text("line one\nline two\r\n\tthree"), "line one line two three")
+        self.assertEqual(scrub_text("a\u2028b\u0085c"), "a b c")
+        self.assertEqual(scrub_text("  plain text  "), "plain text")
+        self.assertEqual(scrub_text("Software Engineer, New Grad"), "Software Engineer, New Grad")
+
+    def test_assessment_scrubs_its_reason(self):
+        em = chr(0x2014)
+        a = Assessment(0.5, f"Open role: Staff {em} Platform\nposted 3 days ago", HIGH)
+        self.assertEqual(a.reason, "Open role: Staff - Platform posted 3 days ago")
+        self.assertEqual(a.value, 0.5)
+        self.assertEqual(check_signal_reason(self, a), a.reason)
+
+    def test_rank_reason_scrubs_its_text(self):
+        em, en = chr(0x2014), chr(0x2013)
+        r = RankReason(f"Role {em} one\ntwo", HIGH)
+        self.assertEqual(r.text, "Role - one two")
+        for dash in (em, en, "\n"):
+            self.assertNotIn(dash, r.line)
+
+    def test_build_rank_reason_scrubs_a_dashed_title(self):
+        em, en = chr(0x2014), chr(0x2013)
+        reasons = [f"Open role: Software Engineer {em} New Grad {en} Boston\nposted 3 days ago", "E-Verify enrolled"]
+        got = build_rank_reason(reasons, HIGH, CFG)
+        self.assertEqual(got.text, "Open role: Software Engineer - New Grad - Boston posted 3 days ago; E-Verify "
+                                   "enrolled")
+        for dash in (em, en, "\n", "\r"):
+            self.assertNotIn(dash, got.line)
+
+    def test_build_rank_reason_drops_a_reason_that_is_empty_after_scrubbing(self):
+        got = build_rank_reason(["", "  \n ", "kept"], HIGH, CFG)
+        self.assertEqual(got.text, "kept")
+        self.assertEqual(build_rank_reason(["", " "], HIGH, CFG).text, "No signal has evidence yet")
+
+
+def check_signal_reason(tc, assessment):
+    class One:
+        name = "one"
+
+        def score(self, facts):
+            return assessment
+
+    return check_signal(tc, One(), None).reason
 
 
 class RankReasonTests(unittest.TestCase):

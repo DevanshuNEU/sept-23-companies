@@ -38,8 +38,11 @@ REQUIRED: dict[str, tuple[str, ...]] = {
                    "rank_high_share", "rank_low_share", "reason_count"),
 }
 
-# The two weights that push a company to the bottom. Each must exceed every other weight added together.
+# The two weights that push a company to the bottom (see _check_bottom_weights).
 BOTTOM_WEIGHTS = ("staffing_risk", "large_later_stage")
+# The negative values of the other signals: (section, key, the weight it is multiplied by).
+_OTHER_NEGATIVES = (("everify", "not_enrolled", "everify"), ("pay_level", "level_1", "pay_level"),
+                    ("small", "weak_flag_value", "small"))
 
 
 @dataclass(frozen=True, eq=False)  # eq=False: the dict fields are not hashable, identity hashing is enough
@@ -60,6 +63,45 @@ def _is_number(v: object) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _number(value: object, where: str) -> float:
+    if not _is_number(value) or not math.isfinite(value):
+        raise ValueError(f"{where} must be a finite number, got {value!r}")
+    return float(value)
+
+
+def _check_bottom_weights(data: dict) -> None:
+    """A company a bottom signal hits must sort below every company it does not hit, so the bottom signal's points
+    (weight times the size of its value) must exceed the most any other company can score: every other weight added
+    together, plus the worst of the other negative signals (E-Verify not enrolled, level I pay, a weak size flag)."""
+    w = data["weights"]
+    positive = sum(v for name, v in w.items() if name not in BOTTOM_WEIGHTS)
+    worst = sum(max(0.0, -_number(data[section][key], f"[{section}] {key}")) * w[weight]
+                for section, key, weight in _OTHER_NEGATIVES)
+    high = _number(data["staffing_risk"]["high"], "[staffing_risk] high")
+    if high != -1.0:
+        raise ValueError(f"[staffing_risk] high must be -1.0 (the full bottom push), got {high}")
+    points = {"staffing_risk": w["staffing_risk"] * abs(high), "large_later_stage": w["large_later_stage"] * 1.0}
+    limit = positive + worst
+    for name in BOTTOM_WEIGHTS:
+        if points[name] <= limit:
+            raise ValueError(f"[weights] {name} gives {points[name]} points at most, which must exceed {limit} (every "
+                             f"other weight plus the worst other negative), or a hit company no longer sorts last")
+
+
+def _check_confidence(c: dict) -> None:
+    factors = [_number(c[f"factor_{level}"], f"[confidence] factor_{level}") for level in ("high", "medium", "low")]
+    if not all(0 < f <= 1 for f in factors):
+        raise ValueError(f"[confidence] factors must be above 0 and at most 1, got {factors}")
+    if not factors[0] >= factors[1] >= factors[2]:
+        raise ValueError(f"[confidence] factor_high >= factor_medium >= factor_low is required, got {factors}")
+    for key in ("rank_high_share", "rank_low_share"):
+        if not 0 < _number(c[key], f"[confidence] {key}") < 1:
+            raise ValueError(f"[confidence] {key} must be between 0 and 1, got {c[key]!r}")
+    for key in ("reason_count", "evidence_old_days", "lca_pay_medium_filings"):
+        if not isinstance(c[key], int) or isinstance(c[key], bool) or c[key] < 1:
+            raise ValueError(f"[confidence] {key} must be a whole number of at least 1, got {c[key]!r}")
+
+
 def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
     path = Path(path)
     raw = path.read_bytes()
@@ -74,11 +116,8 @@ def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
     for name, w in weights.items():
         if not _is_number(w) or not math.isfinite(w) or w <= 0:
             raise ValueError(f"[weights] {name} must be a finite number above 0, got {w!r}")
-    positive = sum(w for name, w in weights.items() if name not in BOTTOM_WEIGHTS)
-    for name in BOTTOM_WEIGHTS:
-        if weights[name] <= positive:
-            raise ValueError(f"[weights] {name} ({weights[name]}) must exceed every other weight added together "
-                             f"({positive}), or a hit company no longer sorts last")
+    _check_bottom_weights(data)
+    _check_confidence(data["confidence"])
     others = {k: v for k, v in data.items() if k not in ("ranker", "weights", "hide")}
     return RankerConfig(ranker=data["ranker"], weights=weights, hide=data["hide"], sections=others, raw=raw)
 

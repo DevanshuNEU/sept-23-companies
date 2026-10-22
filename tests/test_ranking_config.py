@@ -36,6 +36,32 @@ def _temp_ranking_dir(tc: unittest.TestCase) -> tuple[Path, Path]:
     return ranking, crawl
 
 
+def _set(text: str, section: str, key: str, value: str) -> str:
+    """The config text with `key` in `[section]` set to the TOML text `value`."""
+    head = text.index(f"\n[{section}]\n") + 1
+    nxt = text.find("\n[", head + 1)
+    end = len(text) if nxt == -1 else nxt + 1
+    block, n = re.subn(rf"(?m)^{key}\s*=.*$", f"{key} = {value}", text[head:end])
+    assert n == 1, (section, key)
+    return text[:head] + block + text[end:]
+
+
+def _load_edited(tc: unittest.TestCase, *edits: tuple[str, str, str]):
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    for section, key, value in edits:
+        text = _set(text, section, key, value)
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "config.toml"
+        p.write_text(text, encoding="utf-8")
+        return load_ranker_config(p)
+
+
+# Numbers that are exact in binary, so a boundary test can sit exactly on the limit: the positive weights add to 120
+# and the worst non-bottom negatives are 12 * 0.5 + 10 * 0.25 + 12 * 0.25 = 11.5, a limit of 131.5.
+EXACT = (("everify", "not_enrolled", "-0.5"), ("pay_level", "level_1", "-0.25"), ("small", "weak_flag_value", "-0.25"))
+LIMIT = 131.5
+
+
 def _flip(path: Path) -> None:
     path.write_bytes(path.read_bytes() + b"\n#x")
 
@@ -77,14 +103,36 @@ class VersionTests(unittest.TestCase):
         self.assertNotEqual(ranker_version(ranking, crawl), base)
         (ranking / "signals" / "brand_new.py").unlink()
         (ranking / "hide.py").unlink()
-        ranker_version(ranking, crawl)  # does not raise
+        missing = ranker_version(ranking, crawl)  # does not raise
         (ranking / "hide.py").write_bytes(b"")
-        self.assertEqual(ranker_version(ranking, crawl), ranker_version(ranking, crawl))
+        self.assertEqual(ranker_version(ranking, crawl), missing, "a missing file must hash as an empty one")
+        (ranking / "hide.py").write_bytes(b"x")
+        self.assertNotEqual(ranker_version(ranking, crawl), missing)
 
-    def test_version_ignores_job_and_diff_files(self):
+    def test_version_moves_with_the_job_because_compute_rank_lives_there(self):
+        self.assertIn("job.py", RANKING_FILES)
+        self.assertNotIn("job.py", NOT_RANKING)
         ranking, crawl = _temp_ranking_dir(self)
         base = ranker_version(ranking, crawl)
-        for name in ("job.py", "diff.py", "scores.py", "review.py", "version.py", "__init__.py", "__main__.py"):
+        (ranking / "job.py").write_text("# compute_rank changed\n", encoding="utf-8")
+        self.assertNotEqual(ranker_version(ranking, crawl), base)
+
+    def test_version_moves_with_the_rules_version(self):
+        ranking, crawl = _temp_ranking_dir(self)
+        with mock.patch.object(ranking_version, "ruleset_version", return_value="r-aaaaaaaaaaaa"):
+            first = ranker_version(ranking, crawl)
+            self.assertEqual(ranker_version(ranking, crawl), first)
+        with mock.patch.object(ranking_version, "ruleset_version", return_value="r-bbbbbbbbbbbb"):
+            self.assertNotEqual(ranker_version(ranking, crawl), first)
+
+    def test_the_shipped_version_reads_the_real_rules_version(self):
+        from outreach.rules.version import ruleset_version
+        self.assertIs(ranking_version.ruleset_version, ruleset_version)
+
+    def test_version_ignores_diff_and_bookkeeping_files(self):
+        ranking, crawl = _temp_ranking_dir(self)
+        base = ranker_version(ranking, crawl)
+        for name in ("diff.py", "scores.py", "review.py", "version.py", "__init__.py", "__main__.py"):
             with self.subTest(file=name):
                 (ranking / name).write_text("# changed\n", encoding="utf-8")
                 self.assertEqual(ranker_version(ranking, crawl), base)
@@ -105,7 +153,7 @@ class VersionTests(unittest.TestCase):
             self.assertEqual(ranker_version(ranking, crawl), base)
 
     def test_version_hashes_the_stale_text_not_a_bare_number(self):
-        """Pins the format: sha256 over files, then stale.py bytes, then `stale_after_months=<n>`."""
+        """Pins the format: sha256 over files, stale.py bytes, `stale_after_months=<n>`, `ruleset=<version>`."""
         import hashlib
         ranking, crawl = _temp_ranking_dir(self)
         digest = hashlib.sha256()
@@ -114,6 +162,7 @@ class VersionTests(unittest.TestCase):
             digest.update(rel.encode() + b"\0" + (ranking / rel).read_bytes() + b"\0")
         digest.update((crawl / "stale.py").read_bytes())
         digest.update(f"stale_after_months={load_crawl_config().stale_after_months}".encode())
+        digest.update(f"ruleset={ranking_version.ruleset_version()}".encode())
         self.assertEqual(ranker_version(ranking, crawl), "rk-" + digest.hexdigest()[:12])
 
     def test_every_top_level_file_is_ranking_or_not(self):
@@ -206,15 +255,84 @@ class ConfigTests(unittest.TestCase):
             self.assertGreater(w[name], positive, f"{name} must outweigh every positive weight added together")
 
     def test_the_guard_rejects_a_config_where_a_bottom_weight_is_too_small(self):
-        text = CONFIG_PATH.read_text(encoding="utf-8")
-        text, n = re.subn(r"(?m)^large_later_stage\s*=\s*200\.0", "large_later_stage = 100.0", text, count=1)
-        self.assertEqual(n, 1)
-        with tempfile.TemporaryDirectory() as d:
-            p = Path(d) / "config.toml"
-            p.write_text(text, encoding="utf-8")
-            with self.assertRaises(ValueError) as cm:
-                load_ranker_config(p)
+        with self.assertRaises(ValueError) as cm:
+            _load_edited(self, ("weights", "large_later_stage", "100.0"))
         self.assertIn("large_later_stage", str(cm.exception))
+
+    def test_the_shipped_bottom_weights_clear_the_limit_with_the_worst_negatives(self):
+        cfg = default_ranker_config()
+        w = cfg.weights
+        positive = sum(v for k, v in w.items() if k not in BOTTOM)
+        worst = (0.5 * w["everify"] + 0.3 * w["pay_level"] + 0.3 * w["small"])
+        self.assertGreater(abs(cfg.section("staffing_risk")["high"]) * w["staffing_risk"], positive + worst)
+        self.assertGreater(w["large_later_stage"], positive + worst)
+
+    def test_bottom_weight_at_the_limit_is_refused_and_one_over_is_accepted(self):
+        for name in BOTTOM:
+            with self.subTest(weight=name, at="limit"):
+                with self.assertRaises(ValueError) as cm:
+                    _load_edited(self, *EXACT, ("weights", name, str(LIMIT)))
+                self.assertIn(name, str(cm.exception))
+            with self.subTest(weight=name, at="below"):
+                with self.assertRaises(ValueError):
+                    _load_edited(self, *EXACT, ("weights", name, str(LIMIT - 1)))
+            with self.subTest(weight=name, at="one over"):
+                cfg = _load_edited(self, *EXACT, ("weights", name, str(LIMIT + 1)))
+                self.assertEqual(cfg.weights[name], LIMIT + 1)
+
+    def test_the_limit_includes_the_worst_non_bottom_negatives(self):
+        # Without the negatives the limit would be 120, so 125 passes; with them (131.5) it must not.
+        edits = (("weights", "staffing_risk", "125.0"), ("weights", "large_later_stage", "300.0"))
+        with self.assertRaises(ValueError):
+            _load_edited(self, *EXACT, *edits)
+        zero = (("everify", "not_enrolled", "0.0"), ("pay_level", "level_1", "0.0"), ("small", "weak_flag_value", "0.0"))
+        _load_edited(self, *zero, *edits)  # no negatives: 125 > 120 is fine
+        # Each negative moves the limit on its own.
+        for section, key, weight, value in (("everify", "not_enrolled", "everify", "-1.0"),
+                                            ("pay_level", "level_1", "pay_level", "-1.0"),
+                                            ("small", "weak_flag_value", "small", "-1.0")):
+            with self.subTest(negative=key):
+                with self.assertRaises(ValueError):
+                    _load_edited(self, *zero, (section, key, value), *edits)
+
+    def test_a_staffing_risk_high_above_minus_one_is_refused(self):
+        for value in ("-0.99", "-0.5", "0.0", "1.0"):
+            with self.subTest(high=value):
+                with self.assertRaises(ValueError) as cm:
+                    _load_edited(self, ("staffing_risk", "high", value))
+                self.assertIn("high", str(cm.exception))
+        self.assertEqual(_load_edited(self, ("staffing_risk", "high", "-1.0")).section("staffing_risk")["high"], -1.0)
+        with self.assertRaises(ValueError):
+            _load_edited(self, ("staffing_risk", "high", "-1.5"))
+
+    def test_the_staffing_risk_weight_is_scaled_by_its_high_value(self):
+        # A weight of 200 with high = -1.0 is 200 points; the guard reads weight * |high|, so a smaller |high| would
+        # be caught by the high check first. Pin the arithmetic through the shipped pair.
+        cfg = default_ranker_config()
+        self.assertEqual(abs(cfg.section("staffing_risk")["high"]) * cfg.weights["staffing_risk"], 200.0)
+
+    def test_a_non_number_negative_value_is_refused(self):
+        with self.assertRaises(ValueError):
+            _load_edited(self, ("everify", "not_enrolled", '"lots"'))
+
+    def test_confidence_factors_must_be_in_range_and_ordered(self):
+        for edits in ((("confidence", "factor_high", "1.5"),), (("confidence", "factor_low", "0.0"),),
+                      (("confidence", "factor_low", "-0.1"),),
+                      (("confidence", "factor_medium", "0.4"),),  # below low
+                      (("confidence", "factor_high", "0.8"),),  # below medium
+                      (("confidence", "factor_high", '"1.0"'),)):
+            with self.subTest(edits=edits):
+                with self.assertRaises(ValueError):
+                    _load_edited(self, *edits)
+        _load_edited(self, ("confidence", "factor_low", "0.85"))  # equal to medium is allowed
+
+    def test_confidence_shares_and_counts_are_checked(self):
+        for key, value in (("rank_high_share", "0.0"), ("rank_high_share", "1.0"), ("rank_low_share", "0.0"),
+                           ("rank_low_share", "1.5"), ("reason_count", "0"), ("reason_count", "2.5"),
+                           ("evidence_old_days", "0"), ("lca_pay_medium_filings", "0")):
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ValueError):
+                    _load_edited(self, ("confidence", key, value))
 
     def test_no_dashes_in_config_or_wages(self):
         for name in ("config.toml", "wages.toml"):

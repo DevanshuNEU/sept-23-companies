@@ -15,7 +15,6 @@ is ever asked, and a redirect is never followed.
 from __future__ import annotations
 
 import email.utils
-import html
 import re
 import xml.etree.ElementTree as ET
 
@@ -34,6 +33,8 @@ _JOB_NUMBER = re.compile(r"/jobs/(\d+)")
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
 _WEB_URL = re.compile(r"https?://[^\s]+")
 _DOCTYPE = re.compile(rb"<!\s*(?:DOCTYPE|ENTITY)", re.IGNORECASE)
+_QUOTED = re.compile(rb"<!\[CDATA\[.*?\]\]>|<!--.*?-->", re.DOTALL)  # text and comments cannot declare anything
+_ENCODING = re.compile(rb"\A\s*<\?xml[^>]*?encoding\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
 
 
 def _local(tag) -> str:
@@ -83,21 +84,26 @@ def _parse(item: ET.Element) -> JobRef | None:
         return None
     return JobRef(native_id=native_id, title=title, url=link if _WEB_URL.fullmatch(link) else "",
                   location=_location(item), country=None, posted_on=_posted(_child_text(item, "pubDate")),
-                  body=html_to_text(html.unescape(_child_text(item, "description"))) or None)
+                  body=html_to_text(_child_text(item, "description")) or None)
 
 
 def _items(body: bytes) -> list[ET.Element] | str:
     """The feed's items, or the reason the body is not an RSS feed."""
-    if _DOCTYPE.search(body):
+    if _DOCTYPE.search(_QUOTED.sub(b"", body)):
         return "the 200 answer declares a DOCTYPE or an entity"
+    declared = _ENCODING.match(body)
+    if declared and declared.group(1).decode("ascii", "replace").lower().replace("_", "-") not in ("utf-8", "utf8"):
+        return f"the 200 answer declares the encoding {declared.group(1).decode('ascii', 'replace')!r}, not UTF-8"
     try:
         root = ET.fromstring(body)
     except ET.ParseError as e:
         return f"the 200 answer is not XML ({e})"
     if _local(root.tag) != "rss":
         return f"the 200 answer is not an RSS feed (root is {_local(root.tag)!r})"
-    return [node for channel in root if _local(channel.tag) == "channel" for node in channel
-            if _local(node.tag) == "item"]
+    channels = [child for child in root if _local(child.tag) == "channel"]
+    if len(channels) != 1:
+        return f"the 200 answer has {len(channels)} channels, not one"
+    return [node for node in channels[0] if _local(node.tag) == "item"]
 
 
 class TeamtailorAdapter:

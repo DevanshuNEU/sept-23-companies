@@ -108,6 +108,36 @@ class JazzListTests(unittest.TestCase):
         r, _ = read({URL: text_response(page)})
         self.assertEqual((r.result, r.jobs), ("error", ()))
 
+    def test_detail_links_of_any_class_must_all_be_rows_read(self):
+        # A list-group listing: real detail links, no job_title_link class and no table.
+        group = ('<html><body><div class="resumator-jobs"><ul class="list-group">'
+                 '<li class="list-group-item"><h4><a href="https://acme.applytojob.com/apply/jobs/details/AbC1">'
+                 'Engineer</a></h4></li>'
+                 '<li class="list-group-item"><h4><a href="/apply/jobs/details/AbC2">Designer</a></h4></li>'
+                 '</ul></div></body></html>')
+        r, _ = read({URL: text_response(group)})
+        self.assertEqual((r.result, r.jobs), ("error", ()))
+        # One row read, another detail link in a different shape.
+        extra = listing(row("AbC1")).replace("</table>", '</table><a class="btn" href="/apply/jobs/details/AbC9">x</a>')
+        r, _ = read({URL: text_response(extra)})
+        self.assertEqual((r.result, r.jobs), ("error", ()))
+
+    def test_a_second_link_to_a_job_already_read_is_fine(self):
+        page = listing(row("AbC1").replace("</tr>", '<td><a class="btn" href="/apply/jobs/details/AbC1">Apply</a></td></tr>'))
+        r, _ = read({URL: text_response(page)})
+        self.assertEqual((r.result, [j.native_id for j in r.jobs]), ("ok", ["AbC1"]))
+
+    def test_the_listing_container_must_be_an_element_class_or_id(self):
+        css = ('<html><head><link rel="stylesheet" href="https://acme.applytojob.com/css/resumator.css"></head>'
+               "<body><h1>This page is unavailable</h1></body></html>")
+        script = '<html><body><script>var s = "resumator";</script><p>resumator</p></body></html>'
+        for body in (css, script):
+            r, _ = read({URL: text_response(body)})
+            self.assertEqual((r.result, r.jobs), ("error", ()), body[:50])
+        for container in ('<div id="resumator-wrapper"></div>', '<section class="x Resumator-Jobs"></section>'):
+            r, _ = read({URL: text_response(f"<html><body>{container}</body></html>")})
+            self.assertEqual(r.result, "empty", container)
+
     def test_a_row_without_a_usable_id_or_title_is_an_error(self):
         bad = [row(title=""), row(title="  "), row(href=""), row(href="/apply/jobs"), row(href="/careers/x"),
                row(href="/apply/jobs/details/"), row(href="/apply/jobs/details/a b"),
@@ -197,6 +227,12 @@ class JazzBodyTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=location):
                 JazzHRAdapter(client).body("acme", job())
             self.assertEqual(client.requests, [DETAIL], location)
+
+    def test_a_304_is_not_a_redirect(self):
+        client = FakeClient({DETAIL: Response(304, "", b"", {"location": "/apply/jobs/details/AbC123xYz"})})
+        with self.assertRaises(ValueError):
+            JazzHRAdapter(client).body("acme", job())
+        self.assertEqual(client.requests, [DETAIL])
 
     def test_a_redirect_loop_raises(self):
         loop = Response(302, "", b"", {"location": "/apply/jobs/details/AbC123xYz"})

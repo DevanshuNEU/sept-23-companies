@@ -89,6 +89,38 @@ class TeamtailorTests(unittest.TestCase):
         r, _ = read({url(): feed(empty)})
         self.assertEqual((r.result, r.jobs, r.validators), ("empty", (), Validators()))
 
+    def test_an_rss_without_exactly_one_channel_is_error(self):
+        item = one_item().split("<item>", 1)[1].split("</item>", 1)[0]
+        for body in ("<?xml version='1.0'?><rss version='2.0'></rss>",
+                     "<?xml version='1.0'?><rss version='2.0'><error>Rate limited</error></rss>",
+                     "<?xml version='1.0'?><rss version='2.0'><item>" + item + "</item></rss>",
+                     "<?xml version='1.0'?><rss version='2.0'><channel><title>A</title></channel>"
+                     "<channel><title>B</title></channel></rss>"):
+            r, _ = read({url(): feed(body)})
+            self.assertEqual((r.result, r.jobs), ("error", ()), body[:70])
+
+    def test_a_doctype_inside_cdata_is_text_not_a_declaration(self):
+        body = one_item().replace("<![CDATA[", "").replace("]]>", "")
+        body = body.replace("Build things.", "Build things. <![CDATA[ <!DOCTYPE x> ]]>")
+        r, _ = read({url(): feed(body)})
+        self.assertEqual(r.result, "ok")
+
+    def test_a_declared_encoding_other_than_utf_8_is_error(self):
+        for decl in ("ISO-8859-1", "utf-16", "windows-1252"):
+            body = one_item().replace('encoding="UTF-8"', f'encoding="{decl}"')
+            self.assertIn(decl, body)
+            r, _ = read({url(): feed(body)})
+            self.assertEqual((r.result, r.jobs), ("error", ()), decl)
+        for decl in ("UTF-8", "utf-8"):
+            r, _ = read({url(): feed(one_item().replace('encoding="UTF-8"', f'encoding="{decl}"'))})
+            self.assertEqual(r.result, "ok", decl)
+
+    def test_a_description_is_decoded_once(self):
+        # ElementTree already decoded the feed's escapes: an escaped "<b>" in the posting is text, not a tag to strip.
+        body = one_item().replace("Build things.", "Use &amp;lt;b&amp;gt; for bold.")
+        r, _ = read({url(): feed(body)})
+        self.assertIn("Use <b> for bold.", r.jobs[0].body)
+
     def test_full_page_then_empty_page_is_complete(self):
         empty = "<?xml version='1.0'?><rss version='2.0'><channel><title>Acme</title></channel></rss>"
         r, client = read({url(0, 2): feed(page()), url(2, 2): feed(empty)}, size=2)

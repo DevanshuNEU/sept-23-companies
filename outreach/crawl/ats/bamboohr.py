@@ -4,9 +4,10 @@
 in `bhrPositionID_{id}`, the title in the link and the place in `BambooHR-ATS-Location`. (The `/careers/list` JSON
 that the research table names was retired in 2024; `probe` confirms what a tenant answers before this is trusted.)
 
-A 200 is the widget only when an element carries a `BambooHR-ATS` class. A login page, a challenge page or an error
-page does not, so it is `error`; the widget with no jobs is `empty` (Review Focus 2). A widget cut off in the middle
-of an item, or before its root element closes, is `error`: a short list read as `ok` would close real postings.
+A 200 is the widget only when an element carries the `BambooHR-ATS-board` root class and that element closes. A login
+page, a challenge page, an error page with some other ATS class or a widget cut off anywhere is `error`; the widget
+with no jobs is `empty` (Review Focus 2). Every element with a `bhrPositionID_` id must be a job item read, or the
+read is `error`: a short list read as `ok` would close real postings.
 
 There is no ETag and the raw page changes, so the fingerprint is over the ids. `body()` asks the detail endpoint for
 JSON, builds its URL from the token and the id (never from a URL the list returned) and follows no redirect.
@@ -42,6 +43,8 @@ class _Widget(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.marker = False
+        self.position_ids = 0  # every element whose id is bhrPositionID_..., whatever its class
+        self.root_seen = False
         self.rows: list[tuple[str, str, str]] = []  # (id or "", title, location)
         self._root: tuple[str, int] | None = None
         self._root_closed = False
@@ -53,10 +56,13 @@ class _Widget(HTMLParser):
         classes = (attrs.get("class") or "").lower().split()
         if any(c.startswith("bamboohr-ats") for c in classes):
             self.marker = True
+        if (attrs.get("id") or "").startswith("bhrPositionID_"):
+            self.position_ids += 1
         if tag in _VOID:
             return
         if self._root is None and not self._root_closed and "bamboohr-ats-board" in classes:
             self._root = (tag, 1)
+            self.root_seen = True
         elif self._root is not None and tag == self._root[0]:
             self._root = (tag, self._root[1] + 1)
         item = self._item
@@ -106,8 +112,9 @@ class _Widget(HTMLParser):
             self._root_closed = self._root is None
 
     @property
-    def cut_off(self) -> bool:
-        return self._item is not None or self._root is not None
+    def complete(self) -> bool:
+        """The board root was seen and closed, and no item was left open."""
+        return self.root_seen and self._root is None and self._item is None
 
 
 def _parse(token: str, rows: list[tuple[str, str, str]]) -> list[JobRef] | None:
@@ -141,8 +148,12 @@ class BambooHRAdapter:
         parser.close()
         if not parser.marker:
             return read_error("the 200 answer is not the BambooHR careers widget", status=resp.status)
-        if parser.cut_off:
-            return read_error("the careers widget is cut off", status=resp.status)
+        if not parser.complete:
+            return read_error("the careers widget has no closed board root: it is cut off or not the widget",
+                              status=resp.status)
+        if parser.position_ids != len(parser.rows):
+            return read_error("the widget has position elements that are not job items, so the list may be incomplete",
+                              status=resp.status)
         jobs = _parse(token, parser.rows)
         if jobs is None:
             return read_error("a job has no usable id or no title", status=resp.status)
@@ -160,6 +171,8 @@ class BambooHRAdapter:
         result = data.get("result") if isinstance(data, dict) else None
         opening = result.get("jobOpening") if isinstance(result, dict) else None
         description = opening.get("description") if isinstance(opening, dict) else None
+        if not isinstance(opening, dict) or str(opening.get("id")) != job.native_id:
+            raise ValueError(f"the detail answer is not for position {job.native_id}")
         if not isinstance(description, str):
             raise ValueError(f"position {job.native_id} has no description in the detail answer")
         return html_to_text(description) or None

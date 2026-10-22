@@ -103,6 +103,28 @@ class BambooListTests(unittest.TestCase):
             r, _ = read({URL: text_response(cut)})
             self.assertEqual((r.result, r.jobs), ("error", ()), cut[-30:])
 
+    def test_position_elements_under_another_class_name_are_an_error(self):
+        # Every bhrPositionID_ element must be a row read: the widget's item class may have been renamed.
+        renamed = item("2").replace("BambooHR-ATS-Jobs-Item", "BambooHR-ATS-Job-Row")
+        for body in (widget(item("1"), renamed), widget(renamed),
+                     widget(item("1"), '<div id="bhrPositionID_3"><a href="/careers/3">Plain</a></div>')):
+            r, _ = read({URL: text_response(body)})
+            self.assertEqual((r.result, r.jobs), ("error", ()), body[-80:])
+
+    def test_the_board_root_must_be_seen_and_closed(self):
+        no_root = ('<ul class="BambooHR-ATS-Jobs-List">' + item("1") + item("2") + "</ul>")
+        cut = widget(item("1"), item("2"))
+        for body in (no_root, no_root[:no_root.index("</li>") + 5], cut[:cut.index("</li>") + 5],
+                     '<div class="BambooHR-ATS-Department-Wrapper"></div>'):
+            r, _ = read({URL: text_response(body)})
+            self.assertEqual((r.result, r.jobs), ("error", ()), body[-60:])
+
+    def test_an_error_page_with_one_ats_class_is_error(self):
+        for body in ('<html><body><div class="BambooHR-ATS-Message">Service unavailable</div></body></html>',
+                     '<html><body><p class="BambooHR-ATS-Location">Down</p></body></html>'):
+            r, _ = read({URL: text_response(body)})
+            self.assertEqual((r.result, r.jobs), ("error", ()), body)
+
     def test_title_and_location_forms(self):
         markup = ('<li id="bhrPositionID_5" class="BambooHR-ATS-Jobs-Item"><a href="/x"> <b>Staff</b>  Engineer </a>'
                   '<span class="foo BambooHR-ATS-Location extra"> Austin,   TX </span></li>')
@@ -154,6 +176,16 @@ class BambooBodyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             BambooHRAdapter(client).body("acme", job())
         self.assertEqual(client.requests, [DETAIL])
+
+    def test_a_detail_for_another_position_raises(self):
+        for opening_id in ("57", 57, "", None):
+            data = json.loads(json.dumps(DETAIL_JSON))
+            data["result"]["jobOpening"]["id"] = opening_id
+            with self.assertRaises(ValueError, msg=opening_id):
+                self.body(json_response(data))
+        data = json.loads(json.dumps(DETAIL_JSON))
+        data["result"]["jobOpening"]["id"] = 41
+        self.assertIsNotNone(self.body(json_response(data))[0])
 
     def test_the_request_is_built_from_the_token_and_id_never_from_the_posting_url(self):
         client = FakeClient({DETAIL: json_response(DETAIL_JSON)})

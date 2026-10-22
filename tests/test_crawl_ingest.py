@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from outreach.crawl import ingest
+from outreach.crawl import bodies, ingest
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
 from outreach.crawl.ats.lever import LeverAdapter
 from outreach.crawl.base import JobRef, ReadResult, Validators, ids_fingerprint
@@ -147,6 +147,54 @@ class IngestTestCase(unittest.TestCase):
             "VALUES (?, 'lca', ?, 'confirmed', 'lca', ?)",
             (company_id or self.company, json.dumps({"fy": 2025, "software": 3, "jr": 1, "level1": 1,
                                                      "newemp_jr": 1}), T0))
+
+
+class DecisionJoinPlanTests(IngestTestCase):
+    """The crawler's per-board queries reach a posting's current decision through the `decision` primary key, never by
+    scanning a materialized `current_decision` view per row (ranking measured 92.7 s for that at 18,343 companies)."""
+
+    def plans(self):
+        board = load_board(self.conn, self.board_id)
+        seen = []
+        self.conn.set_trace_callback(seen.append)
+        try:
+            ingest._undecided(self.conn, board)
+            bodies.missing_body_ids(self.conn, board, 10)
+            bodies.refetch_body_ids(self.conn, board, [1], T0, 30, 10)
+        finally:
+            self.conn.set_trace_callback(None)
+        self.assertEqual(len(seen), 3)
+        return {sql: [r[3] for r in self.conn.execute("EXPLAIN QUERY PLAN " + sql)] for sql in seen}
+
+    def at_scale(self):
+        """Planner statistics of a store at the size ranking measured: 200,000 postings over 5,000 boards, two
+        decisions each, so the plan is the one the live store gets (`ANALYZE sqlite_schema` reloads them)."""
+        self.conn.execute("ANALYZE")
+        stats = [("posting", None, "200000"), ("posting", "sqlite_autoindex_posting_1", "200000 1"),
+                 ("posting", "posting_board_open", "200000 40 20 1"),
+                 ("posting", "posting_company_open", "200000 20 10"),
+                 ("decision", None, "400000"), ("decision", "sqlite_autoindex_decision_1", "400000 2 1"),
+                 ("decision", "decision_version", "400000 200000"), ("posting_body", None, "150000")]
+        self.conn.execute("DELETE FROM sqlite_stat1 WHERE tbl IN ('posting', 'decision', 'posting_body')")
+        self.conn.executemany("INSERT INTO sqlite_stat1(tbl, idx, stat) VALUES (?, ?, ?)", stats)
+        self.conn.execute("ANALYZE sqlite_schema")
+
+    def test_no_query_scans_the_decision_side(self):
+        self.read(ok())
+        for scale in (False, True):
+            if scale:
+                self.at_scale()
+            with self.subTest(scale=scale):
+                self.check_plans()
+
+    def check_plans(self):
+        for sql, plan in self.plans().items():
+            with self.subTest(sql=sql[:60]):
+                self.assertNotIn("current_decision", sql)
+                for step in plan:
+                    self.assertFalse(step.startswith("MATERIALIZE"), plan)
+                    self.assertNotRegex(step, r"^SCAN (d|decision|current_decision)\b", plan)
+                self.assertTrue(any(s.startswith("SEARCH d USING") for s in plan), plan)
 
 
 class DoubtfulBoardTests(IngestTestCase):

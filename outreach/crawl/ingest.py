@@ -272,9 +272,11 @@ def _open_ids(conn: sqlite3.Connection, board: BoardRow) -> list[int]:
 
 def _undecided(conn: sqlite3.Connection, board: BoardRow) -> list[int]:
     """Open postings of the board with no current decision: the new ones, and any a crash left undecided. A changed
-    field or body never needs this sweep, because it is written in one unit with its decision."""
+    field or body never needs this sweep, because it is written in one unit with its decision. The join goes to
+    `decision` by its key, not through the `current_decision` view, which SQLite materializes and scans per row."""
     return [r[0] for r in conn.execute(
-        "SELECT p.posting_id FROM posting p LEFT JOIN current_decision d ON d.posting_id = p.posting_id "
+        "SELECT p.posting_id FROM posting p LEFT JOIN decision d ON d.posting_id = p.posting_id "
+        "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
         "WHERE p.board_id = ? AND p.closed_at IS NULL AND d.posting_id IS NULL ORDER BY p.posting_id",
         (board.board_id,))]
 

@@ -1,4 +1,4 @@
-"""The company page's writes: `POST /api/companies/{id}/pause`, `/resume`, `/close` and `/reopen`.
+"""The company page's writes: `POST /api/companies/{id}/pause`, `/resume`, `/release-hold`, `/close` and `/reopen`.
 
 Each runs in `run_write` (one transaction, one idempotency key) and checks the company revision the page loaded.
 A merged-away company id writes on its survivor, the company the page shows.
@@ -25,6 +25,14 @@ def pause_company(body: CompanyRevisionBody, request: Request, company_id: int =
 def resume_company(body: CompanyRevisionBody, request: Request, company_id: int = row_id()) -> Response:
     def op(ctx: WriteCtx) -> CompanyResumed:
         return writes.resume(ctx, company_id, body.revision)
+
+    return run_write(request, op)
+
+
+@router.post("/{company_id}/release-hold", response_model=CompanyResumed)
+def release_hold(body: CompanyRevisionBody, request: Request, company_id: int = row_id()) -> Response:
+    def op(ctx: WriteCtx) -> CompanyResumed:
+        return writes.release_hold(ctx, company_id, body.revision)
 
     return run_write(request, op)
 

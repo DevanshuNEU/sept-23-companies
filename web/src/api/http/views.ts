@@ -46,6 +46,7 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   setRoleKind: 'company',
   pauseCompany: 'company',
   resumeCompany: 'company',
+  releaseHold: 'company',
   closeCompany: 'company',
   reopenCompany: 'company',
   pauseSending: 'sending',

@@ -114,7 +114,8 @@ export function useCompanyActions({
       afterCommit: `Resumed ${company.name}.`,
       immediate: true,
       patches: companyPatches(() => ({ pausedAt: null, heldByTouchId: null, held: false, heldByReply: null })),
-      commit: (o) => thenWarm(withRevision(o, known, read, (r) => client.resumeCompany(company.id, r, o))),
+      // His pause first; a company held by a reply and not paused releases the hold.
+      commit: (o) => thenWarm(withRevision(o, known, read, (r) => (company.pausedAt === null ? client.releaseHold(company.id, r, o) : client.resumeCompany(company.id, r, o)))),
     });
 
   const close = (reason: CloseReason, note: string) => {

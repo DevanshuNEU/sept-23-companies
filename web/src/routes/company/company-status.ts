@@ -21,7 +21,7 @@ export function companyActions(c: Company) {
   const open = c.status === 'working';
   return {
     pause: open && c.pausedAt === null,
-    resume: open && (c.pausedAt !== null || c.heldByTouchId !== null),
+    resume: open && (c.pausedAt !== null || c.held || c.heldByTouchId !== null),
     close: c.status === 'working' || c.status === 'backlog' || c.status === 'candidate',
     reopen: isClosed(c),
   };

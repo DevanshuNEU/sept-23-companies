@@ -12,9 +12,11 @@ describe('DEFAULT_LIVE_VIEWS', () => {
     expect(missing).toEqual([]);
   });
 
-  it('sending goes live only with the outbox and the shell, whose pages read its status', () => {
-    // Its pause and resume are live, but the strip and the palette read the state through the outbox and shell
-    // views: with those on sample data, a resume could answer a sample hard block on the real sender.
-    if (DEFAULT_LIVE_VIEWS.includes('sending')) expect(DEFAULT_LIVE_VIEWS).toEqual(expect.arrayContaining(['outbox', 'shell']));
+  it('the outbox, sending and the shell go live together', () => {
+    // Pause and resume are live, but the strip and the palette read the sender's state through the outbox and
+    // shell views: with either on sample data, a resume could answer a sample hard block on the real sender.
+    const together = ['outbox', 'sending', 'shell'] as const;
+    const on = together.filter((v) => DEFAULT_LIVE_VIEWS.includes(v));
+    expect(on.length === 0 || on.length === together.length).toBe(true);
   });
 });

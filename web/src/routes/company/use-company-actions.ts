@@ -79,7 +79,8 @@ export function useCompanyActions(view: CompanyView | undefined) {
       afterCommit: `Resumed ${name}.`,
       immediate: true,
       patches: [patchCompany((c) => ({ ...c, pausedAt: null, heldByTouchId: null, held: false, heldByReply: null })), ...refetch(queryKeys.shell, queryKeys.outbox, queryKeys.today)],
-      commit: (o) => withCompanyRevision(o, c, (r) => client.resumeCompany(id, r, o)),
+      // His pause first; a company held by a reply and not paused releases the hold (Resume shows again for it).
+      commit: (o) => withCompanyRevision(o, c, (r) => (c.pausedAt === null ? client.releaseHold(id, r, o) : client.resumeCompany(id, r, o))),
     });
   }, [view, write, client, patchCompany, withCompanyRevision]);
 

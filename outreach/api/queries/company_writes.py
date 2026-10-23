@@ -20,7 +20,8 @@ from outreach.api.models.company_writes import CompanyResumed, CompanyWritten
 from outreach.api.queries.company import CLOSE_WORDS, person_ref
 from outreach.api.revisions import bump
 from outreach.drafts.checks import draft_input, run_checks
-from outreach.drafts.followups import canonical_company, company_map, no_go_sets, resolve_company
+from outreach.drafts.followups import (RELEASE_KIND, canonical_company, company_map, held_survivors, no_go_sets,
+                                       resolve_company)
 from outreach.sending.followups import stop_planned
 from outreach.store.writes import append_event
 
@@ -79,7 +80,7 @@ def pause(ctx: WriteCtx, company_id: int, revision: int) -> CompanyWritten:
 
 
 def resume(ctx: WriteCtx, company_id: int, revision: int) -> CompanyResumed:
-    """Clears his pause. A hold by a reply is not a pause: releasing it is the Outbox's release-hold (#11 Task 19)."""
+    """Clears his pause. A hold by a reply is not a pause: `release_hold` releases it."""
     row = _survivor(ctx.conn, company_id)
     _fresh(row, revision)
     if row["paused_at"] is None:
@@ -89,6 +90,31 @@ def resume(ctx: WriteCtx, company_id: int, revision: int) -> CompanyResumed:
     new = bump(ctx.conn, "company", "company_id", row["company_id"], revision,
                {"paused_at": None, "pause_note": ""}, at=ctx.now)
     _event(ctx, row["company_id"], "resumed", {"text": "Resumed by you", "released": released})
+    return CompanyResumed(released=released, revision=new)
+
+
+def release_hold(ctx: WriteCtx, company_id: int, revision: int) -> CompanyResumed:
+    """Releases a reply's hold: a `hold_released` event on every company of the merged family and `held_by_touch`
+    cleared across it, exactly what the sender's `held_survivors` reads. A reply recorded later holds again, and the
+    person who replied stays stopped (`replied_people`): the release frees their colleagues only."""
+    conn = ctx.conn
+    row = _survivor(conn, company_id)
+    _fresh(row, revision)
+    survivor = row["company_id"]
+    if survivor not in held_survivors(company_map(conn)):
+        raise ApiProblem("not_allowed", f"{row['name']} is not held by a reply. {NOT_SAVED}")
+    family = _family(conn, survivor)
+    released = sum(1 for m in _messages(conn, family, WAITING) if m["touch_state"] == "open")
+    for n, cid in enumerate(family):
+        append_event(conn, entity="company", entity_id=cid, company_id=survivor, kind=RELEASE_KIND,
+                     actor="devanshu", at=ctx.now, idempotency_key=ctx.event_key(n),
+                     detail={"text": "Hold released by you", "survivor": survivor, "released": released})
+    others = [cid for cid in family if cid != survivor]
+    if others:
+        conn.execute(f"UPDATE company SET held_by_touch = NULL, held_at = NULL, revision = revision + 1 "
+                     f"WHERE company_id IN ({_in(others)}) AND held_by_touch IS NOT NULL", others)
+    new = bump(conn, "company", "company_id", survivor, revision, {"held_by_touch": None, "held_at": None},
+               at=ctx.now)
     return CompanyResumed(released=released, revision=new)
 
 

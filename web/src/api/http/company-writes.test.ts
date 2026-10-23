@@ -26,6 +26,12 @@ describe('companyWriteMethods', () => {
     expect(send).toHaveBeenCalledWith('POST', '/api/companies/7/resume', { revision: 4 }, o);
   });
 
+  it('a hold release posts the revision and answers with how many emails it let go', async () => {
+    const { t, send } = sender({ released: 3, revision: 6 });
+    expect(await companyWriteMethods(t).releaseHold!(7, 5, o)).toEqual({ released: 3 });
+    expect(send).toHaveBeenCalledWith('POST', '/api/companies/7/release-hold', { revision: 5 }, o);
+  });
+
   it('the role kind posts to the person and answers with the person', async () => {
     const person: PersonRef = { id: 12, name: 'Dana Whitcomb', title: 'Recruiter', roleKind: 'engineer', email: null, linkedinUrl: null, revision: 2 };
     const { t, send } = sender(person);

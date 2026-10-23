@@ -28,7 +28,8 @@ export interface OutreachClient {
   setRoleKind(personId: Id, kind: RoleKind, revision: Revision, o: WriteOptions): Promise<PersonRef>;
   compareDrafts(messageId: Id, otherMessageId: Id): Promise<DraftCompare>;
   pauseCompany(companyId: Id, revision: Revision, o: WriteOptions): Promise<void>;
-  resumeCompany(companyId: Id, revision: Revision, o: WriteOptions): Promise<{ released: number }>;
+  resumeCompany(companyId: Id, revision: Revision, o: WriteOptions): Promise<{ released: number }>; // clears his pause only
+  releaseHold(companyId: Id, revision: Revision, o: WriteOptions): Promise<{ released: number }>;   // a reply's hold, across the merged family
   closeCompany(companyId: Id, reason: CloseReason, note: string, revision: Revision, o: WriteOptions): Promise<void>;
   reopenCompany(companyId: Id, revision: Revision, o: WriteOptions): Promise<void>;
   pauseSending(o: WriteOptions): Promise<SendingStatus>;

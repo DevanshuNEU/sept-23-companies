@@ -330,7 +330,7 @@ class Blocks(ChecksCase):
 class Warns(ChecksCase):
     def test_banned_phrase_and_dash_are_warns(self):
         subject = "Passionate about queues"
-        body = BODY.replace("I want to bring", "I'd love to bring").replace(", and your post", " — your post")
+        body = BODY.replace("I want to bring", "I'd love to bring").replace(", and your post", " \u2014 your post")
         found = self.run_on(subject=subject, body=body)
         self.assertEqual(self.codes(found, "block"), [])
         banned = self.one(found, "banned_phrase")
@@ -340,7 +340,7 @@ class Warns(ChecksCase):
         self.assertEqual(texts, [("body", "I'd love to"), ("subject", "Passionate about")])
         dash = self.one(found, "dash")
         self.assertEqual(dash["severity"], "warn")
-        self.assertEqual([body[s["start"]:s["end"]] for s in dash["spans"]], ["—"])
+        self.assertEqual([body[s["start"]:s["end"]] for s in dash["spans"]], ["\u2014"])
 
     def test_banned_scope_rules_and_follow_up_phrases(self):
         with self.subTest("dm and comment scopes are not email rules"):
@@ -352,7 +352,7 @@ class Warns(ChecksCase):
             body = BODY.replace("Thanks,", "Just bumping this. Thanks,")
             self.assertEqual(self.one(self.run_on(body=body), "banned_phrase")["severity"], "warn")
         with self.subTest("every dash from U+2012 to U+2015 warns, a hyphen does not"):
-            for ch in "‒–—―":
+            for ch in "\u2012\u2013\u2014\u2015":
                 self.assertEqual(self.one(self.run_on(body=BODY + ch), "dash")["severity"], "warn")
             self.assert_passes(self.run_on(body=BODY + " well-tested"), "dash")
 
@@ -459,7 +459,7 @@ class Shape(ChecksCase):
         self.assertEqual(self.run_on(), found)
 
     def test_order_is_blocks_then_warns_then_passes(self):
-        body = BODY.replace(", and your post", " — your post") + "\nacme.com"
+        body = BODY.replace(", and your post", " \u2014 your post") + "\nacme.com"
         found = self.run_on(mx="none", body=body, subject="Quick question", role_kind="recruiter")
         rank = {"block": 0, "warn": 1, "pass": 2}
         self.assertEqual([rank[c["severity"]] for c in found], sorted(rank[c["severity"]] for c in found))
@@ -487,7 +487,7 @@ class Shape(ChecksCase):
         from outreach.api.models.checks import Check
         self.colleague(self.acme)
         self.no_go(person_id=self.pat)
-        body = BODY.replace(", and your post", " — your post")
+        body = BODY.replace(", and your post", " \u2014 your post")
         found = self.run_on(mx="none", body=body, subject="Re: hi", role_kind="recruiter", hook="x (2026-01-01)")
         self.assertGreater(len(found), 10)
         for check in found:

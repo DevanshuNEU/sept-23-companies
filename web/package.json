@@ -13,6 +13,7 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "test": "TZ=America/New_York vitest run",
+    "test:load": "bash scripts/under-load.sh pnpm test",
     "e2e": "playwright test"
   },
   "dependencies": {

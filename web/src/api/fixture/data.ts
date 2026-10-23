@@ -945,7 +945,7 @@ const ev = (c: Ctx, at: IsoTime, kind: string, text: string, actor: Actor, impor
 function postingRow(r: RoleToName): PostingRow {
   return {
     id: r.postingId, title: r.title, location: r.location, url: r.url, firstSeenAt: r.firstSeenAt, lastSeenAt: et('2026-11-09', '08:04'), closedAt: null, closeReason: null,
-    levelTier: r.levelTier, sponsorship: 'silent', state: 'open', hiddenRule: null,
+    levelTier: r.levelTier, sponsorship: 'silent', state: 'open', hiddenRule: null, flags: [],
   };
 }
 
@@ -977,7 +977,7 @@ function browserbaseView(c: Ctx, v: Views): CompanyView {
 
   const bposting = (id: number, title: string, loc: string, firstAgo: number, lastAgo: number, tier: LevelTier, sp: PostingRow['sponsorship'], state: PostingRow['state'], o: Partial<PostingRow> = {}): PostingRow => ({
     id, title, location: loc, url: `https://careers.example/browserbase/${id}`, firstSeenAt: noon(firstAgo), lastSeenAt: noon(lastAgo), closedAt: null, closeReason: null,
-    levelTier: tier, sponsorship: sp, state, hiddenRule: null, ...o,
+    levelTier: tier, sponsorship: sp, state, hiddenRule: null, flags: [], ...o,
   });
   const postings: PostingRow[] = [
     { ...postingRow(role), lastSeenAt: noon(1), sponsorship: 'yes' },
@@ -1102,7 +1102,7 @@ function genericCompany(c: Ctx, name: string, v: Views): CompanyView {
     } : null,
     role, postings: [...(role ? [postingRow(role)] : []), ...(entry?.otherRoles ?? []).map((o, i): PostingRow => ({
       id: 9100 + i, title: o.title, location: s.hq, url: `https://careers.example/${slug(name)}/${9100 + i}`, firstSeenAt: o.firstSeenAt, lastSeenAt: et('2026-11-09', '08:04'),
-      closedAt: null, closeReason: null, levelTier: 'not_stated', sponsorship: 'silent', state: 'open', hiddenRule: null,
+      closedAt: null, closeReason: null, levelTier: 'not_stated', sponsorship: 'silent', state: 'open', hiddenRule: null, flags: [],
     }))],
     people,
     touches: items.map((i) => ({ touchId: i.touchId, person: i.person, state: i.touchState, summary: i.summary, messages: v.details[i.touchId]?.thread ?? [] })),

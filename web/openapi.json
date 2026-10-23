@@ -174,6 +174,506 @@
         "title": "CheckSpan",
         "type": "object"
       },
+      "CompanyBoard": {
+        "properties": {
+          "ats": {
+            "title": "Ats",
+            "type": "string"
+          },
+          "emptyStreak": {
+            "title": "Emptystreak",
+            "type": "integer"
+          },
+          "errorStreak": {
+            "title": "Errorstreak",
+            "type": "integer"
+          },
+          "lastRead": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "empty",
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastread"
+          },
+          "lastReadAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastreadat"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ats",
+          "token",
+          "url",
+          "lastRead",
+          "lastReadAt",
+          "errorStreak",
+          "emptyStreak"
+        ],
+        "title": "CompanyBoard",
+        "type": "object"
+      },
+      "CompanyClosed": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "referral",
+              "interview",
+              "no_sponsorship",
+              "no_referrals",
+              "already_hired",
+              "not_now",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "note",
+          "at"
+        ],
+        "title": "CompanyClosed",
+        "type": "object"
+      },
+      "CompanyEvent": {
+        "properties": {
+          "actor": {
+            "enum": [
+              "devanshu",
+              "claude",
+              "sender",
+              "crawler",
+              "rules",
+              "daily_list",
+              "import",
+              "system",
+              "source",
+              "reader"
+            ],
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "importSource": {
+            "anyOf": [
+              {
+                "enum": [
+                  "data_js",
+                  "local_storage",
+                  "contacts_json",
+                  "radar_db",
+                  "devboard",
+                  "contacted_txt",
+                  "devvault_notes"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importsource"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "kind",
+          "text",
+          "actor",
+          "importSource"
+        ],
+        "title": "CompanyEvent",
+        "type": "object"
+      },
+      "CompanyHeader": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "closed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompanyClosed"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "heldByTouchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heldbytouchid"
+          },
+          "hq": {
+            "title": "Hq",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pausedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pausedat"
+          },
+          "pickedOn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pickedon"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "backlog",
+              "working",
+              "closed",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "pausedAt",
+          "heldByTouchId",
+          "domain",
+          "aliases",
+          "hq",
+          "pickedOn",
+          "day",
+          "closed",
+          "revision"
+        ],
+        "title": "CompanyHeader",
+        "type": "object"
+      },
+      "CompanyPerson": {
+        "properties": {
+          "channel": {
+            "enum": [
+              "email",
+              "linkedin"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "lastTouchAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lasttouchat"
+          },
+          "person": {
+            "$ref": "#/components/schemas/PersonRef"
+          },
+          "statusLine": {
+            "title": "Statusline",
+            "type": "string"
+          },
+          "tone": {
+            "enum": [
+              "ok",
+              "info",
+              "warn",
+              "bad",
+              "idle"
+            ],
+            "title": "Tone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "person",
+          "channel",
+          "statusLine",
+          "tone",
+          "lastTouchAt"
+        ],
+        "title": "CompanyPerson",
+        "type": "object"
+      },
+      "CompanyTouch": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadMessage"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "person": {
+            "$ref": "#/components/schemas/PersonRef"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "replied",
+              "bounced",
+              "closed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "touchId": {
+            "title": "Touchid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "touchId",
+          "person",
+          "state",
+          "summary",
+          "messages"
+        ],
+        "title": "CompanyTouch",
+        "type": "object"
+      },
+      "CompanyView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "board": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompanyBoard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyHeader"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/Fact"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/Fact"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "mailServerOk": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mailserverok"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyPerson"
+            },
+            "title": "People",
+            "type": "array"
+          },
+          "postings": {
+            "items": {
+              "$ref": "#/components/schemas/PostingRow"
+            },
+            "title": "Postings",
+            "type": "array"
+          },
+          "reviewItems": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewItem"
+            },
+            "title": "Reviewitems",
+            "type": "array"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleToName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rulesetVersion": {
+            "title": "Rulesetversion",
+            "type": "string"
+          },
+          "sponsorshipShown": {
+            "enum": [
+              "has_sponsored",
+              "says_yes",
+              "says_no",
+              "opt_only",
+              "unclear",
+              "not_stated"
+            ],
+            "title": "Sponsorshipshown",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "touches": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyTouch"
+            },
+            "title": "Touches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "company",
+          "summary",
+          "facts",
+          "sponsorshipShown",
+          "mailServerOk",
+          "board",
+          "role",
+          "postings",
+          "people",
+          "touches",
+          "evidence",
+          "events",
+          "reviewItems",
+          "rulesetVersion"
+        ],
+        "title": "CompanyView",
+        "type": "object"
+      },
       "ErrorEnvelope": {
         "properties": {
           "checks": {
@@ -198,6 +698,125 @@
           "checks"
         ],
         "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "Fact": {
+        "properties": {
+          "confidence": {
+            "enum": [
+              "confirmed",
+              "estimate",
+              "guess"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "fact": {
+            "enum": [
+              "size",
+              "stage",
+              "sponsorship",
+              "domain",
+              "hq",
+              "everify",
+              "lca",
+              "cap_exempt",
+              "staffing_risk",
+              "funding",
+              "headcount"
+            ],
+            "title": "Fact",
+            "type": "string"
+          },
+          "high": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "locked": {
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "low": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low"
+          },
+          "observedOn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observedon"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "sourceKind": {
+            "enum": [
+              "hand",
+              "posting",
+              "old_dashboard",
+              "yc",
+              "builtin",
+              "linkedin",
+              "website",
+              "formd",
+              "lca",
+              "everify",
+              "other",
+              "stapply",
+              "commoncrawl",
+              "hn",
+              "simplify"
+            ],
+            "title": "Sourcekind",
+            "type": "string"
+          },
+          "sourceRef": {
+            "title": "Sourceref",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "fact",
+          "value",
+          "low",
+          "high",
+          "confidence",
+          "locked",
+          "sourceKind",
+          "sourceRef",
+          "quote",
+          "observedOn"
+        ],
+        "title": "Fact",
         "type": "object"
       },
       "HealthBoards": {
@@ -413,6 +1032,71 @@
         "title": "JobRunSummary",
         "type": "object"
       },
+      "PersonRef": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "linkedinUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedinurl"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "roleKind": {
+            "enum": [
+              "engineer",
+              "manager",
+              "founder",
+              "recruiter",
+              "alum",
+              "other"
+            ],
+            "title": "Rolekind",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "title",
+          "roleKind",
+          "email",
+          "linkedinUrl",
+          "revision"
+        ],
+        "title": "PersonRef",
+        "type": "object"
+      },
       "Ping": {
         "properties": {
           "ok": {
@@ -424,6 +1108,206 @@
           "ok"
         ],
         "title": "Ping",
+        "type": "object"
+      },
+      "PostingFlag": {
+        "description": "One field where the reader and the phrase rules disagree (or the reader could not say), with both quotes.",
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "readerQuote": {
+            "title": "Readerquote",
+            "type": "string"
+          },
+          "readerValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readervalue"
+          },
+          "rulesQuote": {
+            "title": "Rulesquote",
+            "type": "string"
+          },
+          "rulesValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rulesvalue"
+          }
+        },
+        "required": [
+          "field",
+          "readerValue",
+          "rulesValue",
+          "readerQuote",
+          "rulesQuote"
+        ],
+        "title": "PostingFlag",
+        "type": "object"
+      },
+      "PostingHit": {
+        "properties": {
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "open": {
+            "title": "Open",
+            "type": "boolean"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "postingId",
+          "title",
+          "companyId",
+          "companyName",
+          "open"
+        ],
+        "title": "PostingHit",
+        "type": "object"
+      },
+      "PostingRow": {
+        "properties": {
+          "closeReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closereason"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closedat"
+          },
+          "firstSeenAt": {
+            "title": "Firstseenat",
+            "type": "string"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/PostingFlag"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "hiddenRule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hiddenrule"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lastSeenAt": {
+            "title": "Lastseenat",
+            "type": "string"
+          },
+          "levelTier": {
+            "enum": [
+              "new_grad",
+              "early_career",
+              "swe1",
+              "swe2",
+              "open",
+              "not_stated",
+              "senior"
+            ],
+            "title": "Leveltier",
+            "type": "string"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "sponsorship": {
+            "enum": [
+              "yes",
+              "no",
+              "opt_only",
+              "unclear",
+              "silent"
+            ],
+            "title": "Sponsorship",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed",
+              "out_of_lane",
+              "hidden"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "location",
+          "url",
+          "firstSeenAt",
+          "lastSeenAt",
+          "closedAt",
+          "closeReason",
+          "levelTier",
+          "sponsorship",
+          "state",
+          "hiddenRule",
+          "flags"
+        ],
+        "title": "PostingRow",
         "type": "object"
       },
       "ReadQueueStatus": {
@@ -482,6 +1366,465 @@
         "title": "ReadQueueStatus",
         "type": "object"
       },
+      "ReviewCompany": {
+        "properties": {
+          "heldByTouchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heldbytouchid"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pausedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pausedat"
+          },
+          "picked": {
+            "title": "Picked",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "backlog",
+              "working",
+              "closed",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "pausedAt",
+          "heldByTouchId",
+          "picked"
+        ],
+        "title": "ReviewCompany",
+        "type": "object"
+      },
+      "ReviewItem": {
+        "properties": {
+          "ageDays": {
+            "title": "Agedays",
+            "type": "integer"
+          },
+          "company": {
+            "$ref": "#/components/schemas/ReviewCompany"
+          },
+          "holdsEmail": {
+            "title": "Holdsemail",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "board_unreadable",
+              "board_empty",
+              "sponsorship_unclear",
+              "size_unknown",
+              "size_guess",
+              "domain_missing",
+              "flagged"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "lastOkAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastokat"
+          },
+          "openPostings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openpostings"
+          },
+          "openedAt": {
+            "title": "Openedat",
+            "type": "string"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewQuote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reads": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewRead"
+            },
+            "title": "Reads",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reopened": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewReopened"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "sizeFacts": {
+            "items": {
+              "$ref": "#/components/schemas/Fact"
+            },
+            "title": "Sizefacts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "company",
+          "holdsEmail",
+          "reason",
+          "openedAt",
+          "ageDays",
+          "reopened",
+          "quote",
+          "reads",
+          "lastOkAt",
+          "openPostings",
+          "sizeFacts",
+          "revision"
+        ],
+        "title": "ReviewItem",
+        "type": "object"
+      },
+      "ReviewQuote": {
+        "properties": {
+          "firstSeenAt": {
+            "title": "Firstseenat",
+            "type": "string"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "postingTitle": {
+            "title": "Postingtitle",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "postingId",
+          "postingTitle",
+          "url",
+          "firstSeenAt"
+        ],
+        "title": "ReviewQuote",
+        "type": "object"
+      },
+      "ReviewRead": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "empty",
+              "error"
+            ],
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "result",
+          "detail"
+        ],
+        "title": "ReviewRead",
+        "type": "object"
+      },
+      "ReviewReopened": {
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "string"
+          },
+          "previous": {
+            "title": "Previous",
+            "type": "string"
+          }
+        },
+        "required": [
+          "previous",
+          "changed"
+        ],
+        "title": "ReviewReopened",
+        "type": "object"
+      },
+      "RoleToName": {
+        "properties": {
+          "firstSeenAt": {
+            "title": "Firstseenat",
+            "type": "string"
+          },
+          "levelTier": {
+            "enum": [
+              "new_grad",
+              "early_career",
+              "swe1",
+              "swe2",
+              "open",
+              "not_stated",
+              "senior"
+            ],
+            "title": "Leveltier",
+            "type": "string"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "start2027": {
+            "title": "Start2027",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "yearsAsked": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yearsasked"
+          }
+        },
+        "required": [
+          "postingId",
+          "title",
+          "url",
+          "location",
+          "firstSeenAt",
+          "levelTier",
+          "yearsAsked",
+          "start2027"
+        ],
+        "title": "RoleToName",
+        "type": "object"
+      },
+      "SearchCompany": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "inProgress": {
+            "title": "Inprogress",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "backlog",
+              "working",
+              "closed",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "statusLine": {
+            "title": "Statusline",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "aliases",
+          "domain",
+          "status",
+          "statusLine",
+          "inProgress"
+        ],
+        "title": "SearchCompany",
+        "type": "object"
+      },
+      "SearchIndex": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "companies": {
+            "items": {
+              "$ref": "#/components/schemas/SearchCompany"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/SearchPerson"
+            },
+            "title": "People",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "companies",
+          "people"
+        ],
+        "title": "SearchIndex",
+        "type": "object"
+      },
+      "SearchPerson": {
+        "properties": {
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "statusLine": {
+            "title": "Statusline",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "companyId",
+          "companyName",
+          "name",
+          "title",
+          "email",
+          "statusLine"
+        ],
+        "title": "SearchPerson",
+        "type": "object"
+      },
       "SenderSummary": {
         "properties": {
           "limitToday": {
@@ -512,6 +1855,61 @@
         ],
         "title": "SenderSummary",
         "type": "object"
+      },
+      "ThreadMessage": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "out",
+              "in"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "seq": {
+            "anyOf": [
+              {
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seq"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "direction",
+          "subject",
+          "body",
+          "at",
+          "from"
+        ],
+        "title": "ThreadMessage",
+        "type": "object"
       }
     }
   },
@@ -521,6 +1919,88 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/companies/{company_id}": {
+      "get": {
+        "operationId": "company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Company",
+        "tags": [
+          "company"
+        ]
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "health",
@@ -744,6 +2224,251 @@
           }
         },
         "summary": "Ping"
+      }
+    },
+    "/api/search/companies": {
+      "get": {
+        "operationId": "search_companies",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchCompany"
+                  },
+                  "title": "Response Search Companies",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Search Companies",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/search/index": {
+      "get": {
+        "operationId": "search_index",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchIndex"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Search Index",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/search/postings": {
+      "get": {
+        "operationId": "search_postings",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PostingHit"
+                  },
+                  "title": "Response Search Postings",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Search Postings",
+        "tags": [
+          "search"
+        ]
       }
     }
   }

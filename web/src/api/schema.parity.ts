@@ -13,4 +13,16 @@ export const _parity: [
   Same<T.JobRunSummary, S['JobRunSummary']>,
   Same<T.ReadQueueStatus, S['ReadQueueStatus']>,
   Same<T.HealthView, S['HealthView']>,
-] = [true, true, true, true];
+  Same<T.Fact, S['Fact']>,
+  Same<T.PostingFlag, S['PostingFlag']>,
+  Same<T.PostingRow, S['PostingRow']>,
+  Same<T.CompanyPerson, S['CompanyPerson']>,
+  Same<T.CompanyEvent, S['CompanyEvent']>,
+  Same<T.ReviewItem, S['ReviewItem']>,
+  Same<T.CompanyView, S['CompanyView']>,
+  Same<T.SearchCompany, S['SearchCompany']>,
+  Same<T.CompanyHit, S['SearchCompany']>,
+  Same<T.SearchPerson, S['SearchPerson']>,
+  Same<T.SearchIndex, S['SearchIndex']>,
+  Same<T.PostingHit, S['PostingHit']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

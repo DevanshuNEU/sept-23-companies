@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/companies/{company_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Company */
+        get: operations["company"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -47,6 +64,57 @@ export interface paths {
         };
         /** Ping */
         get: operations["ping"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search/companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Companies */
+        get: operations["search_companies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Index */
+        get: operations["search_index"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search/postings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Postings */
+        get: operations["search_postings"];
         put?: never;
         post?: never;
         delete?: never;
@@ -127,6 +195,148 @@ export interface components {
             /** Start */
             start: number;
         };
+        /** CompanyBoard */
+        CompanyBoard: {
+            /** Ats */
+            ats: string;
+            /** Emptystreak */
+            emptyStreak: number;
+            /** Errorstreak */
+            errorStreak: number;
+            /** Lastread */
+            lastRead: ("ok" | "empty" | "error") | null;
+            /** Lastreadat */
+            lastReadAt: string | null;
+            /** Token */
+            token: string;
+            /** Url */
+            url: string;
+        };
+        /** CompanyClosed */
+        CompanyClosed: {
+            /** At */
+            at: string;
+            /** Note */
+            note: string;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "referral" | "interview" | "no_sponsorship" | "no_referrals" | "already_hired" | "not_now" | "other";
+        };
+        /** CompanyEvent */
+        CompanyEvent: {
+            /**
+             * Actor
+             * @enum {string}
+             */
+            actor: "devanshu" | "claude" | "sender" | "crawler" | "rules" | "daily_list" | "import" | "system" | "source" | "reader";
+            /** At */
+            at: string;
+            /** Id */
+            id: number;
+            /** Importsource */
+            importSource: ("data_js" | "local_storage" | "contacts_json" | "radar_db" | "devboard" | "contacted_txt" | "devvault_notes") | null;
+            /** Kind */
+            kind: string;
+            /** Text */
+            text: string;
+        };
+        /** CompanyHeader */
+        CompanyHeader: {
+            /** Aliases */
+            aliases: string[];
+            closed: components["schemas"]["CompanyClosed"] | null;
+            /** Day */
+            day: number | null;
+            /** Domain */
+            domain: string | null;
+            /** Heldbytouchid */
+            heldByTouchId: number | null;
+            /** Hq */
+            hq: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Pausedat */
+            pausedAt: string | null;
+            /** Pickedon */
+            pickedOn: string | null;
+            /** Revision */
+            revision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "backlog" | "working" | "closed" | "removed";
+        };
+        /** CompanyPerson */
+        CompanyPerson: {
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "email" | "linkedin";
+            /** Lasttouchat */
+            lastTouchAt: string | null;
+            person: components["schemas"]["PersonRef"];
+            /** Statusline */
+            statusLine: string;
+            /**
+             * Tone
+             * @enum {string}
+             */
+            tone: "ok" | "info" | "warn" | "bad" | "idle";
+        };
+        /** CompanyTouch */
+        CompanyTouch: {
+            /** Messages */
+            messages: components["schemas"]["ThreadMessage"][];
+            person: components["schemas"]["PersonRef"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "replied" | "bounced" | "closed";
+            /** Summary */
+            summary: string;
+            /** Touchid */
+            touchId: number;
+        };
+        /** CompanyView */
+        CompanyView: {
+            /** Asof */
+            asOf: string;
+            board: components["schemas"]["CompanyBoard"] | null;
+            company: components["schemas"]["CompanyHeader"];
+            /** Events */
+            events: components["schemas"]["CompanyEvent"][];
+            /** Evidence */
+            evidence: components["schemas"]["Fact"][];
+            /** Facts */
+            facts: components["schemas"]["Fact"][];
+            /** Mailserverok */
+            mailServerOk: boolean | null;
+            /** People */
+            people: components["schemas"]["CompanyPerson"][];
+            /** Postings */
+            postings: components["schemas"]["PostingRow"][];
+            /** Reviewitems */
+            reviewItems: components["schemas"]["ReviewItem"][];
+            role: components["schemas"]["RoleToName"] | null;
+            /** Rulesetversion */
+            rulesetVersion: string;
+            /**
+             * Sponsorshipshown
+             * @enum {string}
+             */
+            sponsorshipShown: "has_sponsored" | "says_yes" | "says_no" | "opt_only" | "unclear" | "not_stated";
+            /** Summary */
+            summary: string;
+            /** Touches */
+            touches: components["schemas"]["CompanyTouch"][];
+        };
         /** ErrorEnvelope */
         ErrorEnvelope: {
             /** Checks */
@@ -135,6 +345,40 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+        };
+        /** Fact */
+        Fact: {
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "confirmed" | "estimate" | "guess";
+            /**
+             * Fact
+             * @enum {string}
+             */
+            fact: "size" | "stage" | "sponsorship" | "domain" | "hq" | "everify" | "lca" | "cap_exempt" | "staffing_risk" | "funding" | "headcount";
+            /** High */
+            high: number | null;
+            /** Id */
+            id: number;
+            /** Locked */
+            locked: boolean;
+            /** Low */
+            low: number | null;
+            /** Observedon */
+            observedOn: string | null;
+            /** Quote */
+            quote: string;
+            /**
+             * Sourcekind
+             * @enum {string}
+             */
+            sourceKind: "hand" | "posting" | "old_dashboard" | "yc" | "builtin" | "linkedin" | "website" | "formd" | "lca" | "everify" | "other" | "stapply" | "commoncrawl" | "hn" | "simplify";
+            /** Sourceref */
+            sourceRef: string;
+            /** Value */
+            value: string;
         };
         /** HealthBoards */
         HealthBoards: {
@@ -203,10 +447,97 @@ export interface components {
              */
             status: "running" | "ok" | "partial" | "failed";
         };
+        /** PersonRef */
+        PersonRef: {
+            /** Email */
+            email: string | null;
+            /** Id */
+            id: number;
+            /** Linkedinurl */
+            linkedinUrl: string | null;
+            /** Name */
+            name: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Rolekind
+             * @enum {string}
+             */
+            roleKind: "engineer" | "manager" | "founder" | "recruiter" | "alum" | "other";
+            /** Title */
+            title: string;
+        };
         /** Ping */
         Ping: {
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * PostingFlag
+         * @description One field where the reader and the phrase rules disagree (or the reader could not say), with both quotes.
+         */
+        PostingFlag: {
+            /** Field */
+            field: string;
+            /** Readerquote */
+            readerQuote: string;
+            /** Readervalue */
+            readerValue: string | null;
+            /** Rulesquote */
+            rulesQuote: string;
+            /** Rulesvalue */
+            rulesValue: string | null;
+        };
+        /** PostingHit */
+        PostingHit: {
+            /** Companyid */
+            companyId: number;
+            /** Companyname */
+            companyName: string;
+            /** Open */
+            open: boolean;
+            /** Postingid */
+            postingId: number;
+            /** Title */
+            title: string;
+        };
+        /** PostingRow */
+        PostingRow: {
+            /** Closereason */
+            closeReason: string | null;
+            /** Closedat */
+            closedAt: string | null;
+            /** Firstseenat */
+            firstSeenAt: string;
+            /** Flags */
+            flags: components["schemas"]["PostingFlag"][];
+            /** Hiddenrule */
+            hiddenRule: string | null;
+            /** Id */
+            id: number;
+            /** Lastseenat */
+            lastSeenAt: string;
+            /**
+             * Leveltier
+             * @enum {string}
+             */
+            levelTier: "new_grad" | "early_career" | "swe1" | "swe2" | "open" | "not_stated" | "senior";
+            /** Location */
+            location: string;
+            /**
+             * Sponsorship
+             * @enum {string}
+             */
+            sponsorship: "yes" | "no" | "opt_only" | "unclear" | "silent";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "closed" | "out_of_lane" | "hidden";
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
         };
         /** ReadQueueStatus */
         ReadQueueStatus: {
@@ -224,6 +555,155 @@ export interface components {
             /** Refused */
             refused: number;
         };
+        /** ReviewCompany */
+        ReviewCompany: {
+            /** Heldbytouchid */
+            heldByTouchId: number | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Pausedat */
+            pausedAt: string | null;
+            /** Picked */
+            picked: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "backlog" | "working" | "closed" | "removed";
+        };
+        /** ReviewItem */
+        ReviewItem: {
+            /** Agedays */
+            ageDays: number;
+            company: components["schemas"]["ReviewCompany"];
+            /** Holdsemail */
+            holdsEmail: boolean;
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "board_unreadable" | "board_empty" | "sponsorship_unclear" | "size_unknown" | "size_guess" | "domain_missing" | "flagged";
+            /** Lastokat */
+            lastOkAt: string | null;
+            /** Openpostings */
+            openPostings: number | null;
+            /** Openedat */
+            openedAt: string;
+            quote: components["schemas"]["ReviewQuote"] | null;
+            /** Reads */
+            reads: components["schemas"]["ReviewRead"][];
+            /** Reason */
+            reason: string;
+            reopened: components["schemas"]["ReviewReopened"] | null;
+            /** Revision */
+            revision: number;
+            /** Sizefacts */
+            sizeFacts: components["schemas"]["Fact"][];
+        };
+        /** ReviewQuote */
+        ReviewQuote: {
+            /** Firstseenat */
+            firstSeenAt: string;
+            /** Postingid */
+            postingId: number;
+            /** Postingtitle */
+            postingTitle: string;
+            /** Text */
+            text: string;
+            /** Url */
+            url: string;
+        };
+        /** ReviewRead */
+        ReviewRead: {
+            /** At */
+            at: string;
+            /** Detail */
+            detail: string;
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "ok" | "empty" | "error";
+        };
+        /** ReviewReopened */
+        ReviewReopened: {
+            /** Changed */
+            changed: string;
+            /** Previous */
+            previous: string;
+        };
+        /** RoleToName */
+        RoleToName: {
+            /** Firstseenat */
+            firstSeenAt: string;
+            /**
+             * Leveltier
+             * @enum {string}
+             */
+            levelTier: "new_grad" | "early_career" | "swe1" | "swe2" | "open" | "not_stated" | "senior";
+            /** Location */
+            location: string;
+            /** Postingid */
+            postingId: number;
+            /** Start2027 */
+            start2027: boolean;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+            /** Yearsasked */
+            yearsAsked: number | null;
+        };
+        /** SearchCompany */
+        SearchCompany: {
+            /** Aliases */
+            aliases: string[];
+            /** Domain */
+            domain: string | null;
+            /** Id */
+            id: number;
+            /** Inprogress */
+            inProgress: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "backlog" | "working" | "closed" | "removed";
+            /** Statusline */
+            statusLine: string;
+        };
+        /** SearchIndex */
+        SearchIndex: {
+            /** Asof */
+            asOf: string;
+            /** Companies */
+            companies: components["schemas"]["SearchCompany"][];
+            /** People */
+            people: components["schemas"]["SearchPerson"][];
+        };
+        /** SearchPerson */
+        SearchPerson: {
+            /** Companyid */
+            companyId: number;
+            /** Companyname */
+            companyName: string;
+            /** Email */
+            email: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Statusline */
+            statusLine: string;
+            /** Title */
+            title: string;
+        };
         /** SenderSummary */
         SenderSummary: {
             /** Limittoday */
@@ -236,6 +716,24 @@ export interface components {
              */
             state: "running" | "paused_by_you" | "paused_hard_block" | "outside_window" | "weekend" | "signed_out";
         };
+        /** ThreadMessage */
+        ThreadMessage: {
+            /** At */
+            at: string;
+            /** Body */
+            body: string;
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "out" | "in";
+            /** From */
+            from: string;
+            /** Seq */
+            seq: (0 | 1 | 2 | 3) | null;
+            /** Subject */
+            subject: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -245,6 +743,73 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    company: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     health: {
         parameters: {
             query?: never;
@@ -393,6 +958,205 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ping"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    search_companies: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchCompany"][];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    search_index: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchIndex"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    search_postings: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostingHit"][];
                 };
             };
             /** @description bad_request: the request was not valid */

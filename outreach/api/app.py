@@ -4,6 +4,7 @@ import pkgutil
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.routing import APIRoute
 
 import outreach.api.routers
@@ -55,6 +56,7 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
     app.include_router(api, responses=openapi.ERROR_RESPONSES)
     errors.install(app)
     openapi.install(app)
+    app.add_middleware(GZipMiddleware, minimum_size=1024)  # responses over 1 KB; the guard below stays outermost
     # Added last so it is the outermost middleware: a refused request never reaches the body parser or a router.
     app.add_middleware(GuardMiddleware, settings=settings)
     return app

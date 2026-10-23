@@ -9,8 +9,10 @@ export type RemoveReason = 'not_a_fit' | 'already_in_touch' | 'bigger_than_it_lo
 export type RoleKind = 'engineer' | 'manager' | 'founder' | 'recruiter' | 'alum' | 'other';
 export type LevelTier = 'new_grad' | 'early_career' | 'swe1' | 'swe2' | 'open' | 'not_stated' | 'senior';
 export type Confidence = 'confirmed' | 'estimate' | 'guess';
-export type FactKind = 'size' | 'stage' | 'sponsorship' | 'domain' | 'hq' | 'everify';
-export type SourceKind = 'hand' | 'posting' | 'old_dashboard' | 'yc' | 'builtin' | 'linkedin' | 'website' | 'formd' | 'lca' | 'everify' | 'other';
+export type FactKind = 'size' | 'stage' | 'sponsorship' | 'domain' | 'hq' | 'everify' | 'lca' | 'cap_exempt' | 'staffing_risk' | 'funding' | 'headcount';
+export type SourceKind =
+  | 'hand' | 'posting' | 'old_dashboard' | 'yc' | 'builtin' | 'linkedin' | 'website' | 'formd' | 'lca' | 'everify' | 'other'
+  | 'stapply' | 'commoncrawl' | 'hn' | 'simplify';
 export type SponsorshipShown = 'has_sponsored' | 'says_yes' | 'says_no' | 'opt_only' | 'unclear' | 'not_stated'; // derived
 export type MessageState = 'planned' | 'drafted' | 'approved' | 'sending' | 'send_unknown' | 'sent' | 'failed' | 'skipped';
 export type TouchState = 'open' | 'replied' | 'bounced' | 'closed';
@@ -20,7 +22,7 @@ export type CheckSeverity = 'block' | 'warn' | 'pass';
 export type ReviewKind = 'board_unreadable' | 'board_empty' | 'sponsorship_unclear' | 'size_unknown' | 'size_guess' | 'domain_missing' | 'flagged';
 export type NoGoReason = 'no_sponsorship' | 'citizenship' | 'over_300' | 'defence_contractor' | 'agency' | 'said_no' | 'stop_reply' | 'not_a_fit' | 'other';
 export type NoGoSource = 'devanshu' | 'rules' | 'reply' | 'import' | 'claude';
-export type Actor = 'devanshu' | 'claude' | 'sender' | 'crawler' | 'rules' | 'daily_list' | 'import' | 'system';
+export type Actor = 'devanshu' | 'claude' | 'sender' | 'crawler' | 'rules' | 'daily_list' | 'import' | 'system' | 'source' | 'reader';
 export type ImportSource = 'data_js' | 'local_storage' | 'contacts_json' | 'radar_db' | 'devboard' | 'contacted_txt' | 'devvault_notes';
 export type JobKind =
   | 'install' | 'rebuild' | 'crawl' | 'daily_list' | 'sender' | 'import' | 'discover' | 'resolve' | 'find_boards'
@@ -70,6 +72,7 @@ export interface ShellSummary {
 }
 export interface SearchCompany { id: Id; name: string; aliases: string[]; domain: string | null; status: CompanyStatus; statusLine: string; inProgress: boolean }
 export interface SearchPerson { id: Id; companyId: Id; companyName: string; name: string; title: string; email: string | null; statusLine: string }
+export type CompanyHit = SearchCompany; // GET /api/search/companies: the same row the index carries
 export interface SearchIndex { asOf: IsoTime; companies: SearchCompany[]; people: SearchPerson[] }
 export interface PostingHit { postingId: Id; title: string; companyId: Id; companyName: string; open: boolean }
 
@@ -182,10 +185,12 @@ export interface NoGoView {
 }
 
 // Company (spec 13.7)
+export interface PostingFlag { field: string; readerValue: string | null; rulesValue: string | null; readerQuote: string; rulesQuote: string }
 export interface PostingRow {
   id: Id; title: string; location: string; url: string; firstSeenAt: IsoTime; lastSeenAt: IsoTime;
   closedAt: IsoTime | null; closeReason: string | null; levelTier: LevelTier;
   sponsorship: 'yes' | 'no' | 'opt_only' | 'unclear' | 'silent'; state: 'open' | 'closed' | 'out_of_lane' | 'hidden'; hiddenRule: string | null;
+  flags: PostingFlag[]; // fields where the reader and the rules disagree, with both quotes ([] when the reader has not read it)
 }
 export interface CompanyPerson { person: PersonRef; channel: 'email' | 'linkedin'; statusLine: string; tone: 'ok' | 'info' | 'warn' | 'bad' | 'idle'; lastTouchAt: IsoTime | null }
 export interface CompanyEvent { id: Id; at: IsoTime; kind: string; text: string; actor: Actor; importSource: ImportSource | null }

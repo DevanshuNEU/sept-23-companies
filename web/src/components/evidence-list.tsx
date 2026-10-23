@@ -13,6 +13,11 @@ const FACT_LABELS: Record<FactKind, string> = {
   domain: 'Email domain',
   hq: 'HQ',
   everify: 'E-Verify',
+  lca: 'Labor filings',
+  cap_exempt: 'Cap-exempt',
+  staffing_risk: 'Staffing risk',
+  funding: 'Funding',
+  headcount: 'Headcount',
 };
 
 const SOURCE_LABELS: Record<SourceKind, string> = {
@@ -27,6 +32,10 @@ const SOURCE_LABELS: Record<SourceKind, string> = {
   lca: 'Labor filings',
   everify: 'E-Verify',
   other: 'Other',
+  stapply: 'Stapply',
+  commoncrawl: 'Common Crawl',
+  hn: 'Hacker News',
+  simplify: 'Simplify',
 };
 
 const CONFIDENCE_WORDS: Record<Confidence, string> = { confirmed: 'High', estimate: 'Medium', guess: 'Guess' };

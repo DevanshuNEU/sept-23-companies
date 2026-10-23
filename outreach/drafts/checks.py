@@ -391,7 +391,8 @@ def _near_identical(conn, d: DraftInput, family: list[int]) -> Check:
         f"AND m.state IN ({_in(OPEN_STATES)}) AND m.message_id IS NOT ? ORDER BY m.message_id",
         (*family, d.person_id, *OPEN_STATES, d.message_id)).fetchall()
     best, best_ratio = None, 0.0
-    matcher = difflib.SequenceMatcher(None, "", d.body.lower())
+    # autojunk off: on a body over 200 characters it junks common letters, so the score drops and depends on order.
+    matcher = difflib.SequenceMatcher(None, "", d.body.lower(), autojunk=False)
     for row in rows:
         matcher.set_seq1(row["body"].lower())
         if matcher.real_quick_ratio() < SIMILAR or matcher.quick_ratio() < SIMILAR:

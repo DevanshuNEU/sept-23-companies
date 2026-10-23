@@ -146,6 +146,20 @@ class Blocks(ChecksCase):
         self.colleague(self.acme, body=BODY.replace("forty thousand", "fifty thousand"))
         self.assert_blocks(self.run_on(), "near_identical")
 
+    def test_a_long_near_copy_blocks_in_both_directions(self):
+        # The final review's pair: about 94% alike, but difflib's autojunk scored it 66% one way and 89% the other.
+        variant = (BODY.replace("Hi Pat,", "Hi Sam,")
+                   .replace("your post on the queue rewrite is why I'm writing",
+                            "your talk on the billing service is why I'm reaching out")
+                   .replace("with retries and clean shutdowns", "with retries, backoff and clean restarts"))
+        self.assertGreater(len(BODY), 200)
+        _, sam_mid = self.colleague(self.acme, body=variant)
+        with self.subTest("his draft is the test body"):
+            self.assert_blocks(self.run_on(), "near_identical")
+        with self.subTest("his draft is the variant"):
+            self.conn.execute("UPDATE message SET body = ? WHERE message_id = ?", (BODY, sam_mid))
+            self.assert_blocks(self.run_on(body=variant), "near_identical")
+
     def test_a_skipped_colleague_draft_does_not_count(self):
         _, mid = self.colleague(self.acme)
         self.conn.execute("UPDATE message SET state = 'skipped' WHERE message_id = ?", (mid,))

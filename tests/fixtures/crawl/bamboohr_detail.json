@@ -1,0 +1,12 @@
+{
+  "meta": {"totalCount": 1},
+  "result": {
+    "jobOpening": {
+      "id": "41",
+      "jobOpeningName": "Software Engineer & Tooling",
+      "jobOpeningStatus": "Open",
+      "description": "<p>Build internal tools.</p><ul><li>Python</li><li>We sponsor visas</li></ul>",
+      "location": {"city": "Boston", "state": "Massachusetts"}
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "_shape": "shape from ats-scrapers (rippling.py), hand-written",
+  "id": "9d3b1c52-6a0e-4b9e-8f10-1a2b3c4d5e01",
+  "name": "Software Engineer, New Grad",
+  "description": {
+    "company": "<p>Acme builds warehouse robots.</p>",
+    "role": "<p>You will build services.</p><ul><li>Ship &amp; learn</li><li>We sponsor visas for the right person.</li></ul>"
+  },
+  "employmentType": {"label": "SALARIED_FT", "id": "Salaried, full-time"},
+  "createdOn": "2026-09-21T10:00:00Z",
+  "workLocations": ["San Francisco, CA"],
+  "payRangeDetails": []
+}

@@ -1,0 +1,57 @@
+{
+  "offers": [
+    {
+      "id": 421001,
+      "slug": "software-engineer-backend",
+      "title": "Software Engineer, Backend",
+      "status": "published",
+      "department": "Engineering",
+      "careers_url": "https://acme.recruitee.com/o/software-engineer-backend",
+      "location": "Amsterdam, Netherlands",
+      "city": "Amsterdam",
+      "country": "Netherlands",
+      "country_code": "NL",
+      "remote": false,
+      "created_at": "2026-09-14 08:15:02 UTC",
+      "updated_at": "2026-10-01 10:00:00 UTC",
+      "description": "<p>Build the <b>core API</b>.</p><ul><li>Go and Postgres</li></ul>",
+      "requirements": "<p>3 years of backend work.</p><p>We sponsor visas for the right person.</p>",
+      "candidates_count": 12,
+      "views": 340
+    },
+    {
+      "id": 421002,
+      "slug": "account-executive",
+      "title": "Account Executive",
+      "status": "published",
+      "department": "Sales",
+      "careers_url": "https://acme.recruitee.com/o/account-executive",
+      "location": "",
+      "city": "Austin",
+      "country": "United States",
+      "country_code": "US",
+      "remote": false,
+      "created_at": "2026-10-03 12:00:00 UTC",
+      "description": "<p>Sell to engineers.</p>",
+      "requirements": null,
+      "candidates_count": 3,
+      "views": 51
+    },
+    {
+      "id": 421003,
+      "slug": "data-engineer",
+      "title": "Data Engineer",
+      "status": "published",
+      "department": "Data",
+      "careers_url": "https://acme.recruitee.com/o/data-engineer",
+      "location": "Remote",
+      "city": "",
+      "country": "",
+      "country_code": null,
+      "remote": true,
+      "created_at": "not a date",
+      "description": null,
+      "requirements": "<p>SQL.</p>"
+    }
+  ]
+}

@@ -8,8 +8,12 @@ import hashlib
 import itertools
 import shutil
 import sqlite3
+import sys
 import tempfile
+import types
+import unittest
 from pathlib import Path
+from unittest import mock
 
 from outreach.install import install
 from outreach.store import connect
@@ -32,11 +36,42 @@ def fresh_store() -> sqlite3.Connection:
     return connect(path)
 
 
+# The 14 ATSs the crawler plan builds an adapter for (#21). The other board.ats values (gem, icims, cornerstone and
+# so on) have none, so #31 gives a company that only has those a watched careers page.
+PLANNED_ADAPTERS = frozenset({
+    "greenhouse", "lever", "ashby", "smartrecruiters", "workday", "workable", "oracle_orc", "rippling", "breezy",
+    "pinpoint", "teamtailor", "recruitee", "bamboohr", "jazzhr"})
+
+
+def planned_adapters(case: unittest.TestCase) -> None:
+    """For the test's length, `outreach.crawl.ats.supported_ats()` names the 14 `PLANNED_ADAPTERS`.
+
+    The crawler is built one adapter at a time, so the real set grows with every task and a #31 test that depended on
+    it would change with each. Pinning the plan's end state keeps #31's last find_boards pass (a company whose boards
+    all lack an adapter gets a watched page, which reads its careers page) the same in every task. The test must
+    route the careers pages of the companies that pass reaches. A test of the pass that needs another set patches
+    `sys.modules` itself, inside this pin.
+    """
+    fake = types.SimpleNamespace(supported_ats=lambda: PLANNED_ADAPTERS)
+    patch = mock.patch.dict(sys.modules, {"outreach.crawl.ats": fake})
+    patch.start()
+    case.addCleanup(patch.stop)
+
+
 def seed_company(conn: sqlite3.Connection, name: str = "Acme") -> int:
     now = utcnow()
     cur = conn.execute(
         "INSERT INTO company(name, status_at, created_at) VALUES (?, ?, ?)",
         (name, now, now),
+    )
+    return cur.lastrowid
+
+
+def seed_board(conn: sqlite3.Connection, company_id: int, ats: str = "greenhouse", token: str = "acme") -> int:
+    """A never-read board for the company. Returns the board id."""
+    cur = conn.execute(
+        "INSERT INTO board(company_id, ats, token, created_at) VALUES (?, ?, ?, ?)",
+        (company_id, ats, token, utcnow()),
     )
     return cur.lastrowid
 

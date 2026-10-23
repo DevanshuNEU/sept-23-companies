@@ -1,0 +1,27 @@
+{
+  "total": 3,
+  "jobPostings": [
+    {
+      "title": "Software Engineer II",
+      "externalPath": "/job/Boston-MA/Software-Engineer-II_R-2001",
+      "locationsText": "Boston, MA",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": ["R-2001"]
+    },
+    {
+      "title": "Platform Engineer",
+      "externalPath": "/job/Boston-MA/Platform-Engineer_R-2003",
+      "locationsText": "Boston, MA",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": ["R-2003"]
+    },
+    {
+      "title": "Site Reliability Engineer",
+      "externalPath": "/job/Remote-US/Site-Reliability-Engineer_R-2004",
+      "locationsText": "Remote, US",
+      "postedOn": "Posted 30+ Days Ago",
+      "bulletFields": ["R-2004"]
+    }
+  ],
+  "facets": []
+}

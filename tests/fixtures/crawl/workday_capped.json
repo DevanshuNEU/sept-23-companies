@@ -1,0 +1,42 @@
+{
+  "total": 2000,
+  "jobPostings": [
+    {
+      "title": "Software Engineer II",
+      "externalPath": "/job/Boston-MA/Software-Engineer-II_R-2001",
+      "locationsText": "Boston, MA",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": ["R-2001"]
+    },
+    {
+      "title": "Sales Development Representative",
+      "externalPath": "/job/Chicago-IL/Sales-Development-Representative_R-2002",
+      "locationsText": "Chicago, IL",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": ["R-2002"]
+    }
+  ],
+  "facets": [
+    {
+      "facetParameter": "locationMainGroup",
+      "descriptor": "Location",
+      "values": [
+        {
+          "facetParameter": "locations",
+          "descriptor": "Locations",
+          "values": [
+            {"descriptor": "Boston, MA", "id": "7f8e9d0c1b2a4f3e8d7c6b5a49382001", "count": 900}
+          ]
+        }
+      ]
+    },
+    {
+      "facetParameter": "jobFamilyGroup",
+      "descriptor": "Job Family Group",
+      "values": [
+        {"descriptor": "Engineering", "id": "c2a7f1e0b3d94a6f8e5d4c3b2a190001", "count": 1200},
+        {"descriptor": "Sales", "id": "c2a7f1e0b3d94a6f8e5d4c3b2a190002", "count": 800}
+      ]
+    }
+  ]
+}

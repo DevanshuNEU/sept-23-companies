@@ -1,0 +1,60 @@
+# The crawler's numbers (issue #21). Loaded by config.py, which refuses values outside the ranges it checks.
+
+# How often a board is read: its next read is due after (age / age_divisor) seconds, kept between the floor and
+# the ceiling.
+floor_s = 21600
+ceiling_s = 604800
+age_divisor = 8
+# A board deferred by the breaker or the tick budget is due again after this many seconds.
+defer_s = 1800
+# An outage shields a board (its error, or a mass empty, is held as a deferral) only while its last read is younger
+# than this. After that the read is written as it is, so a host that blocks for good still reaches Needs you.
+outage_grace_s = 86400
+
+# The declared User-Agent: no contact address, no URL. Equal to outreach.net.USER_AGENT.
+user_agent = "outreach-crawler/1.0 (personal job search)"
+timeout_s = 30
+max_bytes = 20000000
+max_redirects = 3
+
+# Seconds between two requests to one host bucket; a bucket is the longest suffix below that matches the host.
+default_host_interval_s = 1.0
+# Failures in a row on one bucket before the breaker opens.
+breaker_failures = 5
+
+# Rows per write batch (2,000 to 5,000), postings decided per batch, detail requests per read.
+batch_rows = 2000
+decide_batch = 100
+detail_per_read = 150
+
+# One tick: boards started at most, seconds of budget before no new board starts, top companies read first.
+boards_per_tick = 500
+tick_budget_s = 1500
+top_companies = 300
+
+# Watched careers pages: seconds between reads of one page, pages per tick, text shorter than this is unreadable.
+watch_interval_s = 604800
+watch_per_tick = 40
+watch_min_text_chars = 200
+
+# A posting older than this many months is stale (1 to 60). Never a hide and never a close.
+stale_after_months = 12
+
+# A level-fit engineering posting's body is fetched again after this many days (ruling 6).
+body_refetch_days = 30
+
+[host_interval_s]
+"greenhouse.io" = 0.25
+"lever.co" = 0.25
+"ashbyhq.com" = 0.5
+"smartrecruiters.com" = 0.2
+"workable.com" = 2.0
+"rippling.com" = 0.5
+"bamboohr.com" = 1.0
+"breezy.hr" = 1.0
+"pinpointhq.com" = 0.5
+"teamtailor.com" = 0.5
+"recruitee.com" = 0.5
+"applytojob.com" = 2.0
+"myworkdayjobs.com" = 1.0
+"oraclecloud.com" = 1.0

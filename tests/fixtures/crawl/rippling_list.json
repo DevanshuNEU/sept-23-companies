@@ -1,0 +1,22 @@
+[
+  {
+    "id": "9d3b1c52-6a0e-4b9e-8f10-1a2b3c4d5e01",
+    "name": "Software Engineer, New Grad",
+    "url": "https://ats.rippling.com/acme/jobs/9d3b1c52-6a0e-4b9e-8f10-1a2b3c4d5e01",
+    "department": {"id": "Engineering", "label": "Engineering"},
+    "workLocation": {"id": "loc-1", "label": "San Francisco, CA"}
+  },
+  {
+    "id": "9d3b1c52-6a0e-4b9e-8f10-1a2b3c4d5e02",
+    "name": "Account Executive",
+    "department": {"id": "Sales", "label": "Sales"},
+    "workLocation": "Remote (United States)"
+  },
+  {
+    "id": "9d3b1c52-6a0e-4b9e-8f10-1a2b3c4d5e03",
+    "title": "Data Engineer",
+    "url": "https://ats.rippling.com/acme/jobs/9d3b1c52-6a0e-4b9e-8f10-1a2b3c4d5e03",
+    "department": null,
+    "workLocation": null
+  }
+]

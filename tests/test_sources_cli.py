@@ -24,9 +24,10 @@ from outreach.sources.formd import SEC_USER_AGENT
 from outreach.sources.stapply import MANIFEST_URL
 from outreach.store import connect, finish_job, start_job, writes
 from tests.fakes import FakeClient, status_response, text_response
+from tests.storetest import planned_adapters, table_marks
 from tests.test_formd import DATASET, routes as formd_routes
 from tests.test_hn import NOV, OCT, fixture_client, november_client
-from tests.test_jobs_find_boards import STAPPLY, careers_routes
+from tests.test_jobs_find_boards import CAREERS, STAPPLY, careers_routes
 from tests.test_lca_source import FILES
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -70,6 +71,7 @@ def all_routes(**careers_overrides) -> dict:
 
 class CliCase(unittest.TestCase):
     def setUp(self):
+        planned_adapters(self)
         folder = Path(tempfile.mkdtemp(prefix="outreach-cli-test-"))
         self.addCleanup(shutil.rmtree, folder, True)
         self.db = folder / "outreach.db"
@@ -209,6 +211,22 @@ class OtherCommandsTest(CliCase):
         self.assertTrue(careers)
         for url, headers in careers:
             self.assertEqual(headers, {}, url)  # no caller User-Agent, so no contact address can ride along
+
+    def test_find_boards_rerun_with_an_unread_board_writes_nothing_new(self):
+        # Gem has no adapter in the plan, so the last pass gives Gemco a watched page, once (#31 rule 9).
+        self.ok("add", "--name", "Gemco Labs", "--reason", "a friend works there", "--domain", "gemco.example",
+                "--ats", "gem:gemco")
+        self.client.routes["https://gemco.example/careers"] = CAREERS / "plain_page.html"
+        first = self.ok("find-boards")
+        self.assertEqual(first["report"]["watched_pages"], 1)
+        conn = self.conn()
+        marks = table_marks(conn)
+        second = self.ok("find-boards")
+        self.assertEqual((second["status"], second["report"]["watched_pages"]), ("ok", 0))
+        self.assertEqual(table_marks(conn), marks)
+        self.assertEqual(conn.execute("SELECT count(*) FROM watched_page").fetchone()[0], 1)
+        self.assertEqual(self.client.requests.count("https://gemco.example/careers"), 1)  # not fetched again
+        self.assertEqual(self.client.unrouted, [])
 
     def test_store_missing_exits_1_with_the_install_command(self):
         self.db.unlink()

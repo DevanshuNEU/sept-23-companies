@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "Id": "300000123456789",
+      "Title": "Software Engineer, New Grad",
+      "ExternalDescriptionStr": "<p>We are hiring a new grad engineer.</p>",
+      "ExternalResponsibilitiesStr": "<ul><li>Build services</li><li>Ship &amp; learn</li></ul>",
+      "ExternalQualificationsStr": "<p>A CS degree</p><p>We sponsor visas for the right person.</p>",
+      "CorporateDescriptionStr": "<p>About the company, not read.</p>"
+    }
+  ],
+  "count": 1,
+  "hasMore": false,
+  "limit": 25,
+  "offset": 0
+}

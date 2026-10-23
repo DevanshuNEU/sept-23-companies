@@ -15,3 +15,9 @@ class Wire(BaseModel):
         populate_by_name=True,
         json_schema_serialization_defaults_required=True,
     )
+
+
+class WireRequest(Wire):
+    """Base for request bodies: an unknown field is a 400 that names it, never silently dropped."""
+
+    model_config = ConfigDict(extra="forbid")

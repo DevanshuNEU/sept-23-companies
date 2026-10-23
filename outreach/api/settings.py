@@ -1,7 +1,8 @@
 """Run settings from the environment, with the guards that keep the API off every other port.
 
 The API listens on 127.0.0.1 only. Ports 3001, 3002, 3011 and 3013 belong to the old dashboard, the mail API and
-their previews; 5173 belongs to the web dev server (it is an allowed origin, never a port to bind).
+their previews; 5173 belongs to the web dev server (an allowed origin, never a port to bind). Whether port 3100 may
+be used is decided in `__main__`, not here, so this module does not depend on which checkout it runs in.
 """
 import os
 import re
@@ -13,6 +14,7 @@ import live_checkout
 from outreach.store.db import DEFAULT_PATH, normalise
 
 FORBIDDEN_PORTS = frozenset({3001, 3002, 3011, 3013})
+WEB_DEV_PORTS = frozenset({5173})  # the web dev server: an allowed origin, never a port for the API
 DEFAULT_PORT = 3100
 LOOPBACK = "127.0.0.1"
 DEFAULT_BANNED_PHRASES = "~/Desktop/DevVault/job-search/outreach/banned_phrases.txt"
@@ -48,6 +50,8 @@ def _port(name: str, text: str) -> int:
         raise SettingsError(f"{name} must be from 1024 to 65535, got {port}")
     if port in FORBIDDEN_PORTS:
         raise SettingsError(f"{name} cannot be {port}: that port belongs to the old dashboard or the mail API")
+    if port in WEB_DEV_PORTS:
+        raise SettingsError(f"{name} cannot be {port}: that port belongs to the web dev server")
     return port
 
 

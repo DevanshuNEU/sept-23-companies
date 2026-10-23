@@ -2,8 +2,9 @@
 import argparse
 import sys
 
+import live_checkout
 from outreach.api.app import create_app
-from outreach.api.settings import SettingsError, settings_from_env
+from outreach.api.settings import DEFAULT_PORT, SettingsError, settings_from_env
 from outreach.store import StoreError, connect
 
 
@@ -13,6 +14,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         settings = settings_from_env()
+        if settings.port == DEFAULT_PORT and not live_checkout.is_live():
+            raise SettingsError(
+                f"port {DEFAULT_PORT} is the live API's port and only runs from the live checkout "
+                f"({live_checkout.LIVE_ROOT}); set OUTREACH_API_PORT to another port"
+            )
         app = create_app(settings)  # refuses the live store outside the live checkout
         if args.check:
             connect(settings.db_path).close()

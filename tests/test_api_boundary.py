@@ -4,6 +4,7 @@ Everything else in `outreach/` stays standard library so the sender, the crawler
 the API's packages, and none of them can reach the one approve route.
 """
 import ast
+import re
 import shutil
 import sys
 import tempfile
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTREACH = "outreach"
 ALLOWED_OUTSIDE_API = set(sys.stdlib_module_names) | {"outreach", "live_checkout"}
 OLD_MAILER_PACKAGES = {"mail", "refresh", "dashboard"}
+PINNED = re.compile(r"^[A-Za-z0-9_.-]+==[0-9]+(\.[0-9]+)+$")
 
 
 def imports_of(path: Path, package: str) -> list[str]:
@@ -116,15 +118,19 @@ class StdlibBoundaryTest(unittest.TestCase):
                     found.append(f"{path.relative_to(ROOT)} imports {name}")
         self.assertEqual(found, [])
 
+    def test_the_pin_pattern_accepts_exact_versions_only(self):
+        for good in ("fastapi==0.161.1", "pydantic==2.14.1", "uvicorn==0.54.0"):
+            self.assertRegex(good, PINNED)
+        for bad in ("fastapi==", "fastapi==*", "fastapi==latest", "fastapi==0.161.*", "fastapi>=0.1", "fastapi", "fastapi==1"):
+            self.assertNotRegex(bad, PINNED)
+
     def test_runtime_dependencies_stay_empty(self):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(project["project"]["dependencies"], [])
         group = project["dependency-groups"]["api"]
         self.assertTrue(group)
         for entry in group:
-            self.assertIn("==", entry, f"{entry} is not pinned with ==")
-            self.assertNotIn(">", entry)
-            self.assertNotIn("~", entry)
+            self.assertRegex(entry, PINNED, f"{entry} is not pinned to an exact version with ==")
         self.assertEqual(project["tool"]["uv"]["default-groups"], ["api"])
 
 

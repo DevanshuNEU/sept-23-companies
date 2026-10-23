@@ -8,7 +8,7 @@ from tests.apitest import ApiCase
 PROBES = '''
 from fastapi import APIRouter
 from outreach.api.errors import ApiProblem
-from outreach.api.models.base import Wire
+from outreach.api.models.base import Wire, WireRequest
 
 router = APIRouter()
 
@@ -34,6 +34,15 @@ def with_checks():
 @router.post("/probe/echo", response_model=Person)
 def echo(body: Person) -> Person:
     return body
+
+
+class Strict(WireRequest):
+    first_name: str
+
+
+@router.post("/probe/strict")
+def strict(body: Strict):
+    return {"ok": True}
 
 
 @router.get("/probe/camel", response_model=Person)
@@ -128,6 +137,11 @@ class EnvelopeTest(ApiCase):
         self.assertIn("personId", body["message"])
         self.assertNotIn("Ada", body["message"])
 
+    def test_a_request_body_with_an_unknown_field_is_refused_by_name(self):
+        body = self.assert_envelope(self.post("/api/probe/strict", {"firstName": "A", "nope": 1}), 400, "bad_request")
+        self.assertIn("nope", body["message"])
+        self.assertEqual(self.post("/api/probe/strict", {"first_name": "A"}).status_code, 200)
+
     def test_validation_error_names_a_query_field(self):
         body = self.assert_envelope(self.get("/api/probe/query?limit=abc"), 400, "bad_request")
         self.assertIn("limit", body["message"])
@@ -189,6 +203,17 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(Sample(person_id=1).model_dump(by_alias=True), {"personId": 1})
         self.assertEqual(Sample.model_validate({"personId": 2}).person_id, 2)
         self.assertEqual(Sample.model_validate({"person_id": 3}).person_id, 3)
+
+    def test_request_models_forbid_extra_fields_and_response_models_do_not_need_to(self):
+        from outreach.api.models.base import WireRequest
+
+        class In(WireRequest):
+            person_id: int
+
+        with self.assertRaises(Exception):
+            In.model_validate({"personId": 1, "extra": 2})
+        self.assertEqual(In.model_validate({"personId": 1}).person_id, 1)
+        self.assertEqual(In.model_json_schema().get("additionalProperties"), False)
 
     def test_the_envelope_model_fields(self):
         self.assertEqual(set(ErrorEnvelope.model_fields), {"code", "message", "checks"})

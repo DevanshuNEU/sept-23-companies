@@ -9,7 +9,7 @@ from unittest import mock
 from outreach.api.__main__ import main
 from outreach.api.app import create_app
 from outreach.api.config import load_config
-from outreach.api.settings import FORBIDDEN_PORTS, Settings, SettingsError, settings_from_env
+from outreach.api.settings import FORBIDDEN_PORTS, WEB_DEV_PORTS, Settings, SettingsError, settings_from_env
 from outreach.store import DEFAULT_PATH
 from tests.apitest import ApiCase
 from tests.storetest import fresh_store
@@ -31,6 +31,23 @@ class SettingsTest(unittest.TestCase):
         for port in sorted(FORBIDDEN_PORTS):
             with self.subTest(port=port), self.assertRaises(SettingsError):
                 settings_from_env({"OUTREACH_API_PORT": str(port)})
+
+    def test_the_web_dev_port_is_refused_as_a_listen_port_but_allowed_as_an_origin(self):
+        self.assertEqual(WEB_DEV_PORTS, frozenset({5173}))
+        with self.assertRaises(SettingsError) as ctx:
+            settings_from_env({"OUTREACH_API_PORT": "5173"})
+        self.assertIn("5173", str(ctx.exception))
+        with self.assertRaises(SettingsError):
+            settings_from_env({"CONDUCTOR_PORT": "5172"})  # 5172 + 1
+        self.assertEqual(
+            settings_from_env({"OUTREACH_DEV_ORIGINS": "http://127.0.0.1:5173"}).dev_origins,
+            frozenset({"http://127.0.0.1:5173"}),
+        )
+
+    def test_settings_from_env_stays_pure_about_the_checkout(self):
+        # The live-checkout rule for port 3100 lives in main(), so this works the same in every checkout.
+        with mock.patch("live_checkout.is_live", return_value=False):
+            self.assertEqual(settings_from_env({}).port, 3100)
 
     def test_port_must_be_a_number_in_range(self):
         for bad in ("80", "1023", "65536", "abc", "", "31.5", "-1"):
@@ -116,6 +133,7 @@ class ConfigTest(unittest.TestCase):
 def scratch_env(**extra):
     """The environment `main` reads: no workspace port, no API overrides, and a store that is installed."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("OUTREACH_API_") and k != "CONDUCTOR_PORT"}
+    env["OUTREACH_API_PORT"] = "3150"  # 3100 is the live API's port and main refuses it outside the live checkout
     env.update(extra)
     return mock.patch.dict(os.environ, env, clear=True)
 
@@ -152,12 +170,40 @@ class CheckTest(unittest.TestCase):
         self.assertIn("outreach.install", err.getvalue())
 
     def test_check_refuses_the_live_store_outside_the_live_checkout(self):
-        # is_live is forced false so this test is the same in a worktree and in the live checkout, and never opens it.
+        # is_live is forced false so this test is the same in a worktree and in the live checkout. connect is patched
+        # to fail the test, so a missing guard cannot open the live store from here.
+        def opened(*args, **kwargs):
+            raise AssertionError("the live store was opened")
+
         with mock.patch("live_checkout.is_live", return_value=False):
-            with scratch_env(OUTREACH_DB=DEFAULT_PATH):
-                with self.assertRaises(SystemExit) as ctx:
-                    main(["--check"])
+            with mock.patch("outreach.api.__main__.connect", opened):
+                with scratch_env(OUTREACH_DB=DEFAULT_PATH):
+                    with self.assertRaises(SystemExit) as ctx:
+                        main(["--check"])
         self.assertIn("live checkout", str(ctx.exception))
+
+    def test_port_3100_is_refused_outside_the_live_checkout_with_a_plain_message(self):
+        for argv in (["--check"], []):
+            with self.subTest(argv=argv):
+                err = io.StringIO()
+                served = []
+                with mock.patch("live_checkout.is_live", return_value=False):
+                    with mock.patch("uvicorn.run", lambda app, **kw: served.append(kw)):
+                        with scratch_env(OUTREACH_DB=installed_store_path(self), OUTREACH_API_PORT="3100"):
+                            with mock.patch("sys.stderr", err):
+                                self.assertEqual(main(argv), 1)
+                self.assertEqual(served, [])
+                self.assertIn("3100", err.getvalue())
+                self.assertIn("live checkout", err.getvalue())
+                self.assertIn("OUTREACH_API_PORT", err.getvalue())
+
+    def test_port_3100_is_the_default_and_allowed_in_the_live_checkout(self):
+        calls = []
+        with mock.patch("live_checkout.is_live", return_value=True):
+            with mock.patch("uvicorn.run", lambda app, **kw: calls.append(kw)):
+                with scratch_env(OUTREACH_DB=installed_store_path(self), OUTREACH_API_PORT="3100"):
+                    self.assertEqual(main([]), 0)
+        self.assertEqual(calls[0]["port"], 3100)
 
     def test_the_app_refuses_the_live_store_outside_the_live_checkout(self):
         live = Settings(
@@ -176,7 +222,7 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         kw = calls[0]
         self.assertEqual(kw["host"], "127.0.0.1")
-        self.assertEqual(kw["port"], 3100)
+        self.assertEqual(kw["port"], 3150)
         self.assertIs(kw["proxy_headers"], False)
         self.assertIs(kw["server_header"], False)
 

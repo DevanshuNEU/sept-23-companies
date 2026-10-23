@@ -6,6 +6,7 @@ apart from the rank moves. The CLI reads the two newest stored versions, and `ra
 code and config against a stored version and writes nothing."""
 import contextlib
 import dataclasses
+import gc
 import io
 import unittest
 from unittest import mock
@@ -260,6 +261,9 @@ class CliTests(unittest.TestCase):
     def main(self, *argv: str) -> tuple[int, str, str]:
         from outreach.ranking.__main__ import main
         out, err = io.StringIO(), io.StringIO()
+        # Collect garbage left by earlier tests first: a connection freed during the capture would print its
+        # ResourceWarning into err (it did on a Linux runner), and these tests assert err is empty.
+        gc.collect()
         with mock.patch.dict("os.environ", {"OUTREACH_DB": self.path}), contextlib.redirect_stdout(out), \
                 contextlib.redirect_stderr(err):
             code = main(list(argv))

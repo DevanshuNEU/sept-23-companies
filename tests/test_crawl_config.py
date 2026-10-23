@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from outreach.crawl.config import CONFIG_PATH, CrawlConfig, load_crawl_config
+from outreach.crawl.ats import supported_ats
+from outreach.crawl.config import ATS_HOSTS, CONFIG_PATH, CrawlConfig, load_crawl_config
 from outreach.net import USER_AGENT
 
 
@@ -18,6 +19,75 @@ def _load_with(**changes):
         p = Path(d) / "config.toml"
         p.write_text(text, encoding="utf-8")
         return load_crawl_config(p)
+
+
+def _load_text(text):
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "config.toml"
+        p.write_text(text, encoding="utf-8")
+        return load_crawl_config(p)
+
+
+_OFF_TABLE = re.compile(r"(?ms)^\[ats_off\]\n.*?(?=^\[|\Z)")
+
+
+def _with_off(lines):
+    """The shipped config with its `[ats_off]` table replaced by these lines (None drops the table)."""
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    assert _OFF_TABLE.search(text), "the shipped config has an [ats_off] table"
+    table = "" if lines is None else "[ats_off]\n" + "".join(line + "\n" for line in lines) + "\n"
+    return _OFF_TABLE.sub(lambda _: table, text)
+
+
+class AtsSwitchTests(unittest.TestCase):
+    """The per-ATS off switch (#46): a reader whose host forbids it is off, with its reason, until its line goes."""
+
+    def test_shipped_config_switches_off_smartrecruiters_and_pinpoint_with_a_robots_reason(self):
+        cfg = load_crawl_config()
+        self.assertEqual(sorted(cfg.ats_off), ["pinpoint", "smartrecruiters"])
+        for ats, reason in cfg.ats_off.items():
+            self.assertIn("robots.txt", reason, ats)
+            self.assertIn("2026-10-23", reason, ats)
+            self.assertFalse(cfg.reads(ats), ats)
+        for ats in supported_ats() - set(cfg.ats_off):
+            self.assertTrue(cfg.reads(ats), ats)
+
+    def test_deleting_a_line_turns_that_reader_back_on(self):
+        cfg = _load_text(_with_off(['pinpoint = "robots.txt is Disallow: / (2026-10-23)"']))
+        self.assertTrue(cfg.reads("smartrecruiters"))
+        self.assertFalse(cfg.reads("pinpoint"))
+        everything = _load_text(_with_off([]))
+        self.assertEqual(everything.ats_off, {})
+        self.assertTrue(all(everything.reads(a) for a in supported_ats()))
+
+    def test_an_unknown_ats_name_fails_at_load(self):
+        for name in ("smartrecruiter", "SmartRecruiters", "icims", "dover"):
+            with self.assertRaisesRegex(ValueError, f"ats_off names {name}, which is not an ATS the crawler reads"):
+                _load_text(_with_off([f'{name} = "a reason"']))
+
+    def test_every_switch_needs_a_reason(self):
+        for value in ('""', '"   "', "true", "1"):
+            with self.assertRaisesRegex(ValueError, "ats_off.smartrecruiters must give the reason"):
+                _load_text(_with_off([f"smartrecruiters = {value}"]))
+
+    def test_a_missing_ats_off_table_is_named(self):
+        with self.assertRaises(KeyError) as ctx:
+            _load_text(_with_off(None))
+        self.assertIn("ats_off", str(ctx.exception))
+
+    def test_off_host_names_the_switched_off_ats_of_a_host_and_its_subdomains(self):
+        cfg = load_crawl_config()
+        self.assertEqual(cfg.off_host("api.smartrecruiters.com"), "smartrecruiters")
+        self.assertEqual(cfg.off_host("jobs.smartrecruiters.com"), "smartrecruiters")
+        self.assertEqual(cfg.off_host("acme.pinpointhq.com"), "pinpoint")
+        self.assertEqual(cfg.off_host("ACME.PinpointHQ.com."), "pinpoint")
+        for host in ("boards-api.greenhouse.io", "notsmartrecruiters.com", "pinpointhq.com.evil.com", "acme.com", ""):
+            self.assertIsNone(cfg.off_host(host), host)
+        self.assertIsNone(_load_text(_with_off([])).off_host("api.smartrecruiters.com"))
+
+    def test_ats_hosts_names_every_reader_and_its_host_bucket(self):
+        self.assertEqual(set(ATS_HOSTS), supported_ats())
+        self.assertLessEqual(set(ATS_HOSTS.values()), set(load_crawl_config().host_interval_s))
 
 
 class CrawlConfigTests(unittest.TestCase):

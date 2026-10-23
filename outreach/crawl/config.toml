@@ -58,3 +58,10 @@ body_refetch_days = 30
 "applytojob.com" = 2.0
 "myworkdayjobs.com" = 1.0
 "oraclecloud.com" = 1.0
+
+# Readers switched off (#46), each with the reason. A board on one of these ATSs is never read, probed or slug-probed,
+# and its state, postings and decisions stay as they are; no request goes to the ATS's host. Deleting a line turns
+# that reader back on. A name that is not one of the crawler's readers fails at load.
+[ats_off]
+smartrecruiters = "robots.txt on api.smartrecruiters.com allows only LinkedInBot (checked 2026-10-23)"
+pinpoint = "robots.txt on {tenant}.pinpointhq.com is Disallow: / (checked 2026-10-23)"

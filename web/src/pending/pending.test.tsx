@@ -478,6 +478,90 @@ describe('flush order (N3)', () => {
     expect(log).toEqual(['a:start', 'a:end', 'b:start', 'b:end', 'c:start', 'c:end']);
   });
 
+  /** An approve past its window and still waiting for the server. */
+  async function inFlight(log: string[]) {
+    const first = steps(log, 'first');
+    queue('first', first.commit);
+    await settle(8000);
+    expect(log).toEqual(['first:start']);
+    return first;
+  }
+  /** Undo buttons in toasts that are not on their way out (a dismissed toast lingers for its exit animation). */
+  const liveUndos = () => screen.queryAllByRole('button', { name: 'Undo' }).filter((b) => b.closest('[data-sonner-toast]')?.getAttribute('data-removed') !== 'true');
+  const startFlush = () => act(() => void api.flushPending!());
+
+  it('a pagehide during a flush\'s wait still sends every held write, once each, in queue order', async () => {
+    await setup();
+    const log: string[] = [];
+    const first = await inFlight(log);
+    const b = steps(log, 'b');
+    const c = steps(log, 'c');
+    queue('b', b.commit);
+    queue('c', c.commit);
+    startFlush();
+    await settle();
+    expect(log).toEqual(['first:start']);
+
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    expect(log).toEqual(['first:start', 'b:start', 'c:start']);
+    expect(b.commit).toHaveBeenCalledWith({ requestId: expect.any(String), keepalive: true });
+    expect(c.commit).toHaveBeenCalledWith({ requestId: expect.any(String), keepalive: true });
+
+    first.finish();
+    b.finish();
+    c.finish();
+    await settle(50);
+    expect(b.commit).toHaveBeenCalledTimes(1);
+    expect(c.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('two overlapping flushes keep queue order', async () => {
+    await setup();
+    const log: string[] = [];
+    const first = await inFlight(log);
+    const b = steps(log, 'b');
+    const c = steps(log, 'c');
+    queue('b', b.commit);
+    startFlush();
+    queue('c', c.commit);
+    startFlush();
+    await settle();
+    expect(log).toEqual(['first:start']);
+
+    first.finish();
+    await settle();
+    expect(log).toEqual(['first:start', 'first:end', 'b:start']);
+    b.finish();
+    await settle();
+    expect(log).toEqual(['first:start', 'first:end', 'b:start', 'b:end', 'c:start']);
+    c.finish();
+    await settle();
+    expect(b.commit).toHaveBeenCalledTimes(1);
+    expect(c.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('Undo is not offered for a held entry during the wait, and the write is sent', async () => {
+    await setup();
+    const log: string[] = [];
+    const first = await inFlight(log);
+    const b = steps(log, 'b');
+    queue('b', b.commit);
+    await settle();
+    expect(liveUndos()).toHaveLength(1);
+    startFlush();
+    await settle();
+    expect(screen.getByText('b sent.')).toBeInTheDocument();
+    expect(liveUndos()).toHaveLength(0);
+
+    first.finish();
+    await settle();
+    expect(b.commit).toHaveBeenCalledTimes(1);
+    b.finish();
+    await settle();
+  });
+
   it('a flush on pagehide still starts every commit in one pass, in queue order, and does not wait for one in flight', async () => {
     await setup();
     const log: string[] = [];

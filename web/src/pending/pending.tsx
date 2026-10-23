@@ -52,6 +52,10 @@ class PendingStore {
   private readonly active = new Set<string>();
   /** Writes whose commit has started and not settled, so a flush can wait for them (their revisions come back with the answer). */
   private readonly inflight = new Set<Promise<void>>();
+  /** Flushed writes whose commit has not started, oldest first. They can no longer be undone. */
+  private readonly held: Queued[] = [];
+  /** The drain of `held` that a view-change flush runs; overlapping flushes wait on this one. */
+  private draining: Promise<void> | null = null;
 
   constructor(private readonly queryClient: QueryClient) {}
 
@@ -109,26 +113,40 @@ class PendingStore {
   }
 
   /**
-   * Commits every write still in its window at once. Each leaves the queue before its commit starts. A flush from a
-   * view change first waits for every commit already in flight, then runs the queued ones one after another in queue
-   * order, so each reads the revision the one before it made. A flush on `pagehide` (`keepalive`) cannot wait: the
-   * page is going, so it starts them all in one synchronous pass, in queue order.
+   * Commits every write still in its window at once. From this call on each of them is committed: its toast loses Undo
+   * now, and it waits in `held` until its commit starts (an entry leaves `held` only when it starts, so it starts once).
+   * A flush from a view change drains `held` after every commit already in flight, one after another in queue order, so
+   * each reads the revision the one before it made; overlapping flushes share the one drain and keep that order. A flush
+   * on `pagehide` (`keepalive`) cannot wait: the page is going, so it starts everything in `held` in one synchronous
+   * pass, in queue order.
    */
   async flush(keepalive = false): Promise<void> {
-    const entries = this.queue;
-    this.queue = [];
-    for (const e of entries) clearTimeout(e.timer);
-    const start = (e: Queued) => {
+    for (const e of this.queue) {
+      clearTimeout(e.timer);
       toast(e.write.afterCommit, { id: e.toastId, action: undefined });
-      const o: WriteOptions = keepalive ? { requestId: e.requestId, keepalive: true } : { requestId: e.requestId };
-      return this.run(e.write, e.requestId, e.toastId, o);
-    };
+      this.held.push(e);
+    }
+    this.queue = [];
     if (keepalive) {
-      await Promise.all(entries.map(start));
+      await Promise.all([...this.held].map((e) => this.start(e, true)));
       return;
     }
+    this.draining ??= this.drain().finally(() => (this.draining = null));
+    await this.draining;
+  }
+
+  private async drain(): Promise<void> {
     await Promise.all([...this.inflight]);
-    for (const e of entries) await start(e);
+    for (let next = this.held[0]; next; next = this.held[0]) await this.start(next, false);
+  }
+
+  /** Starts a held write's commit, once: an entry already started is skipped. */
+  private start(e: Queued, keepalive: boolean): Promise<void> {
+    const i = this.held.indexOf(e);
+    if (i === -1) return Promise.resolve();
+    this.held.splice(i, 1);
+    const o: WriteOptions = keepalive ? { requestId: e.requestId, keepalive: true } : { requestId: e.requestId };
+    return this.run(e.write, e.requestId, e.toastId, o);
   }
 
   /** Clears the timers when the provider goes away (tests, hot reload). A page close flushes on pagehide first. */

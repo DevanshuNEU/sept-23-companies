@@ -29,6 +29,7 @@ icon = "play"
 [scripts.run.api]
 available_in = [ "local" ]
 command = """
+set -e
 export PATH="$HOME/.nvm/versions/node/v20.19.5/bin:$PATH"
 mkdir -p .context/api-scratch
 export OUTREACH_DB="$PWD/.context/api-scratch/outreach.db"

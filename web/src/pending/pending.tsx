@@ -50,6 +50,8 @@ class PendingStore {
   private queue: Queued[] = [];
   /** Ids from the moment a write is queued until its commit and refetch settle. */
   private readonly active = new Set<string>();
+  /** Writes whose commit has started and not settled, so a flush can wait for them (their revisions come back with the answer). */
+  private readonly inflight = new Set<Promise<void>>();
 
   constructor(private readonly queryClient: QueryClient) {}
 
@@ -72,7 +74,8 @@ class PendingStore {
 
     if (write.immediate) {
       toast(write.label, { id: toastId });
-      void this.run(write, requestId, toastId, { requestId });
+      // A known revision goes out in this same task (`withRevision` reads first only when it knows none).
+      void this.run(write, requestId, toastId, { requestId, keepalive: true });
       return;
     }
 
@@ -105,18 +108,27 @@ class PendingStore {
     return entry ? this.undo(entry) : false;
   }
 
-  /** Commits every write still in its window at once. Each leaves the queue before its commit starts. */
+  /**
+   * Commits every write still in its window at once. Each leaves the queue before its commit starts. A flush from a
+   * view change first waits for every commit already in flight, then runs the queued ones one after another in queue
+   * order, so each reads the revision the one before it made. A flush on `pagehide` (`keepalive`) cannot wait: the
+   * page is going, so it starts them all in one synchronous pass, in queue order.
+   */
   async flush(keepalive = false): Promise<void> {
     const entries = this.queue;
     this.queue = [];
     for (const e of entries) clearTimeout(e.timer);
-    await Promise.all(
-      entries.map((e) => {
-        toast(e.write.afterCommit, { id: e.toastId, action: undefined });
-        const o: WriteOptions = keepalive ? { requestId: e.requestId, keepalive: true } : { requestId: e.requestId };
-        return this.run(e.write, e.requestId, e.toastId, o);
-      }),
-    );
+    const start = (e: Queued) => {
+      toast(e.write.afterCommit, { id: e.toastId, action: undefined });
+      const o: WriteOptions = keepalive ? { requestId: e.requestId, keepalive: true } : { requestId: e.requestId };
+      return this.run(e.write, e.requestId, e.toastId, o);
+    };
+    if (keepalive) {
+      await Promise.all(entries.map(start));
+      return;
+    }
+    await Promise.all([...this.inflight]);
+    for (const e of entries) await start(e);
   }
 
   /** Clears the timers when the provider goes away (tests, hot reload). A page close flushes on pagehide first. */
@@ -142,7 +154,14 @@ class PendingStore {
     return true;
   }
 
-  private async run(write: PendingWrite, requestId: string, toastId: string, o: WriteOptions): Promise<void> {
+  private run(write: PendingWrite, requestId: string, toastId: string, o: WriteOptions): Promise<void> {
+    const settled = this.execute(write, requestId, toastId, o);
+    this.inflight.add(settled);
+    void settled.finally(() => this.inflight.delete(settled));
+    return settled;
+  }
+
+  private async execute(write: PendingWrite, requestId: string, toastId: string, o: WriteOptions): Promise<void> {
     const keys = uniqueKeys(write.patches);
     try {
       await write.commit(o);

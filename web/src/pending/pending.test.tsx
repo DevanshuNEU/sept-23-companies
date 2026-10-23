@@ -11,6 +11,7 @@ import {
   type Patch,
   type PendingWrite,
 } from '@/pending/pending';
+import { withRevision } from '@/pending/revisions';
 
 interface Item {
   status: 'drafted' | 'approved';
@@ -363,7 +364,7 @@ describe('pending writes', () => {
     const commit = approveCommit();
     approve(commit, { immediate: true, label: 'Marked as asked to stop.' });
     expect(commit).toHaveBeenCalledTimes(1);
-    expect(commit).toHaveBeenCalledWith({ requestId: expect.any(String) });
+    expect(commit).toHaveBeenCalledWith({ requestId: expect.any(String), keepalive: true });
     await settle();
     expect(screen.getByText('Marked as asked to stop.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
@@ -392,5 +393,109 @@ describe('pending writes', () => {
     expect(text('drafts')).toBe('7');
     expect(screen.getByText('Blocked: the company is on the no-go list.')).toBeInTheDocument();
     expect(fetchItem.mock.calls.length).toBeGreaterThan(itemFetches);
+  });
+});
+
+describe('immediate writes (N1)', () => {
+  it('an immediate write with a known revision is sent with keepalive true and no read first', async () => {
+    await setup();
+    const read = vi.fn(() => new Promise<number>(() => {}));
+    const send = vi.fn<(revision: number) => Promise<undefined>>(async () => undefined);
+    approve((o) => withRevision(o, () => 7, read, send), { immediate: true });
+    // The same task: nothing was awaited between the click and the send.
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(7);
+    expect(read).not.toHaveBeenCalled();
+  });
+});
+
+describe('flush order (N3)', () => {
+  /** A commit that records when it starts and ends, and ends only when `finish` is called. */
+  function steps(log: string[], name: string) {
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => (finish = resolve));
+    const commit = vi.fn<(o: WriteOptions) => Promise<void>>(async () => {
+      log.push(`${name}:start`);
+      await done;
+      log.push(`${name}:end`);
+    });
+    return { commit, finish };
+  }
+  const queue = (name: string, commit: (o: WriteOptions) => Promise<unknown>) =>
+    approve(commit, { id: `${name}:m12`, patches: [], label: `${name} queued.`, afterCommit: `${name} sent.` });
+
+  it('a skip flushed while an approve is in flight waits for it and carries its revision', async () => {
+    await setup();
+    let revision = 1;
+    let finishApprove!: () => void;
+    const approveDone = new Promise<void>((resolve) => (finishApprove = resolve));
+    const approveCommitFn = vi.fn<(o: WriteOptions) => Promise<void>>(async () => {
+      await approveDone;
+      revision = 2;
+    });
+    const skipSawRevision: number[] = [];
+    const skip = vi.fn<(o: WriteOptions) => Promise<void>>(async () => void skipSawRevision.push(revision));
+
+    queue('approve', approveCommitFn);
+    await settle(8000);
+    expect(approveCommitFn).toHaveBeenCalledTimes(1);
+    queue('skip', skip);
+    let flushed = false;
+    act(() => {
+      void api.flushPending!().then(() => (flushed = true));
+    });
+    await settle(50);
+    expect(skip).not.toHaveBeenCalled();
+    expect(flushed).toBe(false);
+
+    finishApprove();
+    await settle(50);
+    expect(skip).toHaveBeenCalledTimes(1);
+    expect(skipSawRevision).toEqual([2]);
+    await settle(50);
+    expect(flushed).toBe(true);
+  });
+
+  it('flushed commits run in queue order, one after another', async () => {
+    await setup();
+    const log: string[] = [];
+    const a = steps(log, 'a');
+    const b = steps(log, 'b');
+    const c = steps(log, 'c');
+    queue('a', a.commit);
+    queue('b', b.commit);
+    queue('c', c.commit);
+    act(() => void api.flushPending!());
+    await settle();
+    expect(log).toEqual(['a:start']);
+    a.finish();
+    await settle();
+    expect(log).toEqual(['a:start', 'a:end', 'b:start']);
+    b.finish();
+    await settle();
+    c.finish();
+    await settle();
+    expect(log).toEqual(['a:start', 'a:end', 'b:start', 'b:end', 'c:start', 'c:end']);
+  });
+
+  it('a flush on pagehide still starts every commit in one pass, in queue order, and does not wait for one in flight', async () => {
+    await setup();
+    const log: string[] = [];
+    const early = steps(log, 'early');
+    queue('early', early.commit);
+    await settle(8000);
+    const a = steps(log, 'a');
+    const b = steps(log, 'b');
+    queue('a', a.commit);
+    queue('b', b.commit);
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    expect(log).toEqual(['early:start', 'a:start', 'b:start']);
+    expect(a.commit).toHaveBeenCalledWith({ requestId: expect.any(String), keepalive: true });
+    early.finish();
+    a.finish();
+    b.finish();
+    await settle();
   });
 });

@@ -10,6 +10,9 @@ export default mergeConfig(
       globals: true,
       setupFiles: ['src/test/setup.ts'],
       include: ['src/**/*.test.{ts,tsx}'],
+      // GitHub's shared runners are slower than his Mac: four timing-heavy tests passed in 2 to 3 s locally and hit the
+      // 5 s default there. CI gets more room; local runs keep the default so a slow test still shows up.
+      testTimeout: process.env.CI ? 20000 : 5000,
     },
   }),
 );

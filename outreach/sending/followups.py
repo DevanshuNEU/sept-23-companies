@@ -1,7 +1,8 @@
-"""Planning follow-ups when a first email goes out, and stopping a planned one that will never be drafted.
+"""Follow-ups (#9: one, at about 7 business days), their lapse, closing quiet touches and stopping messages.
 
-Task 8 lands `plan_followups` and `stop_planned` with Task 11's signatures; Task 11 adds the lapse, the quiet close
-and the stop sweep. Every function runs inside the caller's transaction and opens none.
+`plan_followups` runs when a first email goes out; `lapse_followups`, `close_quiet_touches` and `sweep_stopped` run
+on every tick; `stop_touch_messages` is what a reply or a bounce does to the touch's queue. Every function runs
+inside the caller's transaction and opens none.
 
 A `planned` row holds no text, and the `message` CHECK refuses an empty subject or body in every state but
 `planned`, so a planned row that will never be drafted is deleted (with an event on its touch), never moved to
@@ -13,10 +14,13 @@ from datetime import date
 from outreach.drafts.followups import canonical_company
 from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
+from outreach.sending.queue import STOP_REASONS, Verdict
+from outreach.sending.signals import as_datetime
 from outreach.store.timefmt import iso_utc, utcnow
 from outreach.store.writes import append_event
 
-__all__ = ["plan_followups", "stop_planned", "stop_touch_messages", "STOPPABLE"]
+__all__ = ["plan_followups", "stop_planned", "stop_touch_messages", "lapse_followups", "close_quiet_touches",
+           "sweep_stopped", "STOPPABLE"]
 
 # The states of a message that has not gone out and is not in flight: what a stop removes from the queue. A
 # `sending` or `send_unknown` row may already be out, so the sender settles it by Message-ID instead.
@@ -96,4 +100,75 @@ def stop_touch_messages(conn: sqlite3.Connection, touch_id: int, *, reason: str,
                      detail={"seq": row["seq"], "due_on": row["due_on"], "reason": reason},
                      idempotency_key=f"skipped_by_sender:{row['message_id']}:{row['revision'] + 1}")
         stopped += 1
+    return stopped
+
+
+def lapse_followups(conn: sqlite3.Connection, today: date, cfg: SendConfig, *, now: str | None = None) -> int:
+    """A follow-up still `planned` (never drafted) `followup_lapse_business_days` (5) business days after its due
+    date lapses: the row is deleted with a `followup_lapsed` event on its touch (`stop_planned`). A lapsed follow-up
+    is not revived; a re-plan is a new row. Returns how many lapsed. `now` stamps the events (default the clock)."""
+    stamp = iso_utc(now) if now else utcnow()
+    lapsed = 0
+    for row in conn.execute("SELECT message_id, due_on FROM message WHERE state = 'planned' AND due_on IS NOT NULL "
+                            "AND due_on < ? ORDER BY due_on, message_id", (today.isoformat(),)).fetchall():
+        if cal.business_days_between(date.fromisoformat(row["due_on"]), today, cfg) >= cfg.followup_lapse_business_days:
+            stop_planned(conn, row["message_id"], reason="lapsed", now=stamp)
+            lapsed += 1
+    return lapsed
+
+
+_WAITING = ("planned", "drafted", "approved", "sending", "send_unknown")
+
+
+def close_quiet_touches(conn: sqlite3.Connection, today: date, cfg: SendConfig, *, now: str | None = None) -> int:
+    """An `open` touch whose email went out, with nothing waiting (no message `planned`, `drafted`, `approved`,
+    `sending` or `send_unknown`), closes `no_reply` once `close_after_business_days` (7) business days have passed
+    since its last sent message's New York date. Event `closed` on the touch. Returns how many closed."""
+    stamp = iso_utc(now) if now else utcnow()
+    closed = 0
+    for row in conn.execute(
+            "SELECT t.touch_id, max(m.sent_at) AS last_sent FROM touch t "
+            "JOIN message m ON m.touch_id = t.touch_id AND m.state = 'sent' "
+            "WHERE t.state = 'open' AND t.first_sent_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM message w "
+            f"WHERE w.touch_id = t.touch_id AND w.state IN ({','.join('?' * len(_WAITING))})) "
+            "GROUP BY t.touch_id ORDER BY t.touch_id", _WAITING).fetchall():
+        last = cal.ny_date(as_datetime(row["last_sent"]), cfg)
+        if cal.business_days_between(last, today, cfg) < cfg.close_after_business_days:
+            continue
+        if _close(conn, row["touch_id"], "no_reply", stamp, detail={"last_sent": row["last_sent"]}):
+            closed += 1
+    return closed
+
+
+def _close(conn: sqlite3.Connection, touch_id: int, reason: str, stamp: str, *, detail: dict) -> bool:
+    """An `open` touch becomes `closed` with `reason`, and event `closed`. False when it was not open."""
+    if not conn.execute("UPDATE touch SET state = 'closed', close_reason = ?, closed_at = ?, updated_at = ?, "
+                        "revision = revision + 1 WHERE touch_id = ? AND state = 'open'",
+                        (reason, stamp, stamp, touch_id)).rowcount:
+        return False
+    append_event(conn, entity="touch", entity_id=touch_id, company_id=_company_of_touch(conn, touch_id),
+                 kind="closed", actor="sender", at=stamp, detail={"reason": reason, **detail},
+                 idempotency_key=f"closed:{touch_id}:{stamp}")
+    return True
+
+
+def sweep_stopped(conn: sqlite3.Connection, verdicts: list[Verdict], *, now: str) -> int:
+    """For each verdict with a stop reason (the queue's `STOP_REASONS`), stop the whole touch's queue: the approved
+    message and the touch's other `drafted`, `approved` and `failed` messages move to `skipped`, its `planned` ones
+    are deleted through `stop_planned`, each with a `skipped_by_sender` event naming the reason. An `open` touch
+    closes `company_closed` or `no_go`; a replied, bounced or closed touch keeps its state. Waits (held, paused and
+    the rest) are left alone. Returns how many messages were stopped."""
+    stamp = iso_utc(now)
+    stopped = 0
+    for verdict in verdicts:
+        if verdict.reason not in STOP_REASONS:
+            continue
+        row = conn.execute("SELECT m.state, m.touch_id, t.state AS touch_state FROM message m "
+                           "JOIN touch t ON t.touch_id = m.touch_id WHERE m.message_id = ?",
+                           (verdict.message_id,)).fetchone()
+        if row is None or row["state"] != "approved":
+            continue  # moved on since the verdict was read
+        stopped += stop_touch_messages(conn, row["touch_id"], reason=verdict.reason, now=stamp)
+        if row["touch_state"] == "open" and verdict.reason in ("company_closed", "no_go"):
+            _close(conn, row["touch_id"], verdict.reason, stamp, detail={"message_id": verdict.message_id})
     return stopped

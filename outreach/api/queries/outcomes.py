@@ -26,6 +26,7 @@ from outreach.outcomes.context import build_context
 from outreach.outcomes.correct import OUTCOME_COLUMNS, correct_outcome
 from outreach.outcomes.prompt import PromptConfig, due_for_prompt, should_mark_quiet
 from outreach.outcomes.windows import ny_day
+from outreach.sending.followups import stop_planned
 from outreach.store import append_event, iso_utc, log_touch, record_outcome
 from outreach.store.timefmt import ISO_FMT
 
@@ -227,7 +228,8 @@ def stop_unsent_messages(conn: sqlite3.Connection, person_id: int, reply_kind: s
     and `sweep_stopped`). Returns how many it stopped.
 
     A `planned` row holds no text and the `message` CHECK refuses an empty subject or body in every state but
-    `planned`, so it is deleted, with a `touch` event keyed `followup-stopped:<touch_id>:<seq>:<due_on>`. A
+    `planned`, so it is deleted by the sender's own `stop_planned` (actor `devanshu`), with a `touch` event keyed
+    `followup-stopped:<touch_id>:<seq>:<due_on>`. A
     `drafted`, `approved` or `failed` row has text and moves to `skipped` (revision on by one), with a `message`
     event. Both events are `skipped_by_sender` with detail `{seq, due_on, reason}`. A `sending` or `send_unknown`
     row may already be out: the sender settles it.
@@ -241,13 +243,8 @@ def stop_unsent_messages(conn: sqlite3.Connection, person_id: int, reply_kind: s
     for r in rows:
         detail = {"seq": r["seq"], "due_on": r["due_on"], "reason": reply_kind}
         if r["state"] == "planned":
-            # TODO(#14 Task 11): call outreach.sending.followups.stop_planned here once it lands.
-            if not conn.execute("DELETE FROM message WHERE message_id = ? AND state = 'planned'",
-                                (r["message_id"],)).rowcount:
-                continue
-            append_event(conn, entity="touch", entity_id=r["touch_id"], company_id=r["company_id"], kind=STOPPED,
-                         actor="devanshu", at=now, detail=detail,
-                         idempotency_key=f"followup-stopped:{r['touch_id']}:{r['seq']}:{r['due_on'] or ''}")
+            # The sender's one stop for a planned row: deleted, with the touch event its own stops write.
+            stop_planned(conn, r["message_id"], reason=reply_kind, now=now, actor="devanshu")
         else:
             if not conn.execute(
                     "UPDATE message SET state = 'skipped', updated_at = ?, revision = revision + 1 "

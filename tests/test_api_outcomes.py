@@ -699,3 +699,17 @@ class CompanyHold(OutcomeCase):
         self.assertNotEqual(reasons.get(self.queued), "ready")  # the stop reply also holds the company
         self.assertIsNone(self.state_of(planned))
         self.assertEqual(due_followups(self.conn, now.date(), days_ahead=30), [])
+
+
+class OneStopFunction(OutcomeCase):
+    def test_a_stop_reply_deletes_a_planned_row_through_the_senders_stop_planned(self):
+        from outreach.sending import followups
+        pat, email = self.emailed()
+        planned = planned_followup(self.conn, email)
+        t = touch(self.conn, self.acme, pat)
+        with mock.patch.object(outcome_queries, "stop_planned", wraps=followups.stop_planned) as spy:
+            self.assertEqual(self.answer(t, "replied", reply_kind="said_no").status_code, 200)
+        spy.assert_called_once()
+        self.assertEqual(spy.call_args.args[1], planned)
+        self.assertEqual((spy.call_args.kwargs["reason"], spy.call_args.kwargs["actor"]), ("said_no", "devanshu"))
+        self.assertIsNone(self.state_of(planned))

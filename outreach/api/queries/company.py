@@ -96,7 +96,8 @@ def holding_touches(companies: dict[int, sqlite3.Row]) -> dict[int, int]:
         touch = companies[cid]["held_by_touch"]
         if touch is not None:
             found.setdefault(resolve_company(companies, cid)[-1], touch)
-    return {survivor: found[survivor] for survivor in held}
+    # A survivor held only by a reply on another channel (no email touch holds it) has no touch to name here.
+    return {survivor: found[survivor] for survivor in held if survivor in found}
 
 
 def group_of(parents: dict[int, int], survivor: int) -> list[int]:

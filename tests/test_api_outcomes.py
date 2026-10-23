@@ -627,3 +627,75 @@ class LogTouch(OutcomeCase):
         self.assertEqual((res.status_code, res.json()["code"]), (400, "bad_request"), res.text)
         self.assertEqual(self.log(key="other:3", companyId=999).status_code, 404)
         self.assertEqual(self.conn.execute("SELECT count(*) FROM outreach_touch").fetchone()[0], 0)
+
+
+class CompanyHold(OutcomeCase):
+    """#9: a reply from anyone at the company, on any channel, holds its queued email. The queue and the claim's
+    stop re-check read the same hold."""
+
+    def setUp(self):
+        super().setUp()
+        from outreach.sending.config import load_config as load_send_config
+        self.send_cfg = load_send_config()
+        self.colleague = s.person(self.conn, self.acme, "Sam Park")
+        self.queued = s.message(self.conn, s.touch(self.conn, self.colleague), 0, "approved")
+
+    def verdict(self) -> str | None:
+        from datetime import datetime, timezone
+        now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, day=None, gate=None)}
+        return found.get(self.queued)
+
+    def claimable(self) -> bool:
+        """Whether the claim's own stop re-check would let the queued email go (it never reaches Gmail here)."""
+        from outreach.sending import claim
+        q = next(q for q in queue.load_queue(self.conn, self.send_cfg) if q.message_id == self.queued)
+        taken = claim.claim(self.conn, q, rfc_id="<hold.test@gmail.com>", now=NOW)
+        if taken:  # put it back: this test only asks whether the claim would go ahead
+            self.conn.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (self.queued,))
+        return taken
+
+    def test_a_linkedin_reply_recorded_through_the_api_holds_the_companys_queued_email(self):
+        self.assertNotEqual(self.verdict(), "company_held")
+        t = touch(self.conn, self.acme, self.lena, channel="linkedin_message")
+        self.assertEqual(self.answer(t, "replied", reply_kind="interested").status_code, 200)
+        self.assertEqual(self.verdict(), "company_held")
+        self.assertFalse(self.claimable())
+        self.assertEqual(self.state_of(self.queued), "approved")
+
+    def test_a_reply_at_a_merged_duplicate_holds_the_survivors_queued_email(self):
+        duplicate = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=self.acme)
+        pid = s.person(self.conn, duplicate, "Ira Dup", channel="linkedin", linkedin_url="https://www.linkedin.com/in/ira")
+        t = touch(self.conn, duplicate, pid)
+        self.assertEqual(self.answer(t, "replied", reply_kind="not_now").status_code, 200)
+        self.assertEqual(self.verdict(), "company_held")
+
+    def test_an_undone_reply_does_not_hold(self):
+        t = touch(self.conn, self.acme, self.lena)
+        self.assertEqual(self.answer(t, "replied", reply_kind="interested").status_code, 200)
+        self.assertEqual(self.verdict(), "company_held")
+        self.assertEqual(self.correct(t, "replied", None, 2).status_code, 200)
+        self.assertNotEqual(self.verdict(), "company_held")
+        self.assertTrue(self.claimable())
+
+    def test_an_auto_reply_does_not_hold(self):
+        t = touch(self.conn, self.acme, self.lena)
+        res = self.answer(t, "replied", reply_kind="auto_reply")
+        self.assertIn(res.status_code, (400, 422), res.text)
+        self.assertIsNone(self.row(t)["replied_at"])
+        self.assertNotEqual(self.verdict(), "company_held")
+
+    def test_a_stop_reply_leaves_no_follow_up_sendable_by_the_queues_verdicts(self):
+        from outreach.drafts.followups import due_followups
+        pat, email = self.emailed()
+        approved = s.message(self.conn, email, 1, "approved")
+        planned = planned_followup(self.conn, email, seq=2, due_on="2026-11-14")
+        t = touch(self.conn, self.acme, pat, channel="email", email_touch_id=email)
+        self.assertEqual(self.answer(t, "replied", reply_kind="asked_to_stop").status_code, 200)
+        from datetime import datetime, timezone
+        now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        reasons = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, day=None, gate=None)}
+        self.assertNotIn(approved, reasons)
+        self.assertNotEqual(reasons.get(self.queued), "ready")  # the stop reply also holds the company
+        self.assertIsNone(self.state_of(planned))
+        self.assertEqual(due_followups(self.conn, now.date(), days_ahead=30), [])

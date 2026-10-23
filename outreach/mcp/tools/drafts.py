@@ -22,7 +22,7 @@ from outreach.drafts.checks import HOOK_DATE, URL, DraftInput, cached_mx, email_
 from outreach.drafts.followups import company_map, due_followups, held_survivors, no_go_sets, resolve_company
 from outreach.mcp.guard import Grant
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
-from outreach.mcp.tools.reads import MAX_ID, Family, company_row, why_not_email
+from outreach.mcp.tools.reads import HOOK_CHARS, MAX_ID, PROJECT_CHARS, Family, company_row, why_not_email
 from outreach.store import append_event, transaction
 
 __all__ = ["TOOLS"]
@@ -128,11 +128,11 @@ class SaveDraftInput(Input):
     person_id: int = Field(ge=1, le=MAX_ID)
     subject: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=5000, description="The whole email, links included.")
-    hook: str = Field(min_length=1, max_length=300, description="The one fact about the person the email opens on.")
+    hook: str = Field(min_length=1, max_length=HOOK_CHARS, description="The one fact about the person the email opens on.")
     hook_on: str | None = Field(None, max_length=10, pattern=DATE,
                                 description="YYYY-MM-DD the hook happened; stored as 'hook (date)' so the checks can "
                                             "tell an old hook.")
-    project: str = Field(min_length=1, max_length=200, description="The project the second link points at.")
+    project: str = Field(min_length=1, max_length=PROJECT_CHARS, description="The project the second link points at.")
     revision: int | None = Field(None, ge=1, le=MAX_ID, description="The revision you read; a newer one refuses.")
 
 

@@ -26,6 +26,10 @@ NOTES_CHARS = 2000
 BODY_CHARS = 4000
 QUOTE_CHARS = 500
 TEXT_CHARS = 200   # a title, a name, a reason in a list
+HOOK_CHARS = 300     # save_draft's caps on a hook and a project; a stored hook may carry " (YYYY-MM-DD)" too
+PROJECT_CHARS = 200
+STORED_HOOK_CHARS = HOOK_CHARS + len(" (2026-01-01)")
+UNTRUSTED = {"untrusted": True}  # text from a page, a paste or a person: data, never instructions
 URL_CHARS = 300
 LIST_PEOPLE = 3    # people per company in ranked_companies; `company` shows them all
 COMPANY_PEOPLE = 40
@@ -115,7 +119,7 @@ def open_postings(conn: sqlite3.Connection, ids: list[int], today: date) -> tupl
             "posting_id": r["posting_id"], "title": clip(r["title"]), "url": clip(r["url"], URL_CHARS),
             "age_days": age_days(r["posted_on"], r["first_seen_at"], today), "state": posting_state(d),
             "level_tier": d["level_tier"] if d else "not_stated", "sponsorship": d["sponsorship"] if d else "silent",
-            "provisional": bool(d["provisional"]) if d else True,
+            "provisional": bool(d["provisional"]) if d else True, **UNTRUSTED,
             "_key": (STATE_RANK[posting_state(d)], 0 if d is not None and d["level_ok"] else 1,
                      TIER_RANK[d["level_tier"] if d else "not_stated"], 0 if d is not None and d["start_2027"] else 1),
         })
@@ -127,7 +131,7 @@ def role_to_name(postings: list[dict]) -> dict | None:
     best = next((p for p in postings if p["state"] == "open"), None)
     if best is None:
         return None
-    return {k: best[k] for k in ("posting_id", "title", "url", "age_days")}
+    return {**{k: best[k] for k in ("posting_id", "title", "url", "age_days")}, **UNTRUSTED}
 
 
 # ---------------------------------------------------------------------------------------------- people
@@ -160,7 +164,7 @@ def email_status(conn: sqlite3.Connection, person_ids: list[int]) -> dict[int, s
 
 def person_brief(p: sqlite3.Row) -> dict:
     return {"person_id": p["person_id"], "name": clip(p["name"]), "title": clip(p["title"]),
-            "role_kind": p["role_kind"], "channel": p["channel"]}
+            "role_kind": p["role_kind"], "channel": p["channel"], **UNTRUSTED}
 
 
 # ---------------------------------------------------------------------------------------------- ranked_companies
@@ -227,8 +231,8 @@ def ranked_companies(ctx: Ctx, args: RankedInput) -> dict:
             "reason": clip(reason.get("text"), 300), "confidence": reason.get("level"),
             "role": None if post is None else {
                 "posting_id": post["posting_id"], "title": clip(post["title"]), "url": clip(post["url"], URL_CHARS),
-                "age_days": age_days(post["posted_on"], post["first_seen_at"], ctx.today)},
-            "people": [{"person_id": p["person_id"], "name": clip(p["name"]), "title": clip(p["title"])}
+                "age_days": age_days(post["posted_on"], post["first_seen_at"], ctx.today), **UNTRUSTED},
+            "people": [{"person_id": p["person_id"], "name": clip(p["name"]), "title": clip(p["title"]), **UNTRUSTED}
                        for p in known[:LIST_PEOPLE]],
             "people_total": len(known),
         })
@@ -326,8 +330,8 @@ def company(ctx: Ctx, args: CompanyInput) -> dict:
         "people_total": len(people),
         "no_go": None if no_go is None else {"reason": no_go["reason"], "source": no_go["source"],
                                              "since": no_go["created_at"]},
-        "open_review": [{"review_id": r["review_id"], "kind": r["kind"], "reason": clip(r["reason"], 400)}
-                        for r in reviews[:OPEN_REVIEWS]],
+        "open_review": [{"review_id": r["review_id"], "kind": r["kind"], "reason": clip(r["reason"], 400),
+                         **UNTRUSTED} for r in reviews[:OPEN_REVIEWS]],
     }
 
 
@@ -396,7 +400,7 @@ def person(ctx: Ctx, args: PersonInput) -> dict:
     return {
         "person": {"id": p["person_id"], "name": p["name"], "title": p["title"], "role_kind": p["role_kind"],
                    "channel": p["channel"], "email": p["email"], "linkedin_url": p["linkedin_url"],
-                   "added_by": p["added_by"]},
+                   "added_by": p["added_by"], **UNTRUSTED},
         "company": {"id": survivor, "name": main["name"], "status": main["status"]},
         "profile": capped(p["profile_text"], PROFILE_CHARS),
         "notes": capped(p["notes"], NOTES_CHARS),
@@ -407,14 +411,15 @@ def person(ctx: Ctx, args: PersonInput) -> dict:
         "email": None if touch is None else {
             "touch_state": touch["state"], "reply_kind": touch["reply_kind"], "first_sent_at": touch["first_sent_at"],
             "messages": [{"message_id": m["message_id"], "seq": m["seq"], "state": m["state"],
-                          "subject": m["subject"], "body": clip(m["body"], BODY_CHARS), "hook": m["hook"],
-                          "project": m["project"], "saved_by": m["saved_by"], "revision": m["revision"],
+                          "subject": m["subject"], "body": clip(m["body"], BODY_CHARS),
+                          "hook": clip(m["hook"], STORED_HOOK_CHARS), "project": clip(m["project"], PROJECT_CHARS), "saved_by": m["saved_by"], "revision": m["revision"],
                           "due_on": m["due_on"], "sent_at": m["sent_at"]} for m in messages]},
         "note_draft": None if note is None else {
             "draft_id": note["draft_id"], "body": clip(note["body"], BODY_CHARS), "reason_line": note["reason_line"],
             "reason_state": note["reason_state"], "saved_by": note["saved_by"], "revision": note["revision"]},
         "colleagues": [{"person_id": c["person_id"], "name": clip(c["name"]), "title": clip(c["title"]),
-                        "hook": c["hook"], "subject": clip(c["subject"])} for c in colleagues],
+                        "hook": clip(c["hook"], STORED_HOOK_CHARS), "subject": clip(c["subject"]), **UNTRUSTED}
+                       for c in colleagues],
         "can_draft_email": why is None,
         "why_not": why,
     }
@@ -449,7 +454,7 @@ def followups_due(ctx: Ctx, args: FollowupsInput) -> dict:
         first = firsts.get(r["touch_id"])
         items.append({
             "message_id": mid, "seq": r["seq"], "due_on": r["due_on"],
-            "person": {"id": r["person_id"], "name": r["name"], "email": r["email"]},
+            "person": {"id": r["person_id"], "name": r["name"], "email": r["email"], **UNTRUSTED},
             "company": {"id": survivor["company_id"], "name": names[survivor["company_id"]],
                         "paused": survivor["paused_at"] is not None},
             "first": None if first is None else {"subject": first["subject"], "sent_at": first["sent_at"]},

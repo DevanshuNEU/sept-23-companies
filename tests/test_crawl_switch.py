@@ -202,8 +202,9 @@ class ProbeTests(unittest.TestCase):
         self.company = seed_company(self.conn, "Zephyrine")
 
     def probe(self, cfg, routes):
-        client, inner = polite(routes, cfg)
-        report = probe_slugs(self.conn, [self.company], client, limit=5, cfg=cfg, now=T0)
+        # A bare client, not the polite one: the probe's own switch is tested here, apart from the host guard.
+        inner = FakeClient(routes)
+        report = probe_slugs(self.conn, [self.company], inner, limit=5, cfg=cfg, now=T0)
         return report, inner
 
     def test_slug_probing_asks_no_switched_off_ats(self):

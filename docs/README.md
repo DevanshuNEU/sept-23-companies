@@ -155,6 +155,8 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
 - The polite client refuses any request, redirect hops included, to a switched-off ATS's host (`HostOff`, a
   `HostTripped`), so a watched page on such a host is deferred, never fetched.
 - #31 may still create boards on a switched-off ATS (stapply lists, careers pages, `ats_detect`); the rows are harmless.
+  find_boards reads the same `[ats_off]` list (`outreach.crawl.config`, standard library only), so a company whose
+  only boards are switched off gets its careers page watched, like a company with no readable board.
   stapply's `wellfound` and `ycombinator` lists are never downloaded or read; `fetch stapply` reports them in
   `excluded_lists` and `excluded_rows`.
 - The old refresh (`refresh/crawl_more.py`) no longer reads SmartRecruiters or Dover's `/api/`; `--only` or `--skip`
@@ -167,8 +169,6 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
 - A mass empty that lasts past the outage grace is written as empty reads: a day later its boards raise `board_empty`
   items one by one and the second empty closes their postings.
 - A board's host bucket is not stored, so the host ruling groups boards by ATS (true for every adapter here).
-- #31's last find_boards pass gives a watched page only to companies whose boards all lack an adapter; it still counts
-  a switched-off ATS as read, so a company whose only board is SmartRecruiters or Pinpoint gets no watched page.
 - The careers check (`outreach/sources/careers.py`) does not go through the polite client, so its own fetches and
   redirects are not under the `[ats_off]` host guard.
 

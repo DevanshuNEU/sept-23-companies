@@ -3,6 +3,7 @@
 A merged company answers as its survivor, and the survivor's page carries the history of every company merged into
 it (events, evidence, postings, people), so nothing is lost by a merge.
 """
+import importlib
 import json
 import sqlite3
 from datetime import date, datetime, timezone
@@ -17,12 +18,11 @@ from outreach.drafts.followups import company_map, held_survivors, resolve_compa
 from outreach.sending import calendar
 from outreach.sending.config import load_config
 from outreach.store.timefmt import ISO_FMT
-from outreach.store.writes import _NAME_ALIAS_SOURCES, name_key
+from outreach.store.writes import NAME_ALIAS_SOURCES, name_key
 
 EVENT_LIMIT = 500  # the newest events; a board read every few days adds up
 READS_SHOWN = 10
 DAYS_OF_EMAIL = 3
-NAME_ALIAS_SOURCES = _NAME_ALIAS_SOURCES  # the store's own list of name-like alias sources
 IMPORT_SOURCE_KEY = "importSource"  # the key of an import event's detail that names the old place it came from
 EMAIL_HOLDING_KINDS = ("domain_missing", "size_unknown", "size_guess", "size_check")
 IMPORT_SOURCES = ("data_js", "local_storage", "contacts_json", "radar_db", "devboard", "contacted_txt", "devvault_notes")
@@ -176,14 +176,19 @@ def hidden_rule(d: sqlite3.Row) -> tuple[str, str | None]:
     return "open", None
 
 
+READER_MODULES = ("outreach.reader", "outreach.reader.combine")  # #32's package and the module with `explain`
+
+
 def load_explain():
-    """The reader's `explain`, or None while the reader package (#32) is not on this branch. Only the import is
-    guarded: a failing `explain` call is an error, never "no flags"."""
+    """The reader's `explain`, or None while #32's `outreach.reader.combine` is not on this branch. Only that module
+    being missing means None: an import error inside it, or a failing `explain` call, is an error, never "no flags"."""
     try:
-        from outreach.reader.combine import explain
-    except ImportError:
-        return None
-    return explain
+        module = importlib.import_module("outreach.reader.combine")
+    except ModuleNotFoundError as err:
+        if err.name in READER_MODULES:
+            return None
+        raise
+    return module.explain
 
 
 def flags_from_verdicts(verdicts, decision: sqlite3.Row | None) -> list[PostingFlag]:
@@ -296,7 +301,7 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
         people=people,
         touches=touches,
         evidence=[to_fact(r) for r in evidence_rows],
-        events=[_event(r) for r in event_rows],
+        events=[to_event(r) for r in event_rows],
         review_items=needs_you.review_items(conn, review_rows, parents, now),
         ruleset_version=ruleset["ruleset_version"] if ruleset else "",
     )
@@ -412,7 +417,7 @@ def role_to_name(role: dict | None) -> RoleToName | None:
     )
 
 
-def _event(r: sqlite3.Row) -> CompanyEvent:
+def to_event(r: sqlite3.Row) -> CompanyEvent:
     detail = json.loads(r["detail"])
     text = detail.get("text") if isinstance(detail.get("text"), str) and detail["text"] else r["kind"].replace("_", " ").capitalize()
     source = None

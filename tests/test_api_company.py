@@ -440,6 +440,16 @@ class CompanyPage(ApiCase):
         with mock.patch.object(company_queries, "load_explain", lambda: None):
             self.assertEqual(self.view(cid)["postings"][0]["flags"], [])
 
+    def test_only_a_missing_reader_module_means_no_explain(self):
+        import sys
+        with mock.patch.dict(sys.modules, {"outreach.reader.combine": None}):
+            self.assertIsNone(company_queries.load_explain())
+        # an import that fails inside the reader is a bug, never "no flags"
+        for err in (ModuleNotFoundError("no yaml", name="yaml"), ImportError("cannot import name 'x'")):
+            with self.subTest(err=err), mock.patch("importlib.import_module", side_effect=err):
+                with self.assertRaises(type(err)):
+                    company_queries.load_explain()
+
     def test_posting_flags_come_from_explain(self):
         cid = s.company(self.conn)
         flagged = s.posting(self.conn, cid, "Has a reading")

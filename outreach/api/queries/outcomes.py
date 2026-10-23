@@ -20,7 +20,7 @@ from outreach.api.models.company import CompanyRef
 from outreach.api.models.outcomes import (
     CorrectionBody, LogTouchBody, OutcomeBody, OutcomePromptView, PromptTouch, TouchHistory, TouchLogged,
 )
-from outreach.api.queries.company import _event, holding_touches, person_ref, merge_parents, survivor_of
+from outreach.api.queries.company import holding_touches, merge_parents, person_ref, survivor_of, to_event
 from outreach.drafts.followups import company_map
 from outreach.outcomes.context import build_context
 from outreach.outcomes.correct import OUTCOME_COLUMNS, correct_outcome
@@ -367,7 +367,7 @@ def touch_history(conn: sqlite3.Connection, touch_id: int) -> TouchHistory | Non
         touch_id=touch_id, channel=row["channel"], person=person_ref(person) if person is not None else None,
         company=company, sent_at=row["sent_at"], accepted=row["accepted_at"], replied=row["replied_at"],
         reply_kind=row["reply_kind"], referred=row["referred_at"], interview=row["interview_at"],
-        offer=row["offer_at"], quiet=row["quiet_at"], events=[_event(e) for e in events], revision=row["revision"],
+        offer=row["offer_at"], quiet=row["quiet_at"], events=[to_event(e) for e in events], revision=row["revision"],
     )
 
 

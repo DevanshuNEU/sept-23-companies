@@ -14,6 +14,7 @@ import sqlite3
 import sys
 import traceback
 from collections.abc import Callable, Sequence
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -31,11 +32,11 @@ from outreach.store.timefmt import ISO_FMT
 __all__ = ["INSTRUCTIONS", "GROUPS", "MAX_RESULT_CHARS", "tool_specs", "run_tool", "build_server"]
 
 NY = ZoneInfo("America/New_York")
-MAX_RESULT_CHARS = 40_000  # about 10k tokens, under the size Claude Code warns about
+MAX_RESULT_CHARS = 60_000  # about 15k tokens, under the 25k-token default limit Claude Code puts on a tool result
 MAX_PROBLEMS = 8
 
 # Tool modules, each exporting TOOLS. A module that fails to import raises: no tool is skipped quietly.
-GROUPS: tuple[str, ...] = ()
+GROUPS: tuple[str, ...] = ("outreach.mcp.tools.reads",)
 
 INSTRUCTIONS = """\
 Outreach store for Devanshu's job search: ranked companies, the people at them, their drafts and due follow-ups.
@@ -100,7 +101,8 @@ def run_tool(spec: ToolSpec, arguments: dict, *, path: str | None, clock: Callab
                                                      "at a scratch store.")
     try:
         now = clock()
-        payload = spec.handler(Ctx(conn=conn, now=now, today=_today(now)), args)
+        with redirect_stdout(sys.stderr):  # a stray print must never reach the protocol stream
+            payload = spec.handler(Ctx(conn=conn, now=now, today=_today(now)), args)
     except ToolError as err:
         return True, err.payload()
     except sqlite3.DatabaseError as err:

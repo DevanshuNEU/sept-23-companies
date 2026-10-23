@@ -26,7 +26,7 @@ from tests.storetest import fresh_store
 from tests.test_mcp_boundary import forbidden
 
 ROOT = Path(__file__).resolve().parent.parent
-PINNED_TOOLS: set[str] = set()
+PINNED_TOOLS = {"ranked_companies", "company", "person", "followups_due"}
 FORBIDDEN_PROPERTIES = frozenset({
     "state", "approved", "approved_at", "approve", "send", "sent", "sent_at", "skip", "unapprove", "pause", "paused",
     "resume", "confirm", "confirmed", "reason_state", "saved_by", "added_by", "raised_by", "actor", "source",

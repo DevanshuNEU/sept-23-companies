@@ -20,7 +20,7 @@ from outreach.api.models.company import CompanyRef
 from outreach.api.models.outcomes import (
     CorrectionBody, LogTouchBody, OutcomeBody, OutcomePromptView, PromptTouch, TouchHistory, TouchLogged,
 )
-from outreach.api.queries.company import _event, _person_ref, merge_parents, survivor_of
+from outreach.api.queries.company import _event, person_ref, merge_parents, survivor_of
 from outreach.outcomes.context import build_context
 from outreach.outcomes.correct import OUTCOME_COLUMNS, correct_outcome
 from outreach.outcomes.prompt import PromptConfig, due_for_prompt, should_mark_quiet
@@ -76,7 +76,7 @@ def open_touches(conn: sqlite3.Connection, now: str, at_least_days: int) -> list
     return conn.execute(OPEN_TOUCHES_SQL, (_shift(now, max(at_least_days - 1, 0)),)).fetchall()
 
 
-def _by_ids(conn: sqlite3.Connection, sql: str, ids: set[int]) -> list[sqlite3.Row]:
+def by_ids(conn: sqlite3.Connection, sql: str, ids: set[int]) -> list[sqlite3.Row]:
     """`sql` has one `{ids}` placeholder; the ids go in chunks so a long list never passes SQLite's limit."""
     listed, rows = sorted(ids), []
     for start in range(0, len(listed), CHUNK):
@@ -85,21 +85,21 @@ def _by_ids(conn: sqlite3.Connection, sql: str, ids: set[int]) -> list[sqlite3.R
     return rows
 
 
-def _company_refs(conn: sqlite3.Connection, ids: set[int]) -> dict[int, CompanyRef]:
+def company_refs(conn: sqlite3.Connection, ids: set[int]) -> dict[int, CompanyRef]:
     return {r["company_id"]: CompanyRef(id=r["company_id"], name=r["name"], status=r["status"],
                                         paused_at=r["paused_at"], held_by_touch_id=r["held_by_touch"])
-            for r in _by_ids(conn, "SELECT company_id, name, status, paused_at, held_by_touch FROM company "
+            for r in by_ids(conn, "SELECT company_id, name, status, paused_at, held_by_touch FROM company "
                                    "WHERE company_id IN ({ids})", ids)}
 
 
 def _people(conn: sqlite3.Connection, ids: set[int]) -> dict[int, sqlite3.Row]:
-    return {r["person_id"]: r for r in _by_ids(conn, "SELECT * FROM person WHERE person_id IN ({ids})", ids)}
+    return {r["person_id"]: r for r in by_ids(conn, "SELECT * FROM person WHERE person_id IN ({ids})", ids)}
 
 
 def snoozes_of(conn: sqlite3.Connection, touch_ids: set[int]) -> dict[int, list[str]]:
     """Each touch's "Nothing yet" answers, oldest first."""
     found: dict[int, list[str]] = {}
-    for r in _by_ids(conn, "SELECT entity_id, at FROM event WHERE entity = 'outreach_touch' AND kind = '"
+    for r in by_ids(conn, "SELECT entity_id, at FROM event WHERE entity = 'outreach_touch' AND kind = '"
                            + SNOOZE + "' AND entity_id IN ({ids}) ORDER BY at, event_id", touch_ids):
         found.setdefault(r["entity_id"], []).append(r["at"])
     return found
@@ -133,7 +133,7 @@ def prompt_view(conn: sqlite3.Connection, now: str, cfg: PromptConfig) -> Outcom
     if not due:
         return OutcomePromptView(as_of=now, touches=[])
     parents = merge_parents(conn)
-    companies = _company_refs(conn, {survivor_of(parents, r["company_id"]) for r in due})
+    companies = company_refs(conn, {survivor_of(parents, r["company_id"]) for r in due})
     people = _people(conn, {r["person_id"] for r in due if r["person_id"] is not None})
     touches = []
     for r in due:
@@ -142,7 +142,7 @@ def prompt_view(conn: sqlite3.Connection, now: str, cfg: PromptConfig) -> Outcom
             continue
         person = people.get(r["person_id"]) if r["person_id"] is not None else None
         touches.append(PromptTouch(
-            touch_id=r["touch_id"], person=_person_ref(person) if person is not None else None, company=company,
+            touch_id=r["touch_id"], person=person_ref(person) if person is not None else None, company=company,
             channel=r["channel"], sent_at=r["sent_at"], age_days=ny_days_between(r["sent_at"], now),
             context=context_line(r["channel"], r["context"]), revision=r["revision"],
         ))
@@ -164,7 +164,7 @@ def store_refusal(err: sqlite3.IntegrityError) -> ApiProblem:
     return ApiProblem("bad_request", f"{message} {NOT_SAVED}")
 
 
-def _plain(err: ValueError) -> ApiProblem:
+def plain_refusal(err: ValueError) -> ApiProblem:
     text = str(err).strip().rstrip(".")
     return ApiProblem("bad_request", f"{text[:1].upper()}{text[1:]}. {NOT_SAVED}")
 
@@ -173,7 +173,7 @@ def _missing(touch_id: int) -> ApiProblem:
     return ApiProblem("not_found", f"There is no touch {touch_id}.")
 
 
-def _changed() -> ApiProblem:
+def touch_changed() -> ApiProblem:
     return ApiProblem("conflict", f"The touch changed since you loaded it. {NOT_SAVED}")
 
 
@@ -290,7 +290,7 @@ def answer(ctx: WriteCtx, touch_id: int, body: OutcomeBody, cfg: PromptConfig) -
         raise ApiProblem("not_allowed", f"Already recorded: this touch has {OUTCOME_WORDS[body.kind]} on "
                                         f"{ny_day(row[column])}. To change it, correct it from the touch's history.")
     if row["revision"] != body.revision:
-        raise _changed()
+        raise touch_changed()
     if body.kind == "quiet" and not should_mark_quiet(row, ctx.now, cfg):
         # Once per touch per New York day: two tabs answering the same day cannot use up both snoozes.
         append_event(conn, entity="outreach_touch", entity_id=touch_id, company_id=row["company_id"], kind=SNOOZE,
@@ -301,11 +301,11 @@ def answer(ctx: WriteCtx, touch_id: int, body: OutcomeBody, cfg: PromptConfig) -
         revision = record_outcome(conn, touch_id, kind=body.kind, at=ctx.now, reply_kind=body.reply_kind,
                                   revision=body.revision)
     except LookupError:
-        raise _changed() from None
+        raise touch_changed() from None
     except sqlite3.IntegrityError as err:
         raise store_refusal(err) from err
     except ValueError as err:
-        raise _plain(err) from None
+        raise plain_refusal(err) from None
     if row["channel"] in LINKEDIN and body.kind in LOG_KINDS:
         _linkedin_log(conn, row, body.kind, body.reply_kind, ctx.now)
     if body.kind == "replied":
@@ -331,11 +331,11 @@ def correct(ctx: WriteCtx, touch_id: int, kind: str, body: CorrectionBody) -> in
         revision = correct_outcome(conn, touch_id, kind, at=at, reply_kind=body.reply_kind,
                                    revision=body.revision, now=ctx.now)
     except LookupError:
-        raise _changed() from None
+        raise touch_changed() from None
     except sqlite3.IntegrityError as err:
         raise store_refusal(err) from err
     except ValueError as err:
-        raise _plain(err) from None
+        raise plain_refusal(err) from None
     if kind == "replied":  # a reply corrected to said_no or asked_to_stop stops them as an answer would
         row = conn.execute("SELECT * FROM outreach_touch WHERE touch_id = ?", (touch_id,)).fetchone()
         if row["replied_at"] is not None:
@@ -352,13 +352,13 @@ def touch_history(conn: sqlite3.Connection, touch_id: int) -> TouchHistory | Non
     if row is None:
         return None
     survivor = survivor_of(merge_parents(conn), row["company_id"])
-    company = _company_refs(conn, {survivor})[survivor]
+    company = company_refs(conn, {survivor})[survivor]
     person = _people(conn, {row["person_id"]}).get(row["person_id"]) if row["person_id"] is not None else None
     events = conn.execute(
         "SELECT * FROM event WHERE entity = 'outreach_touch' AND entity_id = ? ORDER BY at DESC, event_id DESC",
         (touch_id,)).fetchall()
     return TouchHistory(
-        touch_id=touch_id, channel=row["channel"], person=_person_ref(person) if person is not None else None,
+        touch_id=touch_id, channel=row["channel"], person=person_ref(person) if person is not None else None,
         company=company, sent_at=row["sent_at"], accepted=row["accepted_at"], replied=row["replied_at"],
         reply_kind=row["reply_kind"], referred=row["referred_at"], interview=row["interview_at"],
         offer=row["offer_at"], quiet=row["quiet_at"], events=[_event(e) for e in events], revision=row["revision"],
@@ -393,6 +393,18 @@ def _score_parts(score: sqlite3.Row | None) -> tuple[str, str | None, dict[str, 
     return lane, score["ranker_version"], values
 
 
+def own_context(conn: sqlite3.Connection, company_id: int, role_kind: str | None, role_first_seen_at: str | None,
+                now: str) -> dict:
+    """The context of a touch he logged himself (`source 'own'`): the lane, ranker version and signals come from the
+    company's newest score (lane `own` when it has none), and a role was named when `role_first_seen_at` is given."""
+    lane, version, signals = _score_parts(_newest_score(conn, company_id))
+    return build_context(
+        source="own", lane=lane, role_kind=role_kind,
+        role_age_days=max(ny_days_between(role_first_seen_at, now), 0) if role_first_seen_at is not None else None,
+        ranker_version=version, signals=signals, role_named=role_first_seen_at is not None,
+    )
+
+
 def log_own_touch(ctx: WriteCtx, body: LogTouchBody) -> TouchLogged:
     """Log an HN reply or another touch he made himself, once per `idempotencyKey`, with `source 'own'`. Every input
     is checked first, so a store constraint error here is a bug (a logged 500), never the client's mistake."""
@@ -419,12 +431,7 @@ def log_own_touch(ctx: WriteCtx, body: LogTouchBody) -> TouchLogged:
             raise ApiProblem("not_found", f"There is no posting {body.posting_id}.")
         if survivor_of(parents, posting["company_id"]) != survivor:
             raise ApiProblem("bad_request", f"That posting is at another company. {NOT_SAVED}")
-    lane, version, signals = _score_parts(_newest_score(conn, survivor))
-    context = build_context(
-        source="own", lane=lane, role_kind=person["role_kind"],
-        role_age_days=max(ny_days_between(posting["first_seen_at"], ctx.now), 0) if posting is not None else None,
-        ranker_version=version, signals=signals, role_named=posting is not None,
-    )
+    context = own_context(conn, survivor, person["role_kind"], posting["first_seen_at"] if posting else None, ctx.now)
     touch_id = log_touch(conn, person_id=body.person_id, company_id=survivor, channel=body.channel,
                          sent_at=ctx.now, context=context, posting_id=body.posting_id,
                          idempotency_key=body.idempotency_key)

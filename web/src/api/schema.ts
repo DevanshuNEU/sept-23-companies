@@ -72,6 +72,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/linkedin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Linkedin View */
+        get: operations["linkedin_view"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/linkedin/{person_id}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Log Step */
+        post: operations["log_step"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/linkedin/{person_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo Step */
+        post: operations["undo_step"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/outcomes/prompt": {
         parameters: {
             query?: never;
@@ -719,6 +770,13 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** HeldBy */
+        HeldBy: {
+            /** Personname */
+            personName: string;
+            /** Touchid */
+            touchId: number;
+        };
         /** JobCount */
         JobCount: {
             /** Label */
@@ -751,6 +809,71 @@ export interface components {
              */
             status: "running" | "ok" | "partial" | "failed";
         };
+        /** LinkedInCounts */
+        LinkedInCounts: {
+            /** All */
+            all: number;
+            /** Replied */
+            replied: number;
+            /** Toreach */
+            toReach: number;
+            /** Waiting */
+            waiting: number;
+        };
+        /** LinkedInGroup */
+        LinkedInGroup: {
+            company: components["schemas"]["CompanyRef"];
+            /** Emailed */
+            emailed: number;
+            heldBy: components["schemas"]["HeldBy"] | null;
+            /** Onlinkedin */
+            onLinkedIn: number;
+            /** People */
+            people: components["schemas"]["LinkedInPerson"][];
+            role: components["schemas"]["RoleToName"] | null;
+        };
+        /** LinkedInPerson */
+        LinkedInPerson: {
+            person: components["schemas"]["PersonRef"];
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "past_budget" | "no_email" | "alum_first";
+            /** Replykind */
+            replyKind: ("unsorted" | "interested" | "not_now" | "said_no" | "asked_to_stop") | null;
+            /** Steps */
+            steps: components["schemas"]["LoggedStep"][];
+            /**
+             * Tab
+             * @enum {string}
+             */
+            tab: "to_reach" | "waiting" | "replied";
+        };
+        /** LinkedInView */
+        LinkedInView: {
+            /** Asof */
+            asOf: string;
+            counts: components["schemas"]["LinkedInCounts"];
+            /** Groups */
+            groups: components["schemas"]["LinkedInGroup"][];
+            /** Requeststhisweek */
+            requestsThisWeek: number;
+        };
+        /**
+         * LogStepBody
+         * @description A step he took on LinkedIn by hand. `replyKind` goes with `replied` and nothing else; an out-of-office is
+         *     not a reply, so `auto_reply` is not a kind here.
+         */
+        LogStepBody: {
+            /** Replykind */
+            replyKind?: ("interested" | "not_now" | "said_no" | "asked_to_stop") | null;
+            /**
+             * Step
+             * @enum {string}
+             */
+            step: "request_sent" | "accepted" | "message_sent" | "replied";
+        };
         /**
          * LogTouchBody
          * @description A touch he made himself: a reply to an HN post, or any other touch. The other channels have their own writes.
@@ -769,6 +892,16 @@ export interface components {
             personId?: number | null;
             /** Postingid */
             postingId?: number | null;
+        };
+        /** LoggedStep */
+        LoggedStep: {
+            /** At */
+            at: string;
+            /**
+             * Step
+             * @enum {string}
+             */
+            step: "request_sent" | "accepted" | "message_sent" | "replied";
         };
         /**
          * OutcomeBody
@@ -1192,6 +1325,17 @@ export interface components {
             revision: number;
         };
         /**
+         * UndoStepBody
+         * @description Take back the newest step he logged (only the newest, so the steps left always make sense).
+         */
+        UndoStepBody: {
+            /**
+             * Step
+             * @enum {string}
+             */
+            step: "request_sent" | "accepted" | "message_sent" | "replied";
+        };
+        /**
          * WatchDismissed
          * @description What a dismiss answers with: the id it was sent. (A write answers with JSON; an empty answer reads as broken.)
          */
@@ -1531,6 +1675,249 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    linkedin_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedInView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    log_step: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogStepBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedInPerson"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    undo_step: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UndoStepBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedInPerson"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

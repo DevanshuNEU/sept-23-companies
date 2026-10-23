@@ -40,4 +40,7 @@ export const _parity: [
   Same<T.ProgressView, S['ProgressView']>,
   Same<T.Finding, S['Finding']>,
   Same<T.FindingsView, S['FindingsView']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<T.LinkedInPerson, S['LinkedInPerson']>,
+  Same<T.LinkedInGroup, S['LinkedInGroup']>,
+  Same<T.LinkedInView, S['LinkedInView']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

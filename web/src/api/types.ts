@@ -146,7 +146,7 @@ export interface DraftCompare {
 
 // LinkedIn (spec 13.3)
 export interface LinkedInPerson {
-  person: PersonRef; reason: LinkedInReason; steps: { step: LinkedInStep; at: IsoTime }[]; replyKind: ReplyKind | null;
+  person: PersonRef; reason: LinkedInReason; steps: { step: LinkedInStep; at: IsoTime }[]; replyKind: Exclude<ReplyKind, 'auto_reply'> | null;
   tab: 'to_reach' | 'waiting' | 'replied';
 }
 export interface LinkedInGroup {

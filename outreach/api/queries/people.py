@@ -113,9 +113,14 @@ def email_line(touch, messages, inbound, company) -> Line:
     return Line(text, tone, last)
 
 
-def linkedin_line(entries) -> Line:
+def live_steps(entries) -> list:
+    """A person's `linkedin_log` rows (oldest first) that are steps and were not taken back."""
     undone = {e["undoes"] for e in entries if e["undoes"] is not None}
-    steps = [e for e in entries if e["kind"] in LINKEDIN_STEPS and e["entry_id"] not in undone]
+    return [e for e in entries if e["kind"] in LINKEDIN_STEPS and e["entry_id"] not in undone]
+
+
+def linkedin_line(entries) -> Line:
+    steps = live_steps(entries)
     if not steps:
         return Line("Not started", "idle", None)
     last = steps[-1]

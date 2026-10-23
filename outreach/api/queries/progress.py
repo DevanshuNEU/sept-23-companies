@@ -22,8 +22,8 @@ from outreach.api.models.progress import (
     BaseRates, EffortLine, Finding, FindingChange, FindingCount, FindingsView, FunnelFrom, FunnelStage,
     ProgressPeriod, ProgressView, TodayProgress, Win, WinCounts, WinsSeen, WinsView,
 )
-from outreach.api.queries.company import _person_ref, merge_parents, survivor_of
-from outreach.api.queries.outcomes import CHANNEL_WORDS, LANE_WORDS, _by_ids, _company_refs, _people
+from outreach.api.queries.company import person_ref, merge_parents, survivor_of
+from outreach.api.queries.outcomes import CHANNEL_WORDS, LANE_WORDS, by_ids, company_refs, _people
 from outreach.outcomes import report
 from outreach.outcomes.wins import WIN_KINDS, decode_win_id, is_log_win, is_recognition, win_id, win_line
 from outreach.outcomes.windows import day_bounds_utc, month_bounds, ny_day, week_bounds
@@ -287,12 +287,12 @@ def wins_view(conn: sqlite3.Connection, now: str) -> WinsView:
                    WIN_KINDS.index(c.kind)), reverse=True)
     parents = merge_parents(conn)
     touches = [c.touch for c in shown]
-    companies = _company_refs(conn, {survivor_of(parents, t["company_id"]) for t in touches})
+    companies = company_refs(conn, {survivor_of(parents, t["company_id"]) for t in touches})
     people = _people(conn, {t["person_id"] for t in touches if t["person_id"] is not None})
-    postings = {r["posting_id"]: r["title"] for r in _by_ids(
+    postings = {r["posting_id"]: r["title"] for r in by_ids(
         conn, "SELECT posting_id, title FROM posting WHERE posting_id IN ({ids})",
         {t["posting_id"] for t in touches if t["posting_id"] is not None})}
-    notes = {r["person_id"]: r["body"] for r in _by_ids(
+    notes = {r["person_id"]: r["body"] for r in by_ids(
         conn, "SELECT person_id, body FROM linkedin_draft WHERE person_id IN ({ids})",
         {t["person_id"] for t in touches if t["person_id"] is not None and t["channel"] in LINKEDIN})}
     wins = []
@@ -304,7 +304,7 @@ def wins_view(conn: sqlite3.Connection, now: str) -> WinsView:
         person = people.get(t["person_id"]) if t["person_id"] is not None else None
         wins.append(Win(
             win_id=c.id, kind=c.kind, at=c.at, touch_id=t["touch_id"],
-            person=_person_ref(person) if person is not None else None, company=company,
+            person=person_ref(person) if person is not None else None, company=company,
             line=win_line(c.kind, person["name"] if person is not None else None, company.name, c.reply_kind,
                           _clock(c.at)),
             sent_note=notes.get(t["person_id"]) if t["channel"] in LINKEDIN else None,

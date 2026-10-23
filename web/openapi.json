@@ -1296,6 +1296,24 @@
         "title": "HealthWatchedPages",
         "type": "object"
       },
+      "HeldBy": {
+        "properties": {
+          "personName": {
+            "title": "Personname",
+            "type": "string"
+          },
+          "touchId": {
+            "title": "Touchid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "touchId",
+          "personName"
+        ],
+        "title": "HeldBy",
+        "type": "object"
+      },
       "JobCount": {
         "properties": {
           "label": {
@@ -1402,6 +1420,213 @@
         "title": "JobRunSummary",
         "type": "object"
       },
+      "LinkedInCounts": {
+        "properties": {
+          "all": {
+            "title": "All",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          },
+          "toReach": {
+            "title": "Toreach",
+            "type": "integer"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "toReach",
+          "waiting",
+          "replied",
+          "all"
+        ],
+        "title": "LinkedInCounts",
+        "type": "object"
+      },
+      "LinkedInGroup": {
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "emailed": {
+            "title": "Emailed",
+            "type": "integer"
+          },
+          "heldBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeldBy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "onLinkedIn": {
+            "title": "Onlinkedin",
+            "type": "integer"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/LinkedInPerson"
+            },
+            "title": "People",
+            "type": "array"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleToName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "company",
+          "role",
+          "emailed",
+          "onLinkedIn",
+          "heldBy",
+          "people"
+        ],
+        "title": "LinkedInGroup",
+        "type": "object"
+      },
+      "LinkedInPerson": {
+        "properties": {
+          "person": {
+            "$ref": "#/components/schemas/PersonRef"
+          },
+          "reason": {
+            "enum": [
+              "past_budget",
+              "no_email",
+              "alum_first"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "replyKind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unsorted",
+                  "interested",
+                  "not_now",
+                  "said_no",
+                  "asked_to_stop"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replykind"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/LoggedStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "tab": {
+            "enum": [
+              "to_reach",
+              "waiting",
+              "replied"
+            ],
+            "title": "Tab",
+            "type": "string"
+          }
+        },
+        "required": [
+          "person",
+          "reason",
+          "steps",
+          "replyKind",
+          "tab"
+        ],
+        "title": "LinkedInPerson",
+        "type": "object"
+      },
+      "LinkedInView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/LinkedInCounts"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/LinkedInGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "requestsThisWeek": {
+            "title": "Requeststhisweek",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asOf",
+          "groups",
+          "counts",
+          "requestsThisWeek"
+        ],
+        "title": "LinkedInView",
+        "type": "object"
+      },
+      "LogStepBody": {
+        "additionalProperties": false,
+        "description": "A step he took on LinkedIn by hand. `replyKind` goes with `replied` and nothing else; an out-of-office is\nnot a reply, so `auto_reply` is not a kind here.",
+        "properties": {
+          "replyKind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "interested",
+                  "not_now",
+                  "said_no",
+                  "asked_to_stop"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replykind"
+          },
+          "step": {
+            "enum": [
+              "request_sent",
+              "accepted",
+              "message_sent",
+              "replied"
+            ],
+            "title": "Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step"
+        ],
+        "title": "LogStepBody",
+        "type": "object"
+      },
       "LogTouchBody": {
         "additionalProperties": false,
         "description": "A touch he made himself: a reply to an HN post, or any other touch. The other channels have their own writes.",
@@ -1457,6 +1682,30 @@
           "idempotencyKey"
         ],
         "title": "LogTouchBody",
+        "type": "object"
+      },
+      "LoggedStep": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "step": {
+            "enum": [
+              "request_sent",
+              "accepted",
+              "message_sent",
+              "replied"
+            ],
+            "title": "Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step",
+          "at"
+        ],
+        "title": "LoggedStep",
         "type": "object"
       },
       "OutcomeBody": {
@@ -2780,6 +3029,27 @@
         "title": "TouchRevision",
         "type": "object"
       },
+      "UndoStepBody": {
+        "additionalProperties": false,
+        "description": "Take back the newest step he logged (only the newest, so the steps left always make sense).",
+        "properties": {
+          "step": {
+            "enum": [
+              "request_sent",
+              "accepted",
+              "message_sent",
+              "replied"
+            ],
+            "title": "Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step"
+        ],
+        "title": "UndoStepBody",
+        "type": "object"
+      },
       "WatchDismissed": {
         "description": "What a dismiss answers with: the id it was sent. (A write answers with JSON; an empty answer reads as broken.)",
         "properties": {
@@ -3392,6 +3662,305 @@
         "summary": "Health Job",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/linkedin": {
+      "get": {
+        "operationId": "linkedin_view",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkedInView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Linkedin View",
+        "tags": [
+          "linkedin"
+        ]
+      }
+    },
+    "/api/linkedin/{person_id}/log": {
+      "post": {
+        "operationId": "log_step",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Person Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogStepBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkedInPerson"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Log Step",
+        "tags": [
+          "linkedin"
+        ]
+      }
+    },
+    "/api/linkedin/{person_id}/undo": {
+      "post": {
+        "operationId": "undo_step",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Person Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoStepBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkedInPerson"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Undo Step",
+        "tags": [
+          "linkedin"
         ]
       }
     },

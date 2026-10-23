@@ -232,7 +232,7 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
     domain = best["domain"]["value"] if "domain" in best else None
     mx = conn.execute("SELECT status FROM mx_check WHERE domain = ?", (domain,)).fetchone() if domain else None
 
-    postings, role = _postings(posting_rows, decisions, read_ids, conn)
+    postings, role = rank_postings(posting_rows, decisions, read_ids, conn)
     cfg = load_config()
     today = calendar.ny_date(datetime.strptime(now, ISO_FMT).replace(tzinfo=timezone.utc), cfg)
     picked_on = picked_dates[0] if picked_dates else None
@@ -241,7 +241,7 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
     person_lines = people_queries.lines(data, {c: companies[survivor_of(parents, c)] for c in companies})
     people = [
         CompanyPerson(
-            person=_person_ref(p), channel=p["channel"], status_line=person_lines[p["person_id"]].status_line,
+            person=person_ref(p), channel=p["channel"], status_line=person_lines[p["person_id"]].status_line,
             tone=person_lines[p["person_id"]].tone, last_touch_at=person_lines[p["person_id"]].last_touch_at,
         )
         for p in data.persons
@@ -249,7 +249,7 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
     by_person = {p["person_id"]: p for p in data.persons}
     touches = [
         CompanyTouch(
-            touch_id=t["touch_id"], person=_person_ref(by_person[t["person_id"]]), state=t["state"],
+            touch_id=t["touch_id"], person=person_ref(by_person[t["person_id"]]), state=t["state"],
             summary=people_queries.touch_summary(t, data.messages_by_touch.get(t["touch_id"], [])),
             messages=[ThreadMessage(**m) for m in people_queries.thread(data, t)],
         )
@@ -272,11 +272,7 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
         sponsorship_shown=_sponsorship_shown(best, role, [p for p in postings if p['state'] != 'closed'], evidence_rows),
         mail_server_ok=None if mx is None else mx["status"] == "ok",
         board=_board(boards),
-        role=RoleToName(
-            posting_id=role["row"]["posting_id"], title=role["row"]["title"], url=role["row"]["url"],
-            location=role["row"]["location"], first_seen_at=role["row"]["first_seen_at"], level_tier=role["tier"],
-            years_asked=role["years"], start2027=role["start"],
-        ) if role else None,
+        role=role_to_name(role),
         postings=[p["model"] for p in postings],
         people=people,
         touches=touches,
@@ -288,7 +284,7 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
     )
 
 
-def _person_ref(p: sqlite3.Row) -> PersonRef:
+def person_ref(p: sqlite3.Row) -> PersonRef:
     return PersonRef(id=p["person_id"], name=p["name"], title=p["title"], role_kind=p["role_kind"], email=p["email"],
                      linkedin_url=p["linkedin_url"], revision=p["revision"])
 
@@ -351,7 +347,7 @@ def _board(boards) -> CompanyBoard | None:
     )
 
 
-def _postings(posting_rows, decisions: dict, read_ids: set, conn) -> tuple[list[dict], dict | None]:
+def rank_postings(posting_rows, decisions: dict, read_ids: set, conn) -> tuple[list[dict], dict | None]:
     """Every posting as a row with its state, and the open one to name (best level first)."""
     explain = load_explain() if read_ids else None
     out = []
@@ -385,6 +381,17 @@ def _postings(posting_rows, decisions: dict, read_ids: set, conn) -> tuple[list[
     role = candidates[0] if candidates else None
     out.sort(key=lambda x: (-1 if x is role else STATE_RANK[x["state"]]))
     return out, role
+
+
+def role_to_name(role: dict | None) -> RoleToName | None:
+    """The role `rank_postings` chose to name, as the wire shape (None when there is no open role)."""
+    if role is None:
+        return None
+    row = role["row"]
+    return RoleToName(
+        posting_id=row["posting_id"], title=row["title"], url=row["url"], location=row["location"],
+        first_seen_at=row["first_seen_at"], level_tier=role["tier"], years_asked=role["years"], start2027=role["start"],
+    )
 
 
 def _event(r: sqlite3.Row) -> CompanyEvent:

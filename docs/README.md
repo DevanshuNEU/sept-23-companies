@@ -153,7 +153,9 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
   `switched_off`. `read --company` names each one with the reason and exits 1; `probe <ats>` refuses and sends
   nothing. The adapters and their tests stay.
 - The polite client refuses any request, redirect hops included, to a switched-off ATS's host (`HostOff`, a
-  `HostTripped`), so a watched page on such a host is deferred, never fetched.
+  `HostTripped`), so a watched page on such a host is deferred, never fetched. #31's careers check follows its
+  redirects itself through the same block (`CrawlConfig.off_host`): a hop to such a host is not sent and the check is
+  an `error`, never a definite `none`.
 - #31 may still create boards on a switched-off ATS (stapply lists, careers pages, `ats_detect`); the rows are harmless.
   find_boards reads the same `[ats_off]` list (`outreach.crawl.config`, standard library only), so a company whose
   only boards are switched off gets its careers page watched, like a company with no readable board.
@@ -169,8 +171,6 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
 - A mass empty that lasts past the outage grace is written as empty reads: a day later its boards raise `board_empty`
   items one by one and the second empty closes their postings.
 - A board's host bucket is not stored, so the host ruling groups boards by ATS (true for every adapter here).
-- The careers check (`outreach/sources/careers.py`) does not go through the polite client, so its own fetches and
-  redirects are not under the `[ats_off]` host guard.
 
 ## Evidence only
 

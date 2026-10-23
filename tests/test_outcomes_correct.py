@@ -2,9 +2,9 @@ import json
 import sqlite3
 import unittest
 
-from outreach.outcomes import correct
+from outreach.outcomes import correct, wins
 from outreach.outcomes.context import build_context
-from outreach.store import log_touch, record_outcome, transaction
+from outreach.store import log_touch, record_outcome, transaction, writes
 from tests.storetest import fresh_store, seed_company
 
 SENT = "2026-10-01T15:00:00Z"
@@ -166,6 +166,75 @@ class CorrectOutcomeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.fix("accepted", "2026-09-01T00:00:00Z", revision=1)
         self.assertEqual(row(self.conn, self.touch)["revision"], 1)
+
+
+class AtomicAndClockTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh_store()      # autocommit: no transaction is open unless the code opens one
+        self.touch = new_touch(self.conn)
+
+    def test_a_failing_event_write_leaves_the_touch_unchanged_on_an_autocommit_connection(self):
+        self.assertFalse(self.conn.in_transaction)
+        before = (dict(row(self.conn, self.touch)), events(self.conn, self.touch))
+        with self.assertRaises(sqlite3.IntegrityError):
+            correct.correct_outcome(self.conn, self.touch, "accepted", at="2026-10-04T10:00:00Z",
+                                    reply_kind=None, revision=1, actor="bogus")
+        self.assertEqual((dict(row(self.conn, self.touch)), events(self.conn, self.touch)), before)
+        self.assertEqual(row(self.conn, self.touch)["revision"], 1)
+        self.assertFalse(self.conn.in_transaction)
+        # and the same call with a real actor still works afterwards
+        self.assertEqual(correct.correct_outcome(self.conn, self.touch, "accepted", at="2026-10-04T10:00:00Z",
+                                                 reply_kind=None, revision=1), 2)
+
+    def test_inside_a_callers_transaction_a_failure_undoes_only_the_correction(self):
+        with transaction(self.conn):
+            rev = record_outcome(self.conn, self.touch, kind="accepted", at="2026-10-03T10:00:00Z", revision=1)
+            with self.assertRaises(sqlite3.IntegrityError):
+                correct.correct_outcome(self.conn, self.touch, "accepted", at="2026-10-04T10:00:00Z",
+                                        reply_kind=None, revision=rev, actor="bogus")
+        r = row(self.conn, self.touch)
+        self.assertEqual((r["accepted_at"], r["revision"]), ("2026-10-03T10:00:00Z", rev))
+
+    def test_the_event_takes_the_time_it_is_given(self):
+        correct.correct_outcome(self.conn, self.touch, "accepted", at="2026-10-04T10:00:00Z", reply_kind=None,
+                                revision=1, now="2026-10-05T08:30:00Z")
+        event = [e for e in events(self.conn, self.touch) if e["kind"] == "corrected"][0]
+        self.assertEqual(event["at"], "2026-10-05T08:30:00Z")
+
+    def test_a_correction_that_changes_nothing_bumps_nothing_and_writes_no_event(self):
+        # clearing an outcome that is already empty
+        self.assertEqual(correct.correct_outcome(self.conn, self.touch, "accepted", at=None, reply_kind=None,
+                                                 revision=1), 1)
+        # setting the value it already has (same moment in another spelling)
+        rev = correct.correct_outcome(self.conn, self.touch, "referred", at="2026-10-06T10:00:00Z",
+                                      reply_kind=None, revision=1)
+        self.assertEqual(rev, 2)
+        self.assertEqual(correct.correct_outcome(self.conn, self.touch, "referred", at="2026-10-06T06:00:00-04:00",
+                                                 reply_kind=None, revision=2), 2)
+        # a reply with the same date and the same kind
+        rev = correct.correct_outcome(self.conn, self.touch, "replied", at="2026-10-07T10:00:00Z",
+                                      reply_kind="interested", revision=2)
+        self.assertEqual(correct.correct_outcome(self.conn, self.touch, "replied", at="2026-10-07T10:00:00Z",
+                                                 reply_kind="interested", revision=rev), rev)
+        self.assertEqual(correct.correct_outcome(self.conn, self.touch, "replied", at="2026-10-07T10:00:00Z",
+                                                 reply_kind=None, revision=rev), rev)
+        self.assertEqual(row(self.conn, self.touch)["revision"], rev)
+        self.assertEqual([e["kind"] for e in events(self.conn, self.touch)], ["sent", "corrected", "corrected"])
+
+    def test_a_no_op_with_a_stale_revision_is_still_a_conflict(self):
+        with self.assertRaises(LookupError):
+            correct.correct_outcome(self.conn, self.touch, "accepted", at=None, reply_kind=None, revision=7)
+
+    def test_only_the_reply_kind_changing_is_a_change(self):
+        rev = correct.correct_outcome(self.conn, self.touch, "replied", at="2026-10-07T10:00:00Z",
+                                      reply_kind="interested", revision=1)
+        self.assertEqual(correct.correct_outcome(self.conn, self.touch, "replied", at="2026-10-07T10:00:00Z",
+                                                 reply_kind="said_no", revision=rev), rev + 1)
+
+    def test_the_copied_constants_match_the_foundation(self):
+        # correct.py and wins.py keep their own copies so they need no private names; drift must fail loudly.
+        self.assertEqual(wins.REPLY_KINDS, writes._REPLY_KINDS)
+        self.assertEqual(correct.OUTCOME_COLUMNS, writes._OUTCOME_COLUMNS)
 
 
 class ContextTest(unittest.TestCase):

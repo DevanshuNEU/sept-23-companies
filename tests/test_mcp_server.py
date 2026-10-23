@@ -316,6 +316,15 @@ class RegistrationTest(unittest.TestCase):
         self.assertEqual(config["args"], ["run", "--directory", live_checkout.LIVE_ROOT, "--frozen", "python", "-m",
                                           "outreach.mcp"])
 
+    def test_with_no_uv_on_the_path_it_exits_plainly_and_prints_no_command(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr), mock.patch.object(cli.shutil, "which",
+                                                                                 return_value=None):
+            self.assertEqual(cli.main(["--print-registration"]), 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("uv", stderr.getvalue())
+        self.assertIn("PATH", stderr.getvalue())
+
     def test_registration_has_no_store_override_and_quotes_the_path_with_spaces(self):
         text = self.printed()
         self.assertNotIn("OUTREACH_DB", text)

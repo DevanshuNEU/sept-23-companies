@@ -23,10 +23,15 @@ __all__ = ["main", "registration_command"]
 
 def registration_command(live_root: str = live_checkout.LIVE_ROOT) -> str:
     """One shell line: from the live checkout, register `outreach` for that folder only (local scope), run by the
-    repo's uv from its locked environment. No OUTREACH_DB: there it is the live store, as it should be."""
+    repo's uv from its locked environment. No OUTREACH_DB: there it is the live store, as it should be.
+    LookupError when uv is not on PATH: a bare `uv` would register a command Claude Code may not find."""
+    uv = shutil.which("uv")
+    if uv is None:
+        raise LookupError("uv is not on PATH, so there is no command to register. Install uv (or put it on PATH) "
+                          "and run this again.")
     config = {
         "type": "stdio",
-        "command": shutil.which("uv") or "uv",
+        "command": uv,
         "args": ["run", "--directory", live_root, "--frozen", "python", "-m", "outreach.mcp"],
     }
     return (f"cd {shlex.quote(live_root)} && claude mcp add-json outreach "
@@ -42,7 +47,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.print_registration:
-        print(registration_command())
+        try:
+            command = registration_command()
+        except LookupError as err:
+            print(f"outreach mcp: {err}", file=sys.stderr)
+            return 1
+        print(command)
         return 0
     try:
         path = check_store()

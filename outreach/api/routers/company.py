@@ -8,12 +8,13 @@ from outreach.api.models.company import CompanyView
 from outreach.api.models.score import ScoreView
 from outreach.api.queries.company import company_view
 from outreach.api.queries.score import score_view
+from outreach.api.routers import row_id
 
 router = APIRouter(prefix="/companies", tags=["company"])
 
 
 @router.get("/{company_id}", response_model=CompanyView)
-def company(company_id: int, request: Request, clock: Clock = Depends(get_clock)) -> CompanyView:
+def company(request: Request, company_id: int = row_id(), clock: Clock = Depends(get_clock)) -> CompanyView:
     now = clock()
     with read_conn(request) as conn:
         view = company_view(conn, company_id, now)
@@ -23,7 +24,7 @@ def company(company_id: int, request: Request, clock: Clock = Depends(get_clock)
 
 
 @router.get("/{company_id}/score", response_model=ScoreView)
-def company_score(company_id: int, request: Request, clock: Clock = Depends(get_clock)) -> ScoreView:
+def company_score(request: Request, company_id: int = row_id(), clock: Clock = Depends(get_clock)) -> ScoreView:
     now = clock()
     with read_conn(request) as conn:
         view = score_view(conn, company_id, now)

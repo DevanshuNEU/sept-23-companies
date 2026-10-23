@@ -3156,8 +3156,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                touch_id: number;
                 kind: "accepted" | "replied" | "referred" | "interview" | "offer" | "quiet";
+                touch_id: number;
             };
             cookie?: never;
         };

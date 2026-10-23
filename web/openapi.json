@@ -3895,6 +3895,8 @@
             "name": "company_id",
             "required": true,
             "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
               "title": "Company Id",
               "type": "integer"
             }
@@ -3977,6 +3979,8 @@
             "name": "company_id",
             "required": true,
             "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
               "title": "Company Id",
               "type": "integer"
             }
@@ -5441,6 +5445,8 @@
             "name": "touch_id",
             "required": true,
             "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
               "title": "Touch Id",
               "type": "integer"
             }
@@ -5523,6 +5529,8 @@
             "name": "touch_id",
             "required": true,
             "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
               "title": "Touch Id",
               "type": "integer"
             }
@@ -5632,15 +5640,6 @@
         "parameters": [
           {
             "in": "path",
-            "name": "touch_id",
-            "required": true,
-            "schema": {
-              "title": "Touch Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
             "name": "kind",
             "required": true,
             "schema": {
@@ -5654,6 +5653,17 @@
               ],
               "title": "Kind",
               "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "touch_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Touch Id",
+              "type": "integer"
             }
           }
         ],
@@ -5835,6 +5845,8 @@
             "name": "item_id",
             "required": true,
             "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
               "title": "Item Id",
               "type": "integer"
             }

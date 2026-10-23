@@ -10,6 +10,7 @@ from outreach.api.models.outcomes import (
     TouchRevision,
 )
 from outreach.api.queries import outcomes
+from outreach.api.routers import row_id
 
 router = APIRouter(tags=["outcomes"])
 
@@ -22,7 +23,7 @@ def outcome_prompt(request: Request, clock: Clock = Depends(get_clock)) -> Outco
 
 
 @router.post("/touches/{touch_id}/outcomes", response_model=TouchRevision)
-def log_outcome(touch_id: int, body: OutcomeBody, request: Request) -> Response:
+def log_outcome(body: OutcomeBody, request: Request, touch_id: int = row_id()) -> Response:
     cfg = request.app.state.config
 
     def op(ctx: WriteCtx) -> TouchRevision:
@@ -32,7 +33,7 @@ def log_outcome(touch_id: int, body: OutcomeBody, request: Request) -> Response:
 
 
 @router.put("/touches/{touch_id}/outcomes/{kind}", response_model=TouchRevision)
-def correct_outcome(touch_id: int, kind: OutcomeKind, body: CorrectionBody, request: Request) -> Response:
+def correct_outcome(kind: OutcomeKind, body: CorrectionBody, request: Request, touch_id: int = row_id()) -> Response:
     def op(ctx: WriteCtx) -> TouchRevision:
         return TouchRevision(revision=outcomes.correct(ctx, touch_id, kind, body))
 
@@ -40,7 +41,7 @@ def correct_outcome(touch_id: int, kind: OutcomeKind, body: CorrectionBody, requ
 
 
 @router.get("/touches/{touch_id}/history", response_model=TouchHistory)
-def touch_history(touch_id: int, request: Request) -> TouchHistory:
+def touch_history(request: Request, touch_id: int = row_id()) -> TouchHistory:
     with read_conn(request) as conn:
         history = outcomes.touch_history(conn, touch_id)
     if history is None:

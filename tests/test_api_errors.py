@@ -61,6 +61,32 @@ def query(limit: int):
 '''
 
 
+class PathIdTest(ApiCase):
+    def test_every_id_in_a_path_is_bounded_to_a_row_id(self):
+        from outreach.api.routers import MAX_ID
+        checked = []
+        for path, methods in self.app.openapi()["paths"].items():
+            for method, op in methods.items():
+                for param in op.get("parameters", []):
+                    if param["in"] != "path" or not param["name"].endswith("_id"):
+                        continue
+                    with self.subTest(path=path, method=method, param=param["name"]):
+                        schema = param["schema"]
+                        self.assertEqual((schema.get("minimum"), schema.get("maximum")), (1, MAX_ID))
+                    checked.append((path, method))
+        self.assertGreaterEqual(len(checked), 10)
+
+    def test_a_huge_id_is_a_bad_request_not_a_500(self):
+        huge = 2 ** 63
+        for path in (f"/api/companies/{huge}", f"/api/companies/{huge}/score", f"/api/touches/{huge}/history"):
+            with self.subTest(path=path):
+                reply = self.get(path)
+                self.assertEqual((reply.status_code, reply.json()["code"]), (400, "bad_request"), reply.text)
+        reply = self.post(f"/api/watch/{huge}/dismiss", {})
+        self.assertEqual((reply.status_code, reply.json()["code"]), (400, "bad_request"), reply.text)
+        self.assertIn("item_id", reply.json()["message"])
+
+
 class EnvelopeTest(ApiCase):
     def setUp(self):
         super().setUp()

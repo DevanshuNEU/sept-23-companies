@@ -316,7 +316,10 @@ class Watch(ApiCase):
     def test_unknown_id_is_not_found(self):
         a = s.company(self.conn, "Acme")
         other = s.review(self.conn, a, "size_unknown")
-        for item_id in (0, -4, 3, 4 * 9999 + CAREERS, 4 * 9999 + NEW, 4 * 9999 + MERGE, 4 * other + CAREERS,
+        for item_id in (0, -4):  # not a row id at all: refused before it reaches the store
+            with self.subTest(item_id=item_id):
+                self.assertEqual(self.dismiss(item_id).json()["code"], "bad_request")
+        for item_id in (3, 4 * 9999 + CAREERS, 4 * 9999 + NEW, 4 * 9999 + MERGE, 4 * other + CAREERS,
                         4 * other + MERGE, 4 * 9999 + 3):
             with self.subTest(item_id=item_id):
                 res = self.dismiss(item_id)

@@ -12,7 +12,7 @@ MCP_DIR = ROOT / "outreach" / "mcp"
 FORBIDDEN_IMPORTS = ("outreach.api", "outreach.sending", "outreach.net", "mail", "refresh", "dashboard", "gmail")
 FORBIDDEN_TEXT = ("3001", "3002", "3011", "3013", "3100", "5173", "127.0.0.1", "localhost", "/api/",
                   "Idempotency-Key")
-DASHES = ("–", "—")
+DASHES = (chr(0x2013), chr(0x2014))  # en and em dash, spelled by code point so this file has neither
 
 
 def sources(folder: Path = MCP_DIR) -> list[Path]:

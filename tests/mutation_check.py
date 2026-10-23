@@ -3,6 +3,7 @@
 
     uv run python tests/mutation_check.py            # from the repo root
     uv run python tests/mutation_check.py --list
+    uv run python tests/mutation_check.py --shard 2/6   # only entries whose zero-based index % 6 == 2
 
 NOT part of `unittest discover`, deliberately: it edits source files in place and must never run as a side effect
 of the ordinary suite. Run it after changing the rules or the store.
@@ -532,10 +533,32 @@ def _stop(signum, frame):
     raise SystemExit(128 + signum)  # unwinds through the `finally` that restores the file
 
 
-def main():
+def parse_shard(text):
+    """'I/N' as (I, N) with 0 <= I < N. Anything else is refused, so a typo cannot quietly run nothing."""
+    left, slash, right = text.partition("/")
+    if not (slash and left.isascii() and left.isdigit() and right.isascii() and right.isdigit()):
+        raise argparse.ArgumentTypeError(f"expected I/N with whole numbers, like 2/6, got {text!r}")
+    i, n = int(left), int(right)
+    if n < 1 or i >= n:
+        raise argparse.ArgumentTypeError(f"shard {text!r} is out of range: I must be below N and N at least 1")
+    return i, n
+
+
+def select_shard(items, shard):
+    """The items whose zero-based position % N == I; all of them when there is no shard."""
+    if shard is None:
+        return list(items)
+    i, n = shard
+    return [item for position, item in enumerate(items) if position % n == i]
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--list", action="store_true", help="print mutations and exit")
-    args = ap.parse_args()
+    ap.add_argument("--list", action="store_true", help="print every mutation and exit (a shard does not narrow it)")
+    ap.add_argument("--shard", type=parse_shard, metavar="I/N",
+                    help="run only the mutations whose zero-based index %% N == I; the numbers in the output stay "
+                         "the full-run numbers. Each shard fails on its own missed or skipped entries.")
+    args = ap.parse_args(argv)
 
     if args.list:
         for n, (path, name, _, _, expect) in enumerate(MUTATIONS, start=1):
@@ -565,10 +588,12 @@ def main():
             print("   ", f)
         print("(mutable files are clean in git, so the failure is not a leftover mutation)")
         return 2
-    print(f"baseline green ({len(MUTATIONS)} mutations to apply)\n", flush=True)
+    chosen = select_shard(list(enumerate(MUTATIONS, start=1)), args.shard)
+    which = f" in shard {args.shard[0]}/{args.shard[1]}, of {len(MUTATIONS)}" if args.shard else ""
+    print(f"baseline green ({len(chosen)} mutations to apply{which})\n", flush=True)
 
     caught = missed = skipped = 0
-    for n, (path, name, old, new, expect) in enumerate(MUTATIONS, start=1):
+    for n, (path, name, old, new, expect) in chosen:
         original = path.read_bytes()
         label = f"{n:2} {path.name}: {name}"
         old_b, new_b = old.encode("utf-8"), new.encode("utf-8")

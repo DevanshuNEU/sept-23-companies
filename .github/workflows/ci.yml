@@ -1,0 +1,195 @@
+# CI for the Outreach repo. Advisory: the repo has no branch protection, so a red run does not block a merge by
+# itself. The rule is in CLAUDE.md: never merge a red PR. `ci-ok` is the one check that summarizes the four below.
+#
+# Runs on every pull request and every push to master:
+#   python  the full Python suite (the network guard in tests/__init__.py stays on)
+#   web     typecheck, lint and the Vitest suite
+#   schema  web/openapi.json and src/api/schema.ts match the API (a no-op until outreach/api is on this branch)
+#   e2e     Playwright on the Chromium it installs
+#
+# The mutation check does NOT run on pull requests or pushes: one full run is about 114 reruns of the whole Python
+# suite, which is hours of runner time. Start it by hand (Actions tab, "CI", Run workflow, or
+# `gh workflow run ci.yml`); it splits into six shards. A manual run starts only the mutation shards.
+#
+# No secrets, a read-only token, and nothing here needs the network beyond installing packages.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  python:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # pyproject sets python-preference = "only-system", so a system 3.14 must be on PATH before uv runs.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      # setup-uv publishes exact release tags only (no v10 major tag), so this one is pinned to the release.
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - run: uv run --frozen python -m unittest discover -s tests -t .
+
+  web:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test --maxWorkers=2
+
+  schema:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # The API package and the drift test land on their own branch (#11). Until both are here there is nothing to
+      # check, so the job says so and passes; it starts checking by itself once the files exist.
+      - id: has
+        run: |
+          if [ -f outreach/api/openapi.py ] && [ -f web/src/api/schema.drift.test.ts ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::schema check skipped: outreach/api/openapi.py or web/src/api/schema.drift.test.ts is not in this branch yet"
+          fi
+      - if: steps.has.outputs.present == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - if: steps.has.outputs.present == 'true'
+        uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - if: steps.has.outputs.present == 'true'
+        run: uv sync --frozen
+      - if: steps.has.outputs.present == 'true'
+        run: uv run --frozen python -m outreach.api.openapi --check
+      - if: steps.has.outputs.present == 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - if: steps.has.outputs.present == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - if: steps.has.outputs.present == 'true'
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - if: steps.has.outputs.present == 'true'
+        working-directory: web
+        run: pnpm test src/api/schema.drift.test.ts
+
+  e2e:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: web
+    env:
+      PW_BUNDLED: '1'
+      WEB_PORT: '5173'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+
+  # Manual only. Each shard runs the entries whose zero-based index % 6 equals its number, so together they run all
+  # of them once. A shard is red on a missed or skipped entry, and on any TIMEOUT (the check counts a timeout as
+  # caught, which would hide a weak test).
+  mutation:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    name: mutation (${{ matrix.shard }}/6)
+    env:
+      SHARD: ${{ matrix.shard }}/6
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      # The log goes to RUNNER_TEMP, outside the checkout: the check refuses to start on a dirty tree.
+      - name: Mutation check, shard (must end with missed 0, skipped 0 and no TIMEOUT)
+        run: |
+          set -o pipefail
+          uv run --frozen python tests/mutation_check.py --shard "$SHARD" | tee "$RUNNER_TEMP/mutation.log"
+          grep -Eq '^caught [0-9]+  missed 0  skipped 0$' "$RUNNER_TEMP/mutation.log"
+          if grep -q 'TIMEOUT' "$RUNNER_TEMP/mutation.log"; then
+            echo "::error::a mutation run hit the suite timeout; the check counts that as caught, so fix the slow test"
+            exit 1
+          fi
+
+  ci-ok:
+    if: always() && github.event_name != 'workflow_dispatch'
+    needs: [python, web, schema, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      # All four jobs always run on these events, so anything but success (a skip included) is a red.
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1

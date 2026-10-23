@@ -13,6 +13,7 @@ from outreach.api.models.score import (
 )
 from outreach.api.models.watch import SourceLink
 from outreach.api.queries.company import best_facts, group_of, merge_parents, survivor_of
+from outreach.ranking.confidence import scrub_text
 from outreach.ranking.scores import latest_version
 
 # The ranker's own signal order (`build_signals`), which breaks a tie in points. A test pins it to the ranker.
@@ -101,7 +102,8 @@ def signal_sources(conn: sqlite3.Connection, group: list[int], names: list[str],
     for name in names:
         if name in POSTING_SIGNALS:
             ok = posting is not None and _is_url(posting["url"])
-            out[name] = SourceLink(label=posting["title"], url=posting["url"].strip()) if ok else None
+            # ranking's own scrub: a posting title is one plain line with no long dash, as in its reasons
+            out[name] = SourceLink(label=scrub_text(posting["title"]), url=posting["url"].strip()) if ok else None
         else:
             out[name] = _evidence_link(name, winners)
     return out

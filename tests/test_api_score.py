@@ -143,6 +143,12 @@ class Score(ApiCase):
             self.assertEqual(by[name]["source"], {"label": "New Grad Engineer", "url": "https://jobs.example/ng"}, name)
         self.assertIsNone(by["small"]["source"])  # no size evidence
 
+    def test_score_signal_source_label_is_the_posting_title_scrubbed_to_one_plain_line(self):
+        cid = s.company(self.conn, "Acme")
+        pid = s.posting(self.conn, cid, "New Grad Engineer \u2014 Platform\n  (Remote)", url="https://jobs.example/ng")
+        s.score(self.conn, cid, {"live_role": 40.0}, best_posting_id=pid)
+        self.assertEqual(self.signals(cid)["live_role"]["source"]["label"], "New Grad Engineer - Platform (Remote)")
+
     def test_score_signal_source_is_the_winning_evidence_rows_http_ref(self):
         cid = s.company(self.conn, "Acme")
         s.evidence(self.conn, cid, "everify", "enrolled", source_kind="everify", source_ref="https://e-verify.example/acme",

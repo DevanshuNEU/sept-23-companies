@@ -7,7 +7,8 @@ source that breaks the person_source rules rejects every person and writes nothi
   company of its merged family), refuses the call.
 - Someone already known by email, else by LinkedIn profile (compared in one normal form), else, with neither given,
   by name at the company, is not added again: their id comes back with created false and flag `duplicate`. At the
-  same company an empty profile or empty notes are filled (never over text already there) and new sources added.
+  same company an empty profile or empty notes are filled (never over text already there) and new sources added,
+  except on a name-only match (flag `name_only_match`), which writes nothing: a name alone may be someone else.
   Known at another company: returned with flag `other_company` and left as they are.
 - A known person on an active no-go, or who said no or asked to stop (on an email thread or a logged outreach
   touch), is that person's refusal (`person_no_go`, `said_no`), with a plain reason; the others in the call still go
@@ -242,7 +243,10 @@ def add_people(ctx: Ctx, args: AddPeopleInput) -> dict:
             elif stopped is not None:  # a new address or profile never brings back someone who must not be emailed
                 out = stopped
             elif namesakes and not want["email"] and not want["linkedin"]:
-                out = _known(ctx, namesakes[0], want, family=family, survivor=survivor, no_go_people=no_go_people)
+                out = {"person_id": namesakes[0]["person_id"], "created": False, "refused": None,
+                       "flags": ["duplicate", "name_only_match"],
+                       "message": "Matched by name only, so nothing was filled in or added for them. Give their "
+                                  "email or LinkedIn URL to add details."}
             else:
                 out = _new(ctx, want, survivor, [f"same_name_as:{p['person_id']}" for p in namesakes])
             results.append({"index": i, "name": want["name"], **out})

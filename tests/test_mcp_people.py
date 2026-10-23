@@ -256,5 +256,14 @@ class SameNameTest(PeopleCase):
         self.assertEqual((res["refused"], res["person_id"], res["created"]), ("said_no", sid, False))
         self.assertEqual(fingerprint(self.db), before)
 
+    def test_a_name_only_match_is_flagged_and_fills_nothing(self):
+        known = seed.person(self.db, self.acme, "Pat Lee", email=None, channel="linkedin")
+        before = fingerprint(self.db)
+        res = self.add(person("Pat Lee", profile_text="Builds the queue.", notes="A note",
+                              sources=[{"kind": "profile", "url": PAGE}]))["results"][0]
+        self.assertEqual((res["person_id"], res["created"], res["flags"]),
+                         (known, False, ["duplicate", "name_only_match"]))
+        self.assertEqual(fingerprint(self.db), before)
+
 if __name__ == "__main__":
     unittest.main()

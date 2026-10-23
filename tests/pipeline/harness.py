@@ -10,12 +10,16 @@ its own stage made or its own fixture companies, never a global total.
 
 `STREAM_STAGES` maps each stream to the stage names it may register, in stage order:
 
+  importer (#17)  import_history   (first: history before discovery)
   sources  (#31)  discover, resolve, find_boards
   crawl    (#21)  read_boards
   reader   (#32)  read_postings
   rules    (#30)  rules
   ranking  (#6)   rank
   plan     (#15)  plan
+  mcp      (#13)  draft            (Claude drafts after the plan)
+  sending  (#14)  send             (only what was approved)
+  review   (#16)  needs_you        (last: sweeps what every stage left)
 
 `PipelineHarness()` imports each `tests.pipeline.stages_<stream>` that exists, in that order, and calls its `register`.
 An import of a missing stream module is skipped; a stream module that exists but fails to import is an error. A stream
@@ -33,12 +37,16 @@ from tests.storetest import fresh_store
 __all__ = ["STAGE_NAMES", "STREAM_STAGES", "PipelineHarness"]
 
 STREAM_STAGES = {
-    "sources": ("discover", "resolve", "find_boards"),
-    "crawl": ("read_boards",),
-    "reader": ("read_postings",),
-    "rules": ("rules",),
-    "ranking": ("rank",),
-    "plan": ("plan",),
+    "importer": ("import_history",),                   # #17, first: history before discovery
+    "sources": ("discover", "resolve", "find_boards"),  # #31
+    "crawl": ("read_boards",),                         # #21
+    "reader": ("read_postings",),                      # #32
+    "rules": ("rules",),                               # #30
+    "ranking": ("rank",),                              # #6
+    "plan": ("plan",),                                 # #15
+    "mcp": ("draft",),                                 # #13: Claude drafts after the plan
+    "sending": ("send",),                              # #14: only what was approved
+    "review": ("needs_you",),                          # #16: last, sweeps what every stage left
 }
 STAGE_NAMES = tuple(name for names in STREAM_STAGES.values() for name in names)
 

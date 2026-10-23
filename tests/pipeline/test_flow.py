@@ -24,7 +24,7 @@ from outreach.rules.version import ruleset_version
 from outreach.store import is_shared_key
 from outreach.store.writes import body_sha256
 from tests.fakes import json_response, status_response, text_response
-from tests.pipeline import stages_crawl, stages_ranking, stages_rules
+from tests.pipeline import stages_crawl, stages_ranking, stages_rules, stages_sending
 import tests.pipeline.harness as harness_module
 from tests.pipeline.harness import STAGE_NAMES, PipelineHarness
 from tests.ranking_seed import EMPLOYERS, POSTINGS, seed_ranking_fixture
@@ -180,6 +180,30 @@ def ranking_puts_the_sponsoring_new_grad_employer_first_and_keeps_every_rule(h):
         assert row.signals["best_posting_id"] not in stale, f"{key}: a stale posting is the best posting"
         say = row.signals["rank_reason"]
         assert say["level"] in LEVELS and say["basis"].strip(), f"{key}: the rank reason lacks a level or a basis"
+
+
+@invariant("send")
+def send_sends_only_what_was_approved_once(h):
+    """Counts only the Sendwell Labs fixture: the approved founder email went out once, the drafted one never, the
+    touch was logged on the plan's source, and a follow-up is planned seven business days on."""
+    ids = h.sending_ids
+    sent = [m for m, _, _ in ids.gmail.sent]
+    assert [m.to for m in sent] == [stages_sending.FOUNDER_EMAIL], f"Gmail took {[m.to for m in sent]}"
+    founder = h.conn.execute("SELECT * FROM message WHERE message_id = ?", (ids.founder_message,)).fetchone()
+    assert founder["state"] == "sent" and founder["rfc_message_id"] == sent[0].message_id, "the founder's email is sent"
+    other = h.conn.execute("SELECT state FROM message WHERE message_id = ?", (ids.other_message,)).fetchone()
+    assert other["state"] == "drafted", f"the never-approved draft is {other['state']}"
+    logged = h.conn.execute("SELECT channel, json_extract(context, '$.source') AS source FROM outreach_touch "
+                            "WHERE person_id = ?", (ids.founder,)).fetchall()
+    assert [tuple(r) for r in logged] == [("email", "plan")], f"outreach touches: {[tuple(r) for r in logged]}"
+    planned = h.conn.execute("SELECT seq, state, due_on FROM message WHERE touch_id = ? AND seq >= 1",
+                             (ids.founder_touch,)).fetchall()
+    assert [tuple(r) for r in planned] == [(1, "planned", "2026-11-19")], f"follow-ups: {[tuple(r) for r in planned]}"
+    states = h.conn.execute("SELECT m.state, COUNT(*) FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+                            "JOIN person p ON p.person_id = t.person_id WHERE p.company_id = ? GROUP BY m.state",
+                            (ids.company,)).fetchall()
+    assert {r[0]: r[1] for r in states} == {"sent": 1, "drafted": 1, "planned": 1}, \
+        f"Sendwell's messages by state: {[tuple(r) for r in states]}"
 
 
 class HarnessCase(unittest.TestCase):
@@ -436,8 +460,9 @@ class FlowTests(HarnessCase):
 class RegistrationTests(HarnessCase):
     def test_streams_and_their_stages_are_the_agreed_map(self):
         self.assertEqual(harness_module.STREAM_STAGES, {
-            "sources": ("discover", "resolve", "find_boards"), "crawl": ("read_boards",),
-            "reader": ("read_postings",), "rules": ("rules",), "ranking": ("rank",), "plan": ("plan",)})
+            "importer": ("import_history",), "sources": ("discover", "resolve", "find_boards"),
+            "crawl": ("read_boards",), "reader": ("read_postings",), "rules": ("rules",), "ranking": ("rank",),
+            "plan": ("plan",), "mcp": ("draft",), "sending": ("send",), "review": ("needs_you",)})
         flat = [n for names in harness_module.STREAM_STAGES.values() for n in names]
         self.assertEqual(tuple(flat), STAGE_NAMES)
 
@@ -491,11 +516,13 @@ class RankFlowTests(HarnessCase):
 
     def flow(self):
         h = self.harness()
-        self.assertEqual([n for n, _ in h.stages][-1], "rank")
+        self.assertIn("rank", [n for n, _ in h.stages])
         for name, run in h.stages:
             run()
             if name in INVARIANTS:
                 INVARIANTS[name](h)
+            if name == "rank":  # later streams' stages (plan, send, ...) are not this class's business
+                break
         return h
 
     def row(self, h, key):

@@ -186,6 +186,10 @@ class SendingTest(Base):
         self.assertEqual(self.runs()[-1]["status"], "partial")
         self.assertTrue(any("banned phrases list" in line for line in report.lines))
         self.assertEqual(self.gmail.sent, [])
+        self.assertEqual(self.notices, [(tick.WAIT_TITLE, tick.BANNED_TEXT)])
+        self.clock.advance(minutes=2)
+        run_tick(self.db, self.deps(banned=[]), CFG)
+        self.assertEqual(len(self.notices), 1)  # once a day
 
     def test_weekend_far_east_recipient_is_not_sent(self):
         # Sunday 20:00 in New York is Monday 10:00 in Tokyo: the New York date is not a sending day.

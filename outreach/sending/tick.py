@@ -52,8 +52,8 @@ from outreach.store.db import transaction
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
-__all__ = ["LOCK_NAME", "BUSY_LINE", "STALE_RUN", "COUNT_KEYS", "WAIT_TITLE", "UNPROVEN_TEXT", "TickDeps", "TickReport",
-           "run_tick"]
+__all__ = ["LOCK_NAME", "BUSY_LINE", "STALE_RUN", "COUNT_KEYS", "WAIT_TITLE", "UNPROVEN_TEXT", "BANNED_TEXT",
+           "TickDeps", "TickReport", "run_tick"]
 
 LOCK_NAME = ".sender.lock"
 BUSY_LINE = "another tick is running"
@@ -61,6 +61,7 @@ STALE_RUN = "the tick stopped before it finished"
 COUNT_KEYS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skipped", "lapsed", "closed")
 WAIT_TITLE = "Outreach sending waits"
 UNPROVEN_TEXT = "Sending waits: Gmail's Message-ID handling is not proven."
+BANNED_TEXT = "Sending waits: the banned phrases list could not be read. Fix it to resume."
 # Proof that Gmail keeps the Message-ID the sender sets: an imported email found in Sent under its own id, or a
 # send of this sender recorded under the very id it claimed (read back from Gmail, or found in Sent by it).
 _PROOF = ("SELECT 1 FROM event WHERE entity = 'message' AND (kind = 'import_verified' OR (kind IN ('sent', "
@@ -484,6 +485,7 @@ class _Tick:
             codes = ", ".join(b["code"] for b in blocks)
             if all(b["code"] == LIST_MISSING for b in blocks):
                 self._partial("the banned phrases list could not be read, so nothing is sent until it is fixed")
+                self._notice("banned_list_missing", WAIT_TITLE, BANNED_TEXT)
             else:
                 self.counts["blocked"] += 1
                 self._line(f"message {picked.message_id} went back to review: {codes}")

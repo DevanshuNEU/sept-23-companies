@@ -111,7 +111,7 @@ def _draft(i: int, it: ResearchItem) -> EvidenceDraft:
 def record_research(ctx: Ctx, args: ResearchInput) -> dict:
     _family, survivor, note = resolve(ctx.conn, args.company_id)
     drafts = [_draft(i, it) for i, it in enumerate(args.items)]  # every item is checked before anything is written
-    added = record_evidence(ctx.conn, survivor, drafts, actor="claude")
+    added = record_evidence(ctx.conn, survivor, drafts, actor="claude", at=ctx.now)
     return {"company_id": survivor, "merged_note": note, "added": added, "already_known": len(drafts) - added}
 
 

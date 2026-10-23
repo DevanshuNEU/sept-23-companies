@@ -252,10 +252,11 @@ def decide_and_store(conn: sqlite3.Connection, posting_id: int, *, cfg: Config |
 
 
 def record_evidence(conn: sqlite3.Connection, company_id: int, drafts: list[EvidenceDraft], *,
-                    posting_id: int | None = None, actor: str = "rules") -> int:
+                    posting_id: int | None = None, actor: str = "rules", at: str | None = None) -> int:
     """Insert rule-made evidence (never locked) and return how many rows were new.
 
     `actor` labels the event: 'rules' by default, 'source' for LCA, HN and Form D evidence (an event.actor value).
+    `at` (canonical UTC) is when the rows and the event are recorded; default now. The MCP server passes its clock.
 
     A repeat of an earlier unlocked row adds nothing (the `evidence_once` index). A hand draft is refused: hand values
     come from #16 edits and #17's locked import, which write `locked = 1` themselves. A draft the table rejects
@@ -271,12 +272,12 @@ def record_evidence(conn: sqlite3.Connection, company_id: int, drafts: list[Evid
                 "source_ref, quote, posting_id, observed_on, recorded_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT DO NOTHING",
                 (company_id, d.fact, d.value, d.num_low, d.num_high, d.confidence, d.source_kind, d.source_ref,
-                 d.quote, posting_id, d.observed_on, utcnow()))
+                 d.quote, posting_id, d.observed_on, at or utcnow()))
             if cur.rowcount:
                 added.append(d.fact)
         if added:
             append_event(conn, entity="evidence", kind="recorded", actor=actor, company_id=company_id,
-                         detail={"added": len(added), "facts": added, "posting_id": posting_id})
+                         detail={"added": len(added), "facts": added, "posting_id": posting_id}, at=at)
     return len(added)
 
 

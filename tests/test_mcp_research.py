@@ -5,7 +5,7 @@ item that Devanshu confirms."""
 import unittest
 
 from tests import apiseed as seed
-from tests.mcptest import McpCase, fingerprint
+from tests.mcptest import NOW, McpCase, fingerprint
 from tests.test_mcp_reads import merge, no_go
 
 SITE = "https://acme.example/about"
@@ -49,6 +49,11 @@ class RecordResearchTest(ResearchCase):
                                (self.acme,)).fetchone()
         self.assertEqual(fact["confidence"], "guess")  # ranking hides on confirmed or estimate only
         self.assertEqual([(e["kind"], e["actor"]) for e in self.events("evidence")], [("recorded", "claude")])
+
+    def test_rows_and_their_event_carry_the_calls_clock(self):
+        self.ok("record_research", {"company_id": self.acme, "items": [item()]})
+        self.assertEqual(self.db.execute("SELECT recorded_at FROM evidence").fetchone()[0], NOW)
+        self.assertEqual(self.db.execute("SELECT at FROM event WHERE entity = 'evidence'").fetchone()[0], NOW)
 
     def test_a_size_headcount_domain_or_hq_above_guess_is_refused_with_the_reason(self):
         for fact, value in (("size", "40"), ("headcount", "40"), ("domain", "acme.example"), ("hq", "Boston, MA")):

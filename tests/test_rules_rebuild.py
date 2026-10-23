@@ -401,6 +401,13 @@ class RecordEvidenceTests(RebuildTestCase):
         self.assertEqual((events[0]["kind"], events[0]["actor"], events[0]["company_id"]),
                          ("recorded", "rules", self.company))
 
+    def test_record_evidence_records_at_the_time_it_is_given(self):
+        hq = EvidenceDraft("hq", "Boston, MA", "estimate", "posting")
+        self.assertEqual(record_evidence(self.conn, self.company, [hq], at="2026-11-10T15:14:00Z"), 1)
+        self.assertEqual(self.conn.execute("SELECT recorded_at FROM evidence").fetchone()[0], "2026-11-10T15:14:00Z")
+        self.assertEqual(self.conn.execute("SELECT at FROM event WHERE entity = 'evidence'").fetchone()[0],
+                         "2026-11-10T15:14:00Z")
+
     def test_record_evidence_labels_the_event_with_its_actor(self):
         # LCA, HN and Form D evidence is labeled by its source; the rules stay the default (#30 Task 1).
         lca = EvidenceDraft("lca", '{"fy":2025,"jr":3,"level1":2,"newemp_jr":2,"software":5}', "confirmed", "lca")

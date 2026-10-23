@@ -44,6 +44,7 @@ class Best:
     board_state: str    # read_ok, read_empty, read_failed, never_read or no_board
     provisional: bool   # the decision's flag
     stale_reason: str = ""  # empty for a live posting
+    level_basis: str = ""   # the decision's level basis, dashes cleaned
 
 
 @dataclass(frozen=True)
@@ -139,7 +140,7 @@ def load_roles(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             sponsorship=d.sponsorship, age_days=age_days(r["posted_on"] or r["first_seen_at"], today),
             pay=r["pay"], location=r["location"], posted_on=r["posted_on"], last_seen_on=r["last_seen_at"][:10],
             board_state=_board_state(r["last_read"], bool(r["has_board"])), provisional=bool(r["provisional"]),
-            stale_reason=stale[pid].reason if is_stale else "")
+            stale_reason=stale[pid].reason if is_stale else "", level_basis=clean_text(d.level_basis or ""))
         g["stale" if is_stale else "visible"].append(best)
 
     states = company_board_states(conn, canon, doubtful) if groups else {}

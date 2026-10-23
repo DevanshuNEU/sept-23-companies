@@ -207,7 +207,8 @@ class AgeTests(Store):
                           ("Engineer " + chr(0x2014) + " New Grad", pid))
         b = self.role().best
         self.assertEqual(b, Best(pid, "level_role", "Engineer - New Grad", "new_grad", "yes", 4,
-                                 "$120,000 to $140,000", "Austin, TX", ago(4), "2026-10-21", "read_ok", False))
+                                 "$120,000 to $140,000", "Austin, TX", ago(4), "2026-10-21", "read_ok", False,
+                                 level_basis="Title says new grad"))
 
 
 class StaleTests(Store):

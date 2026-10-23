@@ -6,8 +6,20 @@ from outreach.ranking.confidence import Assessment
 from outreach.ranking.facts import RankFacts
 
 _LANES = ("level_role", "intern_junior", "any_us_role")  # strongest first
-_LABELS = {"new_grad": "new grad", "early_career": "early career", "swe1": "SWE I", "swe2": "SWE II",
-           "open": "open level"}
+_LABELS = {"new_grad": "new grad", "early_career": "early career", "swe1": "SWE I", "swe2": "SWE II"}
+_TITLE_BASIS = "Title says"
+
+
+def _label(lane: str, tier: str | None, basis: str) -> str:
+    """What the role is, from where its level came: the title's tier only when the title set it ("Open SWE II
+    role"), else what the posting said ("Open role at his level (asks 2 years)"); an open level names no tier."""
+    if lane == "intern_junior":
+        return "Open intern role"
+    if lane == "level_role" and tier == "open":
+        return "Open role, no level in the title"
+    if lane == "level_role" and basis and not basis.startswith(_TITLE_BASIS):
+        return f"Open role at his level ({basis[0].lower()}{basis[1:]})"
+    return f"Open {_LABELS.get(tier, 'engineering')} role"
 
 
 def _posted(days: int | None, dated: bool) -> str:
@@ -34,10 +46,10 @@ class LiveRole:
                 if facts.best_role_age_days <= limit:
                     bonus = extra
                     break
-        label = "intern" if lane == "intern_junior" else _LABELS.get(facts.best_level_tier, "engineering")
+        label = _label(lane, facts.best_level_tier, clean_text(facts.best_level_basis))
         title = f": {clean_text(facts.best_title)}" if facts.best_title else ""
         return Assessment(round(min(1.0, self.params[lane] + bonus), 4),
-                          f"Open {label} role{title}{_posted(facts.best_role_age_days, facts.best_dated)}", grade)
+                          f"{label}{title}{_posted(facts.best_role_age_days, facts.best_dated)}", grade)
 
     @staticmethod
     def _no_role(facts: RankFacts) -> str:

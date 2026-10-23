@@ -1,0 +1,48 @@
+[
+  {
+    "id": "a1b2c3d4e5f6",
+    "friendly_id": "a1b2c3d4e5f6-software-engineer-new-grad",
+    "name": "Software Engineer, New Grad",
+    "url": "https://acme.breezy.hr/p/a1b2c3d4e5f6-software-engineer-new-grad",
+    "published_date": "2026-09-14T17:20:31.000Z",
+    "type": {"id": "fullTime", "name": "Full-Time"},
+    "location": {
+      "country": {"name": "United States", "id": "US"},
+      "state": {"id": "CA", "name": "California"},
+      "city": "San Francisco",
+      "primary": true,
+      "is_remote": false,
+      "name": "San Francisco, CA"
+    },
+    "department": "Engineering",
+    "company": {"name": "Acme Robotics", "friendly_id": "acme"}
+  },
+  {
+    "id": "b2c3d4e5f6a1",
+    "friendly_id": "b2c3d4e5f6a1-account-executive",
+    "name": "Account Executive",
+    "url": "https://acme.breezy.hr/p/b2c3d4e5f6a1-account-executive",
+    "published_date": "2026-10-03T09:00:00.000Z",
+    "type": {"id": "fullTime", "name": "Full-Time"},
+    "location": {
+      "country": {"name": "United Kingdom", "id": "GB"},
+      "state": {"id": "ENG", "name": "England"},
+      "city": "London",
+      "primary": true,
+      "is_remote": false
+    },
+    "department": "Sales",
+    "company": {"name": "Acme Robotics", "friendly_id": "acme"}
+  },
+  {
+    "id": "c3d4e5f6a1b2",
+    "friendly_id": "c3d4e5f6a1b2-data-engineer",
+    "name": "Data Engineer",
+    "url": "https://acme.breezy.hr/p/c3d4e5f6a1b2-data-engineer",
+    "published_date": null,
+    "type": {"id": "contract", "name": "Contract"},
+    "location": {"is_remote": true, "name": "Remote"},
+    "department": null,
+    "company": {"name": "Acme Robotics", "friendly_id": "acme"}
+  }
+]

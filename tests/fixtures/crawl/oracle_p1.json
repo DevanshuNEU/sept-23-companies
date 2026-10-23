@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "TotalJobsCount": 3,
+      "Offset": 2,
+      "Limit": 200,
+      "requisitionList": [
+        {
+          "Id": "300000123456791",
+          "Title": "Data Engineer",
+          "PostedDate": "2026-08-29",
+          "PrimaryLocation": "Toronto, ON, Canada",
+          "PrimaryLocationCountry": "CA",
+          "WorkplaceTypeCode": "ORA_REMOTE",
+          "ShortDescriptionStr": "Move data around."
+        }
+      ]
+    }
+  ],
+  "count": 1,
+  "hasMore": false,
+  "limit": 25,
+  "offset": 0
+}

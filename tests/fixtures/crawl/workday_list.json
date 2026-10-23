@@ -1,0 +1,36 @@
+{
+  "total": 3,
+  "jobPostings": [
+    {
+      "title": "Software Engineer I",
+      "externalPath": "/job/Boston-MA/Software-Engineer-I_R-1001",
+      "locationsText": "Boston, MA",
+      "postedOn": "Posted Today",
+      "bulletFields": ["R-1001"]
+    },
+    {
+      "title": "Account Executive",
+      "externalPath": "/job/Remote-US/Account-Executive_R-1002",
+      "locationsText": "Remote, US",
+      "postedOn": "Posted 5 Days Ago",
+      "bulletFields": ["R-1002"]
+    },
+    {
+      "title": "Data Engineer",
+      "externalPath": "/job/New-York-NY/Data-Engineer_R-1003",
+      "locationsText": "2 Locations",
+      "postedOn": "Posted 30+ Days Ago",
+      "bulletFields": ["R-1003"]
+    }
+  ],
+  "facets": [
+    {
+      "facetParameter": "jobFamilyGroup",
+      "descriptor": "Job Family Group",
+      "values": [
+        {"descriptor": "Engineering", "id": "c2a7f1e0b3d94a6f8e5d4c3b2a190001", "count": 2},
+        {"descriptor": "Sales", "id": "c2a7f1e0b3d94a6f8e5d4c3b2a190002", "count": 1}
+      ]
+    }
+  ]
+}

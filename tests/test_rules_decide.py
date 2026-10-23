@@ -195,7 +195,12 @@ class DecideTests(unittest.TestCase):
                             r"|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b")
         funcs = {"compile", "search", "match", "fullmatch", "findall", "finditer", "sub"}
         # allowed exceptions: none today. A path (relative to the repo root) maps to the reason it may differ.
-        allowed = {}
+        allowed = {
+            # Pay is read only for a worksite in a listed metro, never for a remote role. This is a guard on the wage
+            # lookup (the ruling of 2026-10-22), not a classification of the posting: the posting's own location
+            # still goes through outreach/rules.
+            "outreach/ranking/pay.py": "wage lookup refuses a remote or anywhere location",
+        }
         found = []
         for path in sorted((ROOT / "outreach").rglob("*.py")):
             rel = path.relative_to(ROOT).as_posix()

@@ -163,8 +163,8 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     """One verdict per approved message, in queue order. `gate` (`sender_paused`, `signed_out`,
     `old_sender_running`) is a reason the whole tick knows; it applies to every message that is not a stop.
     Order of reasons: stops; the gate; company paused; company held (a hold on any company merged into the
-    survivor counts); no address; a follow-up with no Gmail thread; follow-up not due; bad time zone; not a business day; daily limit; per-company
-    limit; per-company gap; recipient's window; recruiter waits; spacing."""
+    survivor counts); no address; a follow-up with no Gmail thread; follow-up not due; bad time zone; not a
+    business day; daily limit; per-company limit; per-company gap; recipient's window; recruiter waits; spacing."""
     rows, companies = _rows(conn)
     items = {row["message_id"]: _queued(row, companies) for row in rows}
     queue = _sorted(list(items.values()), cfg)

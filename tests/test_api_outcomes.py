@@ -665,7 +665,8 @@ class CompanyHold(OutcomeCase):
 
     def test_a_reply_at_a_merged_duplicate_holds_the_survivors_queued_email(self):
         duplicate = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=self.acme)
-        pid = s.person(self.conn, duplicate, "Ira Dup", channel="linkedin", linkedin_url="https://www.linkedin.com/in/ira")
+        pid = s.person(self.conn, duplicate, "Ira Dup", channel="linkedin",
+                       linkedin_url="https://www.linkedin.com/in/ira")
         t = touch(self.conn, duplicate, pid)
         self.assertEqual(self.answer(t, "replied", reply_kind="not_now").status_code, 200)
         self.assertEqual(self.verdict(), "company_held")

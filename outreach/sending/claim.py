@@ -75,8 +75,8 @@ def _still_sendable(conn: sqlite3.Connection, message_id: int) -> bool:
     is no longer open, or a paused sender). The queue already checked these; this closes the gap between the pick
     and the claim, so a person who said stop a second ago is never sent to."""
     row = conn.execute("SELECT t.state AS touch_state, t.gmail_thread_id, m.seq, p.person_id, p.company_id "
-                       "FROM message m JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
-                       "WHERE m.message_id = ?", (message_id,)).fetchone()
+                       "FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+                       "JOIN person p ON p.person_id = t.person_id WHERE m.message_id = ?", (message_id,)).fetchone()
     if row is None or row["touch_state"] != "open":
         return False
     if row["seq"] >= 1 and not row["gmail_thread_id"]:
@@ -100,8 +100,8 @@ def _attempts(conn: sqlite3.Connection, message_id: int) -> int:
 def claim(conn: sqlite3.Connection, q: Queued, *, rfc_id: str, now: str) -> bool:
     """Commit `approved -> sending` with `rfc_id` as `pending_rfc_id`, in one transaction, and append `claimed`.
     False when nothing changed: the message moved on or was edited since `q` was read (its revision), a stop,
-    hold or pause landed since the pick, or it is a follow-up whose touch has no Gmail thread. Raises AnotherSendInFlight when another message is `sending`, and
-    ValueError when `rfc_id` is not one Message-ID."""
+    hold or pause landed since the pick, or it is a follow-up whose touch has no Gmail thread. Raises
+    AnotherSendInFlight when another message is `sending`, and ValueError when `rfc_id` is not one Message-ID."""
     if not MESSAGE_ID.fullmatch(rfc_id or ""):
         raise ValueError("a claim needs exactly one Message-ID")
     stamp = _stamp(now)
@@ -481,8 +481,8 @@ def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, b
 
     A send Gmail stored under another Message-ID (`Unclear.stored`) becomes `sent` from those ids, whatever the scan
     found: it went out, and a scan by the claimed id can never find it. A hit with the message's own Message-ID
-    becomes `sent` (`record_sent(..., reconciled=True)`, dated to the claim). A complete miss becomes `failed` once `reconcile_after_minutes` have passed since the send returned (and
-    since the claim). Anything else stays `send_unknown`: an incomplete scan, a younger send, or a hit for another
+    becomes `sent` (`record_sent(..., reconciled=True)`, dated to the claim). A complete miss becomes `failed`
+    once `reconcile_after_minutes` have passed since the send returned (and since the claim). Anything else stays `send_unknown`: an incomplete scan, a younger send, or a hit for another
     Message-ID, or a miss from a scan for an earlier attempt's Message-ID. Matching is by Message-ID only, never by
     recipient or subject. Runs in one transaction (a savepoint inside the caller's), with a savepoint per message:
     one that fails to record is logged, counted in `errors` and left unclear. Returns the counts `sent`, `failed`,

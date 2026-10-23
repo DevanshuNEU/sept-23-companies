@@ -105,7 +105,7 @@ def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
     status, reason, elig_quote = eligibility(title, body, cfg)
     return Decision(
         lane=t.lane, level_tier=tier, level_ok=ok, level_basis=basis, years_asked=years, years_quote=years_quote,
-        us=us_status(location, country, cfg), sponsorship=stance, sponsorship_quote=stance_quote,
+        us=us_status(location, country, cfg, title), sponsorship=stance, sponsorship_quote=stance_quote,
         citizenship=citizen, citizenship_quote=citizen_quote, eligibility=status, eligibility_reason=reason,
         eligibility_quote=elig_quote, start_2027=starts_2027(title, body, cfg),
     )

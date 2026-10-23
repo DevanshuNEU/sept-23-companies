@@ -36,6 +36,16 @@ off_lane = [
   "technical writers", "developer advocates",
   # #4 follow-up 2026-10-22: postdoctoral roles need a PhD
   "postdoc", "postdocs", "postdoctoral", "post doctoral", "post doc",
+  # #4 follow-up 2026-10-23: support, field, metrology roles. Contract roles stay in (he wants contract-to-hire);
+  # "field service" and "field technician" are listed above and stay
+  "customer success", "field engineer", "field engineers", "field application engineer",
+  "field applications engineer", "cmm", "metrology",
+]
+# #4 follow-up 2026-10-23: academic posts are off lane even when the title also says "internship" or "engineering".
+# Checked apart from off_lane because the intern check comes first ("Assistant Professor ..., Internship Coordinator").
+# "Research Associate" is left alone on purpose.
+academic = [
+  "professor", "faculty", "adjunct", "lecturer",
 ]
 # refresh/finalcheck.py:104-105 (talent pool and general application titles are not roles)
 general_application = [
@@ -208,6 +218,8 @@ non_us_countries = [
   "bangladesh", "sri lanka", "nepal", "indonesia", "malaysia", "thailand", "new zealand", "chile", "peru",
   "costa rica", "uruguay", "guatemala", "serbia", "croatia", "bulgaria", "slovakia", "hong kong", "macau", "emea",
   "apac", "latam", "europe",
+  # #4 follow-up 2026-10-23: a title can name one ("Software Engineer II (Venezuela)")
+  "venezuela",
 ]
 # refresh/finalcheck.py:69-80 NONUS (city names found only outside the US; Tel Aviv, Munich, Toronto, Tbilisi and Bengaluru are the ones the design names)
 non_us_cities = [
@@ -219,6 +231,11 @@ non_us_cities = [
   "oslo", "helsinki", "istanbul", "dubai", "abu dhabi", "cairo", "lagos", "nairobi", "jakarta", "bangkok",
   "auckland", "santiago", "belgrade", "sofia", "bogota", "medellin", "mexicali", "tijuana", "monterrey",
   "guadalajara", "juarez", "queretaro",
+]
+# #4 follow-up 2026-10-23: words that may sit beside a country in one title segment ("Remote - Canada"); they are
+# dropped before the segment is compared with non_us_countries
+title_fillers = [
+  "remote", "hybrid", "onsite", "on site", "based", "only",
 ]
 # names of both a non-US city and a US town: no alone, yes next to a US state code. refresh/finalcheck.py:69-80 NONUS and refresh/crawl_boards.py:48 (Cambridge); rome, milan, vienna and warsaw added here
 shared_city_names = [

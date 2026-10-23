@@ -95,6 +95,35 @@ POSTDOC_CASES = [
     ("Engineering Fellow", "engineering", "early_career"),
 ]
 
+# #4 follow-up 2026-10-23: support, field, metrology and academic titles are off lane. Contract roles stay in
+# (he wants contract-to-hire), so the contract controls keep their results.
+OFF_LANE_CASES = [
+    ("Mandarin-speaking: Customer Success Engineer (Contract)", "off_lane", None),
+    ("Customer Success Engineer", "off_lane", None),
+    ("Robotics Field Engineer", "off_lane", None),
+    ("Field Engineer", "off_lane", None),
+    ("Field Engineers, Hardware Rollout", "off_lane", None),
+    ("Field Application Engineer", "off_lane", None),
+    ("Field Applications Engineer", "off_lane", None),
+    ("CMM Programmer", "off_lane", None),
+    ("Metrology Engineer", "off_lane", None),
+    ("Assistant Professor of Professional Practice, Clinical Practicum & Internship Coordinator, "
+     "Counselor Education", "off_lane", None),
+    ("Adjunct Faculty - Engineering", "off_lane", None),
+    ("Lecturer, Software Engineering", "off_lane", None),
+    ("Faculty Software Engineer", "off_lane", None),
+    # already off lane before this change (field service and field technician stay as they were)
+    ("Field Service Engineer", "off_lane", None),
+    ("Field Technician", "not_engineering", None),
+    # unchanged controls
+    ("Software Engineer (Contract)", "engineering", None),
+    ("Software Engineer, Contract to Hire", "engineering", None),
+    ("Software Engineer, Field Systems", "engineering", None),
+    ("Software Engineering Intern", "intern", None),
+    ("RA-II/Sr. Research Associate Protein Engineering", "engineering", "senior"),
+    ("Research Associate, Software Engineering", "engineering", "early_career"),
+]
+
 
 class ClassifyTitleTests(unittest.TestCase):
     @classmethod
@@ -125,6 +154,9 @@ class ClassifyTitleTests(unittest.TestCase):
                     got = classify_title(title, self.cfg)
                     self.assertEqual(got.lane, "off_lane")
                     self.assertIsNone(got.tier)
+
+    def test_off_lane_cases(self):
+        self._check(OFF_LANE_CASES)
 
     def test_basis_is_never_empty(self):
         for title, _, _ in CASES + MORE_CASES:

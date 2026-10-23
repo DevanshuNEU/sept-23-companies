@@ -85,7 +85,8 @@ def survivor_of(parents: dict[int, int], company_id: int) -> int:
 def holding_touches(companies: dict[int, sqlite3.Row]) -> dict[int, int]:
     """survivor id to the touch that holds it, read across the merged family as the sender reads it: the survivors
     are `held_survivors` of `company_map`, so a hold left on a duplicate that was merged away holds the survivor. The
-    survivor's own hold wins, else the lowest company id's. In a merge cycle (no survivor) each company keeps its own."""
+    survivor's own hold wins, else the lowest company id's. In a merge cycle (no survivor) each company keeps its
+    own."""
     try:
         held = held_survivors(companies)
     except RuntimeError:

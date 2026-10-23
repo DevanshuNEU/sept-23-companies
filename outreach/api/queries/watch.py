@@ -25,8 +25,9 @@ LANE = "reason_no_role"
 CHUNK = 500
 
 # A company made in the last 14 days that is still open to us, with no person, touch or dismissal, and every score
-# row it has (a no-go is read in Python through the sender's no_go_sets, so a duplicate's no-go counts). The scores are read by key (company_id) from each company: `CROSS JOIN` keeps that order, so the
-# planner never scans company_score. `hide_type` is the JSON type of `signals.hide` ('null' or NULL: not hidden).
+# row it has (a no-go is read in Python through the sender's no_go_sets, so a duplicate's no-go counts). The scores
+# are read by key (company_id) from each company: `CROSS JOIN` keeps that order, so the planner never scans
+# company_score. `hide_type` is the JSON type of `signals.hide` ('null' or NULL: not hidden).
 NEW_COMPANIES_SQL = """
 SELECT c.company_id, c.name, c.status, c.paused_at, c.held_by_touch, c.created_at,
        s.ranker_version, s.score, s.scored_at, s.lanes, json_type(s.signals, '$.hide') AS hide_type
@@ -139,7 +140,8 @@ def _new_items(conn: sqlite3.Connection, parents: dict[int, int], holds: dict[in
     chosen.sort(key=lambda r: (-r["score"], r["company_id"]))
     return [
         WatchItem(
-            id=r["company_id"] * 4 + KIND_INDEX["new_reason_no_role"], kind="new_reason_no_role", company=_ref(r, holds),
+            id=r["company_id"] * 4 + KIND_INDEX["new_reason_no_role"], kind="new_reason_no_role",
+            company=_ref(r, holds),
             text="New company with a reason to reach out and no open role yet.", at=r["created_at"], link=None,
             review_id=None,
         )

@@ -9,9 +9,9 @@ The checks only read. They never approve, send or change a message; the caller s
 Blocks are #9's safety list: no mail server, more than 2 links, a link shortener, near-identical to a colleague's
 draft, a no-go on the person or the company, a person who said no or asked to stop, a company closed for no
 sponsorship. An address with no usable domain counts as no mail server. Placeholder text (TODO, ASK:, {{ }}) blocks,
-as it does in `mail/check_draft.py`. Two more block because a send could not be checked or could not thread: a banned phrases list that
-cannot be read (fail closed), and a follow-up subject that is not `Re: ` plus the first email's subject (#14). There
-is no attachment check because a message has no attachment column (a test pins that).
+as it does in `mail/check_draft.py`. Two more block because a send could not be checked or could not thread: a
+banned phrases list that cannot be read (fail closed), and a follow-up subject that is not `Re: ` plus the first
+email's subject (#14). There is no attachment check because a message has no attachment column (a test pins that).
 """
 import difflib
 import os
@@ -149,8 +149,8 @@ def cached_mx(conn: sqlite3.Connection, domain: str | None, now: str) -> Literal
 
 def draft_input(conn: sqlite3.Connection, message_id: int, *, now: str) -> DraftInput:
     """The `DraftInput` of a stored message, its mail server read from the cache (`unknown` when missing or stale,
-    which only warns; `none` when the address has no usable domain). The API resolves the domain first (`outreach.api.mx.ensure`); the sender reads only the cache.
-    LookupError for an unknown message."""
+    which only warns; `none` when the address has no usable domain). The API resolves the domain first
+    (`outreach.api.mx.ensure`); the sender reads only the cache. LookupError for an unknown message."""
     row = conn.execute(
         "SELECT m.message_id, m.seq, m.subject, m.body, m.hook, p.role_kind, p.name, p.email, p.person_id, "
         "p.company_id FROM message m JOIN touch t ON t.touch_id = m.touch_id "

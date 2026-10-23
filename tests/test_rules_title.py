@@ -82,6 +82,19 @@ MORE_CASES = [
     ("Software Engineer, Layer 2", "engineering", None),
 ]
 
+# #4 follow-up 2026-10-22: postdoctoral roles need a PhD, so they are off lane (he is a May 2026 MS new grad).
+# The controls keep the results they had before the change.
+POSTDOC_CASES = [
+    ("Postdoctoral Associate-Systems Engineering", "off_lane", None),
+    ("Postdoctoral Researcher - Civil, Environmental, and Ocean Engineering", "off_lane", None),
+    ("Postdoc Software Engineer", "off_lane", None),
+    ("Post-Doctoral Fellow, Machine Learning Engineering", "off_lane", None),
+    ("Post Doc Developer", "off_lane", None),
+    ("Software Engineer, New Grad", "engineering", "new_grad"),
+    ("Graduate Software Engineer", "engineering", "new_grad"),
+    ("Engineering Fellow", "engineering", "early_career"),
+]
+
 
 class ClassifyTitleTests(unittest.TestCase):
     @classmethod
@@ -101,6 +114,17 @@ class ClassifyTitleTests(unittest.TestCase):
 
     def test_more_cases(self):
         self._check(MORE_CASES)
+
+    def test_postdoc_cases(self):
+        self._check(POSTDOC_CASES)
+
+    def test_postdoc_titles_are_off_lane_with_no_tier(self):
+        for title, lane, _ in POSTDOC_CASES:
+            if lane == "off_lane":
+                with self.subTest(title=title):
+                    got = classify_title(title, self.cfg)
+                    self.assertEqual(got.lane, "off_lane")
+                    self.assertIsNone(got.tier)
 
     def test_basis_is_never_empty(self):
         for title, _, _ in CASES + MORE_CASES:

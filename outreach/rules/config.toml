@@ -34,6 +34,8 @@ off_lane = [
   "devrel", "evangelist", "community", "it engineer", "customer engineer", "customer experience",
   "marketing engineer", "growth marketing", "product operations", "revenue operations", "business operations",
   "technical writers", "developer advocates",
+  # #4 follow-up 2026-10-22: postdoctoral roles need a PhD
+  "postdoc", "postdocs", "postdoctoral", "post doctoral", "post doc",
 ]
 # refresh/finalcheck.py:104-105 (talent pool and general application titles are not roles)
 general_application = [

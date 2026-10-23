@@ -16,12 +16,13 @@ from outreach.api.queries.people import scope
 from outreach.sending import calendar
 from outreach.sending.config import load_config
 from outreach.store.timefmt import ISO_FMT
-from outreach.store.writes import name_key
+from outreach.store.writes import _NAME_ALIAS_SOURCES, name_key
 
 EVENT_LIMIT = 500  # the newest events; a board read every few days adds up
 READS_SHOWN = 10
 DAYS_OF_EMAIL = 3
-NAME_ALIAS_SOURCES = ("name", "hand", "import", "crawl", "merge", "dba", "legal_name")
+NAME_ALIAS_SOURCES = _NAME_ALIAS_SOURCES  # the store's own list of name-like alias sources
+IMPORT_SOURCE_KEY = "importSource"  # the key of an import event's detail that names the old place it came from
 REVIEW_KINDS = ("board_unreadable", "board_empty", "sponsorship_unclear", "size_unknown", "size_guess",
                 "domain_missing", "flagged")
 EMAIL_HOLDING_KINDS = ("domain_missing", "size_unknown", "size_guess")
@@ -231,12 +232,13 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
     domain = best["domain"]["value"] if "domain" in best else None
     mx = conn.execute("SELECT status FROM mx_check WHERE domain = ?", (domain,)).fetchone() if domain else None
 
-    postings, role, best_posting = _postings(posting_rows, decisions, read_ids, conn)
+    postings, role = _postings(posting_rows, decisions, read_ids, conn)
     cfg = load_config()
     today = calendar.ny_date(datetime.strptime(now, ISO_FMT).replace(tzinfo=timezone.utc), cfg)
     picked_on = picked_dates[0] if picked_dates else None
 
-    person_lines = people_queries.lines(data, companies)
+    # A person on a merged duplicate is judged against the survivor's pause and hold.
+    person_lines = people_queries.lines(data, {c: companies[survivor_of(parents, c)] for c in companies})
     people = [
         CompanyPerson(
             person=_person_ref(p), channel=p["channel"], status_line=person_lines[p["person_id"]].status_line,
@@ -267,7 +269,7 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
         ),
         summary=_summary(main["status"], bool(main["paused_at"]), role, data.persons),
         facts=[to_fact(best[k]) for k in FACT_ORDER if k in best],
-        sponsorship_shown=_sponsorship_shown(best, best_posting, evidence_rows),
+        sponsorship_shown=_sponsorship_shown(best, role, [p for p in postings if p['state'] != 'closed'], evidence_rows),
         mail_server_ok=None if mx is None else mx["status"] == "ok",
         board=_board(boards),
         role=RoleToName(
@@ -323,12 +325,16 @@ def _summary(status: str, paused: bool, role, persons) -> str:
     return f"{phrase}, {naming}; {people}."
 
 
-def _sponsorship_shown(best: dict, best_posting, evidence_rows) -> str:
+def _sponsorship_shown(best: dict, role, live_postings, evidence_rows) -> str:
     fact = best.get("sponsorship")
     if fact is not None and fact["locked"] and fact["value"] in SPONSORSHIP_SHOWN and fact["value"] != "unclear":
         return SPONSORSHIP_SHOWN[fact["value"]]
-    if best_posting is not None and best_posting["sponsorship"] in SPONSORSHIP_SHOWN:
-        return SPONSORSHIP_SHOWN[best_posting["sponsorship"]]
+    # A yes, opt_only or unclear counts only from an open posting that is not hidden (the role to name). A no counts
+    # from any posting that is not closed: it is the evidence for the hide, and honest to show.
+    if role is not None and role["sponsorship"] in SPONSORSHIP_SHOWN:
+        return SPONSORSHIP_SHOWN[role["sponsorship"]]
+    if any(p["sponsorship"] == "no" for p in live_postings):
+        return "says_no"
     if any(json.loads(r["value"]).get("software", 0) > 0 for r in evidence_rows if r["fact"] == "lca"):
         return "has_sponsored"
     return "not_stated"
@@ -345,9 +351,8 @@ def _board(boards) -> CompanyBoard | None:
     )
 
 
-def _postings(posting_rows, decisions: dict, read_ids: set, conn) -> tuple[list[dict], dict | None, dict | None]:
-    """Every posting as a row with its state, the open one to name (best level first) and the best posting that is
-    not closed, hidden ones included (a company whose only posting says it will not sponsor still shows that)."""
+def _postings(posting_rows, decisions: dict, read_ids: set, conn) -> tuple[list[dict], dict | None]:
+    """Every posting as a row with its state, and the open one to name (best level first)."""
     explain = load_explain() if read_ids else None
     out = []
     for p in posting_rows:
@@ -372,15 +377,14 @@ def _postings(posting_rows, decisions: dict, read_ids: set, conn) -> tuple[list[
             ),
         })
     out.sort(key=lambda x: x["row"]["first_seen_at"], reverse=True)  # newest first, then a stable sort by state
-    live = sorted(
-        (x for x in out if x["state"] != "closed"),
-        key=lambda x: (STATE_RANK[x["state"]], 0 if x["decision"] is not None and x["decision"]["level_ok"] else 1,
-                       TIER_RANK[x["tier"]], 0 if x["start"] else 1),
+    candidates = sorted(
+        (x for x in out if x["state"] == "open"),
+        key=lambda x: (0 if x["decision"] is not None and x["decision"]["level_ok"] else 1, TIER_RANK[x["tier"]],
+                       0 if x["start"] else 1),
     )
-    best = live[0] if live else None
-    role = best if best is not None and best["state"] == "open" else None
+    role = candidates[0] if candidates else None
     out.sort(key=lambda x: (-1 if x is role else STATE_RANK[x["state"]]))
-    return out, role, best
+    return out, role
 
 
 def _event(r: sqlite3.Row) -> CompanyEvent:
@@ -388,7 +392,7 @@ def _event(r: sqlite3.Row) -> CompanyEvent:
     text = detail.get("text") if isinstance(detail.get("text"), str) and detail["text"] else r["kind"].replace("_", " ").capitalize()
     source = None
     if r["actor"] == "import":
-        source = next((v for v in (detail.get("import_source"), detail.get("source")) if v in IMPORT_SOURCES), None)
+        source = detail.get(IMPORT_SOURCE_KEY) if detail.get(IMPORT_SOURCE_KEY) in IMPORT_SOURCES else None
     return CompanyEvent(id=r["event_id"], at=r["at"], kind=r["kind"], text=text, actor=r["actor"], import_source=source)
 
 

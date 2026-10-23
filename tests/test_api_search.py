@@ -70,6 +70,44 @@ class Search(ApiCase):
         self.assertEqual(index["companies"][0]["aliases"], ["Acme Labs"])
         self.assertEqual((index["people"][0]["companyId"], index["people"][0]["companyName"]), (a, "Acme"))
 
+    def test_a_person_on_a_merged_duplicate_is_judged_against_the_survivors_pause(self):
+        a = s.company(self.conn, "Acme", "working", paused_at="2026-11-09T12:00:00Z")
+        b = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=a)
+        pid = s.person(self.conn, b, "Ann Approved")
+        s.message(self.conn, s.touch(self.conn, pid), 0, "approved")
+        self.assertEqual([p["statusLine"] for p in self.index()["people"]], ["Paused, approved"])
+
+    def test_a_merge_cycle_does_not_break_the_index(self):
+        a = s.company(self.conn, "Acme", "removed", remove_reason="merged")
+        b = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=a)
+        self.conn.execute("UPDATE company SET merged_into = ? WHERE company_id = ?", (b, a))
+        s.person(self.conn, a, "Pat Lee")
+        s.company(self.conn, "Fine Co")
+        index = self.index()
+        self.assertEqual([c["name"] for c in index["companies"]], ["Fine Co"])
+        self.assertEqual(len(index["people"]), 1)  # kept, under a company name that exists
+        self.assertIn(index["people"][0]["companyName"], ("Acme", "Acme Labs"))
+
+    def test_company_search_never_cuts_the_best_name_match(self):
+        for i in range(205):
+            s.company(self.conn, f"Zed orbit {i:03d}")
+        s.company(self.conn, "Orbital")
+        s.company(self.conn, "Orbit")
+        names = [h["name"] for h in self.companies("orbit")]
+        self.assertEqual(names[:2], ["Orbit", "Orbital"])  # exact, then prefix, before the 200 substring matches
+
+    def test_company_search_never_cuts_the_best_alias_or_domain_match(self):
+        owner = s.company(self.conn, "Holder")
+        for i in range(205):
+            c = s.company(self.conn, f"Filler {i:03d}")
+            s.alias(self.conn, c, f"Big orbit {i:03d}")
+            s.evidence(self.conn, c, "domain", f"x{i:03d}.orbit.example")
+        s.alias(self.conn, owner, "Orbit")
+        late = s.company(self.conn, "Late")
+        s.evidence(self.conn, late, "domain", "orbit.example")
+        self.assertEqual(self.companies("orbit")[0]["name"], "Holder")  # an exact alias beats the substrings
+        self.assertEqual(self.companies("orbit.example")[0]["name"], "Late")  # an exact domain too
+
     # TODO(#6): the capped index (touched companies and the top scored) and its test,
     # test_search_index_cap_keeps_touched_companies_and_the_top_scored, land with the ranking package.
 

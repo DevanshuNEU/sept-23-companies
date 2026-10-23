@@ -91,8 +91,10 @@ class CompanyPage(ApiCase):
         s.alias(self.conn, cid, "Acme Labs")
         s.alias(self.conn, cid, "acme", source="name")  # the company's own name is not an alias
         s.alias(self.conn, cid, "ashby:acme", source="ats")  # a board key is not a name
+        s.alias(self.conn, cid, "Acme Holdings LLC", source="formd")  # a name the SEC filing carries
         body = self.view(cid)["company"]
-        self.assertEqual((body["domain"], body["hq"], body["aliases"]), ("acme.example", "Austin, TX", ["Acme Labs"]))
+        self.assertEqual(
+            (body["domain"], body["hq"], body["aliases"]), ("acme.example", "Austin, TX", ["Acme Holdings LLC", "Acme Labs"]))
 
     def test_sponsorship_shown_precedence(self):
         def shown(locked=None, posting=None, lca=None, unlocked=None) -> str:
@@ -130,6 +132,51 @@ class CompanyPage(ApiCase):
             self.assertEqual(shown(lca=4), "has_sponsored")
         with self.subTest("nothing at all"):
             self.assertEqual(shown(), "not_stated")
+
+    def test_a_hidden_or_off_lane_yes_is_not_says_yes_but_a_hidden_no_is_says_no(self):
+        def shown(**cols) -> str:
+            cid = s.company(self.conn, f"Co{self.conn.execute('SELECT COUNT(*) FROM company').fetchone()[0]}")
+            s.decision(self.conn, s.posting(self.conn, cid), **cols)
+            return self.view(cid)["sponsorshipShown"]
+
+        with self.subTest("a yes on a hidden posting"):
+            self.assertEqual(shown(sponsorship="yes", citizenship=1), "not_stated")
+        with self.subTest("a yes on an off-lane posting"):
+            self.assertEqual(shown(sponsorship="yes", lane="not_engineering", level_tier="not_stated", level_ok=0), "not_stated")
+        with self.subTest("opt_only and unclear on a hidden posting"):
+            self.assertEqual(shown(sponsorship="opt_only", us="no"), "not_stated")
+            self.assertEqual(shown(sponsorship="unclear", eligibility="excluded"), "not_stated")
+        with self.subTest("a no on a hidden posting is the evidence for the hide and is shown"):
+            self.assertEqual(shown(sponsorship="no"), "says_no")
+        with self.subTest("a no on an off-lane posting"):
+            self.assertEqual(shown(sponsorship="no", lane="intern", level_tier="not_stated", level_ok=0), "says_no")
+
+    def test_a_no_on_a_closed_posting_is_not_shown(self):
+        cid = s.company(self.conn)
+        s.decision(self.conn, s.posting(self.conn, cid, closed_at="2026-11-02T10:00:00Z"), sponsorship="no")
+        self.assertEqual(self.view(cid)["sponsorshipShown"], "not_stated")
+
+    def test_an_open_yes_beats_a_hidden_no_elsewhere(self):
+        cid = s.company(self.conn)
+        s.decision(self.conn, s.posting(self.conn, cid, "Open"), sponsorship="yes")
+        s.decision(self.conn, s.posting(self.conn, cid, "Hidden"), sponsorship="no")
+        self.assertEqual(self.view(cid)["sponsorshipShown"], "says_yes")
+
+    def test_a_person_on_a_merged_duplicate_is_judged_against_the_survivors_pause(self):
+        a = s.company(self.conn, "Acme", "working", paused_at="2026-11-09T12:00:00Z")
+        b = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=a)
+        pid = s.person(self.conn, b, "Ann Approved")
+        s.message(self.conn, s.touch(self.conn, pid), 0, "approved")
+        lines = {p["person"]["name"]: p["statusLine"] for p in self.view(a)["people"]}
+        self.assertEqual(lines["Ann Approved"], "Paused, approved")
+
+    def test_a_merge_cycle_still_answers(self):
+        a = s.company(self.conn, "Acme", "removed", remove_reason="merged")
+        b = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=a)
+        self.conn.execute("UPDATE company SET merged_into = ? WHERE company_id = ?", (b, a))
+        s.person(self.conn, a, "Pat Lee")
+        for asked in (a, b):
+            self.assertEqual(self.get(f"/api/companies/{asked}").status_code, 200)
 
     def test_mail_server_ok_is_tristate(self):
         cid = s.company(self.conn)
@@ -191,14 +238,16 @@ class CompanyPage(ApiCase):
         cid = s.company(self.conn)
         s.event(self.conn, cid, "picked", "2026-11-03T10:00:00Z", actor="devanshu", detail={"text": "Picked from Today"})
         s.event(self.conn, cid, "stage", "2026-10-21T12:00:00Z", actor="import",
-                detail={"text": "Stage Referral asked", "import_source": "data_js"})
+                detail={"text": "Stage Referral asked", "importSource": "data_js"})
         s.event(self.conn, cid, "board_read", "2026-11-09T08:04:00Z", actor="crawler", detail={})
         s.event(self.conn, None, "elsewhere", "2026-11-09T09:00:00Z")
+        s.event(self.conn, cid, "old_key", "2026-10-01T12:00:00Z", actor="import", detail={"import_source": "data_js", "source": "devboard"})
         events = self.view(cid)["events"]
-        self.assertEqual([e["kind"] for e in events], ["board_read", "picked", "stage"])
+        self.assertEqual([e["kind"] for e in events], ["board_read", "picked", "stage", "old_key"])
         self.assertEqual(events[0]["text"], "Board read")  # no text in the detail: the kind in words
         self.assertEqual((events[1]["text"], events[1]["actor"], events[1]["importSource"]), ("Picked from Today", "devanshu", None))
         self.assertEqual((events[2]["actor"], events[2]["importSource"]), ("import", "data_js"))
+        self.assertIsNone(events[3]["importSource"])  # only detail.importSource names the source
 
     def test_events_from_the_source_and_reader_actors_are_shown(self):
         cid = s.company(self.conn)

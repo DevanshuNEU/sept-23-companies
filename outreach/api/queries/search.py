@@ -65,12 +65,16 @@ def index(conn: sqlite3.Connection, now: str) -> SearchIndex:
     everyone = companies(conn)
     parents = merge_parents(conn)
     rows = {r["company_id"]: r for r in conn.execute("SELECT * FROM company")}
+    # A person on a merged duplicate is judged against the survivor's pause and hold.
     data = people_queries.load(conn, None, bodies=False)
-    lines = people_queries.lines(data, rows)
+    lines = people_queries.lines(data, {c: rows[survivor_of(parents, c)] for c in rows})
     names = {c.id: c.name for c in everyone}
     people = []
     for p in data.persons:
         company_id = survivor_of(parents, p["company_id"])
+        if company_id not in names:  # a merge cycle has no survivor: the person keeps the company they are on
+            company_id = p["company_id"]
+            names[company_id] = rows[company_id]["name"]
         people.append(SearchPerson(
             id=p["person_id"], company_id=company_id, company_name=names[company_id], name=p["name"], title=p["title"],
             email=p["email"], status_line=lines[p["person_id"]].status_line,
@@ -88,23 +92,35 @@ def find_companies(conn: sqlite3.Connection, q: str) -> list[SearchCompany]:
     if not q:
         return []
     pattern = _like(q)
+    prefix = _like(q)[1:]  # the same pattern without the leading %
     alias_sources = ",".join(repr(s) for s in NAME_ALIAS_SOURCES)
+
+    def quality(column: str) -> str:
+        """0 for an exact match, 1 for a prefix, 2 for a substring."""
+        return f"CASE WHEN lower({column}) = ? THEN 0 WHEN lower({column}) LIKE ? ESCAPE '\\' THEN 1 ELSE 2 END"
+
+    def best_first(column: str) -> str:
+        """Exact match, then prefix, then substring, so the LIMIT never cuts the best match."""
+        return f"ORDER BY {quality(column)}, {column} LIMIT {SOURCE_LIMIT}"
+
+    order = (q, prefix)
     hits = (
-        [r[0] for r in conn.execute(
-            f"SELECT company_id FROM company WHERE name LIKE ? ESCAPE '\\' LIMIT {SOURCE_LIMIT}", (pattern,))],
-        [r[0] for r in conn.execute(
-            f"SELECT company_id FROM company_alias WHERE source IN ({alias_sources}) AND alias LIKE ? ESCAPE '\\' "
-            f"LIMIT {SOURCE_LIMIT}", (pattern,))],
-        [r[0] for r in conn.execute(
-            f"SELECT company_id FROM evidence WHERE fact = 'domain' AND value LIKE ? ESCAPE '\\' LIMIT {SOURCE_LIMIT}",
-            (pattern,))],
+        conn.execute(
+            f"SELECT company_id, {quality('name')} AS q FROM company WHERE name LIKE ? ESCAPE '\\' {best_first('name')}",
+            (*order, pattern, *order)).fetchall(),
+        conn.execute(
+            f"SELECT company_id, {quality('alias')} AS q FROM company_alias WHERE source IN ({alias_sources}) "
+            f"AND alias LIKE ? ESCAPE '\\' {best_first('alias')}", (*order, pattern, *order)).fetchall(),
+        conn.execute(
+            f"SELECT company_id, {quality('value')} AS q FROM evidence WHERE fact = 'domain' "
+            f"AND value LIKE ? ESCAPE '\\' {best_first('value')}", (*order, pattern, *order)).fetchall(),
     )
     parents = merge_parents(conn)
-    rank: dict[int, int] = {}
-    for tier, ids in enumerate(hits):
-        for company_id in ids:
+    rank: dict[int, tuple[int, int]] = {}  # (how well it matched, which source: name, alias, domain)
+    for tier, found in enumerate(hits):
+        for company_id, match in found:
             end = survivor_of(parents, company_id)
-            rank[end] = min(rank.get(end, tier), tier)
+            rank[end] = min(rank.get(end, (match, tier)), (match, tier))
     if not rank:
         return []
     where, params = scope(rank, "company_id")

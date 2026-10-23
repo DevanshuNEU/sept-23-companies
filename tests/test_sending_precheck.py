@@ -72,6 +72,9 @@ class Base(unittest.TestCase):
 
 class PrecheckTest(Base):
     def test_no_go_added_after_approval_stops_the_send(self):
+        """The precheck path covers only the race: a no-go that lands after the tick picked the message. A no-go
+        already there when the tick starts is a stop reason, and the tick's sweep skips the message before the
+        precheck runs."""
         person, mid = self.approve()
         q = self.queued(mid)  # picked before the no-go lands, as a tick would
         self.db.execute("INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'said_no', 'devanshu', ?)",

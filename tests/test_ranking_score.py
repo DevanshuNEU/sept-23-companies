@@ -185,7 +185,7 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual((extra.score, extra.values, extra.reasons), (plain.score, plain.values, plain.reasons))
 
     def test_an_ignored_posting_gets_its_flag_and_none_gets_none(self):
-        self.assertEqual(score(neutral_facts(ignored_postings=1)).flags, ("1 postings ignored: board match doubtful",))
+        self.assertEqual(score(neutral_facts(ignored_postings=1)).flags, ("1 posting ignored: board match doubtful",))
         self.assertEqual(score(neutral_facts()).flags, ())
 
     def test_a_company_with_only_a_stale_posting_scores_with_no_role_credit_and_keeps_its_flag(self):

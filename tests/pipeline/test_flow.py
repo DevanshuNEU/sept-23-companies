@@ -568,8 +568,8 @@ class RankFlowTests(HarnessCase):
         self.assertEqual(self.points(row, "live_role"), 0)
         self.assertEqual(row.lanes.count("level_role"), 0)
         self.assertGreaterEqual(row.signals["ignored_postings"], 1)
-        self.assertTrue(any("postings ignored" in f and "board match doubtful" in f for f in row.signals["flags"]),
-                        row.signals["flags"])
+        n = row.signals["ignored_postings"]
+        self.assertIn(f"{n} {'posting' if n == 1 else 'postings'} ignored: board match doubtful", row.signals["flags"])
 
     def test_flow_rank_follows_a_merge(self):
         h = self.flow()

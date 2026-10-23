@@ -83,7 +83,7 @@ def score_company(facts: RankFacts, hide: Hide | None, signals: list[Signal], cf
     flags = list(facts.weak_flags)
     doubtful = facts.ignored_postings - facts.inactive_postings
     if doubtful > 0:
-        flags.append(f"{doubtful} postings ignored: board match doubtful")
+        flags.append(f"{_postings(doubtful)} ignored: board match doubtful")
     if facts.inactive_postings > 0:
         flags.append(f"{_postings(facts.inactive_postings)} ignored: board no longer read")
     if facts.stale_postings:

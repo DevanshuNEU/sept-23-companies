@@ -297,6 +297,16 @@ class NoGoTests(Store):
         made = Hide("no_sponsorship", "x", False, posting_id=1, quote=REFUSE)
         self.assertFalse(write_no_go(self.conn, self.co, made))
         self.assertEqual(self.count("no_go"), 2)
+        # Claude is not him, and an import replays old lists: neither undoes his lift.
+        for source in ("claude", "import"):
+            with self.subTest(source=source):
+                other = seed_company(self.conn, f"Acme {source}")
+                row = rs.no_go(self.conn, other, "agency", source=source, created_at="2026-10-06T08:00:00Z")
+                rs.merge(self.conn, other, self.co)
+                got = self.inputs()[self.co]
+                self.assertEqual(got.no_go, "lifted")
+                self.assertIsNone(decide_hide(got, CFG))
+                self.conn.execute("DELETE FROM no_go WHERE no_go_id = ?", (row,))
         for source in ("reply", "devanshu"):
             with self.subTest(source=source):
                 other = seed_company(self.conn, f"Acme {source}")
@@ -304,6 +314,7 @@ class NoGoTests(Store):
                 rs.merge(self.conn, other, self.co)
                 got = self.inputs()[self.co]
                 self.assertEqual((got.no_go, got.no_go_reason), ("active", "said_no"))
+                self.assertEqual(decide_hide(got, CFG).kind, "no_go")
                 self.conn.execute("DELETE FROM no_go WHERE no_go_id = ?", (row,))
 
 

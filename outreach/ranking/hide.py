@@ -5,8 +5,8 @@ module adds the company level, in the order of the plan's Decisions:
 
 1. an active `no_go` row set after the latest lift of the company's group (merged duplicates included); else a
    lifted one cancels every hide below, whatever its reason (he put the company back on the list on purpose: it
-   stays shown and ranked, and only a new active row he set, or one from a reply, hides it again; an automated
-   `rules` row never does);
+   stays shown and ranked, and only a new active row he set, or one from the company's reply, hides it again; a
+   `rules`, `claude` or `import` row never does);
 2. size over `hide.size_over` with evidence of a trusted confidence (`size`, else `headcount`);
 3. a sponsorship refusal: an open, live (not stale) engineering posting on a trusted board, not outside the US,
    whose decision says `sponsorship = 'no'`. It hides nothing when another open live trusted posting says `yes`
@@ -35,6 +35,9 @@ __all__ = ["HIDE_KINDS", "posting_visible", "Refusal", "SizeEvidence", "HideInpu
 HIDE_KINDS = ("no_go", "over_size", "no_sponsorship")
 _SPONSORS = ("yes", "opt_only")
 _QUOTE_MAX = 300
+# The no_go sources that undo his lift when set after it: his own row and the company's own reply. Claude is not him,
+# an import replays old lists, and rules are automation.
+_OVERRIDE_LIFT = ("devanshu", "reply")
 # Decisions are joined by key under the current ruleset, not through the current_decision view, which is a scan.
 _DECISION_QUERY = (
     "SELECT p.posting_id, p.company_id, p.board_id, d.lane, d.us, d.sponsorship, d.sponsorship_quote, "
@@ -126,8 +129,8 @@ def load_hide_inputs(conn: sqlite3.Connection, canon: dict[int, int], doubtful: 
 
     # Per surviving company (its merged duplicates included): an active row counts only when it was set after the
     # group's latest lift, so a lift on one company is not undone by an older active row on a duplicate. After a
-    # lift, only a row he set or one from the company's own reply hides again: an automated 'rules' row (say, on a
-    # duplicate merged in later) never overrides his choice.
+    # lift, only a row he set or one from the company's own reply hides again (_OVERRIDE_LIFT): a 'rules', 'claude'
+    # or 'import' row (say, on a duplicate merged in later) never overrides his choice.
     lifted_at: dict[int, str] = {}
     actives: dict[int, list[tuple[str, int, str, str]]] = {}
     for r in conn.execute("SELECT no_go_id, company_id, reason, source, created_at, lifted_at FROM no_go "
@@ -140,7 +143,7 @@ def load_hide_inputs(conn: sqlite3.Connection, canon: dict[int, int], doubtful: 
     no_go: dict[int, tuple[str, str]] = {}
     for cid in set(lifted_at) | set(actives):
         if cid in lifted_at:
-            later = [a for a in actives.get(cid, ()) if a[0] > lifted_at[cid] and a[3] != "rules"]
+            later = [a for a in actives.get(cid, ()) if a[0] > lifted_at[cid] and a[3] in _OVERRIDE_LIFT]
         else:
             later = list(actives.get(cid, ()))
         no_go[cid] = ("active", max(later)[2]) if later else ("lifted", "")

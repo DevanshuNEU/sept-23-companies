@@ -190,7 +190,7 @@ class WriteTests(Base):
         values = row.signals["values"]
         self.assertEqual(values["live_role"]["points"], 0.0)
         self.assertGreater(values["lca_junior"]["points"], 0)
-        self.assertIn("1 postings ignored: board match doubtful", row.signals["flags"])
+        self.assertIn("1 posting ignored: board match doubtful", row.signals["flags"])
         self.assertIn(cid, [r.company_id for r in ranked_list(self.conn)])
         self.assertEqual(got.ignored_postings, 1)
 

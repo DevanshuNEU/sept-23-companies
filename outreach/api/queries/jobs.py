@@ -71,6 +71,9 @@ def expected_next_at(job: str, last_started_at: str | None, now: str) -> str | N
     An interval job counts from its last start (None when it never ran). A daily or weekday job takes the first slot
     after its last start (after `now` when it never ran), at the same New York wall-clock time on each date, so the
     time holds across a daylight saving change. Unscheduled jobs have none.
+
+    The last start is any run, scheduled or not: a manual run moves expectedNextAt on (an interval job counts again
+    from it, and a daily job's next slot is the first one after it).
     """
     cadence = SCHEDULED.get(job)
     if cadence is None:

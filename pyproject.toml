@@ -7,3 +7,12 @@ dependencies = []
 [tool.uv]
 package = false
 python-preference = "only-system"
+default-groups = ["api"]
+
+[dependency-groups]
+api = [
+    "fastapi==0.161.1",
+    "httpx==0.28.1",
+    "pydantic==2.14.1",
+    "uvicorn==0.54.0",
+]

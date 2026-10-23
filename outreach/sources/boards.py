@@ -52,8 +52,9 @@ class BoardRef:
 
 
 def add_board(conn: sqlite3.Connection, company_id: int, ref: BoardRef, *, via: str, matched_on: str,
-              found_by: str, actor: str = "crawler") -> Literal["added", "exists", "conflict"]:
-    """Attach a board to a company.
+              found_by: str, actor: str = "crawler", now: str | None = None) -> Literal["added", "exists", "conflict"]:
+    """Attach a board to a company. `now` stamps the board row and its event (default the wall clock); a write
+    through the API passes its own clock.
 
     `added`: a new `board` row (with `found_by`), the alias `<ats>:<token>` (source `ats`) and a `board` / `found`
     event (actor `actor`, default `crawler`; detail `via` and `matched_on`; key `board-found:<ats>:<token>`), as one
@@ -80,12 +81,12 @@ def add_board(conn: sqlite3.Connection, company_id: int, ref: BoardRef, *, via: 
             if claim is None or follow_merged(conn, claim) == follow_merged(conn, company_id):
                 cur = conn.execute(
                     "INSERT INTO board(company_id, ats, token, found_by, created_at) VALUES (?, ?, ?, ?, ?) "
-                    "ON CONFLICT(ats, token) DO NOTHING", (company_id, ref.ats, token, found_by, utcnow()))
+                    "ON CONFLICT(ats, token) DO NOTHING", (company_id, ref.ats, token, found_by, now or utcnow()))
                 if cur.rowcount:
                     if claim is None:  # else the alias is already ours (or our merge chain's)
                         add_alias(conn, company_id, alias, "ats")
                     append_event(conn, entity="board", kind="found", actor=actor, entity_id=cur.lastrowid,
-                                 company_id=company_id, detail={"via": via, "matched_on": matched_on},
+                                 company_id=company_id, detail={"via": via, "matched_on": matched_on}, at=now,
                                  idempotency_key=f"board-found:{ref.ats}:{token}")
                     return "added"
                 owner = _board_owner(conn, ref.ats, token)  # another writer took it between the read and the insert

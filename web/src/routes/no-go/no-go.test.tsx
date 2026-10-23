@@ -117,7 +117,7 @@ describe('No-go list', () => {
     await user.click(takeOff);
 
     expect(lift).toHaveBeenCalledTimes(1);
-    expect(lift).toHaveBeenCalledWith(halberd.noGoId, 'Their recruiter said they now sponsor', { requestId: expect.any(String) });
+    expect(lift).toHaveBeenCalledWith(halberd.noGoId, 'Their recruiter said they now sponsor', { requestId: expect.any(String), keepalive: true });
     expect(await screen.findByText('Halberd Systems is off the no-go list. It can be proposed again.')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(within(table()).queryByText('Halberd Systems')).not.toBeInTheDocument();
@@ -143,7 +143,7 @@ describe('No-go list', () => {
     await user.click(bringBack);
 
     expect(restore).toHaveBeenCalledTimes(1);
-    expect(restore).toHaveBeenCalledWith(bright.company.id, 'Clicked R by mistake', bright.company.revision, { requestId: expect.any(String) });
+    expect(restore).toHaveBeenCalledWith(bright.company.id, 'Clicked R by mistake', bright.company.revision, { requestId: expect.any(String), keepalive: true });
     expect(lift).not.toHaveBeenCalled();
     expect(await screen.findByText('Brightwater Analytics is back in the backlog.')).toBeInTheDocument();
     await waitFor(() => expect(within(table()).queryByText('Brightwater Analytics')).not.toBeInTheDocument());
@@ -278,7 +278,7 @@ describe('No-go list', () => {
     await user.type(within(dialog).getByRole('textbox', { name: 'Why' }), 'Second reason');
     await user.click(within(dialog).getByRole('button', { name: 'Take it off' }));
     expect(lift).toHaveBeenCalledTimes(2);
-    expect(lift).toHaveBeenLastCalledWith(expect.any(Number), 'Second reason', { requestId: expect.any(String) });
+    expect(lift).toHaveBeenLastCalledWith(expect.any(Number), 'Second reason', { requestId: expect.any(String), keepalive: true });
   });
 
   it('shows the empty state when nothing is kept out', async () => {

@@ -188,6 +188,22 @@ describe('Needs you', () => {
     expect(screen.queryByRole('article', { name: 'Hex' })).not.toBeInTheDocument();
   });
 
+  it('a possible duplicate has no Mark no-go, by button or by n', async () => {
+    const db = buildFixture();
+    const base = db.needsYou.open[0]!;
+    db.needsYou.open.push({
+      ...base, id: 9001, kind: 'merge_candidate', company: { ...base.company, id: 9002, name: 'Bolt', picked: false },
+      holdsEmail: false, reason: 'Maybe one company: Bolt (#9002) and Bolt Labs (#9003).',
+    });
+    await open(new FixtureClient(db));
+    const bolt = item('Bolt');
+    expect(within(bolt).getByRole('button', { name: /Mark ok/ })).toBeInTheDocument();
+    expect(within(bolt).queryByRole('button', { name: /Mark no-go/ })).not.toBeInTheDocument();
+    select('Bolt');
+    press('n');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
   it('setting sponsorship to No opens the same no-go dialog', async () => {
     const user = userEvent.setup();
     await open();

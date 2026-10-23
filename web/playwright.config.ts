@@ -24,5 +24,7 @@ export default defineConfig({
     command: `pnpm dev --host 127.0.0.1 --port ${port} --strictPort`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
+    // The e2e runs on the sample data: no API is started for it, so no view is served live.
+    env: { VITE_LIVE_VIEWS: 'none' },
   },
 });

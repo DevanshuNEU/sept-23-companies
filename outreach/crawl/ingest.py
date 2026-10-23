@@ -40,12 +40,15 @@ from outreach.rules.config import default_config
 from outreach.rules.title import classify_title
 from outreach.store import atomic, body_sha256, describe_error, name_key
 
-__all__ = ["ReadOutcome", "read_board", "list_board", "DOUBTFUL_JOBS"]
+__all__ = ["ReadOutcome", "read_board", "list_board", "full_read_due", "DOUBTFUL_JOBS", "FULL_READ_AFTER_S"]
 
 # Ruling 8: every LCA company files 25 or fewer, so a board listing more jobs than this is likely another company's.
 DOUBTFUL_JOBS = 300
 # Boards found by a name match or a slug guess: either can belong to another company with the same name.
 GUESSED_BOARDS = ("stapply_name", "slug_probe")
+# The weekly full read: once no posting of a board has been listed for this long, the list goes out with no
+# validators, so an ETag or id-fingerprint `unchanged` cannot hide a retitle under the same ids or a later page.
+FULL_READ_AFTER_S = 7 * 86400
 # Alias sources that hold a raw key, not a name key (identity.py's _RAW_SOURCES).
 _RAW_ALIAS_SOURCES = ("fein", "ats", "linkedin")
 
@@ -80,7 +83,7 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     """
     if conn.in_transaction:
         raise ValueError("read_board sends requests, so it must start with no transaction open")
-    result = list_board(adapter, board)
+    result = list_board(adapter, board, full=full_read_due(conn, board, now))
     title_cfg = rules_cfg if rules_cfg is not None else default_config()
     new = changed = reopened = closed = decided = bodies = 0
     any_change = False
@@ -148,12 +151,21 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
                        closed=closed, decided=decided, bodies=bodies, interval_s=interval_s, tripped=tripped)
 
 
-def list_board(adapter: Adapter, board: BoardRow) -> ReadResult:
+def full_read_due(conn: sqlite3.Connection, board: BoardRow, now: str) -> bool:
+    """True when the board's newest `last_seen_at` is over `FULL_READ_AFTER_S` old (only an `ok` read that lists a
+    posting touches it, so a week of `unchanged` reads gets here). A board with no postings has nothing to refresh."""
+    newest = conn.execute("SELECT max(last_seen_at) FROM posting WHERE board_id = ?", (board.board_id,)).fetchone()[0]
+    return newest is not None and newest < add_seconds(now, -FULL_READ_AFTER_S)
+
+
+def list_board(adapter: Adapter, board: BoardRow, *, full: bool = False) -> ReadResult:
     """The adapter's answer; any failure of the adapter itself is an `error` read (one board's bug never stops a
     tick), except a tripped host and a ruleset change, which say nothing about the board. The tick calls this itself
-    first, so it can hold an error read back until it knows whether the host was down (Task 12)."""
+    first, so it can hold an error read back until it knows whether the host was down (Task 12). `full` (the weekly
+    full read, `full_read_due`) sends no validators, so the answer cannot be `unchanged`."""
+    validators = Validators() if full else Validators(board.etag, board.ids_fingerprint)
     try:
-        return adapter.list(board.token, Validators(board.etag, board.ids_fingerprint))
+        return adapter.list(board.token, validators)
     except (HostTripped, RulesetNotCurrent):
         raise
     except Exception as e:
@@ -220,9 +232,15 @@ def _company_name_keys(conn: sqlite3.Connection, company_id: int) -> set[str]:
 
 def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResult, now: str) -> None:
     """Ruling 8: raise one `flagged` item when the board's org name is none of the company's names, or a company with
-    LCA evidence (a filer of 25 or fewer) has a board of over DOUBTFUL_JOBS jobs. Once per board: a repeat is a
-    no-op, so a resolved item stays resolved."""
+    LCA evidence (a filer of 25 or fewer) has a board of over DOUBTFUL_JOBS jobs. A `slug_probe` board whose read
+    names no org is always doubtful (Task 26a). Once per board: a repeat is a no-op, so a resolved item stays
+    resolved."""
     company = conn.execute("SELECT name FROM company WHERE company_id = ?", (board.company_id,)).fetchone()[0]
+    if board.found_by == "slug_probe" and not result.board_name:
+        # Nothing to compare the guess with (Lever and Ashby never say, a Greenhouse board may not): always doubtful.
+        _raise_doubtful(conn, board, now, "board match doubtful: found by a guessed slug; this board does not say "
+                                          "whose it is")
+        return
     why = []
     if result.board_name and name_key(result.board_name) not in _company_name_keys(conn, board.company_id):
         why.append(f'the board calls itself "{result.board_name}", which is none of the names of "{company}"')
@@ -235,6 +253,10 @@ def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResul
         return
     reason = (f"board match doubtful: the {board.ats} board {board.token} was matched to \"{company}\" "
               f"{'by a guessed slug' if board.found_by == 'slug_probe' else 'by name only'}, and {' and '.join(why)}.")
+    _raise_doubtful(conn, board, now, reason)
+
+
+def _raise_doubtful(conn: sqlite3.Connection, board: BoardRow, now: str, reason: str) -> None:
     with atomic(conn, "board_doubtful"):
         conn.execute(
             "INSERT INTO review_item(kind, company_id, board_id, reason, evidence_key, raised_by, created_at) "
@@ -250,9 +272,11 @@ def _open_ids(conn: sqlite3.Connection, board: BoardRow) -> list[int]:
 
 def _undecided(conn: sqlite3.Connection, board: BoardRow) -> list[int]:
     """Open postings of the board with no current decision: the new ones, and any a crash left undecided. A changed
-    field or body never needs this sweep, because it is written in one unit with its decision."""
+    field or body never needs this sweep, because it is written in one unit with its decision. The join goes to
+    `decision` by its key, not through the `current_decision` view, which SQLite materializes and scans per row."""
     return [r[0] for r in conn.execute(
-        "SELECT p.posting_id FROM posting p LEFT JOIN current_decision d ON d.posting_id = p.posting_id "
+        "SELECT p.posting_id FROM posting p LEFT JOIN decision d ON d.posting_id = p.posting_id "
+        "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
         "WHERE p.board_id = ? AND p.closed_at IS NULL AND d.posting_id IS NULL ORDER BY p.posting_id",
         (board.board_id,))]
 

@@ -20,6 +20,7 @@ from outreach.crawl.cadence import add_seconds
 from outreach.crawl.config import load_crawl_config
 from outreach.crawl.ingest import read_board
 from outreach.crawl.polite import PoliteClient
+from outreach.crawl.probe import ProbeReport
 from outreach.crawl.tick import (
     AlreadyRunning, TickReport, ensure_ruleset_current, read_company_boards, resolve_combiner, run_tick, tick_lock)
 from outreach.net import Response
@@ -68,7 +69,13 @@ class Clock:
 
 
 class TickCase(unittest.TestCase):
+    stub_probe = True  # the daily slug probe is its own tests' business (ProbeStepTests); the rest never see it
+
     def setUp(self):
+        if self.stub_probe:
+            patch = mock.patch.object(tick, "probe_slugs", return_value=ProbeReport(0, 0, 0, 0, 0, 0))
+            patch.start()
+            self.addCleanup(patch.stop)
         self.conn = fresh_store()
         self.addCleanup(self.conn.close)
         self.cfg = load_crawl_config()
@@ -398,10 +405,10 @@ class BreakerTests(TickCase):
     """Review Focus 3: one ATS outage must not raise dozens of Needs-you items."""
 
     def good_boards(self, n, prefix="g"):
-        """`n` Greenhouse boards whose last read, a day ago, was ok, all due now."""
+        """`n` Greenhouse boards whose last read, an hour ago, was ok, all due now."""
         ids = [self.board(f"{prefix}{i}") for i in range(n)]
         for bid in ids:
-            self.read_before(bid, 86400, next_in=-60)
+            self.read_before(bid, 3600, next_in=-60)
         return ids
 
     def outage(self, answer, n=6, failures=3):
@@ -562,7 +569,7 @@ class BreakerTests(TickCase):
         self.read_before(old, 5 * 86400, next_in=-4 * 86400)
         fresh = self.board("fresh")
         down = self.board("down")
-        self.read_before(down, 86400, next_in=-7200)
+        self.read_before(down, 3600, next_in=-60)
         self.plan(self.company_of(down), 1)
         # Tick 1: the plan board answers 503 and opens the breaker; the other two are deferred to the same time.
         self.tick({gh("down"): status_response(503)}, cfg=cfg)
@@ -572,6 +579,94 @@ class BreakerTests(TickCase):
         self.client = FakeClient({gh(t): ok() for t in ("down", "fresh", "old")})
         run_tick(self.conn, self.client, cfg=self.cfg, now_fn=lambda: at(1800), clock=self.clock)
         self.assertEqual(self.client.requests, [gh("down"), gh("fresh"), gh("old")])
+
+
+    def test_a_host_that_blocks_for_good_ends_with_one_host_item(self):
+        # The outage grace: a board is shielded only while its last good read is under a day old. After that its
+        # errors are written, back off and spread out, and three or more streaks raise the host's one item.
+        ids = self.good_boards(6)
+        self.ticks({gh(f"g{i}"): status_response(503) for i in range(6)}, 4 * 48)
+        self.assertGreater(self.count("board_read"), 0)
+        self.assertTrue(all(self.row(b)["error_streak"] >= 1 for b in ids))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE kind = 'board_unreadable'")
+                         .fetchone()[0], 0)
+        item, = self.conn.execute("SELECT * FROM review_item WHERE kind = 'flagged'").fetchall()
+        self.assertEqual(item["state"], "open")
+        self.assertTrue(item["evidence_key"].startswith("host-blocked:greenhouse.io:"), item["evidence_key"])
+
+    def test_a_board_last_read_over_the_grace_ago_is_not_shielded(self):
+        stale = self.board("stale")
+        self.read_before(stale, self.cfg.outage_grace_s, next_in=-60)
+        fresh = self.good_boards(2)
+        report = self.tick({gh(t): status_response(503) for t in ("stale", "g0", "g1")},
+                           cfg=dataclasses.replace(self.cfg, breaker_failures=3))
+        self.assertEqual((report.error, report.deferred), (1, 2))
+        self.assertEqual((self.row(stale)["last_read"], self.row(stale)["error_streak"]), ("error", 1))
+        for bid in fresh:
+            self.assert_deferred(bid)
+
+
+class MassEmptyTests(TickCase):
+    """Ruled: five or more boards of one bucket with open postings reading a well-formed empty in one tick is an
+    outage (a broken API answering `{"jobs": []}`), not five boards emptied at once."""
+    EMPTY = (FIXTURES / "greenhouse_empty.json").read_bytes()
+
+    def open_boards(self, n):
+        ids = [self.board(f"e{i}") for i in range(n)]
+        self.tick({gh(f"e{i}"): ok() for i in range(n)})
+        self.assertEqual(self.open_postings(), 3 * n)
+        return ids
+
+    def open_postings(self):
+        return self.conn.execute("SELECT count(*) FROM posting WHERE closed_at IS NULL").fetchone()[0]
+
+    def empty_tick(self, tokens, k):
+        self.client = FakeClient({gh(t): Response(200, "", self.EMPTY, {}) for t in tokens})
+        report = run_tick(self.conn, self.client, cfg=self.cfg, now_fn=lambda: at(k * FLOOR), clock=self.clock,
+                          sleep=self.clock.sleep)
+        self.assertEqual(self.client.unrouted, [])
+        return report
+
+    def test_six_boards_reading_empty_at_once_close_nothing(self):
+        ids = self.open_boards(6)
+        report = self.empty_tick([f"e{i}" for i in range(6)], 1)
+        self.assertEqual((report.empty, report.deferred, report.closed), (0, 6, 0))
+        self.assertEqual(self.open_postings(), 18)
+        self.assertEqual(self.count("review_item"), 0)
+        for bid in ids:
+            row = self.row(bid)
+            self.assertEqual((row["last_read"], row["empty_streak"], row["next_read_at"]),
+                             ("ok", 0, at(FLOOR + self.cfg.defer_s)))
+        self.assertIn("greenhouse.io", report.tripped)
+        # Twice in a row changes nothing either.
+        self.empty_tick([f"e{i}" for i in range(6)], 2)
+        self.assertEqual(self.open_postings(), 18)
+        self.assertEqual(self.count("review_item"), 0)
+
+    def test_one_board_reading_empty_follows_the_two_empties_rule(self):
+        bid, = self.open_boards(1)
+        report = self.empty_tick(["e0"], 1)
+        self.assertEqual((report.empty, report.deferred), (1, 0))
+        self.assertEqual(self.open_postings(), 3)
+        item, = self.conn.execute("SELECT * FROM review_item").fetchall()
+        self.assertEqual(item["kind"], "board_empty")
+        report = self.empty_tick(["e0"], 3)
+        self.assertEqual((report.empty, report.closed), (1, 3))
+        self.assertEqual(self.open_postings(), 0)
+        self.assertEqual(self.row(bid)["empty_streak"], 2)
+
+    def test_four_boards_reading_empty_are_four_empties(self):
+        self.open_boards(4)
+        report = self.empty_tick([f"e{i}" for i in range(4)], 1)
+        self.assertEqual((report.empty, report.deferred), (4, 0))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE kind = 'board_empty'")
+                         .fetchone()[0], 4)
+
+    def test_boards_with_no_open_postings_never_count(self):
+        for i in range(6):
+            self.read_before(self.board(f"e{i}"), 3600, next_in=-60)  # read ok, but nothing listed
+        report = self.empty_tick([f"e{i}" for i in range(6)], 0)
+        self.assertEqual((report.empty, report.deferred), (6, 0))
 
 
 class HostBlockTests(TickCase):
@@ -716,6 +811,119 @@ class WatchPassTests(TickCase):
         report = read_company_boards(self.conn, self.client, [company], cfg=self.cfg, now_fn=lambda: T0)
         self.assertEqual(self.client.requests, [gh("acme")])
         self.assertIsNone(report.watch)
+
+
+def probe_404s(*slugs):
+    routes = {}
+    for slug in slugs:
+        routes[gh(slug)] = status_response(404)
+        routes[lever(slug)] = status_response(404)
+        routes[f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"] = status_response(404)
+    return routes
+
+
+class ProbeStepTests(TickCase):
+    """The daily slug probe (Task 26a): after the boards, before the watch pass, once per New York day."""
+    stub_probe = False
+
+    def setUp(self):
+        super().setUp()
+        self.company = seed_company(self.conn, "Acme Robotics")  # no board: a candidate for probing
+
+    def runs(self):
+        return self.conn.execute("SELECT * FROM event WHERE kind = 'slug_probe_run'").fetchall()
+
+    def test_the_tick_probes_once_a_day_with_the_counts_in_the_report(self):
+        routes = probe_404s("acmerobotics", "acme-robotics")
+        report = self.tick(routes)
+        self.assertEqual((report.probe.considered, report.probe.probed), (1, 1))
+        self.assertEqual(report.probe_error, "")
+        self.assertEqual(len(self.client.requests), 6)
+        run, = self.runs()
+        self.assertEqual(run["idempotency_key"], f"slug-probe-run:{TODAY}")
+        # The same day: no probe pass at all.
+        again = self.tick({})
+        self.assertIsNone(again.probe)
+        self.assertEqual(self.client.requests, [])
+        # The next New York day: the pass runs again (this company is remembered, so it asks nobody).
+        later = self.tick({}, now_fn=lambda: at(86400))
+        self.assertEqual(later.probe, ProbeReport(0, 0, 0, 0, 0, 0))
+        self.assertEqual(len(self.runs()), 2)
+
+    def test_the_job_summary_carries_the_probe_and_watch_passes(self):
+        self.board("acme")
+        report = self.tick({gh("acme"): ok(), **probe_404s("acmerobotics", "acme-robotics")})
+        summary = json.loads(self.jobs("read_boards")[0]["summary"])
+        self.assertEqual(summary["probe"], dataclasses.asdict(report.probe))
+        self.assertEqual(summary["watch"], dataclasses.asdict(report.watch))
+        self.assertEqual((summary["probe_error"], summary["watch_error"]), ("", ""))
+        self.assertEqual(summary["ok"], 1)
+        # A failed pass is in the summary as its error, with no counts.
+        with mock.patch.object(tick, "watch_pages", side_effect=RuntimeError("watch bug")):
+            self.tick({}, now_fn=lambda: at(60))
+        summary = json.loads(self.jobs("read_boards")[1]["summary"])
+        self.assertIsNone(summary["probe"])  # the same New York day: no probe pass
+        self.assertIsNone(summary["watch"])
+        self.assertIn("watch bug", summary["watch_error"])
+
+    def test_the_probe_runs_after_the_boards_and_before_the_watch_pass(self):
+        self.board("acme")
+        self.conn.execute("INSERT INTO watched_page(company_id, url) VALUES (?, ?)", (self.company, PAGE))
+        routes = {gh("acme"): ok(), PAGE: text_response(CAREERS), **probe_404s("acmerobotics", "acme-robotics")}
+        self.tick(routes)
+        reqs = self.client.requests
+        self.assertEqual(reqs[0], gh("acme"))
+        self.assertEqual(reqs[-1], PAGE)
+        self.assertIn(gh("acmerobotics"), reqs[1:-1])
+
+    def test_the_probe_goes_through_the_tick_breaker(self):
+        # Two Greenhouse boards fail and trip that host: the probe asks Lever and Ashby, never Greenhouse.
+        self.board("g0")
+        self.board("g1")
+        cfg = dataclasses.replace(self.cfg, breaker_failures=2)
+        routes = {gh("g0"): status_response(503), gh("g1"): status_response(503),
+                  **{k: v for k, v in probe_404s("acmerobotics", "acme-robotics").items() if "greenhouse" not in k}}
+        report = self.tick(routes, cfg=cfg)
+        self.assertIn("greenhouse.io", report.tripped)
+        self.assertEqual(report.probe.probed, 1)
+        self.assertNotIn(gh("acmerobotics"), self.client.requests)
+        self.assertIn(lever("acmerobotics"), self.client.requests)
+
+    def test_a_probe_failure_is_reported_and_the_board_reads_stay(self):
+        self.board("acme")
+        with mock.patch.object(tick, "probe_slugs", side_effect=RuntimeError("probe bug")):
+            report = self.tick({gh("acme"): ok()})
+        self.assertEqual(report.ok, 1)
+        self.assertIsNone(report.probe)
+        self.assertIn("probe bug", report.probe_error)
+        self.assertEqual(self.jobs("read_boards")[0]["status"], "ok")
+        self.assertEqual(self.runs(), [])  # not recorded: the next tick tries again
+        self.assertEqual(report.watch.baseline + report.watch.unchanged + report.watch.error, 0)  # watch pass still ran
+
+    def test_the_probe_gets_the_limit_the_tick_clients_and_all_company_ids(self):
+        seen = {}
+
+        def spy(conn, ids, client, **kw):
+            seen.update(ids=sorted(ids), limit=kw["limit"], now=kw["now"], cfg=kw["cfg"])
+            return ProbeReport(1, 1, 0, 0, 0, 0)
+
+        with mock.patch.object(tick, "probe_slugs", spy):
+            report = self.tick({})
+        self.assertEqual(seen["ids"], [self.company])
+        self.assertEqual((seen["limit"], seen["now"]), (50, T0))
+        self.assertEqual(report.probe.probed, 1)
+
+    def test_no_probe_once_the_tick_budget_is_spent(self):
+        cfg = dataclasses.replace(self.cfg, tick_budget_s=0)
+        report = self.tick({}, cfg=cfg)
+        self.assertIsNone(report.probe)
+        self.assertEqual(self.runs(), [])
+
+    def test_read_company_boards_runs_no_probe(self):
+        self.client = FakeClient({})
+        report = read_company_boards(self.conn, self.client, [self.company], cfg=self.cfg, now_fn=lambda: T0)
+        self.assertIsNone(report.probe)
+        self.assertEqual(self.client.requests, [])
 
 
 class LockTests(unittest.TestCase):

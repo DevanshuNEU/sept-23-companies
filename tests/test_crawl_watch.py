@@ -258,6 +258,19 @@ class WatchTests(WatchCase):
                 self.assertEqual(row["last_fetch_at"], at(t))
                 self.assertEqual(self.items(), [])
 
+    def test_a_503_with_a_long_readable_page_is_an_error(self):
+        # An error page can carry plenty of text (a maintenance notice, a cached copy of the site); only a 200 is a
+        # read of the careers page, so a non-200 never changes the fingerprint or raises an item.
+        self.baseline()
+        fp = page_fingerprint(A)
+        down = Response(503, URL, CHANGED.encode("utf-8"), {"content-type": "text/html"})
+        self.conn.execute("UPDATE watched_page SET next_fetch_at = NULL WHERE company_id = ?", (self.company,))
+        report = self.run_at(WEEK, {URL: down})
+        self.assertEqual((report.error, report.changed, report.unstable), (1, 0, 0))
+        row = self.row()
+        self.assertEqual((row["fingerprint"], row["last_change_at"], row["error_streak"]), (fp, None, 1))
+        self.assertEqual(self.items(), [])
+
     def test_error_backoff_doubles_to_7_days(self):
         self.baseline()
         waits = []

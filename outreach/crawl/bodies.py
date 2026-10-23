@@ -72,7 +72,8 @@ def missing_body_ids(conn: sqlite3.Connection, board: BoardRow, limit: int) -> l
     marks = ", ".join("?" * len(BODY_LANES))
     rows = conn.execute(
         "SELECT p.posting_id, p.source_key FROM posting p "
-        "JOIN current_decision d ON d.posting_id = p.posting_id "
+        "JOIN decision d ON d.posting_id = p.posting_id "
+        "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
         "LEFT JOIN posting_body b ON b.posting_id = p.posting_id "
         f"WHERE p.board_id = ? AND p.closed_at IS NULL AND b.posting_id IS NULL AND d.lane IN ({marks}) "
         "ORDER BY p.posted_on DESC, p.first_seen_at DESC, p.posting_id DESC LIMIT ?",
@@ -92,7 +93,8 @@ def refetch_body_ids(conn: sqlite3.Connection, board: BoardRow, changed_posting_
     marks = ", ".join("?" * len(BODY_LANES))
     rows = conn.execute(
         "SELECT p.posting_id, p.source_key FROM posting p "
-        "JOIN current_decision d ON d.posting_id = p.posting_id "
+        "JOIN decision d ON d.posting_id = p.posting_id "
+        "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
         "JOIN posting_body b ON b.posting_id = p.posting_id "
         "WHERE p.board_id = ? AND p.closed_at IS NULL AND ("
         f"(p.posting_id IN (SELECT value FROM json_each(?)) AND d.lane IN ({marks})) "

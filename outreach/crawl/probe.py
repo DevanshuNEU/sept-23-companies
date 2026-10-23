@@ -18,8 +18,11 @@ import unicodedata
 import urllib.parse
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from outreach.crawl.ats import adapter_for
+from outreach.crawl.cadence import add_seconds
 from outreach.crawl.base import Validators, valid_token
 from outreach.crawl.config import CrawlConfig, load_crawl_config
 from outreach.crawl.ingest import _company_name_keys
@@ -27,14 +30,19 @@ from outreach.crawl.polite import HostTripped, bucket_for
 from outreach.net import HttpClient, Response
 from outreach.sources.boards import BoardRef, add_board
 from outreach.sources.tiers import effective_tier
-from outreach.store import name_key
+from outreach.store import append_event, name_key, utcnow
+from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["slug_candidates", "ProbeReport", "probe_slugs", "PROBE_ATS", "MIN_SLUG", "MAX_SLUGS"]
+__all__ = ["slug_candidates", "ProbeReport", "probe_slugs", "PROBE_ATS", "MIN_SLUG", "MAX_SLUGS", "PROBE_LIMIT",
+           "MEMORY_DAYS"]
 
 # Probe order: the ATSs a small hiring company most often uses. The host is the adapter's US API host.
 PROBE_ATS = {"greenhouse": "boards-api.greenhouse.io", "lever": "api.lever.co", "ashby": "api.ashbyhq.com"}
 MIN_SLUG = 4  # a shorter slug is too likely to be another company's
 MAX_SLUGS = 4
+PROBE_LIMIT = 50  # companies per run: the daily tick step and the CLI default
+MEMORY_DAYS = 30  # a probed company is not probed again for this long, whatever the answer was
+_NY = ZoneInfo("America/New_York")
 _LEGAL = frozenset({"inc", "incorporated", "llc", "ltd", "limited", "corp", "corporation", "co", "company", "gmbh",
                     "plc", "lp", "llp", "pbc"})
 _RAW_ALIAS_SOURCES = ("fein", "ats", "linkedin")
@@ -113,14 +121,18 @@ def _names(conn: sqlite3.Connection, company_id: int, name: str) -> list[str]:
     return [name] + [r[0] for r in rows if name_key(r[0]) != name_key(name)]
 
 
-def _eligible(conn: sqlite3.Connection, company_ids: Collection[int]) -> list[tuple[int, list[str], list[str]]]:
+def _eligible(conn: sqlite3.Connection, company_ids: Collection[int], now: str
+              ) -> list[tuple[int, list[str], list[str]]]:
     """`(company_id, names, slugs)` in work order: tier 1 (promoted counts as 1), tier 2, then company id. A company
-    that is closed, removed, merged, has an active board, is tier 3 and not promoted, or has no usable slug is out."""
+    that is closed, removed, merged, has any board row (active or not), was probed within `MEMORY_DAYS`, is tier 3 and
+    not promoted, or has no usable slug is out."""
     rows = conn.execute(
-        "SELECT c.company_id, c.name FROM company c WHERE c.company_id IN (SELECT value FROM json_each(?)) "
+        "SELECT c.company_id, c.name FROM company c WHERE c.company_id IN (SELECT value FROM json_each(:ids)) "
         "AND c.status NOT IN ('closed', 'removed') AND c.merged_into IS NULL "
-        "AND NOT EXISTS (SELECT 1 FROM board b WHERE b.company_id = c.company_id AND b.active = 1)",
-        (json.dumps(sorted(set(company_ids))),)).fetchall()
+        "AND NOT EXISTS (SELECT 1 FROM board b WHERE b.company_id = c.company_id) "
+        "AND NOT EXISTS (SELECT 1 FROM event e WHERE e.entity = 'company' AND e.kind = 'slug_probed' "
+        "AND e.company_id = c.company_id AND e.at > :cutoff)",
+        {"ids": json.dumps(sorted(set(company_ids))), "cutoff": add_seconds(now, -MEMORY_DAYS * 86400)}).fetchall()
     out = []
     for company_id, name in rows:
         tier = effective_tier(conn, company_id)
@@ -132,19 +144,30 @@ def _eligible(conn: sqlite3.Connection, company_ids: Collection[int]) -> list[tu
     return [(cid, names, slugs) for _, cid, names, slugs in out]
 
 
+def _remember(conn: sqlite3.Connection, company_id: int, slugs: list[str], now: str) -> None:
+    """One `slug_probed` event for the company, keyed by company and New York day (`_eligible` skips it for 30 days)."""
+    day = datetime.strptime(now, ISO_FMT).replace(tzinfo=timezone.utc).astimezone(_NY).date().isoformat()
+    append_event(conn, entity="company", kind="slug_probed", actor="crawler", entity_id=company_id,
+                 company_id=company_id, detail={"slugs": slugs}, at=now,
+                 idempotency_key=f"slug-probed:{company_id}:{day}")
+
+
 def probe_slugs(conn: sqlite3.Connection, company_ids: Collection[int], client: HttpClient, *, limit: int,
-                cfg: CrawlConfig | None = None) -> ProbeReport:
+                cfg: CrawlConfig | None = None, now: str | None = None) -> ProbeReport:
     """Try each candidate slug of up to `limit` companies (of `company_ids`) on Greenhouse, Lever and Ashby.
 
     One `adapter.list` per slug and ATS, outermost the slug, so a company's best guess is tried everywhere before the
-    next. The first hit of a company ends it: added, a `conflict` (counted, the board is never moved), or a name
-    mismatch (counted, nothing written). A `HostTripped` takes that host's bucket out of the pass, the others go on, and
-    the pass ends when none is left.
+    next. The first hit of a company ends it: added, a `conflict` (counted, the board is never moved), or `exists`.
+    A name mismatch (counted once per company, nothing written) ends only that slug: the ATSs not yet asked about it
+    are not asked, since the slug belongs to someone else. A `HostTripped` takes that host's bucket out of the pass,
+    the others go on, and the pass ends when none is left. A company that got at least one answer is remembered with a
+    `slug_probed` event and is not probed again for `MEMORY_DAYS`, so the next run takes the next companies.
     """
     if limit < 1:
         raise ValueError(f"limit must be at least 1, got {limit}")
     cfg = cfg or load_crawl_config()
-    work = _eligible(conn, company_ids)
+    now = now or utcnow()
+    work = _eligible(conn, company_ids, now)
     probing = _NoEuClient(client)
     adapters = {ats: adapter_for(ats, probing) for ats in PROBE_ATS}
     buckets = {ats: bucket_for(host, cfg) for ats, host in PROBE_ATS.items()}
@@ -155,7 +178,8 @@ def probe_slugs(conn: sqlite3.Connection, company_ids: Collection[int], client: 
             break
         probed += 1
         keys = None
-        done = False
+        asked = 0
+        mismatched = done = False
         for slug in slugs:
             for ats in PROBE_ATS:
                 if ats in dead or adapters[ats] is None:
@@ -166,8 +190,10 @@ def probe_slugs(conn: sqlite3.Connection, company_ids: Collection[int], client: 
                     dead.update(a for a, b in buckets.items() if b == tripped.bucket or a == ats)
                     continue
                 except Exception:
+                    asked += 1
                     errors += 1
                     continue
+                asked += 1
                 if result.result == "error":
                     errors += result.http_status != 404
                     continue
@@ -175,8 +201,11 @@ def probe_slugs(conn: sqlite3.Connection, company_ids: Collection[int], client: 
                     continue
                 keys = keys if keys is not None else _company_name_keys(conn, company_id)
                 if result.board_name and name_key(result.board_name) not in keys:
-                    mismatches += 1
-                    continue
+                    mismatched = True
+                    break  # the slug is someone else's: not worth asking the other ATSs about it
+                if conn.execute("SELECT 1 FROM board WHERE company_id = ?", (company_id,)).fetchone():
+                    done = True  # a board appeared while we were asking: this company is settled
+                    break
                 outcome = add_board(conn, company_id, BoardRef(ats, slug), via="probe", matched_on="slug",
                                     found_by="slug_probe")
                 added += outcome == "added"
@@ -185,5 +214,8 @@ def probe_slugs(conn: sqlite3.Connection, company_ids: Collection[int], client: 
                 break
             if done:
                 break
+        mismatches += mismatched and not done
+        if asked:
+            _remember(conn, company_id, slugs, now)
     return ProbeReport(considered=len(work), probed=probed, added=added, conflicts=conflicts,
                        name_mismatch=mismatches, errors=errors)

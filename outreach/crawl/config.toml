@@ -7,6 +7,9 @@ ceiling_s = 604800
 age_divisor = 8
 # A board deferred by the breaker or the tick budget is due again after this many seconds.
 defer_s = 1800
+# An outage shields a board (its error, or a mass empty, is held as a deferral) only while its last read is younger
+# than this. After that the read is written as it is, so a host that blocks for good still reaches Needs you.
+outage_grace_s = 86400
 
 # The declared User-Agent: no contact address, no URL. Equal to outreach.net.USER_AGENT.
 user_agent = "outreach-crawler/1.0 (personal job search)"

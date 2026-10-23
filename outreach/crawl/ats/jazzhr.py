@@ -2,11 +2,12 @@
 
 `{token}.applytojob.com/apply/jobs` answers an HTML page with one table row per job: the link has class
 `job_title_link` and an href ending `/apply/jobs/details/{id}`, the second cell is the location. A 200 is the listing
-only when the page carries the `resumator` marker. A Cloudflare 403, a challenge page and anything else is `error`
+only when an element has a `resumator...` class or id (the name in a stylesheet link does not count). A Cloudflare 403, a challenge page and anything else is `error`
 (Review Focus 2), and no User-Agent or header is added to get past one: a blocked board is a Needs-you item.
 
 A page that is cut off (no closing `</html>`, or ends inside a row) is `error`. So is a page where the count of
-`job_title_link` anchors differs from the rows read, so a markup change cannot turn into "no jobs".
+`job_title_link` anchors differs from the rows read, or when any link to a detail page, whatever its class, is not a
+job read. So a markup change cannot turn into "no jobs" or a short list.
 
 The raw page changes on every request, so there is no ETag: the fingerprint is over the ids. `body()` reads the
 `application/ld+json` block whose `@type` is `JobPosting`. Its URL is built from the token and the id, and a redirect
@@ -35,6 +36,7 @@ _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
 _DETAIL_PATH = re.compile(r"/apply/jobs/details/([A-Za-z0-9_-]+)/?")
 _MAX_HOPS = 3
+_REDIRECTS = (301, 302, 303, 307, 308)  # a 304 is not a redirect
 
 
 def _words(parts: list[str]) -> str:
@@ -50,6 +52,8 @@ class _Rows(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.rows: list[tuple[str, str, str]] = []  # (href, title, location)
         self.links = 0
+        self.container = False  # an element whose class or id is the listing's `resumator...` name
+        self.detail_ids: set[str] = set()  # the id of every <a> that points at a detail page, whatever its class
         self._row: dict | None = None
 
     def _finish_cell(self) -> None:
@@ -70,6 +74,13 @@ class _Rows(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        names = (attrs.get("class") or "").lower().split() + [(attrs.get("id") or "").lower()]
+        if any(name.startswith("resumator") for name in names):
+            self.container = True
+        if tag == "a":
+            found = _DETAIL_PATH.fullmatch(_path(attrs.get("href")))
+            if found:
+                self.detail_ids.add(found.group(1))
         if tag == "tr":
             self._finish_row()
             self._row = {"cells": [], "cell": None, "linked": False, "in_link": False, "href": "", "title": []}
@@ -143,6 +154,13 @@ def _job_posting(node) -> dict | None:
     return None
 
 
+def _path(href) -> str:
+    try:
+        return urllib.parse.urlsplit((href or "").strip()).path
+    except ValueError:
+        return ""
+
+
 def _on_tenant_host(token: str, url: str) -> bool:
     try:
         parts = urllib.parse.urlsplit(url)
@@ -166,30 +184,30 @@ class JazzHRAdapter:
             return resp
         page = resp.text()
         lower = page.lower()
-        if "resumator" not in lower:
-            return read_error("the 200 answer is not the JazzHR job listing (no resumator marker)", status=resp.status)
         parser = _Rows()
         parser.feed(page)
         parser.close()
+        if not parser.container:
+            return read_error("the 200 answer is not the JazzHR job listing (no resumator element)", status=resp.status)
         if parser.cut_off or "</html" not in lower:
             return read_error("the job listing is cut off", status=resp.status)
         jobs: list[JobRef] = []
         for href, title, location in parser.rows:
-            found = _DETAIL_PATH.fullmatch(urllib.parse.urlsplit(href).path)
+            found = _DETAIL_PATH.fullmatch(_path(href))
             if not found or not title:
                 return read_error("a job row has no usable id or no title", status=resp.status)
             native_id = found.group(1)
             jobs.append(JobRef(native_id=native_id, title=title, url=_DETAIL.format(token=token, id=native_id),
                                location=location, country=None, posted_on=None, body=None))
-        if parser.links != len(parser.rows):
-            return read_error("a job link sits outside a table row, so the list may be incomplete", status=resp.status)
+        if parser.links != len(parser.rows) or parser.detail_ids != {job.native_id for job in jobs}:
+            return read_error("a job link is not a table row read, so the list may be incomplete", status=resp.status)
         return finish_list(jobs, resp, validators, use_etag=False)
 
     def _get(self, token: str, url: str) -> Response:
         """GET `url`, following a redirect only while it stays on the tenant's own host."""
         for _hop in range(_MAX_HOPS + 1):
             resp = self.client.get(url)
-            if not 300 <= resp.status < 400:
+            if resp.status not in _REDIRECTS:
                 return resp
             target = urllib.parse.urljoin(url, resp.headers.get("location", ""))
             if not _on_tenant_host(token, target):

@@ -16,6 +16,7 @@ from outreach.rules.rebuild import record_evidence
 from outreach.sources.base import Candidate
 from outreach.sources.jobs import run_discover, run_resolve
 from outreach.sources.lca import LcaSource
+from outreach.sources.tiers import promote, set_work_tier
 from outreach.store import add_alias, mark_shared_key
 from tests.storetest import fresh_store, seed_company, table_marks
 from tests.test_lca_source import FILES
@@ -252,6 +253,38 @@ class SizeCheckTest(ResolveBase):
         self.company("Acme Robotics", "acme.io")
         self.assertEqual(resolve_store(self.conn).size_checks_raised, 0)
 
+    def test_only_tier_1_holders_of_a_shared_domain_get_a_size_check(self):
+        t1, t2, t3, p3, none = (self.company(f"Veltrix {n}", "veltrix.com") for n in ("One", "Two", "Three", "Four", "Five"))
+        mark_shared_key(self.conn, "domain", "veltrix.com", "5 employers: A, B, C, D, E")
+        set_work_tier(self.conn, t1, 1, "small", "v1")
+        set_work_tier(self.conn, t2, 2, "mid", "v1")
+        set_work_tier(self.conn, t3, 3, "big", "v1")
+        set_work_tier(self.conn, p3, 3, "big", "v1")
+        promote(self.conn, p3, "devanshu")
+        report = resolve_store(self.conn)  # `none` has no tier row: effective tier 1
+        self.assertEqual((report.size_checks_raised, report.size_checks_skipped_tier, report.failed), (3, 2, []))
+        self.assertEqual([i["company_id"] for i in self.items("size_check")], [t1, p3, none])
+        self.assertEqual(report.attempted, 3)
+
+    def test_a_rerun_raises_nothing_new_and_counts_the_skipped_again(self):
+        t1, t2 = self.company("Veltrix One", "veltrix.com"), self.company("Veltrix Two", "veltrix.com")
+        mark_shared_key(self.conn, "domain", "veltrix.com", "2 employers: A, B")
+        set_work_tier(self.conn, t1, 1, "small", "v1")
+        set_work_tier(self.conn, t2, 3, "big", "v1")
+        resolve_store(self.conn)
+        before = table_marks(self.conn)
+        second = resolve_store(self.conn)
+        self.assertEqual((second.size_checks_raised, second.size_checks_skipped_tier), (0, 1))
+        self.assertEqual(table_marks(self.conn), before)
+
+    def test_a_demoted_holder_keeps_the_item_it_already_has(self):
+        a = self.company("Veltrix One", "veltrix.com")
+        mark_shared_key(self.conn, "domain", "veltrix.com", "2 employers: A, B")
+        resolve_store(self.conn)
+        set_work_tier(self.conn, a, 3, "big", "v1")
+        self.assertEqual(resolve_store(self.conn).size_checks_skipped_tier, 1)
+        self.assertEqual([i["company_id"] for i in self.items("size_check")], [a])
+
     def test_shared_domain_raises_size_check_not_merge_for_each_holder(self):
         run_discover(self.conn, [LcaSource(FILES)])
         before = self.conn.execute("SELECT COUNT(*) FROM company").fetchone()[0]
@@ -307,7 +340,8 @@ class ResolveJobTest(ResolveBase):
                                 (run_id,)).fetchone()
         self.assertEqual((row["job"], row["status"], row["error"]), ("resolve", "ok", ""))
         self.assertIsNotNone(row["finished_at"])
-        self.assertEqual(json.loads(row["summary"]), {"pairs_raised": 1, "size_checks_raised": 2, "attempted": 3, "failed": []})
+        self.assertEqual(json.loads(row["summary"]), {"pairs_raised": 1, "size_checks_raised": 2, "size_checks_skipped_tier": 0,
+                          "attempted": 3, "failed": []})
         self.assertEqual((report.pairs_raised, report.size_checks_raised), (1, 2))
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM job_run WHERE job = 'resolve'").fetchone()[0], 1)
 

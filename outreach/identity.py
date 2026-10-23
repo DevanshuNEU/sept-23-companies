@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from outreach.rules.rebuild import record_evidence
 from outreach.sources.base import Candidate, describe_error
 from outreach.sources.keys import US_STATES, classify_domain, normalize_fein, registrable_domain, shared_count
+from outreach.sources.tiers import effective_tier
 from outreach.store import add_alias, append_event, atomic, is_shared_key, name_key, utcnow
 
 __all__ = ["BASES", "CONFIDENCE", "ITEM_CONFIDENCES", "MIN_NAME_KEY", "Resolution", "Match", "follow_merged",
@@ -493,6 +494,7 @@ def resolve_candidate(conn: sqlite3.Connection, cand: Candidate, *, source_name:
 class StoreResolveReport:
     pairs_raised: int = 0  # new `merge_candidate` items
     size_checks_raised: int = 0  # new `size_check` items
+    size_checks_skipped_tier: int = 0  # shared-domain holders of tier 2 or 3 (effective tier), given none
     attempted: int = 0  # items tried: new, already present or failed
     failed: list[str] = field(default_factory=list)  # one entry per item that could not be written
 
@@ -530,6 +532,9 @@ def resolve_store(conn: sqlite3.Connection) -> StoreResolveReport:
     (b) Each live company holding a domain that is a shared key (any confidence; a subdomain counts through its
     registrable root) raises one `size_check` item (`raised_by 'source'`, `evidence_key shared-domain:<domain>`,
     reason naming the basis and the confidence): a subsidiary's size is its own and unknown, never the parent's.
+    Only a company whose effective work tier is 1 (promoted, tier 1 or no tier row) gets one; a tier 2 or 3 holder
+    gets none and is counted in `size_checks_skipped_tier` (ranking already treats a shared domain as a weak "not
+    small" flag, #6 ruling 11), so Devanshu is not asked about thousands of subsidiaries he will not work.
 
     Each item is its own transaction. One that fails is listed in `failed` and the pass goes on.
     """
@@ -566,6 +571,9 @@ def resolve_store(conn: sqlite3.Connection) -> StoreResolveReport:
     for domain, holders in sorted(shared.items()):
         for cid in sorted(holders):
             try:
+                if effective_tier(conn, cid) != 1:
+                    report.size_checks_skipped_tier += 1
+                    continue
                 report.attempted += 1
                 with atomic(conn, "identity_candidate"):
                     name = conn.execute("SELECT name FROM company WHERE company_id = ?", (cid,)).fetchone()[0]

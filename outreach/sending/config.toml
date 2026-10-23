@@ -1,0 +1,64 @@
+# The sending engine's numbers (#14). Every value comes from issue #9 or the plan's "Decisions" section.
+# Keep each key on one line: tests replace single lines of this file.
+
+# One sender: #9 "devanshurajesh@gmail.com via the Gmail API. No second account or domain."
+from_address = "devanshurajesh@gmail.com"
+from_name = "Devanshu Chicholikar"
+
+# The sender's day (send_day.day, daily counts) is this zone's date.
+day_tz = "America/New_York"
+
+# Adaptive ramp (#9): 20 a day to start, +10 each clean sending day, up to 100 (the send_day CHECK is the hard ceiling).
+ramp_start = 20
+ramp_step = 10
+ramp_ceiling = 100
+ramp_floor = 20
+
+# A day is clean when bounces are under 2% over the last 3 days (#9).
+clean_bounce_rate = 0.02
+bounce_days = 3
+
+# Hard block: more than 3% of the last 100 first emails bounced, once at least 10 are sent (the old mailer's live
+# pauseIfBounceRate 0.03 and minSendsForBounceCheck 10).
+hard_bounce_rate = 0.03
+hard_bounce_last_n = 100
+hard_bounce_min_sends = 10
+
+# Hard block: two "asked to stop" tags within 7 days.
+stop_replies_hard = 2
+stop_replies_days = 7
+
+# Window (#9): weekdays (0 is Monday), 08:30 to 16:30 recipient local time, both ends inclusive.
+window_start = "08:30"
+window_end = "16:30"
+weekdays = [0, 1, 2, 3, 4]
+# Dates ("2026-11-26") that are not business days. Empty by default.
+holidays = []
+
+# People per company (#9): at most 3 a day, at least 60 minutes apart.
+per_company_daily = 3
+per_company_gap_minutes = 60
+
+# Random gap between any two sends, in minutes (the deliverability research's pacing range).
+gap_minutes = [4, 9]
+
+# Follow-ups (#9): one, at about 7 business days; up to 3 entries because message.seq is 0 to 3.
+followup_business_days = [7]
+# A follow-up still planned this many business days after it was due lapses.
+followup_lapse_business_days = 5
+# An open touch with nothing queued closes no_reply this many business days after its last sent message.
+close_after_business_days = 7
+
+# A send in doubt waits this long before the sender looks for it in Sent.
+reconcile_after_minutes = 10
+# At most 2 claims per message: send_unknown -> failed -> approved is the only path to a second attempt.
+max_send_attempts = 2
+# Without a usable history cursor, read the threads of touches sent in the last 45 days once.
+rethread_days = 45
+# The most inbound messages read per tick.
+inbound_meta_cap = 200
+
+# The old mailer's launchd job; the new sender refuses to claim while it is loaded.
+old_sender_label = "com.devanshu.outreach-mail-sender"
+# The sender deletes its own ok no-op job_run rows older than this.
+prune_noop_after_days = 14

@@ -9,8 +9,9 @@ A list that may be incomplete is `error`, never `ok` (Review Focus 1). Workday l
 offsets wrap to page 1. A list that reports 2,000 or more is split by the `jobFamilyGroup` facet, each family read
 to its end and the postings joined by `externalPath`. The read is `error` ("list capped") when a family itself
 reports 2,000 or more, when the first page has no family facet, when the families together cover fewer postings than
-the total (a posting with no family would be missing, or two families overlap), or when any page fails, comes back empty early or repeats a
-posting. Workday sends no ETag, so an unchanged board is told by the fingerprint of the `externalPath` ids.
+the total (a posting with no family would be missing, or two families overlap), or when any page fails, comes back
+empty early or repeats a posting. Workday sends no ETag, so an unchanged board is told by the fingerprint of the
+`externalPath` ids.
 """
 from __future__ import annotations
 

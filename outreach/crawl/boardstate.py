@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from outreach.crawl.base import ReadResult
 from outreach.crawl.hostblock import clear_host_block, host_blocked
-from outreach.crawl.streaks import Streaks, needs_review, next_streaks
+from outreach.crawl.streaks import EMPTIES_TO_CLOSE, Streaks, needs_review, next_streaks
 from outreach.store import append_event, atomic
 
 __all__ = ["BoardRow", "load_board", "write_board_state", "board_empty_reason", "BOARD_READS_KEPT"]
@@ -63,7 +63,8 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
     emptying can never be read as `unchanged` and its postings get the chance to reopen (Review Focus 4).
     Review items (raised by the crawler, keyed on `streak_since` so a resolved item stays resolved while the same
     streak goes on): `board_unreadable` from the third error in a row, `board_empty` on the empty read that starts an
-    empty run (an error inside the run neither ends it nor raises the item again). An `ok` or `unchanged` read clears
+    empty run (an error inside the run neither ends it nor raises the item again; the empty read that closes the
+    postings rewrites the open item's reason to say they closed). An `ok` or `unchanged` read clears
     both when open; an `empty` read clears only `board_unreadable`. The `read_state` event is appended when the state
     flips, with `ok` and `unchanged` as one state. Returns the new streaks.
 
@@ -104,6 +105,12 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
             if board.empty_streak == 0:  # this read starts the empty run
                 _raise(conn, board, "board_empty", streaks.streak_since, now,
                        board_empty_reason(board, streaks.empty_streak, now))
+            elif streaks.empty_streak == EMPTIES_TO_CLOSE:  # the read that closes: the open item must say so
+                closed = board_empty_reason(board, streaks.empty_streak, now)
+                conn.execute(
+                    "UPDATE review_item SET reason = ?, revision = revision + 1 "
+                    "WHERE board_id = ? AND kind = 'board_empty' AND state = 'open' AND reason <> ?",
+                    (closed, board.board_id, closed))
         if needs_review(streaks.error_streak) and not (bucket and host_blocked(conn, board.ats, bucket, now)):
             _raise(conn, board, "board_unreadable", streaks.streak_since, now,
                    f"The {board.ats} board {board.token} could not be read {streaks.error_streak} times in a row "

@@ -5,8 +5,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from outreach.crawl import ingest
+from outreach.crawl import bodies, ingest
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
+from outreach.crawl.ats.lever import LeverAdapter
 from outreach.crawl.base import JobRef, ReadResult, Validators, ids_fingerprint
 from outreach.crawl.boardstate import load_board
 from outreach.crawl.cadence import add_seconds
@@ -148,6 +149,54 @@ class IngestTestCase(unittest.TestCase):
                                                      "newemp_jr": 1}), T0))
 
 
+class DecisionJoinPlanTests(IngestTestCase):
+    """The crawler's per-board queries reach a posting's current decision through the `decision` primary key, never by
+    scanning a materialized `current_decision` view per row (ranking measured 92.7 s for that at 18,343 companies)."""
+
+    def plans(self):
+        board = load_board(self.conn, self.board_id)
+        seen = []
+        self.conn.set_trace_callback(seen.append)
+        try:
+            ingest._undecided(self.conn, board)
+            bodies.missing_body_ids(self.conn, board, 10)
+            bodies.refetch_body_ids(self.conn, board, [1], T0, 30, 10)
+        finally:
+            self.conn.set_trace_callback(None)
+        self.assertEqual(len(seen), 3)
+        return {sql: [r[3] for r in self.conn.execute("EXPLAIN QUERY PLAN " + sql)] for sql in seen}
+
+    def at_scale(self):
+        """Planner statistics of a store at the size ranking measured: 200,000 postings over 5,000 boards, two
+        decisions each, so the plan is the one the live store gets (`ANALYZE sqlite_schema` reloads them)."""
+        self.conn.execute("ANALYZE")
+        stats = [("posting", None, "200000"), ("posting", "sqlite_autoindex_posting_1", "200000 1"),
+                 ("posting", "posting_board_open", "200000 40 20 1"),
+                 ("posting", "posting_company_open", "200000 20 10"),
+                 ("decision", None, "400000"), ("decision", "sqlite_autoindex_decision_1", "400000 2 1"),
+                 ("decision", "decision_version", "400000 200000"), ("posting_body", None, "150000")]
+        self.conn.execute("DELETE FROM sqlite_stat1 WHERE tbl IN ('posting', 'decision', 'posting_body')")
+        self.conn.executemany("INSERT INTO sqlite_stat1(tbl, idx, stat) VALUES (?, ?, ?)", stats)
+        self.conn.execute("ANALYZE sqlite_schema")
+
+    def test_no_query_scans_the_decision_side(self):
+        self.read(ok())
+        for scale in (False, True):
+            if scale:
+                self.at_scale()
+            with self.subTest(scale=scale):
+                self.check_plans()
+
+    def check_plans(self):
+        for sql, plan in self.plans().items():
+            with self.subTest(sql=sql[:60]):
+                self.assertNotIn("current_decision", sql)
+                for step in plan:
+                    self.assertFalse(step.startswith("MATERIALIZE"), plan)
+                    self.assertNotRegex(step, r"^SCAN (d|decision|current_decision)\b", plan)
+                self.assertTrue(any(s.startswith("SEARCH d USING") for s in plan), plan)
+
+
 class DoubtfulBoardTests(IngestTestCase):
     company_name = "Acme"
 
@@ -216,6 +265,33 @@ class DoubtfulBoardTests(IngestTestCase):
         self.set_found_by("slug_probe", bid)
         self.read(ok(), board_id=bid, url="https://boards-api.greenhouse.io/v1/boards/zeta/jobs?content=true")
         self.assertEqual(len(self.items("flagged")), 1)
+
+    def test_a_slug_probe_board_whose_read_names_no_org_always_raises_the_item(self):
+        # Lever and Ashby never say whose a board is, and a Greenhouse board may lack company_name: a guessed slug
+        # with no name to compare is doubtful until Devanshu looks.
+        reason = "board match doubtful: found by a guessed slug; this board does not say whose it is"
+        lever_url = "https://api.lever.co/v0/postings/acmelever?mode=json"
+        no_name = board_json(lambda jobs: [j.pop("company_name", None) for j in jobs])
+        cases = (("lever", "acmelever", lever_url, (FIXTURES / "lever_list.json").read_bytes(), LeverAdapter),
+                 ("greenhouse", "acmenoname", "https://boards-api.greenhouse.io/v1/boards/acmenoname/jobs?content=true",
+                  no_name, GreenhouseAdapter))
+        for ats, token, url, body, adapter in cases:
+            with self.subTest(ats=ats):
+                cid = seed_company(self.conn, "Acme Robotics")  # the name would match if the board gave one
+                bid = seed_board(self.conn, cid, ats, token)
+                self.set_found_by("slug_probe", bid)
+                client = FakeClient({url: ok(body)})
+                self.clock[0] = T0
+                read_board(self.conn, load_board(self.conn, bid), adapter(client), run_id=start_job(self.conn, "read_boards"),
+                           now=T0, cfg=self.cfg)
+                item, = self.conn.execute("SELECT * FROM review_item WHERE board_id = ?", (bid,)).fetchall()
+                self.assertEqual((item["kind"], item["raised_by"]), ("flagged", "crawler"))
+                self.assertEqual(item["reason"], reason)
+                self.assertEqual(item["evidence_key"], f"board-doubtful:{bid}")
+        # A name-only board with no org name still raises nothing: the rule is for guessed slugs.
+        self.set_found_by("stapply_name")
+        self.read(ok(no_name))
+        self.assertEqual([i["board_id"] for i in self.items("flagged")].count(self.board_id), 0)
 
     def test_a_host_matched_board_or_a_second_read_or_a_matching_name_raises_nothing(self):
         # A board found another way, with the same other org name: no item.
@@ -380,6 +456,48 @@ class GreenhouseFlowTests(IngestTestCase):
         self.assertEqual((board["last_read"], board["etag"]), ("unchanged", '"A"'))
         self.assertEqual(board["next_read_at"], add_seconds(at(1), out.interval_s))
         self.assertEqual(self.conn.execute("SELECT postings FROM board_read WHERE result = 'unchanged'").fetchone()[0], 3)
+
+    def test_a_week_without_a_listing_sends_no_validators(self):
+        # The weekly full read: once the newest last_seen_at is over 7 days old, the list goes out with no ETag, so a
+        # retitle under the same ids or a change past the first page is seen.
+        self.read(ok())
+        self.read(status_response(304), at(6))  # 6 days: the ETag still goes out
+        self.assertEqual(self.client.calls[0][2].get("If-None-Match"), '"A"')
+        out = self.read(ok(etag='"A"'), at(7.5))
+        self.assertNotIn("If-None-Match", self.client.calls[0][2])
+        self.assertEqual(out.result, "ok")
+        self.assertEqual(self.posting(SWE)["last_seen_at"], at(7.5))
+        self.read(status_response(304), at(8))  # listed again half a day ago: back to the ETag
+        self.assertEqual(self.client.calls[0][2].get("If-None-Match"), '"A"')
+
+    def test_a_week_without_a_listing_finds_a_retitle_under_the_same_ids(self):
+        jobs = [detail_job("w1", "Software Engineer", "2026-10-01"), detail_job("w2", "Data Engineer", "2026-10-01")]
+        retitled = [detail_job("w1", "Software Engineer, New Grad", "2026-10-01"), jobs[1]]
+
+        class Fingerprint(DetailAdapter):
+            """A fingerprint ATS: the same ids as last time read `unchanged`, whatever the titles say."""
+
+            def __init__(self, conn, listing):
+                super().__init__(conn, [])
+                self.listing, self.seen = listing, []
+
+            def list(self, token, validators):
+                self.seen.append(validators)
+                fp = ids_fingerprint(j.native_id for j in self.listing)
+                if validators.ids_fingerprint == fp:
+                    return ReadResult("unchanged", (), validators)
+                return detail_ok(self.listing)
+
+        self.read(None, adapter=Fingerprint(self.conn, jobs))
+        stored = self.board()["ids_fingerprint"]
+        quiet = Fingerprint(self.conn, retitled)
+        self.assertEqual(self.read(None, at(6), adapter=quiet).result, "unchanged")
+        self.assertEqual(quiet.seen[0].ids_fingerprint, stored)
+        weekly = Fingerprint(self.conn, retitled)
+        out = self.read(None, at(7.5), adapter=weekly)
+        self.assertEqual(weekly.seen, [Validators()])
+        self.assertEqual((out.result, out.changed), ("ok", 1))
+        self.assertEqual(self.posting("w1")["title"], "Software Engineer, New Grad")
 
     def test_a_changed_body_is_redecided_and_made_provisional(self):
         self.read(ok())

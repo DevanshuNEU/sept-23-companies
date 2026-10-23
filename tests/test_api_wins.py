@@ -123,7 +123,7 @@ class WinLog(WinsCase):
         s_ = self.make(interview_at="2026-11-10T19:05:00Z")
         line = next(w["line"] for w in self.wins()["wins"] if w["touchId"] == s_)
         self.assertEqual(line, "Interview at Acme. 14:05")
-        self.assertFalse(any(c in line for c in "–—"))
+        self.assertFalse(any(c in line for c in "\u2013\u2014"))
 
     def test_wins_newest_first(self):
         a = self.make(accepted_at="2026-11-05T15:00:00Z")

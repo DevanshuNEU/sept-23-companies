@@ -36,7 +36,8 @@ MAX_RESULT_CHARS = 60_000  # about 15k tokens, under the 25k-token default limit
 MAX_PROBLEMS = 8
 
 # Tool modules, each exporting TOOLS. A module that fails to import raises: no tool is skipped quietly.
-GROUPS: tuple[str, ...] = ("outreach.mcp.tools.reads", "outreach.mcp.tools.research", "outreach.mcp.tools.drafts")
+GROUPS: tuple[str, ...] = ("outreach.mcp.tools.reads", "outreach.mcp.tools.research", "outreach.mcp.tools.drafts",
+                           "outreach.mcp.tools.people")
 
 INSTRUCTIONS = """\
 Outreach store for Devanshu's job search: ranked companies, the people at them, their drafts and due follow-ups.

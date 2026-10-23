@@ -26,6 +26,8 @@ PINNED = {
     "save_followup": {"event": INSERT,
                       "message": Grant(update=frozenset({"state", "subject", "body", "checks", "saved_by",
                                                          "updated_at", "revision"}))},
+    "add_people": {"person": Grant(insert=True, update=frozenset({"profile_text", "notes", "updated_at", "revision"})),
+                   "person_source": INSERT, "event": INSERT},
 }
 
 
@@ -175,6 +177,26 @@ class GrantsCase(McpCase):
             ("UPDATE message SET state = 'drafted', body = 'y' WHERE message_id = ?", (self.his,)),
             ("UPDATE person SET notes = 'x' WHERE person_id = ?", (self.sam,)),
         ], {"person_id": self.sam, "seq": 1, "body": "Hi Sam, one more note on the ledger idea. Thanks, Devanshu"})
+
+    def test_add_people_cannot_write_beyond_its_grants(self):
+        self.check_tool("add_people", [
+            ("UPDATE person SET email = 'new@acme.example' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET company_id = ? WHERE person_id = ?", (seed.company(self.db, "Elsewhere"), self.pat)),
+            ("UPDATE person SET added_by = 'claude' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET role_kind = 'founder', title = 'CEO' WHERE person_id = ?", (self.pat,)),
+            ("INSERT INTO person(company_id, name, role_kind, email, channel, added_by, created_at, updated_at) "
+             "VALUES (?, 'Dev Anshu', 'engineer', 'dev@acme.example', 'email', 'devanshu', ?, ?)",
+             (self.acme, NOW, NOW)),
+            ("INSERT INTO touch(person_id, created_at, updated_at) VALUES (?, ?, ?)",
+             (seed.person(self.db, self.acme, "Tia Touchless"), NOW, NOW)),
+            ("INSERT INTO message(touch_id, seq, state, subject, body, created_at, updated_at) "
+             "VALUES (?, 0, 'drafted', 'Hi', 'Hello', ?, ?)", (self.touch, NOW, NOW)),
+            ("UPDATE person_source SET url = 'https://acme.example/x'", ()),
+            ("INSERT INTO company_alias(alias_key, company_id, alias, source, created_at) "
+             "VALUES ('acmeinc', ?, 'Acme Inc', 'hand', ?)", (self.acme, NOW)),
+        ], {"company_id": self.acme, "people": [{"name": "Lee New", "role_kind": "engineer",
+                                                 "email": "lee@acme.example",
+                                                 "sources": [{"kind": "team", "url": "https://acme.example/team"}]}]})
 
 
 if __name__ == "__main__":

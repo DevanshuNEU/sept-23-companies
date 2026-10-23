@@ -22,7 +22,7 @@ from outreach.ranking.confidence import Confidence, grade_no_role, grade_role
 from outreach.ranking.hide import posting_visible
 from outreach.rules.rebuild import stored_decision
 
-__all__ = ["LANE_ORDER", "Best", "Roles", "role_sort_key", "load_roles", "company_board_states"]
+__all__ = ["LANE_ORDER", "Best", "Roles", "role_sort_key", "newest_stale", "load_roles", "company_board_states"]
 
 LANE_ORDER = ("level_role", "intern_junior", "any_us_role")
 _LANE_RANK = {lane: i for i, lane in enumerate(LANE_ORDER)}
@@ -56,14 +56,20 @@ class Roles:
     stale: tuple[Best, ...]     # would be visible but stale, same order, shown last
     open_count: int             # trusted open postings that are not stale
     confidence: Confidence      # the live_role grade
-    ignored: int                # open postings on doubtful boards
+    ignored: int                # open postings on untrusted boards: doubtful or inactive
     undecided: int              # trusted open postings with no current decision
+    inactive: int = 0           # the part of `ignored` on inactive boards (the crawler no longer reads them)
 
 
 def role_sort_key(b: Best) -> tuple:
     """Lane, then freshest (unknown age last), then a sponsorship of yes, opt_only, the rest, then the newest id."""
     return (_LANE_RANK[b.lane], b.age_days is None, b.age_days or 0, _SPONSOR_RANK.get(b.sponsorship, 2),
             -b.posting_id)
+
+
+def newest_stale(stale: tuple[Best, ...]) -> Best | None:
+    """The newest stale posting by age (unknown age last, then the newest id), the one a reason or flag names."""
+    return min(stale, key=lambda b: (b.age_days is None, b.age_days or 0, -b.posting_id), default=None)
 
 
 def _board_state(last_read: str | None, has_board: bool) -> str:
@@ -106,7 +112,7 @@ _DECISION_COLUMNS = ("lane", "level_tier", "level_ok", "level_basis", "years_ask
                      "eligibility_reason", "eligibility_quote", "start_2027")
 _QUERY = (
     "SELECT p.posting_id, p.company_id, p.board_id, p.title, p.location, p.pay, p.posted_on, p.first_seen_at, "
-    "p.last_seen_at, b.board_id IS NOT NULL AS has_board, b.last_read, d.posting_id IS NOT NULL AS decided, "
+    "p.last_seen_at, b.board_id IS NOT NULL AS has_board, b.last_read, b.active, d.posting_id IS NOT NULL AS decided, "
     "d.provisional, " + ", ".join(f"d.{c}" for c in _DECISION_COLUMNS) + " "
     # Looked up by key under the current ruleset: a join through the current_decision view is scanned once per posting.
     "FROM posting p LEFT JOIN decision d ON d.posting_id = p.posting_id "
@@ -121,9 +127,11 @@ def load_roles(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
     groups: dict[int, dict] = {}
     for r in conn.execute(_QUERY):
         cid = canon.get(r["company_id"], r["company_id"])
-        g = groups.setdefault(cid, {"visible": [], "stale": [], "open": 0, "ignored": 0, "undecided": 0})
+        g = groups.setdefault(cid, {"visible": [], "stale": [], "open": 0, "ignored": 0, "inactive": 0,
+                                    "undecided": 0})
         if r["board_id"] in doubtful:
             g["ignored"] += 1
+            g["inactive"] += 0 if r["active"] else 1
             continue
         pid = r["posting_id"]
         is_stale = pid in stale
@@ -136,7 +144,7 @@ def load_roles(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
         if not posting_visible(d):
             continue
         best = Best(
-            posting_id=pid, lane=_lane(d), title=clean_text(r["title"]), level_tier=d.level_tier,
+            posting_id=pid, lane=_lane(d), title=clean_text(" ".join(r["title"].split())), level_tier=d.level_tier,
             sponsorship=d.sponsorship, age_days=age_days(r["posted_on"] or r["first_seen_at"], today),
             pay=r["pay"], location=r["location"], posted_on=r["posted_on"], last_seen_on=r["last_seen_at"][:10],
             board_state=_board_state(r["last_read"], bool(r["has_board"])), provisional=bool(r["provisional"]),
@@ -156,12 +164,12 @@ def load_roles(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             n = g["undecided"]
             grade = Confidence("low", f"{n} open {'posting' if n == 1 else 'postings'} not decided yet, roles unknown")
         else:
-            newest = min(stale_list, key=lambda b: (b.age_days is None, b.age_days or 0, -b.posting_id),
-                         default=None)
+            newest = newest_stale(stale_list)
             grade = grade_no_role(company_board_state=states.get(cid, "no_board"),
                                   stale_kinds=stale[newest.posting_id].kinds if newest else (),
                                   stale_reason=newest.stale_reason if newest else "")
         lanes = tuple(lane for lane in LANE_ORDER if any(b.lane == lane for b in visible))
         out[cid] = Roles(company_id=cid, lanes=lanes, best=best, visible=visible, stale=stale_list,
-                         open_count=g["open"], confidence=grade, ignored=g["ignored"], undecided=g["undecided"])
+                         open_count=g["open"], confidence=grade, ignored=g["ignored"], undecided=g["undecided"],
+                         inactive=g["inactive"])
     return out

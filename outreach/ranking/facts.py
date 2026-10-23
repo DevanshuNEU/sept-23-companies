@@ -49,7 +49,8 @@ class RankFacts(CompanyFacts):
     work_promoted: bool = False
     reach_via: str = ""                  # person, hn_post or empty
     reach_note: str = ""
-    ignored_postings: int = 0
+    ignored_postings: int = 0            # postings on untrusted boards, doubtful or inactive
+    inactive_postings: int = 0           # the part of ignored_postings on inactive boards
     stale_postings: tuple[Best, ...] = ()
     grades: Mapping[str, Confidence] = field(default_factory=dict)
 
@@ -97,7 +98,7 @@ def _median_level(wage: int, hq: str | None, wages: tuple[Area, ...]) -> tuple[i
         if len(levels) != 1:
             return None
         level, where = levels.pop(), "every listed area"
-    return level, f"LCA median junior wage ${wage:,} in {where}: level {level}"
+    return level, f"LCA median junior wage ${wage:,} in {where}"  # the signal's reason names the level
 
 
 def _one_hq(values: set[str], wages: tuple[Area, ...]) -> str | None:
@@ -297,7 +298,8 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             pay_basis=pay_basis, pay_note=pay_note, weak_flags=tuple(flags),
             size_confidence=size_row["confidence"] if size_row else None, work_tier=work_tier,
             work_promoted=promoted, reach_via=reach_via, reach_note=reach_note,
-            ignored_postings=rl.ignored if rl else 0, stale_postings=rl.stale if rl else (), grades=grades))
+            ignored_postings=rl.ignored if rl else 0, inactive_postings=rl.inactive if rl else 0,
+            stale_postings=rl.stale if rl else (), grades=grades))
     return out
 
 

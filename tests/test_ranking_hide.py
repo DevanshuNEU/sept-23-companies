@@ -523,6 +523,20 @@ class ReasonTextTests(Store):
         hide = self.hide_for()
         self.assertFalse(set(hide.reason) & {chr(0x2013), chr(0x2014), "\n"})
 
+    def test_a_quote_is_kept_whole_up_to_300_characters(self):
+        whole = "We do not sponsor visas. " + "x" * 270
+        self.assertEqual(len(whole), 295)
+        pid = rs.posting(self.conn, self.co)
+        rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote=whole, provisional=0)
+        self.assertIn(f'"{whole}"', self.hide_for().reason)
+        long = seed_company(self.conn, "Long quote")
+        pid = rs.posting(self.conn, long)
+        rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote="We do not sponsor visas. " + "y" * 400,
+                    provisional=0)
+        quoted = self.hide_for(long).reason.split('"')[1]
+        self.assertEqual(len(quoted), 300)
+        self.assertTrue(quoted.endswith("..."))
+
 
 if __name__ == "__main__":
     unittest.main()

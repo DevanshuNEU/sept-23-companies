@@ -14,6 +14,7 @@ from outreach.ranking.confidence import LEVELS, Confidence
 from outreach.ranking.facts import SHARED_DOMAIN_FLAG, RankFacts, load_facts, recent_fiscal_years
 from outreach.ranking.pay import load_wages
 from outreach.ranking.roles import load_roles
+from outreach.ranking.signals.pay_level import PayLevel as PayLevelSignal
 from outreach.ranking.types import CompanyFacts
 from tests import ranking_store as rs
 from tests.storetest import fresh_store, seed_company
@@ -268,7 +269,7 @@ class FactsTests(Store):
         self.ev("lca", lca(2026, jr=12, level1=12, median=300_000))  # level I share says 1; the wage says 4
         f = self.one()
         self.assertEqual((f.pay_level, f.pay_basis), (4, "lca"))
-        self.assertEqual(f.pay_note, "LCA median junior wage $300,000 in every listed area: level 4")
+        self.assertEqual(f.pay_note, "LCA median junior wage $300,000 in every listed area")
         self.assertEqual(f.grade("pay_level").level, "medium")  # 12 filings: medium, never high
 
     def test_the_lca_median_wage_uses_the_area_of_the_hq_state(self):
@@ -276,7 +277,9 @@ class FactsTests(Store):
         self.hq("Austin, TX")
         f = self.one()
         self.assertEqual((f.pay_level, f.pay_basis), (2, "lca"))
-        self.assertEqual(f.pay_note, "LCA median junior wage $140,000 in Austin: level 2")
+        self.assertEqual(f.pay_note, "LCA median junior wage $140,000 in Austin")
+        reason = PayLevelSignal(default_ranker_config().section("pay_level")).score(f).reason
+        self.assertEqual(reason, "Wage level 2: LCA median junior wage $140,000 in Austin")  # the level once
         self.assertEqual(f.grade("pay_level").level, "low")  # 4 filings
 
     def test_the_lca_median_wage_area_is_the_hq_city_matched_like_a_posting_location(self):

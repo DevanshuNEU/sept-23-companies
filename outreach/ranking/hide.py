@@ -35,7 +35,7 @@ __all__ = ["HIDE_KINDS", "posting_visible", "Refusal", "SizeEvidence", "HideInpu
 HIDE_KINDS = ("no_go", "over_size", "no_sponsorship")
 _SPONSORS = ("yes", "opt_only")
 _CONFIDENCE_RANK = {"confirmed": 0, "estimate": 1, "guess": 2}
-_QUOTE_MAX = 200
+_QUOTE_MAX = 300
 # Decisions are joined by key under the current ruleset, not through the current_decision view, which is a scan.
 _DECISION_QUERY = (
     "SELECT p.posting_id, p.company_id, p.board_id, d.lane, d.us, d.sponsorship, d.sponsorship_quote, "

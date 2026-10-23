@@ -16,7 +16,7 @@ from outreach.ranking.confidence import (Confidence, RankReason, build_rank_reas
                                          scrub_text)
 from outreach.ranking.facts import RankFacts
 from outreach.ranking.hide import Hide
-from outreach.ranking.roles import Best
+from outreach.ranking.roles import Best, newest_stale
 from outreach.ranking.types import Signal
 
 __all__ = ["Points", "Scored", "score_company", "to_columns", "list_order"]
@@ -53,8 +53,12 @@ class Scored:
     rank_reason: RankReason
 
 
+def _postings(n: int) -> str:
+    return f"{n} posting" if n == 1 else f"{n} postings"
+
+
 def _stale_flag(stale: tuple[Best, ...]) -> str:
-    newest = scrub_text(clean_text(stale[0].stale_reason))  # the first is the newest
+    newest = scrub_text(clean_text(newest_stale(stale).stale_reason))  # by age, as live_role's reason picks it
     if len(stale) == 1:
         return f"1 stale posting not counted as live: {newest}"
     return f"{len(stale)} stale postings not counted as live: {newest}"
@@ -77,8 +81,11 @@ def score_company(facts: RankFacts, hide: Hide | None, signals: list[Signal], cf
     confidence = rank_confidence({n: (p.raw_points, p.confidence) for n, p in values.items()}, cfg)
 
     flags = list(facts.weak_flags)
-    if facts.ignored_postings > 0:
-        flags.append(f"{facts.ignored_postings} postings ignored: board match doubtful")
+    doubtful = facts.ignored_postings - facts.inactive_postings
+    if doubtful > 0:
+        flags.append(f"{doubtful} postings ignored: board match doubtful")
+    if facts.inactive_postings > 0:
+        flags.append(f"{_postings(facts.inactive_postings)} ignored: board no longer read")
     if facts.stale_postings:
         flags.append(_stale_flag(facts.stale_postings))
     flags.extend(extra_flags)

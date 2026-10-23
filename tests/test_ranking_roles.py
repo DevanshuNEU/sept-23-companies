@@ -156,6 +156,16 @@ class TrustTests(Store):
         self.add("ng", board_id=b)
         r = self.role()
         self.assertEqual((r.best, r.ignored, r.open_count, r.lanes), (None, 1, 0, ()))
+        self.assertEqual(r.inactive, 1)  # counted apart from the doubtful boards, inside `ignored`
+        rs.flag_board(self.conn, self.co, self.board)
+        self.add("ng")
+        self.assertEqual((self.role().ignored, self.role().inactive), (2, 1))
+
+    def test_a_title_with_runs_of_whitespace_is_one_line(self):
+        pid = self.add("ng")
+        self.conn.execute("UPDATE posting SET title = ? WHERE posting_id = ?",
+                          ("  Software   Engineer,\n\tNew Grad ", pid))
+        self.assertEqual(self.role().best.title, "Software Engineer, New Grad")
 
     def test_a_company_whose_only_board_is_doubtful_grades_no_role_low(self):
         rs.flag_board(self.conn, self.co, self.board)

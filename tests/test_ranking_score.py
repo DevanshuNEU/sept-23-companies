@@ -197,10 +197,18 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(stored["stale_postings"], [{"posting_id": 9, "title": "Old - role", "reason": STALE_REASON}])
 
     def test_several_stale_postings_name_the_newest(self):
-        newest = stale_best(9)
-        older = dataclasses.replace(newest, posting_id=4, stale_reason="posted 2015-01-01, over 12 months")
-        got = score(neutral_facts(stale_postings=(newest, older)))
+        newest = dataclasses.replace(stale_best(9), age_days=2500)
+        older = dataclasses.replace(newest, posting_id=4, age_days=3500,
+                                    stale_reason="posted 2015-01-01, over 12 months")
+        got = score(neutral_facts(stale_postings=(older, newest)))  # the newest is not first: it is found by age
         self.assertIn(f"2 stale postings not counted as live: {STALE_REASON}", got.flags)
+
+    def test_postings_on_an_inactive_board_get_their_own_flag(self):
+        both = score(neutral_facts(ignored_postings=3, inactive_postings=1)).flags
+        self.assertEqual(both, ("2 postings ignored: board match doubtful", "1 posting ignored: board no longer read"))
+        only = score(neutral_facts(ignored_postings=2, inactive_postings=2)).flags
+        self.assertEqual(only, ("2 postings ignored: board no longer read",))
+        self.assertEqual(score(neutral_facts(ignored_postings=2, inactive_postings=2)).ignored_postings, 2)
 
     def test_every_reason_is_free_of_dashes(self):
         facts = graded(**fresh_role(everify="enrolled", cap_exempt="confirmed", lca_jr_recent=5, lca_level1_recent=2,

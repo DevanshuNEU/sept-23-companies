@@ -113,6 +113,14 @@ class LiveRoleTests(unittest.TestCase):
     def test_no_role_says_so(self):
         self.assertEqual(self.value().reason, "No open role yet")
 
+    def test_a_large_company_with_only_a_role_below_his_level_says_it_is_not_counted(self):
+        # The loader drops any_us_role for a large later-stage company, but the posting is still its best one.
+        got = self.value(lanes=(), best_posting_id=5, best_title="Senior Engineer", best_level_tier="senior",
+                         stage="series_d")
+        self.assertEqual((got.value, got.reason), (0.0, "Open role at a large company, not counted"))
+        funded = self.value(lanes=("reason_no_role",), best_posting_id=5, size_low=900)
+        self.assertEqual(funded.reason, "Open role at a large company, not counted")
+
     def test_live_role_with_only_stale_postings_is_zero_and_says_why(self):
         one = self.value(stale_postings=(stale(1, "posted 2016-03-02, over 12 months"),))
         self.assertEqual(one.value, 0.0)
@@ -207,7 +215,13 @@ class RegistryTests(unittest.TestCase):
 
     def test_each_signal_takes_its_config_section(self):
         for cls in (LiveRole, PostingSponsors, PayLevel):
-            cls(CFG.section(cls.name))
+            with self.subTest(signal=cls.name):
+                section = CFG.section(cls.name)
+                self.assertTrue(section, f"[{cls.name}] is empty")
+                self.assertIs(cls(section).params, section)
+        bumped = {**CFG.section("pay_level"), "level_2": 0.25}  # the value comes from the section it was given
+        got = check_assessment(self, PayLevel(bumped), neutral_facts(pay_level=2))
+        self.assertEqual(got.value, 0.25)
 
 
 if __name__ == "__main__":

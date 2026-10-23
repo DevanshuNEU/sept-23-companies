@@ -4,6 +4,7 @@ from __future__ import annotations
 from outreach.ranking.common import clean_text
 from outreach.ranking.confidence import Assessment
 from outreach.ranking.facts import RankFacts
+from outreach.ranking.roles import newest_stale
 
 _LANES = ("level_role", "intern_junior", "any_us_role")  # strongest first
 _LABELS = {"new_grad": "new grad", "early_career": "early career", "swe1": "SWE I", "swe2": "SWE II"}
@@ -53,9 +54,12 @@ class LiveRole:
 
     @staticmethod
     def _no_role(facts: RankFacts) -> str:
+        if facts.best_posting_id is not None:
+            # A live posting with no role lane: only an any_us_role posting, which a large company does not earn.
+            return "Open role at a large company, not counted"
         if not facts.stale_postings:
             return "No open role yet"
-        newest = min(facts.stale_postings, key=lambda b: (b.age_days is None, b.age_days or 0, -b.posting_id))
+        newest = newest_stale(facts.stale_postings)
         reason = clean_text(newest.stale_reason)
         if len(facts.stale_postings) == 1:
             return f"No live role: the only posting is stale ({reason})"

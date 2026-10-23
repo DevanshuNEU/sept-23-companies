@@ -78,6 +78,9 @@ class LinkedInCase(ApiCase):
         """When `walk` logs its n-th step."""
         return f"2026-11-10T15:{20 + 5 * n}:00Z"
 
+    def message_state(self, message_id: int) -> str:
+        return self.conn.execute("SELECT state FROM message WHERE message_id = ?", (message_id,)).fetchone()[0]
+
     def walk(self, person_id: int, *steps: str) -> None:
         """Log each step in turn, a few minutes apart (a reply is `interested`)."""
         for n, step in enumerate(steps):
@@ -182,6 +185,26 @@ class LogRequest(LinkedInCase):
         requests = next(st for st in progress["week"]["stages"] if st["stage"] == "requests")
         self.assertEqual(requests["count"], 2)
         self.assertEqual(self.view()["requestsThisWeek"], 2)
+
+    def test_a_live_request_touch_with_no_log_row_counts_as_the_request_step(self):
+        plan_person = self.person("Plan Pat")
+        self.plan_touch(plan_person, with_log=False)
+        shown = self.people()["Plan Pat"]
+        self.assertEqual((shown["tab"], shown["steps"]), ("waiting", [{"step": "request_sent", "at": NOW}]))
+        self.assertEqual(self.view()["counts"]["toReach"], 1)  # only Lena
+        self.set_now(T1)
+        body = self.ok(self.log(plan_person, "accepted"))  # the next step is open to them
+        self.assertEqual([x["step"] for x in body["steps"]], ["request_sent", "accepted"])
+        self.assertEqual(self.touches(plan_person)[0]["accepted_at"], T1)
+
+    def test_taking_back_a_request_that_has_only_a_touch_undoes_the_touch(self):
+        plan_person = self.person("Plan Pat")
+        self.plan_touch(plan_person, with_log=False)
+        self.set_now(T1)
+        body = self.ok(self.undo(plan_person, "request_sent"))
+        self.assertEqual((body["steps"], body["tab"]), ([], "to_reach"))
+        self.assertEqual(self.touches(plan_person)[0]["undone_at"], T1)
+        self.assertEqual(self.log_rows(), [])
 
     def test_a_plan_touch_with_no_log_row_is_already_logged_too(self):
         plan_person = self.person("Plan Pat")
@@ -380,13 +403,18 @@ class Undo(LinkedInCase):
         message = self.touches()[1]
         self.assertEqual((message["replied_at"], message["reply_kind"]), (None, None))
 
-    def test_an_undone_stop_reply_leaves_the_person_on_the_no_go_list(self):
+    def test_an_undone_stop_reply_leaves_the_person_on_the_no_go_list_and_the_followups_skipped(self):
+        email = s.touch(self.conn, self.lena)
+        s.send_first(self.conn, email)
+        drafted = s.message(self.conn, email, 1, "drafted")
         self.walk(self.lena, "request_sent", "accepted")
         self.ok(self.log(self.lena, "replied", "said_no"))
+        self.assertEqual(self.message_state(drafted), "skipped")
         self.ok(self.undo(self.lena, "replied"))
         active = self.conn.execute("SELECT count(*) FROM no_go WHERE person_id = ? AND lifted_at IS NULL",
                                    (self.lena,)).fetchone()[0]
         self.assertEqual(active, 1)  # the safe direction: lift it from the No-go page if the click was a mistake
+        self.assertEqual(self.message_state(drafted), "skipped")  # nothing un-stops a follow-up
         self.assertNotIn("Lena Ortiz", self.people())
 
     def test_taking_back_a_step_that_has_no_touch_only_hides_it(self):
@@ -400,6 +428,19 @@ class Undo(LinkedInCase):
         before = self.counts()
         error = self.refused(self.undo(self.lena, "request_sent"))
         self.assertIn("referral", error["message"])
+        self.assertEqual(self.counts(), before)
+        self.assertIsNone(self.touches()[0]["undone_at"])
+
+    def test_a_request_cannot_be_taken_back_while_their_message_has_an_outcome(self):
+        self.ok(self.log(self.lena, "request_sent"))
+        s._insert(self.conn, "outreach_touch", {
+            "person_id": self.lena, "company_id": self.acme, "channel": "linkedin_message", "sent_at": T1,
+            "replied_at": T2, "reply_kind": "interested", "created_at": T1,
+            "context": json.dumps(build_context(source="own", lane="own", role_kind=None, role_age_days=None,
+                                                ranker_version=None, signals={}, role_named=False))})
+        before = self.counts()
+        error = self.refused(self.undo(self.lena, "request_sent"))
+        self.assertIn("reply", error["message"])
         self.assertEqual(self.counts(), before)
         self.assertIsNone(self.touches()[0]["undone_at"])
 
@@ -438,6 +479,22 @@ class NoGo(LinkedInCase):
                                                 ranker_version=None, signals={}, role_named=False))})
         self.ok(self.post(f"/api/touches/{t}/outcomes", {"kind": "replied", "replyKind": "said_no", "revision": 1}))
         self.assertEqual(self.view()["groups"], [])
+
+    def test_a_no_go_on_a_merged_duplicate_stops_everyone_at_the_survivor(self):
+        dup = s.company(self.conn, "Acme Inc", "removed", merged_into=self.acme)
+        self.add_no_go(company_id=dup, reason="agency")
+        self.assertEqual(self.view()["groups"], [])
+        error = self.refused(self.log(self.lena, "request_sent"))
+        self.assertIn("no-go", error["message"].lower())
+        self.assertEqual(self.counts(), (0, 0, 0))
+
+    def test_a_request_he_already_sent_to_someone_at_a_removed_or_closed_company_is_history_and_logs(self):
+        for name, status, cols in (("Gone", "removed", {}), ("Done", "closed", {"close_reason": "other"})):
+            company = s.company(self.conn, name, status, **cols)
+            who = self.person(f"Person at {name}", company)
+            body = self.ok(self.log(who, "request_sent"))
+            self.assertEqual(body["tab"], "waiting")
+        self.assertEqual(len(self.touches()), 2)
 
     def test_a_lifted_no_go_brings_the_person_back(self):
         no_go = self.add_no_go(person_id=self.lena)

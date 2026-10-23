@@ -12,8 +12,13 @@ together in the caller's transaction (`run_write`):
   `undone_at` and counts nowhere. An accept or a reply is cleared through Task 12's `correct`.
 
 Every step follows the one before: `accepted` needs a request, `message_sent` needs the accept, and `replied` needs
-a message or the accept. Only the newest step can be taken back. A person on the no-go list, at a company on it,
-or at a removed company is never in the list, and no new request or message is logged to one.
+a message or the accept. Only the newest step can be taken back. A live request touch with no log row (the plan
+logged it, or an import) counts as the request step, so that person is waiting and never stuck in to_reach.
+
+A person on the no-go list, at a company on it (a no-go on a duplicate merged away counts for the survivor), or at a
+removed company is never listed, and nobody at a closed company is offered as new. Only a no-go refuses a new
+request or message: logging a request he already sent by hand to someone at a removed or closed company is allowed,
+because it is history, not an offer.
 """
 import sqlite3
 from collections import defaultdict
@@ -30,6 +35,7 @@ from outreach.api.queries import outcomes
 from outreach.api.queries.company import group_of, merge_parents, person_ref, rank_postings, role_to_name, survivor_of
 from outreach.api.queries.outcomes import NOT_SAVED, by_ids, company_refs
 from outreach.api.queries.people import day, live_steps
+from outreach.drafts.followups import company_map, no_go_sets
 from outreach.outcomes.windows import day_bounds_utc, week_bounds
 from outreach.store import log_touch, undo_touch
 
@@ -60,8 +66,27 @@ def _logs(conn: sqlite3.Connection, person_ids: set[int] | None = None) -> dict[
     return found
 
 
-def _person(row: sqlite3.Row, entries: list[sqlite3.Row]) -> LinkedInPerson:
+def steps_of(entries: list[sqlite3.Row], request_at: str | None) -> list:
+    """The person's live steps. A live request touch with no live `request_sent` row counts as that step, first."""
     steps = live_steps(entries)
+    if request_at is not None and not any(e["kind"] == "request_sent" for e in steps):
+        steps = [{"kind": "request_sent", "at": request_at, "entry_id": None, "reply_kind": None}, *steps]
+    return steps
+
+
+def _request_times(conn: sqlite3.Connection, person_ids: set[int] | None = None) -> dict[int, str]:
+    """When each person's live request touch was sent (the newest, when there are two)."""
+    sql = ("SELECT person_id, sent_at FROM outreach_touch WHERE channel = 'linkedin_request' "
+           "AND undone_at IS NULL AND person_id IS NOT NULL{where} ORDER BY sent_at, touch_id")
+    if person_ids is None:
+        rows = conn.execute(sql.format(where=""))
+    else:
+        rows = by_ids(conn, sql.format(where=" AND person_id IN ({ids})"), person_ids)
+    return {r["person_id"]: r["sent_at"] for r in rows}  # the newest wins: the rows are oldest first per call
+
+
+def _person(row: sqlite3.Row, entries: list[sqlite3.Row], request_at: str | None) -> LinkedInPerson:
+    steps = steps_of(entries, request_at)
     replies = [e for e in steps if e["kind"] == "replied"]
     return LinkedInPerson(
         person=person_ref(row), reason=row["linkedin_reason"] or "no_email",
@@ -74,7 +99,9 @@ def _person(row: sqlite3.Row, entries: list[sqlite3.Row]) -> LinkedInPerson:
 def person_view(conn: sqlite3.Connection, person_id: int) -> LinkedInPerson | None:
     """One person as the list shows them (even one who is hidden from it), or None when there is no such person."""
     row = conn.execute("SELECT * FROM person WHERE person_id = ?", (person_id,)).fetchone()
-    return None if row is None else _person(row, _logs(conn, {person_id}).get(person_id, []))
+    if row is None:
+        return None
+    return _person(row, _logs(conn, {person_id}).get(person_id, []), _request_times(conn, {person_id}).get(person_id))
 
 
 def roles(conn: sqlite3.Connection, parents: dict[int, int], survivors: set[int]) -> dict[int, RoleToName]:
@@ -104,13 +131,6 @@ def requests_this_week(conn: sqlite3.Connection, now: str) -> int:
         "AND sent_at >= ? AND sent_at < ?", (day_bounds_utc(monday)[0], day_bounds_utc(sunday)[1])).fetchone()[0]
 
 
-def _no_go(conn: sqlite3.Connection) -> tuple[set[int], set[int]]:
-    """The people and the companies on the no-go list now (any source, so a no-go from a reply counts)."""
-    rows = conn.execute("SELECT person_id, company_id FROM no_go WHERE lifted_at IS NULL").fetchall()
-    return ({r["person_id"] for r in rows if r["person_id"] is not None},
-            {r["company_id"] for r in rows if r["company_id"] is not None})
-
-
 def linkedin_view(conn: sqlite3.Connection, now: str) -> LinkedInView:
     """Every LinkedIn person worth showing, by company, with the tab each is on."""
     rows = conn.execute("SELECT * FROM person WHERE channel = 'linkedin' ORDER BY person_id").fetchall()
@@ -118,17 +138,17 @@ def linkedin_view(conn: sqlite3.Connection, now: str) -> LinkedInView:
         return LinkedInView(as_of=now, groups=[], counts=LinkedInCounts(to_reach=0, waiting=0, replied=0, all=0),
                             requests_this_week=requests_this_week(conn, now))
     parents = merge_parents(conn)
-    no_go_people, no_go_companies = _no_go(conn)
+    no_go_people, no_go_companies = no_go_sets(conn, company_map(conn))
     refs = company_refs(conn, {survivor_of(parents, r["company_id"]) for r in rows})
-    logs = _logs(conn)
+    logs, requested = _logs(conn), _request_times(conn)
     listed: dict[int, list[LinkedInPerson]] = defaultdict(list)
     for row in rows:
         survivor = survivor_of(parents, row["company_id"])
         company = refs.get(survivor)
         if company is None or company.status == "removed" or row["person_id"] in no_go_people \
-                or {row["company_id"], survivor} & no_go_companies:
+                or survivor in no_go_companies:
             continue
-        person = _person(row, logs.get(row["person_id"], []))
+        person = _person(row, logs.get(row["person_id"], []), requested.get(row["person_id"]))
         if person.tab == "to_reach" and company.status == "closed":
             continue  # nobody new goes to a company he closed
         listed[survivor].append(person)
@@ -205,12 +225,11 @@ def log_step(ctx: WriteCtx, person_id: int, body: LogStepBody, cfg: ApiConfig) -
     if (step == "replied") != (body.reply_kind is not None):
         raise ApiProblem("bad_request", "A reply needs its kind (interested, not now, said no or asked to stop), and "
                                         f"no other step takes one. {NOT_SAVED}")
-    steps = live_steps(_logs(conn, {person_id}).get(person_id, []))
-    have = {e["kind"]: e for e in steps}
     request = _live_touch(conn, person_id, "linkedin_request")
-    if step in have or (step == "request_sent" and request is not None):
-        at = have[step]["at"] if step in have else request["sent_at"]
-        raise _refuse(f"Already logged: {STEP_WORDS[step]} for {row['name']} on {day(at)}.")
+    steps = steps_of(_logs(conn, {person_id}).get(person_id, []), request["sent_at"] if request else None)
+    have = {e["kind"]: e for e in steps}
+    if step in have:
+        raise _refuse(f"Already logged: {STEP_WORDS[step]} for {row['name']} on {day(have[step]['at'])}.")
     if (missing := _needs(step, set(have))) is not None:
         raise _refuse(missing)
     parents = merge_parents(conn)
@@ -232,8 +251,8 @@ def log_step(ctx: WriteCtx, person_id: int, body: LogStepBody, cfg: ApiConfig) -
 def _log_outbound(ctx: WriteCtx, row: sqlite3.Row, step: str, parents: dict[int, int], survivor: int) -> LinkedInPerson:
     """A request or a message: the log row and its own touch, with a context of source `own`."""
     conn = ctx.conn
-    no_go_people, no_go_companies = _no_go(conn)
-    if row["person_id"] in no_go_people or {row["company_id"], survivor} & no_go_companies:
+    no_go_people, no_go_companies = no_go_sets(conn, company_map(conn))
+    if row["person_id"] in no_go_people or survivor in no_go_companies:
         raise _refuse(f"{row['name']} is on the no-go list, so nothing goes to them. Lift it first.")
     role = roles(conn, parents, {survivor}).get(survivor)  # the role the list shows beside them
     context = outcomes.own_context(conn, survivor, row["role_kind"], role.first_seen_at if role else None, ctx.now)
@@ -274,7 +293,8 @@ def undo_step(ctx: WriteCtx, person_id: int, body: UndoStepBody) -> LinkedInPers
     reply that was already acted on keeps its no-go (the safe side; lift it from the No-go page if it was a slip)."""
     conn = ctx.conn
     row = _row(conn, person_id)
-    steps = live_steps(_logs(conn, {person_id}).get(person_id, []))
+    request = _live_touch(conn, person_id, "linkedin_request")
+    steps = steps_of(_logs(conn, {person_id}).get(person_id, []), request["sent_at"] if request else None)
     newest = steps[-1] if steps else None
     if newest is None or newest["kind"] != body.step:
         if not any(e["kind"] == body.step for e in steps):
@@ -282,9 +302,13 @@ def undo_step(ctx: WriteCtx, person_id: int, body: UndoStepBody) -> LinkedInPers
                           "nothing to take back.")
         raise _refuse(f"Only the newest step can be taken back, and that is {STEP_WORDS[newest['kind']]} for "
                       f"{row['name']}.")
-    request = _live_touch(conn, person_id, "linkedin_request")
     message = _live_touch(conn, person_id, "linkedin_message")
     if body.step == "request_sent" and request is not None:
+        # The request is the root of the thread: while a message of theirs has an outcome, the request stays.
+        for column, words in OUTCOMES:
+            if message is not None and message[column] is not None:
+                raise _refuse(f"Their message already has {words}, so the request cannot be taken back. Correct "
+                              "that from the touch's history first.")
         _undo_touch(ctx, request)
     elif body.step == "message_sent" and message is not None:
         _undo_touch(ctx, message)
@@ -293,5 +317,6 @@ def undo_step(ctx: WriteCtx, person_id: int, body: UndoStepBody) -> LinkedInPers
         holder = next((t for t in (message, request) if t is not None and t[column] is not None), None)
         if holder is not None:
             _clear(ctx, holder, body.step)
-    _append(ctx, person_id, "undo", undoes=newest["entry_id"])
+    if newest["entry_id"] is not None:  # a request that is only a touch has no log row to point an undo at
+        _append(ctx, person_id, "undo", undoes=newest["entry_id"])
     return person_view(conn, person_id)

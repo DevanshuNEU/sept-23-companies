@@ -478,6 +478,23 @@ class DryRunTest(Base):
         self.assertEqual(self.notices, [])
         self.assertFalse(self.db.in_transaction)
 
+    def test_dry_run_runs_the_pre_claim_check_and_writes_nothing(self):
+        self.tick()  # proves the Message-ID with the imported email
+        mid = self.approve()
+        company = self.db.execute("SELECT p.company_id FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+                                  "JOIN person p ON p.person_id = t.person_id WHERE m.message_id = ?",
+                                  (mid,)).fetchone()[0]
+        colleague = seed_email_person(self.db, company, "Colleague", "colleague@co1.example")
+        seed_message(self.db, colleague, state="drafted", subject="Something else", body=self.message(mid)["body"])
+        before = self.dump()
+        report = self.tick(dry_run=True)
+        self.assertIsNone(report.would_send)
+        self.assertTrue(any("would go back to review: near_identical" in line for line in report.lines))
+        self.assertEqual(self.dump(), before)
+        self.assertEqual(self.message(mid)["state"], "approved")
+        self.assertIsNone(run_tick(self.db, self.deps(banned=[]), CFG, dry_run=True).would_send)
+        self.assertEqual(self.dump(), before)
+
     def test_dry_run_reads_gmail(self):
         self.tick()  # takes a history cursor
         self.gmail.calls.clear()

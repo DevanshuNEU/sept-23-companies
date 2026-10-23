@@ -20,8 +20,8 @@ Nothing is sent in a tick whose inbound mail was not fully read or failed to app
 mail to someone who already answered), nor before `verify_imported` has proven at least once that Gmail keeps the
 Message-ID the sender sets (otherwise a send in doubt could never be found in Sent, and would go out twice).
 
-A dry run does steps 2 and 4 (but not the imported-mail check, which writes), runs 5 and 6 inside one transaction
-that is rolled back, never sends, and writes nothing, `job_run` included; its notices go nowhere.
+A dry run does steps 2 and 4 (but not the imported-mail check, which writes), runs 5, 6 and the pre-claim check
+inside one transaction that is rolled back, never sends, and writes nothing, `job_run` included; its notices go nowhere.
 
 `fcntl.flock` on `.sender.lock` beside the store keeps two ticks from overlapping; the second one returns at once
 having written nothing. The lock goes with the file descriptor, so a killed tick never leaves it held. Every step
@@ -287,10 +287,12 @@ class _Tick:
                 self._apply(found, read)
                 self._reclock()
                 picked = self._pick(old_loaded)
+                if picked is not None and (self.hold is not None or not self._prechecked(picked)):
+                    picked = None
             finally:
                 if self.conn.in_transaction:
                     self.conn.execute("ROLLBACK")
-            self.would_send = picked.message_id if picked is not None and self.hold is None else None
+            self.would_send = picked.message_id if picked is not None else None
             if self.would_send is not None:
                 self._line(f"dry run: would send message {self.would_send}")
             return True
@@ -511,17 +513,26 @@ class _Tick:
         with self._tx():
             notify_once(self.conn, self.notify, kind, self.today, title, text, at=self.stamp)
 
+    def _prechecked(self, picked: queue.Queued) -> bool:
+        """The approve checks again, on the store as it is now (`precheck`). True when it may be claimed. A dry run
+        runs it too, inside its rolled-back transaction, so `would_send` is what a real tick would send."""
+        blocks = precheck(self.conn, picked, now=self.stamp, banned=self.deps.banned)
+        if blocks is None:
+            return True
+        codes = ", ".join(b["code"] for b in blocks)
+        if all(b["code"] == LIST_MISSING for b in blocks):
+            self._partial("the banned phrases list could not be read, so nothing is sent until it is fixed")
+            self._notice("banned_list_missing", WAIT_TITLE, BANNED_TEXT)
+        elif self.dry_run:
+            self._line(f"dry run: message {picked.message_id} would go back to review: {codes}")
+        else:
+            self.counts["blocked"] += 1
+            self._line(f"message {picked.message_id} went back to review: {codes}")
+        return False
+
     def _send(self, picked: queue.Queued) -> None:
         """Step 7."""
-        blocks = precheck(self.conn, picked, now=self.stamp, banned=self.deps.banned)
-        if blocks is not None:
-            codes = ", ".join(b["code"] for b in blocks)
-            if all(b["code"] == LIST_MISSING for b in blocks):
-                self._partial("the banned phrases list could not be read, so nothing is sent until it is fixed")
-                self._notice("banned_list_missing", WAIT_TITLE, BANNED_TEXT)
-            else:
-                self.counts["blocked"] += 1
-                self._line(f"message {picked.message_id} went back to review: {codes}")
+        if not self._prechecked(picked):
             return
         try:
             result = claim.send_one(self.conn, self.client, picked, self.cfg, now=self.stamp, clock=self.deps.clock,

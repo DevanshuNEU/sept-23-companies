@@ -3,14 +3,16 @@ Crawl the boards that refresh/crawl_boards.py does not cover, with the same entr
 
 Board list: refresh/work/crawl/slugs_more.json, entries [ats, token, name|null]. It holds
   - Ashby / Greenhouse / Lever boards that are not in slugs.json or slugs_live.json, and
-  - boards on ATSes crawl_boards.py does not read: workable, smartrecruiters, rippling, gem, recruitee,
-    bamboohr, dover, breezy.
+  - boards on ATSes crawl_boards.py does not read: workable, rippling, gem, recruitee, bamboohr, breezy.
+SmartRecruiters and Dover are no longer read (#46): api.smartrecruiters.com's robots.txt allows only LinkedInBot,
+and app.dover.com's disallows /api/. Their boards in the list are left out, and naming them in --only or --skip
+prints one line and the run carries on.
 Tokens came from the Common Crawl URL index (two most recent crawls) and public slug lists on GitHub
 (stapply-ai/ats-scrapers, Feashliaa/job-board-aggregator); every token was checked to answer before it was kept.
 
 The keep rule is crawl_boards.py's own: its crawl() runs unchanged with board() swapped for a dispatcher that
 adds the new ATSes, so title / location / seniority / citizenship / 45-day filters stay identical.
-For ATSes whose list call carries no date or description (rippling, bamboohr, dover, smartrecruiters, breezy),
+For ATSes whose list call carries no date or description (rippling, bamboohr, breezy),
 the detail call is made only for titles that already pass the title and location filters.
 Where the ATS has a structured country, non-US rows are dropped before the shared filters see them.
 Workable is read through its cross-company search (jobs.workable.com, US, last DAYS days) instead of the
@@ -19,8 +21,9 @@ On top of crawl_boards' rules: non-US rows that only passed on the word "remote"
 "developer" titles are dropped, and so are boards with 100+ open postings, government, universities and hospitals.
 
 Writes refresh/work/research/leads_ats_more.json, sorted best fit first.
-Run from the project root:  python3 refresh/crawl_more.py [--days 45] [--only ats1,ats2] [--skip dover] [--workable-boards]
-A full run takes about 45 minutes, most of it Dover (about one call a second); --skip dover finishes in about 20.
+Run from the project root:  python3 refresh/crawl_more.py [--days 45] [--only ats1,ats2] [--skip ats1,ats2] [--workable-boards]
+A run takes about 16 minutes: the October runs with --skip dover took about 17, and SmartRecruiters was about 6% of
+their boards. --skip dover (refresh.py still passes it) now only prints that Dover is no longer read.
 """
 import json, re, sys, os, time, datetime, collections, urllib.request, urllib.error, concurrent.futures as cf
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,9 +37,12 @@ OUT = "refresh/work/research/leads_ats_more.json"
 UA = dict(cb.UA)
 ENTRY_LEVEL = re.compile(r"entry|junior|graduate|associate", re.I)
 CAREERS = {"ashby": "https://jobs.ashbyhq.com/{}", "greenhouse": "https://job-boards.greenhouse.io/{}", "lever": "https://jobs.lever.co/{}",
-           "workable": "https://apply.workable.com/{}", "smartrecruiters": "https://jobs.smartrecruiters.com/{}",
+           "workable": "https://apply.workable.com/{}",
            "rippling": "https://ats.rippling.com/{}/jobs", "gem": "https://jobs.gem.com/{}", "recruitee": "https://{}.recruitee.com",
-           "bamboohr": "https://{}.bamboohr.com/careers", "dover": "https://app.dover.com/jobs/{}", "breezy": "https://{}.breezy.hr"}
+           "bamboohr": "https://{}.bamboohr.com/careers", "breezy": "https://{}.breezy.hr"}
+# ATSes no longer read, and why (#46, 2026-10-23). Their boards are left out before anything is sent.
+DROPPED = {"smartrecruiters": "api.smartrecruiters.com/robots.txt allows only LinkedInBot",
+           "dover": "app.dover.com/robots.txt disallows /api/"}
 
 def getj(u, t=25):
     st, d = get(u, t)
@@ -65,7 +71,7 @@ def level_hint(v):
 import threading
 _locks, _last = collections.defaultdict(threading.Lock), collections.defaultdict(float)
 def polite_get(u, key, gap, t=25, tries=5):
-    """For hosts that answer 429 after a burst (Workable, Dover): space calls across all threads, retry with backoff."""
+    """For hosts that answer 429 after a burst (Workable): space calls across all threads, retry with backoff."""
     for i in range(tries):
         with _locks[key]:
             wait = _last[key] + gap - time.time()
@@ -78,8 +84,6 @@ def polite_get(u, key, gap, t=25, tries=5):
         except Exception: return None
     return None
 def workable_get(u): return polite_get(u, "workable", 0.4)
-def dover_get(u):       # Dover's job endpoints allow about one call a second; the slug lookup is not limited
-    return polite_get(u, "dover_slug", 0, tries=3) if "careers-page-slug" in u else polite_get(u, "dover", 1.05, tries=4)
 def recruitee_get(u): return polite_get(u, "recruitee", 0, t=90, tries=2)   # offers come with every translation: MBs per board
 
 def workable(tok):
@@ -94,29 +98,6 @@ def workable(tok):
         rows.append((j.get("title", ""), loc, j.get("url") or j.get("shortlink", ""), day(j.get("published_on") or j.get("created_at")),
                      level_hint(j.get("experience")) + strip(j.get("description"))))
     return rows, js.get("name")
-
-def smartrecruiters(tok):
-    rows, org, off = [], None, 0
-    while True:
-        js = getj(f"https://api.smartrecruiters.com/v1/companies/{tok}/postings?limit=100&offset={off}")
-        if not isinstance(js, dict): return None if off == 0 else (rows, org)
-        content = js.get("content") or []
-        if off == 0 and not js.get("totalFound"): return None          # unknown companies answer 200 with nothing
-        SIZE[("smartrecruiters", tok)] = js["totalFound"]
-        for j in content:
-            org = org or (j.get("company") or {}).get("name")
-            l = j.get("location") or {}
-            if not us_country(l.get("country")): continue
-            loc = (l.get("fullLocation") or ", ".join(x for x in (l.get("city"), l.get("region"), "United States") if x)) + (" (Remote)" if l.get("remote") else "")
-            title, posted = j.get("name", ""), day(j.get("releasedDate"))
-            if not posted or posted < SINCE or not maybe(title, loc): continue
-            d = getj(f"https://api.smartrecruiters.com/v1/companies/{tok}/postings/{j['id']}") or {}
-            secs = ((d.get("jobAd") or {}).get("sections") or {})
-            body = " ".join(strip((secs.get(k) or {}).get("text")) for k in ("jobDescription", "qualifications", "additionalInformation"))
-            url = d.get("postingUrl") or f"https://jobs.smartrecruiters.com/{tok}/{j['id']}"
-            rows.append((title, loc, url, posted, level_hint((j.get("experienceLevel") or {}).get("label")) + body))
-        off += 100
-        if off >= (js.get("totalFound") or 0) or off >= 3000: return rows, org
 
 def rippling(tok):
     js = getj(f"https://api.rippling.com/platform/api/ats/v1/board/{tok}/jobs")
@@ -174,30 +155,6 @@ def bamboohr(tok):
         rows.append((title, loc, f"https://{tok}.bamboohr.com/careers/{j['id']}", day(d.get("datePosted")), strip(d.get("description"))))
     return rows, None
 
-UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-def dover(tok):
-    cid, org = tok, None
-    if not UUID.match(tok):
-        info = dover_get(f"https://app.dover.com/api/v1/careers-page-slug/{tok}")
-        if not isinstance(info, dict) or not info.get("id"): return None
-        cid, org = info["id"], info.get("name")
-    js = dover_get(f"https://app.dover.com/api/v1/careers-page/{cid}/jobs")
-    if not isinstance(js, dict) or "results" not in js: return None
-    SIZE[("dover", tok)] = len(js["results"])
-    rows = []
-    for j in js["results"]:
-        if not j.get("is_published", True) or j.get("is_sample"): continue
-        ls = j.get("locations") or []
-        if ls and not any(us_country((l.get("location_option") or {}).get("country")) for l in ls): continue
-        loc = "; ".join(l.get("name") or "" for l in ls) + (" (Remote)" if j.get("workplace_type") == "REMOTE" else "")
-        if any(is_us((l.get("location_option") or {}).get("country")) for l in ls): loc += " United States"
-        title = j.get("title", "")
-        if not maybe(title, loc): continue
-        d = dover_get(f"https://app.dover.com/api/v1/inbound/application-portal-job/{j['id']}") or {}
-        org = org or d.get("client_name")
-        rows.append((title, loc, f"https://app.dover.com/apply/{tok}/{j['id']}", day(d.get("created")), strip(d.get("user_provided_description"))))
-    return rows, org
-
 def breezy(tok):
     st, d = get(f"https://{tok}.breezy.hr/json")
     if st != 200: return None
@@ -248,8 +205,8 @@ def workable_search():
             if not tok or not js.get("jobs"): break
     return len(seen)
 
-NEW = {"workable_search": lambda tok: (_WS[tok][0], _WS[tok][1]) if tok in _WS else None, "workable": workable, "smartrecruiters": smartrecruiters, "rippling": rippling, "gem": gem, "recruitee": recruitee,
-       "bamboohr": bamboohr, "dover": dover, "breezy": breezy}
+NEW = {"workable_search": lambda tok: (_WS[tok][0], _WS[tok][1]) if tok in _WS else None, "workable": workable, "rippling": rippling, "gem": gem, "recruitee": recruitee,
+       "bamboohr": bamboohr, "breezy": breezy}
 _orig_board = cb.board
 def board_any(ats, tok):
     res = NEW[ats](tok) if ats in NEW else _orig_board(ats, tok)
@@ -301,23 +258,30 @@ def main():
     t0 = time.time()
     slugs = json.load(open(SLUGS))
     only = set(sys.argv[sys.argv.index("--only") + 1].split(",")) if "--only" in sys.argv else set()
+    skip = set(sys.argv[sys.argv.index("--skip") + 1].split(",")) if "--skip" in sys.argv else set()
+    for ats in sorted((only | skip) & set(DROPPED)):  # e.g. refresh.py's --skip dover
+        print(f"{ats} is no longer read ({DROPPED[ats]}); carrying on without it", flush=True)
+    only -= set(DROPPED)
     if only: slugs = [s for s in slugs if s[0] in only]
+    elif "--only" in sys.argv: slugs = []            # --only named nothing that is still read
+    dropped = collections.Counter(s[0] for s in slugs if s[0] in DROPPED)
+    if dropped:
+        print(f"left out {sum(dropped.values())} boards on ATSes no longer read: {dict(sorted(dropped.items()))}", flush=True)
+    slugs = [s for s in slugs if s[0] not in DROPPED]
     slugs = [s for s in slugs if not (len(s) > 2 and s[2] and BIG.search(s[2]))]
     wnames = {}
-    if "--skip" in sys.argv:                          # e.g. --skip dover (Dover allows ~1 call/s, so it sets the run time)
-        skip = set(sys.argv[sys.argv.index("--skip") + 1].split(","))
-        slugs = [s for s in slugs if s[0] not in skip]
+    if skip: slugs = [s for s in slugs if s[0] not in skip]
     if "--workable-boards" not in sys.argv:          # per-account Workable crawl is slow (429s); the search sweep covers it
         slugs = [s for s in slugs if s[0] != "workable"]
-    if not only or "workable" in only:
+    if ("--only" not in sys.argv and not only) or "workable" in only:
         n = workable_search()
         wnames = {(s[2] or "").lower(): s[1] for s in json.load(open(SLUGS)) if s[0] == "workable" and s[2]}
         slugs += [["workable_search", cid, v[1]] for cid, v in _WS.items()]
         print(f"workable search: {n} US postings from {len(_WS)} companies ({time.time() - t0:.0f}s)", flush=True)
     print(f"crawling {len(slugs)} boards, roles first published since {SINCE}", flush=True)
     found, dead, per = [], 0, collections.Counter()
-    slow = [s for s in slugs if s[0] in ("workable", "dover")]    # rate-limited hosts: own small pool, runs alongside
-    fast = [s for s in slugs if s[0] not in ("workable", "dover")]
+    slow = [s for s in slugs if s[0] == "workable"]    # a rate-limited host: own small pool, runs alongside
+    fast = [s for s in slugs if s[0] != "workable"]
     def results():
         with cf.ThreadPoolExecutor(max_workers=16) as ex, cf.ThreadPoolExecutor(max_workers=2) as ex2:
             futs = [ex2.submit(crawl, s) for s in slow]
@@ -336,7 +300,7 @@ def main():
                 if tok in wnames.values(): url = CAREERS["workable"].format(tok)
             found.append({"company": name, "ats": ats, "token": tok, "roles": keep, "careersUrl": url or CAREERS[ats].format(tok), "openings": n_open})
         if i % 500 == 0: print(f"  {i}/{len(slugs)}  boards with a match: {len(found)}  ({time.time() - t0:.0f}s)", flush=True)
-    merged = {}                                       # one lead per company: Dover answers to both a slug and a client id
+    merged = {}                                       # one lead per company
     for f in found:
         k = (f["ats"], (f["company"] or f["token"]).lower())
         if k in merged:

@@ -18,9 +18,10 @@ from outreach.crawl.ats.teamtailor import TeamtailorAdapter
 from outreach.crawl.ats.workable import WorkableAdapter
 from outreach.crawl.ats.workday import WorkdayAdapter
 from outreach.crawl.base import Adapter
+from outreach.crawl.config import CrawlConfig
 from outreach.net import HttpClient
 
-__all__ = ["ADAPTERS", "adapter_for", "supported_ats"]
+__all__ = ["ADAPTERS", "adapter_for", "supported_ats", "reading_ats"]
 
 # Each adapter task adds one line.
 ADAPTERS: dict[str, Callable[[HttpClient], Adapter]] = {
@@ -47,4 +48,10 @@ def adapter_for(ats: str, client: HttpClient) -> Adapter | None:
 
 
 def supported_ats() -> frozenset[str]:
+    """Every ATS with an adapter in the code, switched off or not."""
     return frozenset(ADAPTERS)
+
+
+def reading_ats(cfg: CrawlConfig) -> frozenset[str]:
+    """The ATSs the crawler reads: those with an adapter, less the ones `cfg.ats_off` switches off (#46)."""
+    return frozenset(a for a in ADAPTERS if cfg.reads(a))

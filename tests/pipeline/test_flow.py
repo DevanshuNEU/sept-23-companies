@@ -126,6 +126,22 @@ def crawl_read_the_one_board(h):
         "a fresh 2026 posting that the board lists is not stale"
     job = h.conn.execute("SELECT status FROM job_run WHERE job = 'read_boards' ORDER BY run_id DESC").fetchone()
     assert job is not None and job[0] == "ok", "the tick finished ok"
+    crawl_left_the_switched_off_boards_alone(h)
+
+
+def crawl_left_the_switched_off_boards_alone(h):
+    """#46: a board on a switched-off ATS keeps its state through a tick. Part of the `read_boards` invariant."""
+    off = h.crawl.off_board_ids()
+    assert {"smartrecruiters", "pinpoint"} <= set(h.crawl.cfg.ats_off), "the flow runs with both readers off"
+    if _fixture_companies(h).get(stages_crawl.OFF_COMPANY):
+        ats = {r[0] for r in h.conn.execute(f"SELECT ats FROM board WHERE board_id IN ({','.join('?' * len(off))})",
+                                            off)}
+        assert ats == set(h.crawl.cfg.ats_off), f"a switched-off board on every switched-off ATS, got {sorted(ats)}"
+    assert h.crawl.off_snapshot() == h.crawl.off_before, "the tick changed a board on a switched-off ATS"
+    assert h.crawl.report.switched_off == len(off), \
+        f"the tick counts {h.crawl.report.switched_off} switched-off boards, not {len(off)}"
+    asked = [u for u in h.crawl.client.requests if "smartrecruiters" in u or "pinpointhq" in u]
+    assert not asked, f"the tick asked a switched-off host: {asked}"
 
 
 @invariant("rules")
@@ -192,8 +208,10 @@ class SourcesFlowTests(HarnessCase):
 
 
 def _snapshot(h):
+    """The read board's postings (the switched-off fixture's posting has its own check, #46)."""
     return [tuple(r) for r in h.conn.execute(
-        "SELECT posting_id, title, last_seen_at, closed_at FROM posting ORDER BY posting_id")]
+        "SELECT posting_id, title, last_seen_at, closed_at FROM posting WHERE board_id = ? ORDER BY posting_id",
+        (h.crawl.board_id(),))]
 
 
 def _stale_today(h, board_id):
@@ -230,8 +248,17 @@ class CrawlFlowTests(HarnessCase):
     def test_read_boards_reads_the_board_the_sources_stage_made_and_creates_none(self):
         h = self.flow()
         boards = h.conn.execute("SELECT board_id, token FROM board").fetchall()
-        self.assertEqual([r["token"] for r in boards], ["kestrelrobotics"])
+        off = h.crawl.off_board_ids()  # the stage's own switched-off fixture (#46), read by nobody
+        self.assertEqual([r["token"] for r in boards if r["board_id"] not in off], ["kestrelrobotics"])
         self.assertEqual(h.crawl.client.requests, [stages_crawl.list_url()])
+
+    def test_flow_read_boards_passes_with_smartrecruiters_and_pinpoint_off_and_leaves_their_boards_alone(self):
+        h = self.flow()  # the read_boards invariant ran after the first tick
+        self.assertEqual(len(h.crawl.off_board_ids()), 2)
+        self.assertEqual(h.crawl.report.switched_off, 2)
+        for answer in (None, status_response(500), h.crawl.empty()):  # later ticks, whatever the read board says
+            h.crawl.run(answer)
+            crawl_left_the_switched_off_boards_alone(h)
 
     def test_read_boards_seeds_its_own_board_only_when_there_is_none(self):
         h = self.harness(register_streams=False)

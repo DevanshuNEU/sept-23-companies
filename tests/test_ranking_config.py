@@ -340,6 +340,13 @@ class ConfigTests(unittest.TestCase):
                          ["confirmed"])
         _load_edited(self, ("hide", "size_confidences", "[]"))  # never hide by size: allowed
 
+    def test_size_check_top_n_must_be_a_whole_number_of_at_least_one(self):
+        for value in ("0", "-5", "2.5", "true", '"100"'):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    _load_edited(self, ("ranker", "size_check_top_n", value))
+        self.assertEqual(_load_edited(self, ("ranker", "size_check_top_n", "1")).ranker["size_check_top_n"], 1)
+
     def test_confidence_shares_and_counts_are_checked(self):
         for key, value in (("rank_high_share", "0.0"), ("rank_high_share", "1.0"), ("rank_low_share", "0.0"),
                            ("rank_low_share", "1.5"), ("reason_count", "0"), ("reason_count", "2.5"),

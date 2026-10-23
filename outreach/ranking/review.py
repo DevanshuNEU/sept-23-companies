@@ -7,8 +7,9 @@ opens again (an item he resolved himself never does). Items of other raisers are
 """
 from __future__ import annotations
 
+import re
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import scrub_text
@@ -21,6 +22,18 @@ __all__ = ["CONFLICT_PREFIX", "sync_size_items", "sync_conflict_items"]
 
 CONFLICT_PREFIX = "sponsorship-conflict:"
 _SIZE_KINDS = ("size_guess", "size_check")
+# The weak-flag texts facts.py writes carry live counts ("90 open roles"), so an item is keyed on the kind of flag.
+_FLAG_KINDS = ((re.compile(r"\d+ open roles\Z"), "many_open_roles"),
+               (re.compile(r"\d+ software H-1B filings in one fiscal year\Z"), "many_software_lca"),
+               (re.compile(r"later stage, size unknown\Z"), "later_stage_no_size"))
+
+
+def flag_kind(text: str) -> str:
+    """The stable name of a weak flag. A text no rule knows keeps itself, digits as N, so it still keys one item."""
+    for pattern, kind in _FLAG_KINDS:
+        if pattern.match(text):
+            return kind
+    return "other:" + scrub_text(re.sub(r"\d+", "N", text))
 # (kind, company_id, evidence_key) -> (posting_id, reason)
 _Wanted = dict[tuple[str, int, str], tuple[int | None, str]]
 
@@ -68,25 +81,30 @@ def sync_size_items(conn: sqlite3.Connection, scored: list[Scored], facts_by_com
 
     `size_guess`: a listed company whose winning size evidence is a guess over the hide size (wherever it ranks; the
     guess hides nothing). `size_check`: a company in the top `size_check_top_n` of the ranked list with a weak
-    "not small" flag other than the shared domain one (#31's `resolve` raises that one, ruling 11). Evidence keys:
-    the evidence id, and the sorted flags joined by `;`.
+    "not small" flag other than the shared domain one (#31's `resolve` raises that one, ruling 11), and only while
+    its size is unknown (a known size needs no check). Evidence keys: the evidence id, and the sorted flag kinds
+    joined by `;`; the live counts stay in the reason, which is kept current while the item is open.
     """
     now = now or utcnow()
     wanted: _Wanted = {}
     over = cfg.hide["size_over"]
     for s in scored:
         size = sizes.get(s.company_id)
-        if s.hide is None and size is not None and size.confidence == "guess" and size.low > over:
+        if (s.hide is None and size is not None and size.confidence == "guess" and not size.locked
+                and size.low > over):
             reason = scrub_text(f"Size is only a guess ({_span(size)} people, over {over}). Look it up. "
                                 "The company stays visible.")
             wanted[("size_guess", s.company_id, str(size.evidence_id))] = (None, reason)
     for s in list_order(scored)[:cfg.ranker["size_check_top_n"]]:
         facts = facts_by_company.get(s.company_id)
-        flags = sorted(f for f in (facts.weak_flags if facts else ()) if f != SHARED_DOMAIN_FLAG)
+        if facts is None or facts.size_low is not None:
+            continue
+        flags = [f for f in facts.weak_flags if f != SHARED_DOMAIN_FLAG]
         if flags:
             reason = scrub_text(f"Check the size: {'; '.join(flags)}. Ranking treats it as not small until you "
                                 "confirm. The company stays visible.")
-            wanted[("size_check", s.company_id, ";".join(flags))] = (None, reason)
+            key = ";".join(sorted({flag_kind(f) for f in flags}))
+            wanted[("size_check", s.company_id, key)] = (None, reason)
     marks = ", ".join("?" * len(_SIZE_KINDS))
     return _sync(conn, f"kind IN ({marks})", _SIZE_KINDS, wanted, now)
 
@@ -97,17 +115,20 @@ def _postings(ids: list[int], one: str, many: str) -> str:
     return f"postings {', '.join(str(i) for i in ids[:-1])} and {ids[-1]} {many}"
 
 
-def sync_conflict_items(conn: sqlite3.Connection, inputs: Mapping[int, HideInputs], cfg: RankerConfig, *,
-                        now: str | None = None) -> tuple[int, int]:
-    """One `flagged` item per company whose postings disagree on sponsorship (ruling 9); returns (raised, cleared).
+def sync_conflict_items(conn: sqlite3.Connection, inputs: Mapping[int, HideInputs], scored: Iterable[Scored],
+                        cfg: RankerConfig, *, now: str | None = None) -> tuple[int, int]:
+    """One `flagged` item per scored, listed company whose postings disagree on sponsorship (ruling 9); returns
+    (raised, cleared). A company that is not scored (closed, removed, merged away) or is hidden (a no-go, say)
+    gets none, and an open item of one is cleared.
 
     The key is `sponsorship-conflict:` and the sorted refusal posting ids; the item points at the first refusal. It
     names every posting that disagrees and hides nothing.
     """
     now = now or utcnow()
     wanted: _Wanted = {}
+    listed = {s.company_id for s in scored if s.hide is None}
     for company_id, hi in inputs.items():
-        if not hi.conflict:
+        if company_id not in listed or not hi.conflict:
             continue
         refusals = sorted(r.posting_id for r in hi.refusals)
         sponsors = sorted(hi.sponsors)

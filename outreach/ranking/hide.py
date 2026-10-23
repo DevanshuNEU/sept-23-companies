@@ -67,6 +67,7 @@ class SizeEvidence:
     confidence: str
     source_ref: str
     evidence_id: int
+    locked: bool = False  # set by hand: a guess he locked is his own call, not a guess to review
 
 
 @dataclass(frozen=True)
@@ -149,7 +150,7 @@ def load_hide_inputs(conn: sqlite3.Connection, canon: dict[int, int], doubtful: 
                -_CONFIDENCE_RANK.get(r["confidence"], 3), r["recorded_at"], r["evidence_id"])
         if cid not in size or key > size[cid][0]:
             size[cid] = (key, SizeEvidence(r["num_low"], r["num_high"], r["confidence"], r["source_ref"],
-                                           r["evidence_id"]))
+                                           r["evidence_id"], bool(r["locked"])))
 
     ids = set(canon.values()) | set(refusals) | set(sponsors) | set(no_go) | set(size)
     out: dict[int, HideInputs] = {}

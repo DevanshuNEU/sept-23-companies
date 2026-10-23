@@ -21,8 +21,8 @@ NOW = "2026-10-22T09:00:00Z"
 LATER = "2026-10-23T09:00:00Z"
 
 
-def guess(low: int, evidence_id: int = 1, confidence: str = "guess") -> SizeEvidence:
-    return SizeEvidence(low, None, confidence, "https://example.com/about", evidence_id)
+def guess(low: int, evidence_id: int = 1, confidence: str = "guess", locked: bool = False) -> SizeEvidence:
+    return SizeEvidence(low, None, confidence, "https://example.com/about", evidence_id, locked)
 
 
 class Store(unittest.TestCase):
@@ -34,9 +34,10 @@ class Store(unittest.TestCase):
         self.postings = [rs.posting(self.conn, self.a) for _ in range(12)]
         self.assertEqual(self.postings, list(range(1, 13)))
 
-    def company(self, cid: int, points: float, *, flags=(), hide: Hide | None = None):
-        """(scored row at `points`, its facts)"""
-        facts = neutral_facts(company_id=cid, name=f"Co {cid}", weak_flags=tuple(flags))
+    def company(self, cid: int, points: float, *, flags=(), hide: Hide | None = None, size_low: int | None = None):
+        """(scored row at `points`, its facts); the size is unknown unless `size_low` says so"""
+        facts = neutral_facts(company_id=cid, name=f"Co {cid}", weak_flags=tuple(flags), size_low=size_low,
+                              size_high=size_low)
         return dataclasses.replace(score_company(facts, hide, SIGNALS, CFG), score=points), facts
 
     def size_sync(self, rows, sizes=None, cfg=CFG, now=NOW):
@@ -59,7 +60,7 @@ class SizeCheckTests(Store):
         self.assertEqual(self.size_sync(rows, cfg=TOP2), (1, 0))
         got = self.items("size_check")
         self.assertEqual([(r["company_id"], r["evidence_key"], r["state"]) for r in got],
-                         [(self.a, "90 open roles", "open")])
+                         [(self.a, "many_open_roles", "open")])
         self.assertIn("90 open roles", got[0]["reason"])
         self.assertIsNone(got[0]["board_id"])
         self.assertIsNone(got[0]["posting_id"])
@@ -71,15 +72,27 @@ class SizeCheckTests(Store):
         self.assertEqual(self.size_sync(rows, cfg=TOP2), (1, 0))  # the hidden one takes no place in the top 2
         self.assertEqual([r["company_id"] for r in self.items("size_check")], [self.b])
 
-    def test_the_key_is_the_sorted_flags_and_the_reason_is_one_plain_line(self):
+    def test_the_key_is_the_sorted_flag_kinds_and_the_reason_is_one_plain_line(self):
         dash = "9 roles " + chr(0x2014) + " many"
-        rows = [self.company(self.a, 30.0, flags=("zeta flag", dash, "alpha flag"))]
-        self.size_sync(rows)
+        flags = ("12 software H-1B filings in one fiscal year", "90 open roles", "later stage, size unknown", dash)
+        self.size_sync([self.company(self.a, 30.0, flags=flags)])
         got = self.items("size_check")[0]
-        self.assertEqual(got["evidence_key"], ";".join(sorted(("zeta flag", dash, "alpha flag"))))
+        self.assertEqual(got["evidence_key"],
+                         "later_stage_no_size;many_open_roles;many_software_lca;other:N roles - many")
+        self.assertIn("90 open roles", got["reason"])  # the count lives in the reason
         self.assertNotIn("\n", got["reason"])
         for c in (chr(0x2014), chr(0x2013)):
             self.assertNotIn(c, got["reason"])
+
+    def test_a_known_size_needs_no_check(self):
+        rows = [self.company(self.a, 30.0, flags=("90 open roles", "later stage, size unknown"), size_low=50)]
+        self.assertEqual(self.size_sync(rows, {self.a: guess(50, 3, confidence="confirmed")}), (0, 0))
+        self.assertEqual(self.items(), [])
+
+    def test_a_known_size_clears_an_open_check(self):
+        self.size_sync([self.company(self.a, 30.0, flags=("90 open roles",))])
+        rows = [self.company(self.a, 30.0, flags=("90 open roles",), size_low=50)]
+        self.assertEqual(self.size_sync(rows, now=LATER), (0, 1))
 
     def test_shared_domain_flag_raises_no_ranker_size_check(self):
         rows = [self.company(self.a, 30.0, flags=(SHARED_DOMAIN_FLAG,))]
@@ -88,7 +101,7 @@ class SizeCheckTests(Store):
         # with another flag beside it, the shared-domain flag is left out of the key
         rows = [self.company(self.a, 30.0, flags=(SHARED_DOMAIN_FLAG, "90 open roles"))]
         self.size_sync(rows)
-        self.assertEqual(self.items("size_check")[0]["evidence_key"], "90 open roles")
+        self.assertEqual(self.items("size_check")[0]["evidence_key"], "many_open_roles")
 
     def test_no_flag_and_no_size_raise_nothing(self):
         self.assertEqual(self.size_sync([self.company(self.a, 30.0)]), (0, 0))
@@ -116,6 +129,11 @@ class SizeGuessTests(Store):
     def test_unknown_size_alone_raises_nothing(self):
         rows = [self.company(self.a, 30.0), self.company(self.b, 20.0)]
         self.assertEqual(self.size_sync(rows, {}), (0, 0))  # size_unknown is #15's item, not the ranker's
+        self.assertEqual(self.items(), [])
+
+    def test_a_hand_locked_guess_raises_no_size_guess(self):
+        rows = [self.company(self.a, 30.0)]
+        self.assertEqual(self.size_sync(rows, {self.a: guess(500, 4, locked=True)}), (0, 0))
         self.assertEqual(self.items(), [])
 
     def test_a_hidden_company_raises_no_size_guess(self):
@@ -148,6 +166,22 @@ class SizeLifecycleTests(Store):
         self.assertEqual(self.size_sync(rows, now=LATER), (0, 0))
         rows = [self.company(self.a, 30.0, flags=("90 open roles", "later stage, size unknown"))]
         self.assertEqual(self.size_sync(rows, now=LATER), (1, 0))
+
+    def test_a_changed_count_keeps_a_resolved_item_resolved_and_adds_no_row(self):
+        self.size_sync([self.company(self.a, 30.0, flags=("90 open roles",))])
+        rs.resolve(self.conn, self.items("size_check")[0]["review_id"], "marked_ok")
+        self.assertEqual(self.size_sync([self.company(self.a, 30.0, flags=("91 open roles",))], now=LATER), (0, 0))
+        got = self.items("size_check")
+        self.assertEqual([(r["evidence_key"], r["state"], r["resolution"]) for r in got],
+                         [("many_open_roles", "resolved", "marked_ok")])
+
+    def test_a_changed_count_updates_the_reason_of_an_open_item_in_place(self):
+        self.size_sync([self.company(self.a, 30.0, flags=("90 open roles",))])
+        self.assertEqual(self.size_sync([self.company(self.a, 30.0, flags=("91 open roles",))], now=LATER), (0, 0))
+        got = self.items("size_check")
+        self.assertEqual(len(got), 1)
+        self.assertIn("91 open roles", got[0]["reason"])
+        self.assertNotIn("90 open roles", got[0]["reason"])
 
     def test_a_condition_that_went_away_is_cleared(self):
         flagged = [self.company(self.a, 30.0, flags=("90 open roles",)), self.company(self.b, 20.0)]
@@ -206,8 +240,12 @@ def conflict(company_id: int, refuse=(5,), sponsors=(8,)) -> HideInputs:
 
 
 class ConflictTests(Store):
-    def sync(self, inputs, now=NOW):
-        return sync_conflict_items(self.conn, inputs, CFG, now=now)
+    def sync(self, inputs, now=NOW, hidden=(), omit=()):
+        """Every company in `inputs` is scored and listed, except those in `hidden` (a no-go) or `omit` (not scored)."""
+        gone = Hide("no_go", "On the no-go list", False)
+        scored = [self.company(cid, 10.0, hide=gone if cid in hidden else None)[0]
+                  for cid in {self.a, self.b, self.c, *inputs} if cid not in omit]
+        return sync_conflict_items(self.conn, inputs, scored, CFG, now=now)
 
     def test_sponsorship_conflict_raises_one_flagged_item_and_the_company_stays_listed(self):
         inputs = {self.a: conflict(self.a, refuse=(6, 5), sponsors=(8,)), self.b: conflict(self.b, (), (3,)),
@@ -222,6 +260,16 @@ class ConflictTests(Store):
                                          "says it sponsors. The company stays visible.")
         scored, _facts = self.company(self.a, 12.0)
         self.assertEqual([s.company_id for s in list_order([scored])], [self.a])
+
+    def test_a_hidden_or_unscored_company_gets_no_conflict_item(self):
+        inputs = {self.a: conflict(self.a), self.b: conflict(self.b, (1,), (2,)), self.c: conflict(self.c, (3,), (4,))}
+        self.assertEqual(self.sync(inputs, hidden=(self.a,), omit=(self.b,)), (1, 0))  # b: closed, never scored
+        self.assertEqual([r["company_id"] for r in self.items()], [self.c])
+
+    def test_a_company_that_becomes_hidden_has_its_open_item_cleared(self):
+        self.sync({self.a: conflict(self.a)})
+        self.assertEqual(self.sync({self.a: conflict(self.a)}, now=LATER, hidden=(self.a,)), (0, 1))
+        self.assertEqual([(r["state"], r["resolution"]) for r in self.items()], [("resolved", "cleared")])
 
     def test_the_reason_names_both_postings_when_there_is_one_of_each(self):
         self.sync({self.a: conflict(self.a, (5,), (8,))})
@@ -289,7 +337,7 @@ class NeverHidesTests(Store):
         before = [(s.score, s.hide, to_columns(s)) for s in scored]
         order = [s.company_id for s in list_order(scored)]
         self.size_sync(rows, {self.b: guess(500, 4)})
-        sync_conflict_items(self.conn, {self.a: conflict(self.a)}, CFG, now=NOW)
+        sync_conflict_items(self.conn, {self.a: conflict(self.a)}, scored, CFG, now=NOW)
         self.assertEqual([(s.score, s.hide, to_columns(s)) for s in scored], before)
         self.assertEqual([s.company_id for s in list_order(scored)], order)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM no_go").fetchone()[0], 0)

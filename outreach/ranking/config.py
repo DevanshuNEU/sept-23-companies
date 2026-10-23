@@ -102,6 +102,12 @@ def _check_confidence(c: dict) -> None:
             raise ValueError(f"[confidence] {key} must be a whole number of at least 1, got {c[key]!r}")
 
 
+def _check_ranker(r: dict) -> None:
+    top = r["size_check_top_n"]
+    if not isinstance(top, int) or isinstance(top, bool) or top < 1:
+        raise ValueError(f"[ranker] size_check_top_n must be a whole number of at least 1, got {top!r}")
+
+
 _HIDE_CONFIDENCES = ("confirmed", "estimate")
 
 
@@ -132,6 +138,7 @@ def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
     _check_bottom_weights(data)
     _check_confidence(data["confidence"])
     _check_hide(data["hide"])
+    _check_ranker(data["ranker"])
     others = {k: v for k, v in data.items() if k not in ("ranker", "weights", "hide")}
     return RankerConfig(ranker=data["ranker"], weights=weights, hide=data["hide"], sections=others, raw=raw)
 

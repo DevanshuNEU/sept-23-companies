@@ -121,9 +121,14 @@ export interface Check {
   code: string; severity: CheckSeverity; title: string; detail: string; fix: CheckFix | null;
   spans: { field: 'subject' | 'body'; start: number; end: number }[];
 }
-export interface Schedule { // derived
-  earliestAt: IsoTime | null; tz: string;
-  reason: 'next_slot' | 'per_company_limit' | 'spacing' | 'recruiter_day_2' | 'window' | 'daily_limit';
+// The sender's own reason an approved email waits, goes now (`ready`) or never goes (a stop): the queue's REASONS.
+export type ScheduleReason =
+  | 'ready' | 'sender_paused' | 'signed_out' | 'old_sender_running' | 'message_id_unproven' | 'not_business_day'
+  | 'daily_limit' | 'spacing' | 'window' | 'bad_timezone' | 'followup_not_due' | 'company_paused' | 'company_held'
+  | 'per_company_limit' | 'per_company_gap' | 'recruiter_waits' | 'no_address' | 'no_thread'
+  | 'company_closed' | 'no_go' | 'reply_stop' | 'touch_done';
+export interface Schedule { // derived: the sender's verdict for an approved email (a draft has none)
+  earliestAt: IsoTime | null; tz: string; reason: ScheduleReason;
   text: string; companySentToday: number; companySlotsLeft: number;
 }
 export interface OutboxItem {

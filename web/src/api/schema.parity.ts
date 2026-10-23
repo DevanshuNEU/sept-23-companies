@@ -48,4 +48,12 @@ export const _parity: [
   Same<T.ResolvedReview, S['ResolvedReview']>,
   Same<T.NeedsYouView, S['NeedsYouView']>,
   Same<T.ReviewFix, S['ResolveReviewBody']['fix']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<T.SendingStatus, S['SendingStatus']>,
+  Same<T.Schedule, S['Schedule']>,
+  Same<T.OutboxItem, S['OutboxItem']>,
+  Same<T.OutboxCounts, S['OutboxCounts']>,
+  Same<T.OutboxView, S['OutboxView']>,
+  Same<T.ThreadMessage, S['ThreadMessage']>,
+  Same<T.OutboxDetail, S['OutboxDetail']>,
+  Same<T.DraftCompare, S['DraftCompare']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

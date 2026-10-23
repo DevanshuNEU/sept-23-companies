@@ -242,6 +242,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Outbox */
+        get: operations["outbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/outbox/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compare Drafts */
+        get: operations["compare_drafts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/outbox/{touch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Outbox Detail */
+        get: operations["outbox_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/outcomes/prompt": {
         parameters: {
             query?: never;
@@ -372,6 +423,57 @@ export interface paths {
         get: operations["search_postings"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sending Status */
+        get: operations["sending_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sending/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Sending */
+        post: operations["pause_sending"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sending/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Sending */
+        post: operations["resume_sending"];
         delete?: never;
         options?: never;
         head?: never;
@@ -618,6 +720,24 @@ export interface components {
             /** Revision */
             revision: number;
         };
+        /** ClosedBreakdown */
+        ClosedBreakdown: {
+            /**
+             * Bounced
+             * @default 0
+             */
+            bounced: number;
+            /**
+             * Companyclosed
+             * @default 0
+             */
+            companyClosed: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+        };
         /** CompanyBoard */
         CompanyBoard: {
             /** Ats */
@@ -805,6 +925,26 @@ export interface components {
             /** Revision */
             revision: number;
         };
+        /** CompareMatch */
+        CompareMatch: {
+            /** Aend */
+            aEnd: number;
+            /** Astart */
+            aStart: number;
+            /** Bend */
+            bEnd: number;
+            /** Bstart */
+            bStart: number;
+        };
+        /** CompareSide */
+        CompareSide: {
+            /** Body */
+            body: string;
+            /** Messageid */
+            messageId: number;
+            /** Personname */
+            personName: string;
+        };
         /**
          * CorrectionBody
          * @description Set one outcome to `at` (any ISO-8601 time) or clear it (`at` null), from the touch's history.
@@ -816,6 +956,15 @@ export interface components {
             replyKind?: ("unsorted" | "interested" | "not_now" | "said_no" | "asked_to_stop") | null;
             /** Revision */
             revision: number;
+        };
+        /** DraftCompare */
+        DraftCompare: {
+            a: components["schemas"]["CompareSide"];
+            b: components["schemas"]["CompareSide"];
+            /** Matches */
+            matches: components["schemas"]["CompareMatch"][];
+            /** Similarity */
+            similarity: number;
         };
         /** EffortLine */
         EffortLine: {
@@ -974,6 +1123,25 @@ export interface components {
             /** Touchid */
             touchId: number;
         };
+        /** HeldMessage */
+        HeldMessage: {
+            /** Dueon */
+            dueOn: string | null;
+            /** Personname */
+            personName: string;
+            /**
+             * Seq
+             * @enum {integer}
+             */
+            seq: 0 | 1 | 2 | 3;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "drafted" | "approved" | "sending" | "send_unknown" | "sent" | "failed" | "skipped";
+            /** Touchid */
+            touchId: number;
+        };
         /**
          * HoldingReply
          * @description The newest reply holding the company: on any channel, so a LinkedIn reply shows as an email one does.
@@ -1124,6 +1292,205 @@ export interface components {
             /** Resolvedthisweek */
             resolvedThisWeek: components["schemas"]["ResolvedReview"][];
         };
+        /** NextDue */
+        NextDue: {
+            /** On */
+            on: string;
+            /**
+             * Seq
+             * @enum {integer}
+             */
+            seq: 1 | 2 | 3;
+        };
+        /** NextSend */
+        NextSend: {
+            /** At */
+            at: string;
+            /** Companyname */
+            companyName: string;
+            /** Personname */
+            personName: string;
+            /** Touchid */
+            touchId: number;
+            /** Tz */
+            tz: string;
+        };
+        /** OutboxCounts */
+        OutboxCounts: {
+            /**
+             * Approved
+             * @default 0
+             */
+            approved: number;
+            /**
+             * Checking
+             * @default 0
+             */
+            checking: number;
+            /**
+             * Closed
+             * @default 0
+             */
+            closed: number;
+            /**
+             * Paused
+             * @default 0
+             */
+            paused: number;
+            /**
+             * Replied
+             * @default 0
+             */
+            replied: number;
+            /**
+             * Review
+             * @default 0
+             */
+            review: number;
+            /**
+             * Sending
+             * @default 0
+             */
+            sending: number;
+            /**
+             * Sent
+             * @default 0
+             */
+            sent: number;
+        };
+        /** OutboxDetail */
+        OutboxDetail: {
+            /** Asof */
+            asOf: string;
+            /** Body */
+            body: string;
+            /** Bouncereason */
+            bounceReason: string | null;
+            /** Checks */
+            checks: components["schemas"]["Check"][];
+            /** Firstsentat */
+            firstSentAt: string | null;
+            /** Followups */
+            followups: components["schemas"]["OutboxFollowup"][];
+            /** Gmailthreadurl */
+            gmailThreadUrl: string | null;
+            /** Held */
+            held: components["schemas"]["HeldMessage"][];
+            hook: components["schemas"]["OutboxHook"];
+            item: components["schemas"]["OutboxItem"];
+            /** Project */
+            project: string;
+            reply: components["schemas"]["OutboxReply"] | null;
+            role: components["schemas"]["RoleToName"] | null;
+            /** Savedat */
+            savedAt: string;
+            /**
+             * Savedby
+             * @enum {string}
+             */
+            savedBy: "claude" | "devanshu" | "sender" | "import";
+            /** Thread */
+            thread: components["schemas"]["ThreadMessage"][];
+            /** Touchrevision */
+            touchRevision: number;
+        };
+        /** OutboxFollowup */
+        OutboxFollowup: {
+            /** Dueon */
+            dueOn: string;
+            /** Sentat */
+            sentAt: string | null;
+            /**
+             * Seq
+             * @enum {integer}
+             */
+            seq: 1 | 2 | 3;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "drafted" | "approved" | "sending" | "send_unknown" | "sent" | "failed" | "skipped";
+        };
+        /** OutboxHook */
+        OutboxHook: {
+            /** On */
+            on: string | null;
+            /** Text */
+            text: string;
+        };
+        /** OutboxItem */
+        OutboxItem: {
+            /** At */
+            at: string;
+            /** Blockcount */
+            blockCount: number;
+            company: components["schemas"]["CompanyRef"];
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "replied" | "review" | "approved" | "sending" | "checking" | "sent" | "paused" | "closed";
+            /** Messageid */
+            messageId: number;
+            nextDue: components["schemas"]["NextDue"] | null;
+            person: components["schemas"]["PersonRef"];
+            /** Preview */
+            preview: string;
+            /** Revision */
+            revision: number;
+            schedule: components["schemas"]["Schedule"] | null;
+            /**
+             * Seq
+             * @enum {integer}
+             */
+            seq: 0 | 1 | 2 | 3;
+            /** Sortkey */
+            sortKey: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "drafted" | "approved" | "sending" | "send_unknown" | "sent" | "failed" | "skipped";
+            /** Subject */
+            subject: string;
+            /** Summary */
+            summary: string;
+            /** Touchid */
+            touchId: number;
+            /**
+             * Touchstate
+             * @enum {string}
+             */
+            touchState: "open" | "replied" | "bounced" | "closed";
+            /** Warncount */
+            warnCount: number;
+            /** Worst */
+            worst: ("block" | "warn" | "pass") | null;
+        };
+        /** OutboxReply */
+        OutboxReply: {
+            /** At */
+            at: string;
+            /** From */
+            from: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "unsorted" | "interested" | "not_now" | "said_no" | "asked_to_stop" | "auto_reply";
+            /** Text */
+            text: string;
+        };
+        /** OutboxView */
+        OutboxView: {
+            /** Asof */
+            asOf: string;
+            closedBreakdown: components["schemas"]["ClosedBreakdown"];
+            counts: components["schemas"]["OutboxCounts"];
+            /** Items */
+            items: components["schemas"]["OutboxItem"][];
+            sending: components["schemas"]["SendingStatus"];
+        };
         /**
          * OutcomeBody
          * @description An answer to "what came of this?". `quiet` is "Nothing yet": a snooze before day 21, then the quiet mark.
@@ -1145,6 +1512,11 @@ export interface components {
             asOf: string;
             /** Touches */
             touches: components["schemas"]["PromptTouch"][];
+        };
+        /** PauseSendingBody */
+        PauseSendingBody: {
+            /** Revision */
+            revision: number;
         };
         /** PersonRef */
         PersonRef: {
@@ -1337,6 +1709,16 @@ export interface components {
              */
             resolution: "marked_ok" | "marked_no_go" | "field_edited";
         };
+        /** ResumeSendingBody */
+        ResumeSendingBody: {
+            /**
+             * Acknowledgeblock
+             * @default false
+             */
+            acknowledgeBlock: boolean;
+            /** Revision */
+            revision: number;
+        };
         /** ReviewCompany */
         ReviewCompany: {
             /** Held */
@@ -1515,6 +1897,24 @@ export interface components {
             /** Yearsasked */
             yearsAsked: number | null;
         };
+        /** Schedule */
+        Schedule: {
+            /** Companysenttoday */
+            companySentToday: number;
+            /** Companyslotsleft */
+            companySlotsLeft: number;
+            /** Earliestat */
+            earliestAt: string | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "ready" | "sender_paused" | "signed_out" | "old_sender_running" | "message_id_unproven" | "not_business_day" | "daily_limit" | "spacing" | "window" | "bad_timezone" | "followup_not_due" | "company_paused" | "company_held" | "per_company_limit" | "per_company_gap" | "recruiter_waits" | "no_address" | "no_thread" | "company_closed" | "no_go" | "reply_stop" | "touch_done";
+            /** Text */
+            text: string;
+            /** Tz */
+            tz: string;
+        };
         /** ScoreConfidence */
         ScoreConfidence: {
             /** Basis */
@@ -1644,6 +2044,61 @@ export interface components {
              * @enum {string}
              */
             state: "running" | "paused_by_you" | "paused_hard_block" | "outside_window" | "weekend" | "signed_out";
+        };
+        /** SendingSignals */
+        SendingSignals: {
+            /** Bouncerate3D */
+            bounceRate3d: number;
+            /** Gmailerrorstoday */
+            gmailErrorsToday: number;
+            /** Stoprepliestoday */
+            stopRepliesToday: number;
+        };
+        /** SendingStatus */
+        SendingStatus: {
+            /** Gmailmessage */
+            gmailMessage: string | null;
+            lastStepDown: components["schemas"]["SendingStepDown"] | null;
+            /** Limittoday */
+            limitToday: number;
+            /** Nextlimitifclean */
+            nextLimitIfClean: number;
+            nextSend: components["schemas"]["NextSend"] | null;
+            /** Nonereason */
+            noneReason: string | null;
+            /** Pausedat */
+            pausedAt: string | null;
+            /** Pausedreason */
+            pausedReason: string;
+            /** Ramplevel */
+            rampLevel: number;
+            /** Ramplevels */
+            rampLevels: number[];
+            /** Revision */
+            revision: number;
+            /** Senttoday */
+            sentToday: number;
+            signals: components["schemas"]["SendingSignals"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "paused_by_you" | "paused_hard_block" | "outside_window" | "weekend" | "signed_out";
+            window: components["schemas"]["SendingWindow"];
+        };
+        /** SendingStepDown */
+        SendingStepDown: {
+            /** At */
+            at: string;
+            /** Reason */
+            reason: string;
+        };
+        /** SendingWindow */
+        SendingWindow: {
+            /** End */
+            end: string;
+            /** Start */
+            start: string;
         };
         /** SourceLink */
         SourceLink: {
@@ -2937,6 +3392,206 @@ export interface operations {
             };
         };
     };
+    outbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    compare_drafts: {
+        parameters: {
+            query: {
+                messageId: number;
+                otherMessageId: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftCompare"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    outbox_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                touch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxDetail"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     outcome_prompt: {
         parameters: {
             query?: never;
@@ -3482,6 +4137,245 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    sending_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendingStatus"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    pause_sending: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PauseSendingBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendingStatus"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    resume_sending: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResumeSendingBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendingStatus"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

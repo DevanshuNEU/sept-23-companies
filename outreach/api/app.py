@@ -1,4 +1,6 @@
 """The app factory. Routers are found by scanning `outreach.api.routers`, so a view is one new module."""
+import asyncio
+import contextlib
 import importlib
 import pkgutil
 from contextlib import asynccontextmanager
@@ -8,7 +10,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.routing import APIRoute
 
 import outreach.api.routers
-from outreach.api import errors, openapi
+from outreach.api import errors, openapi, sweeper
+from outreach.api.config import load_config
 from outreach.api.guards import GuardMiddleware
 from outreach.api.idempotency import prune_at_startup
 from outreach.api.models.ping import Ping
@@ -30,7 +33,17 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         prune_at_startup(settings, app.state.clock())  # old idempotency keys, once per start
-        yield
+        if settings.sweeper:  # tests turn it off and call sweeper.sweep_quiet themselves
+            app.state.sweeper_tasks.append(
+                asyncio.create_task(sweeper.run_forever(settings, app.state.clock, app.state.config)))
+        try:
+            yield
+        finally:  # cancelled on shutdown; a pass already in its thread finishes (its write is one transaction)
+            for task in app.state.sweeper_tasks:
+                task.cancel()
+            for task in app.state.sweeper_tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     app = FastAPI(
         lifespan=lifespan,
@@ -44,6 +57,8 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
     app.state.settings = settings
     app.state.clock = clock or utcnow
     app.state.mx_resolvers = mx_resolvers
+    app.state.config = load_config()
+    app.state.sweeper_tasks = []
 
     api = APIRouter(prefix="/api")
 

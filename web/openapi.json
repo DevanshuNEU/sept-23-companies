@@ -728,6 +728,51 @@
         "title": "CompanyView",
         "type": "object"
       },
+      "CorrectionBody": {
+        "additionalProperties": false,
+        "description": "Set one outcome to `at` (any ISO-8601 time) or clear it (`at` null), from the touch's history.",
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "replyKind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unsorted",
+                  "interested",
+                  "not_now",
+                  "said_no",
+                  "asked_to_stop"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replykind"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at",
+          "revision"
+        ],
+        "title": "CorrectionBody",
+        "type": "object"
+      },
       "ErrorEnvelope": {
         "properties": {
           "checks": {
@@ -1086,6 +1131,129 @@
         "title": "JobRunSummary",
         "type": "object"
       },
+      "LogTouchBody": {
+        "additionalProperties": false,
+        "description": "A touch he made himself: a reply to an HN post, or any other touch. The other channels have their own writes.",
+        "properties": {
+          "channel": {
+            "enum": [
+              "linkedin_request",
+              "linkedin_message",
+              "email",
+              "application",
+              "hn_reply",
+              "other"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "idempotencyKey": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Idempotencykey",
+            "type": "string"
+          },
+          "personId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personid"
+          },
+          "postingId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postingid"
+          }
+        },
+        "required": [
+          "channel",
+          "companyId",
+          "idempotencyKey"
+        ],
+        "title": "LogTouchBody",
+        "type": "object"
+      },
+      "OutcomeBody": {
+        "additionalProperties": false,
+        "description": "An answer to \"what came of this?\". `quiet` is \"Nothing yet\": a snooze before day 21, then the quiet mark.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "accepted",
+              "replied",
+              "referred",
+              "interview",
+              "offer",
+              "quiet"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "replyKind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "interested",
+                  "not_now",
+                  "said_no",
+                  "asked_to_stop"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replykind"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "revision"
+        ],
+        "title": "OutcomeBody",
+        "type": "object"
+      },
+      "OutcomePromptView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "touches": {
+            "items": {
+              "$ref": "#/components/schemas/PromptTouch"
+            },
+            "title": "Touches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "touches"
+        ],
+        "title": "OutcomePromptView",
+        "type": "object"
+      },
       "PersonRef": {
         "properties": {
           "email": {
@@ -1362,6 +1530,67 @@
           "flags"
         ],
         "title": "PostingRow",
+        "type": "object"
+      },
+      "PromptTouch": {
+        "properties": {
+          "ageDays": {
+            "title": "Agedays",
+            "type": "integer"
+          },
+          "channel": {
+            "enum": [
+              "linkedin_request",
+              "linkedin_message",
+              "email",
+              "application",
+              "hn_reply",
+              "other"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "context": {
+            "title": "Context",
+            "type": "string"
+          },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "sentAt": {
+            "title": "Sentat",
+            "type": "string"
+          },
+          "touchId": {
+            "title": "Touchid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "touchId",
+          "person",
+          "company",
+          "channel",
+          "sentAt",
+          "ageDays",
+          "context",
+          "revision"
+        ],
+        "title": "PromptTouch",
         "type": "object"
       },
       "ReadQueueStatus": {
@@ -1983,6 +2212,187 @@
         "title": "ThreadMessage",
         "type": "object"
       },
+      "TouchHistory": {
+        "properties": {
+          "accepted": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted"
+          },
+          "channel": {
+            "enum": [
+              "linkedin_request",
+              "linkedin_message",
+              "email",
+              "application",
+              "hn_reply",
+              "other"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "interview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview"
+          },
+          "offer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer"
+          },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quiet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quiet"
+          },
+          "referred": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referred"
+          },
+          "replied": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replied"
+          },
+          "replyKind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unsorted",
+                  "interested",
+                  "not_now",
+                  "said_no",
+                  "asked_to_stop"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replykind"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "sentAt": {
+            "title": "Sentat",
+            "type": "string"
+          },
+          "touchId": {
+            "title": "Touchid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "touchId",
+          "channel",
+          "person",
+          "company",
+          "sentAt",
+          "accepted",
+          "replied",
+          "replyKind",
+          "referred",
+          "interview",
+          "offer",
+          "quiet",
+          "events",
+          "revision"
+        ],
+        "title": "TouchHistory",
+        "type": "object"
+      },
+      "TouchLogged": {
+        "properties": {
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "touchId": {
+            "title": "Touchid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "touchId",
+          "revision"
+        ],
+        "title": "TouchLogged",
+        "type": "object"
+      },
+      "TouchRevision": {
+        "properties": {
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "TouchRevision",
+        "type": "object"
+      },
       "WatchDismissed": {
         "description": "What a dismiss answers with: the id it was sent. (A write answers with JSON; an empty answer reads as broken.)",
         "properties": {
@@ -2325,6 +2735,77 @@
         ]
       }
     },
+    "/api/outcomes/prompt": {
+      "get": {
+        "operationId": "outcome_prompt",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomePromptView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Outcome Prompt",
+        "tags": [
+          "outcomes"
+        ]
+      }
+    },
     "/api/ping": {
       "get": {
         "operationId": "ping",
@@ -2635,6 +3116,430 @@
         "summary": "Search Postings",
         "tags": [
           "search"
+        ]
+      }
+    },
+    "/api/touches": {
+      "post": {
+        "operationId": "log_touch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogTouchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TouchLogged"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Log Touch",
+        "tags": [
+          "outcomes"
+        ]
+      }
+    },
+    "/api/touches/{touch_id}/history": {
+      "get": {
+        "operationId": "touch_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "touch_id",
+            "required": true,
+            "schema": {
+              "title": "Touch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TouchHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Touch History",
+        "tags": [
+          "outcomes"
+        ]
+      }
+    },
+    "/api/touches/{touch_id}/outcomes": {
+      "post": {
+        "operationId": "log_outcome",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "touch_id",
+            "required": true,
+            "schema": {
+              "title": "Touch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TouchRevision"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Log Outcome",
+        "tags": [
+          "outcomes"
+        ]
+      }
+    },
+    "/api/touches/{touch_id}/outcomes/{kind}": {
+      "put": {
+        "operationId": "correct_outcome",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "touch_id",
+            "required": true,
+            "schema": {
+              "title": "Touch Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "accepted",
+                "replied",
+                "referred",
+                "interview",
+                "offer",
+                "quiet"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TouchRevision"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Correct Outcome",
+        "tags": [
+          "outcomes"
         ]
       }
     },

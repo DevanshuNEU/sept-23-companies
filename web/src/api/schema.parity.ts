@@ -28,4 +28,7 @@ export const _parity: [
   Same<T.SourceLink, S['SourceLink']>,
   Same<T.WatchItem, S['WatchItem']>,
   Same<T.WatchView, S['WatchView']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<T.PromptTouch, S['PromptTouch']>,
+  Same<T.OutcomePromptView, S['OutcomePromptView']>,
+  Same<T.TouchHistory, S['TouchHistory']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

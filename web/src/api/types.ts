@@ -211,6 +211,18 @@ export interface SourceLink { label: string; url: string }
 export interface WatchItem { id: Id; kind: WatchKind; company: CompanyRef; text: string; at: IsoTime; link: SourceLink | null; reviewId: Id | null }
 export interface WatchView { asOf: IsoTime; items: WatchItem[] }
 
+// Outcomes (#33 seam, #11 Task 12): the prompt, a touch's history. person is null for an application (no person).
+export type Channel = 'linkedin_request' | 'linkedin_message' | 'email' | 'application' | 'hn_reply' | 'other';
+export type OutcomeKind = 'accepted' | 'replied' | 'referred' | 'interview' | 'offer' | 'quiet';
+export interface PromptTouch { touchId: Id; person: PersonRef | null; company: CompanyRef; channel: Channel; sentAt: IsoTime; ageDays: number; context: string; revision: Revision }
+export interface OutcomePromptView { asOf: IsoTime; touches: PromptTouch[] }
+export interface TouchHistory {
+  touchId: Id; channel: Channel; person: PersonRef | null; company: CompanyRef; sentAt: IsoTime;
+  accepted: IsoTime | null; replied: IsoTime | null; replyKind: Exclude<ReplyKind, 'auto_reply'> | null;
+  referred: IsoTime | null; interview: IsoTime | null; offer: IsoTime | null; quiet: IsoTime | null;
+  events: CompanyEvent[]; revision: Revision;                                                  // events newest first
+}
+
 // Done (spec 13.8)
 export interface DoneCompany { company: CompanyRef; outcome: 'interview' | 'referral'; outcomeLabel: string; closedAt: IsoTime; howStarted: string; imported: boolean; role: string | null; note: string }
 export interface DoneView {

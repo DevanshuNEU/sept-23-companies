@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/outcomes/prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Outcome Prompt */
+        get: operations["outcome_prompt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ping": {
         parameters: {
             query?: never;
@@ -116,6 +133,74 @@ export interface paths {
         /** Search Postings */
         get: operations["search_postings"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/touches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Log Touch */
+        post: operations["log_touch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/touches/{touch_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Touch History */
+        get: operations["touch_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/touches/{touch_id}/outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Log Outcome */
+        post: operations["log_outcome"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/touches/{touch_id}/outcomes/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Correct Outcome */
+        put: operations["correct_outcome"];
         post?: never;
         delete?: never;
         options?: never;
@@ -387,6 +472,18 @@ export interface components {
             /** Touches */
             touches: components["schemas"]["CompanyTouch"][];
         };
+        /**
+         * CorrectionBody
+         * @description Set one outcome to `at` (any ISO-8601 time) or clear it (`at` null), from the touch's history.
+         */
+        CorrectionBody: {
+            /** At */
+            at: string | null;
+            /** Replykind */
+            replyKind?: ("unsorted" | "interested" | "not_now" | "said_no" | "asked_to_stop") | null;
+            /** Revision */
+            revision: number;
+        };
         /** ErrorEnvelope */
         ErrorEnvelope: {
             /** Checks */
@@ -497,6 +594,47 @@ export interface components {
              */
             status: "running" | "ok" | "partial" | "failed";
         };
+        /**
+         * LogTouchBody
+         * @description A touch he made himself: a reply to an HN post, or any other touch. The other channels have their own writes.
+         */
+        LogTouchBody: {
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "linkedin_request" | "linkedin_message" | "email" | "application" | "hn_reply" | "other";
+            /** Companyid */
+            companyId: number;
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Personid */
+            personId?: number | null;
+            /** Postingid */
+            postingId?: number | null;
+        };
+        /**
+         * OutcomeBody
+         * @description An answer to "what came of this?". `quiet` is "Nothing yet": a snooze before day 21, then the quiet mark.
+         */
+        OutcomeBody: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "accepted" | "replied" | "referred" | "interview" | "offer" | "quiet";
+            /** Replykind */
+            replyKind?: ("interested" | "not_now" | "said_no" | "asked_to_stop") | null;
+            /** Revision */
+            revision: number;
+        };
+        /** OutcomePromptView */
+        OutcomePromptView: {
+            /** Asof */
+            asOf: string;
+            /** Touches */
+            touches: components["schemas"]["PromptTouch"][];
+        };
         /** PersonRef */
         PersonRef: {
             /** Email */
@@ -588,6 +726,26 @@ export interface components {
             title: string;
             /** Url */
             url: string;
+        };
+        /** PromptTouch */
+        PromptTouch: {
+            /** Agedays */
+            ageDays: number;
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "linkedin_request" | "linkedin_message" | "email" | "application" | "hn_reply" | "other";
+            company: components["schemas"]["CompanyRef"];
+            /** Context */
+            context: string;
+            person: components["schemas"]["PersonRef"] | null;
+            /** Revision */
+            revision: number;
+            /** Sentat */
+            sentAt: string;
+            /** Touchid */
+            touchId: number;
         };
         /** ReadQueueStatus */
         ReadQueueStatus: {
@@ -791,6 +949,50 @@ export interface components {
             /** Subject */
             subject: string;
         };
+        /** TouchHistory */
+        TouchHistory: {
+            /** Accepted */
+            accepted: string | null;
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "linkedin_request" | "linkedin_message" | "email" | "application" | "hn_reply" | "other";
+            company: components["schemas"]["CompanyRef"];
+            /** Events */
+            events: components["schemas"]["CompanyEvent"][];
+            /** Interview */
+            interview: string | null;
+            /** Offer */
+            offer: string | null;
+            person: components["schemas"]["PersonRef"] | null;
+            /** Quiet */
+            quiet: string | null;
+            /** Referred */
+            referred: string | null;
+            /** Replied */
+            replied: string | null;
+            /** Replykind */
+            replyKind: ("unsorted" | "interested" | "not_now" | "said_no" | "asked_to_stop") | null;
+            /** Revision */
+            revision: number;
+            /** Sentat */
+            sentAt: string;
+            /** Touchid */
+            touchId: number;
+        };
+        /** TouchLogged */
+        TouchLogged: {
+            /** Revision */
+            revision: number;
+            /** Touchid */
+            touchId: number;
+        };
+        /** TouchRevision */
+        TouchRevision: {
+            /** Revision */
+            revision: number;
+        };
         /**
          * WatchDismissed
          * @description What a dismiss answers with: the id it was sent. (A write answers with JSON; an empty answer reads as broken.)
@@ -983,6 +1185,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobRunSummary"][];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    outcome_prompt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomePromptView"];
                 };
             };
             /** @description bad_request: the request was not valid */
@@ -1269,6 +1536,339 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    log_touch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogTouchBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TouchLogged"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    touch_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                touch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TouchHistory"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    log_outcome: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                touch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutcomeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TouchRevision"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    correct_outcome: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                touch_id: number;
+                kind: "accepted" | "replied" | "referred" | "interview" | "offer" | "quiet";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TouchRevision"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

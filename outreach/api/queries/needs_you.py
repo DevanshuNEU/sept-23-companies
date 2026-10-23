@@ -448,7 +448,7 @@ def _replace_board(ctx: WriteCtx, row: sqlite3.Row, survivor: int, url: str, sou
         raise ApiProblem("conflict", f"That board belongs to {name} (#{owner[0]}). {NOT_SAVED}")
     try:
         added = add_board(conn, row["company_id"], ref, via="hand", matched_on="needs_you", found_by="hand",
-                          actor="devanshu")
+                          actor="devanshu", now=ctx.now)
     except ValueError as err:
         raise _bad(f"That board cannot be added: {err}.") from None
     if added == "conflict":  # another writer claimed it since the check: retire nothing

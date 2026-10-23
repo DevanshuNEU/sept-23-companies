@@ -310,6 +310,9 @@ class NeedsYou(ApiCase):
                                     "source": "Their site"}))
         boards = {(r["ats"], r["token"]): r for r in self.conn.execute("SELECT * FROM board WHERE company_id = ?", (cid,))}
         self.assertEqual((boards[("lever", "acme")]["found_by"], boards[("lever", "acme")]["active"]), ("hand", 1))
+        self.assertEqual(boards[("lever", "acme")]["created_at"], NOW)  # the write's clock, not the wall clock
+        found = self.conn.execute("SELECT at FROM event WHERE entity = 'board' AND kind = 'found'").fetchone()
+        self.assertEqual(found["at"], NOW)
         self.assertEqual(boards[("ashby", "acmeold")]["active"], 0)
         p = self.conn.execute("SELECT closed_at, close_reason FROM posting WHERE posting_id = ?", (stale,)).fetchone()
         self.assertEqual(tuple(p), (NOW, "hand"))

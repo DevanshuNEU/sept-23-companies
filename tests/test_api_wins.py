@@ -184,6 +184,19 @@ class WinLog(WinsCase):
         touch(self.conn, gone, person, sent_at=SENT, accepted_at=AT)
         self.assertEqual(self.wins()["wins"][0]["company"]["id"], self.acme)
 
+    def test_a_win_whose_company_row_is_gone_is_still_listed_so_the_count_matches(self):
+        ghost = s.company(self.conn, "Ghost")
+        tid = touch(self.conn, ghost, None, channel="application", sent_at=SENT, accepted_at=AT)
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        self.conn.execute("DELETE FROM company WHERE company_id = ?", (ghost,))
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        view = self.wins()
+        self.assertEqual((view["unseen"], len(view["wins"])), (1, 1))
+        [win] = view["wins"]
+        self.assertEqual(win["touchId"], tid)
+        self.assertEqual((win["company"]["id"], win["company"]["name"]), (ghost, "Unknown company"))
+        self.assertIn("Unknown company", win["line"])
+
     def test_the_json_is_valid_without_nan(self):
         self.make(accepted_at=AT)
         json.loads(self.get("/api/wins").text, parse_constant=lambda t: self.fail(t))

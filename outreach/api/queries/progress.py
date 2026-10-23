@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from outreach.api.config import ApiConfig
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
+from outreach.api.models.company import CompanyRef
 from outreach.api.models.progress import (
     BaseRates, EffortLine, Finding, FindingChange, FindingCount, FindingsView, FunnelFrom, FunnelStage,
     ProgressPeriod, ProgressView, TodayProgress, Win, WinCounts, WinsSeen, WinsView,
@@ -40,6 +41,7 @@ STAGE_LABELS = {"requests": "Requests", "accepts": "Accepts", "replies": "Replie
 CAUTION_FACTOR = 2
 MAX_CHANGES = 20
 LINKEDIN = ("linkedin_request", "linkedin_message")
+UNKNOWN_COMPANY = "Unknown company"  # the name a win shows when its company row cannot be read
 MAX_TOUCH_ID = 2 ** 62  # a win id past this cannot name a touch the store holds (and SQLite integers stop at 2 ** 63)
 
 
@@ -304,8 +306,9 @@ def wins_view(conn: sqlite3.Connection, now: str) -> WinsView:
     for c in shown:
         t = c.touch
         company = companies.get(survivor_of(parents, t["company_id"]))
-        if company is None:
-            continue
+        if company is None:  # the company row is gone: still listed, so the list matches the counts
+            company = CompanyRef(id=t["company_id"], name=UNKNOWN_COMPANY, status="removed", paused_at=None,
+                                 held_by_touch_id=None)
         person = people.get(t["person_id"]) if t["person_id"] is not None else None
         wins.append(Win(
             win_id=c.id, kind=c.kind, at=c.at, touch_id=t["touch_id"],

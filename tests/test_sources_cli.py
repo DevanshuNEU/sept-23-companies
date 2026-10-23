@@ -249,6 +249,17 @@ class FetchCommandTest(CliCase):
         self.assertEqual(self.ok("fetch", "stapply", "--dest", dest)["updated"], [])  # nothing changed
         self.assertEqual(self.factory_calls[0][0], "declared")
 
+    def test_fetch_stapply_reports_the_excluded_slices_and_their_rows(self):
+        manifest = json.loads((STAPPLY / "manifest.json").read_text(encoding="utf-8"))
+        routes = {entry["csv"]: STAPPLY / f"{name}.csv" for name, entry in manifest["by_ats_companies"].items()}
+        manifest["by_ats_companies"]["wellfound"] = {"csv": "https://storage.stapply.ai/jobhive/v1/wellfound/x.csv",
+                                                     "sha256": "ab" * 32, "rows": 7}
+        routes["https://storage.stapply.ai/jobhive/v1/manifest.json"] = json.dumps(manifest).encode()
+        self.client = FakeClient(routes)
+        report = self.ok("fetch", "stapply", "--dest", self.sources / "fresh")
+        self.assertEqual((report["excluded_lists"], report["excluded_rows"]), (["wellfound"], 7))
+        self.assertFalse(any("wellfound" in u for u in self.client.requests))
+
     def test_fetch_lca_uses_the_browser_profile_and_the_urls_in_lca_toml(self):
         urls = cli.lca_download_urls()
         self.assertGreaterEqual(len(urls), 5)

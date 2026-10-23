@@ -1,5 +1,6 @@
 """The find_boards job (#31 Tasks 14 and 15): alias boards, the stapply lookup, tiers and the report, on the LCA and HN
 fixtures after run_discover."""
+import dataclasses
 import importlib
 import json
 import sys
@@ -318,6 +319,29 @@ class CareersStepTest(FindBoardsBase):
         self.assertEqual(watched["Gemco Labs"]["url"], "https://gemco.example/careers")  # Gem has no adapter
         self.assertEqual(sorted(watched), ["Gemco Labs", "Mesh Systems"])  # a Greenhouse board gets none
         self.assertEqual((report.adapter_unknown, report.unreadable_boards), (0, 0))
+
+    def test_a_company_whose_only_board_is_on_a_switched_off_ats_gets_a_watched_page(self):
+        # #46: the crawler's [ats_off] list is the one source. A board it never reads is no reader for the company, so
+        # the company is watched like one with no readable board, never silently dropped.
+        add_by_hand(self.conn, name="Smartco Labs", reason="a friend works there", domain="smartco.example",
+                    ats="smartrecruiters:smartco")
+        add_by_hand(self.conn, name="Pinco Labs", reason="a friend works there", domain="pinco.example",
+                    ats="pinpoint:pinco")
+        routes = careers_routes(**{"https://smartco.example/careers": CAREERS / "plain_page.html",
+                                   "https://pinco.example/careers": CAREERS / "plain_page.html"})
+        self.run_careers(routes)
+        watched = self.watched()
+        self.assertEqual(watched["Smartco Labs"]["url"], "https://smartco.example/careers")
+        self.assertEqual(watched["Pinco Labs"]["url"], "https://pinco.example/careers")
+
+    def test_a_reader_turned_back_on_reads_the_company_again_and_no_page_is_added(self):
+        from outreach.crawl import config as crawl_config
+        on = dataclasses.replace(crawl_config.load_crawl_config(), ats_off={})
+        add_by_hand(self.conn, name="Smartco Labs", reason="a friend works there", domain="smartco.example",
+                    ats="smartrecruiters:smartco")
+        with mock.patch.object(crawl_config, "load_crawl_config", return_value=on):
+            self.run_careers()  # no route for smartco.example: a request to it would fail the test
+        self.assertNotIn("Smartco Labs", self.watched())
 
     def test_the_real_adapter_set_decides_which_boards_are_unread(self):
         # No stand-in: whatever `outreach.crawl.ats.supported_ats()` says today. Rule 9 of #31 follows it.

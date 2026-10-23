@@ -15,12 +15,12 @@ CONFIG_PATH = Path(__file__).with_name("config.toml")
 # the TOML fails loudly instead of quietly turning a rule off.
 REQUIRED = {
     "candidate": ("graduated", "max_years_asked"),
-    "title": ("engineering", "intern", "off_lane", "general_application", "senior", "manager", "strong_entry",
+    "title": ("engineering", "intern", "off_lane", "general_application", "academic", "senior", "manager", "strong_entry",
               "new_grad", "early_career", "open_level", "level_nouns", "level_qualifiers"),
     "years": ("experience_words", "preferred", "degree_alternative", "company_age", "company_voice", "candidate_voice",
               "body_entry"),
     "location": ("us_marks", "us_state_codes", "us_state_names", "us_cities", "non_us_countries", "non_us_cities",
-                 "shared_city_names"),
+                 "shared_city_names", "title_fillers"),
     "sponsorship": ("topic", "context", "self_context", "benefit", "non_discrimination", "negation", "negation_near",
                     "clause_verbs", "field_no", "hedge", "negators", "negation_elided", "elided_complete", "continuation",
                     "not_subject", "negation_cued", "negation_cue", "opt", "opt_acronyms", "opt_support", "citizenship",

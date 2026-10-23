@@ -7,7 +7,8 @@ here carries `found_by = 'slug_probe'`, which gets the same first-read check as 
 
 Probing makes no EU request: the Greenhouse and Lever adapters retry a 404 on their EU host, which would double every
 guessed-slug 404, so `_NoEuClient` answers an EU host with a 404 of its own and sends nothing. Normal reads are not
-touched. A tripped host ends the pass for that host only. No transaction is open across a request.
+touched. A tripped host ends the pass for that host only. An ATS whose reader is switched off in config.toml
+(`ats_off`, #46) is never asked. No transaction is open across a request.
 """
 from __future__ import annotations
 
@@ -169,19 +170,20 @@ def probe_slugs(conn: sqlite3.Connection, company_ids: Collection[int], client: 
     now = now or utcnow()
     work = _eligible(conn, company_ids, now)
     probing = _NoEuClient(client)
-    adapters = {ats: adapter_for(ats, probing) for ats in PROBE_ATS}
-    buckets = {ats: bucket_for(host, cfg) for ats, host in PROBE_ATS.items()}
+    asking = [ats for ats in PROBE_ATS if cfg.reads(ats)]  # a switched-off reader is never asked (#46)
+    adapters = {ats: adapter_for(ats, probing) for ats in asking}
+    buckets = {ats: bucket_for(PROBE_ATS[ats], cfg) for ats in asking}
     dead: set[str] = set()
     probed = added = conflicts = mismatches = errors = 0
     for company_id, names, slugs in work:
-        if len(dead) == len(PROBE_ATS) or probed >= limit:
+        if len(dead) == len(asking) or probed >= limit:
             break
         probed += 1
         keys = None
         asked = 0
         mismatched = done = False
         for slug in slugs:
-            for ats in PROBE_ATS:
+            for ats in asking:
                 if ats in dead or adapters[ats] is None:
                     continue
                 try:

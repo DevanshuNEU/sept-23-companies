@@ -58,10 +58,15 @@ def _lane(title: str, cfg: Config) -> tuple[str, str]:
     t = cfg.title
     if m := phrases(t["general_application"]).search(title):
         return "general_application", f"Title says {m.group(0)}, a general application"
+    academic = phrases(t["academic"]).search(title)
     if m := phrases(t["intern"]).search(title):
+        if academic:  # "Assistant Professor ..., Internship Coordinator" is an academic post, not an internship
+            return "off_lane", f"Title says {academic.group(0)}, an academic post"
         return "intern", f"Title says {m.group(0)}, an internship"
     if not phrases(t["engineering"]).search(title):
         return "not_engineering", "Title names no engineering role"
+    if academic:
+        return "off_lane", f"Title says {academic.group(0)}, an academic post"
     if m := phrases(t["off_lane"]).search(title):
         return "off_lane", f"Title says {m.group(0)}, outside his lane"
     return "engineering", ""

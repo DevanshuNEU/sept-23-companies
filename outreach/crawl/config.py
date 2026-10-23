@@ -6,9 +6,19 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["CONFIG_PATH", "CrawlConfig", "load_crawl_config"]
+__all__ = ["ATS_HOSTS", "CONFIG_PATH", "CrawlConfig", "load_crawl_config"]
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
+
+# Each ATS the crawler has a reader for, and the host suffix every request of that reader goes to (its host bucket).
+# A test keeps the names equal to `outreach.crawl.ats.supported_ats()`; it lives here so loading the config imports no
+# adapter.
+ATS_HOSTS = {
+    "greenhouse": "greenhouse.io", "lever": "lever.co", "ashby": "ashbyhq.com", "smartrecruiters": "smartrecruiters.com",
+    "workday": "myworkdayjobs.com", "workable": "workable.com", "oracle_orc": "oraclecloud.com",
+    "rippling": "rippling.com", "breezy": "breezy.hr", "pinpoint": "pinpointhq.com", "teamtailor": "teamtailor.com",
+    "recruitee": "recruitee.com", "bamboohr": "bamboohr.com", "jazzhr": "applytojob.com",
+}
 
 _INT_KEYS = ("floor_s", "ceiling_s", "age_divisor", "defer_s", "max_bytes", "max_redirects", "breaker_failures",
              "batch_rows", "decide_batch", "detail_per_read", "boards_per_tick", "tick_budget_s", "top_companies",
@@ -42,6 +52,20 @@ class CrawlConfig:
     stale_after_months: int
     body_refetch_days: int
     outage_grace_s: int
+    ats_off: dict[str, str]  # ATS name -> why its reader is switched off (#46)
+
+    def reads(self, ats: str) -> bool:
+        """False for an ATS whose reader is switched off: its boards are never read, probed or slug-probed."""
+        return ats not in self.ats_off
+
+    def off_host(self, host: str) -> str | None:
+        """The switched-off ATS whose host suffix `host` is (or is a subdomain of), else None."""
+        host = (host or "").lower().rstrip(".")
+        for ats in self.ats_off:
+            suffix = ATS_HOSTS[ats]
+            if host == suffix or host.endswith("." + suffix):
+                return ats
+        return None
 
 
 def _is_number(v: object) -> bool:
@@ -55,7 +79,7 @@ def _is_positive(v: object) -> bool:
 def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     path = Path(path)
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s"):
+    for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s", "ats_off"):
         if key not in data:
             raise KeyError(f"{key} is missing from {path.name}")
     for key in _INT_KEYS:
@@ -69,6 +93,15 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     hosts = data["host_interval_s"]
     if not isinstance(hosts, dict) or not all(_is_positive(v) for v in hosts.values()):
         raise ValueError("host_interval_s must map host suffixes to finite seconds above 0")
+    off = data["ats_off"]
+    if not isinstance(off, dict):
+        raise ValueError("ats_off must be a table of ATS names, each with the reason its reader is off")
+    for ats, reason in off.items():
+        if ats not in ATS_HOSTS:
+            raise ValueError(f"ats_off names {ats}, which is not an ATS the crawler reads "
+                             f"(it reads: {', '.join(sorted(ATS_HOSTS))})")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"ats_off.{ats} must give the reason its reader is off, as text")
 
     if "@" in data["user_agent"]:
         raise ValueError("user_agent must not carry an email address")
@@ -89,4 +122,5 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
 
     kwargs = {k: data[k] for k in (*_INT_KEYS, *_NUM_KEYS, "user_agent")}
     kwargs["host_interval_s"] = {k.lower(): float(v) for k, v in hosts.items()}
+    kwargs["ats_off"] = {ats: reason.strip() for ats, reason in off.items()}
     return CrawlConfig(**kwargs)

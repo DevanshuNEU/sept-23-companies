@@ -62,6 +62,17 @@ class DecideTests(unittest.TestCase):
     def test_non_us_fails_passes(self):
         self.assertFalse(passes(d("Software Engineer, New Grad", "", "Paris, France")))
 
+    def test_a_non_us_country_in_the_title_fails_passes_when_the_location_is_silent(self):
+        r = d("Software Engineer II (Venezuela)", "", "Remote")
+        self.assertEqual(r.us, "no")
+        self.assertFalse(passes(r))
+        self.assertEqual(d("Software Engineer II (Venezuela)", "", "").us, "no")
+        # a US place in the location, or a US mark in the title, keeps it in
+        self.assertEqual(d("Software Engineer II (Venezuela)", "", "Austin, TX").us, "yes")
+        self.assertNotEqual(d("Software Engineer (US)", "", "Remote").us, "no")
+        self.assertTrue(passes(d("Software Engineer, Remote (USA or Canada)", "", "Remote")))
+        self.assertNotEqual(d("Engineer, Georgia Tech", "", "Remote").us, "no")
+
     def test_off_lane_fails_passes(self):
         self.assertFalse(passes(d("Solutions Engineer", "")))
 

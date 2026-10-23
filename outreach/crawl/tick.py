@@ -3,7 +3,9 @@
 One tick is one `read_boards` job run. It rebuilds first when the store's ruleset is not this code's, so a rebuild
 and a crawl never overlap; `tick_lock` keeps two ticks from running at once. Boards come from `due_boards` in its
 fixed order (today's plan, then never read, then the oldest due), and no new board starts once `tick_budget_s` has
-passed, so a Mac that slept for days reads what matters first and leaves the rest due.
+passed, so a Mac that slept for days reads what matters first and leaves the rest due. A board whose ATS's reader is
+switched off in config.toml (`ats_off`, #46) is never due: nothing is sent, deferred or written for it, so its state,
+postings and decisions stay as they are until the reader is on again. The report counts such boards in `switched_off`.
 
 Every request goes through one `PoliteClient`. An outage is not a finding about any one board (Review Focus 3), so:
 
@@ -45,10 +47,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from outreach.crawl.ats import adapter_for, supported_ats
+from outreach.crawl.ats import adapter_for, reading_ats
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
 from outreach.crawl.boardstate import BoardRow
-from outreach.crawl.cadence import add_seconds, due_boards, error_backoff_s, plan_company_ids
+from outreach.crawl.cadence import add_seconds, due_boards, error_backoff_s, plan_company_ids, switched_off_boards
 from outreach.crawl.config import CrawlConfig, load_crawl_config
 from outreach.crawl.ingest import full_read_due, list_board, read_board
 from outreach.crawl.polite import HostTripped, PoliteClient, bucket_for
@@ -79,7 +81,8 @@ class TickReport:
     """What one tick did, and the `read_boards` job summary (`tripped` a list, `probe` and `watch` objects or null).
     `read` counts the boards whose read was recorded (ok, empty, error, unchanged); `deferred` the boards put off
     with no read recorded; `tripped` the host buckets the breaker stopped or that read a mass empty. The plan's
-    `queued` is gone (ruling 2)."""
+    `queued` is gone (ruling 2). `switched_off` counts the boards left alone because their ATS's reader is switched
+    off in config.toml (#46): not read, not deferred, nothing about them written."""
     run_id: int | None
     rebuilt: bool
     read: int = 0
@@ -91,6 +94,7 @@ class TickReport:
     failed: int = 0
     new: int = 0
     closed: int = 0
+    switched_off: int = 0
     seconds: float = 0.0
     tripped: tuple[str, ...] = ()
     watch: WatchReport | None = None  # the watched-page pass (its own `watch_pages` run); None when it did not run
@@ -229,7 +233,7 @@ class _Pass:
         now = self.now_fn()
         view = self.client()
         adapter = adapter_for(board.ats, view)
-        if adapter is None:  # due_boards selects supported ATSs only
+        if adapter is None:  # due_boards selects the ATSs the crawler reads only
             return
         try:
             result = list_board(adapter, board, full=full_read_due(self.conn, board, now))
@@ -345,8 +349,9 @@ def _checkpoint(conn: sqlite3.Connection) -> None:
 
 def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callable[[str], list[BoardRow]], *,
                  cfg: CrawlConfig, rules_cfg, combiner, now_fn, clock, started: float,
-                 rebuilt: bool) -> tuple[TickReport, _Pass]:
-    """One `read_boards` job run over `select(now)`, starting no board once the budget is spent."""
+                 rebuilt: bool, switched_off: int = 0) -> tuple[TickReport, _Pass]:
+    """One `read_boards` job run over `select(now)`, starting no board once the budget is spent. `switched_off` is
+    the count of boards `select` leaves out because their reader is off; it goes into the report as it is."""
     run_id = start_job(conn, "read_boards", ruleset_version())
     run = _Pass(conn, polite, cfg, rules_cfg, combiner, now_fn, run_id)
     try:
@@ -363,8 +368,8 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
         except Exception as finish_err:  # keep the original error as the one that propagates
             e.add_note(f"could not record the failed run: {describe_error(finish_err)}")
         raise
-    report = TickReport(run_id=run_id, rebuilt=rebuilt, **run.counts, seconds=round(clock() - started, 3),
-                        tripped=tuple(sorted(run.down)))
+    report = TickReport(run_id=run_id, rebuilt=rebuilt, **run.counts, switched_off=switched_off,
+                        seconds=round(clock() - started, 3), tripped=tuple(sorted(run.down)))
     summary = {k: v for k, v in asdict(report).items()
                if k not in ("watch", "watch_error", "probe", "probe_error")}
     if run.failed_ids:
@@ -430,11 +435,12 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
         polite = _polite(client, cfg, clock, sleep)
 
         def select(now: str) -> list[BoardRow]:
-            return due_boards(conn, now, supported=supported_ats(), plan_ids=plan_company_ids(conn, plan_date(now)),
+            return due_boards(conn, now, supported=reading_ats(cfg), plan_ids=plan_company_ids(conn, plan_date(now)),
                               cfg=cfg, limit=limit or cfg.boards_per_tick)
 
+        off = len(switched_off_boards(conn, cfg.ats_off))
         report, run = _read_boards(conn, polite, select, cfg=cfg, rules_cfg=rules_cfg, combiner=combiner,
-                                   now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt)
+                                   now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt, switched_off=off)
         probe, probe_error = _probe_step(conn, run, cfg, now_fn, clock, started)
         report = replace(report, probe=probe, probe_error=probe_error)
         try:
@@ -485,11 +491,12 @@ def _read_company_boards(conn, client, company_ids, *, cfg, rules_cfg, combiner,
         polite = _polite(client, cfg, clock, sleep)
 
         def select(now: str) -> list[BoardRow]:
-            return due_boards(conn, now, supported=supported_ats(), plan_ids=plan_company_ids(conn, plan_date(now)),
+            return due_boards(conn, now, supported=reading_ats(cfg), plan_ids=plan_company_ids(conn, plan_date(now)),
                               cfg=cfg, limit=cfg.boards_per_tick, only_company_ids=ids, force=True)
 
+        off = len(switched_off_boards(conn, cfg.ats_off, only_company_ids=ids))
         report, _ = _read_boards(conn, polite, select, cfg=cfg, rules_cfg=rules_cfg, combiner=combiner,
-                                 now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt)
+                                 now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt, switched_off=off)
         return report
     finally:
         _checkpoint(conn)

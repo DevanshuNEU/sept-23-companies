@@ -13,6 +13,7 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "test": "TZ=America/New_York vitest run",
+    "test:load": "bash scripts/under-load.sh pnpm test",
     "e2e": "playwright test",
     "gen:api": "openapi-typescript openapi.json -o src/api/schema.ts",
     "check:api": "cd .. && uv run python -m outreach.api.openapi --check && cd web && openapi-typescript openapi.json | diff -q - src/api/schema.ts"

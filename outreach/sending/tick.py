@@ -55,7 +55,7 @@ from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
 __all__ = ["LOCK_NAME", "BUSY_LINE", "STALE_RUN", "COUNT_KEYS", "WAIT_TITLE", "UNPROVEN_TEXT", "BANNED_TEXT",
-           "TickDeps", "TickReport", "run_tick"]
+           "PROOF_SQL", "TickDeps", "TickReport", "run_tick"]
 
 LOCK_NAME = ".sender.lock"
 BUSY_LINE = "another tick is running"
@@ -66,7 +66,7 @@ UNPROVEN_TEXT = "Sending waits: Gmail's Message-ID handling is not proven."
 BANNED_TEXT = "Sending waits: the banned phrases list could not be read. Fix it to resume."
 # Proof that Gmail keeps the Message-ID the sender sets: an imported email found in Sent under its own id, or a
 # send of this sender recorded under the very id it claimed (read back from Gmail, or found in Sent by it).
-_PROOF = ("SELECT 1 FROM event WHERE entity = 'message' AND (kind = 'import_verified' OR (kind IN ('sent', "
+PROOF_SQL = ("SELECT 1 FROM event WHERE entity = 'message' AND (kind = 'import_verified' OR (kind IN ('sent', "
           "'reconciled_sent') AND json_extract(detail, '$.rfc_message_id') = json_extract(detail, '$.claimed_rfc_id')))"
           " LIMIT 1")
 
@@ -524,7 +524,7 @@ class _Tick:
         elif old_loaded:
             gate = "old_sender_running"
             self._line("the old mail sender is still loaded, so nothing is sent")
-        elif self.conn.execute(_PROOF).fetchone() is None:
+        elif self.conn.execute(PROOF_SQL).fetchone() is None:
             gate = "message_id_unproven"
         verdicts = queue.verdicts(self.conn, self.now, self.cfg, day=self.day, gate=gate)
         self.waiting = dict(Counter(v.reason for v in verdicts if v.reason != "ready"))

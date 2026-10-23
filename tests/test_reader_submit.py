@@ -1,6 +1,7 @@
 """The reader's submit: quote checks, refusal, re-queue and duplicates (issue #32, Task 3)."""
 import json
 import unittest
+from unittest import mock
 from dataclasses import replace
 
 from outreach.reader import queue
@@ -67,8 +68,8 @@ class SubmitCase(unittest.TestCase):
             obj["reader_version"] = request.reader_version
         return obj
 
-    def submit(self, readings, now=T_SUBMIT, cfg=None):
-        return submit(self.conn, readings, cfg=cfg or self.cfg, version=VERSION, now=now)
+    def submit(self, readings, now=T_SUBMIT, cfg=None, **kw):
+        return submit(self.conn, readings, cfg=cfg or self.cfg, version=VERSION, now=now, **kw)
 
     def stored(self, posting_id=None):
         sql = "SELECT * FROM posting_reading" + ("" if posting_id is None else " WHERE posting_id = ?")
@@ -245,6 +246,47 @@ class RefusalTests(SubmitCase):
         self.assertEqual(self.stored(), [])
         self.assertEqual(self.queue_row(req)["state"], "refused")
 
+    def test_a_lone_surrogate_does_not_stop_the_batch(self):
+        bad_field, bad_version, good = self.leased(), self.leased(), self.leased()
+        surrogate_key = self.reading(bad_field)
+        surrogate_key["fields"]["\ud800"] = {"value": "x", "quote": ""}
+        surrogate_version = self.reading(bad_version, with_version=True)
+        surrogate_version["reader_version"] = "rv-\ud800"
+        results = self.submit([surrogate_key, surrogate_version,
+                               self.reading(good, sponsorship=("wont_sponsor", "We do not sponsor visas."))])
+        self.assertEqual(results[0].status, "requeued")
+        row = self.queue_row(bad_field)
+        self.assertEqual(row["state"], "queued")
+        self.assertIn("\\ud800", row["last_error"])
+        self.assertEqual(results[1].status, "unknown")
+        self.assertEqual(results[2].status, "stored")
+        for res in results[:2]:
+            res.error.encode("ascii")
+        self.assertEqual([r["posting_id"] for r in self.stored()], [good.posting_id])
+        self.assertEqual(self.queue_row(bad_version)["state"], "leased")
+
+    def test_an_unexpected_error_in_one_reading_is_contained(self):
+        first, good = self.leased(), self.leased()
+        with mock.patch("outreach.reader.submit.append_event", side_effect=[RuntimeError("disk said no"), None]):
+            results = self.submit([self.reading(first), self.reading(good)])
+        self.assertEqual([r.status for r in results], ["refused", "stored"])
+        self.assertIn("disk said no", results[0].error)
+        self.assertEqual([r["posting_id"] for r in self.stored()], [good.posting_id])
+        self.assertEqual(self.queue_row(first)["state"], "leased", "the failed unit is rolled back")
+
+    def test_free_text_values_must_be_in_the_text(self):
+        req = self.leased()
+        (res,) = self.submit(self.reading(req, location=("Toronto, Canada", "Austin")))
+        self.assertEqual((res.status, res.refused_fields), ("requeued", ("location",)))
+        req = self.leased(body_of(SPONSOR_LINE + " Pay is $150,000 a year. Start in June 2027."))
+        (res,) = self.submit(self.reading(req, pay=("$900,000", "$150,000"), start_date=("May 2026", "June 2027")))
+        self.assertEqual((res.status, res.refused_fields), ("requeued", ("start_date", "pay")))
+        req = self.leased(body_of(SPONSOR_LINE + " Pay is $150,000 a year. Start in June 2027."))
+        (res,) = self.submit(self.reading(req, pay=("$150,000", "Pay is $150,000 a year."),
+                                          start_date=("june  2027", "Start in June 2027"),
+                                          location=("Austin, TX", "Austin, TX")))
+        self.assertEqual(res.status, "stored")
+
     def test_garbage_never_raises(self):
         req = self.leased()
         results = self.submit(["not a reading", None, 7, {"posting_id": "x"}, {"posting_id": 2 ** 70},
@@ -291,6 +333,15 @@ class QuoteTextTests(SubmitCase):
         other = self.leased(body, title="Software Engineer, New Grad", location="Remote, United States")
         (res,) = self.submit(self.reading(other, level=("new_grad", "Senior Staff Engineer role")))
         self.assertEqual((res.status, res.refused_fields), ("requeued", ("level",)))
+
+    def test_a_quote_cannot_be_stitched_across_title_location_and_body(self):
+        body = body_of("Citizens of all countries are welcome to apply.")
+        across_title = self.leased(body, title="Software Engineer, US", location="")
+        (res,) = self.submit(self.reading(across_title, citizenship_or_clearance=("yes", "Engineer, US Citizens")))
+        self.assertEqual((res.status, res.refused_fields), ("requeued", ("citizenship_or_clearance",)))
+        across_location = self.leased(body, title="Software Engineer", location="US")
+        (res,) = self.submit(self.reading(across_location, citizenship_or_clearance=("yes", "US Citizens of all")))
+        self.assertEqual((res.status, res.refused_fields), ("requeued", ("citizenship_or_clearance",)))
 
 
 class StaleAndDuplicateTests(SubmitCase):
@@ -360,9 +411,9 @@ class LeaseTests(SubmitCase):
     """The queue has no owner column: a reading is keyed on the body and the version, so any reader's valid reading
     of that key is the same fact. The first one is stored, every later one is a duplicate."""
 
-    def hand_on(self, req):
+    def hand_on(self, req, cfg=None):
         """The first lease runs out and a second reader takes the posting."""
-        (second,) = queue.next_batch(self.conn, 1, cfg=self.cfg, version=VERSION, now=T_LATE)
+        (second,) = queue.next_batch(self.conn, 1, cfg=cfg or self.cfg, version=VERSION, now=T_LATE)
         self.assertEqual((second.posting_id, second.body_sha256), (req.posting_id, req.body_sha256))
         self.assertEqual(self.queue_row(req)["attempts"], 2)
         return second
@@ -391,13 +442,61 @@ class LeaseTests(SubmitCase):
         row = self.queue_row(first)
         self.assertEqual((row["state"], row["attempts"]), ("done", 2))
 
-    def test_a_refusal_never_counts_an_attempt(self):
+    def bad(self, req):
+        return self.reading(req, sponsorship=("wont_sponsor", "no visa sponsorship"))
+
+    def test_a_late_bad_reading_leaves_the_second_lease_untouched(self):
         first = self.leased()
         self.hand_on(first)
-        (res,) = self.submit(self.reading(first, sponsorship=("wont_sponsor", "no visa sponsorship")), now=T_LATER)
+        row_before = tuple(self.queue_row(first))
+        (res,) = self.submit(self.bad(first), now=T_LATER, lease_attempt=1)
+        self.assertEqual((res.status, res.refused_fields), ("stale", ("sponsorship",)))
+        self.assertIn("lease", res.error)
+        self.assertEqual(tuple(self.queue_row(first)), row_before)
+        self.assertEqual(self.queue_row(first)["state"], "leased")
+        self.assertEqual(self.stored(), [])
+
+    def test_a_late_bad_reading_at_the_limit_stores_no_partial(self):
+        cfg = replace(self.cfg, max_attempts=2)
+        first = self.leased(cfg=cfg)
+        second = self.hand_on(first, cfg=cfg)
+        row_before = tuple(self.queue_row(first))
+        (res,) = self.submit(self.bad(first), now=T_LATER, cfg=cfg, lease_attempt={first.posting_id: 1})
+        self.assertEqual(res.status, "stale")
+        self.assertEqual(self.stored(), [])
+        self.assertEqual(tuple(self.queue_row(first)), row_before)
+        (res,) = self.submit(self.bad(second), now=T_LATER, cfg=cfg, lease_attempt={second.posting_id: 2})
+        self.assertEqual(res.status, "partial")
+
+    def test_the_current_lease_holder_refusal_requeues(self):
+        first = self.leased()
+        self.hand_on(first)
+        (res,) = self.submit(self.bad(first), now=T_LATER, lease_attempt=2)
         self.assertEqual(res.status, "requeued")
         row = self.queue_row(first)
         self.assertEqual((row["state"], row["attempts"], row["lease_until"]), ("queued", 2, None))
+
+    def test_a_late_good_reading_is_still_accepted(self):
+        first = self.leased()
+        self.hand_on(first)
+        (res,) = self.submit(self.good(first), now=T_LATER, lease_attempt=1)
+        self.assertEqual(res.status, "stored")
+        self.assertEqual(self.queue_row(first)["state"], "done")
+
+    def test_without_a_lease_attempt_a_refusal_requeues_and_never_counts_an_attempt(self):
+        """A side session does not know its attempt; its refusal puts the row back without touching attempts."""
+        first = self.leased()
+        self.hand_on(first)
+        (res,) = self.submit(self.bad(first), now=T_LATER)
+        self.assertEqual(res.status, "requeued")
+        row = self.queue_row(first)
+        self.assertEqual((row["state"], row["attempts"], row["lease_until"]), ("queued", 2, None))
+
+    def test_a_posting_missing_from_the_lease_map_is_not_checked(self):
+        first = self.leased()
+        self.hand_on(first)
+        (res,) = self.submit(self.bad(first), now=T_LATER, lease_attempt={first.posting_id + 1000: 1})
+        self.assertEqual(res.status, "requeued")
 
     def test_an_expired_lease_nobody_took_still_accepts_a_reading(self):
         first = self.leased()

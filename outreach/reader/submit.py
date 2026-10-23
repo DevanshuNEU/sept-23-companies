@@ -2,8 +2,9 @@
 
 A reading is a model's answer about one posting body. Nothing in it is taken on trust: the shape goes through the
 foundation's `PostingReading.from_json`, and every field that states a fact must quote words that are really in the
-posting text (`quote_in_body` on the title, the structured location and the body). A field whose quote is not found
-is refused. While the posting has leases left, a refused reading is not stored at all and the posting goes back to
+posting text (`quote_in_body` on the title, the structured location or the body, one part at a time, so a quote
+cannot be stitched across two of them). A free-text value (location, pay, start date) must itself be in the text, or
+be the quote. A field that fails is refused. While the posting has leases left, a refused reading is not stored at all and the posting goes back to
 the queue for another read; at the limit the reading is stored as partial, each refused field blanked to "unknown",
 so a quote that does not check out never becomes a fact. Submit writes no decision: combining the reading with the
 rules is `combine.py`'s job.
@@ -13,23 +14,28 @@ the row's state, not on who holds the lease. A row that is leased (live or run o
 row that is done or refused answers `duplicate` and changes nothing. Two readers of the same key read the same
 text with the same version, so the first good reading stored is the fact and a late reader costs a second model
 call, never a second fact. Submit never changes `attempts`: an attempt is counted when `next_batch` hands a lease
-out, and a refusal only puts the row back to `queued`.
+out, and a refusal only puts the row back to `queued`. A caller that knows which attempt it leased (the night job)
+passes it as `lease_attempt`; when the row has moved on to a later attempt, the lease was handed to someone else, so
+a bad reading from it changes nothing (no requeue, no partial) and answers `stale`. A good reading is still taken.
 
-Each reading is its own transaction, so a bad one never undoes its neighbours.
+Each reading is its own transaction, so a bad one never undoes its neighbours, and an error inside one (even one
+that is not a `ValueError`) is rolled back and answered, never raised.
 """
 from __future__ import annotations
 
 import json
 import re
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from outreach.reader.config import ReaderConfig, load_reader_config
 from outreach.reader.queue import enqueue
-from outreach.reader.types import FIELDS, INT_FIELDS, TEXT_FIELDS, FieldReading, PostingReading, quote_in_body
+from outreach.reader.types import (FIELDS, INT_FIELDS, TEXT_FIELDS, FieldReading, PostingReading, _collapse,
+                                   quote_in_body)
 from outreach.reader.version import reader_version
-from outreach.store import append_event, atomic, body_sha256, iso_utc, utcnow
+from outreach.store import append_event, atomic, body_sha256, describe_error, iso_utc, utcnow
 
 __all__ = ["SubmitResult", "submit", "blank_field", "min_words"]
 
@@ -70,18 +76,21 @@ def min_words(name: str) -> int:
 
 
 def submit(conn: sqlite3.Connection, readings: list[dict] | dict, *, cfg: ReaderConfig | None = None,
-           version: str | None = None, now: str | None = None) -> list[SubmitResult]:
+           version: str | None = None, now: str | None = None,
+           lease_attempt: int | Mapping[int, int] | None = None) -> list[SubmitResult]:
     """Check and store readings; one result per reading, in order. Never raises on a bad reading.
 
     `version` is the reader version a reading without one is filed under (the model does not copy it back; the
     queue key does); it defaults to the version computed from the files. `now` is when the reading arrived.
+    `lease_attempt` is the attempt the caller leased: one number for every reading, or a map from posting id to
+    attempt (rows in one batch can be on different attempts). A posting it does not name is not checked.
     """
     cfg = cfg if cfg is not None else load_reader_config()
     version = version if version is not None else reader_version(cfg)
     now = iso_utc(now) if now else utcnow()
     if isinstance(readings, dict) or not isinstance(readings, (list, tuple)):
         readings = [readings]
-    return [_submit_one(conn, obj, cfg, version, now) for obj in readings]
+    return [_submit_one(conn, obj, cfg, version, now, lease_attempt) for obj in readings]
 
 
 class _Undo(Exception):
@@ -90,6 +99,19 @@ class _Undo(Exception):
     def __init__(self, result: SubmitResult):
         super().__init__(result.status)
         self.result = result
+
+
+def _safe(text: str) -> str:
+    """Error text that binds to SQLite and prints anywhere: non-ASCII, lone surrogates included, as escapes."""
+    return text.encode("ascii", "backslashreplace").decode("ascii")
+
+
+def _encodes(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _key(obj: Any, version: str) -> tuple[int | None, str, str, str]:
@@ -104,24 +126,28 @@ def _key(obj: Any, version: str) -> tuple[int | None, str, str, str]:
     if not isinstance(sha, str) or not _SHA.match(sha):
         return pid, "", version, "body_sha256 must be 64 lower-case hex characters"
     rv = obj.get("reader_version", version)
-    if not isinstance(rv, str) or not rv:
-        return pid, sha, version, "reader_version must be a non-empty string"
+    if not isinstance(rv, str) or not rv or not _encodes(rv):
+        return pid, sha, version, "reader_version must be a non-empty UTF-8 string"
     return pid, sha, rv, ""
 
 
-def _submit_one(conn: sqlite3.Connection, obj: Any, cfg: ReaderConfig, version: str, now: str) -> SubmitResult:
+def _submit_one(conn: sqlite3.Connection, obj: Any, cfg: ReaderConfig, version: str, now: str,
+                lease_attempt: int | Mapping[int, int] | None) -> SubmitResult:
     pid, sha, rv, error = _key(obj, version)
     if error:
         return SubmitResult(pid, sha, "unknown", error=error)
+    attempt = lease_attempt.get(pid) if isinstance(lease_attempt, Mapping) else lease_attempt
     try:
         with atomic(conn, "reader_submit"):
-            return _checked(conn, obj, pid, sha, rv, cfg, now)
+            return _checked(conn, obj, pid, sha, rv, cfg, now, attempt)
     except _Undo as undo:
         return undo.result
+    except Exception as err:  # noqa: BLE001 - one reading's failure is its answer, never the batch's end
+        return SubmitResult(pid, sha, "refused", error=_safe(describe_error(err)))
 
 
 def _checked(conn: sqlite3.Connection, obj: dict, pid: int, sha: str, rv: str, cfg: ReaderConfig,
-             now: str) -> SubmitResult:
+             now: str, attempt: int | None) -> SubmitResult:
     key = (pid, sha, rv)
     row = conn.execute("SELECT state, attempts FROM read_queue WHERE posting_id = ? AND body_sha256 = ? "
                        "AND reader_version = ?", key).fetchone()
@@ -130,6 +156,8 @@ def _checked(conn: sqlite3.Connection, obj: dict, pid: int, sha: str, rv: str, c
     if row["state"] in ("done", "refused"):
         return SubmitResult(pid, sha, "duplicate")
     at_limit = row["attempts"] >= cfg.max_attempts
+    # The caller's lease was handed on: its bad reading must not requeue or end someone else's lease.
+    handed_on = attempt is not None and attempt != row["attempts"]
 
     post = conn.execute("SELECT p.title, p.location, p.company_id, b.body FROM posting p "
                         "LEFT JOIN posting_body b ON b.posting_id = p.posting_id WHERE p.posting_id = ?",
@@ -145,19 +173,23 @@ def _checked(conn: sqlite3.Connection, obj: dict, pid: int, sha: str, rv: str, c
     try:
         reading = PostingReading.from_json({**obj, "reader_version": rv})
     except ValueError as err:
-        message = f"malformed: {err}"
+        message = _safe(f"malformed: {err}")
+        if handed_on:
+            return SubmitResult(pid, sha, "stale", error=_handed_on(attempt, row["attempts"], message))
         if at_limit:
             _end(conn, key, "refused", message)
             return SubmitResult(pid, sha, "refused", error=message)
         _requeue(conn, key, message)
         return SubmitResult(pid, sha, "requeued", error=message)
 
-    haystack = f"{post['title']}\n{post['location']}\n{post['body']}"
+    parts = (post["title"], post["location"], post["body"])
     fields: dict[str, FieldReading] = {}
     refused: list[str] = []
     for name in FIELDS:
         field = reading.fields[name]
-        found = quote_in_body(field.quote, haystack, min_words=min_words(name))
+        found = _found(field.quote, parts, min_words(name))
+        if found and name in TEXT_FIELDS and field.value:
+            found = _found(field.value, parts, 1) or _collapse(field.value) == _collapse(field.quote)
         if field.value in _NO_FACT:
             # The value needs no quote; a quote is kept only when it is really there, so that every stored quote
             # of a verified reading was found.
@@ -168,6 +200,9 @@ def _checked(conn: sqlite3.Connection, obj: dict, pid: int, sha: str, rv: str, c
             refused.append(name)
             fields[name] = blank_field(name)
 
+    if refused and handed_on:
+        message = _handed_on(attempt, row["attempts"], "refused: " + ", ".join(refused))
+        return SubmitResult(pid, sha, "stale", tuple(refused), message)
     if refused and not at_limit:
         message = "refused: " + ", ".join(refused)
         _requeue(conn, key, message)
@@ -190,6 +225,15 @@ def _checked(conn: sqlite3.Connection, obj: dict, pid: int, sha: str, rv: str, c
         return SubmitResult(pid, sha, "partial", tuple(refused), message)
     _end(conn, key, "done", "")
     return SubmitResult(pid, sha, "stored")
+
+
+def _found(text: str, parts: tuple[str, ...], floor: int) -> bool:
+    """`text` is word for word inside one part of the posting: the title, the location or the body."""
+    return any(quote_in_body(text, part, min_words=floor) for part in parts)
+
+
+def _handed_on(attempt: int, current: int, message: str) -> str:
+    return f"lease handed on (leased attempt {attempt}, the row is at {current}); nothing changed: {message}"
 
 
 def _end(conn: sqlite3.Connection, key: tuple[int, str, str], state: str, error: str) -> None:

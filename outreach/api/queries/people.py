@@ -85,7 +85,8 @@ def _latest_message(messages: list[sqlite3.Row]):
     return live[-1] if live else None
 
 
-def email_line(touch, messages, inbound, company) -> Line:
+def email_line(touch, messages, inbound, company, held: int | None = None) -> Line:
+    """`held` is the touch holding the company's family (`company.holding_touches`), None when nothing holds it."""
     last = max([m["sent_at"] for m in messages if m["sent_at"]] + [i["received_at"] for i in inbound], default=None)
     if touch is None:
         return Line("Not started", "idle", None)
@@ -105,7 +106,6 @@ def email_line(touch, messages, inbound, company) -> Line:
         "skipped": ("Skipped", "idle"),
     }[state]
     if state in ("drafted", "approved") and company is not None:
-        held = company["held_by_touch"]
         if company["paused_at"]:
             text = f"Paused, {text.lower()}"
         elif held is not None and held != touch["touch_id"]:
@@ -131,8 +131,11 @@ def linkedin_line(entries) -> Line:
     return Line(text, tone, last["at"])
 
 
-def lines(data: PeopleData, companies: dict) -> dict[int, Line]:
-    """person_id to the status line of the person, with the company's pause and hold taken into account."""
+def lines(data: PeopleData, companies: dict, holds: dict[int, int]) -> dict[int, Line]:
+    """person_id to the status line of the person, with the company's pause and hold taken into account.
+
+    `companies` maps a person's company id to its survivor's row; `holds` maps a survivor to the touch holding its
+    family (`company.holding_touches`), so a hold on a merged-away duplicate counts."""
     out = {}
     for p in data.persons:
         if p["channel"] == "linkedin":
@@ -140,8 +143,10 @@ def lines(data: PeopleData, companies: dict) -> dict[int, Line]:
             continue
         touch = data.touch_by_person.get(p["person_id"])
         tid = touch["touch_id"] if touch else None
+        company = companies.get(p["company_id"])
         out[p["person_id"]] = email_line(
-            touch, data.messages_by_touch.get(tid, []), data.inbound_by_touch.get(tid, []), companies.get(p["company_id"])
+            touch, data.messages_by_touch.get(tid, []), data.inbound_by_touch.get(tid, []), company,
+            holds.get(company["company_id"]) if company is not None else None,
         )
     return out
 

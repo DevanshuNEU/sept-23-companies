@@ -83,6 +83,18 @@ class Search(ApiCase):
         s.message(self.conn, s.touch(self.conn, pid), 0, "approved")
         self.assertEqual([p["statusLine"] for p in self.index()["people"]], ["Paused, approved"])
 
+    def test_a_hold_on_a_merged_duplicate_holds_the_survivor_in_the_index(self):
+        a = s.company(self.conn, "Acme", "working")
+        b = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=a)
+        t = s.touch(self.conn, s.person(self.conn, b, "Rae Replied"), "replied")
+        s.send_first(self.conn, t)
+        self.conn.execute("UPDATE company SET held_by_touch = ?, held_at = ? WHERE company_id = ?", (t, s.T0, b))
+        s.message(self.conn, s.touch(self.conn, s.person(self.conn, a, "Ann Approved")), 0, "approved")
+        index = self.index()
+        self.assertEqual([(c["id"], c["statusLine"]) for c in index["companies"]], [(a, "Held: reply")])
+        lines = {p["name"]: p["statusLine"] for p in index["people"]}
+        self.assertEqual(lines["Ann Approved"], "Held, approved")
+
     def test_a_merge_cycle_does_not_break_the_index(self):
         a = s.company(self.conn, "Acme", "removed", remove_reason="merged")
         b = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=a)

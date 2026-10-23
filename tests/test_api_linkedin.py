@@ -581,6 +581,15 @@ class Reads(LinkedInCase):
         self.assertIsNone(groups["Free"]["heldBy"])
         self.assertEqual((groups["Free"]["emailed"], groups["Free"]["onLinkedIn"]), (0, 1))
 
+    def test_a_hold_on_a_merged_duplicate_shows_on_the_survivors_group(self):
+        dup = s.company(self.conn, "Acme Inc", "removed", merged_into=self.acme)
+        held = s.touch(self.conn, s.person(self.conn, dup, "Priya Natarajan"))
+        s.send_first(self.conn, held)
+        self.conn.execute("UPDATE company SET held_by_touch = ?, held_at = ? WHERE company_id = ?", (held, s.T0, dup))
+        groups = {g["company"]["name"]: g for g in self.view()["groups"]}
+        self.assertEqual(groups["Acme"]["heldBy"], {"touchId": held, "personName": "Priya Natarajan"})
+        self.assertEqual(groups["Acme"]["company"]["heldByTouchId"], held)
+
     def test_a_merged_company_groups_under_its_survivor_and_follows_its_hold(self):
         dup = s.company(self.conn, "Acme Inc", "removed", merged_into=self.acme)
         self.person("Mia Fox", dup)

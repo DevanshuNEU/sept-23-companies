@@ -95,6 +95,14 @@ class NeedsYou(ApiCase):
     def test_empty_store_is_an_empty_view(self):
         self.assertEqual(self.view(), {"asOf": NOW, "open": [], "resolvedThisWeek": [], "boardsJob": None})
 
+    def test_an_item_shows_a_hold_left_on_a_merged_duplicate(self):
+        cid = s.company(self.conn, "Acme", "working")
+        dup = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=cid)
+        t = hold(self.conn, dup)
+        s.review(self.conn, cid, "size_unknown", reason="Size?", evidence_key="k")
+        [item] = self.view()["open"]
+        self.assertEqual(item["company"]["heldByTouchId"], t)
+
     def test_each_kind_lists_with_its_evidence(self):
         cid = s.company(self.conn, "Acme", "working")
         b = s.board(self.conn, cid, "ashby", "acme", last_read="error", error_streak=1)

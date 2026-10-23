@@ -12,7 +12,8 @@ from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
 from outreach.api.models.company import CompanyRef
 from outreach.api.models.watch import SourceLink, WatchItem, WatchView
-from outreach.api.queries.company import merge_parents, survivor_of
+from outreach.api.queries.company import holding_touches, merge_parents, survivor_of
+from outreach.drafts.followups import company_map, no_go_sets
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
@@ -23,8 +24,8 @@ NEW_LIMIT = 20
 LANE = "reason_no_role"
 CHUNK = 500
 
-# A company made in the last 14 days that is still open to us, with no person, touch, no-go or dismissal, and every
-# score row it has. The scores are read by key (company_id) from each company: `CROSS JOIN` keeps that order, so the
+# A company made in the last 14 days that is still open to us, with no person, touch or dismissal, and every score
+# row it has (a no-go is read in Python through the sender's no_go_sets, so a duplicate's no-go counts). The scores are read by key (company_id) from each company: `CROSS JOIN` keeps that order, so the
 # planner never scans company_score. `hide_type` is the JSON type of `signals.hide` ('null' or NULL: not hidden).
 NEW_COMPANIES_SQL = """
 SELECT c.company_id, c.name, c.status, c.paused_at, c.held_by_touch, c.created_at,
@@ -33,7 +34,6 @@ FROM company c CROSS JOIN company_score s ON s.company_id = c.company_id
 WHERE c.created_at >= ? AND c.merged_into IS NULL AND c.status IN ('candidate', 'backlog', 'working')
   AND NOT EXISTS (SELECT 1 FROM person p WHERE p.company_id = c.company_id)
   AND NOT EXISTS (SELECT 1 FROM outreach_touch t WHERE t.company_id = c.company_id AND t.undone_at IS NULL)
-  AND NOT EXISTS (SELECT 1 FROM no_go g WHERE g.company_id = c.company_id AND g.lifted_at IS NULL)
   AND NOT EXISTS (SELECT 1 FROM watch_dismissal d WHERE d.kind = 'new_reason_no_role' AND d.ref_id = c.company_id)
 """
 
@@ -46,9 +46,10 @@ WHERE c.merged_into IS NOT NULL
 """
 
 
-def _ref(row: sqlite3.Row) -> CompanyRef:
+def _ref(row: sqlite3.Row, holds: dict[int, int]) -> CompanyRef:
+    """`holds` is `holding_touches`: a hold on a merged-away duplicate holds the survivor."""
     return CompanyRef(id=row["company_id"], name=row["name"], status=row["status"], paused_at=row["paused_at"],
-                      held_by_touch_id=row["held_by_touch"])
+                      held_by_touch_id=holds.get(row["company_id"]))
 
 
 def _companies(conn: sqlite3.Connection, ids: set[int]) -> dict[int, sqlite3.Row]:
@@ -71,7 +72,7 @@ def _other_record(evidence_key: str) -> int | None:
         return None
 
 
-def _review_items(conn: sqlite3.Connection, parents: dict[int, int]) -> list[WatchItem]:
+def _review_items(conn: sqlite3.Connection, parents: dict[int, int], holds: dict[int, int]) -> list[WatchItem]:
     rows = conn.execute(
         "SELECT review_id, kind, company_id, reason, evidence_key, created_at FROM review_item "
         "WHERE state = 'open' AND kind IN ('careers_changed', 'merge_candidate') ORDER BY created_at, review_id"
@@ -98,7 +99,7 @@ def _review_items(conn: sqlite3.Connection, parents: dict[int, int]) -> list[Wat
             url = pages.get(r["company_id"])
             items.append(WatchItem(
                 id=r["review_id"] * 4 + KIND_INDEX["careers_changed"], kind="careers_changed",
-                company=_ref(companies[mine]), text=r["reason"], at=r["created_at"],
+                company=_ref(companies[mine], holds), text=r["reason"], at=r["created_at"],
                 link=SourceLink(label="Careers page", url=url) if url else None, review_id=r["review_id"],
             ))
             continue
@@ -108,20 +109,22 @@ def _review_items(conn: sqlite3.Connection, parents: dict[int, int]) -> list[Wat
             continue  # unreadable, already one company, or a record that is gone: nothing to decide
         items.append(WatchItem(
             id=r["review_id"] * 4 + KIND_INDEX["merge_candidate"], kind="merge_candidate",
-            company=_ref(companies[mine]),
+            company=_ref(companies[mine], holds),
             text=f"{companies[mine]['name']} and {companies[theirs]['name']} may be the same company.",
             at=r["created_at"], link=None, review_id=r["review_id"],
         ))
     return items
 
 
-def _new_items(conn: sqlite3.Connection, parents: dict[int, int], now: str) -> list[WatchItem]:
+def _new_items(conn: sqlite3.Connection, parents: dict[int, int], holds: dict[int, int], no_go_survivors: set[int],
+               now: str) -> list[WatchItem]:
+    # The window is rolling: the last 14 times 24 hours before `now`, in UTC, not 14 New York calendar days.
     cutoff = (datetime.strptime(now, ISO_FMT).replace(tzinfo=timezone.utc) - timedelta(days=NEW_WITHIN_DAYS)
               ).strftime(ISO_FMT)
     contacted = {survivor_of(parents, r[0]) for r in conn.execute(CONTACTED_DUPLICATES_SQL)}
     newest: dict[int, sqlite3.Row] = {}
     for r in conn.execute(NEW_COMPANIES_SQL, (cutoff,)):
-        if r["company_id"] in contacted:
+        if r["company_id"] in contacted or r["company_id"] in no_go_survivors:
             continue
         held = newest.get(r["company_id"])
         if held is None or (r["scored_at"], r["ranker_version"]) > (held["scored_at"], held["ranker_version"]):
@@ -136,7 +139,7 @@ def _new_items(conn: sqlite3.Connection, parents: dict[int, int], now: str) -> l
     chosen.sort(key=lambda r: (-r["score"], r["company_id"]))
     return [
         WatchItem(
-            id=r["company_id"] * 4 + KIND_INDEX["new_reason_no_role"], kind="new_reason_no_role", company=_ref(r),
+            id=r["company_id"] * 4 + KIND_INDEX["new_reason_no_role"], kind="new_reason_no_role", company=_ref(r, holds),
             text="New company with a reason to reach out and no open role yet.", at=r["created_at"], link=None,
             review_id=None,
         )
@@ -147,7 +150,10 @@ def _new_items(conn: sqlite3.Connection, parents: dict[int, int], now: str) -> l
 def watch_view(conn: sqlite3.Connection, now: str) -> WatchView:
     """Every item on the list, newest first."""
     parents = merge_parents(conn)
-    items = _review_items(conn, parents) + _new_items(conn, parents, now)
+    companies = company_map(conn)
+    holds = holding_touches(companies)
+    _, no_go_survivors = no_go_sets(conn, companies)
+    items = _review_items(conn, parents, holds) + _new_items(conn, parents, holds, no_go_survivors, now)
     items.sort(key=lambda i: (i.at, i.id), reverse=True)
     return WatchView(as_of=now, items=items)
 

@@ -24,10 +24,12 @@ from outreach.api.models.health import JobRunSummary
 from outreach.api.models.needs_you import NeedsYouView, ResolvedReview, ResolveReviewBody, ReviewResolved
 from outreach.api.queries import jobs
 from outreach.api.queries.company import (
-    ATS_LABELS, EMAIL_HOLDING_KINDS, READS_SHOWN, fact_rank, merge_parents, read_detail, survivor_of, to_fact,
+    ATS_LABELS, EMAIL_HOLDING_KINDS, READS_SHOWN, fact_rank, holding_touches, merge_parents, read_detail, survivor_of,
+    to_fact,
 )
 from outreach.api.queries.outcomes import NOT_SAVED, by_ids
 from outreach.api.revisions import bump
+from outreach.drafts.followups import company_map
 from outreach.identity import follow_merged
 from outreach.outcomes.windows import day_bounds_utc, ny_day, week_bounds
 from outreach.sources.ats_detect import detect_ats
@@ -160,6 +162,7 @@ def review_items(conn: sqlite3.Connection, rows: list[sqlite3.Row], parents: dic
     picked = {survivor_of(parents, r[0]) for r in conn.execute(
         "SELECT company_id FROM daily_list_entry WHERE list_date = ? AND state = 'picked'", (today,))}
     playing = in_play_ids(conn, parents, companies, today)
+    holds = holding_touches(company_map(conn))  # a hold left on a merged-away duplicate holds the survivor
     resolved: dict[tuple, list[sqlite3.Row]] = {}
     for x in by_ids(conn, "SELECT * FROM review_item WHERE state = 'resolved' AND company_id IN ({ids})",
                     {r["company_id"] for r in rows}):
@@ -176,7 +179,7 @@ def review_items(conn: sqlite3.Connection, rows: list[sqlite3.Row], parents: dic
         items.append(ReviewItem(
             id=r["review_id"], kind=r["kind"],
             company=ReviewCompany(id=cid, name=company["name"], status=company["status"],
-                                  paused_at=company["paused_at"], held_by_touch_id=company["held_by_touch"],
+                                  paused_at=company["paused_at"], held_by_touch_id=holds.get(cid),
                                   picked=cid in picked),
             holds_email=cid in picked and r["kind"] in EMAIL_HOLDING_KINDS, reason=r["reason"],
             opened_at=r["created_at"],

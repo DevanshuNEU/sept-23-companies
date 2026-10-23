@@ -20,7 +20,8 @@ from outreach.api.models.company import CompanyRef
 from outreach.api.models.outcomes import (
     CorrectionBody, LogTouchBody, OutcomeBody, OutcomePromptView, PromptTouch, TouchHistory, TouchLogged,
 )
-from outreach.api.queries.company import _event, person_ref, merge_parents, survivor_of
+from outreach.api.queries.company import _event, holding_touches, person_ref, merge_parents, survivor_of
+from outreach.drafts.followups import company_map
 from outreach.outcomes.context import build_context
 from outreach.outcomes.correct import OUTCOME_COLUMNS, correct_outcome
 from outreach.outcomes.prompt import PromptConfig, due_for_prompt, should_mark_quiet
@@ -85,9 +86,14 @@ def by_ids(conn: sqlite3.Connection, sql: str, ids: set[int]) -> list[sqlite3.Ro
     return rows
 
 
-def company_refs(conn: sqlite3.Connection, ids: set[int]) -> dict[int, CompanyRef]:
+def company_refs(conn: sqlite3.Connection, ids: set[int], *, holds: dict[int, int] | None = None
+                 ) -> dict[int, CompanyRef]:
+    """Each company's ref. Its hold is read across its merged family (`holding_touches`, read here when `holds` is
+    None), so a hold left on a duplicate that was merged away shows on the survivor."""
+    if holds is None:
+        holds = holding_touches(company_map(conn))
     return {r["company_id"]: CompanyRef(id=r["company_id"], name=r["name"], status=r["status"],
-                                        paused_at=r["paused_at"], held_by_touch_id=r["held_by_touch"])
+                                        paused_at=r["paused_at"], held_by_touch_id=holds.get(r["company_id"]))
             for r in by_ids(conn, "SELECT company_id, name, status, paused_at, held_by_touch FROM company "
                                    "WHERE company_id IN ({ids})", ids)}
 

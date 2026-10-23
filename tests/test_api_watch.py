@@ -206,6 +206,15 @@ class Watch(ApiCase):
             (blocked, s.T0))
         self.assertEqual(self.items(), [])
 
+    def test_a_no_go_on_a_merged_duplicate_keeps_the_survivor_off_the_list(self):
+        a = self.new_company("Acme")
+        dup = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=a)
+        self.assertEqual([i["company"]["id"] for i in self.items()], [a])
+        self.conn.execute(
+            "INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'not_a_fit', 'devanshu', ?)",
+            (dup, s.T0))
+        self.assertEqual(self.items(), [])
+
     def test_a_merged_away_duplicate_is_never_listed_itself(self):
         a = s.company(self.conn, "Acme")
         dup = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=a, created_at=RECENT)

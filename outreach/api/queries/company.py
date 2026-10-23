@@ -13,6 +13,7 @@ from outreach.api.models.company import (
 )
 from outreach.api.queries import people as people_queries
 from outreach.api.queries.people import scope
+from outreach.drafts.followups import company_map, held_survivors, resolve_company
 from outreach.sending import calendar
 from outreach.sending.config import load_config
 from outreach.store.timefmt import ISO_FMT
@@ -79,6 +80,22 @@ def survivor_of(parents: dict[int, int], company_id: int) -> int:
         company_id = parents[company_id]
         seen.add(company_id)
     return company_id
+
+
+def holding_touches(companies: dict[int, sqlite3.Row]) -> dict[int, int]:
+    """survivor id to the touch that holds it, read across the merged family as the sender reads it: the survivors
+    are `held_survivors` of `company_map`, so a hold left on a duplicate that was merged away holds the survivor. The
+    survivor's own hold wins, else the lowest company id's. In a merge cycle (no survivor) each company keeps its own."""
+    try:
+        held = held_survivors(companies)
+    except RuntimeError:
+        return {cid: r["held_by_touch"] for cid, r in companies.items() if r["held_by_touch"] is not None}
+    found: dict[int, int] = {}
+    for cid in sorted(companies, key=lambda c: (companies[c]["merged_into"] is not None, c)):
+        touch = companies[cid]["held_by_touch"]
+        if touch is not None:
+            found.setdefault(resolve_company(companies, cid)[-1], touch)
+    return {survivor: found[survivor] for survivor in held}
 
 
 def group_of(parents: dict[int, int], survivor: int) -> list[int]:
@@ -236,8 +253,10 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
     today = calendar.ny_date(datetime.strptime(now, ISO_FMT).replace(tzinfo=timezone.utc), cfg)
     picked_on = picked_dates[0] if picked_dates else None
 
-    # A person on a merged duplicate is judged against the survivor's pause and hold.
-    person_lines = people_queries.lines(data, {c: companies[survivor_of(parents, c)] for c in companies})
+    # A person on a merged duplicate is judged against the survivor's pause and the family's hold.
+    held_by = holding_touches(company_map(conn)).get(survivor)
+    person_lines = people_queries.lines(data, {c: companies[survivor_of(parents, c)] for c in companies},
+                                        {survivor: held_by} if held_by is not None else {})
     people = [
         CompanyPerson(
             person=person_ref(p), channel=p["channel"], status_line=person_lines[p["person_id"]].status_line,
@@ -259,14 +278,14 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
         as_of=now,
         company=CompanyHeader(
             id=survivor, name=main["name"], status=main["status"], paused_at=main["paused_at"],
-            held_by_touch_id=main["held_by_touch"], domain=domain, aliases=aliases_for(companies, survivor, alias_rows),
+            held_by_touch_id=held_by, domain=domain, aliases=aliases_for(companies, survivor, alias_rows),
             hq=best["hq"]["value"] if "hq" in best else "", picked_on=picked_on,
             day=_day(main, picked_on, today, cfg),
             closed=CompanyClosed(reason=main["close_reason"], note=main["status_note"], at=main["status_at"])
             if main["status"] == "closed" else None,
             revision=main["revision"],
         ),
-        summary=_summary(main["status"], bool(main["paused_at"]), role, data.persons),
+        summary=_summary(main["status"], bool(main["paused_at"]), held_by is not None, role, data.persons),
         facts=[to_fact(best[k]) for k in FACT_ORDER if k in best],
         sponsorship_shown=_sponsorship_shown(best, role, [p for p in postings if p['state'] != 'closed'], evidence_rows),
         mail_server_ok=None if mx is None else mx["status"] == "ok",
@@ -306,8 +325,8 @@ def _day(main: sqlite3.Row, picked_on: str | None, today: date, cfg) -> int | No
     return max(1, min(DAYS_OF_EMAIL, 1 + gone))
 
 
-def _summary(status: str, paused: bool, role, persons) -> str:
-    phrase = "Paused" if paused else {
+def _summary(status: str, paused: bool, held: bool, role, persons) -> str:
+    phrase = "Paused" if paused else "Held for a reply" if held and status == "working" else {
         "candidate": "A candidate", "backlog": "In the backlog", "working": "Being emailed", "closed": "Closed",
         "removed": "Removed",
     }[status]

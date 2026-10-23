@@ -11,8 +11,9 @@ import sqlite3
 from outreach.api.models.search import PostingHit, SearchCompany, SearchIndex, SearchPerson
 from outreach.api.queries import people as people_queries
 from outreach.api.queries.company import (
-    NAME_ALIAS_SOURCES, aliases_for, best_facts, merge_parents, status_line, survivor_of,
+    NAME_ALIAS_SOURCES, aliases_for, best_facts, holding_touches, merge_parents, status_line, survivor_of,
 )
+from outreach.drafts.followups import company_map
 from outreach.api.queries.people import scope
 from outreach.api.queries.score import top_scored_ids
 
@@ -34,8 +35,10 @@ def _in(ids, column: str) -> tuple[str, list]:
     return f" WHERE {column} IN (SELECT value FROM json_each(?))", [json.dumps(sorted(ids))]
 
 
-def companies(conn: sqlite3.Connection, survivors: list[int] | None = None) -> list[SearchCompany]:
-    """One `SearchCompany` per survivor, in the order given (every unmerged company by name when None)."""
+def companies(conn: sqlite3.Connection, survivors: list[int] | None = None, *,
+              holds: dict[int, int] | None = None) -> list[SearchCompany]:
+    """One `SearchCompany` per survivor, in the order given (every unmerged company by name when None). `holds` is
+    `holding_touches` (read here when None): a hold on a merged-away duplicate holds the survivor."""
     parents = merge_parents(conn)
     if survivors is None:
         survivors = [r[0] for r in conn.execute(
@@ -57,6 +60,8 @@ def companies(conn: sqlite3.Connection, survivors: list[int] | None = None) -> l
     alias_rows: dict[int, list[sqlite3.Row]] = {}
     for r in conn.execute(f"SELECT * FROM company_alias{where}", params):
         alias_rows.setdefault(r["company_id"], []).append(r)
+    if holds is None:
+        holds = holding_touches(company_map(conn))
     out = []
     for s in survivors:
         group = members[s]
@@ -66,7 +71,7 @@ def companies(conn: sqlite3.Connection, survivors: list[int] | None = None) -> l
             id=s, name=main["name"],
             aliases=aliases_for({c: rows[c] for c in group}, s, [a for c in group for a in alias_rows.get(c, [])]),
             domain=domain["value"] if domain else None, status=main["status"],
-            status_line=status_line(main["status"], main["close_reason"], main["paused_at"], main["held_by_touch"]),
+            status_line=status_line(main["status"], main["close_reason"], main["paused_at"], holds.get(s)),
             in_progress=main["status"] == "working",
         ))
     return out
@@ -82,10 +87,11 @@ def index(conn: sqlite3.Connection, now: str) -> SearchIndex:
         "SELECT company_id FROM company WHERE merged_into IS NULL AND (status <> 'candidate' OR "
         "company_id IN (SELECT value FROM json_each(?))) ORDER BY name COLLATE NOCASE, company_id",
         (json.dumps(sorted(kept)),))]
-    listed = companies(conn, selected)
+    holds = holding_touches(company_map(conn))
+    listed = companies(conn, selected, holds=holds)
     where, params = _in(set(at) | set(at.values()), "company_id")
     rows = {r["company_id"]: r for r in conn.execute(f"SELECT * FROM company{where}", params)}
-    lines = people_queries.lines(data, {c: rows[end] for c, end in at.items()})
+    lines = people_queries.lines(data, {c: rows[end] for c, end in at.items()}, holds)
     people = []
     for p in data.persons:
         company_id = at[p["company_id"]]

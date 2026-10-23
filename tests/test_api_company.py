@@ -342,6 +342,23 @@ class CompanyPage(ApiCase):
         self.assertEqual(lines["Ann Approved"], "Held, approved")
         self.assertEqual(lines["Rae Replied"], "Replied")
 
+    def test_a_hold_on_a_merged_duplicate_shows_on_the_survivors_page(self):
+        cid = s.company(self.conn, "Acme", "working")
+        dup = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=cid)
+        talker = s.person(self.conn, dup, "Rae Replied")
+        t = s.touch(self.conn, talker, "replied")
+        s.send_first(self.conn, t)
+        self.conn.execute("UPDATE company SET held_by_touch = ?, held_at = ? WHERE company_id = ?", (t, NOW, dup))
+        waiting = s.person(self.conn, cid, "Ann Approved")
+        s.message(self.conn, s.touch(self.conn, waiting), 0, "approved")
+        for asked in (cid, dup):
+            body = self.view(asked)
+            self.assertEqual(body["company"]["heldByTouchId"], t, asked)
+            self.assertTrue(body["summary"].startswith("Held"), body["summary"])
+            lines = {p["person"]["name"]: p["statusLine"] for p in body["people"]}
+            self.assertEqual(lines["Ann Approved"], "Held, approved")
+            self.assertEqual(lines["Rae Replied"], "Replied")
+
     def test_touches_carry_their_threads_in_time_order(self):
         cid = s.company(self.conn, "Acme", "working")
         pid = s.person(self.conn, cid, "Rae Replied")

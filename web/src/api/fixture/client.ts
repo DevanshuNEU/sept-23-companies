@@ -31,7 +31,10 @@ function eachObject(node: unknown, visit: (o: Obj) => void): void {
 }
 const isCompanyRef = (o: Obj, id: Id) => o.id === id && 'heldByTouchId' in o && 'pausedAt' in o;
 const isPersonRef = (o: Obj, id: Id) => o.id === id && 'roleKind' in o && 'linkedinUrl' in o;
-const refOf = (c: CompanyRef): CompanyRef => ({ id: c.id, name: c.name, status: c.status, pausedAt: c.pausedAt, heldByTouchId: c.heldByTouchId });
+const refOf = (c: CompanyRef): CompanyRef => ({
+  id: c.id, name: c.name, status: c.status, pausedAt: c.pausedAt, heldByTouchId: c.heldByTouchId, held: c.held,
+  heldByReply: c.heldByReply,
+});
 const notAllowed = (message: string) => new ApiError('not_allowed', message);
 const rankOf = (i: OutboxItem) => Number(i.sortKey.split('.')[1]);
 
@@ -493,7 +496,8 @@ export class FixtureClient implements OutreachClient {
       if (holder) { released += holder.held.length; holder.held = []; }
       this.db.linkedin.groups.forEach((g) => { if (g.company.id === companyId) g.heldBy = null; });
       const wasPaused = this.itemsOf(companyId).filter((i) => i.group === 'paused');
-      this.touchCompany(companyId, { pausedAt: null, heldByTouchId: null }, ['resumed', 'Resumed by you']);
+      this.touchCompany(companyId, { pausedAt: null, heldByTouchId: null, held: false, heldByReply: null },
+        ['resumed', 'Resumed by you']);
       for (const item of wasPaused) if (deriveGroup(item) !== 'paused') { this.place(item); released += 1; }
       const still = this.db.today.stillEmailing.find((s) => s.company.id === companyId);
       if (still && (still.state === 'held' || still.state === 'paused')) {

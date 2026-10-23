@@ -31,14 +31,6 @@ ReviewKind = Literal[
 Tone = Literal["ok", "info", "warn", "bad", "idle"]
 
 
-class CompanyRef(Wire):
-    id: int
-    name: str
-    status: CompanyStatus
-    paused_at: str | None
-    held_by_touch_id: int | None
-
-
 class PersonRef(Wire):
     id: int
     name: str
@@ -47,6 +39,27 @@ class PersonRef(Wire):
     email: str | None
     linkedin_url: str | None
     revision: int
+
+
+TouchChannel = Literal["linkedin_request", "linkedin_message", "email", "application", "hn_reply", "other"]
+
+
+class HoldingReply(Wire):
+    """The newest reply holding the company: on any channel, so a LinkedIn reply shows as an email one does."""
+
+    channel: TouchChannel
+    person: PersonRef | None  # None for an application, which has no person
+    at: str
+
+
+class CompanyRef(Wire):
+    id: int
+    name: str
+    status: CompanyStatus
+    paused_at: str | None
+    held_by_touch_id: int | None  # the email touch whose reply holds it, when one does
+    held: bool  # held by a reply on any channel (#9): the sender sends nothing more there until it is released
+    held_by_reply: HoldingReply | None
 
 
 class Fact(Wire):

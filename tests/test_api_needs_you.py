@@ -129,7 +129,8 @@ class NeedsYou(ApiCase):
             self.assertEqual(item["reason"], f"About {kind}.")
             self.assertEqual((item["ageDays"], item["openedAt"], item["revision"]), (5, "2026-11-05T08:00:00Z", 1))
             self.assertEqual(item["company"], {"id": cid, "name": "Acme", "status": "working", "pausedAt": None,
-                                               "heldByTouchId": None, "picked": False})
+                                               "heldByTouchId": None, "held": False,
+                                               "heldByReply": None, "picked": False})
             self.assertIsNone(item["reopened"])
         u = items["board_unreadable"]
         self.assertEqual([(r["result"], r["detail"]) for r in u["reads"]],

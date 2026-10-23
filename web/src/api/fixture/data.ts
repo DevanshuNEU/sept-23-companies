@@ -201,7 +201,9 @@ function makeCtx(): Ctx {
     spec,
     co: (name) => {
       const s = spec(name);
-      return { id: companyId(name), name, status: s.status, pausedAt: s.pausedAt ?? null, heldByTouchId: s.heldBy ?? null };
+      const heldByTouchId = s.heldBy ?? null;
+      return { id: companyId(name), name, status: s.status, pausedAt: s.pausedAt ?? null, heldByTouchId,
+               held: heldByTouchId !== null, heldByReply: null };
     },
     person: (name, title, kind, company, o = {}) => {
       const key = `${company}|${name}`;

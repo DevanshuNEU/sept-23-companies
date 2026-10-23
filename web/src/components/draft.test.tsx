@@ -209,7 +209,9 @@ describe('EvidenceList', () => {
 });
 
 describe('CloseCompanyDialog', () => {
-  const company = { id: 1, name: 'Browserbase', status: 'working', pausedAt: null, heldByTouchId: null } as const;
+  const company = {
+    id: 1, name: 'Browserbase', status: 'working', pausedAt: null, heldByTouchId: null, held: false, heldByReply: null,
+  } as const;
   const SEVEN = ['Referral', 'Interview', 'No sponsorship', 'No referrals', 'Already hired', 'Not now', 'Other'];
 
   it('lists the seven reasons, with the no-go hint on No sponsorship', () => {

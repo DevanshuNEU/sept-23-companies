@@ -7,7 +7,7 @@ const ITEM: WatchView = {
   asOf: '2026-11-10T15:14:00Z',
   items: [{
     id: 8, kind: 'careers_changed',
-    company: { id: 3, name: 'Acme', status: 'working', pausedAt: null, heldByTouchId: null },
+    company: { id: 3, name: 'Acme', status: 'working', pausedAt: null, heldByTouchId: null, held: false, heldByReply: null },
     text: 'The careers page changed.', at: '2026-11-08T12:00:00Z',
     link: { label: 'Careers page', url: 'https://acme.example/jobs' }, reviewId: 2,
   }],

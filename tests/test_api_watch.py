@@ -70,7 +70,8 @@ class Watch(ApiCase):
         self.assertEqual(set(items), {"careers_changed", "new_reason_no_role", "merge_candidate"})
         self.assertEqual(items["careers_changed"], {
             "id": careers * 4 + CAREERS, "kind": "careers_changed",
-            "company": {"id": a, "name": "Acme", "status": "working", "pausedAt": None, "heldByTouchId": None},
+            "company": {"id": a, "name": "Acme", "status": "working", "pausedAt": None, "heldByTouchId": None,
+                        "held": False, "heldByReply": None},
             "text": "The careers page changed since Nov 3.", "at": "2026-11-08T12:00:00Z",
             "link": {"label": "Careers page", "url": "https://acme.example/jobs"}, "reviewId": careers,
         })

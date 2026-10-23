@@ -148,7 +148,7 @@ class Prompt(OutcomeCase):
         self.assertEqual(first["revision"], 1)
         self.assertEqual(first["person"]["name"], "Lena Ortiz")
         self.assertEqual(first["company"], {"id": self.acme, "name": "Acme", "status": "working", "pausedAt": None,
-                                            "heldByTouchId": None})
+                                            "heldByTouchId": None, "held": False, "heldByReply": None})
         self.assertIsInstance(first["context"], str)
         self.assertTrue(first["context"])
         self.assertNotIn("_", first["context"])
@@ -750,3 +750,30 @@ class ReplierStops(OutcomeCase):
         self.assertEqual(self.answer(t, "replied", reply_kind="interested").status_code, 200)
         self.assertEqual(self.correct(t, "replied", None, 2).status_code, 200)
         self.assertNotEqual(self.reason(self.lena_email), "reply_stop")
+
+
+class HoldShown(OutcomeCase):
+    """The API shows a hold from a reply on any channel, not only one held by an email touch."""
+
+    def company(self) -> dict:
+        res = self.get(f"/api/companies/{self.acme}")
+        self.assertEqual(res.status_code, 200, res.text)
+        return res.json()["company"]
+
+    def test_a_linkedin_reply_shows_the_company_held_with_the_reply(self):
+        self.assertEqual((self.company()["held"], self.company()["heldByReply"]), (False, None))
+        t = touch(self.conn, self.acme, self.lena, channel="linkedin_message")
+        self.assertEqual(self.answer(t, "replied", reply_kind="interested").status_code, 200)
+        company = self.company()
+        self.assertEqual((company["held"], company["heldByTouchId"]), (True, None))
+        reply = company["heldByReply"]
+        self.assertEqual((reply["channel"], reply["at"], reply["person"]["name"]), ("linkedin_message", NOW, "Lena Ortiz"))
+        history = self.get(f"/api/touches/{t}/history")
+        self.assertEqual(history.status_code, 200, history.text)
+        self.assertTrue(history.json()["company"]["held"])
+
+    def test_a_cleared_reply_shows_no_hold(self):
+        t = touch(self.conn, self.acme, self.lena)
+        self.assertEqual(self.answer(t, "replied", reply_kind="interested").status_code, 200)
+        self.assertEqual(self.correct(t, "replied", None, 2).status_code, 200)
+        self.assertEqual((self.company()["held"], self.company()["heldByReply"]), (False, None))

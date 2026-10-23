@@ -35,8 +35,14 @@ export type LinkedInReason = 'past_budget' | 'no_email' | 'alum_first';
 export type SenderState = 'running' | 'paused_by_you' | 'paused_hard_block' | 'outside_window' | 'weekend' | 'signed_out'; // derived from sender.pause_kind and the clock
 export type SavedBy = 'claude' | 'devanshu' | 'sender' | 'import';
 
-export interface CompanyRef { id: Id; name: string; status: CompanyStatus; pausedAt: IsoTime | null; heldByTouchId: Id | null }
 export interface PersonRef { id: Id; name: string; title: string; roleKind: RoleKind; email: string | null; linkedinUrl: string | null; revision: Revision }
+// The newest reply holding the company, on any channel (a LinkedIn reply holds as an email reply does, #9).
+export interface HoldingReply { channel: Channel; person: PersonRef | null; at: IsoTime }
+// `held` is the sender's hold, whatever the reply's channel; `heldByTouchId` is the email touch holding it, if one does.
+export interface CompanyRef {
+  id: Id; name: string; status: CompanyStatus; pausedAt: IsoTime | null; heldByTouchId: Id | null; held: boolean;
+  heldByReply: HoldingReply | null;
+}
 export interface Fact {
   id: Id; fact: FactKind; value: string; low: number | null; high: number | null; confidence: Confidence;
   locked: boolean; sourceKind: SourceKind; sourceRef: string; quote: string; observedOn: IsoDate | null;

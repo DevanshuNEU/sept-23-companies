@@ -9,7 +9,7 @@ const ONE: OutcomePromptView = {
     touchId: 7, channel: 'linkedin_request', sentAt: '2026-11-02T15:00:00Z', ageDays: 8, revision: 1,
     context: 'LinkedIn request from the plan, for a role at your level, naming the role.',
     person: { id: 4, name: 'Lena Ortiz', title: 'Software Engineer', roleKind: 'engineer', email: null, linkedinUrl: 'https://www.linkedin.com/in/lena', revision: 1 },
-    company: { id: 3, name: 'Acme', status: 'working', pausedAt: null, heldByTouchId: null },
+    company: { id: 3, name: 'Acme', status: 'working', pausedAt: null, heldByTouchId: null, held: false, heldByReply: null },
   }],
 };
 const o = { requestId: 'req-12345678' };

@@ -425,6 +425,20 @@
             ],
             "title": "Domain"
           },
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "heldByReply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "heldByTouchId": {
             "anyOf": [
               {
@@ -492,6 +506,8 @@
           "status",
           "pausedAt",
           "heldByTouchId",
+          "held",
+          "heldByReply",
           "domain",
           "aliases",
           "hq",
@@ -555,6 +571,20 @@
       },
       "CompanyRef": {
         "properties": {
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "heldByReply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "heldByTouchId": {
             "anyOf": [
               {
@@ -602,7 +632,9 @@
           "name",
           "status",
           "pausedAt",
-          "heldByTouchId"
+          "heldByTouchId",
+          "held",
+          "heldByReply"
         ],
         "title": "CompanyRef",
         "type": "object"
@@ -1312,6 +1344,44 @@
           "personName"
         ],
         "title": "HeldBy",
+        "type": "object"
+      },
+      "HoldingReply": {
+        "description": "The newest reply holding the company: on any channel, so a LinkedIn reply shows as an email one does.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "channel": {
+            "enum": [
+              "linkedin_request",
+              "linkedin_message",
+              "email",
+              "application",
+              "hn_reply",
+              "other"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "channel",
+          "person",
+          "at"
+        ],
+        "title": "HoldingReply",
         "type": "object"
       },
       "JobCount": {
@@ -2409,6 +2479,20 @@
       },
       "ReviewCompany": {
         "properties": {
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "heldByReply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "heldByTouchId": {
             "anyOf": [
               {
@@ -2461,6 +2545,8 @@
           "status",
           "pausedAt",
           "heldByTouchId",
+          "held",
+          "heldByReply",
           "picked"
         ],
         "title": "ReviewCompany",

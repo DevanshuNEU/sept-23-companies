@@ -12,7 +12,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.drafts.followups import (canonical_company, company_map, held_survivors, no_go_sets,
-                                       resolve_company)
+                                       replied_people, resolve_company)
 from outreach.sending import calendar as cal
 from outreach.sending import ramp, signals
 from outreach.sending.config import SendConfig, load_config
@@ -130,6 +130,7 @@ def load_queue(conn: sqlite3.Connection, cfg: SendConfig | None = None) -> list[
 def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], conn: sqlite3.Connection) -> dict:
     """Message id to its stop reason, for the messages that have one."""
     no_go_people, no_go_companies = no_go_sets(conn, companies)
+    replied = replied_people(conn)
     stops = {}
     for row in rows:
         chain = resolve_company(companies, row["person_company"])
@@ -137,7 +138,7 @@ def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], co
             stops[row["message_id"]] = "company_closed"
         elif row["person_id"] in no_go_people or chain[-1] in no_go_companies:
             stops[row["message_id"]] = "no_go"
-        elif row["touch_state"] == "replied":
+        elif row["touch_state"] == "replied" or row["person_id"] in replied:  # a reply on any channel
             stops[row["message_id"]] = "reply_stop"
         elif row["touch_state"] in ("bounced", "closed"):
             stops[row["message_id"]] = "touch_done"

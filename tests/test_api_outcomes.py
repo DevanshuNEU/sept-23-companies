@@ -714,3 +714,39 @@ class OneStopFunction(OutcomeCase):
         self.assertEqual(spy.call_args.args[1], planned)
         self.assertEqual((spy.call_args.kwargs["reason"], spy.call_args.kwargs["actor"]), ("said_no", "devanshu"))
         self.assertIsNone(self.state_of(planned))
+
+
+class ReplierStops(OutcomeCase):
+    """A person who replied on any channel gets no more queued email from the sender, hold or no hold."""
+
+    def setUp(self):
+        super().setUp()
+        from outreach.sending.config import load_config as load_send_config
+        self.send_cfg = load_send_config()
+        self.lena_email = s.message(self.conn, s.touch(self.conn, self.lena), 0, "approved")
+        self.conn.execute("UPDATE person SET email = 'lena@acme.example' WHERE person_id = ?", (self.lena,))
+
+    def reason(self, message_id):
+        from datetime import datetime, timezone
+        now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, day=None, gate=None)}
+        return found.get(message_id)
+
+    def test_a_linkedin_reply_stops_that_persons_own_email_even_after_the_hold_is_released(self):
+        from outreach.drafts.followups import RELEASE_KIND
+        from outreach.sending import claim
+        t = touch(self.conn, self.acme, self.lena, channel="linkedin_message")
+        self.assertEqual(self.answer(t, "replied", reply_kind="interested").status_code, 200)
+        self.assertEqual(self.reason(self.lena_email), "reply_stop")
+        from outreach.store import append_event
+        append_event(self.conn, entity="company", entity_id=self.acme, company_id=self.acme, kind=RELEASE_KIND,
+                     actor="devanshu", at="2026-11-10T16:00:00Z")  # #11 Task 19's release, when it lands
+        self.assertEqual(self.reason(self.lena_email), "reply_stop")
+        q = next(q for q in queue.load_queue(self.conn, self.send_cfg) if q.message_id == self.lena_email)
+        self.assertFalse(claim.claim(self.conn, q, rfc_id="<lena.1@gmail.com>", now=NOW))
+
+    def test_a_cleared_reply_does_not_stop_the_persons_email(self):
+        t = touch(self.conn, self.acme, self.lena, channel="linkedin_message")
+        self.assertEqual(self.answer(t, "replied", reply_kind="interested").status_code, 200)
+        self.assertEqual(self.correct(t, "replied", None, 2).status_code, 200)
+        self.assertNotEqual(self.reason(self.lena_email), "reply_stop")

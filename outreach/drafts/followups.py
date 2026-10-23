@@ -7,7 +7,7 @@ import sqlite3
 from datetime import date, timedelta
 
 __all__ = ["RELEASE_KIND", "canonical_company", "company_map", "resolve_company", "held_survivors", "no_go_sets",
-           "due_followups"]
+           "replied_people", "due_followups"]
 
 # The `company` event that releases a hold (#11 Task 19's release-hold action appends it beside clearing
 # `held_by_touch`). A reply recorded at or before the newest release in the merged family no longer holds it.
@@ -99,12 +99,23 @@ def no_go_sets(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row]) -> t
     return people, survivors
 
 
+def replied_people(conn: sqlite3.Connection) -> set[int]:
+    """The people with a live reply on any channel: an outreach touch with `replied_at` that is not undone, or an
+    email touch with `replied_at`, of any kind but `auto_reply`. The sender sends such a person nothing more (a
+    stop, `reply_stop`), whether or not their company is still held: releasing a hold frees their colleagues only."""
+    return {row[0] for row in conn.execute(
+        "SELECT person_id FROM outreach_touch WHERE person_id IS NOT NULL AND replied_at IS NOT NULL "
+        "AND undone_at IS NULL AND ifnull(reply_kind, '') <> 'auto_reply' UNION "
+        "SELECT person_id FROM touch WHERE replied_at IS NOT NULL AND ifnull(reply_kind, '') <> 'auto_reply'")}
+
+
 def due_followups(conn: sqlite3.Connection, today: date, *, days_ahead: int = 0) -> list[int]:
     """The `message_id`s of `planned` rows due on or before `today + days_ahead`, oldest `due_on` first.
 
     Only rows on a touch that is still `open`, whose first email was sent and which has its thread count. The
-    surviving company (through `merged_into`) must not be held, `closed` or `removed`, and neither the person nor
-    the company family may have an active `no_go`: the queue skips those, so nobody drafts them. A paused company
+    surviving company (through `merged_into`) must not be held, `closed` or `removed`, the person must not have
+    replied on any channel (`replied_people`), and neither the person nor the company family may have an active
+    `no_go`: the queue skips those, so nobody drafts them. A paused company
     still lists its due follow-ups: pausing is Devanshu's, and the sender holds the send, not the draft. Read only.
     """
     horizon = (today + timedelta(days=days_ahead)).isoformat()
@@ -119,10 +130,12 @@ def due_followups(conn: sqlite3.Connection, today: date, *, days_ahead: int = 0)
     companies = company_map(conn)
     held = held_survivors(companies)
     no_go_people, no_go_companies = no_go_sets(conn, companies)
+    replied = replied_people(conn)
     due = []
     for row in rows:
         survivor_id = resolve_company(companies, row["company_id"])[-1]
         if (survivor_id not in held and companies[survivor_id]["status"] not in ("closed", "removed")
-                and survivor_id not in no_go_companies and row["person_id"] not in no_go_people):
+                and survivor_id not in no_go_companies and row["person_id"] not in no_go_people
+                and row["person_id"] not in replied):
             due.append(row["message_id"])
     return due

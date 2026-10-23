@@ -23,7 +23,8 @@ from datetime import date, datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from outreach.drafts.followups import canonical_company, company_map, held_survivors, no_go_sets, resolve_company
+from outreach.drafts.followups import (canonical_company, company_map, held_survivors, no_go_sets, replied_people,
+                                       resolve_company)
 from outreach.outcomes.context import build_context
 from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
@@ -72,8 +73,9 @@ def _stamp(at: datetime | str) -> str:
 def _still_sendable(conn: sqlite3.Connection, message_id: int) -> bool:
     """Read inside the claim's transaction: False when a stop, hold or pause landed after the queue picked the
     message (a no-go on the person or the company family, a closed, removed, paused or held company, a touch that
-    is no longer open, or a paused sender). The queue already checked these; this closes the gap between the pick
-    and the claim, so a person who said stop a second ago is never sent to."""
+    is no longer open, a reply from the person on any channel, or a paused sender). The queue already checked
+    these; this closes the gap between the pick and the claim, so a person who said stop a second ago is never
+    sent to."""
     row = conn.execute("SELECT t.state AS touch_state, t.gmail_thread_id, m.seq, p.person_id, p.company_id "
                        "FROM message m JOIN touch t ON t.touch_id = m.touch_id "
                        "JOIN person p ON p.person_id = t.person_id WHERE m.message_id = ?", (message_id,)).fetchone()
@@ -88,8 +90,8 @@ def _still_sendable(conn: sqlite3.Connection, message_id: int) -> bool:
     no_go_people, no_go_companies = no_go_sets(conn, companies)
     company = companies[survivor]
     return not (row["person_id"] in no_go_people or survivor in no_go_companies
-                or company["status"] in ("closed", "removed") or company["paused_at"] is not None
-                or survivor in held_survivors(companies))
+                or row["person_id"] in replied_people(conn) or company["status"] in ("closed", "removed")
+                or company["paused_at"] is not None or survivor in held_survivors(companies))
 
 
 def _attempts(conn: sqlite3.Connection, message_id: int) -> int:
@@ -482,9 +484,9 @@ def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, b
     A send Gmail stored under another Message-ID (`Unclear.stored`) becomes `sent` from those ids, whatever the scan
     found: it went out, and a scan by the claimed id can never find it. A hit with the message's own Message-ID
     becomes `sent` (`record_sent(..., reconciled=True)`, dated to the claim). A complete miss becomes `failed`
-    once `reconcile_after_minutes` have passed since the send returned (and since the claim). Anything else stays `send_unknown`: an incomplete scan, a younger send, or a hit for another
-    Message-ID, or a miss from a scan for an earlier attempt's Message-ID. Matching is by Message-ID only, never by
-    recipient or subject. Runs in one transaction (a savepoint inside the caller's), with a savepoint per message:
+    once `reconcile_after_minutes` have passed since the send returned (and since the claim). Anything else stays
+    `send_unknown`: an incomplete scan, a younger send, a hit for another Message-ID, or a miss from a scan for an
+    earlier attempt's Message-ID. Matching is by Message-ID only, never by recipient or subject. Runs in one transaction (a savepoint inside the caller's), with a savepoint per message:
     one that fails to record is logged, counted in `errors` and left unclear. Returns the counts `sent`, `failed`,
     `waiting` and `errors`."""
     stamp = _stamp(now)

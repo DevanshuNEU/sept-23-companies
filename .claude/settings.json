@@ -7,7 +7,29 @@
       "Bash(curl -X POST http://localhost:3002:*)",
       "Bash(curl -s http://127.0.0.1:3002/api/approve:*)",
       "Bash(curl -s -X POST http://127.0.0.1:3002:*)",
-      "Bash(curl -s -X POST http://localhost:3002:*)"
+      "Bash(curl -s -X POST http://localhost:3002:*)",
+      "Bash(curl *127.0.0.1:*/api/*approve*)",
+      "Bash(curl *127.0.0.1:*/api/*skip*)",
+      "Bash(curl *127.0.0.1:*/api/*save*)",
+      "Bash(curl *127.0.0.1:*/api/*pause*)",
+      "Bash(curl *localhost:*/api/*approve*)",
+      "Bash(curl *localhost:*/api/*skip*)",
+      "Bash(curl *localhost:*/api/*save*)",
+      "Bash(curl *localhost:*/api/*pause*)",
+      "Bash(wget *127.0.0.1:*/api/*approve*)",
+      "Bash(wget *127.0.0.1:*/api/*skip*)",
+      "Bash(wget *127.0.0.1:*/api/*save*)",
+      "Bash(wget *127.0.0.1:*/api/*pause*)",
+      "Bash(wget *localhost:*/api/*approve*)",
+      "Bash(wget *localhost:*/api/*skip*)",
+      "Bash(wget *localhost:*/api/*save*)",
+      "Bash(wget *localhost:*/api/*pause*)",
+      "Bash(node *fetch*/api/*approve*)",
+      "Bash(node *fetch*/api/*skip*)",
+      "Bash(node *fetch*/api/*save*)",
+      "Bash(node *fetch*/api/*pause*)",
+      "WebFetch(domain:127.0.0.1)",
+      "WebFetch(domain:localhost)"
     ]
   }
 }

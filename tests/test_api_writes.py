@@ -287,9 +287,15 @@ class BumpTest(WriteCase):
     def bump(self, *args, **kwargs):
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            return bump(self.conn, *args, **kwargs)
+            return bump(self.conn, *args, **{"at": "2026-11-10T15:14:00Z", **kwargs})
         finally:
             self.conn.execute("COMMIT")
+
+    def test_bump_needs_the_writes_clock(self):
+        # a default of the wall clock would stamp updated_at off the write's own `now`
+        with self.assertRaises(TypeError):
+            bump(self.conn, "company", "company_id", self.company, 1, {"status_note": "n"})
+        self.assertEqual(self.revision(), 1)
 
     def test_bump_moves_the_revision_and_sets_the_columns(self):
         self.assertEqual(self.bump("company", "company_id", self.company, 1, {"status_note": "n"}), 2)

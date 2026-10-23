@@ -9,7 +9,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from outreach.api.errors import ApiProblem
-from outreach.store.timefmt import utcnow
 
 _NAME = re.compile(r"[a-z_][a-z0-9_]*\Z")
 
@@ -48,12 +47,13 @@ def bump(
     revision: int,
     sets: Mapping[str, object],
     *,
-    at: str | None = None,
+    at: str,
 ) -> int:
     """Set `sets` on one row and move its revision on by one, only if it is still at `revision`.
 
     Run it inside the write's transaction. Returns the new revision. Zero rows changed is `not_found` when the row
-    is absent and `conflict` when it moved on. `at` stamps `updated_at` where the table has one (default now).
+    is absent and `conflict` when it moved on. `at` stamps `updated_at` where the table has one: the write's own clock
+    (`ctx.now`), so it is required.
     A table, key or column outside the allow-list is a programming error (ValueError), never a client error.
     """
     rule = ALLOWED.get(table)
@@ -71,7 +71,7 @@ def bump(
     params: list[object] = list(sets.values())
     if rule.stamps_updated_at:
         assignments.append("updated_at = ?")
-        params.append(at or utcnow())
+        params.append(at)
     cur = conn.execute(
         f"UPDATE {table} SET {', '.join(assignments)} WHERE {rule.key} = ? AND revision = ?",
         (*params, key, revision),

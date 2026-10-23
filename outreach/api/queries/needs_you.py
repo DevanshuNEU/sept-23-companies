@@ -396,7 +396,7 @@ def resolve_review(ctx: WriteCtx, review_id: int, body: ResolveReviewBody) -> Re
         detail.update(kept_id=keep_id, merged_id=lose_id)
         note = f"merged into {keep_id}"
     revision = bump(conn, "review_item", "review_id", review_id, body.revision, {
-        "state": "resolved", "resolution": resolution, "resolved_at": ctx.now, "resolution_note": note})
+        "state": "resolved", "resolution": resolution, "resolved_at": ctx.now, "resolution_note": note}, at=ctx.now)
     events.add(entity="review_item", entity_id=review_id, company_id=row["company_id"], kind="review_resolved",
                detail={**detail, "resolution": resolution, "text": note})
     return ReviewResolved(id=review_id, revision=revision)
@@ -550,7 +550,7 @@ def unmerge_company(ctx: WriteCtx, company_id: int, revision: int) -> int:
         "paused_at": was.get("previous_paused_at") if status == "working" else None,
         "pause_note": was.get("previous_pause_note") or "", "status_at": ctx.now,
     }
-    new = bump(conn, "company", "company_id", company_id, revision, sets)
+    new = bump(conn, "company", "company_id", company_id, revision, sets, at=ctx.now)
     _Events(ctx).add(entity="company", entity_id=company_id, company_id=company_id, kind="unmerged", detail={
         "kept_id": row["merged_into"], "restored_status": status, "text": "Unmerged by you."})
     return new

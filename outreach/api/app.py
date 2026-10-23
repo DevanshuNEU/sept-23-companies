@@ -7,6 +7,7 @@ from fastapi.routing import APIRoute
 
 import outreach.api.routers
 from outreach.api import errors, openapi
+from outreach.api.guards import GuardMiddleware
 from outreach.api.models.ping import Ping
 from outreach.api.settings import Settings, settings_from_env
 from outreach.store.db import guard
@@ -45,4 +46,6 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
     app.include_router(api, responses=openapi.ERROR_RESPONSES)
     errors.install(app)
     openapi.install(app)
+    # Added last so it is the outermost middleware: a refused request never reaches the body parser or a router.
+    app.add_middleware(GuardMiddleware, settings=settings)
     return app

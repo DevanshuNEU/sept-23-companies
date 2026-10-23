@@ -117,7 +117,8 @@ class EnvelopeTest(ApiCase):
         self.assert_envelope(self.get("/api/no-such-thing"), 404, "not_found")
 
     def test_a_wrong_method_is_a_bad_request_envelope_and_keeps_allow(self):
-        reply = self.client.delete("/api/ping")
+        # An own-page write shape, so the guards let it through to the router (tests/test_api_guards.py).
+        reply = self.client.delete("/api/ping", headers={"Content-Type": "application/json"})
         self.assert_envelope(reply, 405, "bad_request")
         self.assertIn("GET", reply.headers["allow"])
 

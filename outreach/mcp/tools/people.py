@@ -9,8 +9,12 @@ source that breaks the person_source rules rejects every person and writes nothi
   by name at the company, is not added again: their id comes back with created false and flag `duplicate`. At the
   same company an empty profile or empty notes are filled (never over text already there) and new sources added.
   Known at another company: returned with flag `other_company` and left as they are.
-- A known person on an active no-go is that person's refusal (`person_no_go`), with a plain reason; the others in
-  the call still go through. An address and a profile that belong to two different people is `two_people`.
+- A known person on an active no-go, or who said no or asked to stop (on an email thread or a logged outreach
+  touch), is that person's refusal (`person_no_go`, `said_no`), with a plain reason; the others in the call still go
+  through. The same-name lookup across the company family runs even when an address or profile is given, so a new
+  address never brings such a person back as someone fresh and draftable; a namesake who may be emailed does not
+  stop the add, which is flagged `same_name_as:<id>`. An address and a profile of two different people is
+  `two_people`.
 """
 from __future__ import annotations
 
@@ -110,8 +114,40 @@ def _clean(i: int, p: PersonIn) -> dict:
             "profile_text": (p.profile_text or "").strip(), "notes": (p.notes or "").strip(), "sources": p.sources}
 
 
-def _match(conn: sqlite3.Connection, want: dict, family_ids: list[int]) -> tuple[sqlite3.Row | None, str | None]:
-    """(the known person, a refusal message when the address and the profile are two different people)."""
+def _namesakes(conn: sqlite3.Connection, want: dict, family_ids: list[int]) -> list[sqlite3.Row]:
+    """Everyone with this name at the company family, whatever address or profile was given."""
+    return [r for r in conn.execute(f"SELECT * FROM person WHERE company_id IN ({marks(family_ids)}) "
+                                    f"ORDER BY person_id", family_ids)
+            if name_key(r["name"]) == name_key(want["name"])]
+
+
+def _said_no(conn: sqlite3.Connection, person_ids: list[int]) -> set[int]:
+    """The people whose reply said no or asked to stop, on an email thread or a logged outreach touch."""
+    if not person_ids:
+        return set()
+    stop = ("said_no", "asked_to_stop")
+    return {r[0] for r in conn.execute(
+        f"SELECT person_id FROM touch WHERE person_id IN ({marks(person_ids)}) AND reply_kind IN (?, ?) "
+        f"UNION SELECT person_id FROM outreach_touch WHERE person_id IN ({marks(person_ids)}) "
+        f"AND undone_at IS NULL AND reply_kind IN (?, ?)", (*person_ids, *stop, *person_ids, *stop))}
+
+
+def _stop_reason(conn: sqlite3.Connection, people: list[sqlite3.Row], no_go_people: set[int]) -> dict | None:
+    """The refusal for the first of `people` who must not be emailed (a person no-go, or said no), else None."""
+    said_no = _said_no(conn, [p["person_id"] for p in people])
+    for p in people:
+        if p["person_id"] in no_go_people:
+            return {"person_id": p["person_id"], "created": False, "refused": "person_no_go", "flags": [],
+                    "message": f"{p['name']} is on the no-go list, so nothing was added or changed for them."}
+        if p["person_id"] in said_no:
+            return {"person_id": p["person_id"], "created": False, "refused": "said_no", "flags": [],
+                    "message": f"{p['name']} said no or asked to stop, so nothing was added or changed for them."}
+    return None
+
+
+def _match(conn: sqlite3.Connection, want: dict) -> tuple[sqlite3.Row | None, str | None]:
+    """(the person known by this address or profile, a refusal message when the address and the profile are two
+    different people)."""
     by_email = conn.execute("SELECT * FROM person WHERE email = ?", (want["email"],)).fetchone() \
         if want["email"] else None
     by_page = None
@@ -122,12 +158,7 @@ def _match(conn: sqlite3.Connection, want: dict, family_ids: list[int]) -> tuple
     if by_email is not None and by_page is not None and by_email["person_id"] != by_page["person_id"]:
         return None, (f"The address is {by_email['name']}'s (person {by_email['person_id']}) and the LinkedIn page "
                       f"is {by_page['name']}'s (person {by_page['person_id']}).")
-    known = by_email or by_page
-    if known is None and not want["email"] and not want["linkedin"]:
-        known = next((r for r in conn.execute(
-            f"SELECT * FROM person WHERE company_id IN ({marks(family_ids)}) ORDER BY person_id", family_ids)
-            if name_key(r["name"]) == name_key(want["name"])), None)
-    return known, None
+    return by_email or by_page, None
 
 
 def _sources(ctx: Ctx, person_id: int, sources) -> int:
@@ -144,9 +175,9 @@ def _sources(ctx: Ctx, person_id: int, sources) -> int:
 def _known(ctx: Ctx, known: sqlite3.Row, want: dict, *, family: Family, survivor: int, no_go_people: set[int]
            ) -> dict:
     conn = ctx.conn
-    if known["person_id"] in no_go_people:
-        return {"person_id": known["person_id"], "created": False, "refused": "person_no_go", "flags": [],
-                "message": f"{known['name']} is on the no-go list, so nothing was added or changed for them."}
+    stop = _stop_reason(conn, [known], no_go_people)
+    if stop is not None:
+        return stop
     if family.survivor(known["company_id"]) != survivor:
         theirs = company_row(conn, family.survivor(known["company_id"]))
         return {"person_id": known["person_id"], "created": False, "refused": None,
@@ -168,7 +199,7 @@ def _known(ctx: Ctx, known: sqlite3.Row, want: dict, *, family: Family, survivor
             "message": "Already known; not added again."}
 
 
-def _new(ctx: Ctx, want: dict, survivor: int) -> dict:
+def _new(ctx: Ctx, want: dict, survivor: int, flags: list[str]) -> dict:
     channel = "email" if want["email"] else "linkedin"
     person_id = ctx.conn.execute(
         "INSERT INTO person(company_id, name, title, role_kind, email, linkedin_url, profile_text, notes, channel, "
@@ -179,7 +210,9 @@ def _new(ctx: Ctx, want: dict, survivor: int) -> dict:
     added = _sources(ctx, person_id, want["sources"])
     append_event(ctx.conn, entity="person", kind="added", actor="claude", entity_id=person_id, company_id=survivor,
                  at=ctx.now, detail={"channel": channel, "role_kind": want["role_kind"], "sources": added})
-    return {"person_id": person_id, "created": True, "refused": None, "flags": [], "message": None}
+    return {"person_id": person_id, "created": True, "refused": None, "flags": flags,
+            "message": "Someone with this name is already at the company; check it is not the same person."
+            if flags else None}
 
 
 def add_people(ctx: Ctx, args: AddPeopleInput) -> dict:
@@ -198,14 +231,20 @@ def add_people(ctx: Ctx, args: AddPeopleInput) -> dict:
         ids = family.members(survivor)
         results = []
         for i, want in enumerate(wanted):
-            known, conflict = _match(conn, want, ids)
+            known, conflict = _match(conn, want)
+            namesakes = _namesakes(conn, want, ids)
+            stopped = _stop_reason(conn, namesakes, no_go_people)
             if conflict is not None:
                 out = {"person_id": None, "created": False, "refused": "two_people", "flags": [],
                        "message": conflict + " Nothing was added for this person."}
             elif known is not None:
                 out = _known(ctx, known, want, family=family, survivor=survivor, no_go_people=no_go_people)
+            elif stopped is not None:  # a new address or profile never brings back someone who must not be emailed
+                out = stopped
+            elif namesakes and not want["email"] and not want["linkedin"]:
+                out = _known(ctx, namesakes[0], want, family=family, survivor=survivor, no_go_people=no_go_people)
             else:
-                out = _new(ctx, want, survivor)
+                out = _new(ctx, want, survivor, [f"same_name_as:{p['person_id']}" for p in namesakes])
             results.append({"index": i, "name": want["name"], **out})
     return {"company": {"id": survivor, "name": main["name"], "status": main["status"]}, "merged_note": note,
             "results": results}

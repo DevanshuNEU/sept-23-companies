@@ -7,7 +7,7 @@ import unittest
 
 from tests import apiseed as seed
 from tests.mcptest import McpCase, fingerprint
-from tests.test_mcp_reads import merge, no_go
+from tests.test_mcp_reads import merge, no_go, outreach_touch
 
 PAGE = "https://acme.example/team"
 
@@ -200,6 +200,61 @@ class AddPeopleTest(PeopleCase):
     def test_unknown_company_is_not_found(self):
         self.assertEqual(self.error("add_people", {"company_id": 999, "people": [person()]})["code"], "not_found")
 
+
+class SameNameTest(PeopleCase):
+    """A known person who must not be emailed cannot come back as a fresh, draftable person under a new address or
+    LinkedIn page (review I1): the same-name lookup runs across the company family whatever else is given."""
+
+    def stopped(self, how: str, name: str, email: str) -> int:
+        nora = seed.person(self.db, self.acme, name, email=email)
+        if how == "no_go":
+            no_go(self.db, person_id=nora)
+        elif how == "touch":
+            seed.touch(self.db, nora, "replied", reply_kind="asked_to_stop")
+        else:
+            outreach_touch(self.db, self.acme, nora)
+            self.db.execute("UPDATE outreach_touch SET reply_kind = 'said_no', replied_at = ? WHERE person_id = ?",
+                            ("2026-11-02T12:00:00Z", nora))
+        return nora
+
+    def test_re_adding_a_stopped_person_with_a_new_email_or_linkedin_url_is_refused(self):
+        n = 0
+        for how, code in (("no_go", "person_no_go"), ("touch", "said_no"), ("outreach_touch", "said_no")):
+            for kind in ("email", "linkedin_url"):
+                n += 1
+                with self.subTest(how=how, kind=kind):
+                    name = f"Nora Stop {'ABCDEF'[n - 1]}"
+                    nora = self.stopped(how, name, f"nora{n}@acme.example")
+                    new = (f"nora{n}.new@acme.example" if kind == "email"
+                           else f"https://www.linkedin.com/in/nora-new-{n}")
+                    before = fingerprint(self.db)
+                    res = self.add(person(f"  {name.upper()} ", **{kind: new}))["results"][0]
+                    self.assertEqual((res["refused"], res["created"], res["person_id"]), (code, False, nora))
+                    self.assertIn(name, res["message"])
+                    self.assertEqual(fingerprint(self.db), before)
+
+    def test_a_stopped_namesake_at_a_merged_duplicate_counts(self):
+        dup = seed.company(self.db, "Acme Dup")
+        nora = seed.person(self.db, dup, "Nora Stop", email="nora@acme.example")
+        no_go(self.db, person_id=nora)
+        merge(self.db, dup, self.acme)
+        res = self.add(person("Nora Stop", email="nora2@acme.example"))["results"][0]
+        self.assertEqual((res["refused"], res["person_id"]), ("person_no_go", nora))
+
+    def test_a_namesake_who_may_be_emailed_does_not_stop_a_new_person_and_is_named(self):
+        pat = seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example")
+        res = self.add(person("Pat Lee", email="pat.lee@acme.example"))["results"][0]
+        self.assertTrue(res["created"])
+        self.assertEqual(res["flags"], [f"same_name_as:{pat}"])
+        self.assertEqual(self.count(), 2)
+
+    def test_a_known_person_who_said_no_is_refused_and_left_as_they_are(self):
+        sid = seed.person(self.db, self.acme, "Sid No", email="sid@acme.example")
+        seed.touch(self.db, sid, "replied", reply_kind="said_no")
+        before = fingerprint(self.db)
+        res = self.add(person("Sid No", email="sid@acme.example", notes="try again"))["results"][0]
+        self.assertEqual((res["refused"], res["person_id"], res["created"]), ("said_no", sid, False))
+        self.assertEqual(fingerprint(self.db), before)
 
 if __name__ == "__main__":
     unittest.main()

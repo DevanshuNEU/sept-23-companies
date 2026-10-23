@@ -73,7 +73,7 @@ def _live(rows: Iterable[Mapping]) -> list[Mapping]:
     return [r for r in rows if r["undone_at"] is None]
 
 
-def _in_period(stamp: str | None, period: tuple[str, str]) -> bool:
+def in_period(stamp: str | None, period: tuple[str, str]) -> bool:
     return stamp is not None and period[0] <= ny_day(stamp) <= period[1]
 
 
@@ -81,9 +81,9 @@ def funnel(rows: Iterable[Mapping], period: tuple[str, str]) -> list[FunnelCount
     """The five stages for `period`, each with the stage and count it is measured against."""
     live = _live(rows)
     counts = {"requests": sum(1 for r in live if r["channel"] == "linkedin_request"
-                              and _in_period(r["sent_at"], period))}
+                              and in_period(r["sent_at"], period))}
     for stage, column in _STAGE_DATE.items():
-        counts[stage] = sum(1 for r in live if _in_period(r[column], period))
+        counts[stage] = sum(1 for r in live if in_period(r[column], period))
     return [FunnelCount(s, counts[s], _STAGE_FROM.get(s), counts[_STAGE_FROM[s]] if s in _STAGE_FROM else None)
             for s in STAGES]
 
@@ -119,9 +119,9 @@ def base_rates(rows: Iterable[Mapping], cfg: ReportConfig) -> BaseRates:
 def is_quiet(rows: Iterable[Mapping], period: tuple[str, str]) -> bool:
     """No accepts and no replies in the period while requests or applications went out in it."""
     live = _live(rows)
-    worked = any(r["channel"] in ("linkedin_request", "application") and _in_period(r["sent_at"], period)
+    worked = any(r["channel"] in ("linkedin_request", "application") and in_period(r["sent_at"], period)
                  for r in live)
-    heard = any(_in_period(r["accepted_at"], period) or _in_period(r["replied_at"], period) for r in live)
+    heard = any(in_period(r["accepted_at"], period) or in_period(r["replied_at"], period) for r in live)
     return worked and not heard
 
 

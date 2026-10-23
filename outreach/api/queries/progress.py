@@ -22,8 +22,8 @@ from outreach.api.models.progress import (
     BaseRates, EffortLine, Finding, FindingChange, FindingCount, FindingsView, FunnelFrom, FunnelStage,
     ProgressPeriod, ProgressView, TodayProgress, Win, WinCounts, WinsSeen, WinsView,
 )
-from outreach.api.queries.company import person_ref, merge_parents, survivor_of
-from outreach.api.queries.outcomes import CHANNEL_WORDS, LANE_WORDS, by_ids, company_refs, _people
+from outreach.api.queries.company import merge_parents, person_ref, survivor_of
+from outreach.api.queries.outcomes import CHANNEL_WORDS, LANE_WORDS, by_ids, company_refs, people_by_ids
 from outreach.outcomes import report
 from outreach.outcomes.wins import WIN_KINDS, decode_win_id, is_log_win, is_recognition, win_id, win_line
 from outreach.outcomes.windows import day_bounds_utc, month_bounds, ny_day, week_bounds
@@ -60,17 +60,22 @@ def _on(stamp: str | None, day: str) -> bool:
 # ---------------------------------------------------------------------------------------------- the plan's counts
 
 def plan_counts(conn: sqlite3.Connection, today: str) -> tuple[int, int]:
-    """`(planned, done)` for the plan of the New York date `today`: its rows that were not removed, and how many are
-    finished. A row is done when every step has happened since the list date:
+    """`(planned, done)` for the plan of the New York date `today`.
 
-    - an email row, once its first message left `drafted` (approved or later);
+    REPLACE with Task 10's plan reader once it exists, so the Today page, the shell and progress agree. Until then
+    this reads `daily_list_entry` (today's rows), `outreach_touch`, and for email rows `touch` and `message`.
+
+    Planned is today's rows that are not removed and not skipped (a skip sets the entry to `backlog`: it is carried
+    to tomorrow, not today's work). A row is done when every step has happened since the New York start of `today`:
+
+    - an email row, once its first message left `drafted` (approved, or sent without an approval time) today;
     - a LinkedIn row, when the person has a `linkedin_request` or `linkedin_message` touch, and, when the row names a
       role, an `application` touch for that posting;
     - a find-someone row (no person), when the company has any `linkedin_request` or `email` touch.
     """
     entries = conn.execute(
         "SELECT company_id, person_id, channel, posting_id FROM daily_list_entry "
-        "WHERE list_date = ? AND state <> 'removed'", (today,)).fetchall()
+        "WHERE list_date = ? AND state NOT IN ('removed', 'backlog')", (today,)).fetchall()
     start = day_bounds_utc(today)[0]
 
     def has(sql: str, *args) -> bool:
@@ -85,7 +90,7 @@ def plan_counts(conn: sqlite3.Connection, today: str) -> tuple[int, int]:
             finished = conn.execute(
                 "SELECT 1 FROM touch t JOIN message m ON m.touch_id = t.touch_id "
                 "WHERE t.person_id = ? AND m.seq = 0 AND m.state IN ('approved','sending','send_unknown','sent') "
-                "LIMIT 1", (e["person_id"],)).fetchone() is not None
+                "AND COALESCE(m.approved_at, m.sent_at) >= ? LIMIT 1", (e["person_id"], start)).fetchone() is not None
         else:
             finished = has("person_id = ? AND channel IN ('linkedin_request','linkedin_message')", e["person_id"])
             if finished and e["posting_id"] is not None:
@@ -104,7 +109,7 @@ def _period(label: str, bounds: tuple[str, str], rows: list[sqlite3.Row], cfg: A
               for c in counts]
 
     def sent(channel: str) -> int:
-        return sum(1 for r in rows if r["channel"] == channel and report._in_period(r["sent_at"], bounds))
+        return sum(1 for r in rows if r["channel"] == channel and report.in_period(r["sent_at"], bounds))
 
     effort = [EffortLine(label="Requests sent", count=by_stage["requests"]),
               EffortLine(label="Applications sent", count=sent("application")),
@@ -288,7 +293,7 @@ def wins_view(conn: sqlite3.Connection, now: str) -> WinsView:
     parents = merge_parents(conn)
     touches = [c.touch for c in shown]
     companies = company_refs(conn, {survivor_of(parents, t["company_id"]) for t in touches})
-    people = _people(conn, {t["person_id"] for t in touches if t["person_id"] is not None})
+    people = people_by_ids(conn, {t["person_id"] for t in touches if t["person_id"] is not None})
     postings = {r["posting_id"]: r["title"] for r in by_ids(
         conn, "SELECT posting_id, title FROM posting WHERE posting_id IN ({ids})",
         {t["posting_id"] for t in touches if t["posting_id"] is not None})}

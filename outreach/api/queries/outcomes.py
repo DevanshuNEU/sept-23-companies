@@ -92,7 +92,7 @@ def company_refs(conn: sqlite3.Connection, ids: set[int]) -> dict[int, CompanyRe
                                    "WHERE company_id IN ({ids})", ids)}
 
 
-def _people(conn: sqlite3.Connection, ids: set[int]) -> dict[int, sqlite3.Row]:
+def people_by_ids(conn: sqlite3.Connection, ids: set[int]) -> dict[int, sqlite3.Row]:
     return {r["person_id"]: r for r in by_ids(conn, "SELECT * FROM person WHERE person_id IN ({ids})", ids)}
 
 
@@ -134,7 +134,7 @@ def prompt_view(conn: sqlite3.Connection, now: str, cfg: PromptConfig) -> Outcom
         return OutcomePromptView(as_of=now, touches=[])
     parents = merge_parents(conn)
     companies = company_refs(conn, {survivor_of(parents, r["company_id"]) for r in due})
-    people = _people(conn, {r["person_id"] for r in due if r["person_id"] is not None})
+    people = people_by_ids(conn, {r["person_id"] for r in due if r["person_id"] is not None})
     touches = []
     for r in due:
         company = companies.get(survivor_of(parents, r["company_id"]))
@@ -353,7 +353,7 @@ def touch_history(conn: sqlite3.Connection, touch_id: int) -> TouchHistory | Non
         return None
     survivor = survivor_of(merge_parents(conn), row["company_id"])
     company = company_refs(conn, {survivor})[survivor]
-    person = _people(conn, {row["person_id"]}).get(row["person_id"]) if row["person_id"] is not None else None
+    person = people_by_ids(conn, {row["person_id"]}).get(row["person_id"]) if row["person_id"] is not None else None
     events = conn.execute(
         "SELECT * FROM event WHERE entity = 'outreach_touch' AND entity_id = ? ORDER BY at DESC, event_id DESC",
         (touch_id,)).fetchall()

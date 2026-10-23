@@ -50,6 +50,25 @@ class ProgressCase(ApiCase):
 
 
 class Progress(ProgressCase):
+    def test_a_week_across_the_daylight_saving_change_has_one_week_and_a_25_hour_sunday(self):
+        # The clocks went back on Sunday 2026-11-01 at 02:00: that Sunday is 25 hours, in the week of Oct 26.
+        self.requests(1, sent_at="2026-11-01T03:59:00Z", accepted_at="2026-11-01T04:30:00Z")   # Oct 31 23:59 EDT
+        self.requests(1, sent_at="2026-11-01T04:00:00Z")   # Sunday 00:00 EDT
+        self.requests(1, sent_at="2026-11-02T04:59:00Z")   # Sunday 23:59 EST: still the week
+        self.requests(1, sent_at="2026-11-02T05:00:00Z")   # Monday 00:00 EST: next week
+        self.set_now("2026-11-01T17:00:00Z")
+        week = self.progress()["week"]
+        self.assertEqual((week["from"], week["to"]), ("2026-10-26", "2026-11-01"))
+        self.assertEqual(self.stages(week)["requests"]["count"], 3)
+        self.assertEqual(self.stages(week)["accepts"]["count"], 1)
+        month = self.progress()["month"]
+        self.assertEqual((month["from"], month["to"]), ("2026-11-01", "2026-11-30"))
+        self.assertEqual(self.stages(month)["requests"]["count"], 3)  # Nov 1 and Nov 2 requests, not the Oct 31 one
+        self.set_now("2026-11-02T10:00:00Z")
+        week = self.progress()["week"]
+        self.assertEqual((week["from"], week["to"]), ("2026-11-02", "2026-11-08"))
+        self.assertEqual(self.stages(week)["requests"]["count"], 1)
+
     def test_empty_store_progress_has_zero_counts_no_rates_and_not_enough(self):
         view = self.progress()
         self.assertEqual(view["asOf"], NOW)
@@ -237,16 +256,40 @@ class TodayAndPlan(ProgressCase):
         view = self.progress()["today"]
         self.assertEqual((view["planned"], view["done"], view["applications"]), (3, 2, 1))
 
-    def test_an_email_row_is_done_once_its_message_left_drafted(self):
-        company = self.entry(1, None, None)
-        pat = s.person(self.conn, company, "Pat", channel="email")
+    def email_row(self, rank: int = 1, state: str = "drafted", **cols) -> tuple[int, int]:
+        company = self.entry(rank, None, None)
+        pat = s.person(self.conn, company, f"Pat{rank}", channel="email")
         self.conn.execute("UPDATE daily_list_entry SET person_id = ?, channel = 'email' WHERE company_id = ?",
                           (pat, company))
-        t = s.touch(self.conn, pat)
-        m = s.message(self.conn, t, 0, "drafted")
+        return pat, s.message(self.conn, s.touch(self.conn, pat), 0, state, **cols)
+
+    def test_an_email_row_is_done_once_its_message_left_drafted(self):
+        _, m = self.email_row()
         self.assertEqual(self.progress()["today"]["done"], 0)
-        self.conn.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?", (s.T0, m))
+        self.conn.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?",
+                          ("2026-11-10T13:00:00Z", m))
         self.assertEqual(self.progress()["today"]["done"], 1)
+
+    def test_a_message_approved_before_today_does_not_make_todays_row_done(self):
+        _, m = self.email_row()
+        # 2026-11-10 05:00Z is New York midnight; 04:59:59Z is still the 9th.
+        self.conn.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?",
+                          ("2026-11-10T04:59:59Z", m))
+        self.assertEqual(self.progress()["today"]["done"], 0)
+        self.conn.execute("UPDATE message SET approved_at = ? WHERE message_id = ?", ("2026-11-10T05:00:00Z", m))
+        self.assertEqual(self.progress()["today"]["done"], 1)
+
+    def test_a_sent_message_with_no_approval_time_is_judged_by_when_it_was_sent(self):
+        _, m = self.email_row(state="sent", sent_at="2026-11-09T14:00:00Z")  # inserted sent: approved_at stays NULL
+        self.assertEqual(self.progress()["today"]["done"], 0)
+        self.conn.execute("UPDATE message SET sent_at = ? WHERE message_id = ?", ("2026-11-10T14:00:00Z", m))
+        self.assertEqual(self.progress()["today"]["done"], 1)
+
+    def test_a_skipped_row_is_not_planned(self):
+        self.entry(1, self.lena, "linkedin_request")
+        self.entry(2, None, None, state="backlog")  # a skip sets backlog: carried to tomorrow, not today's work
+        self.entry(3, None, None, state="picked")
+        self.assertEqual(self.progress()["today"]["planned"], 2)
 
     def test_a_find_someone_row_is_done_when_the_company_has_a_request_since_the_list_date(self):
         company = self.entry(1, None, None)

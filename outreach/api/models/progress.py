@@ -91,7 +91,7 @@ class FindingChange(Wire):
 
 class FindingsView(Wire):
     as_of: str
-    month: str                  # the first day of the month the report is for
+    month: str                  # the report's label (first day of a month); the counts read every touch so far
     reported_on: str | None     # the New York date of the newest touch or outcome the findings read; null without findings
     findings: list[Finding]
     changes: list[FindingChange]

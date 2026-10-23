@@ -92,9 +92,10 @@ def match_by_reply_headers(meta: MessageMeta, ids: Mapping[str, int]) -> int | N
 
 
 def known_ids(conn: sqlite3.Connection) -> set[str]:
-    """The Gmail ids already in the store: inbound messages read before and the sender's own sent messages."""
+    """The Gmail ids already in the store: inbound messages read before, mail read and left alone
+    (`inbound_seen`), and the sender's own sent messages. None of them is read again."""
     return {row[0] for row in conn.execute(
-        "SELECT gmail_message_id FROM inbound_message UNION "
+        "SELECT gmail_message_id FROM inbound_message UNION SELECT gmail_message_id FROM inbound_seen UNION "
         "SELECT gmail_message_id FROM message WHERE gmail_message_id IS NOT NULL AND gmail_message_id <> ''")}
 
 
@@ -124,7 +125,8 @@ def snapshot(conn: sqlite3.Connection, *, now: datetime, cfg: SendConfig) -> Sna
 
 @dataclass(frozen=True)
 class InboundRead:
-    """The messages read and the cursor to move to. `new_history_id` is None unless the read was complete."""
+    """The messages read and the cursor to move to: the page's for a complete read, the last finished history
+    record's for a partial one, or None (stay put)."""
     metas: list[MessageMeta]
     new_history_id: str | None
     complete: bool
@@ -135,6 +137,17 @@ def _gone(err: GmailError) -> bool:
     return err.status == 404
 
 
+def _read_through(added: tuple, unread: set[str]) -> str | None:
+    """The id of the last history record before the first one that holds an unread message: every message up to
+    it was read (or did not need reading). None when that is no record, or a record id is unknown."""
+    first = next(i for i, a in enumerate(added) if a.gmail_message_id in unread)
+    stop = added[first].history_id
+    before = [a.history_id for a in added[:first] if a.history_id != stop]
+    if stop is None or not before or any(h is None for h in before):
+        return None
+    return before[-1]
+
+
 def read_inbound(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: datetime) -> InboundRead:
     """Read new mail from Gmail. No store access: run it with no transaction open.
 
@@ -142,7 +155,8 @@ def read_inbound(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
     other threads (only to catch a bounce Gmail did not thread), at most `inbound_meta_cap` in all. With no cursor,
     or one Gmail calls expired: `profile` first (its history id becomes the cursor), then `thread` for each recent
     tracked thread. A failed call, or the cap, ends the read incomplete: what was read is kept and applied, and the
-    cursor stays where it was so the next tick reads the rest."""
+    cursor moves only to the last history record whose messages were all read (it stays put when that is none, or
+    when the client gives no record ids), so the next tick reads the rest and every tick makes progress."""
     known = set(snap.known)
     metas: list[MessageMeta] = []
     if snap.history_id:
@@ -163,16 +177,17 @@ def read_inbound(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
                 elif "INBOX" in added.labels:
                     others.append(added.gmail_message_id)
             wanted = tracked + others
-            complete = len(wanted) <= cfg.inbound_meta_cap
+            done: set[str] = set()
             for gmail_id in wanted[:cfg.inbound_meta_cap]:
                 try:
                     metas.append(client.message(gmail_id))
                 except GmailError as err:
-                    if _gone(err):
-                        continue
-                    complete = False
-                    break
-            return InboundRead(metas, page.history_id if complete else None, complete)
+                    if not _gone(err):
+                        break
+                done.add(gmail_id)
+            if len(done) == len(wanted):
+                return InboundRead(metas, page.history_id, True)
+            return InboundRead(metas, _read_through(page.added, set(wanted) - done), False)
     try:
         cursor = client.profile().history_id
     except GmailError:
@@ -201,6 +216,16 @@ def _stamp(at: datetime) -> str:
 
 def _received(meta: MessageMeta) -> str:
     return datetime.fromtimestamp(meta.internal_ms / 1000, tz=timezone.utc).strftime(ISO_FMT)
+
+
+# How long a message read and left alone is remembered: well past Gmail's history cursor (about a week).
+SEEN_DAYS = 30
+
+
+def _seen(conn: sqlite3.Connection, meta: MessageMeta, why: str, stamp: str) -> None:
+    """Remember a message read and left alone, so no later tick reads it again."""
+    conn.execute("INSERT INTO inbound_seen(gmail_message_id, thread_id, why, seen_at) VALUES (?, ?, ?, ?) "
+                 "ON CONFLICT(gmail_message_id) DO NOTHING", (meta.gmail_message_id, meta.thread_id or "", why, stamp))
 
 
 def _insert_inbound(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, found: Inbound, received: str,
@@ -308,8 +333,8 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, *, account: str, 
 
     His own messages, delay notices and mail outside the tracked threads write nothing, except a reply whose
     In-Reply-To or References names one of our Message-IDs (Gmail split the thread) and a bounce matched by those
-    headers, its failed recipient or a sent subject: those count as if they were in the thread. Everything else writes one `inbound_message` row, once per Gmail
-    message, and then:
+    headers, its failed recipient or a sent subject: those count as if they were in the thread. Everything else
+    writes one `inbound_message` row, once per Gmail message, and then:
     - a person's reply: the touch `replied` (from `open`, `closed` or `bounced`) with `replied_at` and kind
       `unsorted` when unset; its outreach touch's first `replied` outcome (actor `sender`, at its current revision);
       the surviving company held when no company in its family is held yet; the touch's unsent messages stopped
@@ -318,7 +343,9 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, *, account: str, 
     - a bounce: an `open` touch becomes `bounced`; its unsent messages are stopped (reason `bounced`); then the
       policy, 3-day bounce rate and hard bounce rate signals. A Gmail limit notice instead raises `gmail_limit` and
       leaves the touch alone, even when it matches no touch.
-    The cursor moves to `read.new_history_id` only when the read was complete. Returns counts."""
+    A message that writes nothing is remembered in `inbound_seen` (forgotten after `SEEN_DAYS`), so it is never
+    read again. The cursor moves to `read.new_history_id` (a partial read's is the last record it finished).
+    Returns counts."""
     stamp = _stamp(now)
     counts = {"replies": 0, "auto_replies": 0, "bounces": 0, "limit_notices": 0, "ignored": 0}
     with atomic(conn, "apply_inbound"):
@@ -341,10 +368,13 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, *, account: str, 
             if found.kind == "bounce" and found.dsn_class == "limit":
                 if touch_id is not None:
                     _insert_inbound(conn, touch_id, meta, found, _received(meta), stamp)
+                else:
+                    _seen(conn, meta, "untracked", stamp)
                 _limit_notice(conn, touch_id, meta, _received(meta), now=now, cfg=cfg, notify=notify)
                 counts["limit_notices"] += 1
                 continue
             if touch_id is None or found.kind not in ("human", "auto_reply", "bounce"):
+                _seen(conn, meta, found.kind if found.kind in ("ours", "delay") else "untracked", stamp)
                 counts["ignored"] += 1
                 continue
             received = _received(meta)
@@ -359,8 +389,10 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, *, account: str, 
             else:
                 _apply_bounce(conn, touch_id, meta, found, received, stamp, now=now, cfg=cfg, notify=notify)
                 counts["bounces"] += 1
-        if read.complete and read.new_history_id:
+        if read.new_history_id:  # a complete read's cursor, or the last record a partial read finished
             conn.execute("UPDATE sender SET history_id = ? WHERE sender_id = 1", (read.new_history_id,))
+        conn.execute("DELETE FROM inbound_seen WHERE seen_at < ?",
+                     (_stamp(now - timedelta(days=SEEN_DAYS)),))
     return counts
 
 

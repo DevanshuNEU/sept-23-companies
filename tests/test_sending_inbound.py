@@ -280,7 +280,8 @@ class HumanReplyTest(Base):
         _, touch_id, sent = self.send_first()
         self.sync()
         self.gmail.deliver_reply(sent, "p1@acme.co", subject="Other", new_thread=True,
-                                 headers={"in-reply-to": "<not.ours@example.com>", "references": "<not.ours@example.com>"})
+                                 headers={"in-reply-to": "<not.ours@example.com>",
+                                          "references": "<not.ours@example.com>"})
         self.sync()
         self.assertEqual(self.touch(touch_id)["state"], "open")
         self.assertEqual(self.inbound_rows(), [])
@@ -530,24 +531,90 @@ class ReadTest(Base):
         self.assertTrue(read.complete)
         self.assertTrue(self.sender()["history_id"])
 
-    def test_incomplete_read_keeps_the_cursor(self):
+    def test_a_partial_read_moves_the_cursor_only_past_what_was_read(self):
         _, touch_id, sent = self.send_first()
         self.sync()
-        cursor = self.sender()["history_id"]
+        cursor = int(self.sender()["history_id"])
         self.gmail.deliver_reply(sent, "p1@acme.co")
         self.gmail.deliver_unrelated("news@shop.example", "Sale")
         read, _ = self.sync(dataclasses.replace(CFG, inbound_meta_cap=1))
         self.assertFalse(read.complete)
-        self.assertEqual(self.sender()["history_id"], cursor)
         self.assertEqual(self.touch(touch_id)["state"], "replied")  # tracked threads are read first
+        moved = int(self.sender()["history_id"])
+        self.assertGreater(moved, cursor)  # past the reply, not past the unread sale notice
         self.gmail.deliver_reply(sent, "p1@acme.co")
         self.fail_on["message"] = GmailError("server", 503, "backend error")
         read, _ = self.sync()
         self.assertFalse(read.complete)
-        self.assertEqual(self.sender()["history_id"], cursor)
+        self.assertEqual(int(self.sender()["history_id"]), moved)  # nothing read, nothing passed
         read, _ = self.sync()
         self.assertTrue(read.complete)
-        self.assertNotEqual(self.sender()["history_id"], cursor)
+        self.assertGreater(int(self.sender()["history_id"]), moved)
+        self.assertEqual(len(self.inbound_rows()), 2)
+
+    def backlog(self, sent, before=6, after=5):
+        for i in range(before):
+            self.gmail.deliver_unrelated(f"news{i}@shop.example", f"Digest {i}")
+        self.gmail.deliver_bounce(sent, threaded=False)
+        for i in range(before, before + after):
+            self.gmail.deliver_unrelated(f"news{i}@shop.example", f"Digest {i}")
+
+    def test_a_backlog_over_the_cap_finishes_over_several_ticks_and_counts_its_bounce(self):
+        cfg = dataclasses.replace(CFG, inbound_meta_cap=4)
+        _, touch_id, sent = self.send_first()
+        self.sync(cfg)
+        self.backlog(sent)
+        cursors, reads = [int(self.sender()["history_id"])], 0
+        for _ in range(5):
+            self.gmail.calls.clear()
+            read, _ = self.sync(cfg)
+            reads += self.gmail.calls.count("message")
+            cursors.append(int(self.sender()["history_id"]))
+            if read.complete:
+                break
+        self.assertTrue(read.complete)
+        self.assertEqual(len(cursors), 4)  # 12 new messages, 4 a tick
+        self.assertEqual(cursors, sorted(set(cursors)))  # every tick moved the cursor on
+        self.assertEqual(reads, 12)  # each message read once
+        self.assertEqual(self.touch(touch_id)["state"], "bounced")
+        self.assertEqual(len(self.events("touch", "bounced", touch_id)), 1)
+
+    def test_ignored_mail_is_stored_so_a_backlog_finishes_even_when_the_cursor_cannot_move(self):
+        cfg = dataclasses.replace(CFG, inbound_meta_cap=4)
+        _, touch_id, sent = self.send_first()
+        self.sync(cfg)
+        cursor = self.sender()["history_id"]
+        self.backlog(sent)
+        real = self.gmail.history
+
+        def without_record_ids(start):
+            page = real(start)
+            return dataclasses.replace(page, added=tuple(dataclasses.replace(a, history_id=None) for a in page.added))
+        self.gmail.history = without_record_ids
+        reads = 0
+        for _ in range(5):
+            self.gmail.calls.clear()
+            read, _ = self.sync(cfg)
+            reads += self.gmail.calls.count("message")
+            if read.complete:
+                break
+            self.assertEqual(self.sender()["history_id"], cursor)
+        self.assertTrue(read.complete)
+        self.assertEqual(reads, 12)
+        self.assertEqual(self.touch(touch_id)["state"], "bounced")
+        seen = {r[0] for r in self.db.execute("SELECT why FROM inbound_seen")}
+        self.assertEqual(seen, {"untracked"})
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM inbound_seen").fetchone()[0], 11)
+
+    def test_seen_ids_are_forgotten_after_thirty_days(self):
+        self.send_first()
+        self.sync()
+        self.gmail.deliver_unrelated("news@shop.example", "Digest")
+        self.sync()
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM inbound_seen").fetchone()[0], 1)
+        self.clock.advance(days=31)
+        self.sync()
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM inbound_seen").fetchone()[0], 0)
 
     def test_a_failed_history_call_is_an_incomplete_read_not_no_replies(self):
         self.send_first()

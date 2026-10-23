@@ -486,8 +486,9 @@ def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, b
     becomes `sent` (`record_sent(..., reconciled=True)`, dated to the claim). A complete miss becomes `failed`
     once `reconcile_after_minutes` have passed since the send returned (and since the claim). Anything else stays
     `send_unknown`: an incomplete scan, a younger send, a hit for another Message-ID, or a miss from a scan for an
-    earlier attempt's Message-ID. Matching is by Message-ID only, never by recipient or subject. Runs in one transaction (a savepoint inside the caller's), with a savepoint per message:
-    one that fails to record is logged, counted in `errors` and left unclear. Returns the counts `sent`, `failed`,
+    earlier attempt's Message-ID. Matching is by Message-ID only, never by recipient or subject. Runs in one
+    transaction (a savepoint inside the caller's), with a savepoint per message: one that fails to record is
+    logged, counted in `errors` and left unclear. Returns the counts `sent`, `failed`,
     `waiting` and `errors`."""
     stamp = _stamp(now)
     now_ms = _ms(stamp)

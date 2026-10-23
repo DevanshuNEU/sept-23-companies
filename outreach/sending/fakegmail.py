@@ -220,7 +220,7 @@ class FakeGmail(MailClient):
             raise GmailError("bad_request", 400, "Invalid startHistoryId")
         start = int(start_history_id)
         added = tuple(Added(gmail_message_id=mid, thread_id=self._messages[mid].thread_id,
-                            labels=self._messages[mid].labels)
+                            labels=self._messages[mid].labels, history_id=str(hid))
                       for hid, mid in self._history if hid > start)
         return HistoryPage(added=added, history_id=str(self._history_id))
 

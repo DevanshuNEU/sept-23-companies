@@ -245,6 +245,30 @@ class NoGoTests(Store):
         self.assertEqual((got.no_go, got.no_go_reason), ("active", "said_no"))
         self.assertEqual(decide_hide(got, CFG).kind, "no_go")
 
+    def test_a_rules_row_on_a_duplicate_after_the_lift_never_re_hides_the_survivor(self):
+        # The crawler or an earlier rank run wrote a refusal row on the duplicate after he lifted the survivor;
+        # the merge then joins them. His lift wins over automation; only his own row or a reply hides again.
+        self.refusal(final=True)
+        rs.no_go(self.conn, self.co, "no_sponsorship", lifted=True, lifted_at="2026-10-01T08:00:00Z")
+        dup = seed_company(self.conn, "Acme Inc")
+        rs.no_go(self.conn, dup, "no_sponsorship", source="rules", created_at="2026-10-05T08:00:00Z")
+        rs.merge(self.conn, dup, self.co)
+        got = self.inputs()[self.co]
+        self.assertEqual(got.no_go, "lifted")
+        hide = decide_hide(got, CFG)
+        self.assertIsNone(hide)
+        made = Hide("no_sponsorship", "x", False, posting_id=1, quote=REFUSE)
+        self.assertFalse(write_no_go(self.conn, self.co, made))
+        self.assertEqual(self.count("no_go"), 2)
+        for source in ("reply", "devanshu"):
+            with self.subTest(source=source):
+                other = seed_company(self.conn, f"Acme {source}")
+                row = rs.no_go(self.conn, other, "said_no", source=source, created_at="2026-10-06T08:00:00Z")
+                rs.merge(self.conn, other, self.co)
+                got = self.inputs()[self.co]
+                self.assertEqual((got.no_go, got.no_go_reason), ("active", "said_no"))
+                self.conn.execute("DELETE FROM no_go WHERE no_go_id = ?", (row,))
+
 
 class TrustedBoardTests(Store):
     def test_postings_on_a_doubtful_board_never_hide(self):

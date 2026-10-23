@@ -5,7 +5,8 @@ module adds the company level, in the order of the plan's Decisions:
 
 1. an active `no_go` row set after the latest lift of the company's group (merged duplicates included); else a
    lifted one cancels every hide below, whatever its reason (he put the company back on the list on purpose: it
-   stays shown and ranked, and only a new active row hides it again);
+   stays shown and ranked, and only a new active row he set, or one from a reply, hides it again; an automated
+   `rules` row never does);
 2. size over `hide.size_over` with evidence of a trusted confidence (`size`, else `headcount`);
 3. a sponsorship refusal: an open, live (not stale) engineering posting on a trusted board, not outside the US,
    whose decision says `sponsorship = 'no'`. It hides nothing when another open live trusted posting says `yes`
@@ -125,19 +126,24 @@ def load_hide_inputs(conn: sqlite3.Connection, canon: dict[int, int], doubtful: 
                 Refusal(r["posting_id"], bool(r["provisional"]), r["sponsorship_quote"]))
 
     # Per surviving company (its merged duplicates included): an active row counts only when it was set after the
-    # group's latest lift, so a lift on one company is not undone by an older active row on a duplicate.
+    # group's latest lift, so a lift on one company is not undone by an older active row on a duplicate. After a
+    # lift, only a row he set or one from the company's own reply hides again: an automated 'rules' row (say, on a
+    # duplicate merged in later) never overrides his choice.
     lifted_at: dict[int, str] = {}
-    actives: dict[int, list[tuple[str, int, str]]] = {}
-    for r in conn.execute("SELECT no_go_id, company_id, reason, created_at, lifted_at FROM no_go "
+    actives: dict[int, list[tuple[str, int, str, str]]] = {}
+    for r in conn.execute("SELECT no_go_id, company_id, reason, source, created_at, lifted_at FROM no_go "
                           "WHERE company_id IS NOT NULL"):
         cid = owner(r["company_id"])
         if r["lifted_at"] is not None:
             lifted_at[cid] = max(lifted_at.get(cid, ""), r["lifted_at"])
         else:
-            actives.setdefault(cid, []).append((r["created_at"], r["no_go_id"], r["reason"]))
+            actives.setdefault(cid, []).append((r["created_at"], r["no_go_id"], r["reason"], r["source"]))
     no_go: dict[int, tuple[str, str]] = {}
     for cid in set(lifted_at) | set(actives):
-        later = [a for a in actives.get(cid, ()) if cid not in lifted_at or a[0] > lifted_at[cid]]
+        if cid in lifted_at:
+            later = [a for a in actives.get(cid, ()) if a[0] > lifted_at[cid] and a[3] != "rules"]
+        else:
+            later = list(actives.get(cid, ()))
         no_go[cid] = ("active", max(later)[2]) if later else ("lifted", "")
 
     size: dict[int, tuple[tuple, SizeEvidence]] = {}

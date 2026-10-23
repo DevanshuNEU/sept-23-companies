@@ -8,6 +8,10 @@ ranker's review items, the `weights_changed` event of a version change (ruling 8
 the job's `ok`. Any exception rolls all of it back, closes the run `failed` and re-raises, so the previous rows and
 the no-go table are untouched. A dry run writes nothing, not even a `job_run`.
 
+The write transaction first re-checks the ruleset (a change since the compute fails the run as a stale one
+does) and re-reads which companies are still their own survivor and still listed: a merge or a close that
+committed during the compute gets no no-go row.
+
 Staleness is the crawler's rule: `outreach.crawl.stale.load_stale` is called once per run and its mapping is passed
 to `load_roles` and `load_hide_inputs`. Because stale depends on `today`, a run on a later day may change rows; the
 same day over the same store never does.
@@ -23,7 +27,7 @@ from datetime import date, datetime, timedelta, timezone
 from outreach.crawl import stale as crawl_stale
 from outreach.ranking.common import canonical_ids, doubtful_board_ids
 from outreach.ranking.config import RankerConfig, default_ranker_config
-from outreach.ranking.facts import load_facts
+from outreach.ranking.facts import LISTED_STATUSES, load_facts
 from outreach.ranking.hide import Hide, HideInputs, decide_hide, load_hide_inputs, write_no_go
 from outreach.ranking.pay import load_wages
 from outreach.ranking.review import sync_conflict_items, sync_size_items
@@ -152,14 +156,14 @@ def _old_weights(conn: sqlite3.Connection, version: str) -> dict[str, float]:
     return {name: float(v["weight"]) for name, v in json.loads(row[0])["values"].items()}
 
 
-def _weights_changed(conn: sqlite3.Connection, old: str, new: str, cfg: RankerConfig) -> None:
+def _weights_changed(conn: sqlite3.Connection, old: str, new: str, cfg: RankerConfig, run_id: int) -> None:
     before = _old_weights(conn, old)
     after = {name: float(w) for name, w in cfg.weights.items()}
     changed = {name: [before.get(name), after.get(name)] for name in sorted(set(before) | set(after))
                if before.get(name) != after.get(name)}
     append_event(conn, entity="score", kind="weights_changed", actor="system",
                  detail={"old_version": old, "new_version": new, "changed": changed, "text": weights_text(changed)},
-                 idempotency_key=f"weights-changed:{old}:{new}")
+                 idempotency_key=f"weights-changed:{old}:{new}:{run_id}")  # an A to B to A to B redo is new
 
 
 def _scored_at(conn: sqlite3.Connection, version: str) -> str:
@@ -170,6 +174,16 @@ def _scored_at(conn: sqlite3.Connection, version: str) -> str:
     if newest is not None and newest >= now:
         now = (datetime.strptime(newest, ISO_FMT) + timedelta(seconds=1)).strftime(ISO_FMT)
     return now
+
+
+def _still_listed(conn: sqlite3.Connection) -> set[int]:
+    """Companies that are still their own survivor and still listed, read inside the write transaction. A merge or a
+    close that committed during the compute takes the company out, so no no-go row is written for it (a row on a
+    duplicate would re-hide a survivor he put back)."""
+    canon = canonical_ids(conn)
+    marks = ", ".join("?" for _ in LISTED_STATUSES)
+    return {cid for (cid,) in conn.execute(f"SELECT company_id FROM company WHERE status IN ({marks})",
+                                            LISTED_STATUSES) if canon.get(cid) == cid}
 
 
 def _as_no_go(cfg: RankerConfig) -> Hide:
@@ -193,10 +207,14 @@ def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: Ranker
     try:
         scored, data = compute_rank(conn, today=today, cfg=cfg)
         with transaction(conn):
+            # The compute read a snapshot and held no lock: whatever committed since must not be written over.
+            _check_ruleset(conn)
+            listed = _still_listed(conn)
             before = latest_version(conn)
             written = 0
             for i, s in enumerate(scored):
-                if s.hide is not None and s.hide.kind == "no_sponsorship" and not s.hide.provisional:
+                if s.hide is not None and s.hide.kind == "no_sponsorship" and not s.hide.provisional \
+                        and s.company_id in listed:
                     if write_no_go(conn, s.company_id, s.hide):
                         written += 1
                         scored[i] = dataclasses.replace(s, hide=_as_no_go(cfg))
@@ -208,7 +226,7 @@ def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: Ranker
             size_items, _cleared = sync_size_items(conn, scored, data["facts"], data["sizes"], cfg, now=now)
             conflict_items, _cleared = sync_conflict_items(conn, data["inputs"], scored, cfg, now=now)
             if before is not None and before != version:
-                _weights_changed(conn, before, version, cfg)
+                _weights_changed(conn, before, version, cfg, run_id)
             prune_versions(conn, cfg.ranker["keep_versions"])
             run = _result(version, scored, data, written, size_items, conflict_items)
             finish_job(conn, run_id, "ok", _summary(run))

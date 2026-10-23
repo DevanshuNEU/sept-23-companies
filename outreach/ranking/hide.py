@@ -188,13 +188,17 @@ def decide_hide(inputs: HideInputs, cfg: RankerConfig) -> Hide | None:
 def write_no_go(conn: sqlite3.Connection, company_id: int, hide: Hide) -> bool:
     """Write the `no_go` row for a final sponsorship refusal and its event; return whether a row was written.
 
-    Nothing is written for any other hide, or when the company (or a company merged into it) already has a no-go
-    row of any kind, lifted or not: a lifted row means he took the company off the list, so it is never re-added.
-    Joins the caller's transaction when there is one.
+    Nothing is written for any other hide, for a company merged into another (its row would hide the survivor, whose
+    lift sits up the chain), or when the company's merged family, read from the root of the chain (the company
+    itself once it is not merged away), already has a no-go row of any kind, lifted or not: a lifted row means he
+    put the company back on the list, so it is never re-added. Joins the caller's transaction when there is one.
     """
     if hide.kind != "no_sponsorship" or hide.provisional or hide.posting_id is None:
         return False
     with atomic(conn, "rank_no_go"):
+        merged = conn.execute("SELECT merged_into FROM company WHERE company_id = ?", (company_id,)).fetchone()
+        if merged is not None and merged[0] is not None:
+            return False
         exists = conn.execute(
             "WITH RECURSIVE grp(id) AS (SELECT ? UNION SELECT c.company_id FROM company c JOIN grp "
             "ON c.merged_into = grp.id) SELECT 1 FROM no_go WHERE company_id IN (SELECT id FROM grp) LIMIT 1",

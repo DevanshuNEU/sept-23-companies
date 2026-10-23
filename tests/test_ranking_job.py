@@ -285,6 +285,61 @@ class LockTests(Base):
         self.assertFalse(self.conn.in_transaction)
 
 
+class WindowTests(Base):
+    """Writes that commit on another connection between the compute (a read snapshot) and the write transaction."""
+
+    def during_compute(self, *statements: tuple[str, tuple]):
+        path = self.conn.execute("PRAGMA database_list").fetchone()["file"]
+        other = sqlite3.connect(path, isolation_level=None, timeout=0)
+        self.addCleanup(other.close)
+        real = job.load_hide_inputs
+
+        def meanwhile(*args, **kw):
+            for sql, params in statements:
+                other.execute(sql, params)
+            return real(*args, **kw)
+
+        return mock.patch.object(job, "load_hide_inputs", side_effect=meanwhile)
+
+    def test_a_merge_during_the_compute_never_re_hides_a_company_he_put_back(self):
+        keep, _ = self.company("Keep", board=False)
+        rs.no_go(self.conn, keep, lifted=True)  # he put Keep back on the list
+        dup, dup_board = self.company("Dup")
+        self.refusal(dup, dup_board, final=True)
+        merge = ("UPDATE company SET status = 'removed', remove_reason = 'duplicate', merged_into = ? "
+                 "WHERE company_id = ?", (keep, dup))
+        with self.during_compute(merge), self.at(T1):
+            got = self.rank()
+        self.assertEqual(got.no_go_written, 0)
+        self.assertEqual(len(self.all_rows("no_go")), 1)  # only his lifted row
+        with self.at(T2):
+            self.rank()
+        self.assertIsNone(self.row(keep).signals["hide"])
+        self.assertIn(keep, [r.company_id for r in ranked_list(self.conn)])
+
+    def test_a_company_closed_during_the_compute_gets_no_no_go_row(self):
+        cid, board = self.company()
+        self.refusal(cid, board, final=True)
+        close = ("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?", (cid,))
+        with self.during_compute(close):
+            got = self.rank()
+        self.assertEqual(got.no_go_written, 0)
+        self.assertEqual(self.all_rows("no_go"), [])
+
+    def test_a_ruleset_change_during_the_compute_aborts_the_write(self):
+        cid, board = self.company()
+        self.refusal(cid, board, final=True)
+        switch = (("UPDATE ruleset SET is_current = 0", ()),
+                  ("INSERT INTO ruleset(ruleset_version, config_toml, created_at, is_current) "
+                   "VALUES ('r-0000000000ff', '', ?, 1)", (utcnow(),)))
+        with self.during_compute(*switch), self.assertRaises(RulesetNotCurrent):
+            self.rank()
+        self.assertEqual(self.all_rows("company_score"), [])
+        self.assertEqual(self.all_rows("no_go"), [])
+        self.assertEqual([j["status"] for j in self.jobs()], ["failed"])
+        self.assertFalse(self.conn.in_transaction)
+
+
 class RerunTests(Base):
     def seed_everything(self) -> dict[str, int]:
         final_co, fb = self.company("Final")
@@ -359,6 +414,17 @@ class RerunTests(Base):
         self.assertEqual(self.all_rows("no_go"), [])
         self.assertEqual([j["status"] for j in self.jobs()], ["failed"])
 
+    def test_a_code_ruleset_the_store_never_built_closes_the_run_failed_with_no_ruleset(self):
+        # job_run.ruleset_version is a key into ruleset, so a ruleset the store does not hold is recorded as NULL.
+        self.seed_everything()
+        with mock.patch.object(job, "ruleset_version", return_value="r-0000000000aa"), \
+                self.assertRaises(RulesetNotCurrent):
+            self.rank()
+        runs = self.jobs()
+        self.assertEqual([(j["status"], j["ruleset_version"]) for j in runs], [("failed", None)])
+        self.assertEqual(self.all_rows("company_score"), [])
+        self.assertEqual(self.all_rows("no_go"), [])
+
     def test_a_rerun_on_a_later_day_may_change_rows_but_the_same_day_never_does(self):
         cid, board = self.company()
         posted = months_before(TODAY, 12) + timedelta(days=1)  # 12 months less one day old on TODAY
@@ -397,8 +463,9 @@ class VersionTests(Base):
         events = self.events()
         self.assertEqual(len(events), 1)
         e = events[0]
+        run_id = self.jobs()[-1]["run_id"]
         self.assertEqual((e["entity"], e["actor"], e["idempotency_key"]),
-                         ("score", "system", "weights-changed:rk-aaaaaaaaaaaa:rk-bbbbbbbbbbbb"))
+                         ("score", "system", f"weights-changed:rk-aaaaaaaaaaaa:rk-bbbbbbbbbbbb:{run_id}"))
         detail = json.loads(e["detail"])
         self.assertEqual(detail, {"old_version": "rk-aaaaaaaaaaaa", "new_version": "rk-bbbbbbbbbbbb",
                                   "changed": {"everify": [12.0, 40.0]}, "text": "E-Verify weight 12 to 40"})
@@ -411,6 +478,20 @@ class VersionTests(Base):
             self.rank()
         detail = json.loads(self.events()[0]["detail"])
         self.assertEqual((detail["changed"], detail["text"]), ({}, "Ranker updated, no weight changed"))
+
+    def test_switching_a_to_b_to_a_to_b_appends_an_event_for_every_switch(self):
+        # A revert and a redo are new changes: the second A to B switch is not swallowed by the first one's key.
+        self.company(board=False)
+        a, b = "rk-aaaaaaaaaaaa", "rk-bbbbbbbbbbbb"
+        for version, stamp in zip((a, b, a, b), (T1, T2, T3, T4)):
+            with self.versioned(version), self.at(stamp):
+                self.rank()
+        runs = [j["run_id"] for j in self.jobs()]
+        got = [(json.loads(e["detail"])["old_version"], json.loads(e["detail"])["new_version"], e["idempotency_key"])
+               for e in self.events()]
+        self.assertEqual(got, [(a, b, f"weights-changed:{a}:{b}:{runs[1]}"),
+                               (b, a, f"weights-changed:{b}:{a}:{runs[2]}"),
+                               (a, b, f"weights-changed:{a}:{b}:{runs[3]}")])
 
     def test_first_run_and_same_version_rerun_append_no_event(self):
         self.company(board=False)

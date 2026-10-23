@@ -196,6 +196,20 @@ class NoGoTests(Store):
         self.assertFalse(write_no_go(self.conn, self.co, Hide("no_sponsorship", "x", False, posting_id=1)))
         self.assertEqual(self.count("no_go"), 1)
 
+    def test_a_merged_away_company_is_never_written_and_a_lift_up_its_chain_counts(self):
+        # A merge that commits while the rank job computes leaves the job holding a refusal for the duplicate: its
+        # survivor's lift is up the chain, and a no-go row on the duplicate would re-hide the survivor.
+        dup = seed_company(self.conn, "Acme Inc")
+        rs.no_go(self.conn, self.co, lifted=True)
+        rs.merge(self.conn, dup, self.co)
+        made = Hide("no_sponsorship", "x", False, posting_id=1, quote=REFUSE)
+        self.assertFalse(write_no_go(self.conn, dup, made))
+        bare = seed_company(self.conn, "Bare dup")  # no no-go row anywhere in its family: still refused
+        rs.merge(self.conn, bare, self.co)
+        self.assertFalse(write_no_go(self.conn, bare, made))
+        self.assertEqual(self.count("no_go"), 1)
+        self.assertEqual(self.inputs()[self.co].no_go, "lifted")
+
     def test_an_active_no_go_hides_with_its_own_reason(self):
         rs.no_go(self.conn, self.co, "defence_contractor")
         hide = self.hide_for()

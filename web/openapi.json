@@ -1,6 +1,56 @@
 {
   "components": {
     "schemas": {
+      "BaseRates": {
+        "properties": {
+          "accepts": {
+            "title": "Accepts",
+            "type": "integer"
+          },
+          "enough": {
+            "title": "Enough",
+            "type": "boolean"
+          },
+          "medianDaysToReply": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mediandaystoreply"
+          },
+          "minRequests": {
+            "title": "Minrequests",
+            "type": "integer"
+          },
+          "replies": {
+            "title": "Replies",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "requests",
+          "accepts",
+          "replies",
+          "medianDaysToReply",
+          "enough",
+          "minRequests"
+        ],
+        "title": "BaseRates",
+        "type": "object"
+      },
       "Check": {
         "properties": {
           "code": {
@@ -773,6 +823,24 @@
         "title": "CorrectionBody",
         "type": "object"
       },
+      "EffortLine": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "count"
+        ],
+        "title": "EffortLine",
+        "type": "object"
+      },
       "ErrorEnvelope": {
         "properties": {
           "checks": {
@@ -916,6 +984,209 @@
           "observedOn"
         ],
         "title": "Fact",
+        "type": "object"
+      },
+      "Finding": {
+        "properties": {
+          "caution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caution"
+          },
+          "changed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed"
+          },
+          "counts": {
+            "items": {
+              "$ref": "#/components/schemas/FindingCount"
+            },
+            "title": "Counts",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "counts",
+          "caution",
+          "changed"
+        ],
+        "title": "Finding",
+        "type": "object"
+      },
+      "FindingChange": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "text"
+        ],
+        "title": "FindingChange",
+        "type": "object"
+      },
+      "FindingCount": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "of": {
+            "title": "Of",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "count",
+          "of"
+        ],
+        "title": "FindingCount",
+        "type": "object"
+      },
+      "FindingsView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/FindingChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "reportedOn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reportedon"
+          }
+        },
+        "required": [
+          "asOf",
+          "month",
+          "reportedOn",
+          "findings",
+          "changes"
+        ],
+        "title": "FindingsView",
+        "type": "object"
+      },
+      "FunnelFrom": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "stage": {
+            "enum": [
+              "requests",
+              "accepts",
+              "replies",
+              "referrals",
+              "interviews"
+            ],
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "count"
+        ],
+        "title": "FunnelFrom",
+        "type": "object"
+      },
+      "FunnelStage": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FunnelFrom"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "requests",
+              "accepts",
+              "replies",
+              "referrals",
+              "interviews"
+            ],
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "label",
+          "count",
+          "from"
+        ],
+        "title": "FunnelStage",
         "type": "object"
       },
       "HealthBoards": {
@@ -1530,6 +1801,84 @@
           "flags"
         ],
         "title": "PostingRow",
+        "type": "object"
+      },
+      "ProgressPeriod": {
+        "properties": {
+          "effort": {
+            "items": {
+              "$ref": "#/components/schemas/EffortLine"
+            },
+            "title": "Effort",
+            "type": "array"
+          },
+          "enough": {
+            "title": "Enough",
+            "type": "boolean"
+          },
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "quiet": {
+            "title": "Quiet",
+            "type": "boolean"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/FunnelStage"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "from",
+          "to",
+          "stages",
+          "effort",
+          "enough",
+          "quiet"
+        ],
+        "title": "ProgressPeriod",
+        "type": "object"
+      },
+      "ProgressView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "base": {
+            "$ref": "#/components/schemas/BaseRates"
+          },
+          "month": {
+            "$ref": "#/components/schemas/ProgressPeriod"
+          },
+          "today": {
+            "$ref": "#/components/schemas/TodayProgress"
+          },
+          "week": {
+            "$ref": "#/components/schemas/ProgressPeriod"
+          }
+        },
+        "required": [
+          "asOf",
+          "today",
+          "week",
+          "month",
+          "base"
+        ],
+        "title": "ProgressView",
         "type": "object"
       },
       "PromptTouch": {
@@ -2212,6 +2561,44 @@
         "title": "ThreadMessage",
         "type": "object"
       },
+      "TodayProgress": {
+        "properties": {
+          "accepted": {
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "applications": {
+            "title": "Applications",
+            "type": "integer"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "planned": {
+            "title": "Planned",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "planned",
+          "done",
+          "requests",
+          "applications",
+          "accepted",
+          "replied"
+        ],
+        "title": "TodayProgress",
+        "type": "object"
+      },
       "TouchHistory": {
         "properties": {
           "accepted": {
@@ -2487,6 +2874,208 @@
         ],
         "title": "WatchView",
         "type": "object"
+      },
+      "Win": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "kind": {
+            "enum": [
+              "accepted",
+              "replied",
+              "referred",
+              "interview",
+              "offer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replyKind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unsorted",
+                  "interested",
+                  "not_now",
+                  "said_no",
+                  "asked_to_stop"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replykind"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "sentNote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sentnote"
+          },
+          "touchId": {
+            "title": "Touchid",
+            "type": "integer"
+          },
+          "unseen": {
+            "title": "Unseen",
+            "type": "boolean"
+          },
+          "winId": {
+            "title": "Winid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "winId",
+          "kind",
+          "at",
+          "touchId",
+          "person",
+          "company",
+          "line",
+          "sentNote",
+          "role",
+          "replyKind",
+          "unseen"
+        ],
+        "title": "Win",
+        "type": "object"
+      },
+      "WinCounts": {
+        "properties": {
+          "accepted": {
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "interview": {
+            "title": "Interview",
+            "type": "integer"
+          },
+          "offer": {
+            "title": "Offer",
+            "type": "integer"
+          },
+          "referred": {
+            "title": "Referred",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accepted",
+          "replied",
+          "referred",
+          "interview",
+          "offer"
+        ],
+        "title": "WinCounts",
+        "type": "object"
+      },
+      "WinsSeen": {
+        "properties": {
+          "marked": {
+            "title": "Marked",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "marked"
+        ],
+        "title": "WinsSeen",
+        "type": "object"
+      },
+      "WinsSeenBody": {
+        "additionalProperties": false,
+        "properties": {
+          "winIds": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "title": "Winids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "winIds"
+        ],
+        "title": "WinsSeenBody",
+        "type": "object"
+      },
+      "WinsView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/WinCounts"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "unseen": {
+            "title": "Unseen",
+            "type": "integer"
+          },
+          "wins": {
+            "items": {
+              "$ref": "#/components/schemas/Win"
+            },
+            "title": "Wins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "wins",
+          "unseen",
+          "counts",
+          "since"
+        ],
+        "title": "WinsView",
+        "type": "object"
       }
     }
   },
@@ -2575,6 +3164,77 @@
         "summary": "Company",
         "tags": [
           "company"
+        ]
+      }
+    },
+    "/api/findings": {
+      "get": {
+        "operationId": "findings_view",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Findings View",
+        "tags": [
+          "progress"
         ]
       }
     },
@@ -2872,6 +3532,77 @@
           }
         },
         "summary": "Ping"
+      }
+    },
+    "/api/progress": {
+      "get": {
+        "operationId": "progress_view",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Progress View",
+        "tags": [
+          "progress"
+        ]
       }
     },
     "/api/search/companies": {
@@ -3713,6 +4444,178 @@
         "summary": "Dismiss",
         "tags": [
           "watch"
+        ]
+      }
+    },
+    "/api/wins": {
+      "get": {
+        "operationId": "wins_view",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WinsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Wins View",
+        "tags": [
+          "wins"
+        ]
+      }
+    },
+    "/api/wins/seen": {
+      "post": {
+        "operationId": "mark_seen",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WinsSeenBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WinsSeen"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Mark Seen",
+        "tags": [
+          "wins"
         ]
       }
     }

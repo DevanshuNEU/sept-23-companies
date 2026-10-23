@@ -223,6 +223,23 @@ export interface TouchHistory {
   events: CompanyEvent[]; revision: Revision;                                                  // events newest first
 }
 
+// Progress, findings and wins (#33 seam, #11 Task 13). A funnel row is a count with its denominator, never a rate:
+// accepts and replies of every channel are counted against linkedin_request requests, so only BaseRates is a rate.
+export type WinKind = 'accepted' | 'replied' | 'referred' | 'interview' | 'offer';
+export type FunnelKey = 'requests' | 'accepts' | 'replies' | 'referrals' | 'interviews';
+export interface Win {
+  winId: Id; kind: WinKind; at: IsoTime; touchId: Id; person: PersonRef | null; company: CompanyRef;
+  line: string; sentNote: string | null; role: string | null; replyKind: Exclude<ReplyKind, 'auto_reply'> | null; unseen: boolean; // line is derived
+}
+export interface WinsView { asOf: IsoTime; wins: Win[]; unseen: number; counts: { accepted: number; replied: number; referred: number; interview: number; offer: number }; since: IsoDate }
+export interface FunnelStage { stage: FunnelKey; label: string; count: number; from: { stage: FunnelKey; count: number } | null }  // rate = count / from.count
+export interface ProgressPeriod { label: string; from: IsoDate; to: IsoDate; stages: FunnelStage[]; effort: { label: string; count: number }[]; enough: boolean; quiet: boolean }
+export interface BaseRates { since: IsoDate; requests: number; accepts: number; replies: number; medianDaysToReply: number | null; enough: boolean; minRequests: number }
+export interface TodayProgress { planned: number; done: number; requests: number; applications: number; accepted: number; replied: number }
+export interface ProgressView { asOf: IsoTime; today: TodayProgress; week: ProgressPeriod; month: ProgressPeriod; base: BaseRates }
+export interface Finding { id: Id; text: string; counts: { label: string; count: number; of: number }[]; caution: string | null; changed: string | null }
+export interface FindingsView { asOf: IsoTime; month: IsoDate; reportedOn: IsoDate | null; findings: Finding[]; changes: { at: IsoTime; text: string }[] }
+
 // Done (spec 13.8)
 export interface DoneCompany { company: CompanyRef; outcome: 'interview' | 'referral'; outcomeLabel: string; closedAt: IsoTime; howStarted: string; imported: boolean; role: string | null; note: string }
 export interface DoneView {

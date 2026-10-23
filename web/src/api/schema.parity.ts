@@ -31,4 +31,13 @@ export const _parity: [
   Same<T.PromptTouch, S['PromptTouch']>,
   Same<T.OutcomePromptView, S['OutcomePromptView']>,
   Same<T.TouchHistory, S['TouchHistory']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<T.Win, S['Win']>,
+  Same<T.WinsView, S['WinsView']>,
+  Same<T.FunnelStage, S['FunnelStage']>,
+  Same<T.ProgressPeriod, S['ProgressPeriod']>,
+  Same<T.BaseRates, S['BaseRates']>,
+  Same<T.TodayProgress, S['TodayProgress']>,
+  Same<T.ProgressView, S['ProgressView']>,
+  Same<T.Finding, S['Finding']>,
+  Same<T.FindingsView, S['FindingsView']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

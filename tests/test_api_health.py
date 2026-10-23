@@ -20,6 +20,7 @@ class JobRuns(ApiCase):
     def setUp(self):
         super().setUp()
         self.conn.execute("DELETE FROM job_run")  # install leaves its own `rebuild` run; each test seeds its own
+
     def check_jobs(self) -> list[str]:
         sql = self.conn.execute("SELECT sql FROM sqlite_master WHERE name = 'job_run'").fetchone()[0]
         clause = re.search(r"CHECK \(job IN \(([^)]*)\)", sql).group(1)

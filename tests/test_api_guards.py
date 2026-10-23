@@ -12,9 +12,17 @@ from tests.apitest import BASE_URL, ORIGIN, ApiCase
 
 SCRATCH = '''
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 CALLS = []
+
+
+@router.get("/guard/cors")
+def cors():
+    CALLS.append("cors")
+    return JSONResponse({"ok": True}, headers={
+        "Access-Control-Allow-Origin": "*", "access-control-allow-credentials": "true", "X-Kept": "yes"})
 
 
 @router.get("/guard/read")
@@ -99,7 +107,7 @@ class WriteGuardTest(GuardCase):
             with self.subTest(method=method):
                 self.assert_refused(self.write(method, {"Origin": None}), "origin")
 
-    def test_write_without_origin_is_refused_even_through_the_default_client(self):
+    def test_write_with_origin_null_is_refused(self):
         reply = self.client.post("/api/guard/write", content=b"{}", headers={"Content-Type": JSON, "Origin": "null"})
         self.assert_refused(reply, "origin")
 
@@ -212,6 +220,12 @@ class NoCorsTest(GuardCase):
             with self.subTest(status=reply.status_code):
                 cors = [name for name in reply.headers if name.lower().startswith("access-control-")]
                 self.assertEqual(cors, [])
+
+    def test_the_guard_strips_cors_headers_a_handler_sets(self):
+        reply = self.bare.get("/api/guard/cors", headers={"Origin": ORIGIN})
+        self.assertEqual((reply.status_code, self.calls), (200, ["cors"]), reply.text)
+        self.assertEqual([n for n in reply.headers if n.lower().startswith("access-control-")], [])
+        self.assertEqual(reply.headers["x-kept"], "yes")  # only the CORS headers go
 
     def test_options_is_refused(self):
         for origin in (ORIGIN, "https://evil.example", None):

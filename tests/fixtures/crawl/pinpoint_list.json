@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "id": "2410001",
+      "title": "Software Engineer, New Grad",
+      "url": "https://acme.pinpointhq.com/en/postings/5a7f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a01",
+      "location": {"id": 1, "name": "San Francisco, CA", "city": "San Francisco", "province": "California"},
+      "description": "&lt;p&gt;We are hiring a new grad engineer.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Build services&lt;/li&gt;&lt;li&gt;Ship &amp;amp; learn&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;We sponsor visas for the right person.&lt;/p&gt;",
+      "workplace_type": "hybrid",
+      "employment_type": "full_time",
+      "first_published_at": "2026-09-21T10:00:00.000Z",
+      "job": {"department": {"name": "Engineering"}}
+    },
+    {
+      "id": "2410002",
+      "title": "Account Executive",
+      "url": "https://acme.pinpointhq.com/en/postings/5a7f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a02",
+      "location": {"city": "London", "province": "England"},
+      "description": "&lt;p&gt;Own the full sales cycle.&lt;/p&gt;",
+      "workplace_type": "onsite",
+      "employment_type": "full_time",
+      "job": {"department": {"name": "Sales"}}
+    },
+    {
+      "id": "2410003",
+      "title": "Data Engineer",
+      "url": "https://acme.pinpointhq.com/en/postings/5a7f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a03",
+      "location": null,
+      "description": null,
+      "workplace_type": "remote",
+      "employment_type": "contract",
+      "job": {"department": null}
+    }
+  ]
+}

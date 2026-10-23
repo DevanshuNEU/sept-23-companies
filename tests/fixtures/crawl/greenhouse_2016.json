@@ -1,0 +1,50 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/4012345001",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3301122001,
+      "location": {
+        "name": "San Francisco, CA"
+      },
+      "metadata": null,
+      "id": 4012345001,
+      "updated_at": "2016-03-02T09:00:00-05:00",
+      "requisition_id": "ENG-101",
+      "title": "Software Engineer, New Grad",
+      "company_name": "Acme Robotics",
+      "first_published": "2016-03-02T09:00:00-05:00",
+      "language": "en",
+      "content": "&lt;p&gt;We are hiring a &lt;strong&gt;new grad&lt;/strong&gt; engineer.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Build things&lt;/li&gt;&lt;li&gt;Ship &amp;amp; learn&lt;/li&gt;&lt;/ul&gt;",
+      "departments": [
+        {
+          "id": 55001,
+          "name": "Engineering",
+          "child_ids": [],
+          "parent_id": null
+        }
+      ],
+      "offices": [
+        {
+          "id": 77001,
+          "name": "San Francisco",
+          "location": "San Francisco, CA",
+          "child_ids": [],
+          "parent_id": null
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "total": 1
+  }
+}

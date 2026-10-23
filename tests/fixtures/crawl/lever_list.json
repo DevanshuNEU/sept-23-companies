@@ -1,0 +1,64 @@
+[
+  {
+    "id": "6f1c2d3a-0b1e-4a55-9a10-7d3b8c1e0001",
+    "text": "Software Engineer, New Grad",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Engineering",
+      "location": "San Francisco, CA",
+      "team": "Platform",
+      "allLocations": ["San Francisco, CA"]
+    },
+    "country": "US",
+    "workplaceType": "hybrid",
+    "hostedUrl": "https://jobs.lever.co/acme/6f1c2d3a-0b1e-4a55-9a10-7d3b8c1e0001",
+    "applyUrl": "https://jobs.lever.co/acme/6f1c2d3a-0b1e-4a55-9a10-7d3b8c1e0001/apply",
+    "createdAt": 1790000000000,
+    "opening": "<div>We are hiring a new grad engineer.</div>",
+    "openingPlain": "We are hiring a new grad engineer.",
+    "description": "<div>We are hiring a new grad engineer.</div>",
+    "descriptionPlain": "We are hiring a new grad engineer.",
+    "descriptionBody": "<div>Join the platform team.</div>",
+    "descriptionBodyPlain": "Join the platform team.",
+    "lists": [
+      {"text": "What you will do", "content": "<li>Build services</li><li>Ship &amp; learn</li>"},
+      {"text": "What we ask", "content": "<li>A CS degree</li><li>Curiosity</li>"}
+    ],
+    "additional": "<div>We sponsor visas for the right person.</div>",
+    "additionalPlain": "We sponsor visas for the right person."
+  },
+  {
+    "id": "6f1c2d3a-0b1e-4a55-9a10-7d3b8c1e0002",
+    "text": "Account Executive",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Sales",
+      "team": "Mid-market"
+    },
+    "workplaceType": "remote",
+    "hostedUrl": "https://jobs.lever.co/acme/6f1c2d3a-0b1e-4a55-9a10-7d3b8c1e0002",
+    "applyUrl": "https://jobs.lever.co/acme/6f1c2d3a-0b1e-4a55-9a10-7d3b8c1e0002/apply",
+    "createdAt": 1791000000000,
+    "description": "<div>Own the full <b>sales</b> cycle.</div>",
+    "lists": [],
+    "additional": "",
+    "additionalPlain": ""
+  },
+  {
+    "id": "6f1c2d3a-0b1e-4a55-9a10-7d3b8c1e0003",
+    "text": "Data Engineer",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Data",
+      "location": "New York, NY",
+      "team": "Pipelines"
+    },
+    "country": "US",
+    "workplaceType": "onsite",
+    "hostedUrl": "https://jobs.lever.co/acme/6f1c2d3a-0b1e-4a55-9a10-7d3b8c1e0003",
+    "applyUrl": "https://jobs.lever.co/acme/6f1c2d3a-0b1e-4a55-9a10-7d3b8c1e0003/apply",
+    "createdAt": 1788000000000,
+    "description": "<div>Move data around.</div>",
+    "descriptionPlain": "Move data around."
+  }
+]

@@ -1,0 +1,99 @@
+# Ranker config (#6). Every number here is a starting call, checked monthly against the outcome report.
+# A change to this file is a new ranker version (see version.py), never a crawl.
+
+[ranker]
+keep_versions = 3
+size_check_top_n = 100
+many_postings = 80
+lca_software_many = 25
+funding_window_months = 18
+lca_recent_years = 2
+hn_post_days = 90
+diff_min_rank_move = 25
+diff_top_n = 50
+lca_wage_min_filings = 3
+
+# Weights. staffing_risk and large_later_stage are the bottom push: each is larger than every other weight added
+# together (120), so a company they hit sorts below all the rest and stays on the list. The loader and a test pin it.
+[weights]
+live_role = 40.0
+posting_sponsors = 10.0
+everify = 12.0
+cap_exempt = 10.0
+pay_level = 10.0
+lca_junior = 12.0
+small = 12.0
+reachable_person = 8.0
+funding = 6.0
+staffing_risk = 200.0
+large_later_stage = 200.0
+
+[hide]
+size_over = 300
+size_confidences = ["confirmed", "estimate"]
+
+[live_role]
+intern_junior = 0.4
+level_role = 0.7
+any_us_role = 0.15
+fresh_days = [14, 30, 60]
+fresh_bonus = [0.3, 0.15, 0.05]
+
+[posting_sponsors]
+yes = 1.0
+opt_only = 0.5
+
+[everify]
+enrolled = 1.0
+not_enrolled = -0.5
+
+[cap_exempt]
+confirmed = 1.0
+likely = 0.7
+
+[pay_level]
+basis = "midpoint"
+level_1 = -0.3
+level_2 = 0.6
+level_3 = 0.85
+level_4 = 1.0
+
+[lca_junior]
+cap = 10
+
+# Uses ranker.funding_window_months and has no keys of its own.
+[funding]
+
+[small]
+max_headcount = 250
+borderline_headcount = 300
+early_stages = ["pre_seed", "seed", "series_a", "series_b", "yc", "early"]
+later_stages = ["series_c", "series_d", "series_e_plus", "late_private", "public"]
+early_value = 1.0
+other_value = 0.6
+borderline_value = 0.2
+weak_flag_value = -0.3
+
+[large_later_stage]
+
+[reachable_person]
+role_kinds = ["engineer", "manager", "founder", "alum"]
+person = 1.0
+hn_post = 0.6
+
+[staffing_risk]
+high = -1.0
+medium = -0.5
+promoted_high = -0.5
+
+# Confidence (ruling 2026-10-22). A positive component counts at factor_<level> of its weighted value; a negative
+# one always counts in full. rank_high_share and rank_low_share set the rank confidence (see confidence.py).
+[confidence]
+factor_high = 1.0
+factor_medium = 0.85
+factor_low = 0.5
+evidence_old_days = 365
+lca_pay_medium_filings = 10
+rank_high_share = 0.7
+rank_low_share = 0.5
+reason_count = 3

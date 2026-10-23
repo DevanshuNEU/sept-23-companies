@@ -6,16 +6,29 @@ one calls the invariant its stream declared with `@invariant("<stage>")`. How a 
 companies, never a global total, because earlier stages may have put other rows in the store.
 """
 import importlib.util
+import json
+import tempfile
 import unittest
+from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from outreach.crawl.stale import Stale, load_stale
+from outreach.net import FetchError
+from outreach.ranking.confidence import LEVELS
+from outreach.ranking.config import default_ranker_config
+from outreach.ranking.job import run_rank
+from outreach.ranking.scores import hidden_list, latest_version, load_scores, ranked_list
 from outreach.rules.version import ruleset_version
 from outreach.store import is_shared_key
-from tests.pipeline import stages_rules
+from outreach.store.writes import body_sha256
+from tests.fakes import json_response, status_response, text_response
+from tests.pipeline import stages_crawl, stages_ranking, stages_rules
 import tests.pipeline.harness as harness_module
 from tests.pipeline.harness import STAGE_NAMES, PipelineHarness
-from tests.storetest import seed_company, seed_posting
+from tests.ranking_seed import EMPLOYERS, POSTINGS, seed_ranking_fixture
+from tests.storetest import fresh_store, seed_company, seed_posting
 
 INVARIANTS = {}
 
@@ -81,12 +94,76 @@ def sources_find_boards_made_the_one_board(h):
     assert (board["last_read"], board["next_read_at"], board["active"]) == (None, None, 1), "the board is due now"
 
 
+@invariant("read_boards")
+def crawl_read_the_one_board(h):
+    """Only the `kestrelrobotics` board's own postings are counted, whatever other streams put in the store."""
+    board = h.conn.execute("SELECT * FROM board WHERE ats = 'greenhouse' AND token = ?",
+                           (stages_crawl.TOKEN,)).fetchone()
+    assert board is not None, "no kestrelrobotics board to read"
+    assert (board["last_read"], board["error_streak"], board["empty_streak"], board["active"]) == ("ok", 0, 0, 1)
+    assert board["next_read_at"] is not None, "the first read schedules the next one"
+    reads = h.conn.execute("SELECT result, postings FROM board_read WHERE board_id = ?",
+                           (board["board_id"],)).fetchall()
+    assert [tuple(r) for r in reads] == [("ok", 2)], f"board_read rows: {[tuple(r) for r in reads]}"
+    rows = h.conn.execute("SELECT * FROM posting WHERE board_id = ? ORDER BY posting_id",
+                          (board["board_id"],)).fetchall()
+    assert [r["title"] for r in rows] == ["Software Engineer, New Grad", "Account Executive"], \
+        f"the board's postings are {[r['title'] for r in rows]}"
+    assert all(r["closed_at"] is None for r in rows), "a first read closes nothing"
+    ids = [r["posting_id"] for r in rows]
+    marks = ",".join("?" * len(ids))
+    lanes = {r["posting_id"]: (r["lane"], r["provisional"], r["reader_version"]) for r in h.conn.execute(
+        f"SELECT posting_id, lane, provisional, reader_version FROM current_decision WHERE posting_id IN ({marks})",
+        ids)}
+    assert lanes == {ids[0]: ("engineering", 1, None), ids[1]: ("not_engineering", 1, None)}, \
+        f"decisions {lanes}: each posting has a provisional current decision, with no reader version"
+    stored = h.conn.execute("SELECT body, body_sha256 FROM posting_body WHERE posting_id = ?", (ids[0],)).fetchone()
+    assert stored is not None and stored["body_sha256"] == body_sha256(stored["body"]), "the body's hash is stored"
+    assert "warehouse robots" in stored["body"] and "<p>" not in stored["body"], "the body is plain text"
+    queued = h.conn.execute(f"SELECT count(*) FROM read_queue WHERE posting_id IN ({marks})", ids).fetchone()[0]
+    assert queued == 0, "the crawler writes no read_queue row (the reader's sweep owns the queue)"
+    assert not load_stale(h.conn, date.fromisoformat(h.crawl.last_tick_at()[:10]), company_ids=[board["company_id"]]), \
+        "a fresh 2026 posting that the board lists is not stale"
+    job = h.conn.execute("SELECT status FROM job_run WHERE job = 'read_boards' ORDER BY run_id DESC").fetchone()
+    assert job is not None and job[0] == "ok", "the tick finished ok"
+
+
 @invariant("rules")
 def rules_made_the_current_ruleset(h):
     row = h.conn.execute("SELECT ruleset_version FROM ruleset WHERE is_current = 1").fetchone()
     assert row is not None and row[0] == ruleset_version(), "the rules stage leaves the code's ruleset current"
     last = h.conn.execute("SELECT status FROM job_run WHERE job = 'rebuild' ORDER BY run_id DESC").fetchone()
     assert last is not None and last[0] == "ok", "the rules stage's rebuild finished ok"
+
+
+def _ranking_rows(h):
+    """The fixture companies' stored scores by key (a merged-away duplicate has none), in the latest version."""
+    ids = h.ranking.ids
+    scores = load_scores(h.conn, latest_version(h.conn))
+    return {key: scores[cid] for key, cid in ids.items() if cid in scores}
+
+
+@invariant("rank")
+def ranking_puts_the_sponsoring_new_grad_employer_first_and_keeps_every_rule(h):
+    """Counts only the fixture companies (A to U), never a global total: the earlier stages put other rows in the
+    store. A live new-grad posting that says it sponsors ranks first and its reasons name both; a final refusal is
+    the one rules no-go; a stale posting is never the best posting; every row says how sure it is."""
+    ids = h.ranking.ids
+    rows = _ranking_rows(h)
+    assert "L" not in rows and set(rows) == set(ids) - {"L"}, "every fixture company but the merged one is scored"
+    first = ranked_list(h.conn)[0]
+    assert first.company_id == ids["A"], f"company {first.company_id} ranks first, not A ({ids['A']})"
+    reasons = " | ".join(first.signals["reasons"]).lower()
+    assert "new grad" in reasons and "sponsors" in reasons, f"A's reasons do not name both: {reasons}"
+    marks = ",".join("?" * len(ids))
+    rules_rows = h.conn.execute(f"SELECT company_id FROM no_go WHERE source = 'rules' AND company_id IN ({marks})",
+                                tuple(ids.values())).fetchall()
+    assert [r[0] for r in rules_rows] == [ids["E"]], f"rules no-go rows: {[r[0] for r in rules_rows]}"
+    for key, row in rows.items():
+        stale = {b["posting_id"] for b in row.signals["stale_postings"]}
+        assert row.signals["best_posting_id"] not in stale, f"{key}: a stale posting is the best posting"
+        say = row.signals["rank_reason"]
+        assert say["level"] in LEVELS and say["basis"].strip(), f"{key}: the rank reason lacks a level or a basis"
 
 
 class HarnessCase(unittest.TestCase):
@@ -112,6 +189,148 @@ class SourcesFlowTests(HarnessCase):
             h.run(through="find_boards")
         statuses = {r["job"]: r["status"] for r in h.conn.execute("SELECT job, status FROM job_run")}
         self.assertEqual((statuses["discover"], statuses["resolve"], statuses["find_boards"]), ("ok", "ok", "ok"))
+
+
+def _snapshot(h):
+    return [tuple(r) for r in h.conn.execute(
+        "SELECT posting_id, title, last_seen_at, closed_at FROM posting ORDER BY posting_id")]
+
+
+def _stale_today(h, board_id):
+    company = h.conn.execute("SELECT company_id FROM board WHERE board_id = ?", (board_id,)).fetchone()[0]
+    return load_stale(h.conn, date.fromisoformat(h.crawl.last_tick_at()[:10]), company_ids=[company])
+
+
+class CrawlFlowTests(HarnessCase):
+    """The crawler's stage, through the sources stages that run before it. Each test runs the stages up to and
+    including `read_boards`, then asks the stage for more ticks (`h.crawl.run(answer)`, a day apart)."""
+
+    def flow(self):
+        h = self.harness()
+        self.assertEqual([n for n, _ in h.stages][:4], ["discover", "resolve", "find_boards", "read_boards"])
+        for name, run in h.stages:
+            run()
+            if name in INVARIANTS:
+                INVARIANTS[name](h)
+            if name == "read_boards":
+                break
+        return h
+
+    def rows(self, h):
+        return h.conn.execute("SELECT * FROM posting WHERE board_id = ? ORDER BY posting_id",
+                              (h.crawl.board_id(),)).fetchall()
+
+    def board(self, h):
+        return h.conn.execute("SELECT * FROM board WHERE board_id = ?", (h.crawl.board_id(),)).fetchone()
+
+    def last_result(self, h):
+        return h.conn.execute("SELECT result FROM board_read WHERE board_id = ? ORDER BY rowid DESC",
+                              (h.crawl.board_id(),)).fetchone()[0]
+
+    def test_read_boards_reads_the_board_the_sources_stage_made_and_creates_none(self):
+        h = self.flow()
+        boards = h.conn.execute("SELECT board_id, token FROM board").fetchall()
+        self.assertEqual([r["token"] for r in boards], ["kestrelrobotics"])
+        self.assertEqual(h.crawl.client.requests, [stages_crawl.list_url()])
+
+    def test_read_boards_seeds_its_own_board_only_when_there_is_none(self):
+        h = self.harness(register_streams=False)
+        stages_crawl.register(h)
+        self.assertEqual([n for n, _ in h.stages], ["read_boards"])
+        self.assertEqual(h.conn.execute("SELECT count(*) FROM board").fetchone()[0], 0)
+        h.run()
+        self.assertEqual(h.conn.execute("SELECT count(*) FROM board").fetchone()[0], 1)
+        INVARIANTS["read_boards"](h)
+        h.run()
+        self.assertEqual(h.conn.execute("SELECT count(*) FROM board").fetchone()[0], 1)
+
+    def test_the_read_boards_stage_runs_on_the_fixture_with_no_network(self):
+        h = self.harness()
+        with mock.patch("socket.socket", side_effect=AssertionError("the read_boards stage opened a socket")):
+            h.run(through="read_boards")
+        self.assertEqual(h.crawl.client.unrouted, [])
+
+    def test_flow_read_boards_second_read_is_unchanged_and_writes_no_posting_rows(self):
+        h = self.flow()
+        before = _snapshot(h)
+        self.assertEqual(len(before), 2)
+        h.crawl.run()
+        self.assertEqual(self.last_result(h), "unchanged")
+        self.assertEqual(h.crawl.client.calls[0][2].get("If-None-Match"), stages_crawl.ETAG)
+        self.assertEqual(_snapshot(h), before)
+        self.assertEqual(self.board(h)["last_read"], "unchanged")
+
+    def test_flow_read_boards_writes_no_read_queue_row_and_a_changed_body_is_provisional_again(self):
+        h = self.flow()
+        engineering = self.rows(h)[0]["posting_id"]
+        self.assertEqual(h.conn.execute("SELECT count(*) FROM read_queue").fetchone()[0], 0)
+        before = h.conn.execute("SELECT body_sha256 FROM posting_body WHERE posting_id = ?",
+                                (engineering,)).fetchone()[0]
+        changed = json.loads(h.crawl.body)
+        changed["jobs"][0]["content"] += "&lt;p&gt;We also run a paid summer cohort.&lt;/p&gt;"
+        h.conn.execute("UPDATE decision SET provisional = 0, reader_version = 'flow-test' WHERE posting_id = ?",
+                       (engineering,))  # a verified reading had decided it
+        h.crawl.run(json_response(changed, etag='"flow-2"'))
+        after = h.conn.execute("SELECT body_sha256 FROM posting_body WHERE posting_id = ?",
+                               (engineering,)).fetchone()[0]
+        self.assertNotEqual(after, before)
+        decision = h.conn.execute("SELECT provisional, reader_version FROM current_decision WHERE posting_id = ?",
+                                  (engineering,)).fetchone()
+        self.assertEqual(tuple(decision), (1, None))
+        self.assertEqual(h.conn.execute("SELECT count(*) FROM read_queue").fetchone()[0], 0)
+
+    def test_flow_read_boards_error_never_closes(self):
+        h = self.flow()
+        answers = (status_response(500), status_response(403), FetchError("network", "boom"),
+                   text_response("<html>Just a moment...</html>", headers={"content-type": "text/html"}))
+        for i, answer in enumerate(answers, start=1):
+            with self.subTest(answer=type(answer).__name__, i=i):
+                h.crawl.run(answer)
+                self.assertEqual(self.last_result(h), "error")
+                self.assertTrue(all(r["closed_at"] is None for r in self.rows(h)))
+                self.assertEqual(self.board(h)["last_read"], "error")
+                self.assertEqual(self.board(h)["error_streak"], i)
+                self.assertEqual(h.conn.execute("SELECT count(*) FROM read_queue").fetchone()[0], 0)
+                self.assertEqual(_stale_today(h, h.crawl.board_id()), {})
+
+    def test_flow_read_boards_a_2016_posting_is_stale_and_stays_open(self):
+        h = self.harness()
+        h.run(through="find_boards")
+        fixture = Path(__file__).resolve().parent.parent / "fixtures" / "crawl" / "greenhouse_2016.json"
+        old = json.loads(fixture.read_text(encoding="utf-8"))["jobs"][0]
+        listed = json.loads(stages_crawl.fixture_jobs(h))
+        listed["jobs"].append(old)
+        listed["meta"]["total"] = len(listed["jobs"])  # the adapter refuses a list that disagrees with meta.total
+        h.crawl.run(json_response(listed, etag='"flow-old"'))
+        self.assertEqual(self.last_result(h), "ok")
+        rows = self.rows(h)
+        self.assertEqual(len(rows), 3)
+        two016 = [r for r in rows if r["posted_on"] == "2016-03-02"]
+        self.assertEqual(len(two016), 1)
+        posting = two016[0]
+        self.assertIsNotNone(h.conn.execute("SELECT 1 FROM current_decision WHERE posting_id = ?",
+                                            (posting["posting_id"],)).fetchone())
+        self.assertEqual(_stale_today(h, h.crawl.board_id()),
+                         {posting["posting_id"]: Stale(("old",), "posted 2016-03-02, over 12 months")})
+        self.assertTrue(all(r["closed_at"] is None for r in rows))
+
+    def test_flow_read_boards_a_first_empty_read_makes_postings_stale_and_the_second_closes_them(self):
+        h = self.flow()
+        first_read_day = h.crawl.last_tick_at()[:10]
+        h.crawl.run(h.crawl.empty())
+        self.assertEqual(self.last_result(h), "empty")
+        rows = self.rows(h)
+        self.assertTrue(all(r["closed_at"] is None for r in rows))
+        stale = _stale_today(h, h.crawl.board_id())
+        self.assertEqual(sorted(stale), sorted(r["posting_id"] for r in rows))
+        reason = f"not on the board at its latest read (last listed {first_read_day} or later)"
+        self.assertEqual({s.reason for s in stale.values()}, {reason})
+        self.assertEqual({s.kinds for s in stale.values()}, {("not_on_board",)})
+        h.crawl.run(h.crawl.empty())
+        rows = self.rows(h)
+        self.assertEqual({r["close_reason"] for r in rows}, {"board_empty_twice"})
+        self.assertTrue(all(r["closed_at"] is not None for r in rows))
+        self.assertEqual(_stale_today(h, h.crawl.board_id()), {})
 
 
 class FlowTests(HarnessCase):
@@ -233,6 +452,283 @@ class RegistrationTests(HarnessCase):
         early = SimpleNamespace(register=lambda h: h.stages.append(("rank", lambda: None)))
         with self.assertRaises(ValueError):
             self.build_with({"plan": ("plan",), "ranking": ("rank",)}, late, early)
+
+
+def _rows(h, sql, *args):
+    return h.conn.execute(sql, args).fetchall()
+
+
+class RankFlowTests(HarnessCase):
+    """The rank stage, through every stage before it. Each test runs the stages up to and including `rank` on a
+    fresh harness and reads the stored rows of the fixture companies (`h.ranking.ids`, key to company id)."""
+
+    def flow(self):
+        h = self.harness()
+        self.assertEqual([n for n, _ in h.stages][-1], "rank")
+        for name, run in h.stages:
+            run()
+            if name in INVARIANTS:
+                INVARIANTS[name](h)
+        return h
+
+    def row(self, h, key):
+        return load_scores(h.conn, latest_version(h.conn))[h.ranking.ids[key]]
+
+    def order(self, h):
+        return [r.company_id for r in ranked_list(h.conn)]
+
+    def place(self, h, key):
+        return self.order(h).index(h.ranking.ids[key])
+
+    def postings(self, h, key):
+        return _rows(h, "SELECT * FROM posting WHERE company_id = ? ORDER BY posting_id", h.ranking.ids[key])
+
+    def no_go(self, h, key):
+        return _rows(h, "SELECT * FROM no_go WHERE company_id = ? ORDER BY no_go_id", h.ranking.ids[key])
+
+    def points(self, row, signal):
+        return row.signals["values"][signal]["points"]
+
+    def test_rank_stage_registers_one_stage_named_rank_after_the_crawl_stage(self):
+        h = self.harness(register_streams=False)
+        stages_crawl.register(h)
+        stages_ranking.register(h)
+        self.assertEqual([n for n, _ in h.stages], ["read_boards", "rank"])
+        self.assertIs(h.ranking.conn, h.conn)
+
+    def test_flow_rank_puts_the_sponsoring_new_grad_employer_first_and_names_both(self):
+        h = self.flow()
+        first = ranked_list(h.conn)[0]
+        self.assertEqual(first.company_id, h.ranking.ids["A"])
+        reasons = " ".join(first.signals["reasons"])
+        self.assertIn("new grad", reasons)
+        self.assertIn("sponsors", reasons)
+
+    def test_flow_rank_puts_the_large_later_stage_company_last_but_present(self):
+        h = self.flow()
+        order = self.order(h)
+        self.assertEqual(order[-1], h.ranking.ids["D"])
+        self.assertIn("ranked last", " ".join(self.row(h, "D").signals["reasons"]))
+        self.assertIsNone(self.row(h, "D").signals["hide"])
+
+    def test_flow_rank_puts_staffing_risk_below_a_clean_twin(self):
+        h = self.flow()
+        self.assertGreater(self.place(h, "C"), self.place(h, "B"))
+        self.assertLessEqual(self.points(self.row(h, "C"), "staffing_risk"), -200)
+        self.assertEqual(self.points(self.row(h, "B"), "staffing_risk"), 0)
+
+    def test_flow_rank_hides_only_with_evidence(self):
+        h = self.flow()
+        ids = h.ranking.ids
+        hidden = {r.company_id: r.signals["hide"] for r in hidden_list(h.conn)}
+        # E: a final refusal. The run wrote the rules no-go row and stores the hide that row gives, as the next run
+        # computes it: an active no-go for no sponsorship.
+        self.assertIn(ids["E"], hidden)
+        self.assertEqual((hidden[ids["E"]]["kind"], hidden[ids["E"]]["provisional"]), ("no_go", False))
+        self.assertIn("no sponsorship", hidden[ids["E"]]["reason"])
+        rows = self.no_go(h, "E")
+        self.assertEqual([(r["reason"], r["source"], r["lifted_at"]) for r in rows], [("no_sponsorship", "rules", None)])
+        self.assertTrue(rows[0]["source_ref"])
+        # F: the same refusal, still provisional: hidden pending the reader, nothing written.
+        self.assertEqual((hidden[ids["F"]]["kind"], hidden[ids["F"]]["provisional"]), ("no_sponsorship", True))
+        self.assertEqual(self.no_go(h, "F"), [])
+        # G: a lifted no-go and a final refusal: shown, ranked, and the lifted row is the only row.
+        self.assertNotIn(ids["G"], hidden)
+        self.assertIn(ids["G"], self.order(h))
+        rows = self.no_go(h, "G")
+        self.assertEqual([(r["source"], r["lifted_at"] is not None) for r in rows], [("devanshu", True)])
+        # H: a clearance posting gives no role credit, the company still lists.
+        self.assertNotIn(ids["H"], hidden)
+        self.assertIn(ids["H"], self.order(h))
+        self.assertEqual(self.points(self.row(h, "H"), "live_role"), 0)
+        self.assertNotIn("level_role", self.row(h, "H").lanes)
+        self.assertEqual(set(hidden) & set(ids.values()), {ids["E"], ids["F"]}, "only E and F are hidden")
+        marks = ",".join("?" * len(ids))
+        rules_rows = _rows(h, f"SELECT company_id FROM no_go WHERE source = 'rules' AND company_id IN ({marks})",
+                           *ids.values())
+        self.assertEqual([r[0] for r in rules_rows], [ids["E"]])
+
+    def test_flow_rank_keeps_a_company_with_a_sponsoring_posting_visible_and_flags_the_conflict(self):
+        h = self.flow()
+        n = h.ranking.ids["N"]
+        self.assertIn(n, self.order(h))
+        self.assertEqual(self.no_go(h, "N"), [])
+        self.assertIn("postings disagree on sponsorship", self.row(h, "N").signals["flags"])
+        items = _rows(h, "SELECT * FROM review_item WHERE company_id = ? AND kind = 'flagged' AND raised_by = 'ranker' "
+                         "AND state = 'open'", n)
+        self.assertEqual(len(items), 1)
+        refusals = _rows(h, "SELECT d.provisional FROM posting p JOIN current_decision d USING (posting_id) "
+                            "WHERE p.company_id = ? AND d.sponsorship = 'no'", n)
+        self.assertEqual([r[0] for r in refusals], [0], "N's refusal is final: the sponsoring posting is what saves it")
+
+    def test_flow_rank_keeps_a_doubtful_board_company_visible_without_role_credit(self):
+        h = self.flow()
+        row = self.row(h, "K")
+        self.assertIn(h.ranking.ids["K"], self.order(h))
+        self.assertEqual(self.points(row, "live_role"), 0)
+        self.assertEqual(row.lanes.count("level_role"), 0)
+        self.assertGreaterEqual(row.signals["ignored_postings"], 1)
+        n = row.signals["ignored_postings"]
+        self.assertIn(f"{n} {'posting' if n == 1 else 'postings'} ignored: board match doubtful", row.signals["flags"])
+
+    def test_flow_rank_follows_a_merge(self):
+        h = self.flow()
+        ids = h.ranking.ids
+        self.assertEqual(_rows(h, "SELECT 1 FROM company_score WHERE company_id = ?", ids["L"]), [])
+        self.assertEqual(_rows(h, "SELECT merged_into FROM company WHERE company_id = ?", ids["L"])[0][0], ids["B"])
+        # B scores the same with and without its duplicate in the store.
+        with tempfile.TemporaryDirectory() as folder:
+            without = fresh_store()
+            self.addCleanup(without.close)
+            employers = [e for e in json.loads(EMPLOYERS.read_text(encoding="utf-8")) if e["key"] != "L"]
+            postings = [p for p in json.loads(POSTINGS.read_text(encoding="utf-8")) if p["employer"] != "L"]
+            paths = []
+            for name, rows in (("employers.json", employers), ("postings.json", postings)):
+                path = Path(folder) / name
+                path.write_text(json.dumps(rows), encoding="utf-8")
+                paths.append(path)
+            other = seed_ranking_fixture(without, *paths)
+            run_rank(without, today=stages_ranking.TODAY)
+            b_without = load_scores(without, latest_version(without))[other["B"]]
+        b = self.row(h, "B")
+        self.assertEqual((b.score, b.lanes, b.signals["values"], b.signals["flags"]),
+                         (b_without.score, b_without.lanes, b_without.signals["values"], b_without.signals["flags"]))
+
+    def test_flow_rank_orders_the_cap_exempt_lab_above_a_company_with_only_lca_history(self):
+        h = self.flow()
+        self.assertLess(self.place(h, "I"), self.place(h, "J"))
+        self.assertGreater(self.points(self.row(h, "I"), "cap_exempt"), 0)
+        self.assertEqual(self.row(h, "J").lanes, ("reason_no_role",))
+
+    def test_flow_rank_pay_level_from_posted_pay(self):
+        h = self.flow()
+        pay = self.row(h, "M").signals["values"]["pay_level"]
+        self.assertEqual(pay["value"], default_ranker_config().section("pay_level")["level_2"])
+        self.assertIn("level 2", pay["reason"])
+        self.assertIn("posted", pay["reason"])
+
+    def test_flow_rank_a_2016_posting_gives_no_role_credit_and_the_company_stays_listed(self):
+        h = self.flow()
+        row = self.row(h, "O")
+        self.assertIn(h.ranking.ids["O"], self.order(h))
+        self.assertEqual(row.lanes, ())
+        self.assertEqual(self.points(row, "live_role"), 0)
+        (posting,) = self.postings(h, "O")
+        self.assertEqual(posting["posted_on"], "2016-03-02")
+        self.assertEqual(row.signals["stale_postings"], [{"posting_id": posting["posting_id"], "title": posting["title"],
+                                                           "reason": "posted 2016-03-02, over 12 months"}])
+        self.assertTrue(any("1 stale posting not counted as live" in f for f in row.signals["flags"]))
+        self.assertIsNone(row.signals["hide"])
+        self.assertIsNone(row.signals["best_posting_id"])
+
+    def test_flow_rank_ranks_the_live_posting_twin_above_the_2016_twin(self):
+        h = self.flow()
+        self.assertLess(self.place(h, "P"), self.place(h, "O"))
+        row = self.row(h, "P")
+        (live,) = [r for r in self.postings(h, "P") if r["posted_on"] == "2026-10-18"]
+        (old,) = [r for r in self.postings(h, "P") if r["posted_on"] == "2016-03-02"]
+        self.assertEqual(row.signals["best_posting_id"], live["posting_id"])
+        self.assertEqual([b["posting_id"] for b in row.signals["stale_postings"]], [old["posting_id"]])
+        self.assertIn("level_role", row.lanes)
+
+    def test_flow_rank_a_first_empty_read_makes_the_posting_stale_and_keeps_the_company(self):
+        h = self.flow()
+        row = self.row(h, "Q")
+        self.assertIn(h.ranking.ids["Q"], self.order(h))
+        (posting,) = [p for p in self.postings(h, "Q") if p["last_seen_at"].startswith("2026-10-18")]
+        stale = {b["posting_id"]: b["reason"] for b in row.signals["stale_postings"]}
+        self.assertEqual(stale, {posting["posting_id"]:
+                                 "not on the board at its latest read (last listed 2026-10-18 or later)"})
+        self.assertEqual(row.lanes, ())
+        self.assertEqual(self.points(row, "live_role"), 0)
+        self.assertEqual(row.signals["values"]["live_role"]["confidence"], "medium")
+
+    def test_flow_rank_a_failed_board_read_never_makes_a_posting_stale(self):
+        h = self.flow()
+        row = self.row(h, "R")
+        board = _rows(h, "SELECT last_read, error_streak FROM board WHERE company_id = ?", h.ranking.ids["R"])[0]
+        self.assertEqual(tuple(board), ("error", 1))
+        self.assertEqual(row.signals["stale_postings"], [])
+        live = row.signals["values"]["live_role"]
+        self.assertGreater(live["points"], 0)
+        self.assertEqual(live["confidence"], "medium")
+        self.assertIn("last board read failed", live["basis"])
+
+    def test_flow_rank_a_stale_refusal_hides_nothing(self):
+        h = self.flow()
+        row = self.row(h, "S")
+        self.assertIn(h.ranking.ids["S"], self.order(h))
+        self.assertEqual(self.no_go(h, "S"), [])
+        self.assertIsNone(row.signals["hide"])
+        decision = _rows(h, "SELECT d.sponsorship, d.provisional FROM posting p JOIN current_decision d USING "
+                            "(posting_id) WHERE p.company_id = ? AND p.posted_on = '2016-03-02'", h.ranking.ids["S"])
+        self.assertEqual([tuple(r) for r in decision], [("no", 0)], "S's 2016 refusal is a final decision")
+
+    def test_flow_rank_every_row_says_how_sure_it_is(self):
+        h = self.flow()
+        scores = load_scores(h.conn, latest_version(h.conn))
+        for key, cid in h.ranking.ids.items():
+            if key == "L":
+                continue
+            signals = scores[cid].signals
+            say = signals["rank_reason"]
+            self.assertIn(say["level"], LEVELS, key)
+            self.assertTrue(say["basis"].strip(), key)
+            self.assertTrue(say["line"].startswith(say["text"]), key)
+            self.assertTrue(say["line"].endswith(f"{say['level']} confidence: {say['basis']})"), key)
+            self.assertEqual(signals["confidence"], {"level": say["level"], "basis": say["basis"]}, key)
+            for name, part in signals["values"].items():
+                self.assertIn(part["confidence"], LEVELS, (key, name))
+                self.assertTrue(part["basis"].strip(), (key, name))
+
+    def test_flow_rank_a_guess_never_reads_high_and_loses_to_the_confirmed_twin(self):
+        h = self.flow()
+        self.assertEqual(self.row(h, "D").signals["values"]["large_later_stage"]["confidence"], "low")
+        t, u = self.row(h, "T"), self.row(h, "U")
+        self.assertLess(self.place(h, "T"), self.place(h, "U"))
+        self.assertEqual(self.points(t, "everify") - self.points(u, "everify"), 6.0)
+        self.assertIn("guess", u.signals["values"]["everify"]["basis"])
+        self.assertEqual(t.signals["values"]["everify"]["confidence"], "high")
+        self.assertEqual(u.signals["values"]["everify"]["confidence"], "low")
+
+    def test_flow_rank_is_idempotent(self):
+        h = self.flow()
+
+        def snapshot():
+            return {
+                "scores": _rows(h, "SELECT company_id, ranker_version, score, lanes, signals FROM company_score "
+                                   "ORDER BY company_id, ranker_version"),
+                "no_go": _rows(h, "SELECT * FROM no_go ORDER BY no_go_id"),
+                "items": _rows(h, "SELECT * FROM review_item ORDER BY review_id"),
+            }
+
+        before = [tuple(r) for r in snapshot()["scores"]]
+        again = snapshot()
+        dict(h.stages)["rank"]()
+        after = snapshot()
+        self.assertEqual([tuple(r) for r in after["scores"]], before)
+        self.assertEqual([tuple(r) for r in after["no_go"]], [tuple(r) for r in again["no_go"]])
+        self.assertEqual([tuple(r) for r in after["items"]], [tuple(r) for r in again["items"]])
+        self.assertTrue(after["no_go"])
+
+    def test_the_rank_stage_seeds_the_fixture_once_and_runs_without_network(self):
+        h = self.harness()
+        with mock.patch("socket.socket", side_effect=AssertionError("the rank stage opened a socket")):
+            h.run(through="rank")
+        companies = _rows(h, "SELECT count(*) FROM company")[0][0]
+        postings = _rows(h, "SELECT count(*) FROM posting")[0][0]
+        ids = dict(h.ranking.ids)
+        h.run(through="rank")  # a second run ranks again and seeds nothing new
+        self.assertEqual(_rows(h, "SELECT count(*) FROM company")[0][0], companies)
+        self.assertEqual(_rows(h, "SELECT count(*) FROM posting")[0][0], postings)
+        self.assertEqual(h.ranking.ids, ids)
+        self.assertEqual(len(ids), len(json.loads(EMPLOYERS.read_text(encoding="utf-8"))))
+
+    def test_the_rank_stage_ranks_on_the_fixture_day_with_the_shipped_stale_rule(self):
+        h = self.flow()
+        self.assertEqual(h.ranking.report.version, latest_version(h.conn))
+        self.assertEqual(stages_ranking.TODAY, date(2026, 10, 21))
+        self.assertEqual(h.ranking.report.stale_postings, 3, "O, P and Q each have one stale posting")
 
 
 COMBINE_EXISTS = importlib.util.find_spec("outreach.reader.combine") is not None

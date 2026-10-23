@@ -461,6 +461,14 @@ MUTATIONS = [
      "Confidence(\"low\", f\"no data for {name.replace('_', ' ')}\")",
      "Confidence(\"high\", f\"no data for {name.replace('_', ' ')}\")",
      "test_a_grade_that_is_not_stored_is_the_low_default"),
+    (RANKING / "hide.py", "decide_hide forgets a lift, so a company he put back is hidden by size or a refusal",
+     'if inputs.no_go == "lifted":\n        return None',
+     'if False:\n        return None',
+     "test_a_lifted_no_go_of_any_reason_cancels_the_size_hide"),
+    (RANKING / "job.py", "the write transaction writes a no_go row for a company closed during the compute",
+     "not s.hide.provisional \\\n                        and s.company_id in listed:",
+     "not s.hide.provisional:",
+     "test_a_company_closed_during_the_compute_gets_no_no_go_row"),
 ]
 
 

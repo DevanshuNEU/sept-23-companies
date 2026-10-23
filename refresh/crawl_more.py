@@ -209,7 +209,6 @@ NEW = {"workable_search": lambda tok: (_WS[tok][0], _WS[tok][1]) if tok in _WS e
        "bamboohr": bamboohr, "breezy": breezy}
 _orig_board = cb.board
 def board_any(ats, tok):
-    if ats in DROPPED: return None    # never sent, whatever the list holds
     res = NEW[ats](tok) if ats in NEW else _orig_board(ats, tok)
     if res and (ats, tok) not in SIZE and ats != "workable_search": SIZE[(ats, tok)] = len(res[0])
     return res

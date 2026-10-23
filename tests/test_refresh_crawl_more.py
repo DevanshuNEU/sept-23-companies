@@ -103,6 +103,7 @@ class CrawlMoreTests(unittest.TestCase):
         out, _ = self.run_main(["--days", "45", "--skip", "dover"], self.SLUGS)
         self.assertIn("dover is no longer read", out)
         self.assertIn("left out 2 boards on ATSes no longer read", out)
+        self.assertIn("crawling 1 boards", out)  # gem only: neither dropped board reaches the crawl
         self.assertTrue(self.net.urls)
         self.assertFalse(any(host in u for u in self.net.urls for host in FORBIDDEN))
 

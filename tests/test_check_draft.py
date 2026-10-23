@@ -156,6 +156,21 @@ class CheckDraftTest(unittest.TestCase):
                      "draft": {"subject": "something else", "body": BODY.replace("Jane", "Raj")}}
         self.assertBlocks(CONTACT, "near-identical", others=[colleague])
 
+    def test_a_lightly_reworded_colleague_draft_blocks_both_ways(self):
+        # A new name, a reworded hook and one changed sentence: 92 percent alike. difflib's autojunk scored it 79
+        # percent on emails this long, under the 0.8 line, so both emails would have gone out.
+        reworded = BODY.replace("Jane", "Raj").replace(
+            "I saw your post on how your team tests voice agents before they ship, and I want in on that work.",
+            "I read your talk on how your team catches voice agent regressions before release, and I want to help with that.",
+        ).replace("Would you refer me, or point me to the person who owns that req?",
+                  "Could you refer me, or tell me who owns that req?")
+        raj = {"company": "Acme Voice", "name": "Raj", "email": "raj@acmevoice.com",
+               "draft": {"subject": "something else", "body": reworded}}
+        self.assertBlocks(CONTACT, "near-identical", others=[raj])
+        jane = {"company": "Acme Voice", "name": "Jane Doe", "email": "jane@acmevoice.com",
+                "draft": {"subject": "your voice agent testing post", "body": BODY}}
+        self.assertBlocks({**raj, "kind": "engineer"}, "near-identical", others=[jane])
+
     def test_same_body_at_another_company_is_fine(self):
         stranger = {"company": "Other Co", "name": "Raj", "email": "raj@other.co",
                     "draft": {"subject": "something else", "body": BODY}}

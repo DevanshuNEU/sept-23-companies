@@ -7,6 +7,7 @@ import json
 import random
 import sqlite3
 import unittest
+from unittest import mock
 from datetime import timedelta
 
 from outreach.sending import claim, queue
@@ -24,6 +25,7 @@ MS = 60_000
 class Base(unittest.TestCase):
     def setUp(self):
         self.db = fresh_store()
+        self.db.execute("PRAGMA fullfsync = ON")  # the sender's connection: send_one refuses any other
         self.company = seed_company(self.db)
         self.clock = FakeClock(MON)
         self.problems: list[str] = []
@@ -72,7 +74,8 @@ class Base(unittest.TestCase):
             return claim.reconcile(self.db, found, now=iso(self.clock()), cfg=CFG, rng=self.rng)
 
     def scan(self) -> dict:
-        return {u.message_id: self.gmail.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms)
+        return {u.message_id: (*self.gmail.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
+                               u.rfc_id)
                 for u in claim.unclear(self.db)}
 
 
@@ -140,7 +143,7 @@ class FoundInSentTest(Base):
                                        at=MON)
         self.clock.advance(minutes=11)
         found = self.scan()
-        self.assertEqual(found[mid], (None, True))
+        self.assertEqual(found[mid][:2], (None, True))
         self.reconcile(found)
         row = self.message(mid)
         self.assertEqual(row["state"], "failed")
@@ -151,7 +154,8 @@ class FoundInSentTest(Base):
         _, mid = self.approve()
         self.gmail.fail_next_send(GmailError("network", None, "reset"))
         self.send(mid)
-        counts = self.reconcile({mid: (Sent("m-9", "t-9", "<someone.else@gmail.com>"), True)})
+        pending = self.message(mid)["pending_rfc_id"]
+        counts = self.reconcile({mid: (Sent("m-9", "t-9", "<someone.else@gmail.com>"), True, pending)})
         self.assertEqual(counts["sent"], 0)
         self.assertEqual(self.message(mid)["state"], "send_unknown")
 
@@ -174,7 +178,7 @@ class FoundInSentTest(Base):
         self.clock.advance(minutes=11)
         found = self.scan()
         self.assertIsNotNone(found[a][0])
-        self.assertEqual(found[b], (None, True))
+        self.assertEqual(found[b][:2], (None, True))
         self.reconcile(found)
         self.assertEqual(self.message(a)["state"], "sent")
         self.assertEqual(self.message(a)["gmail_message_id"], self.gmail.sent[0][1].gmail_message_id)
@@ -195,10 +199,10 @@ class MissingFromSentTest(Base):
         mid = self.failed_send()
         pending = self.message(mid)["pending_rfc_id"]
         self.clock.advance(minutes=9)
-        self.assertEqual(self.reconcile(self.scan()), {"sent": 0, "failed": 0, "waiting": 1})
+        self.assertEqual(self.reconcile(self.scan()), {"sent": 0, "failed": 0, "waiting": 1, "errors": 0})
         self.assertEqual(self.message(mid)["state"], "send_unknown")
         self.clock.advance(minutes=1)
-        self.assertEqual(self.reconcile(self.scan()), {"sent": 0, "failed": 1, "waiting": 0})
+        self.assertEqual(self.reconcile(self.scan()), {"sent": 0, "failed": 1, "waiting": 0, "errors": 0})
         row = self.message(mid)
         self.assertEqual(row["state"], "failed")
         self.assertEqual(row["error"], "Not in Sent 10 minutes after the attempt, so it did not go out.")
@@ -215,7 +219,9 @@ class MissingFromSentTest(Base):
         mid = self.failed_send()
         self.clock.advance(minutes=3)
         # Even a scan that calls itself complete does not fail a send younger than the wait.
-        self.assertEqual(self.reconcile({mid: (None, True)}), {"sent": 0, "failed": 0, "waiting": 1})
+        pending = self.message(mid)["pending_rfc_id"]
+        self.assertEqual(self.reconcile({mid: (None, True, pending)}),
+                         {"sent": 0, "failed": 0, "waiting": 1, "errors": 0})
         self.assertEqual(self.message(mid)["state"], "send_unknown")
 
     def test_not_found_needs_a_scan_back_to_the_claim(self):
@@ -228,7 +234,7 @@ class MissingFromSentTest(Base):
         self.gmail.find_sent_page_size = 2
         self.clock.advance(minutes=30)
         found = self.scan()
-        self.assertEqual(found[mid], (None, False))
+        self.assertEqual(found[mid][:2], (None, False))
         self.reconcile(found)
         self.assertEqual(self.message(mid)["state"], "send_unknown")
         self.gmail.find_sent_page_cap = None
@@ -344,6 +350,53 @@ class RequeueTest(Base):
         self.assertEqual(row["state"], "sent")
         self.assertEqual(row["rfc_message_id"], self.gmail.sent[0][0].message_id)
         self.assertNotEqual(row["rfc_message_id"], first)
+
+
+class ReviewFixTest(Base):
+    def test_a_miss_for_an_earlier_attempt_never_fails_a_newer_claim(self):
+        _, mid = self.approve()
+        self.gmail.fail_next_send(GmailError("server", 503, "Backend Error"))
+        self.send(mid)
+        first_rfc = self.message(mid)["pending_rfc_id"]
+        self.clock.advance(minutes=11)
+        stale = self.scan()  # a complete miss for the first attempt
+        self.assertEqual(stale[mid][:2], (None, True))
+        self.reconcile(self.scan())
+        with transaction(self.db):
+            self.assertEqual(claim.requeue_failed(self.db, now=iso(self.clock()), cfg=CFG), 1)
+        # The second attempt went out, but Gmail is slow to show it in Sent.
+        self.gmail.fail_next_send(GmailError("timeout", None, "timed out"), accepted=True,
+                                  lands_after=timedelta(minutes=30))
+        self.assertEqual(self.send(mid), "timeout")
+        self.assertNotEqual(self.message(mid)["pending_rfc_id"], first_rfc)
+        self.clock.advance(minutes=11)
+        self.assertEqual(self.reconcile(stale), {"sent": 0, "failed": 0, "waiting": 1, "errors": 0})
+        self.assertEqual(self.message(mid)["state"], "send_unknown")
+
+    def test_one_message_whose_record_always_fails_does_not_roll_back_the_others(self):
+        _, broken = self.approve()
+        _, fine = self.approve(company=seed_company(self.db, "Beta"))
+        for mid in (broken, fine):
+            self.gmail.fail_next_send(GmailError("server", 500), accepted=True)
+            self.send(mid)
+        self.clock.advance(minutes=2)
+        found = self.scan()
+        real = claim.record_sent
+
+        def record(conn, message_id, *args, **kwargs):
+            if message_id == broken:
+                raise sqlite3.OperationalError("disk I/O error")
+            return real(conn, message_id, *args, **kwargs)
+        with mock.patch.object(claim, "record_sent", side_effect=record), \
+                self.assertLogs("outreach.sending.claim", level="WARNING") as logged:
+            counts = self.reconcile(found)
+        self.assertIn(f"message {broken}", logged.output[0])
+        self.assertEqual((counts["sent"], counts["errors"]), (1, 1))
+        self.assertEqual(self.message(fine)["state"], "sent")
+        self.assertEqual(self.message(broken)["state"], "send_unknown")
+        self.reconcile(self.scan())
+        self.assertEqual(self.message(broken)["state"], "sent")
+        self.assertEqual(len(self.gmail.sent), 2)
 
 
 if __name__ == "__main__":

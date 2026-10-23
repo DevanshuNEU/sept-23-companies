@@ -120,7 +120,8 @@ def settle_and_send(conn: sqlite3.Connection, client, clock, rng, cfg) -> str | 
     from outreach.store import transaction
     now = clock()
     claim.leftover_claims(conn, iso(now))
-    found = {u.message_id: client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms)
+    found = {u.message_id: (*client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
+                            u.rfc_id)
              for u in claim.unclear(conn)}
     with transaction(conn):
         claim.reconcile(conn, found, now=iso(now), cfg=cfg, rng=rng)

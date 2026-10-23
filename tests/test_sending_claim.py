@@ -30,6 +30,7 @@ def parse(text: str) -> datetime:
 class Base(unittest.TestCase):
     def setUp(self):
         self.db = fresh_store()
+        self.db.execute("PRAGMA fullfsync = ON")  # the sender's connection: send_one refuses any other
         self.path = self.db.execute("PRAGMA database_list").fetchone()["file"]
         self.company = seed_company(self.db)
         self.clock = FakeClock(MON)
@@ -599,6 +600,20 @@ class NoThreadTest(Base):
                           rng=self.rng)
         # Gmail starts a new thread under its first message's id; never '' (a follow-up would leave the thread).
         self.assertEqual(self.touch(person)["gmail_thread_id"], "m-77")
+
+
+class FullfsyncTest(Base):
+    def test_send_one_refuses_a_connection_without_fullfsync(self):
+        from outreach.store import connect
+        _, mid = self.approve()
+        loose = connect(self.path)
+        self.addCleanup(loose.close)
+        self.gmail.calls.clear()
+        with self.assertRaises(RuntimeError):
+            claim.send_one(loose, self.gmail, self.queued(mid), CFG, now=iso(MON), clock=self.clock, rng=self.rng,
+                           account=CFG.from_address)
+        self.assertEqual(self.gmail.calls, [])
+        self.assertEqual(self.message(mid)["state"], "approved")
 
 
 if __name__ == "__main__":

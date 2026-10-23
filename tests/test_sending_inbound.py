@@ -26,6 +26,7 @@ CFG = load_config()
 class Base(unittest.TestCase):
     def setUp(self):
         self.db = fresh_store()
+        self.db.execute("PRAGMA fullfsync = ON")  # the sender's connection: send_one refuses any other
         self.path = self.db.execute("PRAGMA database_list").fetchone()["file"]
         self.company = seed_company(self.db)
         self.clock = FakeClock(MON)

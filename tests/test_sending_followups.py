@@ -25,6 +25,7 @@ STAMP = "2026-11-20T15:00:00Z"
 class Base(unittest.TestCase):
     def setUp(self):
         self.db = fresh_store()
+        self.db.execute("PRAGMA fullfsync = ON")  # the sender's connection: send_one refuses any other
         self.company = seed_company(self.db)
         self.n = 0
 

@@ -13,6 +13,7 @@ Each crash window ends in a state that is settled by Message-ID, never by sendin
 - during the record: the record is one transaction, so it either committed (`sent`) or left `sending`.
 """
 import json
+import logging
 import math
 import random
 import sqlite3
@@ -45,6 +46,7 @@ __all__ = ["AnotherSendInFlight", "claim", "outgoing_for", "email_context", "rec
 PLACEHOLDER_DOMAIN = "@outreach.invalid>"
 
 _NEW_YORK = ZoneInfo("America/New_York")
+_log = logging.getLogger(__name__)
 
 # The error a `sending` row found at the start of a tick gets: ticks never overlap, so the last one stopped mid-send.
 LEFTOVER_ERROR = "the sender stopped mid-send"
@@ -335,7 +337,11 @@ def send_one(conn: sqlite3.Connection, client: MailClient, q: Queued, cfg: SendC
     not unclear: the email went out, so it is recorded `sent` under the id Gmail kept, sending pauses, and the error
     is raised for the tick to report. `clock` gives the moment the call returned (sent_at, and the start of the
     wait before a Sent miss counts), which can be long after `now` when the Mac slept mid-call. A failure while
-    recording after Gmail accepted is not caught: the row stays `sending` and the next tick settles it by Sent."""
+    recording after Gmail accepted is not caught: the row stays `sending` and the next tick settles it by Sent.
+    RuntimeError, before anything else, on a connection without fullfsync: on macOS a claim could otherwise be lost
+    to a power cut after Gmail took the email."""
+    if conn.execute("PRAGMA fullfsync").fetchone()[0] != 1:
+        raise RuntimeError("the sender sends only on a connection opened with connect(fullfsync=True)")
     rfc = new_message_id(account)
     if not claim(conn, q, rfc_id=rfc, now=now):
         return "lost_race"
@@ -468,42 +474,58 @@ def _fail(conn: sqlite3.Connection, u: Unclear, *, now: str, cfg: SendConfig) ->
                          "retryable": detail.get("retryable") is True, "attempt": _attempts(conn, u.message_id)})
 
 
-def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, bool]], *, now: str,
+def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, bool, str]], *, now: str,
               cfg: SendConfig, rng: random.Random) -> dict[str, int]:
-    """Apply Sent scans made earlier with no transaction open (`found`: message id to what `find_sent` returned).
+    """Apply Sent scans made earlier with no transaction open (`found`: message id to what `find_sent` returned and
+    the Message-ID it looked for, `(hit, complete, scanned_rfc_id)`).
 
     A send Gmail stored under another Message-ID (`Unclear.stored`) becomes `sent` from those ids, whatever the scan
     found: it went out, and a scan by the claimed id can never find it. A hit with the message's own Message-ID
     becomes `sent` (`record_sent(..., reconciled=True)`, dated to the claim). A complete miss becomes `failed` once `reconcile_after_minutes` have passed since the send returned (and
     since the claim). Anything else stays `send_unknown`: an incomplete scan, a younger send, or a hit for another
-    Message-ID. Matching is by Message-ID only, never by recipient or subject. Runs in one transaction (a savepoint
-    inside the caller's). Returns the counts `sent`, `failed` and `waiting`."""
+    Message-ID, or a miss from a scan for an earlier attempt's Message-ID. Matching is by Message-ID only, never by
+    recipient or subject. Runs in one transaction (a savepoint inside the caller's), with a savepoint per message:
+    one that fails to record is logged, counted in `errors` and left unclear. Returns the counts `sent`, `failed`,
+    `waiting` and `errors`."""
     stamp = _stamp(now)
     now_ms = _ms(stamp)
     settle_ms = cfg.reconcile_after_minutes * 60_000
-    counts = {"sent": 0, "failed": 0, "waiting": 0}
-    with atomic(conn, "reconcile"):
-        pending = {u.message_id: u for u in unclear(conn)}
-        for u in [u for u in pending.values() if u.stored is not None]:
+    counts = {"sent": 0, "failed": 0, "waiting": 0, "errors": 0}
+
+    def settle(u: Unclear, scan: tuple[Sent | None, bool, str] | None) -> str:
+        if u.stored is not None:
             # Gmail kept it under another Message-ID: it went out. Recorded from those ids, scan or no scan.
             record_sent(conn, u.message_id, u.stored, at=u.claimed_at, cfg=cfg, rng=rng, reconciled=True, now=stamp)
-            counts["sent"] += 1
-            del pending[u.message_id]
-        for message_id, (hit, complete) in found.items():
-            u = pending.get(message_id)
-            if u is None:
-                continue  # settled or changed since the scan
-            if hit is not None:
-                if normalise_message_id(hit.rfc_message_id) != normalise_message_id(u.rfc_id):
-                    counts["waiting"] += 1
-                    continue
-                record_sent(conn, message_id, hit, at=u.claimed_at, cfg=cfg, rng=rng, reconciled=True, now=stamp)
-                counts["sent"] += 1
-            elif complete and now_ms >= max(u.send_returned_ms, _ms(u.claimed_at)) + settle_ms:
-                _fail(conn, u, now=stamp, cfg=cfg)
-                counts["failed"] += 1
-            else:
-                counts["waiting"] += 1
+            return "sent"
+        hit, complete, scanned = scan
+        if hit is not None:
+            if normalise_message_id(hit.rfc_message_id) != normalise_message_id(u.rfc_id):
+                return "waiting"
+            record_sent(conn, u.message_id, hit, at=u.claimed_at, cfg=cfg, rng=rng, reconciled=True, now=stamp)
+            return "sent"
+        # A miss proves nothing about this claim unless the scan was for this claim's own Message-ID.
+        if complete and normalise_message_id(scanned) == normalise_message_id(u.rfc_id) \
+                and now_ms >= max(u.send_returned_ms, _ms(u.claimed_at)) + settle_ms:
+            _fail(conn, u, now=stamp, cfg=cfg)
+            return "failed"
+        return "waiting"
+
+    with atomic(conn, "reconcile"):
+        pending = {u.message_id: u for u in unclear(conn)}
+        work = [(u, None) for u in pending.values() if u.stored is not None]
+        work += [(pending[mid], scan) for mid, scan in found.items()
+                 if mid in pending and pending[mid].stored is None]  # one not in pending settled since the scan
+        for u, scan in work:
+            # One savepoint per message: a message whose record keeps failing is logged and left for the next
+            # tick, and never rolls back the others.
+            try:
+                with atomic(conn, "reconcile_one"):
+                    counts[settle(u, scan)] += 1
+            except Exception as err:
+                if not conn.in_transaction:
+                    raise  # SQLite rolled the whole transaction back: nothing here can go on
+                counts["errors"] += 1
+                _log.warning("reconcile left message %s unclear: %s", u.message_id, describe_error(err))
     return counts
 
 

@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from outreach.crawl.stale import Stale
-from outreach.ranking.common import clean_text
+from outreach.ranking.common import clean_text, size_order_key
 from outreach.ranking.config import RankerConfig
 from outreach.rules import Decision, passes
 from outreach.store import append_event, atomic, utcnow
@@ -34,7 +34,6 @@ __all__ = ["HIDE_KINDS", "posting_visible", "Refusal", "SizeEvidence", "HideInpu
 
 HIDE_KINDS = ("no_go", "over_size", "no_sponsorship")
 _SPONSORS = ("yes", "opt_only")
-_CONFIDENCE_RANK = {"confirmed": 0, "estimate": 1, "guess": 2}
 _QUOTE_MAX = 300
 # Decisions are joined by key under the current ruleset, not through the current_decision view, which is a scan.
 _DECISION_QUERY = (
@@ -150,10 +149,7 @@ def load_hide_inputs(conn: sqlite3.Connection, canon: dict[int, int], doubtful: 
     for r in conn.execute("SELECT evidence_id, company_id, fact, num_low, num_high, confidence, locked, source_ref, "
                           "recorded_at FROM company_fact WHERE fact IN ('size', 'headcount')"):
         cid = owner(r["company_id"])
-        # size over headcount, then the company_fact order (hand-locked newest, confidence, newest) across the
-        # companies merged into one
-        key = (r["fact"] == "size", r["locked"], r["recorded_at"] if r["locked"] else "",
-               -_CONFIDENCE_RANK.get(r["confidence"], 3), r["recorded_at"], r["evidence_id"])
+        key = size_order_key(r)  # across the companies merged into one, as the facts loader picks
         if cid not in size or key > size[cid][0]:
             size[cid] = (key, SizeEvidence(r["num_low"], r["num_high"], r["confidence"], r["source_ref"],
                                            r["evidence_id"], bool(r["locked"])))

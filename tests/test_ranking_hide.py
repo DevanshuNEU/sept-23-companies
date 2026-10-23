@@ -14,6 +14,9 @@ from outreach.crawl.stale import load_stale
 from outreach.ranking.common import (BOARD_DOUBTFUL_PREFIX, UNREAD_DOUBTFUL_FOUND_BY, age_days, canonical_ids,
                                      clean_text, doubtful_board_ids)
 from outreach.ranking.config import default_ranker_config
+from outreach.ranking.facts import load_facts
+from outreach.ranking.pay import load_wages
+from outreach.ranking.roles import load_roles
 from outreach.ranking.hide import (Hide, HideInputs, Refusal, decide_hide, load_hide_inputs, posting_visible,
                                    write_no_go)
 from outreach.rules import Decision
@@ -94,6 +97,37 @@ class SizeTests(Store):
         self.assertIsNone(decide_hide(got[c], CFG))
         self.assertEqual(decide_hide(got[d], CFG).kind, "over_size")
         self.assertEqual(got[d].size.low, 420)
+
+    def test_the_hide_and_the_facts_pick_the_same_size_row(self):
+        cases = {
+            "size over a confirmed headcount": [("size", 50, "guess", 0), ("headcount", 420, "confirmed", 0)],
+            "confirmed over estimate": [("size", 400, "estimate", 0), ("size", 80, "confirmed", 0)],
+            "a hand-locked guess first": [("size", 80, "confirmed", 0), ("size", 500, "guess", 1)],
+            "headcount alone": [("headcount", 420, "estimate", 0)],
+        }
+        ids = {}
+        for name, rows in cases.items():
+            cid = ids[name] = seed_company(self.conn, name)
+            dup = seed_company(self.conn, name + " dup")
+            for i, (fact, low, conf, locked) in enumerate(rows):
+                self.conn.execute(
+                    "INSERT INTO evidence(company_id, fact, value, num_low, num_high, confidence, locked, "
+                    "source_kind, source_ref, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?)",
+                    (dup if i % 2 else cid, fact, str(low), low, low, conf, locked, "hand" if locked else "linkedin",
+                     f"2026-10-0{i + 1}T08:00:00Z"))
+            rs.merge(self.conn, dup, cid)
+        canon, doubtful = canonical_ids(self.conn), doubtful_board_ids(self.conn)
+        stale = load_stale(self.conn, TODAY, max_age_months=12)
+        hides = load_hide_inputs(self.conn, canon, doubtful, stale)
+        facts = {f.company_id: f for f in load_facts(self.conn, canon, doubtful,
+                                                     load_roles(self.conn, canon, doubtful, TODAY, stale), TODAY,
+                                                     CFG, load_wages())}
+        want = {"size over a confirmed headcount": 50, "confirmed over estimate": 80, "a hand-locked guess first": 500,
+                "headcount alone": 420}
+        for name, cid in ids.items():
+            with self.subTest(case=name):
+                self.assertEqual(hides[cid].size.low, want[name])
+                self.assertEqual(facts[cid].size_low, want[name])
 
     def test_size_wins_over_headcount_when_both_exist(self):
         rs.evidence(self.conn, self.co, "size", value="50-100", num_low=50, num_high=100, confidence="estimate")

@@ -13,6 +13,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from outreach.sources.keys import US_STATES
+
 __all__ = ["WAGES_PATH", "Area", "PayRange", "PayLevel", "load_wages", "parse_pay", "level_at", "matching_areas",
            "pay_level", "lca_pay_level"]
 
@@ -70,7 +72,7 @@ def load_wages(path: Path = WAGES_PATH) -> tuple[Area, ...]:
         if not aliases:
             raise ValueError(f"area {name} has no aliases")
         states = tuple(str(x).upper() for x in row.get("states", ()))
-        if not states or not all(x in _US_STATES for x in states):
+        if not states or not all(x in US_STATES for x in states):
             raise ValueError(f"area {name}: states must be US state codes, got {row.get('states')!r}")
         metro = tuple(str(x).lower() for x in row.get("metro", ()))
         areas.append(Area(name=name, aliases=aliases, levels=levels, states=states, metro=metro))
@@ -158,7 +160,9 @@ def level_at(annual: int, area: Area) -> int:
     return level
 
 
-_US_STATES = {
+# State names for a location that spells one out. The codes are outreach.sources.keys.US_STATES (one list for the
+# whole platform); a code there with no name here is still read as a code.
+_STATE_NAMES = {
     "AL": "alabama", "AK": "alaska", "AZ": "arizona", "AR": "arkansas", "CA": "california", "CO": "colorado",
     "CT": "connecticut", "DE": "delaware", "DC": "district of columbia", "FL": "florida", "GA": "georgia",
     "HI": "hawaii", "ID": "idaho", "IL": "illinois", "IN": "indiana", "IA": "iowa", "KS": "kansas", "KY": "kentucky",
@@ -169,11 +173,11 @@ _US_STATES = {
     "SC": "south carolina", "SD": "south dakota", "TN": "tennessee", "TX": "texas", "UT": "utah", "VT": "vermont",
     "VA": "virginia", "WA": "washington", "WV": "west virginia", "WI": "wisconsin", "WY": "wyoming",
 }
-_STATE_CODE = re.compile(r"(?<![A-Za-z])(" + "|".join(_US_STATES) + r")(?![A-Za-z])")  # upper case only
+_STATE_CODE = re.compile(r"(?<![A-Za-z])(" + "|".join(sorted(US_STATES)) + r")(?![A-Za-z])")  # upper case only
 _STATE_NAME = re.compile(
-    r"(?<![a-z])(" + "|".join(sorted(map(re.escape, _US_STATES.values()), key=lambda n: (-len(n), n)))
+    r"(?<![a-z])(" + "|".join(sorted(map(re.escape, _STATE_NAMES.values()), key=lambda n: (-len(n), n)))
     + r")(?![a-z])", re.IGNORECASE)
-_NAME_TO_CODE = {name: code for code, name in _US_STATES.items()}
+_NAME_TO_CODE = {name: code for code, name in _STATE_NAMES.items()}
 _NON_US = re.compile(
     r"(?<![a-z])(?:uk|u\.k\.|united kingdom|england|scotland|wales|northern ireland|ireland|canada|ontario|quebec"
     r"|british columbia|alberta|india|germany|france|spain|italy|netherlands|poland|portugal|sweden|switzerland"

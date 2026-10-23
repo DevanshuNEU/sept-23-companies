@@ -5,10 +5,11 @@ Each loader is one query over the whole store, never a query per company.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from datetime import date
 
 __all__ = ["BOARD_DOUBTFUL_PREFIX", "UNREAD_DOUBTFUL_FOUND_BY", "canonical_ids", "doubtful_board_ids", "age_days",
-           "clean_text"]
+           "clean_text", "fact_order_key", "size_order_key"]
 
 # #21 raises an open `flagged` item with this reason prefix on a board it thinks is another company's.
 BOARD_DOUBTFUL_PREFIX = "board match doubtful"
@@ -16,6 +17,7 @@ BOARD_DOUBTFUL_PREFIX = "board match doubtful"
 # (ruling 7; the ledger adds slug_probe, which #21 checks the same way).
 UNREAD_DOUBTFUL_FOUND_BY = ("stapply_name", "slug_probe")
 _DASHES = {0x2013: "-", 0x2014: "-"}
+_CONFIDENCE_RANK = {"confirmed": 0, "estimate": 1, "guess": 2}
 
 
 def canonical_ids(conn: sqlite3.Connection) -> dict[int, int]:
@@ -83,3 +85,17 @@ def age_days(on: str | None, today: date) -> int | None:
 def clean_text(text: str) -> str:
     """The text with en and em dashes turned into a plain hyphen: a posting title may hold one, a reason may not."""
     return text.translate(_DASHES)
+
+
+def fact_order_key(r: Mapping) -> tuple:
+    """The `company_fact` view's order, so the winner across merged duplicates is the one the view would pick:
+    hand-locked first (the newest of those), then confirmed over estimate over guess, then the newest. The larger key
+    wins. `r` needs `locked`, `recorded_at`, `confidence` and `evidence_id`."""
+    return (r["locked"], r["recorded_at"] if r["locked"] else "", -_CONFIDENCE_RANK.get(r["confidence"], 3),
+            r["recorded_at"], r["evidence_id"])
+
+
+def size_order_key(r: Mapping) -> tuple:
+    """The size evidence a company is judged by: a `size` row over a `headcount` row, then `fact_order_key`. The
+    hide policy and the facts loader both pick with it, so they never judge two different sizes."""
+    return (r["fact"] == "size", *fact_order_key(r))

@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 
-from outreach.ranking.common import age_days, clean_text
+from outreach.ranking.common import age_days, clean_text, fact_order_key, size_order_key
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import (Confidence, grade_evidence, grade_no_role, grade_pay, grade_reach,
                                          grade_sponsor, weaker)
@@ -23,11 +23,10 @@ from outreach.ranking.pay import Area, lca_pay_level, level_at, matching_areas, 
 from outreach.ranking.roles import Best, Roles, company_board_states
 from outreach.ranking.types import CompanyFacts
 
-__all__ = ["SHARED_DOMAIN_FLAG", "RankFacts", "recent_fiscal_years", "load_facts"]
+__all__ = ["SHARED_DOMAIN_FLAG", "RankFacts", "recent_fiscal_years", "is_large", "load_facts"]
 
 SHARED_DOMAIN_FLAG = "domain shared with other employers"
 LISTED_STATUSES = ("candidate", "backlog", "working")
-_CONFIDENCE_RANK = {"confirmed": 0, "estimate": 1, "guess": 2}
 _FACTS = ("everify", "cap_exempt", "staffing_risk", "stage", "size", "headcount")
 
 
@@ -76,13 +75,6 @@ def _days_ago(days: int | None) -> str:
     return "today" if days == 0 else "1 day ago" if days == 1 else f"{days} days ago"
 
 
-def _fact_key(r: sqlite3.Row) -> tuple:
-    """The `company_fact` view's order, so the winner across merged duplicates is the one the view would pick:
-    hand-locked first (the newest of those), then confirmed over estimate over guess, then the newest."""
-    return (r["locked"], r["recorded_at"] if r["locked"] else "", -_CONFIDENCE_RANK.get(r["confidence"], 3),
-            r["recorded_at"], r["evidence_id"])
-
-
 def _median_level(wage: int, hq: str | None, wages: tuple[Area, ...]) -> tuple[int, str] | None:
     """The wage level of an LCA median junior wage. With a usable hq value ("City, ST"): the areas it names, matched
     as a posting location is, and the lowest level across them; an hq that names no listed area is outside the table,
@@ -109,7 +101,9 @@ def _one_hq(values: set[str], wages: tuple[Area, ...]) -> str | None:
     return min(values) if len(named) == 1 else None
 
 
-def _is_large(stage: str | None, size_low: int | None, small: dict) -> bool:
+def is_large(stage: str | None, size_low: int | None, small: Mapping) -> bool:
+    """A later-stage or over-borderline company (`small` is the `[small]` section). The loader drops any_us_role for
+    it and `large_later_stage` pushes it to the bottom; both ask this one function."""
     return (stage in small["later_stages"]) or (size_low is not None and size_low > small["borderline_headcount"])
 
 
@@ -135,7 +129,7 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
     marks = ", ".join("?" for _ in _FACTS)
     for r in conn.execute(f"SELECT * FROM company_fact WHERE fact IN ({marks})", _FACTS):
         slot = (owner(r["company_id"]), r["fact"])
-        key = _fact_key(r)
+        key = fact_order_key(r)
         if slot not in won or key > won[slot][0]:
             won[slot] = (key, r)
 
@@ -213,7 +207,8 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
         best = rl.best if rl else None
 
         # Evidence values.
-        size_row = row(cid, "size") or row(cid, "headcount")
+        size_row = max((r for r in (row(cid, "size"), row(cid, "headcount")) if r is not None), key=size_order_key,
+                       default=None)
         stage_row = row(cid, "stage")
         stage = stage_row["value"] if stage_row else None
         size_low = size_row["num_low"] if size_row else None
@@ -258,7 +253,7 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
 
         # Lanes, in design order. A role lane blocks reason_no_role and any_us_role.
         role_lanes = rl.lanes if rl else ()
-        large = _is_large(stage, size_low, small)
+        large = is_large(stage, size_low, small)
         lanes: list[str] = [lane for lane in ("level_role", "intern_junior") if lane in role_lanes]
         if not lanes:
             if (months is not None and months <= ranker["funding_window_months"]) or jr > 0 or cid in watched:

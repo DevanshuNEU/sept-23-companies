@@ -17,7 +17,7 @@ from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import plan_followups, stop_planned
 from outreach.sending.mail import GmailError, MESSAGE_ID, Sent
 from outreach.store import transaction
-from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent
+from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent, settle_and_send
 from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()
@@ -373,6 +373,24 @@ class UnclearTest(Base):
         self.assertEqual(self.events(mid, "send_unknown"), [])
 
 
+    def test_a_rewritten_send_that_cannot_be_recorded_is_never_retried(self):
+        _, mid = self.approve()
+        self.gmail.rewrite_message_ids = True
+        with mock.patch.object(claim, "log_touch", side_effect=sqlite3.OperationalError("disk I/O error")):
+            with self.assertRaises(GmailError):
+                self.send(mid)
+        row = self.message(mid)
+        self.assertEqual(row["state"], "send_unknown")
+        detail = json.loads(self.events(mid, "send_unknown")[0]["detail"])
+        self.assertEqual((detail["error_kind"], detail["retryable"]), ("message_id_rewritten", False))
+        self.assertEqual(detail["stored_rfc_id"], self.gmail.sent[0][1].rfc_message_id)
+        for _ in range(3):
+            self.clock.advance(minutes=11)
+            settle_and_send(self.db, self.gmail, self.clock, self.rng, CFG)
+        self.assertEqual(self.message(mid)["state"], "failed")
+        self.assertEqual(len(self.gmail.sent), 1)
+
+
 class CrashWindowTest(Base):
     def test_crash_after_claim_before_the_call_leaves_sending(self):
         _, mid = self.approve()
@@ -398,12 +416,17 @@ class CrashWindowTest(Base):
         row = self.message(mid)
         self.assertEqual(row["state"], "sending")
         self.assertEqual(len(self.gmail.sent), 1)
-        self.assertEqual(row["pending_rfc_id"], self.gmail.sent[0][0].message_id)
-        # A claimed message is not in the queue, so later picks never send it again.
+        claimed = row["pending_rfc_id"]
+        self.assertEqual(claimed, self.gmail.sent[0][0].message_id)
+        # Three more ticks of reconcile and pick: the first finds it in Sent and records it; none sends again.
         for _ in range(3):
             self.clock.advance(minutes=2)
-            self.assertEqual(queue.load_queue(self.db, CFG), [])
+            self.assertIsNone(settle_and_send(self.db, self.gmail, self.clock, self.rng, CFG))
         self.assertEqual(len(self.gmail.sent), 1)
+        row = self.message(mid)
+        self.assertEqual((row["state"], row["rfc_message_id"]), ("sent", claimed))
+        self.assertEqual(len(self.events(mid, "reconciled_sent")), 1)
+        self.assertEqual(self.problems, [])
 
     def test_a_failed_record_after_accept_leaves_sending_not_unclear(self):
         _, mid = self.approve()

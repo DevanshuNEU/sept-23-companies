@@ -16,7 +16,8 @@ import json
 import math
 import random
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -37,12 +38,20 @@ from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event, log_touch
 
 __all__ = ["AnotherSendInFlight", "claim", "outgoing_for", "email_context", "record_sent", "record_unclear",
-           "send_one", "PLACEHOLDER_DOMAIN"]
+           "send_one", "PLACEHOLDER_DOMAIN", "LEFTOVER_ERROR", "Unclear", "leftover_claims", "unclear", "reconcile",
+           "requeue_failed"]
 
 # #17 writes Message-IDs on this domain for imported mail whose real id is unknown; they are never put in a header.
 PLACEHOLDER_DOMAIN = "@outreach.invalid>"
 
 _NEW_YORK = ZoneInfo("America/New_York")
+
+# The error a `sending` row found at the start of a tick gets: ticks never overlap, so the last one stopped mid-send.
+LEFTOVER_ERROR = "the sender stopped mid-send"
+# Its error kind: not a Gmail answer, and nothing about the message itself, so a proven miss may be retried.
+INTERRUPTED = "interrupted"
+# A Sent scan looks back to this long before the claim, on top of the client's own clock-skew margin.
+CLAIM_MARGIN_MS = 5 * 60 * 1000
 
 REWRITTEN_REASON = ("Sending is paused because Gmail stored a sent email under another Message-ID, so a send in "
                     "doubt could not be found in Sent. The email was recorded as sent. Check Gmail before resuming.")
@@ -267,11 +276,12 @@ def _kind_of(err: BaseException) -> str:
 
 
 def record_unclear(conn: sqlite3.Connection, message_id: int, error: Exception, *, at: str, cfg: SendConfig,
-                   rng: random.Random) -> None:
+                   rng: random.Random, extra: dict | None = None) -> None:
     """In one transaction: `sending -> send_unknown` with the error (one line, at most 300 characters, secrets
     removed) and event `send_unknown` with its kind and whether a proven miss may be retried. `at` is when the
     failed call returned: a Sent miss starts to count as proof only some minutes after it. The next send waits
-    out a gap from `at` too, since the email may have gone out. LookupError when the message is not `sending`."""
+    out a gap from `at` too, since the email may have gone out. `extra` adds ids to the event (never a secret).
+    LookupError when the message is not `sending`."""
     stamp = _stamp(at)
     kind = error.kind if isinstance(error, GmailError) else _kind_of(error)
     text = scrub(str(error) if isinstance(error, GmailError) else describe_error(error))
@@ -285,8 +295,8 @@ def record_unclear(conn: sqlite3.Connection, message_id: int, error: Exception, 
         append_event(conn, entity="message", entity_id=message_id, company_id=_company_of(conn, row["touch_id"]),
                      kind="send_unknown", actor="sender", at=stamp,
                      idempotency_key=f"send_unknown:{row['pending_rfc_id']}",
-                     detail={"pending_rfc_id": row["pending_rfc_id"], "error": text, "error_kind": kind,
-                             "retryable": kind in RETRYABLE})
+                     detail={**(extra or {}), "pending_rfc_id": row["pending_rfc_id"], "error": text,
+                             "error_kind": kind, "retryable": kind in RETRYABLE})
         _push_gap(conn, stamp, cfg, rng)
 
 
@@ -334,9 +344,16 @@ def send_one(conn: sqlite3.Connection, client: MailClient, q: Queued, cfg: SendC
     except GmailError as err:
         returned = _stamp(clock())
         if err.kind == "message_id_rewritten":
-            with transaction(conn):
-                record_sent(conn, q.message_id, err.sent, at=returned, cfg=cfg, rng=rng)
-                _pause_rewritten(conn, q.message_id, err.sent, rfc, at=returned)
+            try:
+                with transaction(conn):
+                    record_sent(conn, q.message_id, err.sent, at=returned, cfg=cfg, rng=rng)
+                    _pause_rewritten(conn, q.message_id, err.sent, rfc, at=returned)
+            except Exception:
+                # A Sent scan by the claimed id can never find this email, so if it cannot be recorded sent it is
+                # at least recorded as an unclear send that may not be retried.
+                record_unclear(conn, q.message_id, err, at=returned, cfg=cfg, rng=rng,
+                               extra={"stored_rfc_id": err.sent.rfc_message_id,
+                                      "gmail_message_id": err.sent.gmail_message_id})
             raise
         record_unclear(conn, q.message_id, err, at=returned, cfg=cfg, rng=rng)
         raise
@@ -346,3 +363,142 @@ def send_one(conn: sqlite3.Connection, client: MailClient, q: Queued, cfg: SendC
         raise failure from err
     record_sent(conn, q.message_id, sent, at=_stamp(clock()), cfg=cfg, rng=rng)
     return "sent"
+
+
+# -- settling unclear sends -------------------------------------------------------------------------------------
+
+def _ms(text: str) -> int:
+    return int(as_datetime(text).timestamp() * 1000)
+
+
+def leftover_claims(conn: sqlite3.Connection, now: str) -> int:
+    """In one transaction (a savepoint inside the caller's), every `sending` row becomes `send_unknown` with error
+    `the sender stopped mid-send`: ticks never overlap, so a `sending` row at the start of one is a crash. Its
+    `send_unknown` event is dated `now`, the moment it was found, and the wait before a Sent miss counts runs from
+    there, never from the claim (the Mac may have slept between the claim and the call). Returns how many."""
+    stamp = _stamp(now)
+    with atomic(conn, "leftover_claims"):
+        rows = conn.execute("SELECT message_id, pending_rfc_id, touch_id FROM message WHERE state = 'sending'"
+                            ).fetchall()
+        for row in rows:
+            conn.execute("UPDATE message SET state = 'send_unknown', error = ?, updated_at = ?, "
+                         "revision = revision + 1 WHERE message_id = ? AND state = 'sending'",
+                         (LEFTOVER_ERROR, stamp, row["message_id"]))
+            append_event(conn, entity="message", entity_id=row["message_id"],
+                         company_id=_company_of(conn, row["touch_id"]), kind="send_unknown", actor="sender", at=stamp,
+                         idempotency_key=f"send_unknown:{row['pending_rfc_id']}",
+                         detail={"pending_rfc_id": row["pending_rfc_id"], "error": LEFTOVER_ERROR,
+                                 "error_kind": INTERRUPTED, "retryable": True})
+    return len(rows)
+
+
+@dataclass(frozen=True)
+class Unclear:
+    """A send in doubt, and what a Sent scan for it needs. `not_before_ms` is the claim time less 5 minutes;
+    `send_returned_ms` is the time of its `send_unknown` event (when the failed call returned, or when a crashed
+    claim was found), which `find_sent` takes as `send_returned_ms`."""
+    message_id: int
+    rfc_id: str
+    claimed_at: str
+    not_before_ms: int
+    send_returned_ms: int
+
+
+def _unknown_event(conn: sqlite3.Connection, rfc_id: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT at, detail FROM event WHERE idempotency_key = ?",
+                        (f"send_unknown:{rfc_id}",)).fetchone()
+
+
+def unclear(conn: sqlite3.Connection) -> list[Unclear]:
+    """Every `send_unknown` message, oldest claim first. Read only."""
+    out = []
+    for row in conn.execute("SELECT message_id, pending_rfc_id, claimed_at, updated_at FROM message "
+                            "WHERE state = 'send_unknown' ORDER BY claimed_at, message_id").fetchall():
+        event = _unknown_event(conn, row["pending_rfc_id"])
+        # Without its event (a hand edit), the later of the claim and the last change: never earlier than either.
+        returned = event["at"] if event is not None else max(row["claimed_at"], row["updated_at"])
+        out.append(Unclear(message_id=row["message_id"], rfc_id=row["pending_rfc_id"], claimed_at=row["claimed_at"],
+                           not_before_ms=_ms(row["claimed_at"]) - CLAIM_MARGIN_MS,
+                           send_returned_ms=max(_ms(returned), _ms(row["claimed_at"]))))
+    return out
+
+
+def _fail(conn: sqlite3.Connection, u: Unclear, *, now: str, cfg: SendConfig) -> None:
+    """A complete Sent miss: `send_unknown -> failed`, the claim cleared, and event `claim_failed` keeping the
+    attempt's Message-ID, its error and whether it may be retried (from its `send_unknown` event; without one it
+    is not retried, so a send nobody can account for is left for Devanshu)."""
+    event = _unknown_event(conn, u.rfc_id)
+    detail = json.loads(event["detail"]) if event is not None else {}
+    row = conn.execute("SELECT touch_id, error FROM message WHERE message_id = ?", (u.message_id,)).fetchone()
+    text = f"Not in Sent {cfg.reconcile_after_minutes} minutes after the attempt, so it did not go out."
+    conn.execute(
+        "UPDATE message SET state = 'failed', pending_rfc_id = NULL, claimed_at = NULL, reconciled_at = ?, "
+        "error = ?, updated_at = ?, revision = revision + 1 "
+        "WHERE message_id = ? AND state = 'send_unknown' AND pending_rfc_id = ?",
+        (now, text, now, u.message_id, u.rfc_id))
+    append_event(conn, entity="message", entity_id=u.message_id, company_id=_company_of(conn, row["touch_id"]),
+                 kind="claim_failed", actor="sender", at=now, idempotency_key=f"claim_failed:{u.rfc_id}",
+                 detail={"pending_rfc_id": u.rfc_id, "error": detail.get("error", row["error"]),
+                         "error_kind": detail.get("error_kind", "unknown"),
+                         "retryable": detail.get("retryable") is True, "attempt": _attempts(conn, u.message_id)})
+
+
+def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, bool]], *, now: str,
+              cfg: SendConfig, rng: random.Random) -> dict[str, int]:
+    """Apply Sent scans made earlier with no transaction open (`found`: message id to what `find_sent` returned).
+
+    A hit with the message's own Message-ID becomes `sent` (`record_sent(..., reconciled=True)`, dated to the
+    claim). A complete miss becomes `failed` once `reconcile_after_minutes` have passed since the send returned (and
+    since the claim). Anything else stays `send_unknown`: an incomplete scan, a younger send, or a hit for another
+    Message-ID. Matching is by Message-ID only, never by recipient or subject. Runs in one transaction (a savepoint
+    inside the caller's). Returns the counts `sent`, `failed` and `waiting`."""
+    stamp = _stamp(now)
+    now_ms = _ms(stamp)
+    settle_ms = cfg.reconcile_after_minutes * 60_000
+    counts = {"sent": 0, "failed": 0, "waiting": 0}
+    with atomic(conn, "reconcile"):
+        pending = {u.message_id: u for u in unclear(conn)}
+        for message_id, (hit, complete) in found.items():
+            u = pending.get(message_id)
+            if u is None:
+                continue  # settled or changed since the scan
+            if hit is not None:
+                if normalise_message_id(hit.rfc_message_id) != normalise_message_id(u.rfc_id):
+                    counts["waiting"] += 1
+                    continue
+                record_sent(conn, message_id, hit, at=u.claimed_at, cfg=cfg, rng=rng, reconciled=True, now=stamp)
+                counts["sent"] += 1
+            elif complete and now_ms >= max(u.send_returned_ms, _ms(u.claimed_at)) + settle_ms:
+                _fail(conn, u, now=stamp, cfg=cfg)
+                counts["failed"] += 1
+            else:
+                counts["waiting"] += 1
+    return counts
+
+
+def requeue_failed(conn: sqlite3.Connection, *, now: str, cfg: SendConfig) -> int:
+    """`failed -> approved` for each failed message whose last `claim_failed` says it may be retried and that has
+    been claimed fewer than `max_send_attempts` times (2). Event `requeued`. A message the sender never failed (no
+    `claim_failed`) is left alone. Runs in one transaction (a savepoint inside the caller's). Returns how many."""
+    stamp = _stamp(now)
+    moved = 0
+    with atomic(conn, "requeue_failed"):
+        for row in conn.execute("SELECT message_id, touch_id FROM message WHERE state = 'failed' "
+                                "ORDER BY message_id").fetchall():
+            fails = [json.loads(r[0]) for r in conn.execute(
+                "SELECT detail FROM event WHERE entity = 'message' AND entity_id = ? AND kind = 'claim_failed' "
+                "ORDER BY event_id", (row["message_id"],))]
+            if not fails or fails[-1].get("retryable") is not True:
+                continue
+            if max(len(fails), _attempts(conn, row["message_id"])) >= cfg.max_send_attempts:
+                continue
+            cur = conn.execute("UPDATE message SET state = 'approved', error = '', updated_at = ?, "
+                               "revision = revision + 1 WHERE message_id = ? AND state = 'failed'",
+                               (stamp, row["message_id"]))
+            if cur.rowcount:
+                moved += 1
+                append_event(conn, entity="message", entity_id=row["message_id"],
+                             company_id=_company_of(conn, row["touch_id"]), kind="requeued", actor="sender", at=stamp,
+                             idempotency_key=f"requeued:{fails[-1].get('pending_rfc_id')}",
+                             detail={"attempts": len(fails), "previous_rfc_id": fails[-1].get("pending_rfc_id")})
+    return moved

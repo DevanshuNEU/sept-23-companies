@@ -205,6 +205,12 @@ export interface CompanyView {
   evidence: Fact[]; events: CompanyEvent[]; reviewItems: ReviewItem[]; rulesetVersion: string;
 }
 
+// Watch list (#33): changed careers pages, new companies with a reason and no role, possible duplicates
+export type WatchKind = 'careers_changed' | 'new_reason_no_role' | 'merge_candidate';
+export interface SourceLink { label: string; url: string }
+export interface WatchItem { id: Id; kind: WatchKind; company: CompanyRef; text: string; at: IsoTime; link: SourceLink | null; reviewId: Id | null }
+export interface WatchView { asOf: IsoTime; items: WatchItem[] }
+
 // Done (spec 13.8)
 export interface DoneCompany { company: CompanyRef; outcome: 'interview' | 'referral'; outcomeLabel: string; closedAt: IsoTime; howStarted: string; imported: boolean; role: string | null; note: string }
 export interface DoneView {

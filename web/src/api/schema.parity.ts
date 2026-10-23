@@ -25,4 +25,7 @@ export const _parity: [
   Same<T.SearchPerson, S['SearchPerson']>,
   Same<T.SearchIndex, S['SearchIndex']>,
   Same<T.PostingHit, S['PostingHit']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<T.SourceLink, S['SourceLink']>,
+  Same<T.WatchItem, S['WatchItem']>,
+  Same<T.WatchView, S['WatchView']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

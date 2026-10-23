@@ -27,7 +27,7 @@ export function getJson<P extends GetPath>(t: Transport, path: P, fill: Fill & {
   return t.get<Ok<P, 'get'>>(url(path, fill), fill.signal);
 }
 
-export function sendJson<P extends PathsWith<Lowercase<WriteMethod>>, M extends Lowercase<WriteMethod> & keyof paths[P]>(
+export function sendJson<M extends Lowercase<WriteMethod>, P extends PathsWith<M>>(
   t: Transport,
   method: M,
   path: P,

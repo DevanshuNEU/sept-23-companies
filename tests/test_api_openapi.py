@@ -138,7 +138,7 @@ class ShapeTest(ApiCase):
 
     def test_every_write_operation_documents_the_error_envelope(self):
         writes = [(p, m, op) for p, m, op in self.operations() if m in ("post", "put", "patch", "delete")]
-        self.assertEqual(len(writes), 3)
+        self.assertGreaterEqual(len(writes), 3)  # the scratch writer's three, and every real write after them
         for path, method, op in writes:
             for status in ERROR_STATUSES:
                 with self.subTest(path=path, method=method, status=status):

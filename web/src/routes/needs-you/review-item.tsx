@@ -64,6 +64,10 @@ export const EDIT_FIELD: Record<ReviewKind, EditField | null> = {
   size_check: 'size',
 };
 
+/** Whether Mark no-go applies: a possible duplicate is merged or kept separate, never put on the no-go list. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const hasNoGo = (kind: ReviewKind): boolean => kind !== 'merge_candidate';
+
 const FIELD_LABEL: Record<EditField, string> = { domain: 'Email domain', size: 'Size', sponsorship: 'Sponsorship', board_url: 'Board URL' };
 const FIELD_HINT: Record<Exclude<EditField, 'sponsorship'>, string> = {
   domain: 'company.com',
@@ -310,7 +314,7 @@ export function ReviewItemRow({
       <div className="col-start-3 row-span-2 row-start-1 flex items-start gap-1.5">
         {field && !editing ? <ActionButton label={EDIT_BUTTON[field]} keyName="E" variant="outline" onClick={onEdit} /> : null}
         {!editing ? <ActionButton label="Mark ok" keyName="O" variant="ghost" onClick={onOk} /> : null}
-        <ActionButton label="Mark no-go" keyName="N" variant="ghost" onClick={() => onNoGo()} />
+        {hasNoGo(item.kind) ? <ActionButton label="Mark no-go" keyName="N" variant="ghost" onClick={() => onNoGo()} /> : null}
       </div>
       <div className="col-start-2 grid gap-2 text-[13px]">
         <p>{item.reason}</p>

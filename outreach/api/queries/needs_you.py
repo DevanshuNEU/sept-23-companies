@@ -62,6 +62,11 @@ REASON_WORDS = {
     "not_a_fit": "not a fit", "other": "other",
 }
 DOMAIN_WORDS = {"free": "a free mail provider", "peo": "a payroll provider", "platform": "a platform or job board host"}
+MERGED_ELSEWHERE = ("One of these was already merged into another company. Keep them separate here, then merge from "
+                    "that company's page.")
+LOST_STOP = {"paused": "This one is paused. Keep the paused company, or unpause it first.",
+             "closed": "This one is closed. Keep the closed company, or reopen it first.",
+             "removed": "This one is removed. Keep the removed company, or restore it first."}
 SPONSORSHIP_VALUES = {"yes": "yes", "unclear": "unclear", "opt only": "opt_only", "opt": "opt_only"}
 
 
@@ -368,10 +373,14 @@ def resolve_review(ctx: WriteCtx, review_id: int, body: ResolveReviewBody) -> Re
     elif fix.kind == "no_go":
         resolution = "marked_no_go"
         source = fix.source.strip()
+        # Onto what the item names: its person, else its own company (a merged-away one included, so the stop
+        # covers the survivor while the merge stands and stays with that company after an unmerge).
+        column, target = (("person_id", row["person_id"]) if row["person_id"] is not None
+                          else ("company_id", row["company_id"]))
         cur = conn.execute(
-            "INSERT INTO no_go(company_id, reason, source, source_ref, created_at) VALUES (?, ?, 'devanshu', ?, ?) "
-            "ON CONFLICT DO NOTHING", (survivor, fix.reason, source, ctx.now))
-        detail.update(no_go_created=cur.rowcount == 1, reason=fix.reason, source=source)
+            f"INSERT INTO no_go({column}, reason, source, source_ref, created_at) VALUES (?, ?, 'devanshu', ?, ?) "
+            "ON CONFLICT DO NOTHING", (target, fix.reason, source, ctx.now))
+        detail.update(no_go_created=cur.rowcount == 1, reason=fix.reason, source=source, **{column: target})
         note = (f"Added to the no-go list by you: {REASON_WORDS[fix.reason]}." if cur.rowcount
                 else "Marked no-go by you; it was already on the no-go list.")
     else:
@@ -391,7 +400,8 @@ def resolve_review(ctx: WriteCtx, review_id: int, body: ResolveReviewBody) -> Re
 
 
 def _apply_edit(ctx: WriteCtx, row: sqlite3.Row, survivor: int, fix, events: _Events, detail: dict) -> str:
-    """Write the value he set: a locked hand fact on the survivor (source_ref his source), or a new board."""
+    """Write the value he set: a locked hand fact (source_ref his source) or a new board, on the company the item
+    names. While it is merged away every fact read follows it to the survivor; an unmerge keeps it where it was."""
     conn, source, value = ctx.conn, fix.source.strip(), fix.value.strip()
     if fix.field == "board_url":
         return _replace_board(ctx, row, survivor, value, source, events, detail)
@@ -406,7 +416,7 @@ def _apply_edit(ctx: WriteCtx, row: sqlite3.Row, survivor: int, fix, events: _Ev
     cur = conn.execute(
         "INSERT INTO evidence(company_id, fact, value, num_low, num_high, confidence, locked, source_kind, source_ref, "
         "observed_on, recorded_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'hand', ?, ?, ?)",
-        (survivor, fix.field, value, low, high, confidence, source, ny_day(ctx.now), ctx.now))
+        (row["company_id"], fix.field, value, low, high, confidence, source, ny_day(ctx.now), ctx.now))
     detail.update(field=fix.field, value=value, source=source, evidence_id=cur.lastrowid)
     return f"{FIELD_WORDS[fix.field].capitalize()} set to {value} by you, from {source}."
 
@@ -423,6 +433,8 @@ def _replace_board(ctx: WriteCtx, row: sqlite3.Row, survivor: int, url: str, sou
                    "https://jobs.ashbyhq.com/company.")
     ref = found[0]
     old = conn.execute("SELECT * FROM board WHERE board_id = ?", (row["board_id"],)).fetchone()
+    if old is not None and follow_merged(conn, old["company_id"]) != survivor:
+        raise ApiProblem("conflict", f"The board this item names belongs to another company. {NOT_SAVED}")
     if old is not None and (old["ats"], old["token"]) == (ref.ats, ref.token):
         raise _bad("That is the board we already read. If the board is right, mark ok.")
     owner = conn.execute("SELECT company_id FROM board WHERE ats = ? AND token = ?", (ref.ats, ref.token)).fetchone()
@@ -432,9 +444,12 @@ def _replace_board(ctx: WriteCtx, row: sqlite3.Row, survivor: int, url: str, sou
         name = _company(conn, owner[0])["name"]
         raise ApiProblem("conflict", f"That board belongs to {name} (#{owner[0]}). {NOT_SAVED}")
     try:
-        add_board(conn, survivor, ref, via="hand", matched_on="needs_you", found_by="hand", actor="devanshu")
+        added = add_board(conn, row["company_id"], ref, via="hand", matched_on="needs_you", found_by="hand",
+                          actor="devanshu")
     except ValueError as err:
         raise _bad(f"That board cannot be added: {err}.") from None
+    if added == "conflict":  # another writer claimed it since the check: retire nothing
+        raise ApiProblem("conflict", f"That board belongs to another company. {NOT_SAVED}")
     conn.execute("UPDATE board SET active = 1 WHERE ats = ? AND token = ?", (ref.ats, ref.token))
     new = f"{ref.ats}:{ref.token}"
     closed = 0
@@ -455,18 +470,21 @@ def merge_companies(ctx: WriteCtx, *, keep_id: int, lose_id: int, review_id: int
     loser's name becomes an alias of the keeper (`add_alias`, source `merge`) unless its key is already taken; one
     `merged` event records what the loser was. Nothing else is written or moved: no `no_go` row (a lifted one stays
     lifted), and `held_by_touch` stays on the loser, where the sender's `held_survivors` reads it for the survivor.
-    `conflict` when either company is already merged (a merge into a merged company, or one that would loop)."""
+    `conflict` when either company is already merged (a merge into a merged company, or one that would loop);
+    `not_allowed` when the merge would release mail the loser stops (`_refuse_lost_stop`)."""
     conn = ctx.conn
     keep, lose = _company(conn, keep_id), _company(conn, lose_id)
     if keep is None or lose is None:
         raise ApiProblem("not_found", f"There is no company {keep_id if keep is None else lose_id}.")
     if keep_id == lose_id:
         raise ApiProblem("not_allowed", "They are already one company.")
-    if keep["merged_into"] is not None:
-        raise ApiProblem("conflict", f"{keep['name']} was merged into another company since you loaded this, so "
-                                     f"nothing can be merged into it. {NOT_SAVED}")
-    if lose["merged_into"] is not None:
-        raise ApiProblem("conflict", f"{lose['name']} was already merged into another company. {NOT_SAVED}")
+    if keep["merged_into"] is not None or lose["merged_into"] is not None:
+        try:
+            one = follow_merged(conn, keep_id) == follow_merged(conn, lose_id)
+        except ValueError:
+            one = False
+        raise ApiProblem("conflict", "These are already one company." if one else MERGED_ELSEWHERE)
+    _refuse_lost_stop(keep, lose)
     conn.execute(
         "UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged', close_reason = NULL, "
         "paused_at = NULL, pause_note = '', status_at = ?, revision = revision + 1 WHERE company_id = ?",
@@ -486,6 +504,21 @@ def merge_companies(ctx: WriteCtx, *, keep_id: int, lose_id: int, review_id: int
         "previous_remove_reason": lose["remove_reason"], "previous_paused_at": lose["paused_at"],
         "previous_pause_note": lose["pause_note"], "kept_id": keep_id, "review_id": review_id,
         "alias_added": alias_added, "text": f"Merged into {keep['name']} (#{keep_id}) by you."})
+
+
+def _stops_mail(company: sqlite3.Row) -> bool:
+    return company["paused_at"] is not None or company["status"] in ("closed", "removed")
+
+
+def _refuse_lost_stop(keep: sqlite3.Row, lose: sqlite3.Row) -> None:
+    """A merge must not release mail the loser stops. The sender reads only the survivor's pause and status, and a
+    merge clears the loser's pause (the company CHECKs force it), so a paused loser needs a keeper that stops mail
+    too; a closed or removed loser (closing a company leaves its touches and messages as they are) needs a closed
+    or removed keeper. Keeping the stopped company is always fine."""
+    if lose["status"] in ("closed", "removed") and keep["status"] not in ("closed", "removed"):
+        raise ApiProblem("not_allowed", LOST_STOP[lose["status"]])
+    if lose["paused_at"] is not None and not _stops_mail(keep):
+        raise ApiProblem("not_allowed", LOST_STOP["paused"])
 
 
 def unmerge_company(ctx: WriteCtx, company_id: int, revision: int) -> int:

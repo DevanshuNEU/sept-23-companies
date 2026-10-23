@@ -27,7 +27,7 @@ import { formatAge, formatDay, formatDayTime, formatWeekdayTime } from '@/lib/fo
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { cn } from '@/lib/utils';
 import { NoGoDialog, type NoGoStart } from './no-go-dialog';
-import { EDIT_FIELD, ReviewItemRow, TRIGGER } from './review-item';
+import { EDIT_FIELD, ReviewItemRow, TRIGGER, hasNoGo } from './review-item';
 
 type Section = { id: string; title: string; items: ReviewItem[] };
 
@@ -245,7 +245,7 @@ function OpenItems({ data }: { data: NeedsYouView }) {
         },
       },
       { keys: 'o', label: 'Mark ok', group, enabled: current !== undefined, run: () => current && markOk(current) },
-      { keys: 'n', label: 'Mark no-go, with a reason', group, enabled: current !== undefined, run: () => current && openNoGo(current) },
+      { keys: 'n', label: 'Mark no-go, with a reason', group, enabled: current !== undefined && hasNoGo(current.kind), run: () => current && openNoGo(current) },
     ],
     { selection: selected },
   );

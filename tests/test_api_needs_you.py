@@ -2,8 +2,11 @@
 import json
 
 from outreach.drafts.followups import company_map, held_survivors, no_go_sets
+from outreach.sending import queue, ramp
+from outreach.sending.config import load_config
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
+from tests.sendtest import MON, seed_email_person, seed_message
 
 TODAY = "2026-11-10"  # NOW in New York
 KINDS = ("board_unreadable", "board_empty", "sponsorship_unclear", "size_unknown", "size_guess", "domain_missing",
@@ -492,6 +495,9 @@ class NeedsYou(ApiCase):
                      {"status": "removed", "remove_reason": "not_a_fit"}):
             with self.subTest(status=cols["status"]):
                 a, b, item = self.pair(f"Keep {cols['status']}", f"Lose {cols['status']}", **cols)
+                # A stopped company merges only into one that stops mail too.
+                self.conn.execute("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?",
+                                  (a,))
                 before = dict(self.company_row(b))
                 self.ok(self.resolve(item, {"kind": "merge", "keep": "a"}))
                 self.ok(self.unmerge(b, before["revision"] + 1))
@@ -522,3 +528,96 @@ class NeedsYou(ApiCase):
         self.ok(self.resolve(item, {"kind": "merge", "keep": "a"}))
         self.refused(self.unmerge(b, 1), "conflict")
         self.assertEqual(self.company_row(b)["merged_into"], a)
+
+    # ------------------------------------------------------------------------------------------ review fixes
+
+    def verdict_of(self, message_id: int) -> str:
+        cfg = load_config()
+        day = ramp.open_day(self.conn, MON, cfg)
+        return {v.message_id: v.reason for v in queue.verdicts(self.conn, MON, cfg, day=day, gate=None)}[message_id]
+
+    def test_merging_away_a_paused_company_is_refused_so_its_mail_stays_paused(self):
+        a, b, item = self.pair(status="working", paused_at="2026-11-02T12:00:00Z")
+        message = seed_message(self.conn, seed_email_person(self.conn, b, "Pat Paused", "pat@boltlabs.example"))
+        self.assertEqual(self.verdict_of(message), "company_paused")
+        res = self.resolve(item, {"kind": "merge", "keep": "a"})
+        self.assertEqual(self.refused(res, "not_allowed")["message"],
+                         "This one is paused. Keep the paused company, or unpause it first.")
+        self.assertIsNone(self.company_row(b)["merged_into"])
+        self.assertEqual(self.verdict_of(message), "company_paused")
+        self.ok(self.resolve(item, {"kind": "merge", "keep": "b"}))  # keeping the paused one is fine
+        self.assertEqual(self.verdict_of(message), "company_paused")
+
+    def test_merging_away_a_closed_or_removed_company_into_a_live_one_is_refused(self):
+        for status, cols, words in (
+                ("closed", {"close_reason": "not_now"}, "This one is closed. Keep the closed company, or reopen it first."),
+                ("removed", {"remove_reason": "not_a_fit"},
+                 "This one is removed. Keep the removed company, or restore it first.")):
+            with self.subTest(status=status):
+                a, b, item = self.pair(f"Keep {status}", f"Lose {status}", status=status, **cols)
+                message = seed_message(self.conn, seed_email_person(self.conn, b, "Pat", f"pat@{status}.example"))
+                self.assertEqual(self.verdict_of(message), "company_closed")
+                self.assertEqual(self.refused(self.resolve(item, {"kind": "merge", "keep": "a"}), "not_allowed")["message"],
+                                 words)
+                self.assertEqual(self.verdict_of(message), "company_closed")
+
+    def test_a_fix_on_a_merged_away_companys_item_stays_with_that_company_after_an_unmerge(self):
+        a, b, item = self.pair()
+        lost_item = s.review(self.conn, b, "flagged")
+        domain_item = s.review(self.conn, b, "domain_missing")
+        self.ok(self.resolve(item, {"kind": "merge", "keep": "a"}))
+        self.ok(self.resolve(lost_item, {"kind": "no_go", "reason": "agency", "source": "Their site"}))
+        self.ok(self.resolve(domain_item, {"kind": "edit", "field": "domain", "value": "boltlabs.io", "source": "Site"}))
+        self.assertIn(a, no_go_sets(self.conn, company_map(self.conn))[1])  # while merged, it stops the survivor
+        self.assertEqual(self.ok(self.get(f"/api/companies/{a}"))["company"]["domain"], "boltlabs.io")
+        self.ok(self.unmerge(b, 2))
+        survivors = no_go_sets(self.conn, company_map(self.conn))[1]
+        self.assertIn(b, survivors)
+        self.assertNotIn(a, survivors)
+        owners = {r[0] for r in self.conn.execute("SELECT company_id FROM evidence WHERE locked = 1")}
+        self.assertEqual(owners, {b})
+
+    def test_a_no_go_fix_on_an_item_about_a_person_is_a_person_no_go(self):
+        cid = s.company(self.conn, "Acme")
+        person = s.person(self.conn, cid, "Pat Lee")
+        item = s._insert(self.conn, "review_item", {
+            "kind": "flagged", "company_id": cid, "person_id": person, "reason": "Pat may be a recruiter.",
+            "evidence_key": "k", "raised_by": "claude", "created_at": "2026-11-08T12:00:00Z"})
+        self.ok(self.resolve(item, {"kind": "no_go", "reason": "not_a_fit", "source": "Their profile"}))
+        row = self.conn.execute("SELECT company_id, person_id, source, source_ref FROM no_go").fetchone()
+        self.assertEqual(tuple(row), (None, person, "devanshu", "Their profile"))
+
+    def test_a_merge_question_with_a_side_merged_into_a_third_company_is_refused_plainly(self):
+        a, b, item = self.pair()
+        third = s.company(self.conn, "Third")
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
+                          "WHERE company_id = ?", (third, b))
+        for keep in ("a", "b"):
+            self.assertEqual(self.refused(self.resolve(item, {"kind": "merge", "keep": keep}), "conflict")["message"],
+                             "One of these was already merged into another company. Keep them separate here, then "
+                             "merge from that company's page.")
+
+    def test_a_board_edit_on_a_board_of_another_company_is_a_conflict_and_closes_nothing(self):
+        cid = s.company(self.conn, "Acme")
+        other = s.company(self.conn, "Other")
+        theirs = s.board(self.conn, other, "ashby", "otherco")
+        posting = s.posting(self.conn, other, board_id=theirs)
+        item = s.review(self.conn, cid, "board_unreadable", board_id=theirs)  # a row that names the wrong board
+        self.refused(self.resolve(item, {"kind": "edit", "field": "board_url", "value": "https://jobs.lever.co/acme",
+                                         "source": "Their site"}), "conflict")
+        self.assertIsNone(self.conn.execute("SELECT closed_at FROM posting WHERE posting_id = ?", (posting,)).fetchone()[0])
+        self.assertEqual(self.conn.execute("SELECT active FROM board WHERE board_id = ?", (theirs,)).fetchone()[0], 1)
+        self.assertEqual(self.count("SELECT count(*) FROM board WHERE token = 'acme'"), 0)
+
+    def test_a_board_conflict_from_add_board_retires_nothing(self):
+        from unittest import mock
+        cid = s.company(self.conn, "Acme")
+        old = s.board(self.conn, cid, "ashby", "acmeold")
+        posting = s.posting(self.conn, cid, board_id=old)
+        item = s.review(self.conn, cid, "board_unreadable", board_id=old)
+        with mock.patch("outreach.api.queries.needs_you.add_board", return_value="conflict"):
+            res = self.resolve(item, {"kind": "edit", "field": "board_url", "value": "https://jobs.lever.co/acme",
+                                      "source": "Their site"})
+        self.refused(res, "conflict")
+        self.assertEqual(self.conn.execute("SELECT active FROM board WHERE board_id = ?", (old,)).fetchone()[0], 1)
+        self.assertIsNone(self.conn.execute("SELECT closed_at FROM posting WHERE posting_id = ?", (posting,)).fetchone()[0])

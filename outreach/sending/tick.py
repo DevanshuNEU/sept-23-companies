@@ -25,7 +25,8 @@ that is rolled back, never sends, and writes nothing, `job_run` included; its no
 `fcntl.flock` on `.sender.lock` beside the store keeps two ticks from overlapping; the second one returns at once
 having written nothing. The lock goes with the file descriptor, so a killed tick never leaves it held. Every step
 is safe to cut short: a transaction either committed or did not, and the next tick settles any send in doubt by
-Message-ID. Report lines are one line each, scrubbed, and never carry a traceback.
+Message-ID. Report lines are one line each, scrubbed, and never carry a traceback. A notice raised inside a
+transaction is shown only after that transaction commits, so a rolled-back step never shows one.
 """
 import contextlib
 import fcntl
@@ -163,7 +164,10 @@ class _Tick:
     def __init__(self, conn: sqlite3.Connection, deps: TickDeps, cfg: SendConfig, dry_run: bool):
         self.conn, self.deps, self.cfg, self.dry_run = conn, deps, cfg, dry_run
         self.client = deps.client
-        self.notify = _quiet if dry_run else deps.notify
+        # Notices raised inside a transaction wait here and are shown only once it commits, so a rolled-back step
+        # never shows a notice whose once-a-day record was rolled back with it (and shows it again every tick).
+        self.pending: list[tuple[str, str]] = []
+        self.notify = _quiet if dry_run else self._queue_notice
         self.now = deps.clock()
         self.stamp = _stamp(self.now)
         self.today = cal.ny_date(self.now, cfg)
@@ -182,6 +186,25 @@ class _Tick:
         self.hold: str | None = None  # why nothing may be sent this tick, though a message is ready (inbound)
 
     # -- the frame ----------------------------------------------------------------------------------------------
+
+    def _queue_notice(self, title: str, text: str) -> None:
+        self.pending.append((title, text))
+
+    @contextlib.contextmanager
+    def _tx(self) -> Iterator[None]:
+        """One store transaction; the notices it raised are shown after it commits, and dropped if it does not."""
+        try:
+            with transaction(self.conn):
+                yield
+        except BaseException:
+            self.pending.clear()
+            raise
+        notices, self.pending = self.pending, []
+        for title, text in notices:
+            try:
+                self.deps.notify(title, text)
+            except Exception as err:  # a notice is best effort; what it reports is already committed
+                self._line(f"a notice could not be shown: {_text(err)}")
 
     def run(self) -> TickReport:
         try:
@@ -213,7 +236,7 @@ class _Tick:
         if self.dry_run or self.conn.in_transaction:
             return
         try:
-            with transaction(self.conn):
+            with self._tx():
                 self._write_run("failed", scrub(f"{text}: {detail}"))
         except sqlite3.Error as again:
             self._line(f"the failed run could not be recorded either: {_text(again)}")
@@ -240,7 +263,7 @@ class _Tick:
         """Step 8."""
         if self.dry_run:
             return
-        with transaction(self.conn):
+        with self._tx():
             self._write_run(self.status, self.error)
 
     # -- the steps ----------------------------------------------------------------------------------------------
@@ -251,7 +274,7 @@ class _Tick:
             self._start()
         if not self._sign_in():
             if not self.dry_run:
-                with transaction(self.conn):
+                with self._tx():
                     self._write_run(self.status, self.error)
             return False
         self._settle_leftovers()
@@ -269,7 +292,7 @@ class _Tick:
             if self.would_send is not None:
                 self._line(f"dry run: would send message {self.would_send}")
             return True
-        with transaction(self.conn):
+        with self._tx():
             self._apply(found, read)
         picked = self._pick(old_loaded)
         if picked is not None and self.hold is None:
@@ -278,7 +301,7 @@ class _Tick:
 
     def _start(self) -> None:
         """Step 1."""
-        with transaction(self.conn):
+        with self._tx():
             stale = self.conn.execute(
                 "UPDATE job_run SET status = 'failed', finished_at = ?, error = ? "
                 "WHERE job = 'sender' AND status = 'running'", (self.stamp, STALE_RUN)).rowcount
@@ -301,7 +324,7 @@ class _Tick:
             self.status, self.error = "failed", "Gmail is signed out"
             self._line(f"Gmail is signed out ({text}); nothing is read or sent until he signs in again")
             if not self.dry_run:
-                with transaction(self.conn):
+                with self._tx():
                     self._signed_out(text)
             return False
         email = (profile.email or "").strip()
@@ -311,7 +334,7 @@ class _Tick:
             self._line(f"the Gmail token signs in as {email or 'no address'}, not {self.cfg.from_address}; "
                        "nothing is read or sent")
             if not self.dry_run:
-                with transaction(self.conn):
+                with self._tx():
                     self._wrong_account(email)
             return False
         self.auth, self.account = "ok", email
@@ -340,7 +363,7 @@ class _Tick:
         if self.dry_run:
             n = self.conn.execute("SELECT COUNT(*) FROM message WHERE state = 'sending'").fetchone()[0]
         else:
-            with transaction(self.conn):
+            with self._tx():
                 self.conn.execute("UPDATE sender SET auth_state = 'ok', account = ?, auth_error = '', "
                                   "auth_checked_at = ? WHERE sender_id = 1", (self.account, self.stamp))
                 n = claim.leftover_claims(self.conn, self.stamp)
@@ -475,7 +498,7 @@ class _Tick:
         if self.dry_run:
             notify_once(self.conn, self.notify, kind, self.today, title, text, at=self.stamp)
             return
-        with transaction(self.conn):
+        with self._tx():
             notify_once(self.conn, self.notify, kind, self.today, title, text, at=self.stamp)
 
     def _send(self, picked: queue.Queued) -> None:
@@ -530,7 +553,7 @@ class _Tick:
             return
         self._partial(f"the send of message {picked.message_id} failed ({text}); it is checked against Sent "
                       "before any retry")
-        with transaction(self.conn):
+        with self._tx():
             if err.kind in ("rate_limit", "daily_limit"):
                 ramp.note_signal(self.conn, "gmail_limit", detail=detail, key=f"gmail_limit:send:{rfc}", **signal)
             elif err.kind == "account_blocked":
@@ -543,7 +566,7 @@ class _Tick:
         """Gmail kept the email under another Message-ID: pause (a hard block, over his own pause too) and tell
         him. `send_one` pauses first; this makes sure of it, since a send in doubt could otherwise go twice."""
         try:
-            with transaction(self.conn):
+            with self._tx():
                 row = self.conn.execute("SELECT paused, pause_kind FROM sender WHERE sender_id = 1").fetchone()
                 if not (row["paused"] and row["pause_kind"] == "hard_block"):
                     self.conn.execute(

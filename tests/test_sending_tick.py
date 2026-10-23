@@ -599,6 +599,27 @@ class SignalTest(Base):
         self.assertEqual(self.tick().sent, (mid,))  # the same bounces never pause twice
         self.assertEqual(self.sender()["paused"], 0)
 
+    def test_a_notice_from_a_rolled_back_step_is_never_shown(self):
+        company = seed_company(self.db, "Many")
+        for i in range(10):
+            person = seed_email_person(self.db, company, f"B{i}", f"b{i}@many.example")
+            seed_sent(self.db, person, at=MON - timedelta(days=1, minutes=i))
+        self.db.execute("UPDATE touch SET state = 'bounced', bounced_at = ? WHERE touch_id = "
+                        "(SELECT max(touch_id) FROM touch)", (iso(MON - timedelta(hours=1)),))
+        # The pause and its notice are raised, then a later step of the same transaction fails: all rolled back.
+        with mock.patch("outreach.sending.followups.lapse_followups", side_effect=RuntimeError("a later step")):
+            for _ in range(2):
+                self.tick()
+                self.clock.advance(minutes=2)
+        self.assertEqual(self.notices, [])
+        self.assertEqual(self.sender()["paused"], 0)
+        self.tick()
+        self.assertEqual(len(self.notices), 1)
+        self.assertEqual(self.sender()["paused"], 1)
+        self.clock.advance(minutes=2)
+        self.tick()
+        self.assertEqual(len(self.notices), 1)
+
     def test_reconcile_errors_tell_him(self):
         mid = self.approve()
         self.gmail.fail_next_send(GmailError("timeout", None, "the call timed out"), accepted=True)

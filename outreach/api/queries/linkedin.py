@@ -33,7 +33,7 @@ from outreach.api.models.linkedin import (
 from outreach.api.models.outcomes import CorrectionBody, OutcomeBody
 from outreach.api.queries import outcomes
 from outreach.api.queries.company import (
-    group_of, holding_touches, merge_parents, person_ref, rank_postings, role_to_name, survivor_of,
+    group_of, company_holds, merge_parents, person_ref, rank_postings, role_to_name, survivor_of,
 )
 from outreach.api.queries.outcomes import NOT_SAVED, by_ids, company_refs
 from outreach.api.queries.people import day, live_steps
@@ -142,7 +142,7 @@ def linkedin_view(conn: sqlite3.Connection, now: str) -> LinkedInView:
     parents = merge_parents(conn)
     companies = company_map(conn)
     no_go_people, no_go_companies = no_go_sets(conn, companies)
-    holds = holding_touches(companies)  # a hold left on a merged-away duplicate holds the survivor
+    holds = company_holds(conn, companies)  # a hold left on a merged-away duplicate holds the survivor
     refs = company_refs(conn, {survivor_of(parents, r["company_id"]) for r in rows}, holds=holds)
     logs, requested = _logs(conn), _request_times(conn)
     listed: dict[int, list[LinkedInPerson]] = defaultdict(list)

@@ -12,7 +12,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.drafts.followups import (canonical_company, company_map, held_survivors, no_go_sets,
-                                       resolve_company)
+                                       replied_people, resolve_company)
 from outreach.sending import calendar as cal
 from outreach.sending import ramp, signals
 from outreach.sending.config import SendConfig, load_config
@@ -23,9 +23,9 @@ __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "
            "load_queue", "verdicts", "pick"]
 
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
-REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "not_business_day", "daily_limit",
-           "spacing", "window", "bad_timezone", "followup_not_due", "company_paused", "company_held",
-           "per_company_limit", "per_company_gap", "recruiter_waits", "no_address") + STOP_REASONS
+REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
+           "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "company_paused", "company_held",
+           "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread") + STOP_REASONS
 # The waits that end by themselves: their verdict carries the time they end.
 TIME_REASONS = frozenset({"not_business_day", "daily_limit", "spacing", "window", "followup_not_due",
                           "per_company_limit", "per_company_gap"})
@@ -35,6 +35,8 @@ REASON_TEXT = {
     "sender_paused": "Sending is paused.",
     "signed_out": "Gmail is signed out, so nothing can be sent.",
     "old_sender_running": "The old mail sender is still running, so the new one waits.",
+    "message_id_unproven": "Sending waits until Gmail is shown to keep the Message-ID the sender sets, so an email "
+                           "in doubt can always be found in Sent.",
     "not_business_day": "Not a sending day: emails go out on weekdays, New York time.",
     "daily_limit": "Today's send limit is used up. This goes out on the next sending day.",
     "spacing": "Waiting a few minutes after the last send.",
@@ -48,6 +50,8 @@ REASON_TEXT = {
     "per_company_gap": "Another email went to this company less than an hour ago. Waiting out the gap.",
     "recruiter_waits": "A recruiter waits while an email to someone else at this company is still queued.",
     "no_address": "No email address for this person.",
+    "no_thread": "This follow-up has no Gmail thread to reply in, so it is not sent. Skip it, or send it as a new "
+                 "first email.",
     "company_closed": "This company is closed or removed, so this email will not be sent.",
     "no_go": "This person or company is on the no-go list, so this email will not be sent.",
     "reply_stop": "This person replied, so this email will not be sent.",
@@ -79,7 +83,7 @@ class Verdict:
 
 _APPROVED = (
     "SELECT m.message_id, m.touch_id, m.seq, m.revision, m.approved_at, m.due_on, t.person_id, t.state AS touch_state, "
-    "p.email, p.tz, p.role_kind, p.company_id AS person_company FROM message m "
+    "t.gmail_thread_id, p.email, p.tz, p.role_kind, p.company_id AS person_company FROM message m "
     "JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id WHERE m.state = 'approved'")
 
 
@@ -128,6 +132,7 @@ def load_queue(conn: sqlite3.Connection, cfg: SendConfig | None = None) -> list[
 def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], conn: sqlite3.Connection) -> dict:
     """Message id to its stop reason, for the messages that have one."""
     no_go_people, no_go_companies = no_go_sets(conn, companies)
+    replied = replied_people(conn)
     stops = {}
     for row in rows:
         chain = resolve_company(companies, row["person_company"])
@@ -135,7 +140,7 @@ def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], co
             stops[row["message_id"]] = "company_closed"
         elif row["person_id"] in no_go_people or chain[-1] in no_go_companies:
             stops[row["message_id"]] = "no_go"
-        elif row["touch_state"] == "replied":
+        elif row["touch_state"] == "replied" or row["person_id"] in replied:  # a reply on any channel
             stops[row["message_id"]] = "reply_stop"
         elif row["touch_state"] in ("bounced", "closed"):
             stops[row["message_id"]] = "touch_done"
@@ -159,19 +164,23 @@ def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
 def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: DayState | None,
              gate: str | None) -> list[Verdict]:
     """One verdict per approved message, in queue order. `gate` (`sender_paused`, `signed_out`,
-    `old_sender_running`) is a reason the whole tick knows; it applies to every message that is not a stop.
+    `old_sender_running`, `message_id_unproven`) is a reason the whole tick knows; it applies to every message that
+    is not a stop.
     Order of reasons: stops; the gate; company paused; company held (a hold on any company merged into the
-    survivor counts); no address; follow-up not due; bad time zone; not a business day; daily limit; per-company
-    limit; per-company gap; recipient's window; recruiter waits; spacing."""
+    survivor counts); no address; a follow-up with no Gmail thread; follow-up not due; bad time zone; not a
+    business day; daily limit; per-company limit; per-company gap; recipient's window; recruiter waits; spacing."""
     rows, companies = _rows(conn)
     items = {row["message_id"]: _queued(row, companies) for row in rows}
     queue = _sorted(list(items.values()), cfg)
     if not queue:
         return []
     stops = _stop_reasons(rows, companies, conn)
+    # A follow-up goes only in its touch's Gmail thread; without one it would start a new thread, so it waits.
+    no_thread = {row["message_id"] for row in rows if row["seq"] >= 1 and not row["gmail_thread_id"]}
     now = now.astimezone(timezone.utc)
-    # A message that blocks a recruiter is one that could go out: not a stop, with an address, due.
+    # A message that blocks a recruiter is one that could go out: not a stop, with an address and a thread, due.
     live_others = {q.company_id for q in queue if q.role_kind != "recruiter" and q.message_id not in stops
+                   and q.message_id not in no_thread
                    and q.to and not (q.due_on is not None
                                      and now < _due_start(q.due_on, cal.recipient_zone(q.tz), cfg))}
     held = held_survivors(companies)
@@ -196,14 +205,15 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     for q in queue:
         reason, earliest = _decide(q, stops, gate, companies[q.company_id], q.company_id in held, now, cfg, today,
                                    sent_today >= limit, sends.get(q.company_id, []), day_begins, gap, tomorrow,
-                                   next_send, q.company_id in live_others)
+                                   next_send, q.company_id in live_others, no_thread=q.message_id in no_thread)
         out.append(Verdict(q.message_id, reason, earliest))
     return out
 
 
 def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held: bool, now: datetime, cfg: SendConfig,
             today: date, day_full: bool, sends: list[datetime], day_begins: datetime, gap: timedelta,
-            tomorrow: datetime, next_send: datetime | None, others_queued: bool) -> tuple[str, datetime | None]:
+            tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
+            no_thread: bool = False) -> tuple[str, datetime | None]:
     if q.message_id in stops:
         return stops[q.message_id], None
     if gate is not None:
@@ -214,6 +224,8 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
         return "company_held", None
     if not q.to:
         return "no_address", None
+    if no_thread:
+        return "no_thread", None
     zone = cal.recipient_zone(q.tz)
     if q.due_on is not None:
         due = _due_start(q.due_on, zone, cfg)

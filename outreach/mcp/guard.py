@@ -34,6 +34,7 @@ TRIGGER_PREFIX = "mcp_"
 # Tables no tool may write, ever. Claude's no-go is a Needs-you item he confirms (#9), never a no_go row.
 NEVER_TABLES = frozenset({
     "sender", "send_day", "api_request", "outreach_touch", "application", "linkedin_log", "inbound_message",
+    "inbound_seen",
     "daily_list", "daily_list_entry", "company", "company_alias", "company_name_key", "no_go", "board", "board_read",
     "watched_page", "job_run", "ruleset", "decision", "schema_migration", "import_record", "mx_check", "win_seen",
     "watch_dismissal", "source", "company_source", "shared_key", "work_tier", "company_post", "company_score",

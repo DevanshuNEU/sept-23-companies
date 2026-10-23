@@ -95,7 +95,7 @@ export function ReplyDetail({
   const { item, reply, thread, asOf } = detail;
   const first = item.person.name.split(' ')[0] ?? item.person.name;
   const company = item.company;
-  const hold = company.heldByTouchId !== null && reply?.kind !== 'auto_reply';
+  const hold = (company.held || company.heldByTouchId !== null) && reply?.kind !== 'auto_reply';
   return (
     <>
       <div className="grid flex-1 auto-rows-min content-start gap-4 overflow-y-auto px-5 py-4">

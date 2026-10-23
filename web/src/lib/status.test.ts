@@ -19,6 +19,8 @@ const company = (over: Partial<CompanyRef> = {}): CompanyRef => ({
   status: 'working',
   pausedAt: null,
   heldByTouchId: null,
+  held: false,
+  heldByReply: null,
   ...over,
 });
 
@@ -83,6 +85,10 @@ describe('companyStatus', () => {
   it('shows Held: reply in green when a touch holds the company, over everything else', () => {
     const s = companyStatus(company({ heldByTouchId: 7, pausedAt: '2026-11-09T12:00:00Z' }));
     expect(s).toMatchObject({ label: 'Held: reply', tone: 'ok' });
+  });
+  it('shows Held: reply for a reply on another channel, with no email touch holding it', () => {
+    const reply = { channel: 'linkedin_message', person: null, at: '2026-11-09T12:00:00Z' } as const;
+    expect(companyStatus(company({ held: true, heldByReply: reply }))).toMatchObject({ label: 'Held: reply', tone: 'ok' });
   });
   it('shows Paused in grey when he paused it', () => {
     expect(companyStatus(company({ pausedAt: '2026-11-09T12:00:00Z' }))).toMatchObject({ label: 'Paused', tone: 'idle' });

@@ -33,7 +33,7 @@ Decisions live in GitHub issue #9. This folder holds the design, plans, and the 
 | `superpowers/plans/2026-10-21-api.md` | #11: FastAPI, generated types, idempotent writes, outcomes, the HTTP client that replaces the fixtures |
 | `superpowers/plans/2026-10-21-web-experience.md` | #33: the people plan, outcomes, progress, wins and the finish line (mockups first) |
 | `superpowers/plans/2026-10-21-integration-review.md` | Cross-plan review of the eight plans and how each finding was resolved |
-| `superpowers/plans/2026-10-22-sending-engine.md` | #14: the new sender: ramp, per-company spacing, one follow-up, stop rules, never a double send (migration 0002) |
+| `superpowers/plans/2026-10-22-sending-engine.md` | #14: the new sender: ramp, spacing, follow-up, holds, stop rules, the two-week simulation (migrations 0002 and 0003) |
 | `superpowers/plans/2026-10-22-import-and-switch-over.md` | #17: import all history (interviews included), the rehearsal, the deploy tool and the switch runbook (migration 0003) |
 | `superpowers/plans/2026-10-22-retire-job-radar.md` | #5: retire Job Radar after its history is imported |
 | `superpowers/plans/2026-10-22-needs-you.md` | #16: the five Needs-you triggers, the sweep, one-click fixes, merge and unmerge |

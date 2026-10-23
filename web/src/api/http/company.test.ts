@@ -5,7 +5,8 @@ import type { CompanyView, ScoreView, SearchIndex } from '../types';
 const EMPTY_VIEW: CompanyView = {
   asOf: '2026-11-10T15:14:00Z',
   company: {
-    id: 7, name: 'Acme', status: 'candidate', pausedAt: null, heldByTouchId: null, domain: null, aliases: [], hq: '',
+    id: 7, name: 'Acme', status: 'candidate', pausedAt: null, heldByTouchId: null, held: false, heldByReply: null,
+    domain: null, aliases: [], hq: '',
     pickedOn: null, day: null, closed: null, revision: 1,
   },
   summary: 'A candidate, no open role; no people yet.', facts: [], sponsorshipShown: 'not_stated', mailServerOk: null, board: null,

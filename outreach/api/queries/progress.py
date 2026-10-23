@@ -308,7 +308,7 @@ def wins_view(conn: sqlite3.Connection, now: str) -> WinsView:
         company = companies.get(survivor_of(parents, t["company_id"]))
         if company is None:  # the company row is gone: still listed, so the list matches the counts
             company = CompanyRef(id=t["company_id"], name=UNKNOWN_COMPANY, status="removed", paused_at=None,
-                                 held_by_touch_id=None)
+                                 held_by_touch_id=None, held=False, held_by_reply=None)
         person = people.get(t["person_id"]) if t["person_id"] is not None else None
         wins.append(Win(
             win_id=c.id, kind=c.kind, at=c.at, touch_id=t["touch_id"],

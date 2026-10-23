@@ -30,8 +30,12 @@ AUTO_PRECEDENCE = ("auto_reply", "bulk", "junk", "list")
 _CODE = r"(?<![\d.])(?:{})(?!\d)"
 _LIMIT = re.compile(r"reached a limit for sending", re.I)
 _POLICY_WORDS = re.compile(r"unsolicited|spam|policy", re.I)
-_POLICY_WITH_WORDS = re.compile(_CODE.format(r"5\.7\.1|4\.7\.28"))
-_POLICY_ALWAYS = re.compile(_CODE.format(r"5\.7\.511|4\.7\.5\d\d"))
+_POLICY_WITH_WORDS = re.compile(_CODE.format(r"5\.7\.1"))
+_POLICY_ALWAYS = re.compile(_CODE.format(r"5\.7\.511"))
+# A 4.7.x code is temporary ("try again later", 4.7.28 and 4.7.5xx included): the server keeps trying, so it is a
+# delay notice, never a bounce, unless a permanent 5.x.x code is in the same notice.
+_TEMPORARY = re.compile(_CODE.format(r"4\.7\.\d{1,3}"))
+_PERMANENT = re.compile(_CODE.format(r"5\.\d{1,3}\.\d{1,3}"))
 _HARD_CODE = re.compile(_CODE.format(r"5\.1\.1|5\.1\.10|5\.4\.1"))
 _HARD_WORDS = re.compile(r"address not found|does not exist", re.I)
 
@@ -99,7 +103,9 @@ def classify(meta: MessageMeta, account: str) -> Inbound:
     if BOUNCE.search(meta.from_addr or "") or (BOUNCE_SUBJ.search(subject) and _machine_made(meta)):
         failed = failed_recipients(meta)
         klass = dsn_class(meta)
-        if DELAY_SUBJ.search(subject) and klass == "unknown":
+        text = meta.snippet or ""
+        temporary = klass != "limit" and _TEMPORARY.search(text) and not _PERMANENT.search(text)
+        if (DELAY_SUBJ.search(subject) and klass == "unknown") or temporary:
             return Inbound("delay", None, failed[0] if failed else None)
         return Inbound("bounce", klass, failed[0] if failed else None)
     if _is_auto(meta):

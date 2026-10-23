@@ -574,6 +574,9 @@ export interface components {
             day: number | null;
             /** Domain */
             domain: string | null;
+            /** Held */
+            held: boolean;
+            heldByReply: components["schemas"]["HoldingReply"] | null;
             /** Heldbytouchid */
             heldByTouchId: number | null;
             /** Hq */
@@ -614,6 +617,9 @@ export interface components {
         };
         /** CompanyRef */
         CompanyRef: {
+            /** Held */
+            held: boolean;
+            heldByReply: components["schemas"]["HoldingReply"] | null;
             /** Heldbytouchid */
             heldByTouchId: number | null;
             /** Id */
@@ -844,6 +850,20 @@ export interface components {
             personName: string;
             /** Touchid */
             touchId: number;
+        };
+        /**
+         * HoldingReply
+         * @description The newest reply holding the company: on any channel, so a LinkedIn reply shows as an email one does.
+         */
+        HoldingReply: {
+            /** At */
+            at: string;
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "linkedin_request" | "linkedin_message" | "email" | "application" | "hn_reply" | "other";
+            person: components["schemas"]["PersonRef"] | null;
         };
         /** JobCount */
         JobCount: {
@@ -1196,6 +1216,9 @@ export interface components {
         };
         /** ReviewCompany */
         ReviewCompany: {
+            /** Held */
+            held: boolean;
+            heldByReply: components["schemas"]["HoldingReply"] | null;
             /** Heldbytouchid */
             heldByTouchId: number | null;
             /** Id */

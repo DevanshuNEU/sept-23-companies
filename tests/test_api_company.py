@@ -24,6 +24,7 @@ class CompanyPage(ApiCase):
         self.assertEqual(
             body["company"],
             {"id": cid, "name": "Acme", "status": "candidate", "pausedAt": None, "heldByTouchId": None,
+             "held": False, "heldByReply": None,
              "domain": None, "aliases": [], "hq": "", "pickedOn": None, "day": None, "closed": None, "revision": 1},
         )
         for key in ("facts", "postings", "people", "touches", "evidence", "events", "reviewItems"):

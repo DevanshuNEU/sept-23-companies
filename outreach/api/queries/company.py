@@ -6,15 +6,16 @@ it (events, evidence, postings, people), so nothing is lost by a merge.
 import importlib
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 from outreach.api.models.company import (
     CompanyBoard, CompanyClosed, CompanyEvent, CompanyHeader, CompanyPerson, CompanyTouch, CompanyView, Fact,
-    PersonRef, PostingFlag, PostingRow, RoleToName, ThreadMessage,
+    HoldingReply, PersonRef, PostingFlag, PostingRow, RoleToName, ThreadMessage,
 )
 from outreach.api.queries import people as people_queries
 from outreach.api.queries.people import scope
-from outreach.drafts.followups import company_map, held_survivors, resolve_company
+from outreach.drafts.followups import company_map, company_reply_held, held_survivors, resolve_company
 from outreach.sending import calendar
 from outreach.sending.config import load_config
 from outreach.store.timefmt import ISO_FMT
@@ -96,7 +97,58 @@ def holding_touches(companies: dict[int, sqlite3.Row]) -> dict[int, int]:
         touch = companies[cid]["held_by_touch"]
         if touch is not None:
             found.setdefault(resolve_company(companies, cid)[-1], touch)
-    return {survivor: found[survivor] for survivor in held}
+    # A survivor held only by a reply on another channel (no email touch holds it) has no touch to name here.
+    return {survivor: found[survivor] for survivor in held if survivor in found}
+
+
+@dataclass(frozen=True)
+class Holds:
+    """Every survivor's hold as the sender reads it (`held_survivors`): `touches` is `holding_touches` (the email
+    touch holding it, when one does), `held` every held survivor whatever the channel of the reply, and `replies`
+    the newest reply holding each survivor held by a reply. `get` reads `touches`, as the plain dict did."""
+    touches: dict[int, int]
+    held: frozenset[int]
+    replies: dict[int, HoldingReply]
+
+    def get(self, company_id: int, default=None):
+        return self.touches.get(company_id, default)
+
+    def fields(self, company_id: int) -> dict:
+        """The hold fields of a `CompanyRef` for this survivor."""
+        return {"held_by_touch_id": self.touches.get(company_id), "held": company_id in self.held,
+                "held_by_reply": self.replies.get(company_id)}
+
+
+def company_holds(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row] | None = None) -> Holds:
+    """Every survivor's hold, with the reply that holds it (#9: a reply on any channel holds the company)."""
+    companies = company_map(conn) if companies is None else companies
+    touches = holding_touches(companies)
+    try:
+        held = held_survivors(companies)
+        survivor = {cid: resolve_company(companies, cid)[-1] for cid in companies}
+    except RuntimeError:  # a merge cycle: each company keeps its own hold
+        held = set(touches)
+        survivor = {cid: cid for cid in companies}
+    holding = {cid for cid, row in companies.items() if company_reply_held(row)}
+    newest: dict[int, tuple[str, str, int | None]] = {}
+    for row in conn.execute(
+            "SELECT company_id, channel, replied_at, person_id FROM outreach_touch "
+            "WHERE replied_at IS NOT NULL AND undone_at IS NULL AND ifnull(reply_kind, '') <> 'auto_reply' "
+            "UNION ALL SELECT p.company_id, 'email', t.replied_at, t.person_id FROM touch t "
+            "JOIN person p ON p.person_id = t.person_id WHERE t.replied_at IS NOT NULL "
+            "AND ifnull(t.reply_kind, '') <> 'auto_reply'"):
+        if row["company_id"] not in holding:
+            continue
+        end = survivor[row["company_id"]]
+        if end not in newest or row["replied_at"] > newest[end][1]:
+            newest[end] = (row["channel"], row["replied_at"], row["person_id"])
+    people = {p["person_id"]: p for p in conn.execute(
+        "SELECT * FROM person WHERE person_id IN (SELECT value FROM json_each(?))",
+        (json.dumps(sorted({n[2] for n in newest.values() if n[2] is not None})),))}
+    replies = {end: HoldingReply(channel=channel, at=at,
+                                 person=person_ref(people[pid]) if pid in people else None)
+               for end, (channel, at, pid) in newest.items() if end in held}
+    return Holds(touches=touches, held=frozenset(held), replies=replies)
 
 
 def group_of(parents: dict[int, int], survivor: int) -> list[int]:
@@ -260,7 +312,8 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
     picked_on = picked_dates[0] if picked_dates else None
 
     # A person on a merged duplicate is judged against the survivor's pause and the family's hold.
-    held_by = holding_touches(company_map(conn)).get(survivor)
+    holds = company_holds(conn)
+    held_by = holds.get(survivor)
     person_lines = people_queries.lines(data, {c: companies[survivor_of(parents, c)] for c in companies},
                                         {survivor: held_by} if held_by is not None else {})
     people = [
@@ -284,14 +337,14 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
         as_of=now,
         company=CompanyHeader(
             id=survivor, name=main["name"], status=main["status"], paused_at=main["paused_at"],
-            held_by_touch_id=held_by, domain=domain, aliases=aliases_for(companies, survivor, alias_rows),
+            **holds.fields(survivor), domain=domain, aliases=aliases_for(companies, survivor, alias_rows),
             hq=best["hq"]["value"] if "hq" in best else "", picked_on=picked_on,
             day=_day(main, picked_on, today, cfg),
             closed=CompanyClosed(reason=main["close_reason"], note=main["status_note"], at=main["status_at"])
             if main["status"] == "closed" else None,
             revision=main["revision"],
         ),
-        summary=_summary(main["status"], bool(main["paused_at"]), held_by is not None, role, data.persons),
+        summary=_summary(main["status"], bool(main["paused_at"]), survivor in holds.held, role, data.persons),
         facts=[to_fact(best[k]) for k in FACT_ORDER if k in best],
         sponsorship_shown=_sponsorship_shown(best, role, [p for p in postings if p['state'] != 'closed'], evidence_rows),
         mail_server_ok=None if mx is None else mx["status"] == "ok",

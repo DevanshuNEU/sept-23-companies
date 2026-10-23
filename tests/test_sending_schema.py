@@ -77,5 +77,22 @@ class SendingSchemaTest(unittest.TestCase):
         self.assertEqual(before, after)
 
 
+
+class InboundSeenTest(unittest.TestCase):
+    def setUp(self):
+        self.db = fresh_store()
+
+    def test_inbound_seen_takes_one_row_per_gmail_id_and_known_reasons_only(self):
+        self.db.execute("INSERT INTO inbound_seen(gmail_message_id, why, seen_at) VALUES ('g1', 'ours', ?)", (NOW,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("INSERT INTO inbound_seen(gmail_message_id, why, seen_at) VALUES ('g1', 'delay', ?)",
+                            (NOW,))
+        for bad in ({"why": "bounce"}, {"gmail_message_id": ""}, {"seen_at": "2026-11-02 08:00:00"}):
+            row = {"gmail_message_id": "g2", "why": "untracked", "seen_at": NOW, **bad}
+            with self.subTest(bad=bad), self.assertRaises(sqlite3.IntegrityError):
+                self.db.execute("INSERT INTO inbound_seen(gmail_message_id, why, seen_at) VALUES (?, ?, ?)",
+                                (row["gmail_message_id"], row["why"], row["seen_at"]))
+
+
 if __name__ == "__main__":
     unittest.main()

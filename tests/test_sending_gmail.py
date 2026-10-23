@@ -664,8 +664,8 @@ class HistoryTest(NoNetwork):
             return pages[query.get("pageToken")]
         client, t = self.client(answer)
         page = client.history("100")
-        self.assertEqual([(a.gmail_message_id, a.thread_id, a.labels) for a in page.added],
-                         [("g1", "th1", ("INBOX",)), ("g2", "th2", ("SENT",))])
+        self.assertEqual([(a.gmail_message_id, a.thread_id, a.labels, a.history_id) for a in page.added],
+                         [("g1", "th1", ("INBOX",), "101"), ("g2", "th2", ("SENT",), "104")])
         self.assertEqual(page.history_id, "106")
         self.assertEqual(len(t.requests), 2)
 

@@ -113,7 +113,7 @@ export function useCompanyActions({
       label: `Resumed ${company.name}.`,
       afterCommit: `Resumed ${company.name}.`,
       immediate: true,
-      patches: companyPatches(() => ({ pausedAt: null, heldByTouchId: null })),
+      patches: companyPatches(() => ({ pausedAt: null, heldByTouchId: null, held: false, heldByReply: null })),
       commit: (o) => thenWarm(withRevision(o, known, read, (r) => client.resumeCompany(company.id, r, o))),
     });
 
@@ -159,7 +159,7 @@ export function useCompanyActions({
             </ul>
           ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel>{company.heldByTouchId !== null ? 'Keep on hold' : 'Keep paused'}</AlertDialogCancel>
+            <AlertDialogCancel>{company.held || company.heldByTouchId !== null ? 'Keep on hold' : 'Keep paused'}</AlertDialogCancel>
             <AlertDialogAction onClick={resume}>{`Resume ${company.name}`}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -168,7 +168,7 @@ export function useCompanyActions({
   );
 
   return {
-    held: company.pausedAt !== null || company.heldByTouchId !== null,
+    held: company.pausedAt !== null || company.held || company.heldByTouchId !== null,
     pause,
     askResume: () => setResuming(true),
     askClose: () => {

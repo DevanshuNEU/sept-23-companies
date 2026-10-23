@@ -42,6 +42,7 @@ CRAWL = ROOT / "outreach" / "crawl"
 RANKING = ROOT / "outreach" / "ranking"
 NET = ROOT / "outreach" / "net.py"
 SOURCES = ROOT / "outreach" / "sources"
+SENDING = ROOT / "outreach" / "sending"
 REFRESH = ROOT / "refresh"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
@@ -531,6 +532,91 @@ MUTATIONS = [
      "not s.hide.provisional \\\n                        and s.company_id in listed:",
      "not s.hide.provisional:",
      "test_a_company_closed_during_the_compute_gets_no_no_go_row"),
+
+    # ---- sending (#14): the claim, the Sent scan, the ramp, the queue, the classifier, the tick, the guard ----------
+    (SENDING / "claim.py", "the claim moved after client.send, so a crash after Gmail took the email leaves no record",
+     '    if not claim(conn, q, rfc_id=rfc, now=now):\n        return "lost_race"\n    try:\n'
+     '        outgoing = outgoing_for(conn, q, cfg, rfc)\n    except Exception as err:\n'
+     '        failure = GmailError("bad_request", None, f"the email could not be built: {describe_error(err)}")\n'
+     '        record_unclear(conn, q.message_id, failure, at=_stamp(clock()), cfg=cfg, rng=rng)\n'
+     '        raise failure from err\n    try:\n        sent = client.send(outgoing)\n',
+     '    try:\n        outgoing = outgoing_for(conn, q, cfg, rfc)\n    except Exception as err:\n'
+     '        failure = GmailError("bad_request", None, f"the email could not be built: {describe_error(err)}")\n'
+     '        record_unclear(conn, q.message_id, failure, at=_stamp(clock()), cfg=cfg, rng=rng)\n'
+     '        raise failure from err\n    try:\n        sent = client.send(outgoing)\n'
+     '        if not claim(conn, q, rfc_id=rfc, now=now):\n            return "lost_race"\n',
+     "test_send_is_claimed_with_its_message_id_before_the_call"),
+    (SENDING / "gmail.py", "find_sent falls back to a To plus Subject match when the Message-ID differs",
+     'if normalise_message_id(_headers(msg).get("message-id")) == wanted:',
+     'if normalise_message_id(_headers(msg).get("message-id")) == wanted or (\n'
+     '                        _headers(msg).get("to") and _headers(msg).get("subject")):',
+     "test_find_sent_matches_by_message_id_only"),
+    (SENDING / "claim.py", "a miss counts as proof although the scan was incomplete, so a send is called not sent early",
+     "if complete and normalise_message_id(scanned) == normalise_message_id(u.rfc_id)",
+     "if normalise_message_id(scanned) == normalise_message_id(u.rfc_id)",
+     "test_not_found_needs_a_scan_back_to_the_claim"),
+    (SENDING / "claim.py", "the attempt cap is removed, so a failing message is retried for ever",
+     'if max(len(fails), _attempts(conn, row["message_id"])) >= cfg.max_send_attempts:',
+     "if False:",
+     "test_requeue_retries_once_then_stops"),
+    (SENDING / "mail.py", "a bad request becomes retryable, so a bad address is sent again",
+     'RETRYABLE = frozenset({"rate_limit",', 'RETRYABLE = frozenset({"bad_request", "rate_limit",',
+     "test_bad_request_failure_is_not_requeued"),
+    (SENDING / "ramp.py", "a warning day rises like a clean one",
+     '    if outcome == "clean":\n        return _step_up(prev["send_limit"], cfg)',
+     '    if outcome in ("clean", "warning"):\n        return _step_up(prev["send_limit"], cfg)',
+     "test_warning_day_does_not_rise"),
+    (SENDING / "signals.py", "exactly 2% bounces counts as clean (the test becomes <= 2%)",
+     "return rate >= cfg.clean_bounce_rate - 1e-12", "return rate > cfg.clean_bounce_rate + 1e-12",
+     "test_bounce_rate_of_exactly_two_percent_is_a_warning"),
+    (SENDING / "ramp.py", "the ceiling is removed, so the ramp goes past 100",
+     "return min(level + cfg.ramp_step, cfg.ramp_ceiling)", "return level + cfg.ramp_step",
+     "test_ramp_stops_at_100"),
+    (SENDING / "queue.py", "the per-company 60 minute gap is dropped",
+     "if sends and now < max(sends) + gap:", "if False:",
+     "test_second_send_at_one_company_waits_60_minutes"),
+    (SENDING / "queue.py", "the per-company gap is compared with <=, so exactly 60 minutes still waits",
+     "if sends and now < max(sends) + gap:", "if sends and now <= max(sends) + gap:",
+     "test_exactly_60_minutes_after_the_last_send_is_ready"),
+    (SENDING / "queue.py", "the company hold check is removed, so a reply no longer holds the colleagues' email",
+     '    if held:\n        return "company_held", None', '    if False:\n        return "company_held", None',
+     "test_reply_holds_every_queued_message_at_the_company"),
+    (SENDING / "queue.py", "a person's own company is used instead of the surviving one, so a merge is ignored",
+     'company_id=resolve_company(companies, row["person_company"])[-1],', 'company_id=row["person_company"],',
+     "test_person_at_merged_company_sends_under_the_survivor"),
+    (SENDING / "classify.py", "the delay check is removed, so a still-trying notice counts as a bounce",
+     'if (DELAY_SUBJ.search(subject) and klass == "unknown") or temporary:', "if False:",
+     "test_delay_notice_is_not_a_bounce"),
+    (SENDING / "classify.py", "Auto-Submitted is ignored, so an out-of-office reads as a person's reply",
+     '    if h.get("auto-submitted", "no").strip().lower() not in ("no", ""):\n        return True\n    if "x-autoreply"',
+     '    if "x-autoreply"',
+     "test_out_of_office_header_is_not_a_reply"),
+    (SENDING / "tick.py", "the dry run's rollback becomes a commit, so a dry run writes",
+     '                    self.conn.execute("ROLLBACK")', '                    self.conn.execute("COMMIT")',
+     "test_dry_run_writes_nothing"),
+    (SENDING / "__main__.py", "the require_live line is removed, so the sender runs from a worktree",
+     "        live_checkout.require_live(what, root or live_checkout.REPO_ROOT, live_root or live_checkout.LIVE_ROOT)",
+     "        pass",
+     "test_run_refuses_outside_the_live_checkout"),
+    (SENDING / "tick.py", "the account check is removed, so a token for another account sends",
+     "if email.lower() != self.cfg.from_address.lower():", "if False:",
+     "test_wrong_account_sends_nothing"),
+    (SENDING / "followups.py", "follow-ups are due in calendar days, not business days",
+     "due_on = cal.add_business_days(first_sent_on, days, cfg).isoformat()",
+     "due_on = (first_sent_on + __import__(\"datetime\").timedelta(days=days)).isoformat()",
+     "test_followup_due_seven_business_days_later"),
+    (SENDING / "claim.py", "client.send is called inside an open store transaction",
+     "        sent = client.send(outgoing)\n    except GmailError as err:\n        returned = _stamp(clock())",
+     '        conn.execute("BEGIN IMMEDIATE")\n        sent = client.send(outgoing)\n        conn.execute("COMMIT")\n'
+     "    except GmailError as err:\n        returned = _stamp(clock())",
+     "test_no_gmail_call_inside_a_transaction"),
+    (SENDING / "followups.py", "stop_planned moves the row to skipped instead of deleting it",
+     "conn.execute(\"DELETE FROM message WHERE message_id = ? AND state = 'planned'\", (message_id,))",
+     "conn.execute(\"UPDATE message SET state = 'skipped' WHERE message_id = ? AND state = 'planned'\", (message_id,))",
+     "test_lapse_deletes_the_planned_row_and_records_it_on_the_touch"),
+    (SENDING / "ramp.py", "effective_limit returns the start limit on a warning day",
+     "return _step_down(start, cfg) if lowered else start", "return start",
+     "test_effective_limit_is_one_level_lower_after_a_warning"),
 ]
 
 

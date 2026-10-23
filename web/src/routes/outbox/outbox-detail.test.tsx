@@ -759,6 +759,7 @@ describe('reply', () => {
     if (!priya) throw new Error('No Priya in the fixture');
     priya.item.company.status = 'closed';
     priya.item.company.heldByTouchId = null;
+    priya.item.company.held = false;
     const client = new FixtureClient(db);
     renderWithApp(<OutboxPage />, { route: `/outbox/${T.priya}`, client });
     await screen.findByRole('heading', { level: 2, name: 'Priya Natarajan' });

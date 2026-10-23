@@ -347,6 +347,16 @@ class ConfigTests(unittest.TestCase):
                     _load_edited(self, ("ranker", "size_check_top_n", value))
         self.assertEqual(_load_edited(self, ("ranker", "size_check_top_n", "1")).ranker["size_check_top_n"], 1)
 
+    def test_the_funding_window_and_the_lca_junior_cap_must_be_above_zero(self):
+        for section, key in (("ranker", "funding_window_months"), ("lca_junior", "cap")):
+            for value in ("0", "-3", "2.5", "true", '"18"'):
+                with self.subTest(key=key, value=value):
+                    with self.assertRaises(ValueError) as cm:
+                        _load_edited(self, (section, key, value))
+                    self.assertIn(key, str(cm.exception))
+        cfg = _load_edited(self, ("ranker", "funding_window_months", "1"), ("lca_junior", "cap", "1"))
+        self.assertEqual((cfg.ranker["funding_window_months"], cfg.section("lca_junior")["cap"]), (1, 1))
+
     def test_confidence_shares_and_counts_are_checked(self):
         for key, value in (("rank_high_share", "0.0"), ("rank_high_share", "1.0"), ("rank_low_share", "0.0"),
                            ("rank_low_share", "1.5"), ("reason_count", "0"), ("reason_count", "2.5"),

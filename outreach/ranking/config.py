@@ -102,10 +102,17 @@ def _check_confidence(c: dict) -> None:
             raise ValueError(f"[confidence] {key} must be a whole number of at least 1, got {c[key]!r}")
 
 
-def _check_ranker(r: dict) -> None:
-    top = r["size_check_top_n"]
-    if not isinstance(top, int) or isinstance(top, bool) or top < 1:
-        raise ValueError(f"[ranker] size_check_top_n must be a whole number of at least 1, got {top!r}")
+def _whole_at_least_one(value: object, where: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError(f"{where} must be a whole number of at least 1, got {value!r}")
+
+
+def _check_ranker(data: dict) -> None:
+    """Counts the ranker divides by or compares against: 0 would make lca_junior divide by zero and the funding
+    window never open."""
+    for key in ("size_check_top_n", "funding_window_months"):
+        _whole_at_least_one(data["ranker"][key], f"[ranker] {key}")
+    _whole_at_least_one(data["lca_junior"]["cap"], "[lca_junior] cap")
 
 
 _HIDE_CONFIDENCES = ("confirmed", "estimate")
@@ -138,7 +145,7 @@ def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
     _check_bottom_weights(data)
     _check_confidence(data["confidence"])
     _check_hide(data["hide"])
-    _check_ranker(data["ranker"])
+    _check_ranker(data)
     others = {k: v for k, v in data.items() if k not in ("ranker", "weights", "hide")}
     return RankerConfig(ranker=data["ranker"], weights=weights, hide=data["hide"], sections=others, raw=raw)
 

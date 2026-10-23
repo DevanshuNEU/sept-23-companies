@@ -1,7 +1,8 @@
-"""The API's import boundary: third-party code lives in outreach/api and nowhere else.
+"""The API's import boundary: third-party code lives in outreach/api and nowhere else, with one exception.
 
-Everything else in `outreach/` stays standard library so the sender, the crawler and the MCP server start without
-the API's packages, and none of them can reach the one approve route.
+Everything else in `outreach/` stays standard library so the sender and the crawler start without the API's
+packages, and none of them can reach the one approve route. The exception (#13 ruling, lean v1): `outreach/mcp` is
+built on the official MCP SDK, so it may import `mcp`, `mcp_types` and `pydantic`, and nothing else third party.
 """
 import ast
 import re
@@ -15,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUTREACH = "outreach"
 ALLOWED_OUTSIDE_API = set(sys.stdlib_module_names) | {"outreach", "live_checkout"}
+ALLOWED_IN_MCP = ALLOWED_OUTSIDE_API | {"mcp", "mcp_types", "pydantic"}
 OLD_MAILER_PACKAGES = {"mail", "refresh", "dashboard"}
 PINNED = re.compile(r"^[A-Za-z0-9_.-]+==[0-9]+(\.[0-9]+)+$")
 
@@ -54,9 +56,11 @@ def python_files(root: Path, *, inside_api: bool):
 
 def third_party_outside_api(root: Path) -> list[str]:
     found = []
+    mcp = root / OUTREACH / "mcp"
     for path in python_files(root, inside_api=False):
+        allowed = ALLOWED_IN_MCP if mcp in path.parents else ALLOWED_OUTSIDE_API
         tops = {name.split(".")[0] for name in imports_of(path, package_of(root, path)) if name}
-        found.extend(f"{path.relative_to(root)} imports {top}" for top in sorted(tops - ALLOWED_OUTSIDE_API))
+        found.extend(f"{path.relative_to(root)} imports {top}" for top in sorted(tops - allowed))
     return found
 
 
@@ -81,10 +85,14 @@ class StdlibBoundaryTest(unittest.TestCase):
             (copy / OUTREACH / "store" / "planted.py").write_text("import fastapi\n", encoding="utf-8")
             (copy / OUTREACH / "planted_from.py").write_text("from pydantic import BaseModel\n", encoding="utf-8")
             (copy / OUTREACH / "api" / "fine.py").write_text("import fastapi\n", encoding="utf-8")
+            (copy / OUTREACH / "mcp" / "fine.py").write_text("import mcp\nfrom pydantic import Field\n",
+                                                            encoding="utf-8")
+            (copy / OUTREACH / "mcp" / "planted.py").write_text("import httpx\n", encoding="utf-8")
             found = third_party_outside_api(copy)
         self.assertEqual(
             found,
-            ["outreach/planted_from.py imports pydantic", "outreach/store/planted.py imports fastapi"],
+            ["outreach/mcp/planted.py imports httpx", "outreach/planted_from.py imports pydantic",
+             "outreach/store/planted.py imports fastapi"],
         )
 
     def test_the_scan_reads_something(self):
@@ -131,7 +139,8 @@ class StdlibBoundaryTest(unittest.TestCase):
         self.assertTrue(group)
         for entry in group:
             self.assertRegex(entry, PINNED, f"{entry} is not pinned to an exact version with ==")
-        self.assertEqual(project["tool"]["uv"]["default-groups"], ["api"])
+        self.assertEqual(project["dependency-groups"]["mcp"], ["mcp==2.3.0"])  # the SDK the MCP server runs on (#13)
+        self.assertEqual(project["tool"]["uv"]["default-groups"], ["api", "mcp"])
 
 
 if __name__ == "__main__":

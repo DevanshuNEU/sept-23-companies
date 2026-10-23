@@ -9,16 +9,24 @@ the write lock (BEGIN IMMEDIATE) before it reads, so two callers never get the s
 finished by its deadline is handed out again with `attempts` up; a posting that has used `max_attempts` leases ends
 `refused` and is shown, flagged, instead of being tried every night.
 
+A stale posting (old, or gone from its board's latest read; `outreach.crawl.stale.load_stale`) is never read: it is
+not queued, and a queued row that has gone stale is skipped by `next_batch` and left exactly as it is, so it is
+read again if the posting is listed again. `today` is the day staleness is judged on (default: today in UTC).
+
 Order of reading (design section 7.3): provisional hides first, then lane 1 postings at the top-scored companies,
 then everything else, newest first. A company whose newest score carries a final hide is held: nothing of it is
 shown, so reading it can wait, and it takes none of the top slots.
 """
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+from outreach.crawl.stale import load_stale
 
 from outreach.ranking.common import canonical_ids
 from outreach.ranking.hide import posting_visible
@@ -49,8 +57,19 @@ _ELIGIBLE = (
     "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
     "WHERE p.closed_at IS NULL AND d.lane IN ('engineering', 'intern') AND length(b.body) >= ?")
 
+_WHITESPACE = re.compile(r"\s+")  # the pattern `body_sha256` collapses
+
 _INSERT = ("INSERT INTO read_queue(posting_id, body_sha256, reader_version, priority, state, enqueued_at) "
            "VALUES (?, ?, ?, ?, 'queued', ?) ON CONFLICT DO NOTHING")
+
+
+def _long_enough(body: str, cfg: ReaderConfig) -> bool:
+    """The floor counts the text `body_sha256` hashes (whitespace collapsed, ends stripped), not the raw body."""
+    return len(_WHITESPACE.sub(" ", body).strip()) >= cfg.min_body_chars
+
+
+def _today(today: date | None) -> date:
+    return today if today is not None else datetime.now(timezone.utc).date()
 
 
 def _defaults(cfg: ReaderConfig | None, version: str | None) -> tuple[ReaderConfig, str]:
@@ -70,24 +89,25 @@ def _insert(conn: sqlite3.Connection, keys: list[tuple[int, str]], version: str)
 
 
 def enqueue(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfig | None = None,
-            version: str | None = None) -> bool:
+            version: str | None = None, today: date | None = None) -> bool:
     """Queue one posting's current body for `version`. False, and nothing written, when the posting has no body,
-    a body shorter than `min_body_chars`, is closed, has no decision or is not in the engineering or intern lane,
-    or when this body is already queued (or done, or refused) under `version`."""
+    a body shorter than `min_body_chars` once whitespace is collapsed, is closed or stale, has no decision or is not
+    in the engineering or intern lane, or when this body is already queued (or done, or refused) under `version`."""
     cfg, version = _defaults(cfg, version)
     row = conn.execute("SELECT b.body " + _ELIGIBLE + " AND p.posting_id = ?",
                        (cfg.min_body_chars, posting_id)).fetchone()
-    if row is None:
+    if row is None or not _long_enough(row["body"], cfg) or load_stale(conn, _today(today), posting_ids=[posting_id]):
         return False
     return _insert(conn, [(posting_id, body_sha256(row["body"]))], version) == 1
 
 
 def enqueue_missing(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = None, version: str | None = None,
-                    limit: int | None = None) -> int:
-    """Queue every eligible open posting that has no row for its current body under `version`: the backlog, a night
-    that was skipped, a new reader version or a body that changed. Newest postings first when `limit` cuts it short.
-    Returns how many rows were added."""
+                    limit: int | None = None, today: date | None = None) -> int:
+    """Queue every eligible, fresh open posting that has no row for its current body under `version`: the backlog, a
+    night that was skipped, a new reader version or a body that changed. Newest postings first when `limit` cuts it
+    short. Returns how many rows were added."""
     cfg, version = _defaults(cfg, version)
+    stale = load_stale(conn, _today(today))
     have = {(r[0], r[1]) for r in conn.execute(
         "SELECT posting_id, body_sha256 FROM read_queue WHERE reader_version = ?", (version,))}
     missing: list[tuple[int, str]] = []
@@ -95,6 +115,8 @@ def enqueue_missing(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = None
                             (cfg.min_body_chars,)):
         if limit is not None and len(missing) >= limit:
             break
+        if row["posting_id"] in stale or not _long_enough(row["body"], cfg):
+            continue
         key = (row["posting_id"], body_sha256(row["body"]))
         if key not in have:
             missing.append(key)
@@ -143,6 +165,13 @@ def _priority(row: sqlite3.Row, company_id: int, scores: _Scores) -> int:
     return TIER_ORDINARY * _TIER
 
 
+def _canon(conn: sqlite3.Connection) -> dict[int, int]:
+    try:
+        return canonical_ids(conn)
+    except ValueError:  # a merge loop is a store error for ranking to report; here it only means "no survivor"
+        return {}
+
+
 def refresh_priorities(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = None) -> int:
     """Recompute `priority` of every queued row from the current decisions and scores; returns how many changed.
 
@@ -155,10 +184,7 @@ def refresh_priorities(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = N
     """
     cfg = cfg if cfg is not None else load_reader_config()
     scores = _load_scores(conn, cfg)
-    try:
-        canon = canonical_ids(conn)
-    except ValueError:  # a merge loop is a store error for ranking to report; here it only means "no survivor"
-        canon = {}
+    canon = _canon(conn)
     changes: list[tuple[int, int]] = []
     for row in conn.execute(
             "SELECT q.rowid AS qrowid, q.priority AS queued_priority, p.company_id, d.* FROM read_queue q "
@@ -179,39 +205,49 @@ def refresh_priorities(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = N
 
 
 def next_batch(conn: sqlite3.Connection, limit: int, *, cfg: ReaderConfig | None = None, version: str | None = None,
-               now: str | None = None) -> list[ReadRequest]:
+               now: str | None = None, today: date | None = None) -> list[ReadRequest]:
     """Lease up to `limit` postings for `version`, best priority first (newest first within a priority).
 
     A row is up for lease when it is queued, or leased with a deadline before `now`. Each one handed out gets
-    `lease_minutes` from `now` and one more attempt. A row that has used `max_attempts` leases is set refused
-    ("gave up after N leases") instead, and takes no slot. A row whose body is gone or no longer matches its hash
-    (the body changed after it was queued: `enqueue` makes a new key for the new body) is refused too, so a reading
-    is never made of text the hash does not name. Held rows (a company with a final hide) are not handed out.
+    `lease_minutes` from `now` and one more attempt. Rows that are skipped and left exactly as they are, whatever
+    their state: a stale posting (`today`, default today in UTC) and a company with a final hide (held). That covers
+    an expired lease too, which `refresh_priorities` does not touch. A row that has used `max_attempts` leases is
+    set refused ("gave up after N leases") and takes no slot. A row whose body is gone or no longer matches its
+    hash (the body changed after it was queued: `enqueue` makes a new key for the new body) is refused too, so a
+    reading is never made of text the hash does not name.
     """
     cfg, version = _defaults(cfg, version)
     if limit < 1:
         return []
     refresh_priorities(conn, cfg=cfg)
     now = iso_utc(now) if now else utcnow()
+    today = _today(today)
     until = (datetime.strptime(now, ISO_FMT) + timedelta(minutes=cfg.lease_minutes)).strftime(ISO_FMT)
-    up = "q.reader_version = ? AND (q.state = 'queued' OR (q.state = 'leased' AND q.lease_until < ?))"
+    held = _load_scores(conn, cfg).held
+    canon = _canon(conn)
     out: list[ReadRequest] = []
+    seen: set[int] = set()  # rows looked at and skipped, so the loop never fetches one again
     with transaction(conn):  # BEGIN IMMEDIATE: the lock is taken before the rows are read
-        conn.execute(
-            "UPDATE read_queue AS q SET state = 'refused', lease_until = NULL, "
-            "last_error = 'gave up after ' || q.attempts || ' leases' "
-            f"WHERE q.attempts >= ? AND {up}", (cfg.max_attempts, version, now))
         while len(out) < limit:
             rows = conn.execute(
-                "SELECT q.rowid AS qrowid, q.posting_id, q.body_sha256, q.reader_version, p.title, b.body "
-                "FROM read_queue q JOIN posting p ON p.posting_id = q.posting_id "
+                "SELECT q.rowid AS qrowid, q.posting_id, q.body_sha256, q.reader_version, q.attempts, p.title, "
+                "p.company_id, b.body FROM read_queue q JOIN posting p ON p.posting_id = q.posting_id "
                 "LEFT JOIN posting_body b ON b.posting_id = q.posting_id "
-                f"WHERE q.priority > ? AND {up} ORDER BY q.priority DESC, q.posting_id DESC LIMIT ?",
-                (HELD, version, now, limit - len(out))).fetchall()
+                "WHERE q.priority > ? AND q.reader_version = ? "
+                "AND (q.state = 'queued' OR (q.state = 'leased' AND q.lease_until < ?)) "
+                "AND q.rowid NOT IN (SELECT value FROM json_each(?)) "
+                "ORDER BY q.priority DESC, q.posting_id DESC LIMIT ?",
+                (HELD, version, now, json.dumps(sorted(seen)), limit - len(out))).fetchall()
             if not rows:
                 break
+            stale = load_stale(conn, today, posting_ids=[r["posting_id"] for r in rows])
             for row in rows:
-                if row["body"] is None:
+                seen.add(row["qrowid"])
+                if row["posting_id"] in stale or canon.get(row["company_id"], row["company_id"]) in held:
+                    continue
+                if row["attempts"] >= cfg.max_attempts:
+                    why = f"gave up after {row['attempts']} leases"
+                elif row["body"] is None:
                     why = "no stored body"
                 elif body_sha256(row["body"]) != row["body_sha256"]:
                     why = "body changed"

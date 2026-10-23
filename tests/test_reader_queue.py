@@ -2,6 +2,7 @@
 import json
 import unittest
 from dataclasses import replace
+from datetime import date
 
 from outreach.reader import queue
 from outreach.reader.config import load_reader_config
@@ -13,6 +14,8 @@ from tests.storetest import fresh_store, seed_company, seed_posting
 
 VERSION = "rv-000000000001"
 T0 = "2026-10-23T08:00:00Z"
+TODAY = date(2026, 10, 23)
+OLD = "2020-01-01"  # posted long before the stale cutoff
 
 
 def body_of(length: int = 600, seed: str = "We build software.") -> str:
@@ -96,6 +99,18 @@ class EnqueueTests(QueueCase):
         self.assertEqual(queue.enqueue_missing(self.conn, cfg=self.cfg, version=VERSION), 1)
         self.assertEqual([r["posting_id"] for r in self.rows()], [exact])
 
+    def test_the_length_floor_counts_the_text_that_is_hashed_not_the_raw_body(self):
+        spaces = self.posting(body=" " * 600)
+        padded = self.posting(body=("ab" + " " * 10) * 50)  # 600 raw characters, 149 once whitespace is collapsed
+        for pid in (spaces, padded):
+            self.assertFalse(self.enqueue(pid), pid)
+        self.assertEqual(queue.enqueue_missing(self.conn, cfg=self.cfg, version=VERSION), 0)
+        short_after = self.posting(body="x" * 499 + " " * 50)
+        self.assertFalse(self.enqueue(short_after))
+        exact = self.posting(body=("x" * 249 + "  \n  ") * 2 + "x" * 2)  # 249 + 1 + 249 + 1 + 2 = 502 collapsed
+        self.assertTrue(self.enqueue(exact))
+        self.assertEqual(self.rows()[0]["body_sha256"], body_sha256(("x" * 249 + " ") * 2 + "x" * 2))
+
     def test_closed_or_off_lane_posting_is_not_enqueued(self):
         closed = self.posting()
         self.conn.execute("UPDATE posting SET closed_at = '2026-10-22T00:00:00Z', close_reason = 'hand' "
@@ -136,6 +151,98 @@ class EnqueueTests(QueueCase):
         self.enqueue(self.posting())
         queue.enqueue_missing(self.conn, cfg=self.cfg, version=VERSION)
         self.assertFalse(self.conn.in_transaction)
+
+
+class StaleTests(QueueCase):
+    def stale(self, posting_id):
+        self.conn.execute("UPDATE posting SET posted_on = ? WHERE posting_id = ?", (OLD, posting_id))
+
+    def fresh(self, posting_id):
+        self.conn.execute("UPDATE posting SET posted_on = NULL WHERE posting_id = ?", (posting_id,))
+
+    def state(self, posting_id):
+        r = self.row(posting_id)
+        return (r["state"], r["lease_until"], r["attempts"], r["last_error"])
+
+    def test_a_stale_posting_is_not_enqueued(self):
+        old, fresh = self.posting(), self.posting()
+        self.stale(old)
+        self.assertFalse(queue.enqueue(self.conn, old, cfg=self.cfg, version=VERSION, today=TODAY))
+        self.assertTrue(queue.enqueue(self.conn, fresh, cfg=self.cfg, version=VERSION, today=TODAY))
+        self.assertEqual(self.rows(old), [])
+
+    def test_a_posting_gone_from_its_board_is_not_enqueued(self):
+        from tests.storetest import seed_board
+        board = seed_board(self.conn, self.company)
+        gone, listed = self.posting(), self.posting()
+        for pid in (gone, listed):
+            self.conn.execute("UPDATE posting SET board_id = ? WHERE posting_id = ?", (board, pid))
+        self.conn.execute("UPDATE board SET last_read = 'empty', last_read_at = ?, empty_streak = 1, streak_since = ? "
+                          "WHERE board_id = ?", (T0, T0, board))
+        self.assertFalse(queue.enqueue(self.conn, gone, cfg=self.cfg, version=VERSION, today=TODAY))
+        self.assertEqual(queue.enqueue_missing(self.conn, cfg=self.cfg, version=VERSION, today=TODAY), 0)
+
+    def test_enqueue_missing_skips_stale_postings_and_counts_only_what_it_added(self):
+        old, a, b = self.posting(), self.posting(), self.posting()
+        self.stale(old)
+        self.assertEqual(queue.enqueue_missing(self.conn, cfg=self.cfg, version=VERSION, today=TODAY), 2)
+        self.assertEqual({r["posting_id"] for r in self.rows()}, {a, b})
+
+    def test_enqueue_missing_limit_counts_fresh_postings_only(self):
+        fresh, old = self.posting(), self.posting()  # old is the newest, so a limit of 1 would take it first
+        self.stale(old)
+        self.assertEqual(queue.enqueue_missing(self.conn, cfg=self.cfg, version=VERSION, limit=1, today=TODAY), 1)
+        self.assertEqual([r["posting_id"] for r in self.rows()], [fresh])
+
+    def test_the_default_day_is_today_in_utc(self):
+        old = self.posting()
+        self.stale(old)
+        self.assertFalse(self.enqueue(old))
+        self.assertEqual(queue.enqueue_missing(self.conn, cfg=self.cfg, version=VERSION), 0)
+
+    def test_a_posting_that_goes_stale_after_queueing_is_skipped_and_left_alone(self):
+        old, other = self.posting(), self.posting()
+        self.enqueue(old)
+        self.enqueue(other)
+        self.stale(old)
+        before = self.state(old)
+        self.assertEqual([r.posting_id for r in self.batch(5, today=TODAY)], [other])
+        self.assertEqual(self.state(old), before)
+        self.assertEqual(before[0], "queued")
+        self.fresh(old)  # a posting that is listed again is read
+        self.assertEqual([r.posting_id for r in self.batch(5, today=TODAY)], [old])
+
+    def test_stale_rows_do_not_use_up_slots_or_loop(self):
+        fresh = self.posting()
+        olds = [self.posting() for _ in range(5)]  # newer than fresh, so they come first
+        for pid in [fresh, *olds]:
+            self.enqueue(pid)
+        for pid in olds:
+            self.stale(pid)
+        self.assertEqual([r.posting_id for r in self.batch(2, today=TODAY)], [fresh])
+        self.assertTrue(all(self.row(p)["state"] == "queued" for p in olds))
+
+    def test_a_stale_row_with_an_expired_lease_is_skipped_and_left_leased(self):
+        old = self.posting()
+        self.enqueue(old)
+        self.assertEqual(len(self.batch(1, now="2026-10-23T08:00:00Z", today=TODAY)), 1)
+        self.stale(old)
+        before = self.state(old)
+        self.assertEqual(self.batch(1, now="2026-10-23T09:00:00Z", today=TODAY), [])
+        self.assertEqual(self.state(old), before)
+        self.assertEqual(before, ("leased", "2026-10-23T08:30:00Z", 1, ""))
+
+    def test_a_stale_row_out_of_attempts_is_not_refused_either(self):
+        cfg = replace(self.cfg, max_attempts=1)
+        old = self.posting()
+        self.enqueue(old)
+        self.batch(1, now="2026-10-23T08:00:00Z", cfg=cfg, today=TODAY)
+        self.stale(old)
+        self.assertEqual(self.batch(1, now="2026-10-23T09:00:00Z", cfg=cfg, today=TODAY), [])
+        self.assertEqual(self.row(old)["state"], "leased")
+        self.fresh(old)
+        self.assertEqual(self.batch(1, now="2026-10-23T09:00:00Z", cfg=cfg, today=TODAY), [])
+        self.assertEqual(self.row(old)["state"], "refused")  # once it is listed again the limit applies
 
 
 class PriorityTests(QueueCase):
@@ -282,6 +389,20 @@ class PriorityTests(QueueCase):
         self.assertEqual(self.order(5), [])
         self.conn.execute("UPDATE company_score SET signals = '{}'")
         self.assertEqual(self.order(5), [pid])
+
+    def test_a_company_with_a_final_hide_is_not_handed_out_on_an_expired_lease_either(self):
+        company = seed_company(self.conn, "Hidden later")
+        pid = self.posting(company=company)
+        self.enqueue_all(pid)
+        self.assertEqual(self.order(5, now="2026-10-23T08:00:00Z"), [pid])
+        self.score(company, 0.5, hide={"kind": "size", "reason": "x", "provisional": False})
+        before = {k: self.row(pid)[k] for k in ("state", "lease_until", "attempts", "last_error")}
+        self.assertEqual(self.order(5, now="2026-10-23T09:00:00Z"), [])
+        self.assertEqual({k: self.row(pid)[k] for k in before}, before)
+        self.assertEqual(before["state"], "leased")
+        self.conn.execute("UPDATE company_score SET signals = '{}'")  # lifted: it is read again
+        self.assertEqual(self.order(5, now="2026-10-23T09:00:00Z"), [pid])
+        self.assertEqual(self.row(pid)["attempts"], 2)
 
     def test_only_the_newest_score_decides_a_hide(self):
         company = seed_company(self.conn, "Once hidden")

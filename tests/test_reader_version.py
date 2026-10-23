@@ -32,6 +32,14 @@ class VersionTests(unittest.TestCase):
         b = replace(self.cfg, prompt_path=self.prompt_copy("Read each posting,", "b.md"))
         self.assertNotEqual(reader_version(a), reader_version(b))
 
+    def test_a_whitespace_only_prompt_edit_moves_the_version(self):
+        # The version hashes the prompt file bytes, not its words: a trailing newline or a changed indent is a new
+        # reader version (it re-reads, in shadow, until promoted). That is the safe side of the trade.
+        a = replace(self.cfg, prompt_path=self.prompt_copy("Read each posting.\n", "a.md"))
+        b = replace(self.cfg, prompt_path=self.prompt_copy("Read each posting.\n\n", "b.md"))
+        c = replace(self.cfg, prompt_path=self.prompt_copy("Read  each posting.\n", "c.md"))
+        self.assertEqual(len({reader_version(a), reader_version(b), reader_version(c)}), 3)
+
     def test_version_changes_with_model(self):
         self.assertNotEqual(reader_version(self.cfg), reader_version(replace(self.cfg, model="claude-sonnet-5-5")))
 

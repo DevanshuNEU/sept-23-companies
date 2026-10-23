@@ -94,7 +94,7 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
 
 **#11 API and health view.**
 - `TickReport` (`outreach.crawl.tick`): `run_id`, `rebuilt`, `read`, `ok`, `empty`, `error`, `unchanged`, `deferred`,
-  `failed`, `new`, `closed`, `seconds`, `tripped` (host buckets the breaker stopped or that read a mass empty, sorted),
+  `failed`, `new`, `closed`, `switched_off` (boards left alone because their reader is off, #46), `seconds`, `tripped` (host buckets the breaker stopped or that read a mass empty, sorted),
   `watch` (a `WatchReport` with `baseline`, `unchanged`, `changed`, `unstable`, `error`, `deferred`), `watch_error`,
   `probe` (a `ProbeReport` with `considered`, `probed`, `added`, `conflicts`, `name_mismatch`, `errors`; None when the
   day's pass already ran or the budget was spent) and `probe_error`. `read` counts boards whose read was recorded;
@@ -144,6 +144,22 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
   - Ashby: what a nonexistent token returns. If it is a 200 with no jobs, slug probing must not read that as a board.
   - Also check how long the first tick takes to decide (the first Greenhouse pass decides about 13,000 postings, roughly 70 s of CPU in batches of 100), and that the host-blocked item and `tripped` look right when one host is made to fail on a scratch store.
 
+**Switching a source off (#46).**
+- A crawler reader is switched off by a line under `[ats_off]` in `outreach/crawl/config.toml`: the ATS name and the
+  reason. SmartRecruiters and Pinpoint are off (their robots.txt forbids the reads, checked 2026-10-23). Deleting the
+  line turns the reader back on; nothing else changes. A name that is not one of the 14 readers fails at load.
+- A board on a switched-off ATS is never due, read, probed or slug-probed. Its row, postings, decisions and items stay
+  as they are: no close, no error, no streak change, no host-blocked or outage item. The tick counts such boards in
+  `switched_off`. `read --company` names each one with the reason and exits 1; `probe <ats>` refuses and sends
+  nothing. The adapters and their tests stay.
+- The polite client refuses any request, redirect hops included, to a switched-off ATS's host (`HostOff`, a
+  `HostTripped`), so a watched page on such a host is deferred, never fetched.
+- #31 may still create boards on a switched-off ATS (stapply lists, careers pages, `ats_detect`); the rows are harmless.
+  stapply's `wellfound` and `ycombinator` lists are never downloaded or read; `fetch stapply` reports them in
+  `excluded_lists` and `excluded_rows`.
+- The old refresh (`refresh/crawl_more.py`) no longer reads SmartRecruiters or Dover's `/api/`; `--only` or `--skip`
+  naming either prints one line and the run goes on.
+
 **Known gaps at hand-off.**
 - Body edits on detail-request ATSs (Workday, Oracle, SmartRecruiters, Rippling, BambooHR, JazzHR) go unseen after the
   first fetch, except through ruling 6's refetch (a changed title or date, and the monthly lane 1 refetch).
@@ -151,6 +167,10 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
 - A mass empty that lasts past the outage grace is written as empty reads: a day later its boards raise `board_empty`
   items one by one and the second empty closes their postings.
 - A board's host bucket is not stored, so the host ruling groups boards by ATS (true for every adapter here).
+- #31's last find_boards pass gives a watched page only to companies whose boards all lack an adapter; it still counts
+  a switched-off ATS as read, so a company whose only board is SmartRecruiters or Pinpoint gets no watched page.
+- The careers check (`outreach/sources/careers.py`) does not go through the polite client, so its own fetches and
+  redirects are not under the `[ats_off]` host guard.
 
 ## Evidence only
 

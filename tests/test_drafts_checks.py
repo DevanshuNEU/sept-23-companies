@@ -31,7 +31,7 @@ BODY = (
     "Thanks,\nDevanshu"
 )
 CLEAN_CODES = [
-    "no_mail_server", "too_many_links", "link_shortener", "near_identical", "no_go_person", "said_no",
+    "no_mail_server", "placeholder", "too_many_links", "link_shortener", "near_identical", "no_go_person", "said_no",
     "closed_no_sponsorship", "banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused",
     "link_count", "recruiter",
 ]
@@ -114,6 +114,31 @@ class Blocks(ChecksCase):
     def test_no_mail_server_blocks(self):
         self.assert_blocks(self.run_on(mx="none"), "no_mail_server")
         self.assert_passes(self.run_on(mx="ok"), "no_mail_server")
+
+    def test_no_address_or_a_malformed_domain_is_no_mail_server(self):
+        for email in (None, "", "pat", "pat@", "pat@-acme-.com", "pat@acme..com"):
+            with self.subTest(email=email):
+                for mx in ("ok", "unknown"):
+                    found = self.run_on(person_email=email, mx=mx)
+                    self.assert_blocks(found, "no_mail_server")
+                    self.assertNotIn("mail_server_unknown", [c["code"] for c in found])
+
+    def test_placeholder_text_blocks(self):
+        for field, text in (("body", "TODO"), ("body", "ASK: which team"), ("subject", "{{role}}"),
+                            ("body", "end }}")):
+            with self.subTest(field=field, text=text):
+                if field == "body":
+                    body, subject = BODY.replace("Thanks,", f"{text} Thanks,"), SUBJECT
+                else:
+                    body, subject = BODY, f"{SUBJECT} {text}"
+                check = self.assert_blocks(self.run_on(body=body, subject=subject), "placeholder")
+                source = body if field == "body" else subject
+                self.assertTrue(check["spans"] and all(s["field"] == field for s in check["spans"]), check)
+                self.assertTrue(all(source[s["start"]:s["end"]] in ("TODO", "ASK:", "{{", "}}")
+                                    for s in check["spans"]), check)
+        with self.subTest("words that only look like one pass"):
+            self.assert_passes(self.run_on(body=BODY.replace("Thanks,", "I'll ask: todo lists. Thanks,")),
+                               "placeholder")
 
     def test_three_links_block(self):
         body = BODY.replace(f"at {PROJECT}.", f"at {PROJECT} and {PROJECT}/docs.")
@@ -542,9 +567,9 @@ class Inputs(ChecksCase):
         self.assertEqual(cached_mx(self.conn, "ACME.example.", NOW), "none")
         self.assertEqual(cached_mx(self.conn, "", NOW), "unknown")
 
-    def test_draft_input_for_a_person_with_no_address_has_unknown_mail_server(self):
+    def test_draft_input_for_a_person_with_no_address_has_no_mail_server(self):
         self.conn.execute("UPDATE person SET email = NULL, added_by = 'import' WHERE person_id = ?", (self.pat,))
-        self.assertEqual(draft_input(self.conn, self.mid, now=NOW).mx, "unknown")
+        self.assertEqual(draft_input(self.conn, self.mid, now=NOW).mx, "none")
 
     def test_draft_input_for_an_unknown_message_raises(self):
         with self.assertRaises(LookupError):

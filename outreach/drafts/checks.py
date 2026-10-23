@@ -8,7 +8,8 @@ The checks only read. They never approve, send or change a message; the caller s
 
 Blocks are #9's safety list: no mail server, more than 2 links, a link shortener, near-identical to a colleague's
 draft, a no-go on the person or the company, a person who said no or asked to stop, a company closed for no
-sponsorship. Two more block because a send could not be checked or could not thread: a banned phrases list that
+sponsorship. An address with no usable domain counts as no mail server. Placeholder text (TODO, ASK:, {{ }}) blocks,
+as it does in `mail/check_draft.py`. Two more block because a send could not be checked or could not thread: a banned phrases list that
 cannot be read (fail closed), and a follow-up subject that is not `Re: ` plus the first email's subject (#14). There
 is no attachment check because a message has no attachment column (a test pins that).
 """
@@ -43,7 +44,9 @@ NEVER = ["bumping this", "bump this", "got buried", "gentle reminder", "in case 
 WEAK_SUBJECT = ["quick question", "following up", "excited"]
 SHORTENERS = {"bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "buff.ly", "is.gd", "rebrand.ly", "cutt.ly",
               "lnkd.in", "shorturl.at", "rb.gy", "tiny.cc", "s.id", "t.ly"}
-DASHES = re.compile(r"[‒-―]")
+DASHES = re.compile("[\u2012-\u2015]")
+# Placeholder text a draft must not keep: the regex of mail/check_draft.py (copied, not imported).
+PLACEHOLDER = re.compile(r"\bTODO\b|\bASK:|\{\{|\}\}")
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 URL = re.compile(r"https?://[^\s<>()\"']+", re.I)
 # A bare domain becomes a link in Gmail too, so it counts.
@@ -58,7 +61,7 @@ _DOMAIN = re.compile(rf"(?:{_LABEL}\.)+{_LABEL}")
 OPEN_STATES = ("drafted", "approved", "sending", "send_unknown", "sent", "failed")
 STOP_REPLIES = ("said_no", "asked_to_stop")
 
-BLOCK_CODES = ("no_mail_server", "banned_list_missing", "too_many_links", "link_shortener", "followup_subject",
+BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "too_many_links", "link_shortener", "followup_subject",
                "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
 WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused", "link_count",
               "recruiter", "mail_server_unknown")
@@ -146,7 +149,7 @@ def cached_mx(conn: sqlite3.Connection, domain: str | None, now: str) -> Literal
 
 def draft_input(conn: sqlite3.Connection, message_id: int, *, now: str) -> DraftInput:
     """The `DraftInput` of a stored message, its mail server read from the cache (`unknown` when missing or stale,
-    which only warns). The API resolves the domain first (`outreach.api.mx.ensure`); the sender reads only the cache.
+    which only warns; `none` when the address has no usable domain). The API resolves the domain first (`outreach.api.mx.ensure`); the sender reads only the cache.
     LookupError for an unknown message."""
     row = conn.execute(
         "SELECT m.message_id, m.seq, m.subject, m.body, m.hook, p.role_kind, p.name, p.email, p.person_id, "
@@ -157,7 +160,8 @@ def draft_input(conn: sqlite3.Connection, message_id: int, *, now: str) -> Draft
     return DraftInput(
         message_id=row["message_id"], seq=row["seq"], subject=row["subject"], body=row["body"], hook=row["hook"],
         role_kind=row["role_kind"], person_name=row["name"], person_email=row["email"], person_id=row["person_id"],
-        company_id=row["company_id"], mx=cached_mx(conn, email_domain(row["email"]), now))
+        company_id=row["company_id"],
+        mx=cached_mx(conn, domain, now) if (domain := email_domain(row["email"])) else "none")
 
 
 # Text rules (a copy of mail/check_draft.py)
@@ -204,6 +208,10 @@ def _check(code: str, severity: str, title: str, detail: str, fix: dict | None =
 
 
 def _mail_server(d: DraftInput) -> list[Check]:
+    if email_domain(d.person_email) is None:  # nothing to look up, so nothing can take the mail
+        return [_check("no_mail_server", "block", "No usable email address",
+                       f"{d.person_email or 'This person has no address'}: there is no valid domain to send to. "
+                       "Fix the address or skip this person.")]
     if d.mx == "none":
         return [_check("no_mail_server", "block", "No mail server",
                        f"{d.person_email or 'This address'} has no mail server, so this email would bounce. "
@@ -246,6 +254,15 @@ def _dash(d: DraftInput) -> Check:
         return _check("dash", "warn", "Em or en dash", "Use a comma, a colon, a full stop or a plain hyphen instead.",
                       spans=spans)
     return _check("dash", "pass", "No em or en dashes", "No long dashes.")
+
+
+def _placeholder(d: DraftInput) -> Check:
+    spans = [_span(f, m.start(), m.end()) for f, text in (("subject", d.subject), ("body", d.body))
+             for m in PLACEHOLDER.finditer(text)]
+    if spans:
+        return _check("placeholder", "block", "Placeholder text left in",
+                      "TODO, ASK: or {{ }} is still in the draft. Replace it with the real words.", spans=spans)
+    return _check("placeholder", "pass", "No placeholder text", "No TODO, ASK: or {{ }} left in.")
 
 
 def _link_rules(d: DraftInput) -> list[Check]:
@@ -449,6 +466,7 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         *_mail_server(d),
         *_banned(d, banned),
         _dash(d),
+        _placeholder(d),
         *_link_rules(d),
         _length(d),
         _stale_hook(d, now),

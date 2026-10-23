@@ -1,0 +1,293 @@
+{
+  "components": {
+    "schemas": {
+      "Check": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "fix": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "compare": "#/components/schemas/CheckFixCompare",
+                    "no_go": "#/components/schemas/CheckFixNoGo",
+                    "review_item": "#/components/schemas/CheckFixReviewItem",
+                    "role_kind": "#/components/schemas/CheckFixRoleKind"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CheckFixCompare"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CheckFixReviewItem"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CheckFixNoGo"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CheckFixRoleKind"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fix"
+          },
+          "severity": {
+            "enum": [
+              "block",
+              "warn",
+              "pass"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/CheckSpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "title",
+          "detail",
+          "fix",
+          "spans"
+        ],
+        "title": "Check",
+        "type": "object"
+      },
+      "CheckFixCompare": {
+        "properties": {
+          "kind": {
+            "const": "compare",
+            "title": "Kind",
+            "type": "string"
+          },
+          "otherMessageId": {
+            "title": "Othermessageid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "otherMessageId"
+        ],
+        "title": "CheckFixCompare",
+        "type": "object"
+      },
+      "CheckFixNoGo": {
+        "properties": {
+          "kind": {
+            "const": "no_go",
+            "title": "Kind",
+            "type": "string"
+          },
+          "noGoId": {
+            "title": "Nogoid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "noGoId"
+        ],
+        "title": "CheckFixNoGo",
+        "type": "object"
+      },
+      "CheckFixReviewItem": {
+        "properties": {
+          "kind": {
+            "const": "review_item",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reviewId": {
+            "title": "Reviewid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "reviewId"
+        ],
+        "title": "CheckFixReviewItem",
+        "type": "object"
+      },
+      "CheckFixRoleKind": {
+        "properties": {
+          "kind": {
+            "const": "role_kind",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "CheckFixRoleKind",
+        "type": "object"
+      },
+      "CheckSpan": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "integer"
+          },
+          "field": {
+            "enum": [
+              "subject",
+              "body"
+            ],
+            "title": "Field",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "field",
+          "start",
+          "end"
+        ],
+        "title": "CheckSpan",
+        "type": "object"
+      },
+      "ErrorEnvelope": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "checks"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "Ping": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "Ping",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Outreach API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/ping": {
+      "get": {
+        "operationId": "ping",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ping"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Ping"
+      }
+    }
+  }
+}

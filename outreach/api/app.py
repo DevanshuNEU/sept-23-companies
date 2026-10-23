@@ -6,6 +6,8 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 
 import outreach.api.routers
+from outreach.api import errors, openapi
+from outreach.api.models.ping import Ping
 from outreach.api.settings import Settings, settings_from_env
 from outreach.store.db import guard
 from outreach.store.timefmt import utcnow
@@ -34,11 +36,13 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
 
     api = APIRouter(prefix="/api")
 
-    @api.get("/ping")
-    def ping() -> dict[str, bool]:
-        return {"ok": True}
+    @api.get("/ping", response_model=Ping)
+    def ping() -> Ping:
+        return Ping(ok=True)
 
     for module in sorted(pkgutil.iter_modules(outreach.api.routers.__path__), key=lambda m: m.name):
         api.include_router(importlib.import_module(f"outreach.api.routers.{module.name}").router)
-    app.include_router(api)
+    app.include_router(api, responses=openapi.ERROR_RESPONSES)
+    errors.install(app)
+    openapi.install(app)
     return app

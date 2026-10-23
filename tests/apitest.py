@@ -6,13 +6,16 @@ matching Origin), so a test that wants a foreign page overrides those headers on
 """
 import json
 import shutil
+import sys
 import tempfile
+import textwrap
 import unittest
 import uuid
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import outreach.api.routers as routers_package
 from outreach.api.app import create_app
 from outreach.api.settings import Settings
 from tests.storetest import fresh_store
@@ -41,12 +44,35 @@ class ApiCase(unittest.TestCase):
             busy_timeout_ms=200,
             sweeper=False,
         )
+        self.build()
+
+    def build(self):
+        """(Re)build the app and the client for this test's store."""
         self.app = create_app(self.settings, clock=lambda: self.now)
         # raise_server_exceptions=False: a bug is the clean 500 envelope a browser would see, and the test asserts it.
         self.client = TestClient(
             self.app, base_url=BASE_URL, headers={"Origin": ORIGIN}, raise_server_exceptions=False
         )
         self.addCleanup(self.client.close)
+
+    def use_routers(self, **sources: str):
+        """Add throwaway router modules (name -> source) to outreach.api.routers for this test, then rebuild.
+
+        Each source defines `router`. They are removed again when the test ends, so no test leaves a route behind.
+        """
+        folder = tempfile.mkdtemp(prefix="outreach-api-routers-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        for name, source in sources.items():
+            Path(folder, f"{name}.py").write_text(textwrap.dedent(source), encoding="utf-8")
+        routers_package.__path__.append(folder)
+
+        def remove():
+            routers_package.__path__.remove(folder)
+            for name in sources:
+                sys.modules.pop(f"outreach.api.routers.{name}", None)
+
+        self.addCleanup(remove)
+        self.build()
 
     def set_now(self, iso: str) -> None:
         self.now = iso

@@ -201,27 +201,14 @@ class PingTest(ApiCase):
 
     def test_routers_are_found_by_scanning_the_package(self):
         # A module dropped into outreach/api/routers is included under /api with no edit to app.py.
-        import sys
-        import tempfile
-        import textwrap
-        import outreach.api.routers as routers
-        with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "zz_probe.py").write_text(textwrap.dedent("""
-                from fastapi import APIRouter
-                router = APIRouter()
-                @router.get("/probe")
-                def probe():
-                    return {"probe": True}
-            """), encoding="utf-8")
-            routers.__path__.append(tmp)
-            try:
-                app = create_app(self.settings)
-            finally:
-                routers.__path__.remove(tmp)
-                sys.modules.pop("outreach.api.routers.zz_probe", None)
-        from fastapi.testclient import TestClient
-        reply = TestClient(app, base_url="http://127.0.0.1:3100").get("/api/probe")
-        self.assertEqual(reply.json(), {"probe": True})
+        self.use_routers(zz_probe="""
+            from fastapi import APIRouter
+            router = APIRouter()
+            @router.get("/probe")
+            def probe():
+                return {"probe": True}
+        """)
+        self.assertEqual(self.get("/api/probe").json(), {"probe": True})
 
 
 if __name__ == "__main__":

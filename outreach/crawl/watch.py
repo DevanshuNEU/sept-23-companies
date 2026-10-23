@@ -12,6 +12,9 @@ on a page that read before, raises it on the third error in a row. The item is r
 dismissed item stays dismissed, and the next usable read of the page clears an open one (resolution `cleared`), which
 a later run of failures reopens.
 
+A page on the host of an ATS whose reader is switched off (`ats_off`, #46) is never fetched: the polite client refuses
+it (`HostOff`, a `HostTripped`) and the page is deferred like any refused host, with no error and no item.
+
 No transaction is open during a request: every page is fetched first and written afterwards in one unit.
 """
 from __future__ import annotations

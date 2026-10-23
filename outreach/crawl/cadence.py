@@ -16,7 +16,8 @@ from outreach.crawl.boardstate import BoardRow
 from outreach.crawl.config import CrawlConfig
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["next_interval_s", "error_backoff_s", "add_seconds", "last_new_age_s", "plan_company_ids", "due_boards"]
+__all__ = ["next_interval_s", "error_backoff_s", "add_seconds", "last_new_age_s", "plan_company_ids", "due_boards",
+           "switched_off_boards"]
 
 # Ruling 5: an erroring board waits 6, 12, then 24 hours and stays at 24. The 7-day ceiling is for quiet boards only.
 ERROR_BACKOFF_CAP_S = 86400
@@ -101,4 +102,23 @@ def due_boards(conn: sqlite3.Connection, now: str, *, supported: Collection[str]
         f"AND b.ats IN (SELECT value FROM json_each(:supported)) {only}AND {eligible} "
         "ORDER BY b.company_id IN (SELECT value FROM json_each(:plan)) DESC, (b.last_read IS NULL) DESC, "
         "b.next_read_at, b.board_id LIMIT :limit", params).fetchall()
+    return [BoardRow(*r) for r in rows]
+
+
+def switched_off_boards(conn: sqlite3.Connection, off: Collection[str], *,
+                        only_company_ids: Collection[int] | None = None) -> list[BoardRow]:
+    """The boards `due_boards` leaves out because their ATS's reader is switched off (#46): active boards of live
+    companies whose `ats` is in `off` (and in `only_company_ids` when given), due or not, by board id. Read only."""
+    if not off or (only_company_ids is not None and not only_company_ids):
+        return []
+    columns = ", ".join(f"b.{f.name}" for f in dataclasses.fields(BoardRow))
+    params: dict[str, object] = {"off": json.dumps(sorted(set(off)))}
+    only = ""
+    if only_company_ids is not None:
+        only = "AND b.company_id IN (SELECT value FROM json_each(:only)) "
+        params["only"] = json.dumps(sorted(set(only_company_ids)))
+    rows = conn.execute(
+        f"SELECT {columns} FROM board b JOIN company c ON c.company_id = b.company_id "
+        "WHERE b.active = 1 AND c.status NOT IN ('closed', 'removed') AND c.merged_into IS NULL "
+        f"AND b.ats IN (SELECT value FROM json_each(:off)) {only}ORDER BY b.board_id", params).fetchall()
     return [BoardRow(*r) for r in rows]

@@ -4,9 +4,12 @@
   New York day, up to 50 companies with no board), then the due watched pages. The one log line carries all three,
   as does the tick's `read_boards` job summary (`probe`, `probe_error`, `watch`, `watch_error`). Another tick holding
   the lock is not an error: it prints so and exits 0.
-- `read --company ID [ID ...]`: read these companies' boards now (floor kept, an erroring board's backoff kept).
+- `read --company ID [ID ...]`: read these companies' boards now (floor kept, an erroring board's backoff kept). A
+  board whose ATS's reader is switched off in config.toml (`ats_off`, #46) is not read: one line on stderr names it
+  and the reason, the other boards are read, and the exit code is 1.
 - `probe ATS TOKEN`: one list request through the polite client, no store access. Prints the result, the job count,
-  the ETag and the first five titles: how a token or an adapter's shape is checked on first use.
+  the ETag and the first five titles: how a token or an adapter's shape is checked on first use. A switched-off ATS
+  is refused with its reason and nothing is sent.
 - `probe-slugs [--limit N]`: for up to N companies with no board (default 50, the daily tick step's size), try the
   slugs their names suggest on Greenhouse, Lever and Ashby and add each `ok` hit as a `slug_probe` board (at most 12
   requests a company). Takes the crawl lock, so it never overlaps a tick. The tick runs the same pass once a day, so
@@ -72,6 +75,8 @@ def _line(report) -> str:
     text = (f"read_boards run {report.run_id}: read {report.read} (ok {report.ok}, empty {report.empty}, "
             f"error {report.error}, unchanged {report.unchanged}), deferred {report.deferred}, "
             f"failed {report.failed}, new {report.new}, closed {report.closed}, {report.seconds:.1f} s")
+    if report.switched_off:
+        text += f"; switched off {report.switched_off} (their reader is off in config.toml)"
     if report.rebuilt:
         text += "; rebuilt the ruleset first"
     if report.tripped:
@@ -129,9 +134,20 @@ def _tick(client: HttpClient | None) -> int:
 
 
 def _read(company_ids: list[int], client: HttpClient | None) -> int:
+    from outreach.crawl.cadence import switched_off_boards
     from outreach.crawl.tick import read_company_boards
-    return _locked_run("read", client,
-                       lambda conn, polite, cfg: read_company_boards(conn, polite, company_ids, cfg=cfg), lock=False)
+
+    refused: list[int] = []
+
+    def run(conn, polite, cfg):
+        for board in switched_off_boards(conn, cfg.ats_off, only_company_ids=company_ids):
+            _say(f"company {board.company_id}: not reading its {board.ats} board {board.token}: the {board.ats} "
+                 f"reader is switched off ({cfg.ats_off[board.ats]})")
+            refused.append(board.board_id)
+        return read_company_boards(conn, polite, company_ids, cfg=cfg)
+
+    code = _locked_run("read", client, run, lock=False)
+    return 1 if refused else code
 
 
 def _probe(ats: str, token: str, client: HttpClient | None) -> int:
@@ -140,6 +156,10 @@ def _probe(ats: str, token: str, client: HttpClient | None) -> int:
     from outreach.crawl.config import load_crawl_config
 
     cfg = load_crawl_config()
+    if ats in cfg.ats_off:
+        _say(f"the {ats} reader is switched off ({cfg.ats_off[ats]}); nothing was sent. "
+             "Delete its line under [ats_off] in outreach/crawl/config.toml to turn it back on.")
+        return 1
     adapter = adapter_for(ats, _polite(client, cfg))
     if adapter is None:
         _say(f"no adapter for {ats!r}; the crawler reads: {', '.join(sorted(supported_ats()))}")

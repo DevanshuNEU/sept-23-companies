@@ -101,7 +101,6 @@ OFF_LANE_CASES = [
     ("Mandarin-speaking: Customer Success Engineer (Contract)", "off_lane", None),
     ("Customer Success Engineer", "off_lane", None),
     ("Robotics Field Engineer", "off_lane", None),
-    ("Field Engineer", "off_lane", None),
     ("Field Engineers, Hardware Rollout", "off_lane", None),
     ("Field Application Engineer", "off_lane", None),
     ("Field Applications Engineer", "off_lane", None),
@@ -112,6 +111,16 @@ OFF_LANE_CASES = [
     ("Adjunct Faculty - Engineering", "off_lane", None),
     ("Lecturer, Software Engineering", "off_lane", None),
     ("Faculty Software Engineer", "off_lane", None),
+    ("Customer Success Engineers", "off_lane", None),
+    ("Customer Success Manager, Engineering", "off_lane", None),
+    ("Customer Success Specialist, Developer Tools", "off_lane", None),
+    ("Customer Success Architect, Software Engineering", "off_lane", None),
+    # narrowed 2026-10-23 (second commit): these software roles stay in
+    ("Forward Deployed Engineer | AI Implementation & Customer Success", "engineering", "open"),
+    ("AI Field Engineer - Enterprise", "engineering", None),
+    ("MLOps Field Engineer", "engineering", None),
+    ("Cloud Field Engineer", "engineering", None),
+    ("Field Engineer", "engineering", None),  # a plain Field Engineer passes, accepted
     # already off lane before this change (field service and field technician stay as they were)
     ("Field Service Engineer", "off_lane", None),
     ("Field Technician", "not_engineering", None),

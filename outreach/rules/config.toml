@@ -37,9 +37,12 @@ off_lane = [
   # #4 follow-up 2026-10-22: postdoctoral roles need a PhD
   "postdoc", "postdocs", "postdoctoral", "post doctoral", "post doc",
   # #4 follow-up 2026-10-23: support, field, metrology roles. Contract roles stay in (he wants contract-to-hire);
-  # "field service" and "field technician" are listed above and stay
-  "customer success", "field engineer", "field engineers", "field application engineer",
-  "field applications engineer", "cmm", "metrology",
+  # "field service" and "field technician" are listed above and stay. Narrowed the same day (opportunity-first):
+  # a bare "customer success" would drop "Forward Deployed Engineer | ... Customer Success", and a bare "field
+  # engineer" would drop "AI Field Engineer", "MLOps Field Engineer" and "Cloud Field Engineer", all software roles
+  "customer success engineer", "customer success engineers", "customer success manager",
+  "customer success managers", "customer success specialist", "customer success architect",
+  "robotics field engineer", "field application engineer", "field applications engineer", "cmm", "metrology",
 ]
 # #4 follow-up 2026-10-23: academic posts are off lane even when the title also says "internship" or "engineering".
 # Checked apart from off_lane because the intern check comes first ("Assistant Professor ..., Internship Coordinator").

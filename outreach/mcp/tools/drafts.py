@@ -76,14 +76,19 @@ def result(message_id: int, revision: int, *, created: bool, unchanged: bool, bo
             "passes": sum(1 for c in found if c["severity"] == "pass")}
 
 
+def banned_list() -> list:
+    """The banned phrases, read before the write transaction opens; an unusable list is [] and run_checks blocks
+    on it (fail closed)."""
+    return load_banned()[0]
+
+
 def checks_of(ctx: Ctx, person: sqlite3.Row, *, message_id: int | None, seq: int, subject: str, body: str,
-              hook: str) -> list[dict]:
+              hook: str, banned: list) -> list[dict]:
     domain = email_domain(person["email"])
     d = DraftInput(message_id=message_id, seq=seq, subject=subject, body=body, hook=hook,
                    role_kind=person["role_kind"], person_name=person["name"], person_email=person["email"],
                    person_id=person["person_id"], company_id=person["company_id"],
                    mx=cached_mx(ctx.conn, domain, ctx.now) if domain else "none")
-    banned, _usable = load_banned()  # an unusable list is [] and run_checks blocks on it
     return run_checks(ctx.conn, d, banned=banned, now=ctx.now)
 
 
@@ -153,6 +158,7 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
     conn = ctx.conn
     subject, body, project = text(args.subject, "subject"), text(args.body, "body"), text(args.project, "project")
     hook = stored_hook(args, ctx.today)
+    banned = banned_list()
     with transaction(conn):
         p = person_row(conn, args.person_id)
         family = Family(conn)
@@ -170,7 +176,7 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
         if first is not None and args.revision is not None and args.revision != first["revision"]:
             raise stale(args.revision)
         found = checks_of(ctx, p, message_id=first["message_id"] if first else None, seq=0, subject=subject,
-                          body=body, hook=hook)
+                          body=body, hook=hook, banned=banned)
         if first is not None and (first["subject"], first["body"], first["hook"], first["project"]) == (
                 subject, body, hook, project):
             return result(first["message_id"], first["revision"], created=False, unchanged=True, body=body,
@@ -227,6 +233,7 @@ def stopped(conn: sqlite3.Connection, p: sqlite3.Row, touch: sqlite3.Row) -> Too
 def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
     conn = ctx.conn
     body = text(args.body, "body")
+    banned = banned_list()
     with transaction(conn):
         p = person_row(conn, args.person_id)
         touch = conn.execute("SELECT touch_id, state, first_sent_at FROM touch WHERE person_id = ?",
@@ -256,7 +263,8 @@ def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
         if args.revision is not None and args.revision != m["revision"]:
             raise stale(args.revision)
         subject = f"Re: {first['subject']}"
-        found = checks_of(ctx, p, message_id=m["message_id"], seq=args.seq, subject=subject, body=body, hook="")
+        found = checks_of(ctx, p, message_id=m["message_id"], seq=args.seq, subject=subject, body=body, hook="",
+                          banned=banned)
         if m["state"] == "drafted" and (m["subject"], m["body"]) == (subject, body):
             return result(m["message_id"], m["revision"], created=False, unchanged=True, body=body, found=found)
         revision = redraft(ctx, m, {"state": "drafted", "subject": subject, "body": body},

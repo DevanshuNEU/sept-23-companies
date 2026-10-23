@@ -96,6 +96,15 @@ export const jobKindLabel = {
   daily_list: 'Daily list',
   sender: 'Sender',
   import: 'Import',
+  discover: 'Discover',
+  resolve: 'Resolve',
+  find_boards: 'Find boards',
+  read_boards: 'Read boards',
+  watch_pages: 'Watch pages',
+  read_postings: 'Read postings',
+  rank: 'Rank',
+  plan: 'Plan',
+  prepare: 'Prepare',
 } satisfies Record<JobKind, string>;
 
 /** The last run of a job. `late` is derived by the API (`expectedNextAt` passed with no new run). */

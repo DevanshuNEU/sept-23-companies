@@ -1,6 +1,6 @@
 import { ApiError, type OutreachClient, type WriteOptions } from '../client';
 import type {
-  Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
+  Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, SearchIndex, SendingStatus, ShellSummary, TodayView,
 } from '../types';
@@ -114,6 +114,18 @@ export class FixtureClient implements OutreachClient {
     return structuredClone(result);
   }
 
+  /** A fixed sample: the shell's jobs and sender, with the queue and board counts of a quiet night. */
+  health(): Promise<HealthView> {
+    return this.read(() => ({
+      asOf: this.db.shell.asOf,
+      store: { version: 2, rulesetVersion: 'r-3f9a0c71b2de' },
+      jobs: this.db.shell.jobs,
+      readQueue: { queued: 14, leased: 2, leaseExpired: 0, done: 812, refused: 3, oldestQueuedAgeHours: 6.5, lastNight: null },
+      boards: { active: 47, dueNow: 5, erroring: 2 },
+      watchedPages: { total: 9, changedLast7Days: 1 },
+      sender: this.db.shell.sending,
+    }));
+  }
   shell(): Promise<ShellSummary> { return this.read(() => this.db.shell); }
   searchIndex(): Promise<SearchIndex> { return this.read(() => this.db.searchIndex); }
   searchPostings(q: string): Promise<PostingHit[]> { return this.read(() => this.db.postings.filter((p) => postingMatches(p.title, q)).slice(0, 20)); }

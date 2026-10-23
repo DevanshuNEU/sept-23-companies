@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Health */
+        get: operations["health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/health/jobs/{job}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Health Job */
+        get: operations["health_job"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ping": {
         parameters: {
             query?: never;
@@ -102,10 +136,105 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** HealthBoards */
+        HealthBoards: {
+            /** Active */
+            active: number;
+            /** Duenow */
+            dueNow: number;
+            /** Erroring */
+            erroring: number;
+        };
+        /** HealthStore */
+        HealthStore: {
+            /** Rulesetversion */
+            rulesetVersion: string | null;
+            /** Version */
+            version: number;
+        };
+        /** HealthView */
+        HealthView: {
+            /** Asof */
+            asOf: string;
+            boards: components["schemas"]["HealthBoards"];
+            /** Jobs */
+            jobs: components["schemas"]["JobRunSummary"][];
+            readQueue: components["schemas"]["ReadQueueStatus"];
+            sender: components["schemas"]["SenderSummary"];
+            store: components["schemas"]["HealthStore"];
+            watchedPages: components["schemas"]["HealthWatchedPages"];
+        };
+        /** HealthWatchedPages */
+        HealthWatchedPages: {
+            /** Changedlast7Days */
+            changedLast7Days: number;
+            /** Total */
+            total: number;
+        };
+        /** JobCount */
+        JobCount: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+        };
+        /** JobRunSummary */
+        JobRunSummary: {
+            /** Counts */
+            counts: components["schemas"]["JobCount"][];
+            /** Error */
+            error: string;
+            /** Expectednextat */
+            expectedNextAt: string | null;
+            /** Finishedat */
+            finishedAt: string | null;
+            /**
+             * Job
+             * @enum {string}
+             */
+            job: "install" | "rebuild" | "crawl" | "daily_list" | "sender" | "import" | "discover" | "resolve" | "find_boards" | "read_boards" | "watch_pages" | "read_postings" | "rank" | "plan" | "prepare";
+            /** Late */
+            late: boolean;
+            /** Startedat */
+            startedAt: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "ok" | "partial" | "failed";
+        };
         /** Ping */
         Ping: {
             /** Ok */
             ok: boolean;
+        };
+        /** ReadQueueStatus */
+        ReadQueueStatus: {
+            /** Done */
+            done: number;
+            lastNight: components["schemas"]["JobRunSummary"] | null;
+            /** Leaseexpired */
+            leaseExpired: number;
+            /** Leased */
+            leased: number;
+            /** Oldestqueuedagehours */
+            oldestQueuedAgeHours: number | null;
+            /** Queued */
+            queued: number;
+            /** Refused */
+            refused: number;
+        };
+        /** SenderSummary */
+        SenderSummary: {
+            /** Limittoday */
+            limitToday: number;
+            /** Senttoday */
+            sentToday: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "paused_by_you" | "paused_hard_block" | "outside_window" | "weekend" | "signed_out";
         };
     };
     responses: never;
@@ -116,6 +245,138 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    health_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRunSummary"][];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     ping: {
         parameters: {
             query?: never;

@@ -47,6 +47,8 @@ describe('status vocabulary', () => {
   it('names every job and its last result', () => {
     expect(jobKindLabel).toEqual({
       install: 'Install', rebuild: 'Rebuild', crawl: 'Board read', daily_list: 'Daily list', sender: 'Sender', import: 'Import',
+      discover: 'Discover', resolve: 'Resolve', find_boards: 'Find boards', read_boards: 'Read boards',
+      watch_pages: 'Watch pages', read_postings: 'Read postings', rank: 'Rank', plan: 'Plan', prepare: 'Prepare',
     });
     expect(jobStatus.running).toMatchObject({ label: 'Running', tone: 'info' });
     expect(jobStatus.ok).toMatchObject({ label: 'Finished', tone: 'idle' });

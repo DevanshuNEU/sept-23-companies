@@ -24,6 +24,7 @@ export const ALL_VIEWS: readonly ViewName[] = [
 
 /** Every method of the client and the view that serves it. A method added to the interface without a line here fails `pnpm typecheck`. */
 export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, ViewName> = {
+  health: 'health',
   shell: 'shell',
   searchIndex: 'search',
   searchPostings: 'search',
@@ -60,4 +61,4 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
 };
 
 /** The views served by the API unless `?live=` or `VITE_LIVE_VIEWS` says otherwise. Each view's task adds its name. */
-export const DEFAULT_LIVE_VIEWS: readonly ViewName[] = [];
+export const DEFAULT_LIVE_VIEWS: readonly ViewName[] = ['health'];

@@ -22,7 +22,9 @@ export type NoGoReason = 'no_sponsorship' | 'citizenship' | 'over_300' | 'defenc
 export type NoGoSource = 'devanshu' | 'rules' | 'reply' | 'import' | 'claude';
 export type Actor = 'devanshu' | 'claude' | 'sender' | 'crawler' | 'rules' | 'daily_list' | 'import' | 'system';
 export type ImportSource = 'data_js' | 'local_storage' | 'contacts_json' | 'radar_db' | 'devboard' | 'contacted_txt' | 'devvault_notes';
-export type JobKind = 'install' | 'rebuild' | 'crawl' | 'daily_list' | 'sender' | 'import';
+export type JobKind =
+  | 'install' | 'rebuild' | 'crawl' | 'daily_list' | 'sender' | 'import' | 'discover' | 'resolve' | 'find_boards'
+  | 'read_boards' | 'watch_pages' | 'read_postings' | 'rank' | 'plan' | 'prepare';
 export type ReadResult = 'ok' | 'empty' | 'error';
 export type LinkedInStep = 'request_sent' | 'accepted' | 'message_sent' | 'replied';
 export type LinkedInReason = 'past_budget' | 'no_email' | 'alum_first';
@@ -43,6 +45,20 @@ export interface JobRunSummary {
   job: JobKind; startedAt: IsoTime; finishedAt: IsoTime | null; status: 'running' | 'ok' | 'partial' | 'failed';
   error: string; counts: { label: string; value: number }[]; // from job_run.summary
   expectedNextAt: IsoTime | null; late: boolean;             // derived
+}
+
+// Health (#11 Task 6)
+export interface ReadQueueStatus {
+  queued: number; leased: number; leaseExpired: number; done: number; refused: number;
+  oldestQueuedAgeHours: number | null; lastNight: JobRunSummary | null;
+}
+export interface HealthView {
+  asOf: IsoTime;
+  store: { version: number; rulesetVersion: string | null };
+  jobs: JobRunSummary[]; readQueue: ReadQueueStatus;
+  boards: { active: number; dueNow: number; erroring: number };
+  watchedPages: { total: number; changedLast7Days: number };
+  sender: { state: SenderState; sentToday: number; limitToday: number };
 }
 
 // Shell (spec 13.1)

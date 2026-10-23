@@ -8,4 +8,9 @@ type S = components['schemas'];
 
 export type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 
-export const _parity: [Same<T.Check, S['Check']>] = [true];
+export const _parity: [
+  Same<T.Check, S['Check']>,
+  Same<T.JobRunSummary, S['JobRunSummary']>,
+  Same<T.ReadQueueStatus, S['ReadQueueStatus']>,
+  Same<T.HealthView, S['HealthView']>,
+] = [true, true, true, true];

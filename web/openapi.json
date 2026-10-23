@@ -200,6 +200,219 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "HealthBoards": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "dueNow": {
+            "title": "Duenow",
+            "type": "integer"
+          },
+          "erroring": {
+            "title": "Erroring",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active",
+          "dueNow",
+          "erroring"
+        ],
+        "title": "HealthBoards",
+        "type": "object"
+      },
+      "HealthStore": {
+        "properties": {
+          "rulesetVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rulesetversion"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "rulesetVersion"
+        ],
+        "title": "HealthStore",
+        "type": "object"
+      },
+      "HealthView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "boards": {
+            "$ref": "#/components/schemas/HealthBoards"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobRunSummary"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "readQueue": {
+            "$ref": "#/components/schemas/ReadQueueStatus"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/SenderSummary"
+          },
+          "store": {
+            "$ref": "#/components/schemas/HealthStore"
+          },
+          "watchedPages": {
+            "$ref": "#/components/schemas/HealthWatchedPages"
+          }
+        },
+        "required": [
+          "asOf",
+          "store",
+          "jobs",
+          "readQueue",
+          "boards",
+          "watchedPages",
+          "sender"
+        ],
+        "title": "HealthView",
+        "type": "object"
+      },
+      "HealthWatchedPages": {
+        "properties": {
+          "changedLast7Days": {
+            "title": "Changedlast7Days",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "changedLast7Days"
+        ],
+        "title": "HealthWatchedPages",
+        "type": "object"
+      },
+      "JobCount": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "title": "JobCount",
+        "type": "object"
+      },
+      "JobRunSummary": {
+        "properties": {
+          "counts": {
+            "items": {
+              "$ref": "#/components/schemas/JobCount"
+            },
+            "title": "Counts",
+            "type": "array"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "expectedNextAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectednextat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "job": {
+            "enum": [
+              "install",
+              "rebuild",
+              "crawl",
+              "daily_list",
+              "sender",
+              "import",
+              "discover",
+              "resolve",
+              "find_boards",
+              "read_boards",
+              "watch_pages",
+              "read_postings",
+              "rank",
+              "plan",
+              "prepare"
+            ],
+            "title": "Job",
+            "type": "string"
+          },
+          "late": {
+            "title": "Late",
+            "type": "boolean"
+          },
+          "startedAt": {
+            "title": "Startedat",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "ok",
+              "partial",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job",
+          "startedAt",
+          "finishedAt",
+          "status",
+          "error",
+          "counts",
+          "expectedNextAt",
+          "late"
+        ],
+        "title": "JobRunSummary",
+        "type": "object"
+      },
       "Ping": {
         "properties": {
           "ok": {
@@ -212,6 +425,93 @@
         ],
         "title": "Ping",
         "type": "object"
+      },
+      "ReadQueueStatus": {
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "lastNight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "leaseExpired": {
+            "title": "Leaseexpired",
+            "type": "integer"
+          },
+          "leased": {
+            "title": "Leased",
+            "type": "integer"
+          },
+          "oldestQueuedAgeHours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldestqueuedagehours"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "refused": {
+            "title": "Refused",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued",
+          "leased",
+          "leaseExpired",
+          "done",
+          "refused",
+          "oldestQueuedAgeHours",
+          "lastNight"
+        ],
+        "title": "ReadQueueStatus",
+        "type": "object"
+      },
+      "SenderSummary": {
+        "properties": {
+          "limitToday": {
+            "title": "Limittoday",
+            "type": "integer"
+          },
+          "sentToday": {
+            "title": "Senttoday",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "paused_by_you",
+              "paused_hard_block",
+              "outside_window",
+              "weekend",
+              "signed_out"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "sentToday",
+          "limitToday"
+        ],
+        "title": "SenderSummary",
+        "type": "object"
       }
     }
   },
@@ -221,6 +521,163 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/health/jobs/{job}": {
+      "get": {
+        "operationId": "health_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "title": "Job",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobRunSummary"
+                  },
+                  "title": "Response Health Job",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Health Job",
+        "tags": [
+          "health"
+        ]
+      }
+    },
     "/api/ping": {
       "get": {
         "operationId": "ping",

@@ -47,11 +47,12 @@ class Store(unittest.TestCase):
         self.co = seed_company(self.conn, "Acme")
         self.board = rs.board(self.conn, self.co)
 
-    def load(self, today: date = TODAY) -> dict[int, RankFacts]:
+    def load(self, today: date = TODAY, wages=None) -> dict[int, RankFacts]:
         canon, doubtful = canonical_ids(self.conn), doubtful_board_ids(self.conn)
         stale = load_stale(self.conn, today, max_age_months=12)
         roles = load_roles(self.conn, canon, doubtful, today, stale)
-        facts = load_facts(self.conn, canon, doubtful, roles, today, default_ranker_config(), load_wages())
+        facts = load_facts(self.conn, canon, doubtful, roles, today, default_ranker_config(),
+                           load_wages() if wages is None else wages)
         return {f.company_id: f for f in facts}
 
     def one(self, company_id: int | None = None) -> RankFacts:
@@ -277,10 +278,24 @@ class FactsTests(Store):
         self.assertEqual((f.pay_level, f.pay_basis), (2, "lca"))
         self.assertEqual(f.pay_note, "LCA median junior wage $140,000 in Austin: level 2")
         self.assertEqual(f.grade("pay_level").level, "low")  # 4 filings
-        ca = self.company("California")
-        self.ev("lca", lca(2026, jr=4, median=170_000), company_id=ca)  # level 1 in San Jose, 2 in San Francisco
-        self.hq("CA", company_id=ca)  # both areas hold CA: the lower level
-        self.assertEqual(self.load()[ca].pay_level, 1)
+
+    def test_the_lca_median_wage_area_is_the_hq_city_matched_like_a_posting_location(self):
+        bay = tuple(a for a in load_wages() if a.name in ("San Jose", "San Francisco"))
+        self.ev("lca", lca(2026, jr=10, level1=8, median=300_000))  # level 4 in both areas; the share says 1
+        self.hq("Los Angeles, CA")  # California, but in neither area: no median-based level
+        f = self.load(wages=bay)[self.co]
+        self.assertEqual((f.pay_level, f.pay_basis), (1, "lca"))
+        self.assertIn("8 of 10", f.pay_note)
+        sf = self.company("San Francisco")
+        self.ev("lca", lca(2026, jr=10, level1=8, median=170_000), company_id=sf)  # 1 in San Jose, 2 in SF
+        self.hq("San Francisco, CA", company_id=sf)
+        got = self.load(wages=bay)[sf]
+        self.assertEqual((got.pay_level, got.pay_basis), (2, "lca"))
+        self.assertIn("in San Francisco", got.pay_note)
+        bare = self.company("Bare state")
+        self.ev("lca", lca(2026, jr=10, level1=8, median=300_000), company_id=bare)
+        self.hq("CA", company_id=bare)  # a state alone names no area
+        self.assertIn("8 of 10", self.load(wages=bay)[bare].pay_note)
 
     def test_an_ambiguous_median_wage_with_no_usable_hq_falls_back_to_the_level_one_share(self):
         self.ev("lca", lca(2026, jr=10, level1=8, median=140_000))  # level 1 in San Jose, 2 in Boston

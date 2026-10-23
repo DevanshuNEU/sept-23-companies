@@ -13,8 +13,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["WAGES_PATH", "Area", "PayRange", "PayLevel", "load_wages", "parse_pay", "level_at", "pay_level",
-           "lca_pay_level"]
+__all__ = ["WAGES_PATH", "Area", "PayRange", "PayLevel", "load_wages", "parse_pay", "level_at", "matching_areas",
+           "pay_level", "lca_pay_level"]
 
 WAGES_PATH = Path(__file__).with_name("wages.toml")
 
@@ -214,6 +214,14 @@ def _matches(location: str, area: Area) -> bool:
     return any(_site_matches(site, area) for site in _WORKSITE_SPLIT.split(location))
 
 
+def matching_areas(location: str, wages: tuple[Area, ...]) -> tuple[Area, ...]:
+    """The listed areas a place names: a city with one of the area's states, or a metro name. Empty for a remote
+    role, a bare state, an unlisted city or anything that is not text."""
+    if not isinstance(location, str) or _REMOTE.search(location):
+        return ()
+    return tuple(a for a in wages if _matches(location, a))
+
+
 def _dollars(n: int) -> str:
     return f"${n:,}"
 
@@ -225,9 +233,9 @@ def pay_level(pay_text: str, location: str, wages: tuple[Area, ...], basis: str 
     if basis not in ("midpoint", "minimum"):
         raise ValueError(f"basis must be 'midpoint' or 'minimum', got {basis!r}")
     pay = parse_pay(pay_text)
-    if pay is None or not isinstance(location, str) or _REMOTE.search(location):
+    if pay is None:
         return None
-    matched = [a for a in wages if _matches(location, a)]
+    matched = matching_areas(location, wages)
     if not matched:
         return None
     mid = (pay.low + pay.high) // 2

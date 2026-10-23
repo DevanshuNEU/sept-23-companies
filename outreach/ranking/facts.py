@@ -19,10 +19,9 @@ from outreach.ranking.common import age_days, clean_text
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import (Confidence, grade_evidence, grade_no_role, grade_pay, grade_reach,
                                          grade_sponsor, weaker)
-from outreach.ranking.pay import Area, lca_pay_level, level_at, pay_level
+from outreach.ranking.pay import Area, lca_pay_level, level_at, matching_areas, pay_level
 from outreach.ranking.roles import Best, Roles, company_board_states
 from outreach.ranking.types import CompanyFacts
-from outreach.sources.keys import US_STATES
 
 __all__ = ["SHARED_DOMAIN_FLAG", "RankFacts", "recent_fiscal_years", "load_facts"]
 
@@ -82,18 +81,13 @@ def _fact_key(r: sqlite3.Row) -> tuple:
             r["recorded_at"], r["evidence_id"])
 
 
-def _hq_state(value: str) -> str | None:
-    """The US state of an hq value, "City, ST" or a bare "ST", else None."""
-    part = value.rpartition(",")[2].strip()
-    return part if part in US_STATES else None
-
-
-def _median_level(wage: int, hq_state: str | None, wages: tuple[Area, ...]) -> tuple[int, str] | None:
-    """The wage level of an LCA median junior wage. With a usable hq state: the areas that hold that state, and the
-    lowest level across them. With none: only when every listed area gives the same level. Else None (the caller
-    falls back to the level I share). A state no listed area holds is outside the table, so it is neutral."""
-    if hq_state is not None:
-        areas = [a for a in wages if hq_state in a.states]
+def _median_level(wage: int, hq: str | None, wages: tuple[Area, ...]) -> tuple[int, str] | None:
+    """The wage level of an LCA median junior wage. With a usable hq value ("City, ST"): the areas it names, matched
+    as a posting location is, and the lowest level across them; an hq that names no listed area is outside the table,
+    so it is None. With no usable hq: only when every listed area gives the same level. Else None (the caller falls
+    back to the level I share)."""
+    if hq is not None:
+        areas = matching_areas(hq, wages)
         if not areas:
             return None
         level, where = min(level_at(wage, a) for a in areas), " and ".join(a.name for a in areas)
@@ -103,6 +97,14 @@ def _median_level(wage: int, hq_state: str | None, wages: tuple[Area, ...]) -> t
             return None
         level, where = levels.pop(), "every listed area"
     return level, f"LCA median junior wage ${wage:,} in {where}: level {level}"
+
+
+def _one_hq(values: set[str], wages: tuple[Area, ...]) -> str | None:
+    """The company's hq value when its values all name the same areas (one of them, in a stable order), else None."""
+    if not values:
+        return None
+    named = {tuple(a.name for a in matching_areas(v, wages)) for v in values}
+    return min(values) if len(named) == 1 else None
 
 
 def _is_large(stage: str | None, size_low: int | None, small: dict) -> bool:
@@ -159,12 +161,12 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
         if cid not in funding or key > funding[cid][0]:
             funding[cid] = (key, r, filed)
 
-    # The hq state, from hq evidence that is not a guess (as identity reads it); two states that disagree are no state.
-    hq_states: dict[int, set[str]] = {}
+    # The hq values from hq evidence that is not a guess (as identity reads it). Two values that name different
+    # areas are no usable hq.
+    hq_values: dict[int, set[str]] = {}
     for r in conn.execute("SELECT company_id, value FROM evidence WHERE fact = 'hq' AND confidence <> 'guess'"):
-        state = _hq_state(r["value"])
-        if state is not None:
-            hq_states.setdefault(owner(r["company_id"]), set()).add(state)
+        if isinstance(r["value"], str) and r["value"].strip():
+            hq_values.setdefault(owner(r["company_id"]), set()).add(r["value"].strip())
 
     shared = {r[0] for r in conn.execute("SELECT value FROM shared_key WHERE kind = 'domain'")}
     shared_cids = {owner(r["company_id"]) for r in conn.execute("SELECT company_id, value FROM evidence "
@@ -244,8 +246,7 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
                 break
         if level is None:  # the LCA median wage of the newest counted year that has one, then the level I share
             median = next((d["median_jr_wage"] for _k, _r, d in reversed(counted) if d.get("median_jr_wage")), None)
-            hq = hq_states.get(cid, set())
-            found_median = _median_level(median, next(iter(hq)) if len(hq) == 1 else None, wages) if median else None
+            found_median = _median_level(median, _one_hq(hq_values.get(cid, set()), wages), wages) if median else None
             if found_median is not None:
                 pay_basis, level, pay_note = "lca", found_median[0], found_median[1]
         if level is None:

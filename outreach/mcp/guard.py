@@ -120,11 +120,11 @@ _VALUE_TRIGGERS = (
      "OR (NEW.fact IN ('size', 'headcount', 'domain', 'hq') AND NEW.confidence IS NOT 'guess')",
      "evidence from Claude is never locked, by hand or confirmed; a size, headcount, domain or hq is a guess"),
     ("review_item_insert", "BEFORE INSERT ON main.review_item",
-     "NEW.raised_by IS NULL OR NEW.raised_by NOT IN ('claude', 'reader')",
+     "NEW.raised_by IS NOT 'claude'",  # reader joins when #32 adds the reader tools
      "a review item from Claude is raised by claude"),
     ("review_item_update", "BEFORE UPDATE ON main.review_item", "NEW.resolution IS NOT 'cleared'",
      "Claude only clears a review item; Devanshu resolves them"),
-    ("event_insert", "BEFORE INSERT ON main.event", "NEW.actor IS NULL OR NEW.actor NOT IN ('claude', 'reader')",
+    ("event_insert", "BEFORE INSERT ON main.event", "NEW.actor IS NOT 'claude'",
      "an event from Claude has actor claude"),
 )
 

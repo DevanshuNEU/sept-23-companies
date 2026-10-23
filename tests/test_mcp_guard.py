@@ -172,6 +172,17 @@ class TriggerLayerTest(GuardCase):
         self.assert_trigger_refuses(conn, "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, "
                                           "created_at) VALUES ('flagged', ?, 'r', 'k', 'rules', ?)", (self.company, T))
 
+    def test_only_claude_may_be_the_actor_or_raise_an_item_until_reader_tools_exist(self):
+        conn = self.triggers_only()
+        self.assert_trigger_refuses(conn, "INSERT INTO event(at, recorded_at, entity, kind, actor) "
+                                          "VALUES (?, ?, 'reading', 'x', 'reader')", (T, T))
+        self.assert_trigger_refuses(conn, "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, "
+                                          "created_at) VALUES ('flagged', ?, 'r', 'k', 'reader', ?)", (self.company, T))
+        conn.execute("INSERT INTO event(at, recorded_at, entity, kind, actor) VALUES (?, ?, 'company', 'x', 'claude')",
+                     (T, T))
+        conn.execute("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+                     "VALUES ('flagged', ?, 'r', 'k', 'claude', ?)", (self.company, T))
+
 
 class AuthorizerLayerTest(GuardCase):
     def test_reads_are_allowed(self):

@@ -557,5 +557,49 @@ class FollowupsStubTest(Base):
             stop_planned(self.db, drafted, reason="replied", now=iso(MON))
 
 
+class NoThreadTest(Base):
+    """A follow-up goes only in its thread: an imported touch can have a first send and no Gmail thread."""
+
+    def imported_followup(self, thread):
+        person = self.person()
+        touch = self.db.execute("INSERT INTO touch(person_id, origin, first_sent_at, first_rfc_id, gmail_thread_id, "
+                                "created_at, updated_at) VALUES (?, 'import', ?, ?, ?, ?, ?)",
+                                (person, "2026-10-20T14:00:00Z", f"<imp.{self.n}@gmail.com>", thread,
+                                 "2026-10-20T14:00:00Z", "2026-10-20T14:00:00Z")).lastrowid
+        self.db.execute("INSERT INTO message(touch_id, seq, state, subject, body, sent_at, rfc_message_id, saved_by, "
+                        "created_at, updated_at) VALUES (?, 0, 'sent', 'Hi', 'Hello.', ?, ?, 'import', ?, ?)",
+                        (touch, "2026-10-20T14:00:00Z", f"<imp.{self.n}@gmail.com>", "2026-10-20T14:00:00Z",
+                         "2026-10-20T14:00:00Z"))
+        return seed_message(self.db, person, seq=1, subject="Re: Hi", due_on="2026-11-02")
+
+    def test_a_follow_up_with_no_thread_waits_and_is_never_claimed(self):
+        for thread in (None, ""):
+            with self.subTest(thread=thread):
+                mid = self.imported_followup(thread)
+                reasons = {v.message_id: v.reason for v in queue.verdicts(self.db, MON, CFG, day=None, gate=None)}
+                self.assertEqual(reasons[mid], "no_thread")
+                self.assertIn(reasons[mid], queue.REASONS)
+                self.assertFalse(claim.claim(self.db, self.queued(mid), rfc_id=f"<nt.{self.n}@gmail.com>",
+                                             now=iso(MON)))
+                self.assertEqual(self.message(mid)["state"], "approved")
+                self.assertEqual(self.gmail.sent, [])
+
+    def test_a_follow_up_with_no_thread_does_not_block_the_queue(self):
+        self.imported_followup(None)
+        _, ready = self.approve(company=seed_company(self.db, "Beta"))
+        self.db.execute("UPDATE message SET approved_at = '2026-11-02T13:45:00Z' WHERE message_id = ?", (ready,))
+        self.assertEqual(queue.load_queue(self.db, CFG)[-1].message_id, ready)  # the follow-up is first in line
+        picked = queue.pick(queue.verdicts(self.db, MON, CFG, day=None, gate=None), queue.load_queue(self.db, CFG))
+        self.assertEqual(picked.message_id, ready)
+
+    def test_an_empty_thread_id_from_gmail_is_never_stored_as_empty_text(self):
+        person, mid = self.approve()
+        self.assertTrue(claim.claim(self.db, self.queued(mid), rfc_id="<empty.thread@gmail.com>", now=iso(MON)))
+        claim.record_sent(self.db, mid, Sent("m-77", "", "<empty.thread@gmail.com>"), at=iso(MON), cfg=CFG,
+                          rng=self.rng)
+        # Gmail starts a new thread under its first message's id; never '' (a follow-up would leave the thread).
+        self.assertEqual(self.touch(person)["gmail_thread_id"], "m-77")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -72,11 +72,13 @@ def _still_sendable(conn: sqlite3.Connection, message_id: int) -> bool:
     message (a no-go on the person or the company family, a closed, removed, paused or held company, a touch that
     is no longer open, or a paused sender). The queue already checked these; this closes the gap between the pick
     and the claim, so a person who said stop a second ago is never sent to."""
-    row = conn.execute("SELECT t.state AS touch_state, p.person_id, p.company_id FROM message m "
-                       "JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
+    row = conn.execute("SELECT t.state AS touch_state, t.gmail_thread_id, m.seq, p.person_id, p.company_id "
+                       "FROM message m JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
                        "WHERE m.message_id = ?", (message_id,)).fetchone()
     if row is None or row["touch_state"] != "open":
         return False
+    if row["seq"] >= 1 and not row["gmail_thread_id"]:
+        return False  # a follow-up with no thread would go out as a new thread (an imported touch can lack one)
     if conn.execute("SELECT paused FROM sender WHERE sender_id = 1").fetchone()["paused"]:
         return False
     companies = company_map(conn)
@@ -95,8 +97,8 @@ def _attempts(conn: sqlite3.Connection, message_id: int) -> int:
 
 def claim(conn: sqlite3.Connection, q: Queued, *, rfc_id: str, now: str) -> bool:
     """Commit `approved -> sending` with `rfc_id` as `pending_rfc_id`, in one transaction, and append `claimed`.
-    False when nothing changed: the message moved on or was edited since `q` was read (its revision), or a stop,
-    hold or pause landed since the pick. Raises AnotherSendInFlight when another message is `sending`, and
+    False when nothing changed: the message moved on or was edited since `q` was read (its revision), a stop,
+    hold or pause landed since the pick, or it is a follow-up whose touch has no Gmail thread. Raises AnotherSendInFlight when another message is `sending`, and
     ValueError when `rfc_id` is not one Message-ID."""
     if not MESSAGE_ID.fullmatch(rfc_id or ""):
         raise ValueError("a claim needs exactly one Message-ID")
@@ -247,9 +249,13 @@ def record_sent(conn: sqlite3.Connection, message_id: int, sent: Sent, *, at: st
              message_id))
         touch_id = row["touch_id"]
         if row["seq"] == 0:
+            # Never '' (a follow-up would then start a new thread). Gmail files a message that starts a thread under
+            # that message's own id, so with no thread id given that is the thread; if it is wrong, a follow-up
+            # gets a 404 from Gmail and is refused, never sent outside the thread.
+            thread = sent.thread_id or sent.gmail_message_id or None
             conn.execute("UPDATE touch SET first_sent_at = ?, first_rfc_id = ?, gmail_thread_id = ?, updated_at = ?, "
                          "revision = revision + 1 WHERE touch_id = ? AND first_sent_at IS NULL",
-                         (stamp, sent.rfc_message_id, sent.thread_id, recorded, touch_id))
+                         (stamp, sent.rfc_message_id, thread, recorded, touch_id))
             logged = conn.execute("SELECT 1 FROM outreach_touch WHERE email_touch_id = ?", (touch_id,)).fetchone()
             if logged is None:
                 log_touch(conn, person_id=row["person_id"], company_id=company_id, channel="email", sent_at=stamp,

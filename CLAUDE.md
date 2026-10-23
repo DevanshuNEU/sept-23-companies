@@ -59,9 +59,13 @@ the mail API on :3002 (`/api/approve`, `/api/save`, `/api/skip`, `/api/unapprove
 `.claude/settings.json` denies the obvious curl forms, and the rule covers every other way too.
 
 The same rule covers the new API (`outreach/api`: :3100 in production, `OUTREACH_API_PORT` in a workspace). Never call
-its write routes (approve, unapprove, skip, save, pause, and every other POST, PUT or DELETE under `/api/`) by any
-means, on any port; `.claude/settings.json` denies the curl, wget and fetch forms, and the rule covers every other way
-too. A workspace never binds 3100.
+its write routes (approve, unapprove, skip, save, pause, resume, release, send, and every other POST, PUT or DELETE under
+`/api/`) by any means, on any port. `.claude/settings.json` denies curl, wget, httpie (`http`, `https`, `xh`), python,
+node, bun and deno commands that name one of those paths, and WebFetch to a loopback host. The PreToolUse hook
+`.claude/hooks/block_api_writes.py` also refuses any Bash command that names a loopback host (127.x, localhost, [::1],
+0.0.0.0) together with such a path or a write method or body flag, or that builds the host from a variable. Both read
+the command text only, so the rule still covers every other way: never assemble a request to get around them. A
+workspace never binds 3100.
 
 The old dashboard's code (`dashboard/app.js`) always talks to the live mail API on `127.0.0.1:3002`. Preview it only
 on `:3011` (`.claude/launch.json`): the mail API accepts calls only from pages on `:3001`, so a preview there

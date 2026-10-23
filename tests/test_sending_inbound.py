@@ -249,6 +249,42 @@ class HumanReplyTest(Base):
         self.assertEqual([r["gmail_message_id"] for r in self.inbound_rows()][-1], second.gmail_message_id)
         self.assertEqual(len(self.inbound_rows()), 2)
 
+    def test_a_reply_in_a_thread_gmail_split_is_matched_by_its_reply_headers(self):
+        _, touch_id, sent = self.send_first()
+        colleague = self.colleague()
+        self.sync()  # takes the cursor: mail outside the tracked threads is read by history from here
+        reply = self.gmail.deliver_reply(sent, "p1@acme.co", subject="A new subject, so Gmail starts a new thread",
+                                         new_thread=True)
+        self.assertNotIn(reply.thread_id, inbound.tracked_threads(self.db))
+        _, counts = self.sync()
+        self.assertEqual(counts["replies"], 1)
+        self.assertEqual(self.touch(touch_id)["state"], "replied")
+        self.assertIsNotNone(self.outreach(touch_id)["replied_at"])
+        self.assertEqual(self.verdict(colleague), "company_held")
+        self.assertEqual([r["touch_id"] for r in self.inbound_rows()], [touch_id])
+
+    def test_a_split_reply_matches_by_references_and_an_auto_reply_by_in_reply_to(self):
+        _, first, sent_a = self.send_first()
+        _, second, sent_b = self.send_first()
+        self.sync()
+        self.gmail.deliver_reply(sent_a, "p1@acme.co", subject="Fresh subject", new_thread=True,
+                                 headers={"in-reply-to": "<someone.elses@example.com>",
+                                          "references": f"<older@example.com> {sent_a.rfc_message_id}"})
+        self.gmail.deliver_auto_reply(sent_b, "p2@acme.co", subject="Automatic reply: away", new_thread=True)
+        self.sync()
+        self.assertEqual(self.touch(first)["state"], "replied")
+        self.assertEqual((self.touch(second)["state"], self.touch(second)["auto_reply_at"] is not None),
+                         ("open", True))
+
+    def test_a_reply_to_someone_elses_message_outside_the_threads_writes_nothing(self):
+        _, touch_id, sent = self.send_first()
+        self.sync()
+        self.gmail.deliver_reply(sent, "p1@acme.co", subject="Other", new_thread=True,
+                                 headers={"in-reply-to": "<not.ours@example.com>", "references": "<not.ours@example.com>"})
+        self.sync()
+        self.assertEqual(self.touch(touch_id)["state"], "open")
+        self.assertEqual(self.inbound_rows(), [])
+
     def test_a_reply_dated_before_the_send_by_gmails_clock_still_records(self):
         _, touch_id, sent = self.send_first()
         meta = self.gmail.deliver_reply(sent, "p1@acme.co")

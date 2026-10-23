@@ -124,13 +124,17 @@ class FakeGmail(MailClient):
         return meta
 
     def deliver_reply(self, to: Sent, from_addr: str, *, subject: str | None = None,
-                      headers: Mapping[str, str] | None = None, snippet: str = "") -> MessageMeta:
+                      headers: Mapping[str, str] | None = None, snippet: str = "",
+                      new_thread: bool = False) -> MessageMeta:
+        """A reply to `to`. `new_thread=True` is a reply Gmail filed in a thread of its own (a changed subject, or
+        a client that drops the thread): its In-Reply-To and References still name our email."""
         original = self._messages[to.gmail_message_id]
-        return self._inbound(to.thread_id, from_addr, subject or "Re: " + original.subject,
-                             self._reply_headers(to, from_addr, headers), snippet)
+        return self._inbound(self._new_thread() if new_thread else to.thread_id, from_addr,
+                             subject or "Re: " + original.subject, self._reply_headers(to, from_addr, headers), snippet)
 
-    def deliver_auto_reply(self, to: Sent, from_addr: str, *, subject: str = "Automatic reply") -> MessageMeta:
-        return self._inbound(to.thread_id, from_addr, subject,
+    def deliver_auto_reply(self, to: Sent, from_addr: str, *, subject: str = "Automatic reply",
+                           new_thread: bool = False) -> MessageMeta:
+        return self._inbound(self._new_thread() if new_thread else to.thread_id, from_addr, subject,
                              self._reply_headers(to, from_addr, {"auto-submitted": "auto-replied"}), "")
 
     def deliver_bounce(self, to: Sent, *, dsn: Literal["hard", "policy", "delay", "limit"] = "hard",

@@ -11,6 +11,7 @@ an incomplete read (never "no replies"), a reply holds the whole surviving compa
 queued messages, and a bounce stops that touch's queued messages. A Gmail limit notice is about his account, not
 the recipient: it pauses sending and never marks a touch bounced.
 """
+import re
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -30,7 +31,8 @@ from outreach.store.atomic import atomic
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event, record_outcome
 
-__all__ = ["Snapshot", "InboundRead", "tracked_threads", "tracked_subjects", "tracked_addresses", "known_ids",
+__all__ = ["Snapshot", "InboundRead", "tracked_threads", "tracked_subjects", "tracked_addresses",
+           "tracked_message_ids", "match_by_reply_headers", "known_ids",
            "snapshot", "read_inbound", "apply_inbound", "observe_stop_tags", "verify_imported"]
 
 
@@ -59,6 +61,34 @@ def tracked_addresses(conn: sqlite3.Connection) -> dict[str, int]:
     return {row[0].strip().lower(): row[1] for row in conn.execute(
         "SELECT p.email, t.touch_id FROM touch t JOIN person p ON p.person_id = t.person_id "
         "WHERE t.first_sent_at IS NOT NULL AND p.email IS NOT NULL AND p.email <> ''")}
+
+
+def tracked_message_ids(conn: sqlite3.Connection) -> dict[str, int]:
+    """Each Message-ID the sender (or the import) put on a sent email, to its touch id: every sent message's
+    `rfc_message_id` and every touch's `first_rfc_id`. A reply Gmail filed outside the thread still names one."""
+    found: dict[str, int] = {}
+    for rfc, touch_id in conn.execute(
+            "SELECT rfc_message_id, touch_id FROM message WHERE state = 'sent' AND rfc_message_id IS NOT NULL "
+            "UNION ALL SELECT first_rfc_id, touch_id FROM touch WHERE first_rfc_id IS NOT NULL"):
+        key = normalise_message_id(rfc)
+        if key:
+            found.setdefault(key, touch_id)
+    return found
+
+
+_REFERENCE = re.compile(r"<[^<>\s]+>")
+
+
+def match_by_reply_headers(meta: MessageMeta, ids: Mapping[str, int]) -> int | None:
+    """The touch a message answers, by its In-Reply-To, then its References (newest first), against our own
+    Message-IDs; None when it names none of them."""
+    for name in ("in-reply-to", "references"):
+        refs = _REFERENCE.findall(meta.headers.get(name) or "")
+        for ref in reversed(refs):
+            touch_id = ids.get(normalise_message_id(ref))
+            if touch_id is not None:
+                return touch_id
+    return None
 
 
 def known_ids(conn: sqlite3.Connection) -> set[str]:
@@ -276,8 +306,9 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, *, account: str, 
                   notify: Notifier) -> dict[str, int]:
     """Classify and apply what `read_inbound` read, in one transaction (a savepoint inside the caller's).
 
-    His own messages, delay notices and mail outside the tracked threads (but for a bounce matched by its failed
-    recipient or a sent subject) write nothing. Everything else writes one `inbound_message` row, once per Gmail
+    His own messages, delay notices and mail outside the tracked threads write nothing, except a reply whose
+    In-Reply-To or References names one of our Message-IDs (Gmail split the thread) and a bounce matched by those
+    headers, its failed recipient or a sent subject: those count as if they were in the thread. Everything else writes one `inbound_message` row, once per Gmail
     message, and then:
     - a person's reply: the touch `replied` (from `open`, `closed` or `bounced`) with `replied_at` and kind
       `unsorted` when unset; its outreach touch's first `replied` outcome (actor `sender`, at its current revision);
@@ -293,9 +324,16 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, *, account: str, 
     with atomic(conn, "apply_inbound"):
         threads = tracked_threads(conn)
         unthreaded: tuple[dict, dict] | None = None
+        our_ids: dict[str, int] | None = None
         for meta in read.metas:
             found = classify(meta, account)
             touch_id = threads.get(meta.thread_id)
+            if touch_id is None and found.kind in ("human", "auto_reply", "bounce"):
+                # Gmail split the thread (a new subject, or a client that dropped it): the reply headers still
+                # name our email.
+                if our_ids is None:
+                    our_ids = tracked_message_ids(conn)
+                touch_id = match_by_reply_headers(meta, our_ids)
             if touch_id is None and found.kind == "bounce":
                 if unthreaded is None:
                     unthreaded = (tracked_addresses(conn), tracked_subjects(conn))

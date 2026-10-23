@@ -11,6 +11,7 @@ import anyio
 from mcp import Client, StdioServerParameters
 
 from outreach.mcp import server
+from outreach.mcp.tools import reads
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase, fingerprint
 from tests.storetest import fresh_store
@@ -432,8 +433,8 @@ class AllReadsTest(McpCase):
         self.assertEqual(self.db.execute("SELECT state FROM message WHERE message_id = ?", (mid,)).fetchone()[0],
                          "drafted")
 
-    def test_every_real_tool_declares_no_grants(self):
-        for spec in server.tool_specs():
+    def test_every_read_tool_declares_no_grants(self):
+        for spec in reads.TOOLS:
             self.assertEqual(dict(spec.grants), {}, spec.name)
 
 
@@ -471,7 +472,7 @@ class StdioTest(unittest.TestCase):
 
         instructions, tools, noisy, ranked, bad = anyio.run(go)
         self.assertEqual(instructions, server.INSTRUCTIONS)
-        self.assertEqual(tools, {"ranked_companies", "company", "person", "followups_due", "noisy"})
+        self.assertEqual(tools, {s.name for s in server.tool_specs()} | {"noisy"})
         self.assertEqual(json.loads(noisy.content[0].text), {"ok": True})
         self.assertEqual(json.loads(ranked.content[0].text)["companies"][0]["name"], "Acme")
         self.assertTrue(bad.is_error)

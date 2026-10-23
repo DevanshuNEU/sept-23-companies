@@ -26,7 +26,9 @@ from tests.storetest import fresh_store
 from tests.test_mcp_boundary import forbidden
 
 ROOT = Path(__file__).resolve().parent.parent
-PINNED_TOOLS = {"ranked_companies", "company", "person", "followups_due"}
+READ_TOOLS = {"ranked_companies", "company", "person", "followups_due"}
+WRITE_TOOLS = {"record_research", "flag_review", "mark_no_go"}
+PINNED_TOOLS = READ_TOOLS | WRITE_TOOLS
 FORBIDDEN_PROPERTIES = frozenset({
     "state", "approved", "approved_at", "approve", "send", "sent", "sent_at", "skip", "unapprove", "pause", "paused",
     "resume", "confirm", "confirmed", "reason_state", "saved_by", "added_by", "raised_by", "actor", "source",
@@ -180,8 +182,8 @@ class RealToolsTest(unittest.TestCase):
     def test_tool_list_is_pinned(self):
         self.assertEqual({s.name for s in server.tool_specs()}, PINNED_TOOLS)
 
-    def test_every_real_tool_is_read_only_until_the_write_batch(self):
-        self.assertEqual([s.name for s in server.tool_specs() if s.grants], [])
+    def test_only_the_write_tools_declare_grants(self):
+        self.assertEqual({s.name for s in server.tool_specs() if s.grants}, WRITE_TOOLS)
 
     def test_every_input_schema_is_closed_and_bounded(self):
         for spec in server.tool_specs():
@@ -190,7 +192,7 @@ class RealToolsTest(unittest.TestCase):
                 kind = sub.get("type")
                 if kind == "object":
                     self.assertIs(sub.get("additionalProperties"), False, where)
-                if kind == "string":
+                if kind == "string" and "enum" not in sub:  # an enum is bounded by its values
                     self.assertIn("maxLength", sub, where)
                 if kind == "array":
                     self.assertIn("maxItems", sub, where)

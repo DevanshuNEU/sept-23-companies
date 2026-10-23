@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from outreach.drafts.followups import RELEASE_KIND, canonical_company, company_map, due_followups, held_survivors
-from outreach.store.writes import append_event
+from outreach.store.writes import append_event, record_outcome
 from tests.sendtest import MON, bounce, seed_email_person, seed_message, seed_sent
 from tests.storetest import fresh_store, seed_company
 
@@ -247,16 +247,40 @@ class ReplyHoldTest(unittest.TestCase):
         self.db.execute("UPDATE outreach_touch SET replied_at = NULL, reply_kind = NULL WHERE touch_id = ?", (touch,))
         self.assertNotIn(self.company, self.held())
 
+    def record_reply(self, touch_id, at):
+        """A reply recorded as the API and the sender record one (with its `replied` event)."""
+        record_outcome(self.db, touch_id, kind="replied", at=at, reply_kind="interested", revision=1)
+
     def test_a_release_ends_the_reply_hold_and_a_later_reply_holds_again(self):
         survivor = seed_company(self.db, "Survivor")
         duplicate = seed_company(self.db, "Duplicate")
-        self.reach(company=duplicate, replied_at="2026-11-05T15:00:00Z")
+        self.record_reply(self.reach(company=duplicate), "2026-11-05T15:00:00Z")
         self.db.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
                         "WHERE company_id = ?", (survivor, duplicate))
-        self.release(survivor, "2026-11-06T15:00:00Z")
+        for company in (survivor, duplicate):  # the release action releases every company in the family
+            self.release(company, "2026-11-06T15:00:00Z")
         self.assertNotIn(survivor, self.held())
-        self.reach(company=survivor, replied_at="2026-11-07T15:00:00Z")
+        self.record_reply(self.reach(company=survivor), "2026-11-07T15:00:00Z")
         self.assertIn(survivor, self.held())
+
+    def test_a_merge_cannot_drop_a_hold(self):
+        survivor = seed_company(self.db, "Survivor")
+        duplicate = seed_company(self.db, "Duplicate")
+        self.record_reply(self.reach(company=survivor), "2026-11-04T15:00:00Z")
+        self.record_reply(self.reach(company=duplicate), "2026-11-05T15:00:00Z")
+        self.release(survivor, "2026-11-06T15:00:00Z")  # the survivor's own hold was released before the merge
+        self.assertNotIn(survivor, self.held())
+        self.db.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
+                        "WHERE company_id = ?", (survivor, duplicate))
+        self.assertIn(survivor, self.held())  # the duplicate's reply was never released
+
+    def test_a_back_dated_reply_recorded_after_a_release_still_holds(self):
+        self.record_reply(self.reach(), "2026-11-04T15:00:00Z")
+        self.release(self.company, "2026-11-06T15:00:00Z")
+        self.assertNotIn(self.company, self.held())
+        # Logged on the 7th for a LinkedIn reply that came on the 5th, before the release: it is news, so it holds.
+        self.record_reply(self.reach(), "2026-11-05T15:00:00Z")
+        self.assertIn(self.company, self.held())
 
     def test_a_release_does_not_clear_a_hold_by_touch(self):
         person = self.person()

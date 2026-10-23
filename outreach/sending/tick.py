@@ -107,14 +107,28 @@ def _lock_path(conn: sqlite3.Connection) -> Path:
     raise RuntimeError("the sender runs on a store file, not an in-memory database")
 
 
+class _NoLock(Exception):
+    """The lock file could not be opened or locked (not because another tick holds it)."""
+
+
+def _open_lock(path: Path) -> int:
+    return os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+
+
 @contextlib.contextmanager
 def _lock(conn: sqlite3.Connection) -> Iterator[None]:
-    fd = os.open(_lock_path(conn), os.O_RDWR | os.O_CREAT, 0o600)
+    path = _lock_path(conn)
+    try:
+        fd = _open_lock(path)
+    except OSError as err:
+        raise _NoLock(f"the tick lock {path} could not be opened ({_text(err)}), so this tick did nothing") from None
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise _Busy() from None
+        except OSError as err:
+            raise _NoLock(f"the tick lock {path} could not be taken ({_text(err)}), so this tick did nothing") from None
         yield
     finally:
         os.close(fd)
@@ -157,8 +171,24 @@ def run_tick(conn: sqlite3.Connection, deps: TickDeps, cfg: SendConfig, *, dry_r
         with _lock(conn):
             return _Tick(conn, deps, cfg, dry_run).run()
     except _Busy:
-        return TickReport(auth="skipped", day=None, reconciled={}, inbound={}, sent=(), would_send=None, waiting={},
-                          dry_run=dry_run, lines=(BUSY_LINE,))
+        return _skipped(dry_run, BUSY_LINE)
+    except _NoLock as err:
+        line = scrub(str(err))
+        _log.warning("sender tick did not run: %s", line)
+        if not dry_run:
+            try:
+                with transaction(conn):
+                    at = _stamp(deps.clock())
+                    conn.execute("INSERT INTO job_run(job, started_at, finished_at, status, error) "
+                                 "VALUES ('sender', ?, ?, 'failed', ?)", (at, at, line))
+            except sqlite3.Error as again:
+                _log.warning("its failed run could not be recorded: %s", _text(again))
+        return _skipped(dry_run, line)
+
+
+def _skipped(dry_run: bool, line: str) -> TickReport:
+    return TickReport(auth="skipped", day=None, reconciled={}, inbound={}, sent=(), would_send=None, waiting={},
+                      dry_run=dry_run, lines=(line,))
 
 
 class _Tick:

@@ -552,6 +552,24 @@ class LockTest(Base):
         self.assertEqual(len(self.gmail.sent), 1)
         self.assertEqual(len(self.runs()), 1)
 
+    def test_a_lock_file_that_cannot_be_opened_fails_the_run_in_one_line(self):
+        self.approve()
+        denied = PermissionError(13, "Permission denied", str(Path(self.path).with_name(LOCK_NAME)))
+        with mock.patch.object(tick, "_open_lock", side_effect=denied):
+            dry = self.tick(dry_run=True)
+            self.assertEqual(self.runs(), [])  # a dry run writes nothing, even here
+            report = self.tick()
+        for r in (dry, report):
+            self.assertEqual(len(r.lines), 1)
+            self.assertIn("lock", r.lines[0])
+            self.assertIn("Permission denied", r.lines[0])
+            self.assertNotIn("Traceback", r.lines[0])
+            self.assertEqual(r.sent, ())
+        run = self.runs()[-1]
+        self.assertEqual(run["status"], "failed")
+        self.assertIn("lock", run["error"])
+        self.assertEqual(self.gmail.calls, [])
+
     def test_locked_store_fails_the_tick_without_sending(self):
         mid = self.approve()
         self.db.execute("PRAGMA busy_timeout = 0")

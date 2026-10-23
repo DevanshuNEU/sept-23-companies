@@ -40,8 +40,8 @@ export function createTransport({ fetchFn = (url, init) => fetch(url, init), bas
     } finally {
       done();
     }
-    if (!res.ok) throw toApiError(res.status, body ?? undefined);
-    if (body === null) throw unreadable();
+    if (!res.ok) throw toApiError(res.status, body ?? undefined, write);
+    if (body === null) throw unreadable(write);
     return body as T;
   }
 

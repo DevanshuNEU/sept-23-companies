@@ -168,6 +168,25 @@ describe('transport errors', () => {
     expect((await caught(createTransport({ fetchFn }).get('/api/x'))).code).toBe('network');
   });
 
+  it('a write whose 2xx answer cannot be read says it may have gone through', async () => {
+    const { fetchFn } = fake(new Response('<html></html>', { status: 200 }));
+    const e = await caught(createTransport({ fetchFn }).send('POST', '/api/x', {}, WRITE));
+    expect(e.code).toBe('network');
+    expect(e.message).toMatch(/may have gone through/);
+    expect(e.message).not.toMatch(/Try again\.$/);
+  });
+
+  it('a write whose 5xx answer is not JSON says it may have gone through; a read does not', async () => {
+    const page = () => new Response('<html><body>Bad gateway</body></html>', { status: 502, headers: { 'Content-Type': 'text/html' } });
+    const { fetchFn } = fake(page(), page());
+    const t = createTransport({ fetchFn });
+    const write = await caught(t.send('POST', '/api/x', {}, WRITE));
+    expect(write.code).toBe('network');
+    expect(write.message).toMatch(/may have gone through/);
+    const read = await caught(t.get('/api/x'));
+    expect(read.message).not.toMatch(/gone through/);
+  });
+
   it('503 busy says nothing was saved', async () => {
     const { fetchFn } = fake(envelope('busy', 'The store is busy right now. Nothing was saved. Try again in a moment.', 503));
     const e = await caught(createTransport({ fetchFn }).send('POST', '/api/x', {}, WRITE));

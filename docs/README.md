@@ -25,7 +25,10 @@ Decisions live in GitHub issue #9. This folder holds the design, plans, and the 
 | `launchd/com.devanshu.outreach-crawl.plist.template` | The `tick` job, every 30 minutes; `{{LIVE_CHECKOUT}}` and `{{LOG_PATH}}` only; installed by #17's deploy tool, never by the repo. Label `com.devanshu.outreach-crawl` |
 | `tests/test_crawl_*.py`, `tests/fixtures/crawl/`, `tests/pipeline/stages_crawl.py` | The crawler's tests on saved responses and `tests/fakes.py` (no network), and the `read_boards` stage of the pipeline flow test with its invariants. `tests/mutation_check.py` carries the crawler's mutation entries |
 | `superpowers/plans/2026-10-21-posting-reader.md` | #32: the read queue, quote checks, the night job through Claude Code, the labeled set and eval |
-| `superpowers/plans/2026-10-21-ranking.md` | #6: lanes, hides with evidence, config-weighted signals with reasons, stored scores |
+| `superpowers/plans/2026-10-21-ranking.md` | #6: lanes, hides with evidence, config-weighted signals with reasons, stored scores. Built; where the code differs from the plan text, the rulings in the plan and the hand-offs below win |
+| `outreach/ranking/` (how to run) | `uv run python -m outreach.ranking --help` lists the commands: `rank [--dry-run] [--today YYYY-MM-DD] [--diff-with VERSION]` (score every listed company in one transaction; `--dry-run` writes nothing, and `--diff-with` ranks with the current code and config and prints what moved against a stored version, so a weight change is judged before it is committed) and `diff [--old VERSION] [--new VERSION]` (what moved between two stored versions). Every command opens the store through `connect()`, so the live store opens only from the live checkout |
+| `outreach/ranking/` (modules) | `config.toml` and `config.py` (every weight and number), `wages.toml` and `pay.py` (pay text to a wage level), `common.py` (canonical ids, doubtful boards), `confidence.py` (grades and the rank confidence), `roles.py` (lanes and the best posting; stale postings last), `facts.py` (`RankFacts` loader), `hide.py` (the hide policy and the one `no_go` row ranking writes), `signals/` (the eleven signals), `score.py` (points and the stored JSON), `scores.py` (`company_score` reads and writes), `review.py` (size and sponsorship-conflict items), `version.py` (the ranker version hash), `job.py` (`compute_rank`, `run_rank`, the `weights_changed` event), `diff.py` (`what_moved`) |
+| `tests/test_ranking_*.py`, `tests/ranking_*.py`, `tests/fixtures/ranking/`, `tests/pipeline/stages_ranking.py` | The ranker's tests on seeded stores (no network), 21 fixture employers with 44 postings, and the `rank` stage of the pipeline flow test with its invariants. `tests/mutation_check.py` carries the ranker's mutation entries |
 | `superpowers/plans/2026-10-21-daily-people-plan.md` | #15: Today as a plan of people, capacity, the prepare step, LinkedIn notes and checks |
 | `superpowers/plans/2026-10-21-api.md` | #11: FastAPI, generated types, idempotent writes, outcomes, the HTTP client that replaces the fixtures |
 | `superpowers/plans/2026-10-21-web-experience.md` | #33: the people plan, outcomes, progress, wins and the finish line (mockups first) |
@@ -59,7 +62,7 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
   `"old"`, `"not_on_board"` or both; `Stale.reason` is the text to show. Leave `max_age_months` unset so the config's
   `stale_after_months` applies. Do not re-derive the rule and do not read the config value yourself.
 - The reason texts are "posted 2016-03-02, over 12 months" and "not on the board at its latest read (last listed
-  2026-10-18 or later)". Use the second one in #6's tests; the ranking plan still quotes an older wording.
+  2026-10-18 or later)". Use the second one in #6's tests.
 - A stale posting is not a live role, is shown last with the flag and its reason, and is never a hide and never a close.
   A failed read never makes a posting stale.
 - A posting on a board the platform has never read has no absence signal, so only the age rule can flag it. Grade such a

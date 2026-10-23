@@ -1,6 +1,7 @@
 """The app factory. Routers are found by scanning `outreach.api.routers`, so a view is one new module."""
 import importlib
 import pkgutil
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
@@ -8,6 +9,7 @@ from fastapi.routing import APIRoute
 import outreach.api.routers
 from outreach.api import errors, openapi
 from outreach.api.guards import GuardMiddleware
+from outreach.api.idempotency import prune_at_startup
 from outreach.api.models.ping import Ping
 from outreach.api.settings import Settings, settings_from_env
 from outreach.store.db import guard
@@ -23,7 +25,14 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
     """
     settings = settings or settings_from_env()
     guard(settings.db_path)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        prune_at_startup(settings, app.state.clock())  # old idempotency keys, once per start
+        yield
+
     app = FastAPI(
+        lifespan=lifespan,
         title="Outreach API",
         version="0.1.0",
         docs_url=None,

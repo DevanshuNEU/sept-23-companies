@@ -344,16 +344,21 @@ def send_one(conn: sqlite3.Connection, client: MailClient, q: Queued, cfg: SendC
     except GmailError as err:
         returned = _stamp(clock())
         if err.kind == "message_id_rewritten":
+            # First, one small commit that makes a second send impossible: the sender paused, and the message
+            # send_unknown, never retryable, keeping the ids Gmail stored it under. A Sent scan by the claimed id
+            # can never find this email, so reconcile records it from these ids and never fails it.
+            with transaction(conn):
+                record_unclear(conn, q.message_id, err, at=returned, cfg=cfg, rng=rng,
+                               extra={"stored_rfc_id": err.sent.rfc_message_id,
+                                      "gmail_message_id": err.sent.gmail_message_id,
+                                      "thread_id": err.sent.thread_id})
+                _pause_rewritten(conn, q.message_id, err.sent, rfc, at=returned)
+            # Then record it sent. If that fails (or the process dies here), the next reconcile does it.
             try:
                 with transaction(conn):
                     record_sent(conn, q.message_id, err.sent, at=returned, cfg=cfg, rng=rng)
-                    _pause_rewritten(conn, q.message_id, err.sent, rfc, at=returned)
             except Exception:
-                # A Sent scan by the claimed id can never find this email, so if it cannot be recorded sent it is
-                # at least recorded as an unclear send that may not be retried.
-                record_unclear(conn, q.message_id, err, at=returned, cfg=cfg, rng=rng,
-                               extra={"stored_rfc_id": err.sent.rfc_message_id,
-                                      "gmail_message_id": err.sent.gmail_message_id})
+                pass  # it stays send_unknown with the stored ids, paused; the error raised below is the news
             raise
         record_unclear(conn, q.message_id, err, at=returned, cfg=cfg, rng=rng)
         raise
@@ -396,12 +401,26 @@ def leftover_claims(conn: sqlite3.Connection, now: str) -> int:
 class Unclear:
     """A send in doubt, and what a Sent scan for it needs. `not_before_ms` is the claim time less 5 minutes;
     `send_returned_ms` is the time of its `send_unknown` event (when the failed call returned, or when a crashed
-    claim was found), which `find_sent` takes as `send_returned_ms`."""
+    claim was found), which `find_sent` takes as `send_returned_ms`. `stored` is set for an email Gmail took and
+    stored under another Message-ID (`message_id_rewritten`): it went out, and these are the ids Gmail kept."""
     message_id: int
     rfc_id: str
     claimed_at: str
     not_before_ms: int
     send_returned_ms: int
+    stored: Sent | None = None
+
+
+def _stored(event: sqlite3.Row | None) -> Sent | None:
+    """The ids Gmail kept for a rewritten send, from its `send_unknown` event, or None for any other unclear send."""
+    if event is None:
+        return None
+    detail = json.loads(event["detail"])
+    if detail.get("error_kind") != "message_id_rewritten" or not detail.get("gmail_message_id") \
+            or not detail.get("stored_rfc_id"):
+        return None
+    return Sent(gmail_message_id=detail["gmail_message_id"], thread_id=detail.get("thread_id") or "",
+                rfc_message_id=detail["stored_rfc_id"])
 
 
 def _unknown_event(conn: sqlite3.Connection, rfc_id: str) -> sqlite3.Row | None:
@@ -419,7 +438,7 @@ def unclear(conn: sqlite3.Connection) -> list[Unclear]:
         returned = event["at"] if event is not None else max(row["claimed_at"], row["updated_at"])
         out.append(Unclear(message_id=row["message_id"], rfc_id=row["pending_rfc_id"], claimed_at=row["claimed_at"],
                            not_before_ms=_ms(row["claimed_at"]) - CLAIM_MARGIN_MS,
-                           send_returned_ms=max(_ms(returned), _ms(row["claimed_at"]))))
+                           send_returned_ms=max(_ms(returned), _ms(row["claimed_at"])), stored=_stored(event)))
     return out
 
 
@@ -447,8 +466,9 @@ def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, b
               cfg: SendConfig, rng: random.Random) -> dict[str, int]:
     """Apply Sent scans made earlier with no transaction open (`found`: message id to what `find_sent` returned).
 
-    A hit with the message's own Message-ID becomes `sent` (`record_sent(..., reconciled=True)`, dated to the
-    claim). A complete miss becomes `failed` once `reconcile_after_minutes` have passed since the send returned (and
+    A send Gmail stored under another Message-ID (`Unclear.stored`) becomes `sent` from those ids, whatever the scan
+    found: it went out, and a scan by the claimed id can never find it. A hit with the message's own Message-ID
+    becomes `sent` (`record_sent(..., reconciled=True)`, dated to the claim). A complete miss becomes `failed` once `reconcile_after_minutes` have passed since the send returned (and
     since the claim). Anything else stays `send_unknown`: an incomplete scan, a younger send, or a hit for another
     Message-ID. Matching is by Message-ID only, never by recipient or subject. Runs in one transaction (a savepoint
     inside the caller's). Returns the counts `sent`, `failed` and `waiting`."""
@@ -458,6 +478,11 @@ def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, b
     counts = {"sent": 0, "failed": 0, "waiting": 0}
     with atomic(conn, "reconcile"):
         pending = {u.message_id: u for u in unclear(conn)}
+        for u in [u for u in pending.values() if u.stored is not None]:
+            # Gmail kept it under another Message-ID: it went out. Recorded from those ids, scan or no scan.
+            record_sent(conn, u.message_id, u.stored, at=u.claimed_at, cfg=cfg, rng=rng, reconciled=True, now=stamp)
+            counts["sent"] += 1
+            del pending[u.message_id]
         for message_id, (hit, complete) in found.items():
             u = pending.get(message_id)
             if u is None:

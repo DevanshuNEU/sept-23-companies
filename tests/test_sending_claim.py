@@ -370,8 +370,35 @@ class UnclearTest(Base):
         hard = self.db.execute("SELECT detail FROM event WHERE entity = 'sender' AND kind = 'hard_block'").fetchall()
         self.assertEqual([json.loads(h[0])["kind"] for h in hard], ["message_id_rewritten"])
         self.assertEqual(len(self.gmail.sent), 1)
-        self.assertEqual(self.events(mid, "send_unknown"), [])
+        # The pause and a never-retried send_unknown were committed first, so a kill mid-record could not resend.
+        [unknown] = self.events(mid, "send_unknown")
+        detail = json.loads(unknown["detail"])
+        self.assertEqual((detail["error_kind"], detail["retryable"], detail["stored_rfc_id"]),
+                         ("message_id_rewritten", False, caught.exception.sent.rfc_message_id))
 
+    def test_a_kill_during_the_rewritten_record_sends_once_and_pauses(self):
+        _, mid = self.approve()
+        self.gmail.rewrite_message_ids = True
+        with mock.patch.object(claim, "record_sent", side_effect=SystemExit("killed while recording")):
+            with self.assertRaises(SystemExit):
+                self.send(mid)
+        self.assertFalse(self.db.in_transaction)
+        sender = self.db.execute("SELECT paused, pause_kind FROM sender").fetchone()
+        self.assertEqual((sender["paused"], sender["pause_kind"]), (1, "hard_block"))
+        self.assertEqual(self.message(mid)["state"], "send_unknown")
+        stored = self.gmail.sent[0][1]
+        for _ in range(4):
+            self.clock.advance(minutes=11)
+            settle_and_send(self.db, self.gmail, self.clock, self.rng, CFG)
+            self.db.execute("UPDATE sender SET paused = 0, pause_kind = NULL, paused_at = NULL")  # even resumed
+        self.assertEqual(len(self.gmail.sent), 1)
+        row = self.message(mid)
+        self.assertEqual((row["state"], row["rfc_message_id"], row["gmail_message_id"]),
+                         ("sent", stored.rfc_message_id, stored.gmail_message_id))
+        self.assertEqual(self.events(mid, "claim_failed"), [])
+        self.assertEqual(self.touch(self.db.execute("SELECT person_id FROM touch WHERE touch_id = ?",
+                                                    (row["touch_id"],)).fetchone()[0])["gmail_thread_id"],
+                         stored.thread_id)
 
     def test_a_rewritten_send_that_cannot_be_recorded_is_never_retried(self):
         _, mid = self.approve()
@@ -387,7 +414,10 @@ class UnclearTest(Base):
         for _ in range(3):
             self.clock.advance(minutes=11)
             settle_and_send(self.db, self.gmail, self.clock, self.rng, CFG)
-        self.assertEqual(self.message(mid)["state"], "failed")
+        # Recorded from the ids Gmail kept, never failed as "did not go out".
+        self.assertEqual(self.message(mid)["state"], "sent")
+        self.assertEqual(self.message(mid)["rfc_message_id"], self.gmail.sent[0][1].rfc_message_id)
+        self.assertEqual(self.events(mid, "claim_failed"), [])
         self.assertEqual(len(self.gmail.sent), 1)
 
 

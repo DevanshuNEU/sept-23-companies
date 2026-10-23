@@ -1,0 +1,31 @@
+# The posting reader's settings (#32). The model and the prompt file are part of the reader version (version.py);
+# everything else here changes how the queue and the night job run, never what a reading means.
+
+[reader]
+# The model the night job asks for. Changing it makes a new reader version, which runs in shadow until promoted.
+model = "claude-haiku-5-5"
+# The reader version whose readings decide postings. "" means none: every decision stays provisional and nothing hides.
+# `python -m outreach.reader promote` writes this line, and only when the eval gate passes.
+promoted_version = ""
+# A body shorter than this (in characters) is never read: Workday and Oracle stubs say nothing a reader could use.
+min_body_chars = 500
+# Postings in one model call.
+batch_size = 20
+# How long a leased posting is held before another caller may take it.
+lease_minutes = 30
+# Leases a posting may use up before it ends refused and is shown, flagged.
+max_attempts = 3
+
+[priority]
+# The queue ranks lane 1 postings only at this many top-scored companies (a company with a final hide takes no slot).
+top_companies = 200
+
+[night]
+max_postings_per_night = 400
+max_batches = 25
+# Failed calls in a row (not counting a session limit or an auth error) before the night stops.
+max_consecutive_failures = 2
+call_timeout_s = 900
+# Lower-case text that marks a model reply as "the session ran out" or "not signed in": stop cleanly, never retry.
+session_limit_patterns = ["usage limit", "session limit", "limit reached", "resets at"]
+auth_patterns = ["not logged in", "please run /login", "authentication", "invalid api key", "oauth token"]

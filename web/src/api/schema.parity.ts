@@ -20,6 +20,8 @@ export const _parity: [
   Same<T.CompanyEvent, S['CompanyEvent']>,
   Same<T.ReviewItem, S['ReviewItem']>,
   Same<T.CompanyView, S['CompanyView']>,
+  Same<T.ScoreSignal, S['ScoreSignal']>,
+  Same<T.ScoreView, S['ScoreView']>,
   Same<T.SearchCompany, S['SearchCompany']>,
   Same<T.CompanyHit, S['SearchCompany']>,
   Same<T.SearchPerson, S['SearchPerson']>,
@@ -46,4 +48,4 @@ export const _parity: [
   Same<T.ResolvedReview, S['ResolvedReview']>,
   Same<T.NeedsYouView, S['NeedsYouView']>,
   Same<T.ReviewFix, S['ResolveReviewBody']['fix']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

@@ -1,5 +1,5 @@
 import type { OutreachClient, WriteOptions } from '../client';
-import type { CompanyHit, FindingsView, Id, LinkedInPerson, LinkedInStep, OutcomeKind, OutcomePromptView, ProgressView, ReplyKind, Revision, WatchView, WinsView } from '../types';
+import type { CompanyHit, FindingsView, Id, LinkedInPerson, LinkedInStep, OutcomeKind, OutcomePromptView, ProgressView, ReplyKind, Revision, ScoreView, WatchView, WinsView } from '../types';
 import { companyMethods, searchMethods } from './company';
 import { healthMethods } from './health';
 import { linkedinMethods } from './linkedin';
@@ -12,6 +12,7 @@ import { watchMethods } from './watch';
 /** The methods the API serves so far. Each view's task adds one factory below. */
 export type LiveMethods = Partial<Omit<OutreachClient, 'source'>> & {
   searchCompanies?: (q: string) => Promise<CompanyHit[]>;
+  score?: (companyId: Id) => Promise<ScoreView>; // not on `OutreachClient` until #33 adds it; 'not_found' for no score
   // Not on `OutreachClient` until #33 adds them.
   watchList?: () => Promise<WatchView>;
   dismissWatch?: (itemId: Id, o: WriteOptions) => Promise<void>;

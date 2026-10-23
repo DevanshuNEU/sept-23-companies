@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company_id}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Company Score */
+        get: operations["company_score"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company_id}/unmerge": {
         parameters: {
             query?: never;
@@ -1078,6 +1095,13 @@ export interface components {
             /** Url */
             url: string;
         };
+        /** PreviousScore */
+        PreviousScore: {
+            /** Rankerversion */
+            rankerVersion: string;
+            /** Score */
+            score: number;
+        };
         /** ProgressPeriod */
         ProgressPeriod: {
             /** Effort */
@@ -1334,6 +1358,78 @@ export interface components {
             url: string;
             /** Yearsasked */
             yearsAsked: number | null;
+        };
+        /** ScoreConfidence */
+        ScoreConfidence: {
+            /** Basis */
+            basis: string;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "high" | "medium" | "low";
+        };
+        /** ScoreLane */
+        ScoreLane: {
+            /**
+             * Lane
+             * @enum {string}
+             */
+            lane: "level_role" | "intern_junior" | "any_us_role";
+            /** Strongest */
+            strongest: boolean;
+        };
+        /** ScoreSignal */
+        ScoreSignal: {
+            /** Basis */
+            basis: string;
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "high" | "medium" | "low";
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+            /** Neutral */
+            neutral: boolean;
+            /** Points */
+            points: number;
+            /** Reason */
+            reason: string;
+            /** Share */
+            share: number;
+            source: components["schemas"]["SourceLink"] | null;
+            /** Value */
+            value: number;
+            /** Weight */
+            weight: number;
+        };
+        /** ScoreView */
+        ScoreView: {
+            /** Asof */
+            asOf: string;
+            /** Companyid */
+            companyId: number;
+            confidence: components["schemas"]["ScoreConfidence"];
+            /** Lanes */
+            lanes: components["schemas"]["ScoreLane"][];
+            /** Ofcompanies */
+            ofCompanies: number;
+            previous: components["schemas"]["PreviousScore"] | null;
+            /** Rank */
+            rank: number | null;
+            /** Rankreason */
+            rankReason: string;
+            /** Rankerversion */
+            rankerVersion: string;
+            /** Score */
+            score: number;
+            /** Scoredat */
+            scoredAt: string;
+            /** Signals */
+            signals: components["schemas"]["ScoreSignal"][];
         };
         /** SearchCompany */
         SearchCompany: {
@@ -1619,6 +1715,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CompanyView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    company_score: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreView"];
                 };
             };
             /** @description bad_request: the request was not valid */

@@ -1,8 +1,12 @@
 """Search: the index, posting search and company search, read from a scratch store seeded through SQL."""
 import unittest
+from unittest import mock
 
+from outreach.api.queries import score as score_queries
+from outreach.api.queries import search
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
+from tests.storetest import fresh_store
 
 
 class Search(ApiCase):
@@ -51,8 +55,10 @@ class Search(ApiCase):
         self.assertEqual((people["Lin Kedin"]["email"], people["Lin Kedin"]["statusLine"]), (None, "Not started"))
 
     def test_status_lines_per_status(self):
+        candidate = s.company(self.conn, "A", "candidate")
+        s.score(self.conn, candidate, {"live_role": 10.0})  # a candidate is indexed when it scores high enough
         lines = {
-            s.company(self.conn, "A", "candidate"): "Candidate",
+            candidate: "Candidate",
             s.company(self.conn, "B", "closed", close_reason="interview"): "Done: interview",
             s.company(self.conn, "C", "closed", close_reason="no_sponsorship"): "Closed: no sponsorship",
             s.company(self.conn, "D", "removed", remove_reason="not_a_fit"): "Removed by you",
@@ -82,7 +88,7 @@ class Search(ApiCase):
         b = s.company(self.conn, "Acme Labs", "removed", remove_reason="merged", merged_into=a)
         self.conn.execute("UPDATE company SET merged_into = ? WHERE company_id = ?", (b, a))
         s.person(self.conn, a, "Pat Lee")
-        s.company(self.conn, "Fine Co")
+        s.score(self.conn, s.company(self.conn, "Fine Co"), {"live_role": 10.0})  # a scored candidate is indexed
         index = self.index()
         self.assertEqual([c["name"] for c in index["companies"]], ["Fine Co"])
         self.assertEqual(len(index["people"]), 1)  # kept, under a company name that exists
@@ -108,8 +114,73 @@ class Search(ApiCase):
         self.assertEqual(self.companies("orbit")[0]["name"], "Holder")  # an exact alias beats the substrings
         self.assertEqual(self.companies("orbit.example")[0]["name"], "Late")  # an exact domain too
 
-    # TODO(#6): the capped index (touched companies and the top scored) and its test,
-    # test_search_index_cap_keeps_touched_companies_and_the_top_scored, land with the ranking package.
+    def test_search_index_cap_keeps_touched_companies_and_the_top_scored(self):
+        working = s.company(self.conn, "Working", "working")
+        done = s.company(self.conn, "Done", "closed", close_reason="interview")
+        backlog = s.company(self.conn, "Backlog", "backlog")
+        with_person = s.company(self.conn, "With Person")
+        s.person(self.conn, with_person, "Pat Lee")
+        survivor = s.company(self.conn, "Survivor")
+        duplicate = s.company(self.conn, "Duplicate", "removed", remove_reason="merged", merged_into=survivor)
+        s.person(self.conn, duplicate, "Dee Dupe")  # a person on a duplicate touches the survivor
+        top = [s.company(self.conn, f"Top {i}") for i in range(3)]
+        low = [s.company(self.conn, f"Low {i}") for i in range(2)]
+        hidden = s.company(self.conn, "Hidden")
+        unscored = s.company(self.conn, "Unscored")
+        stale = s.company(self.conn, "Only Old Version")
+        for points, cid in zip((90.0, 80.0, 70.0), top):
+            s.score(self.conn, cid, {"live_role": points})
+        for points, cid in zip((60.0, 50.0), low):
+            s.score(self.conn, cid, {"live_role": points})
+        s.score(self.conn, hidden, {"live_role": 99.0}, hide={"kind": "no_go", "reason": "No", "provisional": False})
+        s.score(self.conn, stale, {"live_role": 98.0}, version="rk-old", at="2026-10-01T08:00:00Z")
+        s.score(self.conn, top[0], {"live_role": 1.0}, version="rk-old", at="2026-10-01T08:00:00Z")
+        with mock.patch.object(search, "INDEX_TOP_SCORED", 3):
+            index = self.index()
+        names = [c["name"] for c in index["companies"]]
+        self.assertEqual(names, sorted(["Working", "Done", "Backlog", "With Person", "Survivor", "Top 0", "Top 1", "Top 2"],
+                                       key=str.lower))
+        absent = {"Low 0", "Low 1", "Hidden", "Unscored", "Only Old Version", "Duplicate"}
+        self.assertFalse(absent & set(names), absent & set(names))
+        self.assertEqual({p["name"] for p in index["people"]}, {"Pat Lee", "Dee Dupe"})
+        self.assertEqual([c["name"] for c in self.companies("low 1")], ["Low 1"])  # found by the live company search
+        self.assertEqual({working, done, backlog} - {c["id"] for c in index["companies"]}, set())
+
+    def test_search_index_cap_default_is_3000_and_an_empty_ranking_changes_nothing(self):
+        self.assertEqual(search.INDEX_TOP_SCORED, 3000)
+        cid = s.company(self.conn, "Candidate")
+        self.assertEqual([c["name"] for c in self.index()["companies"]], [])  # unscored, untouched: not in the index
+        s.company(self.conn, "Working", "working")
+        self.assertEqual([c["name"] for c in self.index()["companies"]], ["Working"])
+        self.assertEqual([c["name"] for c in self.companies("candid")], ["Candidate"])
+        self.assertTrue(cid)
+
+    def test_top_scored_ids_are_the_rankers_ranked_list(self):
+        from outreach.ranking.scores import ranked_list
+        ids = [s.company(self.conn, f"C{i}") for i in range(6)]
+        for i, cid in enumerate(ids):
+            hide = {"kind": "no_go", "reason": "No", "provisional": True} if i == 4 else None
+            s.score(self.conn, cid, {"live_role": float(10 * (i % 3))}, hide=hide)
+        for limit in (1, 3, 6, 50):
+            self.assertEqual(score_queries.top_scored_ids(self.conn, limit),
+                             [r.company_id for r in ranked_list(self.conn, limit=limit)])
+        self.assertEqual(score_queries.top_scored_ids(self.conn, 0), [])
+
+    def test_search_index_reads_a_fixed_number_of_statements(self):
+        def count(n: int) -> int:
+            conn = fresh_store()
+            self.addCleanup(conn.close)
+            for i in range(n):
+                cid = s.company(conn, f"Co {i}", "working" if i % 2 else "candidate")
+                s.score(conn, cid, {"live_role": float(i)})
+                if i % 3 == 0:
+                    s.person(conn, cid, f"Person {i}")
+            seen: list[str] = []
+            conn.set_trace_callback(seen.append)
+            search.index(conn, NOW)
+            return len(seen)
+
+        self.assertEqual(count(10), count(60))  # never one query per company
 
     def test_posting_search_matches_initials(self):
         cid = s.company(self.conn, "Acme")
@@ -197,7 +268,7 @@ class Search(ApiCase):
 
     def test_responses_over_1kb_are_gzipped_and_small_ones_are_not(self):
         for i in range(40):
-            s.company(self.conn, f"Company number {i}")
+            s.score(self.conn, s.company(self.conn, f"Company number {i}"), {"live_role": float(i)})
         big = self.get("/api/search/index", headers={"Accept-Encoding": "gzip"})
         self.assertEqual(big.headers.get("content-encoding"), "gzip")
         self.assertEqual(len(big.json()["companies"]), 40)  # the client unpacks it

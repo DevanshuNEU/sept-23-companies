@@ -174,6 +174,33 @@ def mx(conn, domain: str, status: str) -> None:
     conn.execute("INSERT INTO mx_check(domain, status, checked_at) VALUES (?,?,?)", (domain, status, T0))
 
 
+def score(conn, company_id: int, points: dict | None = None, *, version: str = "rk-1", at: str = "2026-11-10T08:00:00Z",
+          lanes=("level_role",), hide: dict | None = None, best_posting_id: int | None = None,
+          confidence: tuple[str, str] = ("high", "Most of the points rest on confirmed evidence"),
+          line: str = "Hiring an engineer", value: dict | None = None, signals: dict | None = None,
+          total: float | None = None) -> None:
+    """A `company_score` row in the ranking plan's stored shape (hand written, so a change to the ranker's own
+    code cannot hide a change to the shape). `points` is signal name to its points; `value` overrides a value."""
+    points = points or {}
+    values = {}
+    for name, pts in points.items():
+        v = (value or {}).get(name, 1.0 if pts else 0.0)
+        values[name] = {"value": v, "weight": abs(pts) or 10.0, "raw_points": pts, "points": pts,
+                        "reason": f"{name} reason", "confidence": "medium", "basis": f"{name} basis"}
+    body = {
+        "values": values, "reasons": [v["reason"] for v in values.values() if v["points"]], "hide": hide, "flags": [],
+        "best_posting_id": best_posting_id, "ignored_postings": 0, "stale_postings": [],
+        "confidence": {"level": confidence[0], "basis": confidence[1]},
+        "rank_reason": {"text": line, "level": confidence[0], "basis": confidence[1],
+                        "line": f"{line} ({confidence[0]} confidence: {confidence[1]})"},
+    }
+    body.update(signals or {})
+    conn.execute(
+        "INSERT INTO company_score(company_id, ranker_version, score, signals, lanes, scored_at) VALUES (?,?,?,?,?,?)",
+        (company_id, version, sum(points.values()) if total is None else total, json.dumps(body, sort_keys=True),
+         json.dumps(list(lanes)), at))
+
+
 def _insert(conn, table: str, row: dict) -> int:
     cols = list(row)
     cur = conn.execute(

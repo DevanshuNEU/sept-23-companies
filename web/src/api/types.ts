@@ -209,6 +209,20 @@ export interface CompanyView {
   evidence: Fact[]; events: CompanyEvent[]; reviewItems: ReviewItem[]; rulesetVersion: string;
 }
 
+// Score breakdown (#6, #11): what the ranker stored for a company, read as stored and never recomputed.
+// share = points / the sum of |points|, signed (0 when every signal is neutral); rank is null for a hidden company.
+export type RankConfidence = 'high' | 'medium' | 'low';
+export interface ScoreSignal {
+  name: string; label: string; value: number; weight: number; points: number; share: number; neutral: boolean;
+  reason: string; confidence: RankConfidence; basis: string; source: SourceLink | null;
+}
+export interface ScoreView {
+  asOf: IsoTime; companyId: Id; rankerVersion: string; score: number; rank: number | null; ofCompanies: number;
+  lanes: { lane: 'level_role' | 'intern_junior' | 'any_us_role'; strongest: boolean }[]; signals: ScoreSignal[];
+  rankReason: string; confidence: { level: RankConfidence; basis: string }; scoredAt: IsoTime;
+  previous: { rankerVersion: string; score: number } | null;
+}
+
 // Watch list (#33): changed careers pages, new companies with a reason and no role, possible duplicates
 export type WatchKind = 'careers_changed' | 'new_reason_no_role' | 'merge_candidate';
 export interface SourceLink { label: string; url: string }

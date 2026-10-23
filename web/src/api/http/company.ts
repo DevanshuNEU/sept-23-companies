@@ -2,9 +2,10 @@ import type { LiveMethods } from './client';
 import { getJson } from './api';
 import type { Transport } from './transport';
 
-/** The company page: `GET /api/companies/{id}` (a merged company answers as its survivor). */
+/** The company page: `GET /api/companies/{id}` (a merged company answers as its survivor) and its score breakdown. */
 export const companyMethods = (t: Transport): LiveMethods => ({
   company: (companyId) => getJson(t, '/api/companies/{company_id}', { params: { company_id: companyId } }),
+  score: (companyId) => getJson(t, '/api/companies/{company_id}/score', { params: { company_id: companyId } }),
 });
 
 /** Search: the index, posting search and company search (the last is not on `OutreachClient` yet). */

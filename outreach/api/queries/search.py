@@ -1,7 +1,10 @@
 """Search: the index the palette loads, posting search (substring or initials) and company search.
 
 A merged company is never listed on its own: it answers as its survivor, and lends its name to it as an alias.
+The index is capped: every company that is not a candidate, every company with a person and the top scored
+companies (`INDEX_TOP_SCORED`). The rest are found by `find_companies`.
 """
+import json
 import re
 import sqlite3
 
@@ -11,14 +14,24 @@ from outreach.api.queries.company import (
     NAME_ALIAS_SOURCES, aliases_for, best_facts, merge_parents, status_line, survivor_of,
 )
 from outreach.api.queries.people import scope
+from outreach.api.queries.score import top_scored_ids
 
 HITS = 20
+INDEX_TOP_SCORED = 3000  # candidates the index keeps beyond the touched companies (about 18,000 are stored)
 SOURCE_LIMIT = 200  # candidates read per source before merged companies fold into their survivors
 STOP_WORDS = {"of", "the", "and", "a", "an", "at", "for", "in", "to"}
 
 
 def _and(where: str, condition: str) -> str:
     return where + (" AND " if where else " WHERE ") + condition
+
+
+def _in(ids, column: str) -> tuple[str, list]:
+    """A WHERE clause for `column IN ids` that binds one JSON text, so thousands of ids never reach SQLite's
+    variable limit; no clause at all when `ids` is None (everything)."""
+    if ids is None:
+        return "", []
+    return f" WHERE {column} IN (SELECT value FROM json_each(?))", [json.dumps(sorted(ids))]
 
 
 def companies(conn: sqlite3.Connection, survivors: list[int] | None = None) -> list[SearchCompany]:
@@ -36,7 +49,7 @@ def companies(conn: sqlite3.Connection, survivors: list[int] | None = None) -> l
         end = survivor_of(parents, c)
         if end in members:
             members[end].append(c)
-    where, params = scope(ids, "company_id")
+    where, params = _in(ids, "company_id")
     rows = {r["company_id"]: r for r in conn.execute(f"SELECT * FROM company{where}", params)}
     domains: dict[int, list[sqlite3.Row]] = {}
     for r in conn.execute(f"SELECT * FROM company_fact{_and(where, 'fact = ' + repr('domain'))}", params):
@@ -60,26 +73,29 @@ def companies(conn: sqlite3.Connection, survivors: list[int] | None = None) -> l
 
 
 def index(conn: sqlite3.Connection, now: str) -> SearchIndex:
-    # TODO(#6): cap this at the touched companies plus the top scored (the ranking package supplies the scores);
-    # companies the cap leaves out are found by `find_companies`.
-    everyone = companies(conn)
     parents = merge_parents(conn)
-    rows = {r["company_id"]: r for r in conn.execute("SELECT * FROM company")}
     # A person on a merged duplicate is judged against the survivor's pause and hold.
     data = people_queries.load(conn, None, bodies=False)
-    lines = people_queries.lines(data, {c: rows[survivor_of(parents, c)] for c in rows})
-    names = {c.id: c.name for c in everyone}
+    at = {c: survivor_of(parents, c) for c in {p["company_id"] for p in data.persons}}
+    kept = set(at.values()) | set(top_scored_ids(conn, INDEX_TOP_SCORED))
+    selected = [r[0] for r in conn.execute(
+        "SELECT company_id FROM company WHERE merged_into IS NULL AND (status <> 'candidate' OR "
+        "company_id IN (SELECT value FROM json_each(?))) ORDER BY name COLLATE NOCASE, company_id",
+        (json.dumps(sorted(kept)),))]
+    listed = companies(conn, selected)
+    where, params = _in(set(at) | set(at.values()), "company_id")
+    rows = {r["company_id"]: r for r in conn.execute(f"SELECT * FROM company{where}", params)}
+    lines = people_queries.lines(data, {c: rows[end] for c, end in at.items()})
     people = []
     for p in data.persons:
-        company_id = survivor_of(parents, p["company_id"])
-        if company_id not in names:  # a merge cycle has no survivor: the person keeps the company they are on
+        company_id = at[p["company_id"]]
+        if rows[company_id]["merged_into"] is not None:  # a merge cycle has no survivor: the person keeps their company
             company_id = p["company_id"]
-            names[company_id] = rows[company_id]["name"]
         people.append(SearchPerson(
-            id=p["person_id"], company_id=company_id, company_name=names[company_id], name=p["name"], title=p["title"],
-            email=p["email"], status_line=lines[p["person_id"]].status_line,
+            id=p["person_id"], company_id=company_id, company_name=rows[company_id]["name"], name=p["name"],
+            title=p["title"], email=p["email"], status_line=lines[p["person_id"]].status_line,
         ))
-    return SearchIndex(as_of=now, companies=everyone, people=people)
+    return SearchIndex(as_of=now, companies=listed, people=people)
 
 
 def _like(q: str) -> str:

@@ -2092,6 +2092,24 @@
         "title": "PostingRow",
         "type": "object"
       },
+      "PreviousScore": {
+        "properties": {
+          "rankerVersion": {
+            "title": "Rankerversion",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rankerVersion",
+          "score"
+        ],
+        "title": "PreviousScore",
+        "type": "object"
+      },
       "ProgressPeriod": {
         "properties": {
           "effort": {
@@ -2845,6 +2863,212 @@
           "start2027"
         ],
         "title": "RoleToName",
+        "type": "object"
+      },
+      "ScoreConfidence": {
+        "properties": {
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "title": "Level",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "basis"
+        ],
+        "title": "ScoreConfidence",
+        "type": "object"
+      },
+      "ScoreLane": {
+        "properties": {
+          "lane": {
+            "enum": [
+              "level_role",
+              "intern_junior",
+              "any_us_role"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "strongest": {
+            "title": "Strongest",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "lane",
+          "strongest"
+        ],
+        "title": "ScoreLane",
+        "type": "object"
+      },
+      "ScoreSignal": {
+        "properties": {
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "neutral": {
+            "title": "Neutral",
+            "type": "boolean"
+          },
+          "points": {
+            "title": "Points",
+            "type": "number"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "value",
+          "weight",
+          "points",
+          "share",
+          "neutral",
+          "reason",
+          "confidence",
+          "basis",
+          "source"
+        ],
+        "title": "ScoreSignal",
+        "type": "object"
+      },
+      "ScoreView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ScoreConfidence"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreLane"
+            },
+            "title": "Lanes",
+            "type": "array"
+          },
+          "ofCompanies": {
+            "title": "Ofcompanies",
+            "type": "integer"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviousScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "rankReason": {
+            "title": "Rankreason",
+            "type": "string"
+          },
+          "rankerVersion": {
+            "title": "Rankerversion",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "scoredAt": {
+            "title": "Scoredat",
+            "type": "string"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreSignal"
+            },
+            "title": "Signals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "companyId",
+          "rankerVersion",
+          "score",
+          "rank",
+          "ofCompanies",
+          "lanes",
+          "signals",
+          "rankReason",
+          "confidence",
+          "scoredAt",
+          "previous"
+        ],
+        "title": "ScoreView",
         "type": "object"
       },
       "SearchCompany": {
@@ -3739,6 +3963,88 @@
           }
         },
         "summary": "Company",
+        "tags": [
+          "company"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/score": {
+      "get": {
+        "operationId": "company_score",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Company Score",
         "tags": [
           "company"
         ]

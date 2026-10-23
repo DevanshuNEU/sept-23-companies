@@ -52,12 +52,20 @@ from outreach.store.db import transaction
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
-__all__ = ["LOCK_NAME", "BUSY_LINE", "STALE_RUN", "COUNT_KEYS", "TickDeps", "TickReport", "run_tick"]
+__all__ = ["LOCK_NAME", "BUSY_LINE", "STALE_RUN", "COUNT_KEYS", "WAIT_TITLE", "UNPROVEN_TEXT", "TickDeps", "TickReport",
+           "run_tick"]
 
 LOCK_NAME = ".sender.lock"
 BUSY_LINE = "another tick is running"
 STALE_RUN = "the tick stopped before it finished"
 COUNT_KEYS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skipped", "lapsed", "closed")
+WAIT_TITLE = "Outreach sending waits"
+UNPROVEN_TEXT = "Sending waits: Gmail's Message-ID handling is not proven."
+# Proof that Gmail keeps the Message-ID the sender sets: an imported email found in Sent under its own id, or a
+# send of this sender recorded under the very id it claimed (read back from Gmail, or found in Sent by it).
+_PROOF = ("SELECT 1 FROM event WHERE entity = 'message' AND (kind = 'import_verified' OR (kind IN ('sent', "
+          "'reconciled_sent') AND json_extract(detail, '$.rfc_message_id') = json_extract(detail, '$.claimed_rfc_id')))"
+          " LIMIT 1")
 
 _log = logging.getLogger(__name__)
 
@@ -170,7 +178,7 @@ class _Tick:
         self.would_send: int | None = None
         self.waiting: dict[str, int] = {}
         self.counts = Counter()
-        self.hold: str | None = None  # why nothing may be sent this tick, though a message is ready
+        self.hold: str | None = None  # why nothing may be sent this tick, though a message is ready (inbound)
 
     # -- the frame ----------------------------------------------------------------------------------------------
 
@@ -450,15 +458,24 @@ class _Tick:
         elif old_loaded:
             gate = "old_sender_running"
             self._line("the old mail sender is still loaded, so nothing is sent")
+        elif self.conn.execute(_PROOF).fetchone() is None:
+            gate = "message_id_unproven"
         verdicts = queue.verdicts(self.conn, self.now, self.cfg, day=self.day, gate=gate)
         self.waiting = dict(Counter(v.reason for v in verdicts if v.reason != "ready"))
-        picked = queue.pick(verdicts, queue.load_queue(self.conn, self.cfg))
-        if picked is not None and self.conn.execute(
-                "SELECT 1 FROM event WHERE entity = 'message' AND kind = 'import_verified' LIMIT 1").fetchone() is None:
-            self.hold = self.hold or "message_id_unproven"
-            self._line("nothing is sent until Gmail is shown to keep the Message-ID the sender sets (no imported "
-                       "email has been found in Sent under its own Message-ID yet)")
-        return picked
+        if self.waiting.get("message_id_unproven"):
+            self._partial("nothing is sent until Gmail is shown to keep the Message-ID the sender sets (no imported "
+                          "email has been found in Sent under its own Message-ID yet)")
+            self._notice("message_id_unproven", WAIT_TITLE, UNPROVEN_TEXT)
+        return queue.pick(verdicts, queue.load_queue(self.conn, self.cfg))
+
+    def _notice(self, kind: str, title: str, text: str) -> None:
+        """Tell him once a New York day, in a short transaction of its own (inside the caller's in a dry run, which
+        tells nobody and is rolled back)."""
+        if self.dry_run:
+            notify_once(self.conn, self.notify, kind, self.today, title, text, at=self.stamp)
+            return
+        with transaction(self.conn):
+            notify_once(self.conn, self.notify, kind, self.today, title, text, at=self.stamp)
 
     def _send(self, picked: queue.Queued) -> None:
         """Step 7."""

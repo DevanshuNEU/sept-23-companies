@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.drafts.checks import load_banned
-from outreach.sending import claim, tick
+from outreach.sending import claim, queue, tick
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import GmailError, Sent
@@ -335,7 +335,6 @@ class GateTest(Base):
         self.assertEqual(self.runs()[-1]["status"], "partial")
         self.assertEqual(self.tick().sent, (second,))
 
-
     def test_a_failed_sent_search_leaves_the_send_in_doubt(self):
         mid = self.approve()
         self.gmail.fail_next_send(GmailError("timeout", None, "the call timed out"), accepted=True)
@@ -361,8 +360,41 @@ class ImportProofTest(Base):
         report = self.tick()
         self.assertEqual(report.sent, ())
         self.assertTrue(any("Message-ID" in line for line in report.lines))
+        self.assertEqual(report.waiting, {"message_id_unproven": 1})
         self.assertEqual(self.message(mid)["state"], "approved")
+        run = self.runs()[-1]
+        self.assertEqual(run["status"], "partial")
+        self.assertIn("Message-ID", run["error"])
+        self.assertEqual(self.notices, [(tick.WAIT_TITLE, "Sending waits: Gmail's Message-ID handling is not proven.")])
+        self.clock.advance(minutes=2)
+        self.tick()
+        self.assertEqual(len(self.notices), 1)  # once a day
         self.assertIsNone(self.tick(dry_run=True).would_send)
+
+    def test_a_send_read_back_under_its_claimed_id_is_proof(self):
+        first = self.approve()
+        q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == first)
+        self.assertEqual(claim.send_one(self.db, self.gmail, q, CFG, now=iso(self.clock()), clock=self.clock,
+                                        rng=self.rng, account=CFG.from_address), "sent")
+        second = self.approve()
+        self.clock.advance(minutes=10)
+        self.assertEqual(self.tick().sent, (second,))
+
+    def test_a_send_gmail_stored_under_another_id_is_not_proof(self):
+        self.gmail.rewrite_message_ids = True
+        first = self.approve()
+        q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == first)
+        with self.assertRaises(GmailError):
+            claim.send_one(self.db, self.gmail, q, CFG, now=iso(self.clock()), clock=self.clock, rng=self.rng,
+                           account=CFG.from_address)
+        self.assertEqual(self.message(first)["state"], "sent")
+        self.resume()
+        self.gmail.rewrite_message_ids = False
+        self.approve()
+        self.clock.advance(minutes=10)
+        report = self.tick()
+        self.assertEqual(report.sent, ())
+        self.assertEqual(report.waiting, {"message_id_unproven": 1})
 
     def test_gmail_that_rewrote_the_imported_message_id_blocks_every_send(self):
         self.seed_imported("<rewritten@mail.gmail.com>")  # Gmail has it under another Message-ID

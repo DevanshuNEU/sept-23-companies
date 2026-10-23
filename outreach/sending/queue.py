@@ -23,8 +23,8 @@ __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "
            "load_queue", "verdicts", "pick"]
 
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
-REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "not_business_day", "daily_limit",
-           "spacing", "window", "bad_timezone", "followup_not_due", "company_paused", "company_held",
+REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
+           "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "company_paused", "company_held",
            "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread") + STOP_REASONS
 # The waits that end by themselves: their verdict carries the time they end.
 TIME_REASONS = frozenset({"not_business_day", "daily_limit", "spacing", "window", "followup_not_due",
@@ -35,6 +35,8 @@ REASON_TEXT = {
     "sender_paused": "Sending is paused.",
     "signed_out": "Gmail is signed out, so nothing can be sent.",
     "old_sender_running": "The old mail sender is still running, so the new one waits.",
+    "message_id_unproven": "Sending waits until Gmail is shown to keep the Message-ID the sender sets, so an email "
+                           "in doubt can always be found in Sent.",
     "not_business_day": "Not a sending day: emails go out on weekdays, New York time.",
     "daily_limit": "Today's send limit is used up. This goes out on the next sending day.",
     "spacing": "Waiting a few minutes after the last send.",
@@ -162,7 +164,8 @@ def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
 def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: DayState | None,
              gate: str | None) -> list[Verdict]:
     """One verdict per approved message, in queue order. `gate` (`sender_paused`, `signed_out`,
-    `old_sender_running`) is a reason the whole tick knows; it applies to every message that is not a stop.
+    `old_sender_running`, `message_id_unproven`) is a reason the whole tick knows; it applies to every message that
+    is not a stop.
     Order of reasons: stops; the gate; company paused; company held (a hold on any company merged into the
     survivor counts); no address; a follow-up with no Gmail thread; follow-up not due; bad time zone; not a
     business day; daily limit; per-company limit; per-company gap; recipient's window; recruiter waits; spacing."""

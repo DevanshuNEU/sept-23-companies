@@ -1,0 +1,15 @@
+# The numbers the API owns. The sending window and ramp are the sender's (outreach/sending/config.toml);
+# the API reads them there and keeps no copy.
+
+[notes]
+max_chars = 200
+
+[outcomes]
+min_requests = 30        # a period with fewer requests is "not enough yet"
+finding_group_min = 20   # each side of a finding needs this many requests
+prompt_after_days = 7    # ask about a touch once it is this old
+reask_after_days = 7     # after "Nothing yet", ask once more this many days later
+quiet_after_days = 21    # then the touch is marked quiet
+
+[search]
+index_top = 3000         # companies outside the browser index are found with a server search

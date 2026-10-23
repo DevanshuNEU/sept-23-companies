@@ -191,6 +191,23 @@ class SendingTest(Base):
         run_tick(self.db, self.deps(banned=[]), CFG)
         self.assertEqual(len(self.notices), 1)  # once a day
 
+    def test_a_long_gmail_read_cannot_push_a_send_past_the_window(self):
+        self.clock.set(datetime(2026, 11, 2, 21, 25, tzinfo=timezone.utc))  # 16:25 in New York
+        mid = self.approve()
+        self.hooks["thread"] = lambda: self.clock.advance(minutes=10)  # the read ends at 16:35
+        report = self.tick()
+        self.assertEqual(report.sent, ())
+        self.assertEqual(report.waiting, {"window": 1})
+        self.assertEqual(self.message(mid)["state"], "approved")
+        self.assertEqual(self.gmail.sent, [])
+
+    def test_the_claim_is_dated_when_the_pick_was_made(self):
+        mid = self.approve()
+        self.hooks["thread"] = lambda: self.clock.advance(minutes=3)
+        self.tick()
+        at = self.db.execute("SELECT at FROM event WHERE kind = 'claimed' AND entity_id = ?", (mid,)).fetchone()[0]
+        self.assertEqual(at, iso(MON + timedelta(minutes=3)))
+
     def test_weekend_far_east_recipient_is_not_sent(self):
         # Sunday 20:00 in New York is Monday 10:00 in Tokyo: the New York date is not a sending day.
         self.clock.set(datetime(2026, 11, 9, 1, 0, tzinfo=timezone.utc))

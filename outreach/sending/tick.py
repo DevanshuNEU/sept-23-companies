@@ -10,7 +10,8 @@ The steps, in order. Gmail is called only in steps 2, 4 and 7, and never inside 
 5. One transaction: reconcile, requeue proven failures (before quiet touches close, so a touch never closes on a
    message waiting for its one retry), apply inbound mail, stop tags, open the day, the bounce rules, lapse
    follow-ups, close quiet touches, sweep stopped messages, and once a New York day prune old quiet runs.
-6. The gate (paused, signed out, old sender loaded), the verdicts and the pick.
+6. The clock is read again, then the gate (paused, signed out, old sender loaded, Message-ID not proven), the
+   verdicts and the pick.
 7. At most one message: the approve checks again (`precheck`), then `send_one`. A Gmail error from the send is
    applied in one short transaction after the call.
 8. The `job_run` finishes with integer counts and `noop`.
@@ -284,6 +285,7 @@ class _Tick:
             self.conn.execute("BEGIN IMMEDIATE")
             try:
                 self._apply(found, read)
+                self._reclock()
                 picked = self._pick(old_loaded)
             finally:
                 if self.conn.in_transaction:
@@ -294,10 +296,18 @@ class _Tick:
             return True
         with self._tx():
             self._apply(found, read)
+        self._reclock()
         picked = self._pick(old_loaded)
         if picked is not None and self.hold is None:
             self._send(picked)
         return True
+
+    def _reclock(self) -> None:
+        """Read the clock again just before the pick: the Gmail reads can be long, and the window, the gaps and the
+        claim time must be judged at the moment of the send, never at the start of the tick. Never backwards."""
+        self.now = max(self.now, self.deps.clock())
+        self.stamp = _stamp(self.now)
+        self.today = cal.ny_date(self.now, self.cfg)
 
     def _start(self) -> None:
         """Step 1."""

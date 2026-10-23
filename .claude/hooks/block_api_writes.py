@@ -8,7 +8,11 @@ command that
      /api/ path with a write word in it (approve, unapprove, skip, save, pause, resume, release, send), or
   2. names a loopback host, a network client (curl, wget, httpie, python, node, bun, deno, nc ...) and a write
      method or body flag (-X POST/PUT/PATCH/DELETE, -d, -F, -T, --data*, --post-data, --json, --form, .post( ...), or
-  3. builds the host from a shell variable and names an /api/ write path (curl "$BASE/api/outbox/1/approve").
+  3. builds the host from a shell variable and names an /api/ write path (curl "$BASE/api/outbox/1/approve"), or
+  4. builds the host of any /api/ path from a shell variable and has a network client and a write method or body flag
+     (curl -X POST "$API/api/wins/seen").
+
+urllib's `Request(url, data)` counts as a body flag: its second positional argument is the request body.
 
 This is a backstop to the deny patterns in .claude/settings.json, which cannot see inside `sh -c`, variables or other
 tools. It reads the command text only: a command that assembles the host or the path out of pieces gets past it, so
@@ -45,6 +49,8 @@ WRITE_FLAGS = [
     re.compile(r"\b(?:data|body|json)="),  # urlopen(req, data=...), httpx.request(..., json=...)
     re.compile(r"\b(?:data|body)\s*:\s"),  # fetch(..., {body: ...})
     re.compile(r"(?<!\S)(?:POST|PUT|DELETE|PATCH)\s+/"),  # a raw HTTP request line sent with nc or /dev/tcp
+    # urllib.request.Request(url, data, ...): a second positional argument (not name=) is the body. Quotes are stripped.
+    re.compile(r"\bRequest\s*\(\s*[^,()\s]+\s*,\s*(?![A-Za-z_]\w*\s*=)[^\s)]"),
 ]
 # `http POST host/path`, `xh put ...`, and httpie's body items (`name=value`, `name:=json`), which make it a POST.
 HTTPIE = re.compile(r"(?<![\w./:-])(?:http|https|xh|xhs|curlie|hurl)(?=\s)")
@@ -54,7 +60,7 @@ HTTPIE_WRITE = [
 ]
 CLIENT = re.compile(
     r"(?<![\w.-])(?:curl|wget|httpie|nc|ncat|netcat|socat|telnet|python[\d.]*|node|nodejs|bun|deno|ruby|perl|php|npx|tsx)"
-    r"(?![\w-])"
+    r"(?![\w-])|\burlopen\s*\("
 )
 VARIABLE_HOST = re.compile(r"[$`]")
 
@@ -64,13 +70,16 @@ def _strip_quoting(command: str) -> str:
     return re.sub(r"""\$'|['"\\]""", "", command)
 
 
+def _api_tokens(text: str) -> list[str]:
+    """Whitespace-separated tokens that hold an /api/ path."""
+    return [token for token in re.split(r"\s+", text) if "/api/" in token]
+
+
 def _write_path_tokens(text: str) -> list[str]:
     """Whitespace-separated tokens that hold an /api/ path with a write word in it."""
     hits = []
-    for token in re.split(r"\s+", text):
-        _, found, path = token.partition("/api/")
-        if not found:
-            continue
+    for token in _api_tokens(text):
+        path = token.partition("/api/")[2]
         words = re.split(r"[^a-z]+", re.split(r"[?#]", path, maxsplit=1)[0].lower())
         if WRITE_WORDS.intersection(words):
             hits.append(token)
@@ -93,8 +102,13 @@ def decide(command: str) -> str | None:
     for token in write_tokens:
         if VARIABLE_HOST.search(token.partition("/api/")[0]):
             return f"it builds the host of the API write path {token!r} from a variable"
-    if loopback and (CLIENT.search(text) or HTTPIE.search(text)) and _has_write_flag(text):
+    client = bool(CLIENT.search(text) or HTTPIE.search(text))
+    if loopback and client and _has_write_flag(text):
         return "it sends a write (POST, PUT, PATCH, DELETE or a request body) to a loopback host"
+    if client and _has_write_flag(text):
+        for token in _api_tokens(text):
+            if VARIABLE_HOST.search(token.partition("/api/")[0]):
+                return f"it sends a write to the API path {token!r} on a host built from a variable"
     return None
 
 

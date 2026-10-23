@@ -105,6 +105,13 @@ DENIED_ONLY_BY_HOOK = [
     "curl -X POST http://0x7f000001:3100/api/anything",
     "curl -X POST http://2130706433:3100/api/anything",
     "curl -X POST http://127.0.0.1.nip.io:3100/api/anything",
+    # a variable host plus a client and a write flag, on a path with no write word in it
+    'curl -X POST "$OUTREACH_API/api/wins/seen" -d {}',
+    'curl -X PUT "${API}/api/touches/3/outcomes/replied" --json {}',
+    # urllib's Request(url, data): a second positional argument is the body, so it is a POST
+    "urlopen(Request('http://127.0.0.1:3100/api/watch/4/dismiss', b'{}', {}))",
+    "python3 -c \"from urllib.request import urlopen, Request; "
+    "urlopen(Request('http://127.0.0.1:3100/api/watch/4/dismiss', b'{}', {}))\"",
 ]
 
 # Reads and unrelated commands: neither layer may refuse them.
@@ -129,6 +136,9 @@ ALLOWED = [
     "cd web && pnpm typecheck && pnpm lint",
     "python3 -c \"import sys; [print(p) for p in sys.argv[1:]]\" outreach/api/errors.py",
     "ls -d outreach/api",
+    'curl -s "$OUTREACH_API/api/wins"',
+    "python3 -c \"from urllib.request import urlopen, Request; "
+    "print(urlopen(Request('http://127.0.0.1:3100/api/ping', headers={'Accept': 'x'})).read())\"",
 ]
 
 

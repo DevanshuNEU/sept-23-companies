@@ -4,19 +4,28 @@ For every write tool: its grants are pinned here; on a connection opened with ex
 tool may make (approve, a no_go row, a company or sender change, a delete) and the writes just outside this tool's
 grants are refused; and a real call with valid input changes no table outside its grants."""
 import hashlib
+import os
 import sqlite3
 import unittest
+from unittest import mock
 
 from outreach.mcp import server
 from outreach.mcp.guard import Grant, open_guarded
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase
+from tests.test_drafts_checks import BODY, FIXTURE_BANNED
 
 INSERT = Grant(insert=True)
 PINNED = {
     "record_research": {"evidence": INSERT, "event": INSERT},
     "flag_review": {"review_item": INSERT, "event": INSERT},
     "mark_no_go": {"review_item": INSERT, "event": INSERT},
+    "save_draft": {"touch": INSERT, "event": INSERT,
+                   "message": Grant(insert=True, update=frozenset({"subject", "body", "hook", "project", "checks",
+                                                                   "saved_by", "updated_at", "revision"}))},
+    "save_followup": {"event": INSERT,
+                      "message": Grant(update=frozenset({"state", "subject", "body", "checks", "saved_by",
+                                                         "updated_at", "revision"}))},
 }
 
 
@@ -40,6 +49,9 @@ class GrantsCase(McpCase):
 
     def setUp(self):
         super().setUp()
+        patcher = mock.patch.dict(os.environ, {"OUTREACH_BANNED_PHRASES": str(FIXTURE_BANNED)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.acme = seed.company(self.db, "Acme", "working")
         self.posting = seed.posting(self.db, self.acme)
         self.pat = seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example")
@@ -51,6 +63,8 @@ class GrantsCase(McpCase):
         self.planned = self.db.execute(
             "INSERT INTO message(touch_id, seq, state, due_on, created_at, updated_at) "
             "VALUES (?, 1, 'planned', '2026-11-10', ?, ?)", (self.sent_touch, NOW, NOW)).lastrowid
+        self.his = seed.message(self.db, seed.touch(self.db, seed.person(self.db, self.acme, "Dee Edited")), 0)
+        self.db.execute("UPDATE message SET saved_by = 'devanshu' WHERE message_id = ?", (self.his,))
         self.review = self.db.execute(
             "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
             "VALUES ('flagged', ?, 'Look', 'k1', 'claude', ?)", (self.acme, NOW)).lastrowid
@@ -129,6 +143,38 @@ class GrantsCase(McpCase):
             ("UPDATE person SET notes = 'no-go' WHERE person_id = ?", (self.pat,)),
             ("UPDATE touch SET reply_kind = 'said_no' WHERE touch_id = ?", (self.touch,)),
         ], {"person_id": self.pat, "reason": "said_no", "quote": "Please stop emailing me."})
+
+    def test_save_draft_cannot_write_beyond_its_grants(self):
+        lee = seed.person(self.db, self.acme, "Lee New", email="lee@acme.example")
+        self.check_tool("save_draft", [
+            ("UPDATE message SET state = 'drafted', subject = 'Re: x', body = 'y' WHERE message_id = ?",
+             (self.planned,)),
+            ("UPDATE message SET due_on = '2026-11-11' WHERE message_id = ?", (self.planned,)),
+            ("UPDATE message SET body = 'his text was here' WHERE message_id = ?", (self.his,)),
+            ("INSERT INTO message(touch_id, seq, state, subject, body, created_at, updated_at) "
+             "VALUES (?, 0, 'approved', 'Hi', 'Hello', ?, ?)", (self.touch, NOW, NOW)),
+            ("INSERT INTO message(touch_id, seq, state, due_on, created_at, updated_at) "
+             "VALUES (?, 2, 'planned', '2026-11-20', ?, ?)", (self.sent_touch, NOW, NOW)),
+            ("INSERT INTO touch(person_id, state, created_at, updated_at, first_sent_at, first_rfc_id, "
+             "gmail_thread_id) VALUES (?, 'open', ?, ?, ?, '<r@x>', 't')", (lee, NOW, NOW, NOW)),
+            ("UPDATE person SET email = 'other@acme.example' WHERE person_id = ?", (self.pat,)),
+            ("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+             "VALUES ('flagged', ?, 'x', 'k4', 'claude', ?)", (self.acme, NOW)),
+        ], {"person_id": lee, "subject": "Your queue rewrite", "body": BODY, "hook": "His post on the queue",
+            "project": "runner"})
+
+    def test_save_followup_cannot_write_beyond_its_grants(self):
+        self.check_tool("save_followup", [
+            ("INSERT INTO message(touch_id, seq, state, subject, body, created_at, updated_at) "
+             "VALUES (?, 0, 'drafted', 'Hi', 'Hello', ?, ?)", (self.touch, NOW, NOW)),
+            ("INSERT INTO touch(person_id, created_at, updated_at) VALUES (?, ?, ?)",
+             (seed.person(self.db, self.acme, "Tia Touchless"), NOW, NOW)),
+            ("UPDATE message SET due_on = '2026-11-11' WHERE message_id = ?", (self.planned,)),
+            ("UPDATE message SET hook = 'x', project = 'y' WHERE message_id = ?", (self.planned,)),
+            ("UPDATE message SET state = 'skipped' WHERE message_id = ?", (self.planned,)),
+            ("UPDATE message SET state = 'drafted', body = 'y' WHERE message_id = ?", (self.his,)),
+            ("UPDATE person SET notes = 'x' WHERE person_id = ?", (self.sam,)),
+        ], {"person_id": self.sam, "seq": 1, "body": "Hi Sam, one more note on the ledger idea. Thanks, Devanshu"})
 
 
 if __name__ == "__main__":

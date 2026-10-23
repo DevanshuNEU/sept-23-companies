@@ -4,7 +4,8 @@ The rules are Task 9's (`outreach.outcomes`): `due_for_prompt` and `should_mark_
 touch is quiet, `correct_outcome` changes or clears one outcome, `build_context` makes a touch's context. The store's
 `record_outcome` and `log_touch` write the touch. This module reads rows, refuses in plain words and puts the writes
 of one answer into the caller's transaction (`run_write`): the outcome, the `linkedin_log` row of a LinkedIn touch,
-and for a reply that says no or asks to stop the person's `no_go` row and the cancel of their planned follow-ups.
+and for a reply that says no or asks to stop, on any channel, the person's `no_go` row and the stop of every unsent
+message on their email touch.
 """
 import itertools
 import json
@@ -211,43 +212,56 @@ def add_person_no_go(conn: sqlite3.Connection, touch: Mapping, reply_kind: str, 
     return no_go_id
 
 
-def cancel_planned_followups(conn: sqlite3.Connection, person_id: int, reply_kind: str, *, now: str,
-                             keys: Iterator[str]) -> int:
-    """Cancel the person's planned follow-ups: every `message` row in state `planned` with `seq > 0` on their email
-    touch is deleted, with one `touch` event `followup_cancelled` (`{seq, dueOn, reason}`) per row.
+STOPPED = "skipped_by_sender"  # the sending plan's event kind for a stopped message (#14, stop_planned)
 
-    A planned row holds no text, and the `message` CHECK refuses an empty subject or body in every state but
-    `planned`, so it cannot move to `skipped`; the sender plan (#14) deletes it the same way. Drafted, approved and
-    failed follow-ups are left to the approve checks and the sender, which stop on the no-go or the reply.
+
+def stop_unsent_messages(conn: sqlite3.Connection, person_id: int, reply_kind: str, *, now: str,
+                         keys: Iterator[str]) -> int:
+    """Stop every unsent message on the person's email touch, as the sending plan's stops do (#14 `stop_planned`
+    and `sweep_stopped`). Returns how many it stopped.
+
+    A `planned` row holds no text and the `message` CHECK refuses an empty subject or body in every state but
+    `planned`, so it is deleted, with a `touch` event keyed `followup-stopped:<touch_id>:<seq>:<due_on>`. A
+    `drafted`, `approved` or `failed` row has text and moves to `skipped` (revision on by one), with a `message`
+    event. Both events are `skipped_by_sender` with detail `{seq, due_on, reason}`. A `sending` or `send_unknown`
+    row may already be out: the sender settles it.
     """
     rows = conn.execute(
-        "SELECT m.message_id, m.touch_id, m.seq, m.due_on, p.company_id FROM message m "
+        "SELECT m.message_id, m.touch_id, m.seq, m.due_on, m.state, p.company_id FROM message m "
         "JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
-        "WHERE t.person_id = ? AND m.state = 'planned' AND m.seq > 0 ORDER BY m.seq", (person_id,)).fetchall()
-    cancelled = 0
+        "WHERE t.person_id = ? AND m.state IN ('planned', 'drafted', 'approved', 'failed') ORDER BY m.seq",
+        (person_id,)).fetchall()
+    stopped = 0
     for r in rows:
-        if not conn.execute("DELETE FROM message WHERE message_id = ? AND state = 'planned'",
-                            (r["message_id"],)).rowcount:
-            continue
-        cancelled += 1
-        why = "they said no" if reply_kind == "said_no" else "they asked to stop"
-        append_event(conn, entity="touch", entity_id=r["touch_id"], company_id=r["company_id"],
-                     kind="followup_cancelled", actor="devanshu", at=now, idempotency_key=next(keys),
-                     detail={"seq": r["seq"], "dueOn": r["due_on"], "reason": reply_kind,
-                             "text": f"Follow-up {r['seq']} cancelled: {why}."})
-    return cancelled
+        detail = {"seq": r["seq"], "due_on": r["due_on"], "reason": reply_kind}
+        if r["state"] == "planned":
+            # TODO(#14 Task 11): call outreach.sending.followups.stop_planned here once it lands.
+            if not conn.execute("DELETE FROM message WHERE message_id = ? AND state = 'planned'",
+                                (r["message_id"],)).rowcount:
+                continue
+            append_event(conn, entity="touch", entity_id=r["touch_id"], company_id=r["company_id"], kind=STOPPED,
+                         actor="devanshu", at=now, detail=detail,
+                         idempotency_key=f"followup-stopped:{r['touch_id']}:{r['seq']}:{r['due_on'] or ''}")
+        else:
+            if not conn.execute(
+                    "UPDATE message SET state = 'skipped', updated_at = ?, revision = revision + 1 "
+                    "WHERE message_id = ? AND state = ?", (now, r["message_id"], r["state"])).rowcount:
+                continue
+            append_event(conn, entity="message", entity_id=r["message_id"], company_id=r["company_id"],
+                         kind=STOPPED, actor="devanshu", at=now, detail=detail, idempotency_key=next(keys))
+        stopped += 1
+    return stopped
 
 
 def apply_reply_effects(conn: sqlite3.Connection, touch: Mapping, reply_kind: str | None, *, now: str,
                         keys: Iterator[str]) -> None:
-    """What a reply that says no or asks to stop does beyond the outcome, in the caller's transaction: a LinkedIn
-    touch adds the person's no-go, and on any touch with a person their planned follow-ups are cancelled. Any other
-    reply kind does nothing here. (Task 16's LinkedIn log calls this too.)"""
+    """What a reply that says no or asks to stop does beyond the outcome, in the caller's transaction, on any
+    channel: the person's no-go (a person who said stop is never contacted again) and the stop of every unsent
+    message on their email touch. Any other reply kind does nothing here. (Task 16's LinkedIn log calls this too.)"""
     if reply_kind not in STOP_REASONS or touch["person_id"] is None:
         return
-    if touch["channel"] in LINKEDIN:
-        add_person_no_go(conn, touch, reply_kind, now=now, keys=keys)
-    cancel_planned_followups(conn, touch["person_id"], reply_kind, now=now, keys=keys)
+    add_person_no_go(conn, touch, reply_kind, now=now, keys=keys)
+    stop_unsent_messages(conn, touch["person_id"], reply_kind, now=now, keys=keys)
 
 
 def _linkedin_log(conn: sqlite3.Connection, touch: Mapping, kind: str, reply_kind: str | None, now: str) -> None:
@@ -259,14 +273,8 @@ def _linkedin_log(conn: sqlite3.Connection, touch: Mapping, kind: str, reply_kin
 # ---------------------------------------------------------------------------------------------- answers
 
 def answer(ctx: WriteCtx, touch_id: int, body: OutcomeBody, cfg: PromptConfig) -> int:
-    """Record an answer from the prompt inside the write's transaction. Returns the touch's revision after it."""
-    try:
-        return _answer(ctx, touch_id, body, cfg)
-    except sqlite3.IntegrityError as err:
-        raise store_refusal(err) from err
-
-
-def _answer(ctx: WriteCtx, touch_id: int, body: OutcomeBody, cfg: PromptConfig) -> int:
+    """Record an answer from the prompt inside the write's transaction. Returns the touch's revision after it.
+    Only the outcome write maps a store constraint to `bad_request`; any other IntegrityError is a bug and a 500."""
     conn, keys = ctx.conn, (ctx.event_key(n) for n in itertools.count())
     if body.kind == "replied" and body.reply_kind is None:
         raise ApiProblem("bad_request", f"Say what kind of reply it was. {NOT_SAVED}")
@@ -284,8 +292,9 @@ def _answer(ctx: WriteCtx, touch_id: int, body: OutcomeBody, cfg: PromptConfig) 
     if row["revision"] != body.revision:
         raise _changed()
     if body.kind == "quiet" and not should_mark_quiet(row, ctx.now, cfg):
+        # Once per touch per New York day: two tabs answering the same day cannot use up both snoozes.
         append_event(conn, entity="outreach_touch", entity_id=touch_id, company_id=row["company_id"], kind=SNOOZE,
-                     actor="devanshu", at=ctx.now, idempotency_key=next(keys),
+                     actor="devanshu", at=ctx.now, idempotency_key=f"{SNOOZE}:{touch_id}:{ny_day(ctx.now)}",
                      detail={"text": "Nothing yet."})
         return row["revision"]
     try:
@@ -293,6 +302,8 @@ def _answer(ctx: WriteCtx, touch_id: int, body: OutcomeBody, cfg: PromptConfig) 
                                   revision=body.revision)
     except LookupError:
         raise _changed() from None
+    except sqlite3.IntegrityError as err:
+        raise store_refusal(err) from err
     except ValueError as err:
         raise _plain(err) from None
     if row["channel"] in LINKEDIN and body.kind in LOG_KINDS:
@@ -317,14 +328,20 @@ def correct(ctx: WriteCtx, touch_id: int, kind: str, body: CorrectionBody) -> in
             raise ApiProblem("bad_request", "The date must be an ISO time such as 2026-11-10T15:14:00Z, or null "
                                             f"to clear it. {NOT_SAVED}") from None
     try:
-        return correct_outcome(conn, touch_id, kind, at=at, reply_kind=body.reply_kind, revision=body.revision,
-                               now=ctx.now)
+        revision = correct_outcome(conn, touch_id, kind, at=at, reply_kind=body.reply_kind,
+                                   revision=body.revision, now=ctx.now)
     except LookupError:
         raise _changed() from None
     except sqlite3.IntegrityError as err:
         raise store_refusal(err) from err
     except ValueError as err:
         raise _plain(err) from None
+    if kind == "replied":  # a reply corrected to said_no or asked_to_stop stops them as an answer would
+        row = conn.execute("SELECT * FROM outreach_touch WHERE touch_id = ?", (touch_id,)).fetchone()
+        if row["replied_at"] is not None:
+            apply_reply_effects(conn, row, row["reply_kind"], now=ctx.now,
+                                keys=(ctx.event_key(n) for n in itertools.count()))
+    return revision
 
 
 # ---------------------------------------------------------------------------------------------- history
@@ -377,14 +394,8 @@ def _score_parts(score: sqlite3.Row | None) -> tuple[str, str | None, dict[str, 
 
 
 def log_own_touch(ctx: WriteCtx, body: LogTouchBody) -> TouchLogged:
-    """Log an HN reply or another touch he made himself, once per `idempotencyKey`, with `source 'own'`."""
-    try:
-        return _log_own_touch(ctx, body)
-    except sqlite3.IntegrityError as err:
-        raise store_refusal(err) from err
-
-
-def _log_own_touch(ctx: WriteCtx, body: LogTouchBody) -> TouchLogged:
+    """Log an HN reply or another touch he made himself, once per `idempotencyKey`, with `source 'own'`. Every input
+    is checked first, so a store constraint error here is a bug (a logged 500), never the client's mistake."""
     conn = ctx.conn
     if body.channel not in OWN_CHANNELS:
         raise ApiProblem("bad_request", "Log a LinkedIn step from the LinkedIn list, an application from the plan; "

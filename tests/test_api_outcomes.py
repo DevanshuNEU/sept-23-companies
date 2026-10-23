@@ -13,6 +13,7 @@ from outreach.api.config import load_config
 from outreach.api.errors import ApiProblem
 from outreach.api.queries import outcomes as outcome_queries
 from outreach.outcomes.wins import is_log_win
+from outreach.sending import queue
 from outreach.store import connect
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
@@ -44,6 +45,17 @@ def planned_followup(conn, email_touch_id: int, seq: int = 1, due_on: str = "202
         "touch_id": email_touch_id, "seq": seq, "state": "planned", "due_on": due_on, "saved_by": "sender",
         "created_at": s.T0, "updated_at": s.T0,
     })
+
+
+def move(conn, message_id: int, state: str) -> None:
+    """Walk a drafted message to `state` through legal transitions (approved, or failed after an unclear send)."""
+    conn.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?", (s.T0, message_id))
+    if state == "failed":
+        conn.execute("UPDATE message SET state = 'sending', pending_rfc_id = ?, claimed_at = ? WHERE message_id = ?",
+                     (f"<pending{message_id}@x>", s.T0, message_id))
+        conn.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (message_id,))
+        conn.execute("UPDATE message SET state = 'failed', pending_rfc_id = NULL, claimed_at = NULL "
+                     "WHERE message_id = ?", (message_id,))
 
 
 def score(conn, company_id: int, lanes=("level_role",), *, version: str = "r1",
@@ -94,6 +106,23 @@ class OutcomeCase(ApiCase):
         if kind:
             sql, args = sql + " WHERE kind = ?", (kind,)
         return self.conn.execute(sql + " ORDER BY event_id", args).fetchall()
+
+    def state_of(self, message_id: int) -> str | None:
+        row = self.conn.execute("SELECT state FROM message WHERE message_id = ?", (message_id,)).fetchone()
+        return row[0] if row else None
+
+    def sendable(self, message_id: int) -> bool:
+        """Whether the sender's own queue would still consider this message (approved, and no stop reason)."""
+        rows, companies = queue._rows(self.conn)
+        ids = {r["message_id"] for r in rows}
+        return message_id in ids and message_id not in queue._stop_reasons(rows, companies, self.conn)
+
+    def emailed(self, name: str = "Pat Lee") -> tuple[int, int]:
+        """A person with an email touch whose first email was sent: (person_id, email touch_id)."""
+        pid = s.person(self.conn, self.acme, name)
+        email = s.touch(self.conn, pid)
+        s.send_first(self.conn, email)
+        return pid, email
 
     def log_rows(self) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM linkedin_log ORDER BY entry_id").fetchall()
@@ -179,12 +208,10 @@ class Answers(OutcomeCase):
         messages = {r[0] for r in self.conn.execute("SELECT message_id FROM message WHERE state = 'planned'")}
         self.assertNotIn(planned, messages)
         self.assertIn(kept, messages)
-        cancelled = self.events("followup_cancelled")
-        self.assertEqual(len(cancelled), 1)
-        self.assertEqual((cancelled[0]["entity"], cancelled[0]["entity_id"], cancelled[0]["actor"]),
+        stopped = self.events("skipped_by_sender")
+        self.assertEqual(len(stopped), 1)
+        self.assertEqual((stopped[0]["entity"], stopped[0]["entity_id"], stopped[0]["actor"]),
                          ("touch", email, "devanshu"))
-        self.assertEqual(json.loads(cancelled[0]["detail"])["seq"], 1)
-        self.assertEqual(json.loads(cancelled[0]["detail"])["dueOn"], "2026-11-14")
         self.assertEqual([(r["kind"], r["reply_kind"]) for r in self.log_rows()], [("replied", "said_no")])
 
     def test_asked_to_stop_is_a_stop_reply_no_go(self):
@@ -193,16 +220,71 @@ class Answers(OutcomeCase):
         reasons = [r[0] for r in self.conn.execute("SELECT reason FROM no_go WHERE person_id = ?", (self.lena,))]
         self.assertEqual(reasons, ["stop_reply"])
 
-    def test_said_no_on_an_email_touch_cancels_followups_without_a_no_go(self):
-        pat = s.person(self.conn, self.acme, "Pat Lee")
-        email = s.touch(self.conn, pat)
-        s.send_first(self.conn, email)
+    def test_said_no_on_an_email_touch_writes_the_no_go_and_cancels_followups(self):
+        pat, email = self.emailed()
         planned = planned_followup(self.conn, email)
         t = touch(self.conn, self.acme, pat, channel="email", email_touch_id=email)
         self.assertEqual(self.answer(t, "replied", reply_kind="said_no").status_code, 200)
         self.assertIsNone(self.conn.execute("SELECT 1 FROM message WHERE message_id = ?", (planned,)).fetchone())
-        self.assertEqual(self.conn.execute("SELECT count(*) FROM no_go").fetchone()[0], 0)
+        no_go = self.conn.execute("SELECT person_id, reason, source FROM no_go").fetchall()
+        self.assertEqual([tuple(r) for r in no_go], [(pat, "said_no", "reply")])
         self.assertEqual(self.log_rows(), [])
+
+    def test_a_stop_reply_writes_the_no_go_on_every_channel(self):
+        for channel in ("linkedin_request", "linkedin_message", "email", "hn_reply", "other"):
+            with self.subTest(channel=channel):
+                pid = s.person(self.conn, self.acme, f"Person {channel}")
+                t = touch(self.conn, self.acme, pid, channel=channel)
+                self.assertEqual(self.answer(t, "replied", reply_kind="asked_to_stop").status_code, 200)
+                rows = self.conn.execute("SELECT reason, source FROM no_go WHERE person_id = ? AND lifted_at IS NULL",
+                                         (pid,)).fetchall()
+                self.assertEqual([tuple(r) for r in rows], [("stop_reply", "reply")])
+
+    def test_an_approved_followup_is_not_sendable_after_a_stop_reply(self):
+        pat, email = self.emailed()
+        approved = s.message(self.conn, email, 1, "approved")
+        self.assertTrue(self.sendable(approved))
+        t = touch(self.conn, self.acme, pat, channel="email", email_touch_id=email)
+        self.assertEqual(self.answer(t, "replied", reply_kind="asked_to_stop").status_code, 200)
+        self.assertFalse(self.sendable(approved))
+        self.assertEqual(self.state_of(approved), "skipped")
+
+    def test_a_stop_reply_skips_drafted_approved_and_failed_rows_and_leaves_sent_ones(self):
+        pat, email = self.emailed()
+        first = self.conn.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 0",
+                                  (email,)).fetchone()[0]
+        approved = s.message(self.conn, email, 1, "approved")
+        drafted = s.message(self.conn, email, 2, "drafted")
+        failed = s.message(self.conn, email, 3, "drafted")
+        move(self.conn, failed, "failed")
+        other, other_email = self.emailed("Sam Park")
+        theirs = s.message(self.conn, other_email, 1, "approved")
+        t = touch(self.conn, self.acme, pat)
+        self.assertEqual(self.answer(t, "replied", reply_kind="said_no").status_code, 200)
+        self.assertEqual([self.state_of(m) for m in (first, approved, drafted, failed)],
+                         ["sent", "skipped", "skipped", "skipped"])
+        self.assertEqual(self.state_of(theirs), "approved")
+        skipped = self.events("skipped_by_sender")
+        self.assertEqual(sorted((e["entity"], e["entity_id"]) for e in skipped),
+                         sorted(("message", m) for m in (approved, drafted, failed)))
+        revisions = [r[0] for r in self.conn.execute(
+            "SELECT revision FROM message WHERE message_id IN (?, ?, ?)", (approved, drafted, failed))]
+        self.assertEqual(revisions, [2, 2, 2])  # each skip moves the revision on, so a stale approve conflicts
+
+    def test_the_stop_event_matches_the_senders_stop_planned(self):
+        pat, email = self.emailed()
+        planned_followup(self.conn, email, seq=1, due_on="2026-11-14")
+        drafted = s.message(self.conn, email, 2, "drafted")
+        t = touch(self.conn, self.acme, pat)
+        self.assertEqual(self.answer(t, "replied", reply_kind="said_no").status_code, 200)
+        events = {e["entity"]: e for e in self.events("skipped_by_sender")}
+        planned_event = events["touch"]
+        self.assertEqual((planned_event["entity_id"], planned_event["idempotency_key"]),
+                         (email, f"followup-stopped:{email}:1:2026-11-14"))
+        self.assertEqual(json.loads(planned_event["detail"]), {"seq": 1, "due_on": "2026-11-14", "reason": "said_no"})
+        message_event = events["message"]
+        self.assertEqual(message_event["entity_id"], drafted)
+        self.assertEqual(json.loads(message_event["detail"]), {"seq": 2, "due_on": "2026-11-12", "reason": "said_no"})
 
     def test_a_second_said_no_keeps_one_active_no_go(self):
         first = touch(self.conn, self.acme, self.lena)
@@ -292,6 +374,15 @@ class Quiet(OutcomeCase):
         self.set_now("2026-11-23T15:00:00Z")  # day 20, after a second snooze: never again
         self.assertEqual(self.prompt_ids(), [])
         self.assertIsNone(self.row(t)["quiet_at"])
+
+    def test_two_snoozes_on_the_same_day_count_once(self):
+        t = touch(self.conn, self.acme, self.lena, sent_at=DAY_7)
+        self.assertEqual(self.answer(t, "quiet", key="tab-one-123").status_code, 200)
+        self.set_now("2026-11-10T22:00:00Z")  # later the same New York day, from another tab
+        self.assertEqual(self.answer(t, "quiet", key="tab-two-456").status_code, 200)
+        self.assertEqual(len(self.events("prompt_snoozed")), 1)
+        self.set_now("2026-11-17T15:00:00Z")  # one snooze counted: asked once more
+        self.assertEqual(self.prompt_ids(), [t])
 
     def test_quiet_from_day_21_sets_quiet_at(self):
         t = touch(self.conn, self.acme, self.lena, sent_at=DAY_21)
@@ -405,6 +496,40 @@ class Corrections(OutcomeCase):
         self.assertEqual(res.json()["code"], "bad_request")
         self.assertNotIn("CHECK", res.json()["message"])
         self.assertIn("Nothing was saved", res.json()["message"])
+
+    def test_a_correction_to_a_stop_reply_applies_the_same_effects(self):
+        pat, email = self.emailed()
+        approved = s.message(self.conn, email, 1, "approved")
+        drafted = s.message(self.conn, email, 2, "drafted")
+        planned = planned_followup(self.conn, email, seq=3, due_on="2026-11-20")
+        t = touch(self.conn, self.acme, pat, channel="email", email_touch_id=email, replied_at=DAY_6,
+                  reply_kind="interested")
+        res = self.correct(t, "replied", DAY_6, 1, reply_kind="asked_to_stop")
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(self.row(t)["reply_kind"], "asked_to_stop")
+        self.assertEqual([tuple(r) for r in self.conn.execute("SELECT person_id, reason, source FROM no_go")],
+                         [(pat, "stop_reply", "reply")])
+        self.assertEqual((self.state_of(approved), self.state_of(drafted), self.state_of(planned)),
+                         ("skipped", "skipped", None))
+        self.assertFalse(self.sendable(approved))
+
+    def test_a_correction_to_an_interested_reply_stops_nothing(self):
+        pat, email = self.emailed()
+        approved = s.message(self.conn, email, 1, "approved")
+        t = touch(self.conn, self.acme, pat, channel="email", email_touch_id=email, replied_at=DAY_6,
+                  reply_kind="unsorted")
+        self.assertEqual(self.correct(t, "replied", DAY_6, 1, reply_kind="interested").status_code, 200)
+        self.assertEqual(self.state_of(approved), "approved")
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM no_go").fetchone()[0], 0)
+
+    def test_an_integrity_error_outside_an_outcome_write_is_a_logged_500(self):
+        refused = sqlite3.IntegrityError("UNIQUE constraint failed: outreach_touch.idempotency_key")
+        with mock.patch.object(outcome_queries, "log_touch", side_effect=refused):
+            with self.assertLogs("outreach.api", level="ERROR"):
+                res = self.post("/api/touches", {"channel": "other", "companyId": self.acme, "personId": self.lena,
+                                                 "idempotencyKey": "other:boom"})
+        self.assertEqual(res.status_code, 500, res.text)
+        self.assertEqual(res.json()["code"], "server_error")
 
     def test_store_refusal_maps_only_constraint_errors(self):
         problem = outcome_queries.store_refusal(sqlite3.IntegrityError("CHECK constraint failed: x"))

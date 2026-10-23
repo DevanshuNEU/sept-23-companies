@@ -7,9 +7,12 @@ import unittest
 from datetime import date
 from unittest import mock
 
+from outreach.crawl.base import ReadResult, Validators
+from outreach.crawl.boardstate import load_board
+from outreach.crawl.ingest import GUESSED_BOARDS, _before_first_good_read, _check_doubtful
 from outreach.crawl.stale import load_stale
-from outreach.ranking.common import (BOARD_DOUBTFUL_PREFIX, age_days, canonical_ids, clean_text,
-                                     doubtful_board_ids)
+from outreach.ranking.common import (BOARD_DOUBTFUL_PREFIX, UNREAD_DOUBTFUL_FOUND_BY, age_days, canonical_ids,
+                                     clean_text, doubtful_board_ids)
 from outreach.ranking.config import default_ranker_config
 from outreach.ranking.hide import (Hide, HideInputs, Refusal, decide_hide, load_hide_inputs, posting_visible,
                                    write_no_go)
@@ -334,6 +337,54 @@ class TrustedBoardTests(Store):
         b = rs.board(self.conn, self.co, found_by="import", last_read=None)
         self.refusal(board_id=b)
         self.assertEqual(self.hide_for().kind, "no_sponsorship")
+
+
+class CrawlerContractTests(Store):
+    """Ranking restates three crawler facts (outreach/crawl/ingest.py) without importing its private code. These
+    tests pin each copy to the crawler's own function, so a change on either side fails here."""
+
+    def test_the_crawlers_doubtful_reason_starts_with_the_prefix_ranking_reads(self):
+        b = rs.board(self.conn, self.co, found_by="stapply_name", last_read=None)
+        read = ReadResult("empty", (), Validators(), board_name="Someone Else Entirely")
+        _check_doubtful(self.conn, load_board(self.conn, b), read, "2026-10-21T08:00:00Z")
+        reasons = [r[0] for r in self.conn.execute("SELECT reason FROM review_item WHERE board_id = ?", (b,))]
+        self.assertEqual(len(reasons), 1)
+        self.assertTrue(reasons[0].startswith(BOARD_DOUBTFUL_PREFIX), reasons[0])
+        rs.board_read(self.conn, b, "empty")  # read once: only the crawler's item keeps it doubtful now
+        self.conn.execute("UPDATE board SET last_read = 'empty', last_read_at = '2026-10-21T08:00:00Z', "
+                          "streak_since = '2026-10-21T08:00:00Z', empty_streak = 1 WHERE board_id = ?", (b,))
+        self.assertIn(b, doubtful_board_ids(self.conn))
+
+    def test_the_guessed_board_kinds_are_the_crawlers(self):
+        self.assertEqual(frozenset(UNREAD_DOUBTFUL_FOUND_BY), frozenset(GUESSED_BOARDS))
+
+    def test_before_the_first_good_read_matches_the_crawler_on_every_seeded_board(self):
+        seeded = []
+        for found_by in GUESSED_BOARDS:
+            seeded.append(rs.board(self.conn, self.co, found_by=found_by, last_read=None))
+            for last in ("ok", "empty", "unchanged"):
+                seeded.append(rs.board(self.conn, self.co, found_by=found_by, last_read=last))
+            only_errors = rs.board(self.conn, self.co, found_by=found_by, last_read="error", error_streak=2)
+            rs.board_read(self.conn, only_errors, "error")
+            rs.read_state_event(self.conn, only_errors, "error")
+            seeded.append(only_errors)
+            seeded.append(rs.board(self.conn, self.co, found_by=found_by, last_read="error", empty_streak=1))
+            for sign in ("ok", "empty", "unchanged"):
+                kept = rs.board(self.conn, self.co, found_by=found_by, last_read="error")
+                rs.board_read(self.conn, kept, sign)
+                seeded.append(kept)
+            for to in ("ok", "empty"):
+                evented = rs.board(self.conn, self.co, found_by=found_by, last_read="error")
+                rs.read_state_event(self.conn, evented, to)
+                seeded.append(evented)
+        doubtful = doubtful_board_ids(self.conn)
+        verdicts = set()
+        for b in seeded:
+            crawler = _before_first_good_read(self.conn, load_board(self.conn, b))
+            verdicts.add(crawler)
+            with self.subTest(board=b):
+                self.assertEqual(b in doubtful, crawler)
+        self.assertEqual(verdicts, {True, False})  # the seeds cover both answers
 
 
 class ConflictTests(Store):

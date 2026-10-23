@@ -53,6 +53,7 @@ def doubtful_board_ids(conn: sqlite3.Connection) -> frozenset[int]:
     # "Before its first good read" restates outreach/crawl/ingest.py _before_first_good_read: never read, or only
     # errors so far (last read an error, no empty run under it, no kept good board_read row and no read_state event
     # to a good state). An error carries no name and no jobs, so #21's check waits for a good read, and so do we.
+    # tests/test_ranking_hide.py CrawlerContractTests pins this copy, the prefix and the found_by list to the crawler.
     rows = conn.execute(
         "SELECT board_id FROM review_item WHERE kind = 'flagged' AND raised_by = 'crawler' AND state = 'open' "
         "AND board_id IS NOT NULL AND reason LIKE ? "

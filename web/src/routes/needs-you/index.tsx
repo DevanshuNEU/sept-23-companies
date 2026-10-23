@@ -60,6 +60,10 @@ const OK_TEXT: Record<ReviewItem['kind'], string> = {
   board_unreadable: 'keeps its postings open',
   board_empty: 'keeps its postings closed',
   flagged: 'stays as it is',
+  merge_candidate: 'stays a separate company',
+  reader_disagrees: 'keeps what the rules decided',
+  careers_changed: 'stays as it is',
+  size_check: 'keeps the size on file',
 };
 
 const FIELD_NAME: Record<Extract<ReviewFix, { kind: 'edit' }>['field'], string> = {

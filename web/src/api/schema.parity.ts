@@ -43,4 +43,7 @@ export const _parity: [
   Same<T.LinkedInPerson, S['LinkedInPerson']>,
   Same<T.LinkedInGroup, S['LinkedInGroup']>,
   Same<T.LinkedInView, S['LinkedInView']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<T.ResolvedReview, S['ResolvedReview']>,
+  Same<T.NeedsYouView, S['NeedsYouView']>,
+  Same<T.ReviewFix, S['ResolveReviewBody']['fix']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

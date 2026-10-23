@@ -816,7 +816,7 @@ function buildLinkedIn(c: Ctx): LinkedInView {
 function buildNeedsYou(c: Ctx): NeedsYouView {
   const item = (kind: ReviewKind, company: string, picked: boolean, openedAt: IsoTime, ageDays: number, reason: string, o: Partial<ReviewItem> = {}): ReviewItem => ({
     id: c.next(), kind, company: { ...c.co(company), picked }, holdsEmail: false, reason, openedAt, ageDays, reopened: null, quote: null, reads: [],
-    lastOkAt: null, openPostings: null, sizeFacts: [], revision: 1, ...o,
+    lastOkAt: null, openPostings: null, sizeFacts: [], revision: 1, inPlay: true, ...o,
   });
   const read = (date: IsoDate, result: 'ok' | 'empty' | 'error', detail: string) => ({ at: et(date, '08:04'), result, detail });
   const hex = c.role('Hex', 'Software Engineer, New Grad', 'new_grad', SF, 12);

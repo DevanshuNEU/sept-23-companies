@@ -1708,6 +1708,46 @@
         "title": "LoggedStep",
         "type": "object"
       },
+      "NeedsYouView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "boardsJob": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewItem"
+            },
+            "title": "Open",
+            "type": "array"
+          },
+          "resolvedThisWeek": {
+            "items": {
+              "$ref": "#/components/schemas/ResolvedReview"
+            },
+            "title": "Resolvedthisweek",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "open",
+          "resolvedThisWeek",
+          "boardsJob"
+        ],
+        "title": "NeedsYouView",
+        "type": "object"
+      },
       "OutcomeBody": {
         "additionalProperties": false,
         "description": "An answer to \"what came of this?\". `quiet` is \"Nothing yet\": a snooze before day 21, then the quiet mark.",
@@ -2247,6 +2287,108 @@
         "title": "ReadQueueStatus",
         "type": "object"
       },
+      "ResolveReviewBody": {
+        "additionalProperties": false,
+        "properties": {
+          "fix": {
+            "discriminator": {
+              "mapping": {
+                "edit": "#/components/schemas/ReviewFixEdit",
+                "merge": "#/components/schemas/ReviewFixMerge",
+                "no_go": "#/components/schemas/ReviewFixNoGo",
+                "ok": "#/components/schemas/ReviewFixOk"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReviewFixOk"
+              },
+              {
+                "$ref": "#/components/schemas/ReviewFixEdit"
+              },
+              {
+                "$ref": "#/components/schemas/ReviewFixNoGo"
+              },
+              {
+                "$ref": "#/components/schemas/ReviewFixMerge"
+              }
+            ],
+            "title": "Fix"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fix",
+          "revision"
+        ],
+        "title": "ResolveReviewBody",
+        "type": "object"
+      },
+      "ResolvedReview": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "board_unreadable",
+              "board_empty",
+              "sponsorship_unclear",
+              "size_unknown",
+              "size_guess",
+              "domain_missing",
+              "flagged",
+              "merge_candidate",
+              "reader_disagrees",
+              "careers_changed",
+              "size_check"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "locked": {
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "marked_ok",
+              "marked_no_go",
+              "field_edited"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "companyName",
+          "resolution",
+          "note",
+          "at",
+          "locked"
+        ],
+        "title": "ResolvedReview",
+        "type": "object"
+      },
       "ReviewCompany": {
         "properties": {
           "heldByTouchId": {
@@ -2306,6 +2448,117 @@
         "title": "ReviewCompany",
         "type": "object"
       },
+      "ReviewFixEdit": {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "enum": [
+              "domain",
+              "size",
+              "sponsorship",
+              "board_url"
+            ],
+            "title": "Field",
+            "type": "string"
+          },
+          "kind": {
+            "const": "edit",
+            "title": "Kind",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "field",
+          "value",
+          "source"
+        ],
+        "title": "ReviewFixEdit",
+        "type": "object"
+      },
+      "ReviewFixMerge": {
+        "additionalProperties": false,
+        "properties": {
+          "keep": {
+            "enum": [
+              "a",
+              "b"
+            ],
+            "title": "Keep",
+            "type": "string"
+          },
+          "kind": {
+            "const": "merge",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "keep"
+        ],
+        "title": "ReviewFixMerge",
+        "type": "object"
+      },
+      "ReviewFixNoGo": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "no_go",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "no_sponsorship",
+              "citizenship",
+              "over_300",
+              "defence_contractor",
+              "agency",
+              "said_no",
+              "stop_reply",
+              "not_a_fit",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "reason",
+          "source"
+        ],
+        "title": "ReviewFixNoGo",
+        "type": "object"
+      },
+      "ReviewFixOk": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "ok",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "ReviewFixOk",
+        "type": "object"
+      },
       "ReviewItem": {
         "properties": {
           "ageDays": {
@@ -2323,6 +2576,10 @@
             "title": "Id",
             "type": "integer"
           },
+          "inPlay": {
+            "title": "Inplay",
+            "type": "boolean"
+          },
           "kind": {
             "enum": [
               "board_unreadable",
@@ -2331,7 +2588,11 @@
               "size_unknown",
               "size_guess",
               "domain_missing",
-              "flagged"
+              "flagged",
+              "merge_candidate",
+              "reader_disagrees",
+              "careers_changed",
+              "size_check"
             ],
             "title": "Kind",
             "type": "string"
@@ -2419,7 +2680,8 @@
           "lastOkAt",
           "openPostings",
           "sizeFacts",
-          "revision"
+          "revision",
+          "inPlay"
         ],
         "title": "ReviewItem",
         "type": "object"
@@ -2501,6 +2763,24 @@
           "changed"
         ],
         "title": "ReviewReopened",
+        "type": "object"
+      },
+      "ReviewResolved": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "revision"
+        ],
+        "title": "ReviewResolved",
         "type": "object"
       },
       "RoleToName": {
@@ -3050,6 +3330,33 @@
         "title": "UndoStepBody",
         "type": "object"
       },
+      "UnmergeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "UnmergeBody",
+        "type": "object"
+      },
+      "Unmerged": {
+        "properties": {
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "Unmerged",
+        "type": "object"
+      },
       "WatchDismissed": {
         "description": "What a dismiss answers with: the id it was sent. (A write answers with JSON; an empty answer reads as broken.)",
         "properties": {
@@ -3434,6 +3741,120 @@
         "summary": "Company",
         "tags": [
           "company"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/unmerge": {
+      "post": {
+        "operationId": "unmerge_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnmergeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unmerged"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Unmerge Company",
+        "tags": [
+          "needs-you"
         ]
       }
     },
@@ -3964,6 +4385,77 @@
         ]
       }
     },
+    "/api/needs-you": {
+      "get": {
+        "operationId": "needs_you",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeedsYouView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Needs You",
+        "tags": [
+          "needs-you"
+        ]
+      }
+    },
     "/api/outcomes/prompt": {
       "get": {
         "operationId": "outcome_prompt",
@@ -4171,6 +4663,120 @@
         "summary": "Progress View",
         "tags": [
           "progress"
+        ]
+      }
+    },
+    "/api/review/{review_id}/resolve": {
+      "post": {
+        "operationId": "resolve_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Review Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveReviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResolved"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Resolve Review",
+        "tags": [
+          "needs-you"
         ]
       }
     },

@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { Archive, CircleHelp, Clock, Flag, Lock, Mail, RefreshCw, User, type LucideIcon } from 'lucide-react';
+import { Archive, CircleHelp, Clock, Copy, Flag, Lock, Mail, RefreshCw, User, type LucideIcon } from 'lucide-react';
 import type { IsoTime, ReviewFix, ReviewItem, ReviewKind } from '@/api';
 import { RunStrip } from '@/components/run-strip';
 import { StatusBadge } from '@/components/status-badge';
@@ -28,6 +28,10 @@ export const TRIGGER = {
   board_unreadable: { label: 'Board unreadable', tone: 'bad' },
   board_empty: { label: 'Board shows zero jobs', tone: 'warn' },
   flagged: { label: 'Flagged', tone: 'warn' },
+  merge_candidate: { label: 'Maybe one company', tone: 'warn' },
+  reader_disagrees: { label: 'Reader disagrees', tone: 'warn' },
+  careers_changed: { label: 'Careers page changed', tone: 'warn' },
+  size_check: { label: 'May be a subsidiary', tone: 'warn' },
 } satisfies Record<ReviewKind, Status>;
 
 const ICON: Record<ReviewKind, LucideIcon> = {
@@ -38,6 +42,10 @@ const ICON: Record<ReviewKind, LucideIcon> = {
   board_unreadable: RefreshCw,
   board_empty: Archive,
   flagged: Flag,
+  merge_candidate: Copy,
+  reader_disagrees: CircleHelp,
+  careers_changed: RefreshCw,
+  size_check: User,
 };
 
 /** The field Edit sets for each trigger. A flag has none: mark it ok or no-go. */
@@ -50,6 +58,10 @@ export const EDIT_FIELD: Record<ReviewKind, EditField | null> = {
   board_unreadable: 'board_url',
   board_empty: 'board_url',
   flagged: null,
+  merge_candidate: null, // merged or kept separate (Mark ok); the merge confirm is #16's
+  reader_disagrees: null,
+  careers_changed: null,
+  size_check: 'size',
 };
 
 const FIELD_LABEL: Record<EditField, string> = { domain: 'Email domain', size: 'Size', sponsorship: 'Sponsorship', board_url: 'Board URL' };

@@ -635,6 +635,7 @@ export class FixtureClient implements OutreachClient {
       if (!review) throw new ApiError('not_found', `No review item ${reviewId}`);
       if (review.revision !== revision) throw new ApiError('conflict', 'This item changed since you loaded it');
       if (fix.kind === 'edit' && (fix.source.trim() === '' || fix.value.trim() === '')) throw notAllowed('An edit needs a value and a source');
+      if (fix.kind === 'merge' && review.kind !== 'merge_candidate') throw notAllowed('Only a possible duplicate can be merged.');
       const v = this.view(review.company.id);
       let resolution: ResolvedReview['resolution'] = 'marked_ok';
       let note = 'Marked ok by you';
@@ -657,6 +658,9 @@ export class FixtureClient implements OutreachClient {
         this.shut(v, fix.reason === 'no_sponsorship' ? 'no_sponsorship' : 'other', fix.source, fix.reason);
         resolution = 'marked_no_go';
         note = `Added to the no-go list by you: ${fix.reason.replace(/_/g, ' ')}`;
+      } else if (fix.kind === 'merge') {
+        resolution = 'field_edited';
+        note = 'Merged by you';
       }
       this.db.needsYou.open = this.db.needsYou.open.filter((r) => r.id !== reviewId);
       this.db.needsYou.resolvedThisWeek.unshift({ id: reviewId, kind: review.kind, companyName: review.company.name, resolution, note, at: this.now, locked: fix.kind === 'edit' });

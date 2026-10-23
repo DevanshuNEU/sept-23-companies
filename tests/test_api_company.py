@@ -377,7 +377,7 @@ class CompanyPage(ApiCase):
         unclear = s.review(self.conn, cid, "sponsorship_unclear", posting_id=p, evidence_key="k2")
         size = s.review(self.conn, cid, "size_guess", evidence_key="k3")
         s.review(self.conn, cid, "domain_missing", evidence_key="k4", state="resolved")
-        s.review(self.conn, cid, "merge_candidate", evidence_key="k5")  # a kind Needs you owns; not on the page yet
+        s.review(self.conn, cid, "merge_candidate", evidence_key="k5")  # names no second company: nothing to decide
         items = {i["id"]: i for i in self.view(cid)["reviewItems"]}
         self.assertEqual(set(items), {unreadable, unclear, size})
         u = items[unreadable]

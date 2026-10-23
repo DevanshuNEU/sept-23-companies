@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company_id}/unmerge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unmerge Company */
+        post: operations["unmerge_company"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/findings": {
         parameters: {
             query?: never;
@@ -123,6 +140,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/needs-you": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Needs You */
+        get: operations["needs_you"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/outcomes/prompt": {
         parameters: {
             query?: never;
@@ -168,6 +202,23 @@ export interface paths {
         get: operations["progress_view"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/review/{review_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve Review */
+        post: operations["resolve_review"];
         delete?: never;
         options?: never;
         head?: never;
@@ -903,6 +954,16 @@ export interface components {
              */
             step: "request_sent" | "accepted" | "message_sent" | "replied";
         };
+        /** NeedsYouView */
+        NeedsYouView: {
+            /** Asof */
+            asOf: string;
+            boardsJob: components["schemas"]["JobRunSummary"] | null;
+            /** Open */
+            open: components["schemas"]["ReviewItem"][];
+            /** Resolvedthisweek */
+            resolvedThisWeek: components["schemas"]["ResolvedReview"][];
+        };
         /**
          * OutcomeBody
          * @description An answer to "what came of this?". `quiet` is "Nothing yet": a snooze before day 21, then the quiet mark.
@@ -1079,6 +1140,36 @@ export interface components {
             /** Refused */
             refused: number;
         };
+        /** ResolveReviewBody */
+        ResolveReviewBody: {
+            /** Fix */
+            fix: components["schemas"]["ReviewFixOk"] | components["schemas"]["ReviewFixEdit"] | components["schemas"]["ReviewFixNoGo"] | components["schemas"]["ReviewFixMerge"];
+            /** Revision */
+            revision: number;
+        };
+        /** ResolvedReview */
+        ResolvedReview: {
+            /** At */
+            at: string;
+            /** Companyname */
+            companyName: string;
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "board_unreadable" | "board_empty" | "sponsorship_unclear" | "size_unknown" | "size_guess" | "domain_missing" | "flagged" | "merge_candidate" | "reader_disagrees" | "careers_changed" | "size_check";
+            /** Locked */
+            locked: boolean;
+            /** Note */
+            note: string;
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "marked_ok" | "marked_no_go" | "field_edited";
+        };
         /** ReviewCompany */
         ReviewCompany: {
             /** Heldbytouchid */
@@ -1097,6 +1188,59 @@ export interface components {
              */
             status: "candidate" | "backlog" | "working" | "closed" | "removed";
         };
+        /** ReviewFixEdit */
+        ReviewFixEdit: {
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "domain" | "size" | "sponsorship" | "board_url";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "edit";
+            /** Source */
+            source: string;
+            /** Value */
+            value: string;
+        };
+        /** ReviewFixMerge */
+        ReviewFixMerge: {
+            /**
+             * Keep
+             * @enum {string}
+             */
+            keep: "a" | "b";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "merge";
+        };
+        /** ReviewFixNoGo */
+        ReviewFixNoGo: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "no_go";
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "no_sponsorship" | "citizenship" | "over_300" | "defence_contractor" | "agency" | "said_no" | "stop_reply" | "not_a_fit" | "other";
+            /** Source */
+            source: string;
+        };
+        /** ReviewFixOk */
+        ReviewFixOk: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "ok";
+        };
         /** ReviewItem */
         ReviewItem: {
             /** Agedays */
@@ -1106,11 +1250,13 @@ export interface components {
             holdsEmail: boolean;
             /** Id */
             id: number;
+            /** Inplay */
+            inPlay: boolean;
             /**
              * Kind
              * @enum {string}
              */
-            kind: "board_unreadable" | "board_empty" | "sponsorship_unclear" | "size_unknown" | "size_guess" | "domain_missing" | "flagged";
+            kind: "board_unreadable" | "board_empty" | "sponsorship_unclear" | "size_unknown" | "size_guess" | "domain_missing" | "flagged" | "merge_candidate" | "reader_disagrees" | "careers_changed" | "size_check";
             /** Lastokat */
             lastOkAt: string | null;
             /** Openpostings */
@@ -1159,6 +1305,13 @@ export interface components {
             changed: string;
             /** Previous */
             previous: string;
+        };
+        /** ReviewResolved */
+        ReviewResolved: {
+            /** Id */
+            id: number;
+            /** Revision */
+            revision: number;
         };
         /** RoleToName */
         RoleToName: {
@@ -1335,6 +1488,16 @@ export interface components {
              */
             step: "request_sent" | "accepted" | "message_sent" | "replied";
         };
+        /** UnmergeBody */
+        UnmergeBody: {
+            /** Revision */
+            revision: number;
+        };
+        /** Unmerged */
+        Unmerged: {
+            /** Revision */
+            revision: number;
+        };
         /**
          * WatchDismissed
          * @description What a dismiss answers with: the id it was sent. (A write answers with JSON; an empty answer reads as broken.)
@@ -1478,6 +1641,95 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    unmerge_company: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnmergeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unmerged"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1945,6 +2197,71 @@ export interface operations {
             };
         };
     };
+    needs_you: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NeedsYouView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     outcome_prompt: {
         parameters: {
             query?: never;
@@ -2113,6 +2430,95 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    resolve_review: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                review_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveReviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewResolved"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

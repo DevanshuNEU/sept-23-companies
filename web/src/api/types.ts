@@ -19,7 +19,9 @@ export type TouchState = 'open' | 'replied' | 'bounced' | 'closed';
 export type ReplyKind = 'unsorted' | 'interested' | 'not_now' | 'said_no' | 'asked_to_stop' | 'auto_reply';
 export type OutboxGroup = 'replied' | 'review' | 'approved' | 'sending' | 'checking' | 'sent' | 'paused' | 'closed'; // derived
 export type CheckSeverity = 'block' | 'warn' | 'pass';
-export type ReviewKind = 'board_unreadable' | 'board_empty' | 'sponsorship_unclear' | 'size_unknown' | 'size_guess' | 'domain_missing' | 'flagged';
+export type ReviewKind =
+  | 'board_unreadable' | 'board_empty' | 'sponsorship_unclear' | 'size_unknown' | 'size_guess' | 'domain_missing' | 'flagged'
+  | 'merge_candidate' | 'reader_disagrees' | 'careers_changed' | 'size_check';
 export type NoGoReason = 'no_sponsorship' | 'citizenship' | 'over_300' | 'defence_contractor' | 'agency' | 'said_no' | 'stop_reply' | 'not_a_fit' | 'other';
 export type NoGoSource = 'devanshu' | 'rules' | 'reply' | 'import' | 'claude';
 export type Actor = 'devanshu' | 'claude' | 'sender' | 'crawler' | 'rules' | 'daily_list' | 'import' | 'system' | 'source' | 'reader';
@@ -162,13 +164,15 @@ export interface ReviewItem {
   quote: { text: string; postingId: Id; postingTitle: string; url: string; firstSeenAt: IsoTime } | null;
   reads: { at: IsoTime; result: ReadResult; detail: string }[]; lastOkAt: IsoTime | null; openPostings: number | null;
   sizeFacts: Fact[]; revision: Revision;
+  inPlay: boolean; // being worked, picked or planned: Needs you lists these first and the rest under Later (#11 Task 20)
 }
 export interface ResolvedReview { id: Id; kind: ReviewKind; companyName: string; resolution: 'marked_ok' | 'marked_no_go' | 'field_edited'; note: string; at: IsoTime; locked: boolean }
 export interface NeedsYouView { asOf: IsoTime; open: ReviewItem[]; resolvedThisWeek: ResolvedReview[]; boardsJob: JobRunSummary | null }
 export type ReviewFix =
   | { kind: 'ok' }
   | { kind: 'edit'; field: 'domain' | 'size' | 'sponsorship' | 'board_url'; value: string; source: string }
-  | { kind: 'no_go'; reason: NoGoReason; source: string };
+  | { kind: 'no_go'; reason: NoGoReason; source: string }
+  | { kind: 'merge'; keep: 'a' | 'b' }; // only for merge_candidate: a is the item's company, b the other one (#11 Task 20)
 
 // No-go (spec 13.6). Two kinds of row: a no_go table row (liftable), or a removed company (restorable).
 export interface NoGoRow {

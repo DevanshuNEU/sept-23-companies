@@ -62,6 +62,10 @@ export const reviewKindStatus = {
   size_guess: { label: 'Guess', tone: 'warn' },
   domain_missing: { label: 'No domain', tone: 'warn' },
   flagged: { label: 'Flagged', tone: 'warn' },
+  merge_candidate: { label: 'Duplicate?', tone: 'warn' },
+  reader_disagrees: { label: 'Reader disagrees', tone: 'warn' },
+  careers_changed: { label: 'Page changed', tone: 'info' },
+  size_check: { label: 'Check size', tone: 'warn' },
 } satisfies Record<ReviewKind, Status>;
 
 export const noGoReasonStatus = {

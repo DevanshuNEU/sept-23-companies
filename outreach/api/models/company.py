@@ -23,10 +23,10 @@ TouchState = Literal["open", "replied", "bounced", "closed"]
 Actor = Literal["devanshu", "claude", "sender", "crawler", "rules", "daily_list", "import", "system", "source", "reader"]
 ImportSource = Literal["data_js", "local_storage", "contacts_json", "radar_db", "devboard", "contacted_txt", "devvault_notes"]
 ReadResult = Literal["ok", "empty", "error"]
-# The kinds the web's Needs you tables know. The four newer kinds (merge_candidate, reader_disagrees,
-# careers_changed, size_check) join with the Needs you view (Task 20), which widens this and the web's tables.
+# Every value `review_item.kind` allows (the foundation's four newer kinds included).
 ReviewKind = Literal[
     "board_unreadable", "board_empty", "sponsorship_unclear", "size_unknown", "size_guess", "domain_missing", "flagged",
+    "merge_candidate", "reader_disagrees", "careers_changed", "size_check",
 ]
 Tone = Literal["ok", "info", "warn", "bad", "idle"]
 
@@ -198,6 +198,8 @@ class ReviewItem(Wire):
     open_postings: int | None
     size_facts: list[Fact]
     revision: int
+    # The company is in play (being worked, picked or planned): Needs you lists these first, the rest under Later.
+    in_play: bool
 
 
 class CompanyView(Wire):

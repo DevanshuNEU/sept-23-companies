@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 
 from outreach.api.models.company import (
     CompanyBoard, CompanyClosed, CompanyEvent, CompanyHeader, CompanyPerson, CompanyTouch, CompanyView, Fact,
-    PersonRef, PostingFlag, PostingRow, ReviewCompany, ReviewItem, ReviewQuote, ReviewRead, RoleToName, ThreadMessage,
+    PersonRef, PostingFlag, PostingRow, RoleToName, ThreadMessage,
 )
 from outreach.api.queries import people as people_queries
 from outreach.api.queries.people import scope
@@ -23,9 +23,7 @@ READS_SHOWN = 10
 DAYS_OF_EMAIL = 3
 NAME_ALIAS_SOURCES = _NAME_ALIAS_SOURCES  # the store's own list of name-like alias sources
 IMPORT_SOURCE_KEY = "importSource"  # the key of an import event's detail that names the old place it came from
-REVIEW_KINDS = ("board_unreadable", "board_empty", "sponsorship_unclear", "size_unknown", "size_guess",
-                "domain_missing", "flagged")
-EMAIL_HOLDING_KINDS = ("domain_missing", "size_unknown", "size_guess")
+EMAIL_HOLDING_KINDS = ("domain_missing", "size_unknown", "size_guess", "size_check")
 IMPORT_SOURCES = ("data_js", "local_storage", "contacts_json", "radar_db", "devboard", "contacted_txt", "devvault_notes")
 TIER_RANK = {"new_grad": 0, "early_career": 1, "swe1": 2, "swe2": 3, "open": 4, "not_stated": 5, "senior": 6}
 STATE_RANK = {"open": 0, "out_of_lane": 1, "hidden": 2, "closed": 3}
@@ -194,6 +192,8 @@ def _text(value) -> str | None:
 
 def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> CompanyView | None:
     """The page of `company_id` (answered as its survivor), or None when there is no such company."""
+    from outreach.api.queries import needs_you  # it builds the review items, and imports this module
+
     if conn.execute("SELECT 1 FROM company WHERE company_id = ?", (company_id,)).fetchone() is None:
         return None
     parents = merge_parents(conn)
@@ -223,8 +223,7 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
     event_rows = conn.execute(
         f"SELECT * FROM event{where} ORDER BY at DESC, event_id DESC LIMIT {EVENT_LIMIT}", params).fetchall()
     review_rows = conn.execute(
-        f"SELECT * FROM review_item{where} AND state = 'open' AND kind IN ({','.join('?' * len(REVIEW_KINDS))}) "
-        "ORDER BY created_at, review_id", params + list(REVIEW_KINDS)).fetchall()
+        f"SELECT * FROM review_item{where} AND state = 'open' ORDER BY created_at, review_id", params).fetchall()
     picked_dates = [r[0] for r in conn.execute(
         f"SELECT DISTINCT list_date FROM daily_list_entry{where} AND state = 'picked' ORDER BY list_date DESC", params)]
     ruleset = conn.execute("SELECT ruleset_version FROM ruleset WHERE is_current = 1").fetchone()
@@ -278,8 +277,7 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
         touches=touches,
         evidence=[to_fact(r) for r in evidence_rows],
         events=[_event(r) for r in event_rows],
-        review_items=_review_items(conn, review_rows, companies, posting_rows, decisions, boards, evidence_rows,
-                                   picked_dates, today, now),
+        review_items=needs_you.review_items(conn, review_rows, parents, now),
         ruleset_version=ruleset["ruleset_version"] if ruleset else "",
     )
 
@@ -403,49 +401,8 @@ def _event(r: sqlite3.Row) -> CompanyEvent:
     return CompanyEvent(id=r["event_id"], at=r["at"], kind=r["kind"], text=text, actor=r["actor"], import_source=source)
 
 
-def _review_items(conn, rows, companies, posting_rows, decisions, boards, evidence_rows, picked_dates, today, now):
-    if not rows:
-        return []
-    board_ids = {r["board_id"] for r in rows if r["board_id"] is not None}
-    reads: dict[int, list] = {}
-    if board_ids:
-        where, params = scope(board_ids, "board_id")
-        for r in conn.execute(f"SELECT * FROM board_read{where} ORDER BY at DESC, run_id DESC", params):
-            reads.setdefault(r["board_id"], []).append(r)
-    ats = {b["board_id"]: ATS_LABELS.get(b["ats"], b["ats"]) for b in boards}
-    postings = {p["posting_id"]: p for p in posting_rows}
-    moment = datetime.strptime(now, ISO_FMT)
-    picked = today.isoformat() in picked_dates
-    items = []
-    for r in rows:
-        company = companies[r["company_id"]]
-        shown = list(reversed(reads.get(r["board_id"], [])[:READS_SHOWN]))
-        ok = [x["at"] for x in shown if x["result"] in ("ok", "unchanged")]
-        quote = None
-        d = decisions.get(r["posting_id"]) if r["posting_id"] else None
-        if r["kind"] == "sponsorship_unclear" and d is not None and d["sponsorship_quote"]:
-            p = postings[r["posting_id"]]
-            quote = ReviewQuote(text=d["sponsorship_quote"], posting_id=p["posting_id"], posting_title=p["title"],
-                                url=p["url"], first_seen_at=p["first_seen_at"])
-        items.append(ReviewItem(
-            id=r["review_id"], kind=r["kind"],
-            company=ReviewCompany(id=company["company_id"], name=company["name"], status=company["status"],
-                                  paused_at=company["paused_at"], held_by_touch_id=company["held_by_touch"], picked=picked),
-            holds_email=picked and r["kind"] in EMAIL_HOLDING_KINDS, reason=r["reason"], opened_at=r["created_at"],
-            age_days=max(0, (moment - datetime.strptime(r["created_at"], ISO_FMT)).days), reopened=None, quote=quote,
-            reads=[ReviewRead(at=x["at"], result="ok" if x["result"] == "unchanged" else x["result"],
-                              detail=_read_detail(x, ats.get(x["board_id"], "Board"))) for x in shown],
-            last_ok_at=ok[-1] if ok else None,
-            open_postings=sum(1 for p in posting_rows if p["board_id"] == r["board_id"] and not p["closed_at"])
-            if r["board_id"] is not None else None,
-            size_facts=[to_fact(e) for e in evidence_rows if e["fact"] == "size"]
-            if r["kind"] in ("size_unknown", "size_guess") else [],
-            revision=r["revision"],
-        ))
-    return items
-
-
-def _read_detail(read: sqlite3.Row, ats: str) -> str:
+def read_detail(read: sqlite3.Row, ats: str) -> str:
+    """One read of a board, as the Needs you strip words it."""
     if read["result"] == "error":
         return read["error"] or (f"HTTP {read['http_status']}" if read["http_status"] else "The read failed")
     if read["result"] == "empty":

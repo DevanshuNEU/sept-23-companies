@@ -24,18 +24,21 @@ from __future__ import annotations
 import bisect
 import re
 import unicodedata
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
+from datetime import date
 
 from outreach.importer.manifest import Overrides
-from outreach.importer.model import IssueIn, TouchIn
-from outreach.importer.records import SOURCES
-from outreach.importer.vocab import STOP_KINDS
+from outreach.importer.model import ApplicationIn, IssueIn, OutcomeIn, PersonIn, RecordOutcome, TouchIn
+from outreach.importer.records import SOURCES, SourceRecord
+from outreach.importer.vocab import (STOP_KINDS, curated_channel, curated_outcome, followups_count, noon_ny, ny_date,
+                                    req_named, role_kind)
 from outreach.sources.keys import email_key, linkedin_key, person_name_key
 from outreach.store import name_key
 
 __all__ = ["company_key", "CompanyIndex", "NEAR_WORDS", "MIN_PREFIX", "ROLE_WORDS", "parse_person_name",
-           "PersonId", "PersonIndex", "placeholder_key", "is_placeholder", "carry_stops"]
+           "PersonId", "PersonIndex", "placeholder_key", "is_placeholder", "carry_stops", "touch_key", "merge_outcome",
+           "join_curated", "origin_touch", "interview_touch", "interview_date"]
 
 NEAR_WORDS = ("ai", "labs", "inc", "technologies", "systems", "hq", "app")
 MIN_PREFIX = 5  # "Arc" and "Arcadia" are not near names; "Tidal" and "Tidalwave Bio" are
@@ -503,3 +506,252 @@ def carry_stops(people: PersonIndex, touches: Iterable[TouchIn]
                                   False))
     return stops, issues
 
+
+
+# ---- touches -----------------------------------------------------------------------------------------------------
+
+def touch_key(company_key_: str, person_key: str | None, channel: str, sent_at: str) -> str:
+    """`<company key>|<person key or ->|<channel>|<New York date>`."""
+    return f"{company_key_}|{person_key or '-'}|{channel}|{ny_date(sent_at)}"
+
+
+# How strongly a reply kind speaks; a stop always wins, so no source can lose one.
+_REPLY_RANK = {"unsorted": 0, "interested": 1, "not_now": 1, "said_no": 2, "asked_to_stop": 3}
+
+
+def _better_date(a: OutcomeIn, b: OutcomeIn) -> OutcomeIn:
+    """The outcome whose date to keep: a known date over an estimated one, else the earlier."""
+    if a.estimated != b.estimated:
+        return b if a.estimated else a
+    return a if a.at <= b.at else b
+
+
+def merge_outcome(outcomes: tuple[OutcomeIn, ...], new: OutcomeIn) -> tuple[tuple[OutcomeIn, ...], str | None]:
+    """Add one outcome to a touch's outcomes. One outcome per kind: the same kind again keeps the known (else the
+    earlier) date. Two replies: a sorted kind beats `unsorted`; two sorted kinds that differ are a conflict (the
+    returned text), and a stop (`asked_to_stop`, then `said_no`) wins it, so a stop in any source is kept;
+    otherwise the first stays."""
+    for i, old in enumerate(outcomes):
+        if old.kind != new.kind:
+            continue
+        dated = _better_date(old, new)
+        conflict = None
+        keep = old
+        if new.kind == "replied" and old.reply_kind != new.reply_kind:
+            r_old, r_new = _REPLY_RANK.get(old.reply_kind, 0), _REPLY_RANK.get(new.reply_kind, 0)
+            if min(r_old, r_new) > 0:
+                conflict = (f"{old.record} says the reply was {old.reply_kind} and {new.record} says {new.reply_kind}; "
+                            f"kept {(new if r_new > r_old else old).reply_kind}.")
+            if r_new > r_old:
+                keep = new
+        merged = OutcomeIn(keep.kind, dated.at, keep.reply_kind, dated.estimated, keep.record)
+        return outcomes[:i] + (merged,) + outcomes[i + 1:], conflict
+    return outcomes + (new,), None
+
+
+def _parse_day(text) -> str | None:
+    try:
+        return date.fromisoformat(str(text or "").strip()).isoformat()
+    except ValueError:
+        return None
+
+
+def _find_touch(target: str, touches: list[TouchIn]) -> int | None:
+    """The touch a `touch_for` value names: its key, or a record id it came from."""
+    for i, t in enumerate(touches):
+        if t.key == target:
+            return i
+    for i, t in enumerate(touches):
+        if target in t.records:
+            return i
+    return None
+
+
+def _role_fit(row_role: str | None, person_role: str | None) -> int:
+    """2 for the same role kind, 1 when either side is not known (`other` included), 0 for two different kinds."""
+    if row_role is None or person_role in (None, "other"):
+        return 1
+    return 2 if row_role == person_role else 0
+
+
+def join_curated(touches: list[TouchIn], rows: list[SourceRecord], companies: CompanyIndex, *,
+                 people: Mapping[str, PersonIn] | None = None
+                 ) -> tuple[list[TouchIn], list[IssueIn], dict[str, RecordOutcome]]:
+    """Curated rows are annotations on touches. A row joins the touch at the same company and New York date whose
+    person has the same role kind (a touch whose person's role is not known, or a row whose role is not known,
+    fits any; an exact role is taken first); with several, rows and touches pair in record order, each pair a
+    `curated_by_order` issue he can fix with [touch_for]. His `touch_for` (row record id to a touch key or a record
+    id) wins. A joined row adds its outcome, `role_named` from `req` when the touch does not know it, and
+    `followups_sent` from `fu`: record outcome `merged`, reason `annotation`. A row with no touch is its own touch
+    with a placeholder person (issue `touch_unmatched`, outcome `imported`). A row with no company or no date is
+    `held` (`unparsed_record`). Returns every touch (the given ones first, in order), the issues and one outcome
+    per row."""
+    out = list(touches)
+    used: set[str] = set()
+    issues: list[IssueIn] = []
+    outcomes: dict[str, RecordOutcome] = {}
+    roles = {k: p.role_kind for k, p in (people or {}).items()}
+    touch_for = companies.overrides.touch_for
+
+    for rec in rows:
+        rid = f"{rec.source}:{rec.source_key}"
+        raw = rec.raw if isinstance(rec.raw, dict) else {}
+        day = _parse_day(raw.get("date"))
+        name = str(raw.get("company") or "").strip()
+        if day is None or not name:
+            what = "no date it can read" if day is None else "no company"
+            issues.append(IssueIn("unparsed_record", None, rid, f"{rid} has {what}, so it cannot be placed. Fix the "
+                                                                f"row in the curated file.", True))
+            outcomes[rid] = RecordOutcome("held", "unparsed_record", None, None)
+            continue
+        ck = companies.add(name, rid)
+        row_role = role_kind(raw.get("role"))
+        found = None
+        target = touch_for.get(rid)
+        if target is not None:
+            found = _find_touch(target, out)
+            if found is None:
+                issues.append(IssueIn("touch_for_unknown", ck, rid, f"[touch_for] sends {rid} to {target!r}, which "
+                                                                    f"is no touch; the row was matched by its date.",
+                                      False))
+        if found is None:
+            pool = [i for i, t in enumerate(out[:len(touches)])
+                    if t.company_key == ck and ny_date(t.sent_at) == day
+                    and _role_fit(row_role, roles.get(t.person_key)) > 0]
+            fit = {i: _role_fit(row_role, roles.get(out[i].person_key)) for i in pool}
+            free = [i for i in pool if out[i].key not in used]
+            best = max((fit[i] for i in free), default=0)
+            free = [i for i in free if fit[i] == best]
+            tier = [i for i in pool if fit[i] == best]
+            if free:
+                found = free[0]
+                if len(tier) > 1:
+                    issues.append(IssueIn("curated_by_order", ck, rid,
+                                          f"{rid} was paired by order with {out[found].key}, one of {len(tier)} "
+                                          f"touches that day at {ck}. Rule [touch_for] if it is another one.", False))
+        effect = curated_outcome(raw.get("outcome"))
+        if effect is None:
+            text = str(raw.get("outcome")).strip()
+            issues.append(IssueIn("reply_text", ck, rid, f"{rid} says the outcome was {text!r}; kept as a reply to "
+                                                         f"sort.", False))
+            effect = (["replied"], "unsorted")
+        kinds, reply_kind = effect
+        fu = followups_count(raw.get("fu"))
+        if fu is None:
+            issues.append(IssueIn("fu_unmapped", ck, rid, f"{rid} gives follow-ups as {raw.get('fu')!r}; counted as "
+                                                          f"none.", False))
+            fu = 0
+        named = req_named(raw.get("req"))
+
+        if found is not None:
+            t = out[found]
+            used.add(t.key)
+            at = t.sent_at
+        else:
+            channel = curated_channel(raw.get("channel"))
+            if channel is None:
+                issues.append(IssueIn("channel_unmapped", ck, rid, f"{rid} gives the channel as "
+                                                                   f"{raw.get('channel')!r}; kept as other.", False))
+                channel = "other"
+            at = noon_ny(day)
+            pk = placeholder_key(ck, rid)
+            t = TouchIn(key=touch_key(ck, pk, channel, at), company_key=ck, person_key=pk, channel=channel,
+                        sent_at=at, posting_key=None, role_named=False, role_named_known=False, outcomes=(),
+                        email=None, followups_sent=0, records=())
+            said = f" It says {', '.join(kinds)}." if kinds else ""
+            issues.append(IssueIn("touch_unmatched", ck, rid, f"{rid} ({day}, {name}, {raw.get('role') or 'no role'}) "
+                                                              f"matched no touch, so it is its own touch with an "
+                                                              f"unnamed person.{said} Rule [touch_for] if it belongs "
+                                                              f"to one.", False))
+        merged = t.outcomes
+        for kind in kinds:
+            merged, conflict = merge_outcome(merged, OutcomeIn(kind, at, reply_kind if kind == "replied" else None,
+                                                               True, rid))
+            if conflict:
+                issues.append(IssueIn("outcome_conflict", ck, rid, conflict, False))
+        role_named, known = t.role_named, t.role_named_known
+        if not known and named is not None:
+            role_named, known = named, True
+        t = replace(t, outcomes=merged, role_named=role_named, role_named_known=known,
+                    followups_sent=max(t.followups_sent, fu), records=t.records + (rid,))
+        if found is not None:
+            out[found] = t
+            outcomes[rid] = RecordOutcome("merged", "annotation", "outreach_touch", t.key)
+        else:
+            out.append(t)
+            outcomes[rid] = RecordOutcome("imported", "", "outreach_touch", t.key)
+    return out, issues, outcomes
+
+
+# ---- where an interview came from --------------------------------------------------------------------------------
+
+_POSITIVE = frozenset({"replied", "referred", "accepted", "interview", "offer"})
+
+
+def origin_touch(company_key_: str, interview_at: str | None, touches: list[TouchIn],
+                 applications: list[ApplicationIn], *, record: str | None = None,
+                 overrides: Overrides | None = None) -> tuple[str | None, str | None]:
+    """(the touch or application key an interview is recorded on, the issue code or None). His `touch_for` for the
+    record (a touch or application key, or a record id) wins. Else, at the company: (1) the only touch sent on or
+    before the day with a reply or a positive outcome (with several, the latest, issue `interview_origin`); (2) the
+    only touch before the day; (3) the latest touch before it, issue `interview_origin`; (4) the latest
+    application before it; (5) none: (None, `interview_origin`), and the caller makes an `interview_touch`. With no
+    day known every touch counts as before it."""
+    day = ny_date(interview_at) if interview_at else None
+    code = None
+    target = _empty(overrides).touch_for.get(record) if record else None
+    if target is not None:
+        for t in touches:
+            if t.key == target or target in t.records:
+                return t.key, None
+        for a in applications:
+            if a.key == target or target in a.records:
+                return a.key, None
+        code = "touch_for_unknown"
+
+    def latest(items, when):
+        return max(items, key=lambda x: (when(x), x.key)).key
+
+    mine = [t for t in touches if t.company_key == company_key_]
+    on_or_before = [t for t in mine if day is None or ny_date(t.sent_at) <= day]
+    answered = [t for t in on_or_before if any(o.kind in _POSITIVE for o in t.outcomes)]
+    if len(answered) == 1:
+        return answered[0].key, code
+    if answered:
+        return latest(answered, lambda t: t.sent_at), code or "interview_origin"
+    before = [t for t in mine if day is None or ny_date(t.sent_at) < day]
+    if len(before) == 1:
+        return before[0].key, code
+    if before:
+        return latest(before, lambda t: t.sent_at), code or "interview_origin"
+    apps = [a for a in applications if a.company_key == company_key_ and (day is None or a.applied_on < day)]
+    if apps:
+        return latest(apps, lambda a: a.applied_on), code
+    return None, code or "interview_origin"
+
+
+def interview_touch(company_key_: str, day: str, record: str) -> TouchIn:
+    """The touch for an interview with no recorded way in: channel `other`, a placeholder person, at noon New York
+    on the interview day. The caller adds the interview outcome and the `interview_origin` issue."""
+    at = noon_ny(day)
+    pk = placeholder_key(company_key_, record)
+    return TouchIn(key=touch_key(company_key_, pk, "other", at), company_key=company_key_, person_key=pk,
+                   channel="other", sent_at=at, posting_key=None, role_named=False, role_named_known=False,
+                   outcomes=(), email=None, followups_sent=0, records=(record,))
+
+
+def interview_date(record: SourceRecord, origin_at: str | None = None) -> tuple[str | None, bool]:
+    """(the interview's New York day, estimated): the earliest session date, else the brief's `verified_on`, else
+    the origin touch's day (estimated; the caller raises `date_unknown`). (None, True) when none is known: the
+    caller places it by `origin_touch` with no day, or holds it."""
+    raw = record.raw if isinstance(record.raw, dict) else {}
+    sessions = sorted(d for d in (_parse_day(x) for x in raw.get("session_dates") or []) if d)
+    if sessions:
+        return sessions[0], False
+    brief = raw.get("brief") if isinstance(raw.get("brief"), dict) else {}
+    verified = _parse_day(brief.get("verified_on"))
+    if verified:
+        return verified, False
+    if origin_at:
+        return ny_date(origin_at), True
+    return None, True

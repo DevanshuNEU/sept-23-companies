@@ -56,4 +56,10 @@ export const _parity: [
   Same<T.ThreadMessage, S['ThreadMessage']>,
   Same<T.OutboxDetail, S['OutboxDetail']>,
   Same<T.DraftCompare, S['DraftCompare']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<T.HiddenCompany, S['HiddenCompany']>,
+  Same<T.NoGoRow, S['NoGoRow']>,
+  Same<T.RemovedRow, S['RemovedRow']>,
+  Same<T.NoGoView, S['NoGoView']>,
+  Same<T.DoneCompany, S['DoneCompany']>,
+  Same<T.DoneView, S['DoneView']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

@@ -1015,6 +1015,124 @@
         "title": "CorrectionBody",
         "type": "object"
       },
+      "DoneCompany": {
+        "properties": {
+          "closedAt": {
+            "title": "Closedat",
+            "type": "string"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "howStarted": {
+            "title": "Howstarted",
+            "type": "string"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "boolean"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "interview",
+              "referral"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "outcomeLabel": {
+            "title": "Outcomelabel",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": [
+          "company",
+          "outcome",
+          "outcomeLabel",
+          "closedAt",
+          "howStarted",
+          "imported",
+          "role",
+          "note"
+        ],
+        "title": "DoneCompany",
+        "type": "object"
+      },
+      "DoneMetrics": {
+        "properties": {
+          "interviews": {
+            "title": "Interviews",
+            "type": "integer"
+          },
+          "referrals": {
+            "title": "Referrals",
+            "type": "integer"
+          },
+          "repliesPerWeek": {
+            "items": {
+              "$ref": "#/components/schemas/WeekReplies"
+            },
+            "title": "Repliesperweek",
+            "type": "array"
+          },
+          "repliesThisMonth": {
+            "title": "Repliesthismonth",
+            "type": "integer"
+          },
+          "replyRate": {
+            "$ref": "#/components/schemas/ReplyRate"
+          }
+        },
+        "required": [
+          "repliesThisMonth",
+          "repliesPerWeek",
+          "replyRate",
+          "referrals",
+          "interviews"
+        ],
+        "title": "DoneMetrics",
+        "type": "object"
+      },
+      "DoneView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "companies": {
+            "items": {
+              "$ref": "#/components/schemas/DoneCompany"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/DoneMetrics"
+          }
+        },
+        "required": [
+          "asOf",
+          "companies",
+          "metrics"
+        ],
+        "title": "DoneView",
+        "type": "object"
+      },
       "DraftCompare": {
         "properties": {
           "a": {
@@ -1060,6 +1178,12 @@
           "count"
         ],
         "title": "EffortLine",
+        "type": "object"
+      },
+      "Empty": {
+        "description": "The answer of a write that has nothing to report: JSON `{}`, never an empty body.",
+        "properties": {},
+        "title": "Empty",
         "type": "object"
       },
       "ErrorEnvelope": {
@@ -1591,6 +1715,39 @@
         "title": "HeldMessage",
         "type": "object"
       },
+      "HiddenCompany": {
+        "description": "A company the ranker hides, with the reason it stored. `provisional` is \"hidden, pending reader\".",
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "kind": {
+            "enum": [
+              "no_go",
+              "over_size",
+              "no_sponsorship"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "company",
+          "kind",
+          "reason",
+          "provisional"
+        ],
+        "title": "HiddenCompany",
+        "type": "object"
+      },
       "HoldingReply": {
         "description": "The newest reply holding the company: on any channel, so a LinkedIn reply shows as an email one does.",
         "properties": {
@@ -1733,6 +1890,21 @@
           "late"
         ],
         "title": "JobRunSummary",
+        "type": "object"
+      },
+      "LiftNoGoBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "LiftNoGoBody",
         "type": "object"
       },
       "LinkedInCounts": {
@@ -2132,6 +2304,225 @@
           "companyName"
         ],
         "title": "NextSend",
+        "type": "object"
+      },
+      "NoGoRow": {
+        "properties": {
+          "addedAt": {
+            "title": "Addedat",
+            "type": "string"
+          },
+          "importSource": {
+            "anyOf": [
+              {
+                "enum": [
+                  "data_js",
+                  "local_storage",
+                  "contacts_json",
+                  "radar_db",
+                  "devboard",
+                  "contacted_txt",
+                  "devvault_notes"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importsource"
+          },
+          "kind": {
+            "const": "no_go",
+            "title": "Kind",
+            "type": "string"
+          },
+          "noGoId": {
+            "title": "Nogoid",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "no_sponsorship",
+              "citizenship",
+              "over_300",
+              "defence_contractor",
+              "agency",
+              "said_no",
+              "stop_reply",
+              "not_a_fit",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "devanshu",
+              "rules",
+              "reply",
+              "import",
+              "claude"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "sourceRef": {
+            "title": "Sourceref",
+            "type": "string"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "target": {
+            "discriminator": {
+              "mapping": {
+                "company": "#/components/schemas/NoGoTargetCompany",
+                "person": "#/components/schemas/NoGoTargetPerson"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoGoTargetCompany"
+              },
+              {
+                "$ref": "#/components/schemas/NoGoTargetPerson"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "kind",
+          "noGoId",
+          "target",
+          "reason",
+          "quote",
+          "note",
+          "source",
+          "sourceRef",
+          "sourceUrl",
+          "importSource",
+          "addedAt"
+        ],
+        "title": "NoGoRow",
+        "type": "object"
+      },
+      "NoGoTargetCompany": {
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "kind": {
+            "const": "company",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "company"
+        ],
+        "title": "NoGoTargetCompany",
+        "type": "object"
+      },
+      "NoGoTargetPerson": {
+        "properties": {
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "kind": {
+            "const": "person",
+            "title": "Kind",
+            "type": "string"
+          },
+          "person": {
+            "$ref": "#/components/schemas/PersonRef"
+          }
+        },
+        "required": [
+          "kind",
+          "person",
+          "companyName"
+        ],
+        "title": "NoGoTargetPerson",
+        "type": "object"
+      },
+      "NoGoView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "companies": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "no_go": "#/components/schemas/NoGoRow",
+                  "removed": "#/components/schemas/RemovedRow"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/NoGoRow"
+                },
+                {
+                  "$ref": "#/components/schemas/RemovedRow"
+                }
+              ]
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "countsByReason": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonCount"
+            },
+            "title": "Countsbyreason",
+            "type": "array"
+          },
+          "hiddenCompanies": {
+            "items": {
+              "$ref": "#/components/schemas/HiddenCompany"
+            },
+            "title": "Hiddencompanies",
+            "type": "array"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/NoGoRow"
+            },
+            "title": "People",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "companies",
+          "people",
+          "countsByReason",
+          "hiddenCompanies"
+        ],
+        "title": "NoGoView",
         "type": "object"
       },
       "OutboxCounts": {
@@ -3205,6 +3596,151 @@
         "title": "ReadQueueStatus",
         "type": "object"
       },
+      "ReasonCount": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "no_sponsorship",
+                  "citizenship",
+                  "over_300",
+                  "defence_contractor",
+                  "agency",
+                  "said_no",
+                  "stop_reply",
+                  "not_a_fit",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "removed",
+                "type": "string"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "reason",
+          "count"
+        ],
+        "title": "ReasonCount",
+        "type": "object"
+      },
+      "RemovedCompany": {
+        "properties": {
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "heldByReply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "heldByTouchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heldbytouchid"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pausedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pausedat"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "backlog",
+              "working",
+              "closed",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "pausedAt",
+          "heldByTouchId",
+          "held",
+          "heldByReply",
+          "revision"
+        ],
+        "title": "RemovedCompany",
+        "type": "object"
+      },
+      "RemovedRow": {
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/RemovedCompany"
+          },
+          "kind": {
+            "const": "removed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "removeReason": {
+            "title": "Removereason",
+            "type": "string"
+          },
+          "removedAt": {
+            "title": "Removedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "company",
+          "removeReason",
+          "note",
+          "removedAt"
+        ],
+        "title": "RemovedRow",
+        "type": "object"
+      },
       "ReplyKindBody": {
         "additionalProperties": false,
         "properties": {
@@ -3230,6 +3766,25 @@
           "revision"
         ],
         "title": "ReplyKindBody",
+        "type": "object"
+      },
+      "ReplyRate": {
+        "description": "Of the emails first sent this month, how many have a reply (a cohort, so the rate is never above 1).",
+        "properties": {
+          "firstEmails": {
+            "title": "Firstemails",
+            "type": "integer"
+          },
+          "replies": {
+            "title": "Replies",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "replies",
+          "firstEmails"
+        ],
+        "title": "ReplyRate",
         "type": "object"
       },
       "ResolveReviewBody": {
@@ -4949,6 +5504,24 @@
         "title": "WatchView",
         "type": "object"
       },
+      "WeekReplies": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "weekOf": {
+            "title": "Weekof",
+            "type": "string"
+          }
+        },
+        "required": [
+          "weekOf",
+          "count"
+        ],
+        "title": "WeekReplies",
+        "type": "object"
+      },
       "Win": {
         "properties": {
           "at": {
@@ -6011,6 +6584,77 @@
         ]
       }
     },
+    "/api/done": {
+      "get": {
+        "operationId": "done_view",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoneView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Done View",
+        "tags": [
+          "done"
+        ]
+      }
+    },
     "/api/findings": {
       "get": {
         "operationId": "findings_view",
@@ -7062,6 +7706,191 @@
         "summary": "Needs You",
         "tags": [
           "needs-you"
+        ]
+      }
+    },
+    "/api/no-go": {
+      "get": {
+        "operationId": "no_go_view",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoGoView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "No Go View",
+        "tags": [
+          "no-go"
+        ]
+      }
+    },
+    "/api/no-go/{no_go_id}/lift": {
+      "post": {
+        "operationId": "lift_no_go",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "no_go_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "No Go Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiftNoGoBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Empty"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Lift No Go",
+        "tags": [
+          "no-go"
         ]
       }
     },

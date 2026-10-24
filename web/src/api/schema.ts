@@ -140,6 +140,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Done View */
+        get: operations["done_view"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/findings": {
         parameters: {
             query?: never;
@@ -321,6 +338,40 @@ export interface paths {
         get: operations["needs_you"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/no-go": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** No Go View */
+        get: operations["no_go_view"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/no-go/{no_go_id}/lift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lift No Go */
+        post: operations["lift_no_go"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1059,6 +1110,47 @@ export interface components {
             /** Revision */
             revision: number;
         };
+        /** DoneCompany */
+        DoneCompany: {
+            /** Closedat */
+            closedAt: string;
+            company: components["schemas"]["CompanyRef"];
+            /** Howstarted */
+            howStarted: string;
+            /** Imported */
+            imported: boolean;
+            /** Note */
+            note: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "interview" | "referral";
+            /** Outcomelabel */
+            outcomeLabel: string;
+            /** Role */
+            role: string | null;
+        };
+        /** DoneMetrics */
+        DoneMetrics: {
+            /** Interviews */
+            interviews: number;
+            /** Referrals */
+            referrals: number;
+            /** Repliesperweek */
+            repliesPerWeek: components["schemas"]["WeekReplies"][];
+            /** Repliesthismonth */
+            repliesThisMonth: number;
+            replyRate: components["schemas"]["ReplyRate"];
+        };
+        /** DoneView */
+        DoneView: {
+            /** Asof */
+            asOf: string;
+            /** Companies */
+            companies: components["schemas"]["DoneCompany"][];
+            metrics: components["schemas"]["DoneMetrics"];
+        };
         /** DraftCompare */
         DraftCompare: {
             a: components["schemas"]["CompareSide"];
@@ -1075,6 +1167,11 @@ export interface components {
             /** Label */
             label: string;
         };
+        /**
+         * Empty
+         * @description The answer of a write that has nothing to report: JSON `{}`, never an empty body.
+         */
+        Empty: Record<string, never>;
         /** ErrorEnvelope */
         ErrorEnvelope: {
             /** Checks */
@@ -1245,6 +1342,22 @@ export interface components {
             touchId: number;
         };
         /**
+         * HiddenCompany
+         * @description A company the ranker hides, with the reason it stored. `provisional` is "hidden, pending reader".
+         */
+        HiddenCompany: {
+            company: components["schemas"]["CompanyRef"];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "no_go" | "over_size" | "no_sponsorship";
+            /** Provisional */
+            provisional: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /**
          * HoldingReply
          * @description The newest reply holding the company: on any channel, so a LinkedIn reply shows as an email one does.
          */
@@ -1289,6 +1402,11 @@ export interface components {
              * @enum {string}
              */
             status: "running" | "ok" | "partial" | "failed";
+        };
+        /** LiftNoGoBody */
+        LiftNoGoBody: {
+            /** Reason */
+            reason: string;
         };
         /** LinkedInCounts */
         LinkedInCounts: {
@@ -1421,6 +1539,73 @@ export interface components {
             touchId: number;
             /** Tz */
             tz: string;
+        };
+        /** NoGoRow */
+        NoGoRow: {
+            /** Addedat */
+            addedAt: string;
+            /** Importsource */
+            importSource: ("data_js" | "local_storage" | "contacts_json" | "radar_db" | "devboard" | "contacted_txt" | "devvault_notes") | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "no_go";
+            /** Nogoid */
+            noGoId: number;
+            /** Note */
+            note: string;
+            /** Quote */
+            quote: string;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "no_sponsorship" | "citizenship" | "over_300" | "defence_contractor" | "agency" | "said_no" | "stop_reply" | "not_a_fit" | "other";
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "devanshu" | "rules" | "reply" | "import" | "claude";
+            /** Sourceref */
+            sourceRef: string;
+            /** Sourceurl */
+            sourceUrl: string | null;
+            /** Target */
+            target: components["schemas"]["NoGoTargetCompany"] | components["schemas"]["NoGoTargetPerson"];
+        };
+        /** NoGoTargetCompany */
+        NoGoTargetCompany: {
+            company: components["schemas"]["CompanyRef"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "company";
+        };
+        /** NoGoTargetPerson */
+        NoGoTargetPerson: {
+            /** Companyname */
+            companyName: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "person";
+            person: components["schemas"]["PersonRef"];
+        };
+        /** NoGoView */
+        NoGoView: {
+            /** Asof */
+            asOf: string;
+            /** Companies */
+            companies: (components["schemas"]["NoGoRow"] | components["schemas"]["RemovedRow"])[];
+            /** Countsbyreason */
+            countsByReason: components["schemas"]["ReasonCount"][];
+            /** Hiddencompanies */
+            hiddenCompanies: components["schemas"]["HiddenCompany"][];
+            /** People */
+            people: components["schemas"]["NoGoRow"][];
         };
         /** OutboxCounts */
         OutboxCounts: {
@@ -1786,6 +1971,49 @@ export interface components {
             /** Refused */
             refused: number;
         };
+        /** ReasonCount */
+        ReasonCount: {
+            /** Count */
+            count: number;
+            /** Reason */
+            reason: ("no_sponsorship" | "citizenship" | "over_300" | "defence_contractor" | "agency" | "said_no" | "stop_reply" | "not_a_fit" | "other") | "removed";
+        };
+        /** RemovedCompany */
+        RemovedCompany: {
+            /** Held */
+            held: boolean;
+            heldByReply: components["schemas"]["HoldingReply"] | null;
+            /** Heldbytouchid */
+            heldByTouchId: number | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Pausedat */
+            pausedAt: string | null;
+            /** Revision */
+            revision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "backlog" | "working" | "closed" | "removed";
+        };
+        /** RemovedRow */
+        RemovedRow: {
+            company: components["schemas"]["RemovedCompany"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "removed";
+            /** Note */
+            note: string;
+            /** Removereason */
+            removeReason: string;
+            /** Removedat */
+            removedAt: string;
+        };
         /** ReplyKindBody */
         ReplyKindBody: {
             /**
@@ -1795,6 +2023,16 @@ export interface components {
             kind: "interested" | "not_now" | "said_no" | "asked_to_stop" | "auto_reply";
             /** Revision */
             revision: number;
+        };
+        /**
+         * ReplyRate
+         * @description Of the emails first sent this month, how many have a reply (a cohort, so the rate is never above 1).
+         */
+        ReplyRate: {
+            /** Firstemails */
+            firstEmails: number;
+            /** Replies */
+            replies: number;
         };
         /** ResolveReviewBody */
         ResolveReviewBody: {
@@ -2363,6 +2601,13 @@ export interface components {
             asOf: string;
             /** Items */
             items: components["schemas"]["WatchItem"][];
+        };
+        /** WeekReplies */
+        WeekReplies: {
+            /** Count */
+            count: number;
+            /** Weekof */
+            weekOf: string;
         };
         /** Win */
         Win: {
@@ -3075,6 +3320,71 @@ export interface operations {
             };
             /** @description blocked or idempotency_mismatch: the write changed nothing */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    done_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DoneView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3936,6 +4246,160 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    no_go_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoGoView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    lift_no_go: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                no_go_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiftNoGoBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Empty"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

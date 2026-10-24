@@ -912,6 +912,7 @@ function buildNoGo(c: Ctx): NoGoView {
       { reason: 'no_sponsorship', count: countOf('no_sponsorship') }, { reason: 'citizenship', count: countOf('citizenship') },
       { reason: 'over_300', count: countOf('over_300') }, { reason: 'removed', count: companies.filter((r) => r.kind === 'removed').length },
     ],
+    hiddenCompanies: [],
   };
 }
 

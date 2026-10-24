@@ -194,9 +194,13 @@ export interface NoGoRow {
   addedAt: IsoTime;
 }
 export interface RemovedRow { kind: 'removed'; company: CompanyRef & { revision: Revision }; removeReason: string; note: string; removedAt: IsoTime }
+// A company the ranker hides, with the reason it stored. provisional: "hidden, pending reader".
+export type HideKind = 'no_go' | 'over_size' | 'no_sponsorship';
+export interface HiddenCompany { company: CompanyRef; kind: HideKind; reason: string; provisional: boolean }
 export interface NoGoView {
   asOf: IsoTime; companies: (NoGoRow | RemovedRow)[]; people: NoGoRow[];
   countsByReason: { reason: NoGoReason | 'removed'; count: number }[];
+  hiddenCompanies: HiddenCompany[];
 }
 
 // Company (spec 13.7)

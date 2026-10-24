@@ -196,6 +196,7 @@ class FakeRunner:
         self.loaded_labels = set(loaded)
         self.calls: list[tuple[str, str]] = []
         self.fail_bootstrap: set[str] = set()
+        self.fail_bootout: set[str] = set()
         self.fail_lint: set[str] = set()
 
     def bootstrap(self, plist: Path) -> None:
@@ -209,6 +210,8 @@ class FakeRunner:
 
     def bootout(self, label: str) -> None:
         self.calls.append(("bootout", label))
+        if label in self.fail_bootout:
+            raise DeployError(f"Boot-out failed: 5: Input/output error ({label})")
         if label not in self.loaded_labels:
             raise DeployError(f"Boot-out failed: 3: No such process ({label})")
         self.loaded_labels.discard(label)
@@ -557,6 +560,21 @@ class RollbackTest(DeployCase):
                 self.assertEqual(code, 0, err)
                 self.assertTrue((self.agents / sender.plist).exists())
                 self.assertIn(sender.label, self.runner.loaded_labels)
+
+    def test_rollback_never_loads_the_old_sender_while_the_new_one_is_loaded(self):
+        self.main("install")
+        self.main("retire-old")
+        self.runner.fail_bootout.add("com.devanshu.outreach-sender")
+        calls = len(self.runner.calls)
+        code, out, err = self.main("rollback")
+        self.assertEqual(code, 1)
+        self.assertIn("com.devanshu.outreach-sender is still loaded", err)
+        self.assertIn("com.devanshu.outreach-sender", self.runner.loaded_labels)
+        self.assertNotIn("com.devanshu.outreach-mail-sender", self.runner.loaded_labels)
+        self.assertNotIn(("bootstrap", "com.devanshu.outreach-mail-sender.plist"), self.runner.calls[calls:])
+        self.assertTrue((self.agents / "com.devanshu.outreach-mail-sender.plist.disabled").exists())
+        for job in OLD_JOBS[1:]:
+            self.assertIn(job.label, self.runner.loaded_labels)
 
     def test_rollback_before_any_install_only_reloads_what_is_not_loaded(self):
         self.runner.loaded_labels.discard("com.devanshu.outreach-mail-server")

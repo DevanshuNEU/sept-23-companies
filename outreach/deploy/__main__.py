@@ -24,6 +24,7 @@ BEFORE_SWITCH = ".before-switch"
 VENV_PYTHON = ".venv/bin/python"
 WEB_INDEX = "web/dist/index.html"
 OLD_SENDER = "com.devanshu.outreach-mail-sender"
+NEW_SENDER = "com.devanshu.outreach-sender"
 OLD_CONFIG = "mail/config.json"
 PAUSE_FIRST = "Pause sending in the old dashboard (back on :3001), then run rollback again."
 ROLLBACK_REMINDER = ("The old sender is paused in the old dashboard. Run python -m outreach.importer rollback-check "
@@ -225,6 +226,11 @@ def cmd_rollback(ctx: Context, _args) -> int:
     for job in OLD_JOBS:
         try:
             if job.label == OLD_SENDER and not ctx.runner.loaded(job.label):
+                if ctx.runner.loaded(NEW_SENDER):  # two senders must never run at once
+                    print(f"{job.label}: left off, {NEW_SENDER} is still loaded", flush=True)
+                    failed.append(f"{job.label}: left off because {NEW_SENDER} is still loaded; boot it out "
+                                  f"(launchctl bootout gui/$(id -u)/{NEW_SENDER}), then run rollback again.")
+                    continue
                 paused, said = old_sender_paused(ctx.live_root)
                 if not paused:  # an unpaused old sender would start sending the moment it loads
                     print(f"{job.label}: left off ({said})", flush=True)

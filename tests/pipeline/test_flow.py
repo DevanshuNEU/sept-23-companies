@@ -23,8 +23,10 @@ from outreach.ranking.scores import hidden_list, latest_version, load_scores, ra
 from outreach.rules.version import ruleset_version
 from outreach.store import is_shared_key
 from outreach.store.writes import body_sha256
+from tests.contracts import check_review_items
 from tests.fakes import json_response, status_response, text_response
 from outreach.reader import combine as reader_combine
+from outreach.review.triggers import sweep_needs_you
 from outreach.reader.queue import TIER_PROVISIONAL_HIDE, next_batch, release
 from outreach.reader.version import reader_version
 from outreach.rules import passes
@@ -275,6 +277,32 @@ def send_sends_only_what_was_approved_once(h):
                             (ids.company,)).fetchall()
     assert {r[0]: r[1] for r in states} == {"sent": 1, "drafted": 1, "planned": 1}, \
         f"Sendwell's messages by state: {[tuple(r) for r in states]}"
+
+
+class _Contract(unittest.TestCase):
+    """The contract checks assert through a TestCase; an invariant has no test, so it borrows this one."""
+    def runTest(self):
+        pass
+
+
+@invariant("needs_you")
+def needs_you_items_obey_the_contract_and_a_second_sweep_changes_nothing(h):
+    """After the stage every review item the earlier streams raised passes `check_review_items`, and a second
+    sweep rewrites no `review_item` row and adds at most its one `sweep_run` heartbeat event (none when it runs in
+    the same half hour as the first)."""
+    check_review_items(_Contract(), h.conn)
+    items = "SELECT * FROM review_item ORDER BY review_id"
+    before = [tuple(r) for r in h.conn.execute(items)]
+    events = h.conn.execute("SELECT count(*) FROM event").fetchone()[0]
+    sweep_needs_you(h.conn)
+    after = [tuple(r) for r in h.conn.execute(items)]
+    assert after == before, "a second sweep changed review_item rows"
+    added = h.conn.execute("SELECT count(*) FROM event").fetchone()[0] - events
+    assert added <= 1, f"a second sweep added {added} events, not at most its heartbeat"
+    if added:
+        kinds = h.conn.execute("SELECT kind FROM event ORDER BY event_id DESC LIMIT 1").fetchone()[0]
+        assert kinds == "sweep_run", f"the one new event is {kinds!r}, not the sweep heartbeat"
+    check_review_items(_Contract(), h.conn)
 
 
 class HarnessCase(unittest.TestCase):

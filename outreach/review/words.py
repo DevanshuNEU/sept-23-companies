@@ -12,7 +12,9 @@ from zoneinfo import ZoneInfo
 from outreach.review.kinds import NO_GO_REASONS
 
 __all__ = ["clean", "day", "sponsorship_reason", "size_reason", "domain_reason", "board_reason", "reopened",
-           "fix_note", "no_go_note", "ok_note"]
+           "fix_note", "no_go_note", "ok_note", "already_no_go_note", "person_no_go_note", "keep_separate_note",
+           "settled_by_field", "NO_GO_SETTLED", "TIE_WARNING", "merge_note", "merged_away_note", "same_company_note",
+           "shared_domain_note", "moved_pair_note", "MERGE_TAKEN_BACK"]
 
 _NEW_YORK = ZoneInfo("America/New_York")
 _DASHES = str.maketrans({chr(0x2013): "-", chr(0x2014): "-"})
@@ -161,3 +163,56 @@ def no_go_note(reason: str) -> str:
 
 def ok_note() -> str:
     return "Marked ok by you"
+
+
+def already_no_go_note() -> str:
+    """The note when he marks no-go on a company or person already on the list: no second row is written."""
+    return "Marked no-go by you. It was already on the no-go list"
+
+
+def person_no_go_note(name: str, reason: str) -> str:
+    if reason not in NO_GO_REASONS:
+        raise ValueError(f"unknown no-go reason {reason!r}")
+    return clean(f"Added {name} to the no-go list by you: {_NO_GO_PHRASES[reason]}")
+
+
+def keep_separate_note() -> str:
+    """A merge question he answered "keep separate" (the ok fix)."""
+    return "Kept separate by you"
+
+
+def settled_by_field(field: str) -> str:
+    """The note on another open item of the same family that a field he set also settles."""
+    return f"Settled by the {field} you set."
+
+
+NO_GO_SETTLED = "This company is on the no-go list."
+
+TIE_WARNING = "This record collects name-only mentions that could be either company."
+
+
+def merge_note(loser: str, keeper: str) -> str:
+    return clean(f"Merged {loser} into {keeper} by you")
+
+
+def merged_away_note(keeper: str) -> str:
+    """The note on the other open items of the company that a merge took away."""
+    return clean(f"Merged into {keeper}.")
+
+
+def same_company_note(loser: str) -> str:
+    """The note on a merge question that a merge answered: its two sides are one company now, or another open
+    question asks the same pair."""
+    return clean(f"Same company after merging {loser}")
+
+
+def moved_pair_note(loser: str, keeper: str) -> str:
+    """The note on a merge question whose pair moved to the keeper after a merge."""
+    return clean(f"Moved to {keeper} after merging {loser}")
+
+
+MERGE_TAKEN_BACK = "The merge it came from was taken back."
+
+
+def shared_domain_note(domain: str) -> str:
+    return clean(f"{domain} is shared by several employers, so it no longer joins them")

@@ -153,8 +153,12 @@ def settle_siblings(conn: sqlite3.Connection, company_id: int, *, kinds: Iterabl
 
 def decided_before(conn: sqlite3.Connection, *, kind: str, company_id: int, evidence_key: str) -> sqlite3.Row | None:
     """An item of this kind, company and key that he settled (ok, no-go or a field edit), on any posting, board or
-    person. An item the system cleared is not a decision."""
+    person. An item the system cleared is not a decision. A decision he made on a company merged into this one (any
+    depth) counts too: a merge moves no review item, so the question he already answered is not asked again."""
     return conn.execute(
-        "SELECT * FROM review_item WHERE kind = ? AND company_id = ? AND evidence_key = ? AND state = 'resolved' "
+        "WITH RECURSIVE family(company_id) AS (SELECT ? UNION SELECT c.company_id FROM company c "
+        "JOIN family f ON c.merged_into = f.company_id) "
+        "SELECT * FROM review_item WHERE kind = ? AND company_id IN (SELECT company_id FROM family) "
+        "AND evidence_key = ? AND state = 'resolved' "
         "AND resolution IN ('marked_ok', 'marked_no_go', 'field_edited') "
-        "ORDER BY resolved_at DESC, review_id DESC LIMIT 1", (kind, company_id, evidence_key)).fetchone()
+        "ORDER BY resolved_at DESC, review_id DESC LIMIT 1", (company_id, kind, evidence_key)).fetchone()

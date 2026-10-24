@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
@@ -38,7 +38,7 @@ from outreach.rules.rebuild import stored_decision
 from outreach.store import atomic, body_sha256, iso_utc, transaction, utcnow
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["enqueue", "enqueue_missing", "refresh_priorities", "next_batch", "release", "batch_payload",
+__all__ = ["enqueue", "enqueue_missing", "refresh_priorities", "next_batch", "release", "requeue", "batch_payload",
            "TIER_ORDINARY", "TIER_LANE_ONE", "TIER_PROVISIONAL_HIDE", "HELD"]
 
 BATCH = 500  # rows per write transaction, as `rebuild` does
@@ -274,6 +274,26 @@ def release(conn: sqlite3.Connection, requests: Iterable[ReadRequest]) -> None:
             conn.execute(
                 "UPDATE read_queue SET state = 'queued', lease_until = NULL, attempts = max(attempts - 1, 0) "
                 "WHERE posting_id = ? AND body_sha256 = ? AND reader_version = ? AND state = 'leased'", key)
+
+
+def requeue(conn: sqlite3.Connection, requests: Iterable[ReadRequest], error: str, *,
+            attempts: Mapping[int, int] | None = None) -> int:
+    """Put leased rows back to queued and keep the attempt their lease used, for a stop that is the posting's: the
+    model's reply had no reading for it, or a call with only this posting in it failed. A posting that keeps failing
+    this way runs out of leases and `next_batch` ends it refused, so it is shown, flagged, instead of being tried
+    every night. Only a row that is still leased is touched, and, when `attempts` names its posting, only on that
+    attempt (a lease handed on to another caller is theirs). Returns how many rows went back."""
+    back = 0
+    with atomic(conn, "reader_requeue"):
+        for r in requests:
+            sql = ("UPDATE read_queue SET state = 'queued', lease_until = NULL, last_error = ? WHERE posting_id = ? "
+                   "AND body_sha256 = ? AND reader_version = ? AND state = 'leased'")
+            args: list = [error, r.posting_id, r.body_sha256, r.reader_version]
+            if attempts is not None and r.posting_id in attempts:
+                sql += " AND attempts = ?"
+                args.append(attempts[r.posting_id])
+            back += conn.execute(sql, args).rowcount
+    return back
 
 
 def batch_payload(conn: sqlite3.Connection, requests: list[ReadRequest]) -> dict:

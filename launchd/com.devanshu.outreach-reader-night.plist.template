@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The posting reader's night job (#32): daily at 02:30, read the queued postings through Devanshu's Claude Code seat,
+  one claude -p call per batch, up to the night's caps in outreach/reader/config.toml (400 postings, 25 calls), then
+  combine every stored reading with the rules. One summary line per night in the log. A session limit or an expired
+  login stops the night cleanly and gives its leases back; the next night starts where it stopped.
+
+  StartCalendarInterval (not StartInterval), so a run missed while the Mac sleeps fires on wake. caffeinate -i keeps
+  the Mac awake until the night ends. PATH starts with ~/.local/bin, where the claude CLI is installed.
+
+  Placeholders, filled by the deploy tool (#17): {{LIVE_CHECKOUT}} is the live checkout, {{LOG_PATH}} the log file.
+  Nothing else is filled; the store is the default.
+
+  Not installed by the repo, and never loaded from a worktree. Installing it is Devanshu's step. After filling it in:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.devanshu.outreach-reader-night.plist
+  To remove it:
+    launchctl bootout gui/$(id -u)/com.devanshu.outreach-reader-night
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-reader-night</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-c</string>
+    <string>cd '{{LIVE_CHECKOUT}}' &amp;&amp; PATH=$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/bin/caffeinate -i /opt/homebrew/bin/python3 -m outreach.reader night &gt;&gt; '{{LOG_PATH}}' 2&gt;&amp;1</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>2</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+</dict>
+</plist>

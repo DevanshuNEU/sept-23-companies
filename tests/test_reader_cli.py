@@ -133,6 +133,25 @@ class SubmitTests(CliCase):
         self.assertEqual(json.loads(out)[0]["status"], "requeued")
         self.assertEqual(json.loads(out)[0]["refused_fields"], ["sponsorship"])
 
+    def test_a_reading_refused_at_the_limit_fails_open_at_once(self):
+        # A posting that used its last lease and still gave no usable reading ends refused. The posting is shown,
+        # flagged, by this submit; it does not wait for the next `apply` or night.
+        pid = seed_posting(self.conn, self.company, "Software Engineer, New Grad",
+                           "We do not sponsor visas for this role. " + BODY, "Boston, MA")
+        rebuild(self.conn)
+        before = self.conn.execute("SELECT sponsorship FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
+        self.assertEqual(before[0], "no")  # the rules hide it, provisionally
+        cfg = dataclasses.replace(self.cfg, promoted_version=reader_version(self.cfg), max_attempts=1)
+        reading = self.readings_for(self.next_batch(limit=1, cfg=cfg))[0]
+        del reading["fields"]["pay"]  # malformed: nothing can be stored
+        code, out = self.run_cli(["submit"], json.dumps([reading]), cfg=cfg)
+        self.assertEqual((code, json.loads(out)[0]["status"]), (0, "refused"))
+        row = self.conn.execute("SELECT sponsorship, provisional FROM current_decision WHERE posting_id = ?",
+                                (pid,)).fetchone()
+        self.assertEqual(tuple(row), ("unclear", 1))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE kind = 'reader_disagrees' "
+                                           "AND posting_id = ?", (pid,)).fetchone()[0], 1)
+
     def test_submit_rejects_non_json_with_exit_2(self):
         for text in ("not json", "", "[1, 2"):
             code, out = self.run_cli(["submit"], text)
@@ -169,7 +188,7 @@ class GuardTests(unittest.TestCase):
         self.assertFalse((folder / "outreach.db").exists())
 
     def test_later_commands_are_registered_but_not_built(self):
-        for name in ("night", "gold", "eval", "promote"):
+        for name in ("gold", "eval", "promote"):
             err = io.StringIO()
             with mock.patch("sys.stderr", err):
                 self.assertEqual(cli.main([name], stdin=io.StringIO(""), stdout=io.StringIO()), 2, name)

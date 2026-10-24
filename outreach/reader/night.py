@@ -31,7 +31,8 @@ The stop phrases (a limit, a login, a broken CLI) are matched only against the C
 echoes the prompt quotes the posting). So a posting that says "usage limit" or "authentication" is never a stop: it
 fails like any other poison posting.
 
-The night also stops at `max_postings_per_night` postings handed out or `max_batches` calls. However it stops, it
+The night also stops at `max_postings_per_night` postings handed out or `max_batches` calls. A failed batch of
+several is not counted against either, and its one-posting retries run before the caps are checked again. However it stops, it
 then runs `apply_all`, so every posting with a stored reading or an ended-refused row has the combined decision,
 whatever wrote its decision row last. The job row is always closed; an error that is not the model's or the CLI's
 (the store, a changed ruleset) closes it `failed`, gives back the leases it holds, and only a store error is raised.
@@ -259,11 +260,13 @@ class _Night:
         failures = 0
         singles = 0  # calls left that read one posting each, after a failed call of several
         while True:
-            if self.batches >= cfg.max_batches:
+            # The one-posting retries of a failed batch run before the caps are checked again: the batch they
+            # replace was not counted, and its postings fit inside the cap it was leased under.
+            if not singles and self.batches >= cfg.max_batches:
                 return "cap_reached", f"{self.batches} batches (max_batches)"
-            if self.handed >= cfg.max_postings_per_night:
+            if not singles and self.handed >= cfg.max_postings_per_night:
                 return "cap_reached", f"{self.handed} postings (max_postings_per_night)"
-            size = min(1 if singles else cfg.batch_size, cfg.max_postings_per_night - self.handed)
+            size = 1 if singles else min(cfg.batch_size, cfg.max_postings_per_night - self.handed)
             self.leased = next_batch(self.conn, size, cfg=cfg, version=self.version, now=self.now(),
                                      skip=self.failed)
             if not self.leased:
@@ -291,8 +294,10 @@ class _Night:
                 self.failed.add(self.leased[0].posting_id)
                 self.requeued += requeue(self.conn, self.leased, f"call failed: {detail}", attempts=attempts)
                 self.leased = []
-            else:
+            else:  # discarded: not counted against the caps; its postings are read one per call next
                 singles = len(self.leased)
+                self.batches -= 1
+                self.handed -= len(self.leased)
                 self.requeued += len(self.leased)
                 self.give_back()
             if failures >= cfg.max_consecutive_failures:

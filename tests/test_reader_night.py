@@ -460,6 +460,29 @@ class FailOpenTests(NightCase):
         self.assertLessEqual(len(fake.calls), 30)
 
 
+    def test_a_failed_batch_on_the_last_cap_slot_is_still_split(self):
+        # Grok second review: the batch a poison posting breaks is discarded and does not count; its one-posting
+        # retries run before the caps are checked again.
+        for cap in ({"max_batches": 1}, {"max_postings_per_night": 20}):
+            with self.subTest(**cap):
+                self.conn.execute("DELETE FROM read_queue")
+                self.conn.execute("DELETE FROM posting_reading")
+                if not self.conn.execute("SELECT count(*) FROM posting").fetchone()[0]:
+                    self.others = self.postings(44)
+                    (self.poison,) = self.postings(1, lead=REFUSAL)
+                poison = self.poison
+                def answer(n, payload):
+                    if poison in [p["posting_id"] for p in payload["postings"]]:
+                        return RunResult(1, "", "Error: prompt is too long")
+                    return good(n, payload)
+                fake = Fake(answer)
+                summary = self.run_night(fake, dataclasses.replace(self.promoted, **cap))
+                self.assertEqual(summary.status, "cap_reached")
+                self.assertEqual(fake.sizes(), [20] + [1] * 20)
+                self.assertEqual((summary.batches, summary.stored), (20, 19))
+                self.assertEqual((self.row(poison)["state"], self.row(poison)["attempts"]), ("queued", 1))
+                self.assertEqual(self.states(), Counter(done=19, queued=26))
+
 class ApplyAllTests(NightCase):
     def test_night_applies_all_after_its_batches(self):
         (pid,) = self.postings(1)

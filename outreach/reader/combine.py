@@ -40,7 +40,7 @@ from outreach.ranking.common import doubtful_board_ids
 from outreach.reader.config import ReaderConfig, load_reader_config
 from outreach.reader.submit import min_words
 from outreach.reader.types import FIELDS, TEXT_FIELDS, PostingReading, _collapse, quote_in_body
-from outreach.reader.version import reader_version
+from outreach.reader.version import reader_version, side_version
 from outreach.rules import Decision, PostingInput, RulesetNotCurrent, decide, decide_and_store, ruleset_version
 from outreach.rules.config import Config, default_config
 from outreach.rules.eligibility import starts_2027
@@ -436,15 +436,15 @@ def _close_other_versions(conn: sqlite3.Connection, version: str) -> None:
 def explain(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfig | None = None,
             rules_cfg: Config | None = None) -> tuple[FieldVerdict, ...]:
     """The verdicts for the posting, for the API and UI to show flagged fields with both quotes: the promoted
-    version's reading when there is one, else the candidate version's. The rules side is decide() on the stored
-    text (the stored row holds the combined facts). Read-only."""
+    version's reading when there is one, else the candidate version's, else a side session's (`side_version`). The
+    rules side is decide() on the stored text (the stored row holds the combined facts). Read-only."""
     cfg = cfg if cfg is not None else load_reader_config()
     post = _posting(conn, posting_id)
     if post is None:
         return ()
     rules = _decide(post, rules_cfg)
     rules_cfg = rules_cfg if rules_cfg is not None else default_config()
-    for version in (cfg.promoted_version, reader_version(cfg)):
+    for version in (cfg.promoted_version, reader_version(cfg), side_version(cfg)):
         reading, refused, unreadable = _state_for(conn, post, version)
         if reading is not None or unreadable:
             return compare(rules, reading, refused, rules_cfg)

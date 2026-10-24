@@ -424,11 +424,14 @@ text above, this section and the ledger rulings win.
 
 **#13's two reader tools (its Task 12).** Use only these functions; there is no second write path.
 
-- `reader_next`: `enqueue_missing(conn)`, then `next_batch(conn, limit)`, then `batch_payload(conn, requests)`. A
-  posting left out for `MAX_BATCH_CHARS` goes back with `release(conn, [request])`, which gives its attempt back. The
-  payload's `reader_version` is the candidate version (the files' version): the side session reads with the pinned
-  prompt at `outreach/reader/prompts/read_posting.md`, and its readings are filed under that version.
-- `reader_submit`: `submit(conn, readings, version=<the payload's reader_version>)`, then
+- `reader_next`: `side = side_version()` (`outreach.reader.version`), `enqueue_missing(conn, version=side)`, then
+  `next_batch(conn, limit, version=side)`, then `batch_payload(conn, requests)`. A posting left out for
+  `MAX_BATCH_CHARS` goes back with `release(conn, [request])`, which gives its attempt back. The payload's
+  `reader_version` is the side version (`side-` and the files' version), never the night's: the side session reads
+  with the pinned prompt at `outreach/reader/prompts/read_posting.md` but not through the night's `claude -p` call,
+  so its readings are kept apart (final review ruling, 2026-10-24). The CLI's `next` and `submit` do the same.
+- `reader_submit`: every reading's `reader_version` set to `side_version()`, whatever it says, then
+  `submit(conn, readings, version=side_version())`, then
   `apply_reading(conn, result.posting_id)` for every result whose `status` is in `outreach.reader.night.APPLIED`
   (`stored`, `partial` and `refused`; a refused one is shown, flagged, at once). The plan text said stored or partial
   only; the night job and the CLI apply refused results too. A reading needs no `reader_version` key: `submit` fills it.
@@ -441,8 +444,8 @@ text above, this section and the ledger rulings win.
 - So #13's guard must widen in three places before Task 12 passes: `review_item` inserts with `raised_by 'reader'`
   (today `guard.py` accepts only `claude`), the reopen update that sets `resolution` to NULL (today only
   `resolution = 'cleared'` is accepted), and the `posting.pay` update. Nothing else.
-- A side-session reading decides nothing until its version is promoted (Runbook step 7); until then it is stored in
-  shadow and only `explain` shows it.
+- A side-session reading never decides anything: `promote` takes only an `rv-` version, so the side version is
+  never promoted. It is stored in shadow and only `explain` shows it (after the promoted and candidate versions).
 
 **#15's prepare run.** Import, never redefine: `RunResult(returncode, stdout, stderr)`, `Runner =
 Callable[[str, str, str], RunResult]` called as `(system_prompt, user_message, model)`, and

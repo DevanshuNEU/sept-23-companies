@@ -6,7 +6,9 @@
     python -m outreach.reader night [--max-batches N] [--max-postings N]   # the night job, live checkout only
 
 `next` and `submit` are what a side session uses: it reads the printed batch with the pinned prompt and pipes its
-answer back. `submit` takes one reading object, a list of them, or {"readings": [...]}, prints a JSON list of
+answer back. Both work under the side version (`side_version`: `side-` and the files' version), never the night's:
+`next` queues and leases under it and `submit` files every reading under it, whatever version the reading names. So
+a side-session reading is stored in shadow and never decides a posting, even when the night's version is promoted. `submit` takes one reading object, a list of them, or {"readings": [...]}, prints a JSON list of
 results (refusals are results, so the exit is 0), and exits 2 on input that is not JSON. Every stored or partial
 reading, and every posting that ended refused, is then combined with the rules (`apply_reading`), so a posting the
 reader gave up on is shown, flagged, at once.
@@ -62,7 +64,7 @@ from outreach.reader.evaluate import run_reader_on_gold
 from outreach.reader.night import APPLIED, claude_runner, run_night
 from outreach.reader.queue import batch_payload, enqueue_missing, next_batch
 from outreach.reader.submit import submit
-from outreach.reader.version import reader_version
+from outreach.reader.version import reader_version, side_version
 from outreach.rules import RulesetNotCurrent
 from outreach.store import body_sha256, connect
 from outreach.store.db import db_path, is_live_path
@@ -317,8 +319,10 @@ def main(argv: list[str] | None = None, *, stdin=None, stdout=None) -> int:
     try:
         if args.command == "next":
             limit = args.limit if args.limit is not None else cfg.batch_size
-            enqueue_missing(conn, cfg=cfg)
-            print(json.dumps(batch_payload(conn, next_batch(conn, limit, cfg=cfg)), ensure_ascii=False), file=stdout)
+            side = side_version(cfg)
+            enqueue_missing(conn, cfg=cfg, version=side)
+            print(json.dumps(batch_payload(conn, next_batch(conn, limit, cfg=cfg, version=side)),
+                             ensure_ascii=False), file=stdout)
             return 0
         if args.command == "submit":
             try:
@@ -326,7 +330,12 @@ def main(argv: list[str] | None = None, *, stdin=None, stdout=None) -> int:
             except ValueError as err:
                 print(f"submit: input is not JSON: {err}", file=sys.stderr)
                 return 2
-            results = submit(conn, readings, cfg=cfg)
+            side = side_version(cfg)
+            if isinstance(readings, dict):
+                readings = [readings]
+            if isinstance(readings, list):  # filed under the side version, whatever a reading says
+                readings = [{**r, "reader_version": side} if isinstance(r, dict) else r for r in readings]
+            results = submit(conn, readings, cfg=cfg, version=side)
             print(json.dumps([dataclasses.asdict(r) for r in results], ensure_ascii=False), file=stdout)
             try:
                 for r in results:

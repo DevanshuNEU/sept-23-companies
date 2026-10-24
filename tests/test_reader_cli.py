@@ -12,7 +12,9 @@ from unittest import mock
 from outreach.reader import __main__ as cli
 from outreach.reader.config import load_reader_config
 from outreach.reader.types import FIELDS
-from outreach.reader.version import reader_version
+from outreach.reader import queue
+from outreach.reader.submit import submit
+from outreach.reader.version import reader_version, side_version
 from outreach.rules import rebuild
 from outreach.store import db as store_db
 from tests.storetest import fresh_store, seed_company, seed_posting
@@ -75,7 +77,7 @@ class NextTests(CliCase):
         self.assertEqual(len(batch["postings"]), 2)
         for entry in batch["postings"]:
             self.assertEqual(set(entry), {"posting_id", "body_sha256", "reader_version", "title", "location", "body"})
-            self.assertEqual(entry["reader_version"], reader_version(self.cfg))
+            self.assertEqual(entry["reader_version"], side_version(self.cfg))
         states = {r["posting_id"]: r["state"] for r in self.conn.execute("SELECT posting_id, state FROM read_queue")}
         self.assertEqual(len(states), 3)  # enqueue_missing ran first
         for entry in batch["postings"]:
@@ -95,18 +97,28 @@ class NextTests(CliCase):
 
 class SubmitTests(CliCase):
     def test_submit_round_trip(self):
+        # Side-session readings are filed under their own version, never the night's: even with the night's
+        # version promoted they decide nothing (final review).
         self.postings(2)
-        cfg = dataclasses.replace(self.cfg, promoted_version=reader_version(self.cfg))
+        night = reader_version(self.cfg)
+        cfg = dataclasses.replace(self.cfg, promoted_version=night)
         batch = self.next_batch(limit=2, cfg=cfg)
-        code, out = self.run_cli(["submit"], json.dumps(self.readings_for(batch)), cfg=cfg)
+        readings = self.readings_for(batch)
+        readings[1]["reader_version"] = night  # a side session that names the night's version is not believed
+        code, out = self.run_cli(["submit"], json.dumps(readings), cfg=cfg)
         self.assertEqual(code, 0)
         results = json.loads(out)
         self.assertEqual([r["status"] for r in results], ["stored", "stored"])
         self.assertEqual([r["posting_id"] for r in results], [p["posting_id"] for p in batch["postings"]])
+        self.assertEqual({r[0] for r in self.conn.execute("SELECT reader_version FROM posting_reading")},
+                         {side_version(self.cfg)})
+        self.assertNotEqual(side_version(self.cfg), night)
         for entry in batch["postings"]:
             row = self.conn.execute("SELECT provisional, reader_version FROM current_decision WHERE posting_id = ?",
                                     (entry["posting_id"],)).fetchone()
-            self.assertEqual(tuple(row), (0, reader_version(self.cfg)))
+            self.assertEqual(tuple(row), (1, None))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM read_queue WHERE reader_version = ?",
+                                           (night,)).fetchone()[0], 0)
 
     def test_submit_before_promotion_stores_but_decides_nothing(self):
         self.postings(1)
@@ -133,9 +145,10 @@ class SubmitTests(CliCase):
         self.assertEqual(json.loads(out)[0]["status"], "requeued")
         self.assertEqual(json.loads(out)[0]["refused_fields"], ["sponsorship"])
 
-    def test_a_reading_refused_at_the_limit_fails_open_at_once(self):
-        # A posting that used its last lease and still gave no usable reading ends refused. The posting is shown,
-        # flagged, by this submit; it does not wait for the next `apply` or night.
+    def test_a_reading_refused_at_the_limit_is_filed_under_the_side_version(self):
+        # A posting that used its last side-session lease and still gave no usable reading ends refused under the
+        # side version. That version never decides, so the row is left as the rules made it; the night's reader
+        # still reads the posting under its own version.
         pid = seed_posting(self.conn, self.company, "Software Engineer, New Grad",
                            "We do not sponsor visas for this role. " + BODY, "Boston, MA")
         rebuild(self.conn)
@@ -146,11 +159,13 @@ class SubmitTests(CliCase):
         del reading["fields"]["pay"]  # malformed: nothing can be stored
         code, out = self.run_cli(["submit"], json.dumps([reading]), cfg=cfg)
         self.assertEqual((code, json.loads(out)[0]["status"]), (0, "refused"))
+        state = self.conn.execute("SELECT state FROM read_queue WHERE posting_id = ? AND reader_version = ?",
+                                  (pid, side_version(self.cfg))).fetchone()
+        self.assertEqual(state[0], "refused")
         row = self.conn.execute("SELECT sponsorship, provisional FROM current_decision WHERE posting_id = ?",
                                 (pid,)).fetchone()
-        self.assertEqual(tuple(row), ("unclear", 1))
-        self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE kind = 'reader_disagrees' "
-                                           "AND posting_id = ?", (pid,)).fetchone()[0], 1)
+        self.assertEqual(tuple(row), ("no", 1))
+        self.assertEqual(queue.enqueue_missing(self.conn, cfg=cfg), 1)  # the night version still reads it
 
     def test_submit_rejects_non_json_with_exit_2(self):
         for text in ("not json", "", "[1, 2"):
@@ -164,8 +179,9 @@ class ApplyTests(CliCase):
     def test_apply_prints_the_count(self):
         self.postings(1)
         cfg = dataclasses.replace(self.cfg, promoted_version=reader_version(self.cfg))
-        batch = self.next_batch(limit=1, cfg=cfg)
-        self.run_cli(["submit"], json.dumps(self.readings_for(batch)), cfg=cfg)
+        queue.enqueue_missing(self.conn, cfg=cfg)
+        batch = queue.batch_payload(self.conn, queue.next_batch(self.conn, 1, cfg=cfg))
+        submit(self.conn, self.readings_for(batch), cfg=cfg)  # a night reading, at the promoted version
         rebuild(self.conn)  # rows go provisional again
         code, out = self.run_cli(["apply"], cfg=cfg)
         self.assertEqual((code, out.strip()), (0, "1"))

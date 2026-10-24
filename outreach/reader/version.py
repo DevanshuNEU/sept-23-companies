@@ -12,7 +12,10 @@ import hashlib
 from outreach.reader.config import ReaderConfig, load_reader_config
 from outreach.reader.types import READING_SCHEMA_VERSION
 
-__all__ = ["reader_version"]
+__all__ = ["SIDE_PREFIX", "reader_version", "side_version"]
+
+# What a side session's readings are filed under, before the files' version (see `side_version`).
+SIDE_PREFIX = "side-"
 
 
 def reader_version(cfg: ReaderConfig | None = None) -> str:
@@ -22,3 +25,11 @@ def reader_version(cfg: ReaderConfig | None = None) -> str:
         cfg.prompt_path.read_bytes() + b"\0" + cfg.model.encode("utf-8") + b"\0"
         + str(READING_SCHEMA_VERSION).encode("ascii"))
     return "rv-" + digest.hexdigest()[:12]
+
+
+def side_version(cfg: ReaderConfig | None = None) -> str:
+    """The version a side session's readings (`next` and `submit` on the command line, #13's reader tools) are
+    filed under: `side-` plus `reader_version`. A side session reads with the pinned prompt but not through the
+    night job's `claude -p` call (its own model, context and tools), so its readings are kept apart: they never sit
+    under the night's version, and `promote` takes only an `rv-` version, so they can never make a hide final."""
+    return SIDE_PREFIX + reader_version(cfg)

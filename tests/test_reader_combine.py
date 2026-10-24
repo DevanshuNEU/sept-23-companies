@@ -14,7 +14,7 @@ from outreach.reader.combine import (HIDE_FIELDS, Combined, FieldVerdict, apply_
                                      explain, reader_combiner, reading_state)
 from outreach.reader.config import load_reader_config
 from outreach.reader.types import FIELDS, FieldReading, PostingReading
-from outreach.reader.version import reader_version
+from outreach.reader.version import reader_version, side_version
 from outreach.rules import Decision, RulesetNotCurrent, passes, rebuild
 from outreach.rules.config import default_config
 from outreach.store import body_sha256, utcnow
@@ -407,6 +407,15 @@ class ApplyTests(StoreCase):
         before = self.conn.total_changes
         self.assertEqual(verdict(explain(self.conn, pid, cfg=self.cfg), "sponsorship").state, "agree")
         self.assertEqual(self.conn.total_changes, before)
+
+    def test_explain_falls_back_to_a_side_session_reading_and_it_decides_nothing(self):
+        pid = self.posting()
+        side = side_version(self.cfg)
+        self.store_reading(pid, version=side, sponsorship=("wont_sponsor", REFUSAL))
+        self.assertEqual(verdict(explain(self.conn, pid, cfg=self.cfg), "sponsorship").state, "agree")
+        promoted = dataclasses.replace(self.cfg, promoted_version=reader_version(self.cfg))
+        self.assertTrue(apply_reading(self.conn, pid, cfg=promoted).provisional)
+        self.assertEqual(self.row(pid)["provisional"], 1)
 
     def test_apply_all_restores_combined_rows_after_a_rebuild(self):
         agreed, relaxed, unread = self.posting(), self.posting(), self.posting()

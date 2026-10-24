@@ -44,6 +44,7 @@ NET = ROOT / "outreach" / "net.py"
 SOURCES = ROOT / "outreach" / "sources"
 SENDING = ROOT / "outreach" / "sending"
 IMPORTER = ROOT / "outreach" / "importer"
+REVIEW = ROOT / "outreach" / "review"
 REFRESH = ROOT / "refresh"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
@@ -660,6 +661,25 @@ MUTATIONS = [
     (IMPORTER / "plan.py", "a sent contact with no company is held as a settleable record again",
      '            if "sent" in (plan.message0, plan.message1):', "            if False:",
      "test_skip_record_cannot_settle_a_sent_contact_with_no_company"),
+
+    # ---- review/ (#16 Needs you) ----------------------------------------------------------------------------------
+    (REVIEW / "items.py", "decided_before finds nothing, so a settled item comes back on a new posting",
+     '    person. An item the system cleared is not a decision."""\n',
+     '    person. An item the system cleared is not a decision."""\n    return None\n',
+     "test_the_same_wording_on_a_new_posting_does_not_return_after_he_marked_it_ok"),
+    (REVIEW / "triggers.py", "a ruleset that is not current is read as nothing wrong, so the sweep clears items",
+     "    if current is None or current[0] != version:\n        return SyncResult(0, 0, \"ruleset not current\")\n", "",
+     "test_ruleset_not_current_skips_and_clears_nothing"),
+    (REVIEW / "triggers.py", "a locked sponsorship fact no longer suppresses the item",
+     " and owner not in locked}", "}",
+     "test_a_locked_sponsorship_fact_suppresses_and_clears"),
+    (REVIEW / "hand.py", "a hand fact is written unlocked, so a later automated row can overwrite it",
+     "quote, posting_id, observed_on, recorded_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'hand', ?, ?, ?, ?, ?)\"",
+     "quote, posting_id, observed_on, recorded_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'hand', ?, ?, ?, ?, ?)\"",
+     "test_hand_fact_is_locked_hand_evidence_and_wins_company_fact_over_a_later_confirmed_automated_row"),
+    (REVIEW / "merge.py", "unmerge does not put back the pause he set",
+     'was.get("previous_paused_at") if status == "working" else None,', "None,",
+     "test_unmerge_restores_status_close_reason_and_pause_exactly"),
 ]
 
 

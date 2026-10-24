@@ -10,11 +10,13 @@ the wrong shape, is a `ValueError`, so a typo never reads as "no override". Keys
     [done_add]                keys = ["name key"]      company joins the done set
     [done_remove]             keys = ["name key"]      company leaves it
     [touch_for]               "<record id>" = "<record id>"   this row annotates that touch
+    [skip_record]             "<record id>" = "why"    a held record he settles by skipping it (only the holds
+                                                       the planner allows; an unclear send never)
 """
 import glob
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import live_checkout
@@ -37,6 +39,7 @@ class Overrides:
     done_add: frozenset[str]
     done_remove: frozenset[str]
     touch_for: dict[str, str]
+    skip_record: dict[str, str] = field(default_factory=dict)
 
 
 def _expand(text: str, env) -> str:
@@ -68,7 +71,7 @@ def load_manifest(path: Path | None = None, *, env=os.environ) -> Manifest:
     return Manifest(paths=paths, overrides=Path(_expand(override, env)) if override else None)
 
 
-_PAIR_TABLES = ("same_company", "person_name", "touch_for")
+_PAIR_TABLES = ("same_company", "person_name", "touch_for", "skip_record")
 _LIST_TABLES = {"not_same_company": "pairs", "done_add": "keys", "done_remove": "keys"}
 
 
@@ -110,4 +113,5 @@ def load_overrides(path: Path | None) -> Overrides:
         done_add=frozenset(lists["done_add"]),
         done_remove=frozenset(lists["done_remove"]),
         touch_for=mappings["touch_for"],
+        skip_record=mappings["skip_record"],
     )

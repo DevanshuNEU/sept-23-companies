@@ -72,6 +72,7 @@ class VocabTest(unittest.TestCase):
     def test_note_reply_table_and_free_text_is_none(self):
         self.table(note_reply, [
             (None, ([], None)), ("null", ([], None)), ("n/a", ([], None)), ("N/A", ([], None)), ("", ([], None)),
+            ("none", ([], None)),
             ("replied", (["replied"], "unsorted")),
             ("polite-no", (["replied"], "said_no")),
             ("soft-positive", (["replied"], "interested")),

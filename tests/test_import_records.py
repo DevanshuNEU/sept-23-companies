@@ -186,6 +186,8 @@ keys = ["quarrylabs"]
 keys = ["kestrelrobotics"]
 [touch_for]
 "curated_touches:row:3" = "contacted_txt:line:7"
+[skip_record]
+"contacted_txt:line:12" = "a stray note"
 """)
         got = load_overrides(path)
         self.assertEqual(got.same_company, {"tidewater": "tidewaterai"})
@@ -194,6 +196,8 @@ keys = ["kestrelrobotics"]
         self.assertEqual(got.done_add, frozenset({"quarrylabs"}))
         self.assertEqual(got.done_remove, frozenset({"kestrelrobotics"}))
         self.assertEqual(got.touch_for, {"curated_touches:row:3": "contacted_txt:line:7"})
+        self.assertEqual(got.skip_record, {"contacted_txt:line:12": "a stray note"})
+        self.assertEqual(load_overrides(None).skip_record, {})
 
     def test_overrides_refuse_an_unknown_table(self):
         path = write(self.tmp / "o.toml", '[same_compny]\na = "b"\n')

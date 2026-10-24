@@ -66,8 +66,13 @@ class OutcomeIn:
 
 @dataclass(frozen=True)
 class EmailIn:
-    """The old mailer's email touch for a contacts.json contact. A historic email (contacted.txt, a company file)
-    has no EmailIn."""
+    """An email touch's own state, as the `touch` row and its messages need it.
+
+    For a contacts.json contact it carries the old mailer's messages: `sent0_at` None means nothing was sent (a
+    draft, skipped or failed contact; the writer logs no outreach_touch for it). A historic email (contacted.txt, a
+    company file, the tracker) has `contact_id` None and no message text: only `sent0_at`, the state (closed
+    `no_reply` unless it has a reply or a bounce) and the bounce and auto-reply times. `old_approval` says he had
+    approved it in the old mailer: the writer notes it in an event and the message stays a draft."""
     contact_id: str | None
     subject0: str | None
     body0: str | None
@@ -85,6 +90,7 @@ class EmailIn:
     bounced_at: str | None
     auto_reply_at: str | None
     history: tuple[tuple[str, str], ...]
+    old_approval: bool = False
 
 
 @dataclass(frozen=True)
@@ -113,6 +119,8 @@ class ApplicationIn:
     outcome: str
     outcome_at: str | None
     records: tuple[str, ...]
+    # replies, referrals, interviews and offers on the application's own touch (radar events, a placed interview)
+    outcomes: tuple[OutcomeIn, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -148,6 +156,7 @@ class IssueIn:
     record: str
     detail: str
     holds: bool
+    key: str | None = None  # the review item's evidence key when it is not `import:<code>:<record>` (ruled_out)
 
 
 @dataclass(frozen=True)

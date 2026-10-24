@@ -102,7 +102,7 @@ def contact_status_plan(status, *, followup_sent: bool = False) -> ContactPlan |
 Reply = tuple[list[OutcomeKind], str | None]
 
 _NOTE_REPLY: dict[str, Reply] = {
-    "": ([], None), "null": ([], None), "n/a": ([], None),
+    "": ([], None), "null": ([], None), "n/a": ([], None), "none": ([], None),
     "replied": (["replied"], "unsorted"),
     "polite-no": (["replied"], "said_no"),
     "soft-positive": (["replied"], "interested"),

@@ -8,12 +8,22 @@ rebuild_decisions.py did, and lost data); it upserts under the new version, swit
 transaction, then prunes versions nobody reads. The crawler must not run at the same time: #21's job runs rebuild
 first, then crawls.
 
+`combiner` (rebuild and decide_and_store) is the posting reader's (#32): a callable taking (conn, posting_id, the
+rules' Decision) and returning an object with `decision`, `provisional` and `reader_version`, which is what gets
+compared and written. This module never imports the reader: callers pass the combiner in, so the reader's code is
+not part of the ruleset hash (rebuild.py is in NOT_RULES). With no combiner every row is written provisional with
+no reader version, so a re-decide never keeps an earlier reader's agreement.
+
 `python -m outreach.rules.rebuild` runs a rebuild on the store at OUTREACH_DB (the live path only in the live
-checkout) and prints the flip report.
+checkout) with the reader's combiner when the reader package is there, then the reader's `apply_all`, and prints
+the flip report.
 """
 import argparse
+import importlib
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from outreach.store import append_event, atomic, connect, finish_job, start_job, transaction, utcnow
 
@@ -22,7 +32,7 @@ from .decide import Decision, PostingInput, decide, passes
 from .facts import EvidenceDraft
 from .version import ruleset_version
 
-__all__ = ["RulesetNotCurrent", "Flip", "FlipReport", "BATCH_SIZE", "rebuild", "decide_and_store",
+__all__ = ["RulesetNotCurrent", "Flip", "FlipReport", "BATCH_SIZE", "Combiner", "rebuild", "decide_and_store",
            "record_evidence", "stored_decision", "main"]
 
 BATCH_SIZE = 500
@@ -30,11 +40,15 @@ BATCH_SIZE = 500
 _COLUMNS = ("lane", "level_tier", "level_ok", "level_basis", "years_asked", "years_quote", "us", "sponsorship",
             "sponsorship_quote", "citizenship", "citizenship_quote", "eligibility", "eligibility_reason",
             "eligibility_quote", "start_2027")
+_WRITTEN = _COLUMNS + ("provisional", "reader_version")
 _UPSERT = (
-    "INSERT INTO decision(posting_id, ruleset_version, decided_at, " + ", ".join(_COLUMNS) + ") VALUES (?, ?, ?, "
-    + ", ".join("?" for _ in _COLUMNS) + ") ON CONFLICT(posting_id, ruleset_version) DO UPDATE SET decided_at = "
-    "excluded.decided_at, " + ", ".join(f"{c} = excluded.{c}" for c in _COLUMNS)
+    "INSERT INTO decision(posting_id, ruleset_version, decided_at, " + ", ".join(_WRITTEN) + ") VALUES (?, ?, ?, "
+    + ", ".join("?" for _ in _WRITTEN) + ") ON CONFLICT(posting_id, ruleset_version) DO UPDATE SET decided_at = "
+    "excluded.decided_at, " + ", ".join(f"{c} = excluded.{c}" for c in _WRITTEN)
 )
+# The reader's combiner: (conn, posting_id, the rules' decision) -> an object with decision, provisional and
+# reader_version (outreach.reader.combine.Combined). Typed loosely so this module needs no reader import.
+Combiner = Callable[[sqlite3.Connection, int, Decision], Any]
 # The fields passes() reads: what a shown-to-hidden flip is explained by.
 _HIDING_FIELDS = ("lane", "us", "sponsorship", "citizenship", "eligibility")
 
@@ -97,16 +111,33 @@ def _change(old: Decision, new: Decision, fields) -> str:
                      for f in fields if getattr(old, f) != getattr(new, f))
 
 
-def _upsert(conn: sqlite3.Connection, posting_id: int, version: str, d: Decision) -> None:
-    row = d.as_row()
-    conn.execute(_UPSERT, (posting_id, version, utcnow(), *(row[c] for c in _COLUMNS)))
+@dataclass(frozen=True)
+class _Write:
+    """One decision row to write: the facts, and whether a verified reading made them final."""
+    decision: Decision
+    provisional: bool = True
+    reader_version: str | None = None
+
+
+def _combined(conn: sqlite3.Connection, posting_id: int, rules: Decision, combiner: Combiner | None) -> _Write:
+    if combiner is None:
+        return _Write(rules)
+    got = combiner(conn, posting_id, rules)
+    provisional = bool(got.provisional)
+    return _Write(got.decision, provisional, None if provisional else got.reader_version)
+
+
+def _upsert(conn: sqlite3.Connection, posting_id: int, version: str, w: _Write) -> None:
+    row = w.decision.as_row()
+    conn.execute(_UPSERT, (posting_id, version, utcnow(), *(row[c] for c in _COLUMNS), int(w.provisional),
+                           w.reader_version))
 
 
 def _posting_input(row: sqlite3.Row) -> PostingInput:
     return PostingInput(row["title"], row["body"], row["location"], row["country"])
 
 
-def _decide_batch(conn, ids, cfg, report: dict) -> list[tuple[int, Decision]]:
+def _decide_batch(conn, ids, cfg, report: dict, combiner: Combiner | None = None) -> list[tuple[int, _Write]]:
     """Decide one batch with no write transaction open; add its flips to `report`; return the rows to write.
 
     Reads run in autocommit, so the CPU-bound decide() calls never hold the write lock. The flip comparison uses the
@@ -123,7 +154,8 @@ def _decide_batch(conn, ids, cfg, report: dict) -> list[tuple[int, Decision]]:
         old_row = None
         if posting["closed_at"] is None:
             old_row = conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (posting_id,)).fetchone()
-        new = decide(_posting_input(posting), cfg)
+        write = _combined(conn, posting_id, decide(_posting_input(posting), cfg), combiner)
+        new = write.decision
         if old_row is not None:
             old = stored_decision(old_row)
             was, now = passes(old), passes(new)
@@ -137,7 +169,7 @@ def _decide_batch(conn, ids, cfg, report: dict) -> list[tuple[int, Decision]]:
                 report["level_lost"].append(Flip(
                     posting_id, posting["name"], posting["title"],
                     f"level {old.level_tier} -> {new.level_tier}: {new.level_basis}"))
-        decided.append((posting_id, new))
+        decided.append((posting_id, write))
     return decided
 
 
@@ -160,11 +192,12 @@ def _prune(conn: sqlite3.Connection, keep: list[str], batch_size: int) -> int:
 
 
 def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str | None = None,
-            batch_size: int = BATCH_SIZE, progress=None) -> FlipReport:
+            batch_size: int = BATCH_SIZE, progress=None, combiner: Combiner | None = None) -> FlipReport:
     """Re-decide every open posting (and any with no decision) under `version`, make it current, prune old rows.
 
     `cfg` and `version` default to the shipped config and the code's ruleset version; tests override them. Returns
-    the flips against the ruleset that was current when the run started. A failed run leaves that ruleset current;
+    the flips against the ruleset that was current when the run started; with a `combiner`, what it returns is
+    what is compared and written (it runs with no transaction open, like decide()). A failed run leaves that ruleset current;
     rows already written under the new version are overwritten by the next run. A posting whose decision the table
     refuses (sqlite3.IntegrityError) is skipped and listed in the report and the job summary, and the job is closed
     "partial"; the rest of its batch still commits. If only the prune after the switch fails, the new ruleset is
@@ -186,12 +219,12 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
             "SELECT posting_id FROM posting p WHERE closed_at IS NULL OR NOT EXISTS "
             "(SELECT 1 FROM decision d WHERE d.posting_id = p.posting_id) ORDER BY posting_id")]
         for start in range(0, len(ids), batch_size):
-            decided = _decide_batch(conn, ids[start:start + batch_size], cfg, flips)
+            decided = _decide_batch(conn, ids[start:start + batch_size], cfg, flips, combiner)
             with transaction(conn):
-                for posting_id, decision in decided:
+                for posting_id, write in decided:
                     conn.execute("SAVEPOINT rebuild_row")  # one refused row undoes only itself
                     try:
-                        _upsert(conn, posting_id, version, decision)
+                        _upsert(conn, posting_id, version, write)
                     except sqlite3.IntegrityError as err:
                         conn.execute("ROLLBACK TO rebuild_row")
                         skipped.append((posting_id, str(err)))
@@ -231,10 +264,12 @@ def rebuild(conn: sqlite3.Connection, *, cfg: Config | None = None, version: str
     return FlipReport(version, previous, decided, **flips, skipped=skipped)
 
 
-def decide_and_store(conn: sqlite3.Connection, posting_id: int, *, cfg: Config | None = None) -> Decision:
+def decide_and_store(conn: sqlite3.Connection, posting_id: int, *, cfg: Config | None = None,
+                     combiner: Combiner | None = None) -> Decision:
     """Decide one posting and upsert its row under the store's current ruleset. What the crawler calls per posting.
 
-    Raises RulesetNotCurrent when the store's current version is not this code's. Joins the caller's transaction
+    With a `combiner` the row and the returned Decision are the combiner's; without one the row is provisional with
+    no reader version. Raises RulesetNotCurrent when the store's current version is not this code's. Joins the caller's transaction
     when there is one.
     """
     with atomic(conn, "rules_unit"):
@@ -246,9 +281,9 @@ def decide_and_store(conn: sqlite3.Connection, posting_id: int, *, cfg: Config |
             "LEFT JOIN posting_body b ON b.posting_id = p.posting_id WHERE p.posting_id = ?", (posting_id,)).fetchone()
         if posting is None:
             raise LookupError(f"no posting {posting_id}")
-        decision = decide(_posting_input(posting), cfg)
-        _upsert(conn, posting_id, row[0], decision)
-    return decision
+        write = _combined(conn, posting_id, decide(_posting_input(posting), cfg), combiner)
+        _upsert(conn, posting_id, row[0], write)
+    return write.decision
 
 
 def record_evidence(conn: sqlite3.Connection, company_id: int, drafts: list[EvidenceDraft], *,
@@ -281,6 +316,17 @@ def record_evidence(conn: sqlite3.Connection, company_id: int, drafts: list[Evid
     return len(added)
 
 
+def _reader_combine():
+    """The reader's combine module (#32), loaded lazily so this module never imports the reader; None only when
+    the reader package or that module is missing. An import error inside the reader propagates."""
+    try:
+        return importlib.import_module("outreach.reader.combine")
+    except ModuleNotFoundError as err:
+        if err.name in ("outreach.reader", "outreach.reader.combine"):
+            return None
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     argparse.ArgumentParser(
         prog="python -m outreach.rules.rebuild",
@@ -288,7 +334,13 @@ def main(argv: list[str] | None = None) -> int:
     ).parse_args(argv)
     conn = connect()
     try:
-        print("\n".join(rebuild(conn).lines()))
+        combine = _reader_combine()
+        if combine is None:
+            report = rebuild(conn)
+        else:
+            report = rebuild(conn, combiner=combine.reader_combiner(conn))
+            combine.apply_all(conn)  # raise and clear the reader's review items for the new rows
+        print("\n".join(report.lines()))
     finally:
         conn.close()
     return 0

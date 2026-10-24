@@ -8,6 +8,7 @@ import os
 import random
 import sqlite3
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from outreach.rules import (
@@ -472,6 +473,66 @@ class RecordEvidenceTests(RebuildTestCase):
             "INSERT INTO evidence(company_id, fact, value, num_low, num_high, confidence, locked, source_kind, "
             "recorded_at) VALUES (?, 'size', '40', 40, 40, 'confirmed', 1, 'hand', ?)", (self.company, utcnow()))
         self.assertEqual(record_evidence(self.conn, self.company, [draft]), 0)
+
+
+class CombinerHookTests(RebuildTestCase):
+    """The reader's combiner hook (#32 Task 4). The combiner here is a stand-in with the same shape as
+    `outreach.reader.combine.Combined`, so these tests need no reader."""
+
+    def final_combiner(self, version="rv-0000000000aa", relax=False):
+        calls = []
+
+        def combiner(conn, posting_id, decision):
+            calls.append(posting_id)
+            if relax and decision.sponsorship == "no":
+                decision = dataclasses.replace(decision, sponsorship="unclear")
+            return SimpleNamespace(decision=decision, provisional=False, reader_version=version)
+        combiner.calls = calls
+        return combiner
+
+    def flags(self, pid):
+        row = self.conn.execute("SELECT provisional, reader_version, sponsorship FROM current_decision "
+                                "WHERE posting_id = ?", (pid,)).fetchone()
+        return tuple(row)
+
+    def test_rebuild_with_a_combiner_writes_provisional_and_reader_version(self):
+        pid = self.posting(body="We do not sponsor.")
+        combiner = self.final_combiner()
+        rebuild(self.conn, combiner=combiner)
+        self.assertEqual(combiner.calls, [pid])
+        self.assertEqual(self.flags(pid), (0, "rv-0000000000aa", "no"))
+
+    def test_the_flip_report_compares_what_the_combiner_returned(self):
+        pid = self.posting()
+        rebuild(self.conn, version=V1)
+        self.set_body(pid, "We do not sponsor.")
+        report = rebuild(self.conn, combiner=self.final_combiner(relax=True))
+        self.assertEqual(report.to_hidden, [])
+        self.assertEqual(self.flags(pid), (0, "rv-0000000000aa", "unclear"))
+
+    def test_rebuild_without_a_combiner_resets_provisional_to_one(self):
+        pid = self.posting(body="We do not sponsor.")
+        rebuild(self.conn, combiner=self.final_combiner())
+        rebuild(self.conn)
+        self.assertEqual(self.flags(pid), (1, None, "no"))
+
+    def test_decide_and_store_takes_the_combiner_too(self):
+        pid = self.posting(body="We do not sponsor.")
+        got = decide_and_store(self.conn, pid, combiner=self.final_combiner(relax=True))
+        self.assertEqual(got.sponsorship, "unclear")
+        self.assertEqual(self.flags(pid), (0, "rv-0000000000aa", "unclear"))
+        decide_and_store(self.conn, pid)
+        self.assertEqual(self.flags(pid), (1, None, "no"))
+
+    def test_rebuild_does_not_import_the_reader_and_is_not_a_rule_file(self):
+        import ast
+        from outreach.rules.version import NOT_RULES, RULE_FILES
+        tree = ast.parse(open(rebuild_module.__file__, encoding="utf-8").read())
+        names = [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
+        names += [n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
+        self.assertFalse([n for n in names if "reader" in n])
+        self.assertIn("rebuild.py", NOT_RULES)
+        self.assertNotIn("rebuild.py", RULE_FILES)
 
 
 class CliTests(RebuildTestCase):

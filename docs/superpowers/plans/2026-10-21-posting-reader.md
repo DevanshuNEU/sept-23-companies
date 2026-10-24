@@ -200,7 +200,7 @@
   - `combine(rules: Decision, reading: PostingReading | None, *, refused: frozenset[str] = frozenset(), unreadable: bool = False, cfg: Config | None = None) -> Combined`: pure. No reading and not `unreadable`: the rules' decision unchanged, `provisional=True`, `reader_version=None`, no verdicts. Otherwise relax every rules hide whose state is not `agree` (see the decisions above), `provisional=False`, `reader_version=reading.reader_version` (for `unreadable` with no reading: every hide field is `missing`, `reader_version=None`, `provisional=False`).
   - `reading_state(conn, posting_id: int, *, promoted: str) -> tuple[PostingReading | None, frozenset[str], bool]`: the reading stored for the posting's current body hash at version `promoted` (`None` when `promoted` is empty), its `refused_fields`, and whether the queue row for that key is `refused` with no reading (unreadable).
   - `apply_reading(conn, posting_id: int, *, cfg: ReaderConfig | None = None) -> Combined`: decides with the rules (`decide()` on the stored title, body, location, country), combines, upserts the `decision` row under the current ruleset (`provisional`, `reader_version` included), raises one `reader_disagrees` review item per posting when `raised` is non-empty (`raised_by 'reader'`, `evidence_key = f"{version}:{sha[:12]}:{','.join(sorted(fields))}"`, `reason` naming each field with both values and the reader's quote), and clears an open `reader_disagrees` item for the posting with resolution `cleared` when `raised` is empty. Idempotent: a second call changes nothing. Raises `RulesetNotCurrent` as `decide_and_store` does.
-  - `apply_all(conn, *, cfg=None) -> int`: `apply_reading` for every open posting that has a reading or an unreadable queue row for its current hash (run after a rebuild or a promotion; no API, no crawl). Returns the count.
+  - `apply_all(conn, *, cfg=None) -> int`: `apply_reading` for every open posting that has a reading or an unreadable queue row for its current hash (run after a rebuild or a promotion; no API, no crawl), and for every open posting whose row is final under another reader version, `""` included, so a rollback returns them to provisional; open `reader_disagrees` items raised under another version are closed. Returns the count.
   - `explain(conn, posting_id: int, *, cfg=None) -> tuple[FieldVerdict, ...]`: the verdicts for the posting under the promoted version if there is one, else under the candidate version, for the API and UI to show "flagged" fields and both quotes. Read-only.
   - `reader_combiner(conn, cfg: ReaderConfig | None = None) -> Callable[[sqlite3.Connection, int, Decision], Combined]`: the callable the CLI, the crawler (#21) and the flow test pass as `combiner`; it looks up `reading_state` for the posting at `cfg.promoted_version` and calls `combine`.
   - `rebuild.rebuild(..., combiner=None)` and `rebuild.decide_and_store(..., combiner=None)`: `combiner: Callable[[sqlite3.Connection, int, Decision], Combined] | None`; when given, its `decision`, `provisional` and `reader_version` are what get compared (flips) and written. The shared `_UPSERT` gains `provisional` and `reader_version`; with no combiner it writes `1` and NULL, so a re-decided row with changed facts never keeps an old `provisional = 0`. `rebuild.py` does not import `outreach.reader` (the CLI passes `combiner`); it is in `NOT_RULES`, so the ruleset hash does not move.
@@ -271,7 +271,7 @@
   - `@dataclass(frozen=True) class NightSummary: status: Literal['queue_empty', 'cap_reached', 'session_limit', 'auth', 'failed']; batches: int; stored: int; partial: int; requeued: int; applied: int; stopped_reason: str`.
   - `run_night(conn, runner: Runner, cfg: ReaderConfig | None = None, *, now=utcnow) -> NightSummary`: records a `job_run` with job `read_postings`; runs `enqueue_missing`; loops until the queue is empty, `max_postings_per_night` postings were handed out, or `max_batches` batches ran. Each batch: `next_batch(batch_size)`, one `runner` call, then `classify_run(result, session_limit_patterns=cfg.session_limit_patterns, auth_patterns=cfg.auth_patterns)`. `session_limit` or `auth`: `release` the batch and stop (job `partial` for a session limit, `failed` for auth). `failed` or a `parse_reply` error: `release` the batch, count a consecutive failure, stop at `max_consecutive_failures`. `ok`: the model's readings get `reader_version` filled in by code (the model does not copy it), go through `submit`, then `apply_reading` for stored and partial results; postings the model skipped are `release`d. After the last batch, and also when the run stops early for any reason (session limit, failures, cap), `run_night` calls `apply_all(conn)` (Task 4) so every posting that has a stored reading or an ended-`refused` queue row has the combined decision, whatever wrote its row last: a crawler redecision or a rebuild that ran without the combiner heals overnight, with no reader call. Never raises on a model or CLI problem; always closes the job.
   - `main` subcommand `night [--max-batches N] [--max-postings N]`: calls `live_checkout.require_live("the reader night job")` first, then `run_night(conn, claude_runner(cfg))`, prints the summary line.
-  - `launchd/com.devanshu.outreach-reader-night.plist.template`: label `com.devanshu.outreach-reader-night`, modeled on `com.devanshu.outreach-refresh.plist`: `StartCalendarInterval` daily at 02:30 (a run missed during sleep fires on wake), command `cd '{{LIVE_CHECKOUT}}' && PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/bin/caffeinate -i /opt/homebrew/bin/python3 -m outreach.reader night >> '{{LOG_PATH}}' 2>&1`; the comment block says: install is Devanshu's step, with the exact `launchctl bootstrap gui/$(id -u) <plist>` line, and `launchctl bootout` to remove.
+  - `launchd/com.devanshu.outreach-reader-night.plist.template` (as first built; the Hand-off's #17 note says what it is now): label `com.devanshu.outreach-reader-night`, modeled on `com.devanshu.outreach-refresh.plist`: `StartCalendarInterval` daily at 02:30 (a run missed during sleep fires on wake), command `cd '{{LIVE_CHECKOUT}}' && PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/bin/caffeinate -i /opt/homebrew/bin/python3 -m outreach.reader night >> '{{LOG_PATH}}' 2>&1`; the comment block says: install is Devanshu's step, with the exact `launchctl bootstrap gui/$(id -u) <plist>` line, and `launchctl bootout` to remove.
 
 - [ ] **Step 1: Write the failing tests** in `tests/test_reader_night.py` with a fake `Runner` that answers each batch from a script, over a scratch store with 45 eligible postings:
   - `test_night_reads_the_queue_in_batches`: fake runner returns valid readings for every posting it is sent (it parses the posting ids from the user message); `batch_size=20`: three batches, 45 stored, status `queue_empty`, job row `ok`.
@@ -408,16 +408,240 @@ reader's invariants, so a break between the reader and the crawler, the rules or
 
 ## Hand-off
 
-What the other streams call and where the boundaries sit.
+What the other streams call and where the boundaries sit, as built (2026-10-24). Where this differs from a task's
+text above, this section and the ledger rulings win.
 
 | Stream | Calls | Boundary |
 |---|---|---|
 | #21 crawler | `decide_and_store(conn, posting_id, combiner=reader_combiner(conn))` for every posting it decides, and `rebuild(conn, combiner=...)` at a ruleset change | The crawler never calls `enqueue` and writes nothing in `read_queue` (ruling 0): `enqueue_missing` finds the bodies it stored. This plan owns leasing, `submit` and re-queue. Eligibility (lane, body length) lives in `enqueue` only, so it is not duplicated |
-| #6 ranking | Writes `company_score`. Reads `current_decision.provisional` and keeps `passes()` as the posting-level hide policy | The queue order reads `company_score` when present and ignores it when absent. #6 never reads `read_queue` or `posting_reading` |
-| #13 MCP | Two reader tools: `next_batch(conn, limit)` with `batch_payload`, and `submit(conn, readings)` followed by `apply_reading` for each stored or partial result | The tools return only what the side session needs (the payload and the `SubmitResult` list) |
+| #6 ranking | Writes `company_score`. Reads `current_decision.provisional` and keeps `passes()` as the posting-level hide policy | The queue order reads `company_score` when present and ignores it when absent. A company whose newest score carries a final hide is held (priority 0). #6 never reads `read_queue` or `posting_reading` |
+| #13 MCP | `reader_next` and `reader_submit`, below | The tools return only what the side session needs (the payload and the `SubmitResult` list) |
+| #15 plan and prepare | `RunResult`, `Runner`, `classify_run` from `outreach.reader.night`, below | #15 defines none of the three itself |
 | #11 and #12 API and web | `explain(conn, posting_id)` for flagged fields and both quotes; open `review_item` rows of kind `reader_disagrees` for Needs you | Read only |
 | `rules` stage (#30 owns it) | `rebuild(conn, combiner=reader_combiner(conn))`, then `apply_all(conn)` after every rebuild | Without the combiner a rebuild resets `provisional` to 1 until `apply_all` runs; the night job also runs `apply_all` after its batches |
-| Pipeline flow test | The reader registers `read_postings` through `tests/pipeline/stages_reader.py` and adds the invariants in Task 9 | The flow test stays green on every PR |
+| #17 deploy | Installs `launchd/com.devanshu.outreach-reader-night.plist.template`, below | The repo never installs it |
+| Pipeline flow test | The reader registers `read_postings` through `tests/pipeline/stages_reader.py` (`register(harness, runner=None)`, `harness.reader`) and its invariant in `test_flow.py` | The flow test stays green on every PR |
+
+**#13's two reader tools (its Task 12).** Use only these functions; there is no second write path.
+
+- `reader_next`: `side = side_version()` (`outreach.reader.version`), `enqueue_missing(conn, version=side)`, then
+  `next_batch(conn, limit, version=side)`, then `batch_payload(conn, requests)`. A posting left out for
+  `MAX_BATCH_CHARS` goes back with `release(conn, [request])`, which gives its attempt back. The payload's
+  `reader_version` is the side version (`side-` and the files' version), never the night's: the side session reads
+  with the pinned prompt at `outreach/reader/prompts/read_posting.md` but not through the night's `claude -p` call,
+  so its readings are kept apart (final review ruling, 2026-10-24). The CLI's `next` and `submit` do the same.
+- `reader_submit`: every reading's `reader_version` set to `side_version()`, whatever it says, then
+  `submit(conn, readings, version=side_version())`, then
+  `apply_reading(conn, result.posting_id)` for every result whose `status` is in `outreach.reader.night.APPLIED`
+  (`stored`, `partial` and `refused`; a refused one is shown, flagged, at once). The plan text said stored or partial
+  only; the night job and the CLI apply refused results too. A reading needs no `reader_version` key: `submit` fills it.
+- What these functions write, for the guard's grants: `read_queue` (insert, and update of `priority`, `state`,
+  `lease_until`, `attempts`, `last_error`), `posting_reading` (insert), `decision` (upsert through
+  `decide_and_store`), `review_item` (insert with `raised_by = 'reader'`; update to `resolved` with
+  `resolution = 'cleared'`; and update back to `open` with `resolution = NULL` when a cleared item's evidence returns),
+  `posting.pay` (only when it is empty and a verified reading states pay), and `event` (`entity 'reading'` with
+  `actor 'claude'`; `entity 'posting'`, kind `pay_from_reading`, with `actor 'reader'`).
+- So #13's guard must widen in three places before Task 12 passes: `review_item` inserts with `raised_by 'reader'`
+  (today `guard.py` accepts only `claude`), the reopen update that sets `resolution` to NULL (today only
+  `resolution = 'cleared'` is accepted), and the `posting.pay` update. Nothing else.
+- A side-session reading never decides anything: `promote` takes only an `rv-` version, so the side version is
+  never promoted. It is stored in shadow and only `explain` shows it (after the promoted and candidate versions).
+
+**#15's prepare run.** Import, never redefine: `RunResult(returncode, stdout, stderr)`, `Runner =
+Callable[[str, str, str], RunResult]` called as `(system_prompt, user_message, model)`, and
+`classify_run(result, *, session_limit_patterns, auth_patterns) -> 'ok' | 'session_limit' | 'auth' | 'failed'`. A call
+that exits 0 with a `claude -p --output-format json` result object that is not an error is `ok` whatever its text
+says; otherwise `auth` patterns are matched first, then `session_limit`, else `failed`. Copy the pattern lists from
+`[night]` in `outreach/reader/config.toml`, and update both copies when the real run captures the real texts
+(Runbook step 1). `parse_reply` is reader-shaped (it wants `{"readings": [...]}`), so #15 parses its own replies.
+`READER_CWD` (`~/Library/Application Support/outreach/reader-cwd/`) is the neutral folder #15 also runs from.
+`claude_command` is the reader's flag list; `--safe-mode` in it is unconfirmed until Runbook step 1, and #15 must
+not copy it before that.
+
+**#17 deploy.** The night template follows the convention #17's `test_every_template_follows_the_one_convention`
+checks (final review ruling, 2026-10-24): `WorkingDirectory` `{{LIVE_CHECKOUT}}`, `ProgramArguments`
+`[{{LIVE_CHECKOUT}}/.venv/bin/python, -m, outreach.reader, night]`, `StandardOutPath` and `StandardErrorPath` both
+`{{LOG_PATH}}`, no shell, no `PATH` and no other placeholder. `caffeinate` moved into the command: `night` starts
+`/usr/bin/caffeinate -i -w <its pid>`, so the Mac stays awake until the night ends. The `claude` CLI is found on
+`PATH` or at `~/.local/bin/claude` (`night._claude_binary`), so the job needs no `PATH`. #17 installs it like any
+other job; until #17 ships, the Runbook installs it by hand.
+
+**The labeled set.** The real gold file is `~/Library/Application Support/outreach/gold/items.jsonl`, and its readings
+are `readings/<version>.jsonl` beside it (controller ruling, 2026-10-24): outside the repo, so the live checkout stays
+fast-forwardable. `tests/gold/items.jsonl` is an empty copy of the format; tests pass their own paths. Back the folder
+up: git does not hold it.
+
+**Known gaps at hand-off.**
+- `--safe-mode` with `-p` is unconfirmed (Runbook step 1).
+- Ruling 4 asked for `--json-schema`; `claude_command` does not pass it yet. `parse_reply` skips code fences and prose
+  and `submit` validates everything, so a malformed answer costs a re-read, never a wrong fact.
+- The session-limit and expired-login texts in `[night]` are guesses until the first real run prints them.
+- A rules `no_go` row ranking wrote from a final refusal, and a pay filled from a reading, stay after a rollback of
+  the promotion; the Runbook's rollback lists both (the `no_go` rows and the `pay_from_reading` events) for a fix by
+  hand.
+
+## Runbook: the first real run (Devanshu runs every step)
+
+No agent session runs any step here: each one either calls `claude -p` on his seat or reads real postings. Every
+command runs from the live checkout (`cd ~/Desktop/"Sept 23 Companies"`) unless the step says otherwise. Steps 1 to 3
+prove the reader on his seat; 4 installs it; 5 to 8 are labeling, eval, promotion and apply. Until step 7, the reader
+decides nothing: every decision stays provisional and nothing hides for good.
+
+`DB` below is the new store: `DB="$HOME/Library/Application Support/outreach/outreach.db"`.
+
+**0. Before anything.** The PR is merged and deployed as `CLAUDE.md` says (pull with `--ff-only`, then
+`uv run python -m unittest discover -s tests -t .`). The new store exists and the crawler has stored bodies:
+`sqlite3 -readonly "$DB" "select count(*) from posting_body"` prints more than 0. If the store is not installed yet,
+this waits for #17's switch-over (its step S6).
+
+**1. Check `--safe-mode` first.** It is the one flag in `claude_command` (`outreach/reader/night.py`) not confirmed
+with `-p`; `claude --help` lists it, but no run has shown it keeps the seat login while it turns off `CLAUDE.md`,
+hooks, plugins and memory. Without it, `~/.claude/CLAUDE.md` (his writing rules and email voice) loads into every
+night call. Run the night job's exact command once by hand, from the reader's own folder:
+
+    mkdir -p "$HOME/Library/Application Support/outreach/reader-cwd"
+    cd "$HOME/Library/Application Support/outreach/reader-cwd"
+    claude --version
+    claude --help | grep -n -e --safe-mode -e --strict-mcp-config -e --disable-slash-commands -e --no-session-persistence -e '--tools'
+    echo "Say only the word ok." | claude -p --model claude-haiku-5-5 --output-format json --tools "" \
+      --no-session-persistence --disable-slash-commands --strict-mcp-config --safe-mode \
+      --system-prompt "You answer in one word."
+    echo "List every instruction file or memory you were given, or say none." | claude -p --model claude-haiku-5-5 \
+      --output-format json --tools "" --no-session-persistence --disable-slash-commands --strict-mcp-config \
+      --safe-mode --system-prompt "Answer plainly."
+
+Pass: both exit 0 and print one JSON object with `"is_error": false`; the first `result` is "ok"; the second names
+no CLAUDE.md, memory or skill. Then:
+- `--safe-mode` unknown, or the call says it is not logged in: do not install the night job. Open a PR that drops
+  the flag from `claude_command` and its test (`tests/test_reader_night.py`), and puts in whatever `claude --help`
+  offers to skip user settings and memory, then run this step again. Never use `--bare`: it turns off the seat login.
+- The model name is refused: set `model` in `outreach/reader/config.toml` to the name his seat takes (that makes a
+  new reader version, which is fine before step 5).
+- A limit or login message instead of JSON: copy its exact text into `session_limit_patterns` or `auth_patterns`
+  in `[night]` and into a test fixture in `tests/test_reader_night.py` (one PR), and tell #15 (they copy the lists).
+
+**2. The side-session proof, on a scratch copy (the issue's "Done when").** Nothing here touches the real store.
+
+    PROOF="$HOME/Library/Application Support/outreach/reader-proof"
+    mkdir -p "$PROOF"
+    sqlite3 -readonly "$DB" ".backup '$PROOF/store.db'"
+    export OUTREACH_DB="$PROOF/store.db"
+    sqlite3 "$OUTREACH_DB" "select count(*) from posting_body b join current_decision d using (posting_id) where d.lane in ('engineering','intern') and length(b.body) >= 500"
+    uv run python -m outreach.reader next --limit 20 > "$PROOF/batch.json"
+
+The count must be at least 40. Give `$PROOF/batch.json` and `outreach/reader/prompts/read_posting.md` to a Claude side
+session; save its answer, a `{"readings": [...]}` object, as `$PROOF/answer.json`; then:
+
+    uv run python -m outreach.reader submit < "$PROOF/answer.json"
+    sqlite3 "$OUTREACH_DB" "select state, last_error, count(*) from read_queue group by 1, 2"
+    unset OUTREACH_DB
+
+Record in the PR: how many of the 20 were stored, partial or refused, and each refusal reason. Delete the `$PROOF`
+folder afterwards (it holds a copy of the store).
+
+**3. One real night batch, by hand.** In shadow: nothing it reads decides anything yet.
+
+    uv run python -m outreach.reader night --max-batches 1 --max-postings 20
+
+It prints one line (`night: queue_empty|cap_reached|session_limit|auth|failed, ...`) and exits 0 for the first three.
+Check it:
+
+    sqlite3 -readonly "$DB" "select status, error from job_run where job = 'read_postings' order by run_id desc limit 1"
+    sqlite3 -readonly "$DB" "select verified, count(*) from posting_reading group by verified"
+    sqlite3 -readonly "$DB" "select last_error, count(*) from read_queue where state in ('queued','refused') and last_error <> '' group by 1"
+
+Note in the PR any difference from the plan (flags, model, the time a batch of 20 takes).
+
+**4. Install the night job.** Until #17's deploy tool installs it, by hand:
+
+    LIVE="$HOME/Desktop/Sept 23 Companies"
+    LOG="$HOME/Library/Logs/outreach-reader-night.log"
+    PLIST="$HOME/Library/LaunchAgents/com.devanshu.outreach-reader-night.plist"
+    sed -e "s|{{LIVE_CHECKOUT}}|$LIVE|g" -e "s|{{LOG_PATH}}|$LOG|g" "$LIVE/launchd/com.devanshu.outreach-reader-night.plist.template" > "$PLIST"
+    plutil -lint "$PLIST"
+    launchctl bootstrap gui/$(id -u) "$PLIST"
+    launchctl print gui/$(id -u)/com.devanshu.outreach-reader-night | grep -e state -e "last exit"
+
+It runs daily at 02:30 and reads up to 400 postings in 25 calls, in shadow. The next morning:
+`tail -n 3 "$LOG"`. To stop it: `launchctl bootout gui/$(id -u)/com.devanshu.outreach-reader-night`.
+
+**5. The first labeling sittings.** The set lives in `~/Library/Application Support/outreach/gold/`, never in the repo.
+
+    uv run python -m outreach.reader gold sample --per-class 30 --seed 1
+
+That draws up to 30 postings per stratum from the store (it opens the store, so it runs from the live checkout) and
+appends them `prelabeled` with empty labels. Then, in a Claude side session, have Claude fill the `labels` of the
+prelabeled items in `~/Library/Application Support/outreach/gold/items.jsonl` by the labeling rules in the
+`outreach/reader/gold.py` docstring: every known value quotes the posting word for word, and nothing is confirmed by
+Claude. Do not show that session the reader's readings or the rules' decisions. Then each sitting (about 30 minutes):
+
+    uv run python -m outreach.reader gold show --limit 15
+    uv run python -m outreach.reader gold confirm g0007 --set sponsorship=wont_sponsor --quote "We do not sponsor visas."
+    uv run python -m outreach.reader gold confirm --all-shown
+    uv run python -m outreach.reader gold coverage
+
+Correct a wrong pre-label with `confirm <id> --set field=value --quote "..."` (a quote not word for word in the
+posting is refused; use `--quote ""` for unknown), then `--all-shown` confirms the rest of what `show` printed,
+untouched. Repeat until the strata in `coverage` add up to at least 300 confirmed with at least 20 labeled per hide class (the gate's floor), 30
+per stratum as the target. A hide class needs 150 with no error before it can claim the 2% bound. Copy the `gold`
+folder somewhere safe after each sitting.
+
+**6. Eval.** From the live checkout, so the version is the one the night job reads with:
+
+    uv run python -m outreach.reader eval --run
+    uv run python -m outreach.reader eval
+
+`--run` reads every gold item through `claude -p` (seat usage: about one call per 20 items) into
+`gold/readings/<version>.jsonl`; a session limit stops it with what it read kept, and the next `--run` carries on.
+The second command prints the table (precision and recall for reader, rules and both, with n and intervals; for each
+hide class the false hides and misses) and the gate. Read the gate lines first: the promotion rests on
+"false hides (both) 0", "false hides (reader)" at most 5%, and misses (both) at most 85%. A `CANNOT EVALUATE` means
+more sittings (step 5) or a missing reading (`eval --run` again).
+
+**7. Promote.** Only when step 6 says "may be promoted". Not in the live checkout, so it stays fast-forwardable: in a
+fresh branch of master (a Conductor workspace is fine), with the same reader files:
+
+    export OUTREACH_DB="$PWD/.context/promote-scratch.db"   # promote opens no store; this only proves it is not the live one
+    uv run python -m outreach.reader promote --version <the rv-... that eval printed>
+    git diff outreach/reader/config.toml        # one line: promoted_version = "rv-..."
+    git commit -am "Reader: promote rv-... (#32)"
+
+`promote` runs the same gate and refuses (exit 1, config untouched) below it. After the first promotion, `--against`
+defaults to the promoted version, and any class with 20 or more labels that gets worse blocks. Open the PR, merge it,
+and deploy it as `CLAUDE.md` says.
+
+**8. Apply.** In the live checkout, after the deploy:
+
+    uv run python -m outreach.reader apply
+    sqlite3 -readonly "$DB" "select provisional, count(*) from current_decision group by provisional"
+    sqlite3 -readonly "$DB" "select count(*) from review_item where kind = 'reader_disagrees' and state = 'open'"
+
+`apply` prints how many postings it combined. It also returns to provisional every final row an earlier promoted
+version made and closes the open `reader_disagrees` items raised under any version but this one. From here an
+agreed, verified hide is final, a disputed one is shown and
+raised in Needs you, and the night job keeps reading. The next rank run sees the final hides (`uv run python -m
+outreach.ranking rank` to see them now).
+
+**Rollback.** `git revert` the promotion commit, merge and deploy, then in the live checkout
+
+    uv run python -m outreach.reader apply
+    sqlite3 -readonly "$DB" "select reader_version, count(*) from current_decision where provisional = 0 group by 1"
+
+`apply` re-applies every open posting whose row is final under a version that is no longer promoted: with no promoted
+version every such row goes back to provisional, with an older one promoted again each row is combined with that
+version's reading. It closes the open `reader_disagrees` items raised under the rolled-back version. The `sqlite3`
+line prints nothing, or only the version now promoted. Two things the rolled-back version wrote stay, and `apply`
+does not undo them; list both and fix them by hand:
+
+- Rules `no_go` rows written while it was promoted:
+  `sqlite3 -readonly "$DB" "select company_id, reason, created_at from no_go where source = 'rules' and lifted_at is null order by created_at desc"`.
+  Lift the ones made after the promotion.
+- Pay filled from its readings (`posting.pay` was empty and the reading stated one), one `pay_from_reading` event
+  each, with the version in its detail:
+  `sqlite3 -readonly "$DB" "select entity_id as posting_id, json_extract(detail, '$.pay'), at from event where kind = 'pay_from_reading' and json_extract(detail, '$.reader_version') = 'rv-...' order by at desc"`
+  (the rolled-back version). Clear `posting.pay` on the ones that are wrong.
+
+Stopping the night job is step 4's `bootout`.
 
 ## Self-review (against the spec and issue)
 

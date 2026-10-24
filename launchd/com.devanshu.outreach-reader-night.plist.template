@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The posting reader's night job (#32): daily at 02:30, read the queued postings through Devanshu's Claude Code seat,
+  one claude -p call per batch, up to the night's caps in outreach/reader/config.toml (400 postings, 25 calls), then
+  combine every stored reading with the rules. One summary line per night in the log. A session limit or an expired
+  login stops the night cleanly and gives its leases back; the next night starts where it stopped.
+
+  StartCalendarInterval (not StartInterval), so a run missed while the Mac sleeps fires on wake. The night command
+  itself starts /usr/bin/caffeinate -i -w <its pid>, so the Mac stays awake until the night ends. The claude CLI is
+  found on PATH or at ~/.local/bin/claude, so the job sets no PATH.
+
+  It follows the deploy tool's one convention (#17, outreach/deploy/jobs.py): WorkingDirectory is the live checkout,
+  the program is the checkout's venv python run as a module, and both streams go to the log. Placeholders, filled by
+  the deploy tool: {{LIVE_CHECKOUT}} is the live checkout, {{LOG_PATH}} the log file. Nothing else is filled; the
+  store is the default.
+
+  Not installed by the repo, and never loaded from a worktree. Installing it is Devanshu's step. After filling it in:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.devanshu.outreach-reader-night.plist
+  To remove it:
+    launchctl bootout gui/$(id -u)/com.devanshu.outreach-reader-night
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-reader-night</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.reader</string>
+    <string>night</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>2</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

@@ -1,0 +1,11 @@
+Backend Software Engineer
+
+Ledgerline Systems builds the accounting ledger that small clinics and dental offices use to bill insurers and patients. You will design and ship the services behind invoices, payment plans and month-end reports, working in Python and PostgreSQL with a team of six engineers in Austin.
+
+What you will do: own a service from design to production, write tests that catch real billing mistakes before customers see them, review code with your teammates, and take part in a calm on-call rotation once every six weeks.
+
+What we look for: a computer science degree or equivalent experience, one or two years of building web services, and care for correctness when money is involved.
+
+We do not sponsor visas.
+
+We offer health insurance, a learning budget and four weeks of paid time off.

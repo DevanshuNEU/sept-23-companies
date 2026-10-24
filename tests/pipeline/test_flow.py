@@ -24,7 +24,12 @@ from outreach.rules.version import ruleset_version
 from outreach.store import is_shared_key
 from outreach.store.writes import body_sha256
 from tests.fakes import json_response, status_response, text_response
-from tests.pipeline import stages_crawl, stages_ranking, stages_rules, stages_sending
+from outreach.reader import combine as reader_combine
+from outreach.reader.queue import TIER_PROVISIONAL_HIDE, next_batch, release
+from outreach.reader.version import reader_version
+from outreach.rules import passes
+from outreach.rules.rebuild import stored_decision
+from tests.pipeline import stages_crawl, stages_ranking, stages_reader, stages_rules, stages_sending
 import tests.pipeline.harness as harness_module
 from tests.pipeline.harness import STAGE_NAMES, PipelineHarness
 from tests.ranking_seed import EMPLOYERS, POSTINGS, seed_ranking_fixture
@@ -142,6 +147,40 @@ def crawl_left_the_switched_off_boards_alone(h):
         f"the tick counts {h.crawl.report.switched_off} switched-off boards, not {len(off)}"
     asked = [u for u in h.crawl.client.requests if "smartrecruiters" in u or "pinpointhq" in u]
     assert not asked, f"the tick asked a switched-off host: {asked}"
+
+
+def _reader_posting(h):
+    """The hide posting the reader stage seeded, with its current decision and its queue and reading rows."""
+    pid = h.reader.posting_id
+    decision = h.conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
+    queue = h.conn.execute("SELECT * FROM read_queue WHERE posting_id = ?", (pid,)).fetchall()
+    readings = h.conn.execute("SELECT * FROM posting_reading WHERE posting_id = ?", (pid,)).fetchall()
+    items = h.conn.execute("SELECT * FROM review_item WHERE kind = 'reader_disagrees' AND posting_id = ?",
+                           (pid,)).fetchall()
+    return SimpleNamespace(id=pid, decision=decision, queue=queue, readings=readings, items=items)
+
+
+@invariant("read_postings")
+def reader_read_the_hide_posting_and_with_no_promoted_version_nothing_is_final(h):
+    """Counts only the postings the stage decided. The hide posting is queued (as a provisional hide, first in
+    line) and read once by the fake runner; with no promoted version every decision the stage made stays
+    provisional with no reader version, so the rules' hide stays a provisional hide and nothing is raised."""
+    assert h.reader.runner == h.reader.fake and h.reader.calls >= 1, "the stage reads with its fake runner"
+    r = _reader_posting(h)
+    assert len(r.queue) == 1 and r.queue[0]["priority"] // 1_000_000 == TIER_PROVISIONAL_HIDE, \
+        f"the hide posting is queued once as a provisional hide: {[tuple(q) for q in r.queue]}"
+    job = h.conn.execute("SELECT status FROM job_run WHERE job = 'read_postings' ORDER BY run_id DESC").fetchone()
+    assert job is not None and job[0] == "ok", "the night batch finished ok"
+    if h.reader.cfg.promoted_version:
+        return  # a test promoted a version: its own asserts say what is final
+    marks = ",".join("?" * len(h.reader.decided))
+    final = h.conn.execute(f"SELECT posting_id FROM current_decision WHERE posting_id IN ({marks}) "
+                           f"AND (provisional = 0 OR reader_version IS NOT NULL)", h.reader.decided).fetchall()
+    assert not final, f"no promoted version, yet final decisions for {[f[0] for f in final]}"
+    items = h.conn.execute(f"SELECT count(*) FROM review_item WHERE kind = 'reader_disagrees' AND posting_id IN "
+                           f"({marks})", h.reader.decided).fetchone()[0]
+    assert items == 0, "no promoted version raises nothing"
+    assert not passes(stored_decision(r.decision)), "the rules' hide stays a provisional hide"
 
 
 @invariant("rules")
@@ -785,6 +824,110 @@ class RankFlowTests(HarnessCase):
         self.assertEqual(h.ranking.report.stale_postings, 3, "O, P and Q each have one stale posting")
 
 
+class ReaderFlowTests(HarnessCase):
+    """The reader's stage, through every stage before it. Each test sets the stage's script (and, when it says so,
+    promotes the current version in the stage's config) before the stages run, then reads `h.conn`."""
+
+    def flow(self, *, promote=False, **script):
+        h = self.harness()
+        self.assertEqual([n for n, _ in h.stages][:5],
+                         ["discover", "resolve", "find_boards", "read_boards", "read_postings"])
+        if promote:
+            h.reader.promote()
+        h.reader.script[stages_reader.HIDE_TITLE].update(script)
+        for name, run in h.stages:
+            run()
+            if name in INVARIANTS:
+                INVARIANTS[name](h)
+            if name == "read_postings":
+                break
+        return h
+
+    def test_flow_refused_quote_leaves_the_decision_provisional(self):
+        h = self.flow(promote=True, sponsorship=("wont_sponsor", "no visa sponsorship is offered"))
+        r = _reader_posting(h)
+        self.assertEqual(r.readings, [], "a refused reading is never stored as a fact")
+        self.assertEqual((r.decision["provisional"], r.decision["reader_version"]), (1, None))
+        self.assertFalse(passes(stored_decision(r.decision)), "still a rules hide, read again next night")
+        (queued,) = r.queue
+        self.assertEqual((queued["state"], queued["attempts"]), ("queued", 1))
+        self.assertIn("sponsorship", queued["last_error"])
+        self.assertEqual(r.items, [])
+
+    def test_flow_agreeing_verified_reading_makes_the_decision_final(self):
+        h = self.flow(promote=True)
+        r = _reader_posting(h)
+        self.assertEqual([row["verified"] for row in r.readings], [1])
+        self.assertEqual(r.decision["provisional"], 0)
+        self.assertEqual(r.decision["reader_version"], reader_version(h.reader.cfg))
+        self.assertEqual(h.reader.cfg.promoted_version, reader_version(h.reader.cfg))
+        self.assertFalse(passes(stored_decision(r.decision)), "an agreed hide hides, for good")
+        self.assertEqual(r.items, [])
+
+    def test_flow_with_no_promoted_version_an_agreeing_reading_decides_nothing(self):
+        h = self.flow()
+        self.assertEqual(h.reader.cfg.promoted_version, "")
+        r = _reader_posting(h)
+        self.assertEqual([row["verified"] for row in r.readings], [1], "the reading is stored, in shadow")
+        self.assertEqual((r.decision["provisional"], r.decision["reader_version"]), (1, None))
+        self.assertFalse(passes(stored_decision(r.decision)))
+        self.assertEqual(r.items, [])
+
+    def test_flow_disagreement_with_a_provisional_hide_shows_the_posting_and_raises_the_review(self):
+        # The plan wrote provisional = 0 here; combine.py stays stricter (ledger, batch 4-5): a disputed hide is shown
+        # and stays provisional, so a later agreeing read can still decide it.
+        h = self.flow(promote=True, sponsorship=("unknown", ""))
+        r = _reader_posting(h)
+        self.assertEqual((r.decision["provisional"], r.decision["reader_version"]), (1, None))
+        self.assertTrue(passes(stored_decision(r.decision)), "shown again")
+        self.assertEqual(len(r.items), 1)
+        (item,) = r.items
+        self.assertEqual((item["raised_by"], item["posting_id"], item["state"]), ("reader", r.id, "open"))
+
+    def test_flow_queue_order_ignores_company_score_when_absent_and_reads_it_when_present(self):
+        h = self.harness()
+        h.run(through="read_boards")
+        body = h.fixture("posting_hide.txt").read_text(encoding="utf-8").replace(stages_reader.REFUSAL, "")
+        alder = seed_company(h.conn, "Alder Labs")
+        birch = seed_company(h.conn, "Birch Works")
+        first = seed_posting(h.conn, alder, "Software Engineer, New Grad", body + " Alder.", "Austin, TX")
+        second = seed_posting(h.conn, birch, "Software Engineer, New Grad", body + " Birch.", "Austin, TX")
+        h.reader.prepare()
+        self.assertEqual(h.conn.execute("SELECT count(*) FROM company_score").fetchone()[0], 0)
+
+        def order():
+            batch = next_batch(h.conn, 10, cfg=h.reader.cfg)
+            release(h.conn, batch)
+            return [b.posting_id for b in batch]
+
+        self.assertEqual(order(), [h.reader.posting_id, second, first], "no scores: newest lane 1 posting first")
+        h.conn.execute("INSERT INTO company_score(company_id, ranker_version, score, signals, lanes, scored_at) "
+                       "VALUES (?, 'rank-flow-test', 0.9, '{}', '[\"level_role\"]', '2026-10-22T08:00:00Z')", (alder,))
+        self.assertEqual(order(), [h.reader.posting_id, first, second], "the scored company's lane 1 posting first")
+
+    def test_flow_a_rebuild_keeps_the_reader_decisions(self):
+        h = self.flow(promote=True)
+        before = _reader_posting(h).decision
+        self.assertEqual(before["provisional"], 0)
+        calls = h.reader.calls
+        with mock.patch.object(reader_combine, "load_reader_config", return_value=h.reader.cfg):
+            dict(h.stages)["rules"]()
+        after = _reader_posting(h).decision
+        self.assertEqual((after["provisional"], after["reader_version"]), (0, before["reader_version"]))
+        self.assertEqual(h.reader.calls, calls, "a rebuild makes no reader call")
+
+    def test_read_postings_registers_one_stage_and_never_builds_the_real_runner(self):
+        h = self.harness(register_streams=False)
+        with mock.patch("outreach.reader.night.claude_runner", side_effect=AssertionError("real runner")):
+            stages_reader.register(h)
+        self.assertEqual([n for n, _ in h.stages], ["read_postings"])
+        self.assertEqual(h.reader.runner, h.reader.fake)
+        calls = []
+        other = self.harness(register_streams=False)
+        stages_reader.register(other, runner=lambda *a: calls.append(a))
+        self.assertIsNot(other.reader.runner, other.reader.fake)
+
+
 COMBINE_EXISTS = importlib.util.find_spec("outreach.reader.combine") is not None
 
 
@@ -846,7 +989,8 @@ class RulesStageTests(HarnessCase):
         company = seed_company(h.conn, "Kestrel Robotics")
         posting = seed_posting(h.conn, company, "Software Engineer, New Grad", body, "Boston, MA")
         h.run()
-        raw = reading_json()
+        # The reading confirms what the body says ("We sponsor work visas"): a final row needs the reader to agree.
+        raw = reading_json(sponsorship=("will_sponsor", "We sponsor work visas"))
         raw.update(posting_id=posting, body_sha256=body_sha256(body))
         reading = PostingReading.from_json(raw)
         h.conn.execute(

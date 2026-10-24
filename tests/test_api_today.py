@@ -416,3 +416,58 @@ class Repeats(TodayCase):
                 self.assertEqual(second.status_code, 409, second.text)
                 self.assertEqual(len(self.events(kind)), 1)
                 self.assertEqual(self.company(a)["revision"], after)
+
+
+class Barred(TodayCase):
+    """A company that is closed, removed, given a no-go or held after the list was built leaves the list."""
+
+    def setUp(self):
+        super().setUp()
+        self.ids = {n: self.ranked(n, 9.0 - i) for i, n in enumerate(("A", "B", "C", "D", "Keep"))}
+        self.view()
+
+    def test_a_company_barred_after_the_build_is_not_shown_proposed_or_backlog(self):
+        self.assertEqual(self.backlog(self.ids["D"]).status_code, 200)
+        c = self.conn
+        c.execute("UPDATE company SET status = 'closed', close_reason = 'not_now' WHERE company_id = ?", (self.ids["A"],))
+        c.execute("UPDATE company SET status = 'removed', remove_reason = 'not_a_fit' WHERE company_id = ?", (self.ids["B"],))
+        c.execute("INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'other', 'devanshu', ?)",
+                  (self.ids["C"], s.T0))
+        held_by = s.touch(c, s.person(c, self.ids["D"], "Hal"))
+        c.execute("UPDATE company SET held_by_touch = ?, held_at = ? WHERE company_id = ?", (held_by, s.T0, self.ids["D"]))
+        v = self.view()
+        self.assertEqual(([e["company"]["name"] for e in v["proposed"]], v["backlog"]), (["Keep"], []))
+
+    def test_a_barred_duplicate_hides_its_survivors_row(self):
+        dup = s.company(self.conn, "Keep Inc", "removed", merged_into=self.ids["Keep"])
+        self.conn.execute("INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'other', 'devanshu', ?)",
+                          (dup, s.T0))
+        self.assertNotIn("Keep", self.names())
+
+    def test_a_picked_company_that_was_closed_does_not_count_against_capacity(self):
+        self.conn.execute("UPDATE daily_list SET capacity = 1")
+        a, b = self.ids["A"], self.ids["B"]
+        self.assertEqual(self.pick(a).status_code, 200)
+        self.assertEqual(self.pick(b).json()["code"], "capacity")
+        self.conn.execute("UPDATE company SET status = 'closed', close_reason = 'not_now' WHERE company_id = ?", (a,))
+        self.assertEqual(self.view()["picked"], 0)
+        self.assertEqual(self.pick(b).status_code, 200)
+        self.assertEqual(self.get("/api/shell").json()["pickedToday"], 1)
+
+    def test_unpick_of_a_company_that_is_no_longer_working_is_not_allowed(self):
+        a = self.ids["A"]
+        self.assertEqual(self.pick(a).status_code, 200)
+        self.conn.execute("UPDATE company SET status = 'closed', close_reason = 'not_now', paused_at = NULL WHERE company_id = ?", (a,))
+        res = self.unpick(a)
+        self.assertEqual((res.status_code, res.json()["code"]), (409, "not_allowed"), res.text)
+        self.assertIn("closed", res.json()["message"])
+        self.assertEqual(self.entry(a)["state"], "picked")
+
+    def test_a_picked_company_that_is_held_stays_on_the_list_and_counts(self):
+        a = self.ids["A"]
+        self.assertEqual(self.pick(a).status_code, 200)
+        held_by = s.touch(self.conn, s.person(self.conn, a, "Hal"))
+        self.conn.execute("UPDATE company SET held_by_touch = ?, held_at = ? WHERE company_id = ?", (held_by, s.T0, a))
+        v = self.view()
+        self.assertEqual(v["picked"], 1)
+        self.assertIn("A", [e["company"]["name"] for e in v["proposed"]])

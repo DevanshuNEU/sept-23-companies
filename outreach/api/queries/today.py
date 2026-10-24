@@ -253,6 +253,42 @@ def _entry_rows(conn: sqlite3.Connection, day: str, states: tuple[str, ...], ord
                         (day, *states)).fetchall()
 
 
+def picked_count(conn: sqlite3.Connection, day: str) -> int:
+    """Picked rows of `day` whose company (its survivor) is still being worked: a pick that was closed or removed
+    since is not a pick any more, so it never counts against the day's capacity. The page, the shell and a pick's
+    capacity check all count this way."""
+    rows = conn.execute("SELECT company_id FROM daily_list_entry WHERE list_date = ? AND state = 'picked'",
+                        (day,)).fetchall()
+    if not rows:
+        return 0
+    parents = merge_parents(conn)
+    owners = {survivor_of(parents, r[0]) for r in rows}
+    working = {r[0] for r in by_ids(conn, "SELECT company_id FROM company WHERE status = 'working' "
+                                         "AND company_id IN ({ids})", owners)}
+    return sum(1 for r in rows if survivor_of(parents, r[0]) in working)
+
+
+def _shown(conn: sqlite3.Connection, rows: list[sqlite3.Row], parents: dict[int, int]) -> list[sqlite3.Row]:
+    """The rows still worth showing. Rows are stored once, so a company closed, removed, given a no-go or held by a
+    reply after the build leaves the list here (judged as its survivor, through the sender's own sets). A picked
+    row that is held stays: he picked it and it is being worked."""
+    if not rows:
+        return rows
+    companies = company_map(conn)
+    held = held_survivors(companies)
+    no_go = no_go_sets(conn, companies)[1]
+    shown = []
+    for r in rows:
+        survivor = survivor_of(parents, r["company_id"])
+        company = companies.get(survivor)
+        if company is None or company["status"] in ("closed", "removed") or survivor in no_go:
+            continue
+        if survivor in held and r["state"] != "picked":
+            continue
+        shown.append(r)
+    return shown
+
+
 def _still_emailing(conn: sqlite3.Connection, now: str, day: str, parents: dict[int, int], holds) -> list[StillEmailing]:
     """Companies picked on an earlier day that are still being emailed (working), with where each stands."""
     picked = {survivor_of(parents, r["company_id"]): r["d"] for r in conn.execute(
@@ -311,9 +347,9 @@ def today_view(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sender
     built = conn.execute("SELECT * FROM daily_list WHERE list_date = ?", (day,)).fetchone()
     if built is not None:
         shown, capacity = day, built["capacity"]
-        proposed = build_entries(conn, _entry_rows(conn, day, ("proposed", "picked"), "rank"), parents, holds)
-        picked = conn.execute("SELECT count(*) FROM daily_list_entry WHERE list_date = ? AND state = 'picked'",
-                              (day,)).fetchone()[0]
+        proposed = build_entries(
+            conn, _shown(conn, _entry_rows(conn, day, ("proposed", "picked"), "rank"), parents), parents, holds)
+        picked = picked_count(conn, day)
         not_ready = None
     else:
         newest = conn.execute("SELECT max(list_date) FROM daily_list WHERE list_date < ?", (day,)).fetchone()[0]
@@ -321,7 +357,8 @@ def today_view(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sender
         capacity = capacity_for(conn, now, cfg, old_sender_loaded=old_sender_loaded)
         not_ready = NotReady(reason="weekend", text=WEEKEND_TEXT) if not _weekday(day) \
             else NotReady(reason="not_built", text=NOT_BUILT_TEXT)
-    backlog = build_entries(conn, _entry_rows(conn, shown, ("backlog",), "decided_at DESC, rank"), parents, holds) \
+    backlog = build_entries(
+        conn, _shown(conn, _entry_rows(conn, shown, ("backlog",), "decided_at DESC, rank"), parents), parents, holds) \
         if shown else []
     last = conn.execute("SELECT * FROM job_run WHERE job = 'daily_list' ORDER BY started_at DESC, run_id DESC LIMIT 1").fetchone()
     return TodayView(
@@ -414,9 +451,7 @@ def pick(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
     if survivor in held_survivors(companies):
         raise _refuse(f"{name} is held by a reply. Answer it first.")
     capacity = conn.execute("SELECT capacity FROM daily_list WHERE list_date = ?", (entry["list_date"],)).fetchone()[0]
-    picked = conn.execute("SELECT count(*) FROM daily_list_entry WHERE list_date = ? AND state = 'picked'",
-                          (entry["list_date"],)).fetchone()[0]
-    if picked >= capacity:
+    if picked_count(conn, entry["list_date"]) >= capacity:
         raise ApiProblem("capacity", f"Today's limit carries {capacity} companies. Unpick one first. {NOT_SAVED}")
     bump(conn, "company", "company_id", survivor, revision,
          {"status": "working", "status_at": ctx.now}, at=ctx.now)
@@ -443,6 +478,8 @@ def unpick(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
     entry = _todays_entry(conn, ctx.now, survivor, name)
     if entry["state"] != "picked":
         raise _refuse(f"{name} is not picked.")
+    if row["status"] != "working":
+        raise _refuse(f"{name} is {row['status']}, so it cannot be unpicked.")
     _fresh(row, revision)
     _leave_picked(ctx, row, entry, "unpicked")
     before = _json(entry["why"]).get("pickedFrom")

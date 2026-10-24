@@ -11,7 +11,7 @@ sidebar never disagrees with the page it links to. The ones with no view of thei
 import sqlite3
 
 from outreach.api.models.shell import PlanProgress, ShellSummary
-from outreach.api.queries import done, jobs, linkedin, needs_you, no_go, progress
+from outreach.api.queries import done, jobs, linkedin, needs_you, no_go, progress, today
 from outreach.api.queries.company import merge_parents, survivor_of
 from outreach.api.queries.outcomes import by_ids
 from outreach.api.queries.sending import sender_summary
@@ -39,11 +39,9 @@ def drafts_to_review(conn: sqlite3.Connection) -> int:
 def shell_summary(conn: sqlite3.Connection, now: str, *, old_sender_loaded: bool) -> ShellSummary:
     day = ny_day(now)
     built = conn.execute("SELECT capacity FROM daily_list WHERE list_date = ?", (day,)).fetchone()
-    picked = conn.execute("SELECT count(*) FROM daily_list_entry WHERE list_date = ? AND state = 'picked'",
-                          (day,)).fetchone()[0]
     planned, finished = progress.plan_counts(conn, day)
     return ShellSummary(
-        as_of=now, picked_today=picked, capacity_today=built["capacity"] if built is not None else 0,
+        as_of=now, picked_today=today.picked_count(conn, day), capacity_today=built["capacity"] if built is not None else 0,
         unhandled_replies=conn.execute("SELECT count(*) FROM touch WHERE state = 'replied' "
                                        "AND reply_kind = 'unsorted'").fetchone()[0],
         drafts_to_review=drafts_to_review(conn), linkedin_to_reach=linkedin.to_reach_count(conn),

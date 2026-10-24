@@ -442,6 +442,36 @@ class EvalCliTests(unittest.TestCase):
         self.assertEqual(data["version"], NEW)
         self.assertIn("gate", data)
 
+    def test_against_compares_only_items_both_versions_read(self):
+        # Final review: an item the old version never read scored as an old miss, which hid a real regression.
+        refusals = [i for i in self.items if i.labels["sponsorship"].value == "wont_sponsor"]
+        worse = self.worse()  # misses refusals[0]
+        old = perfect(self.items)
+        for item in refusals[1:5]:
+            old.pop(item.gold_id)  # 21 refusals read by both, still a gated class
+        self.write_readings(OLD, old)
+        self.write_readings(NEW, worse)
+        common = ("--file", str(self.gold), "--readings", str(self.readings))
+        code, out = self.run_cli("eval", "--version", NEW, "--against", OLD, *common)
+        self.assertEqual(code, 1, out)
+        self.assertIn("sponsorship = wont_sponsor (reader): recall 1.000 -> 0.952", out)
+        self.assertIn("no class gets worse", out)
+        self.assertIn("REJECT", out)
+        code, out = self.run_cli("promote", "--version", NEW, "--against", OLD, *common)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(load_reader_config(self.config).promoted_version, "")
+
+    def test_eval_run_refuses_a_version_the_files_do_not_make(self):
+        with mock.patch.object(cli, "claude_runner", side_effect=AssertionError("no runner")), \
+                mock.patch.object(cli, "run_reader_on_gold", side_effect=AssertionError("no read")):
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                code, _ = self.run_cli("eval", "--run", "--version", OLD, "--file", str(self.gold), "--readings",
+                                       str(self.readings))
+        self.assertEqual(code, 2)
+        self.assertIn(NEW, err.getvalue())
+        self.assertFalse((self.readings / f"{OLD}.jsonl").exists())
+
     def test_eval_and_promote_default_to_the_real_set_with_its_readings_beside_it(self):
         self.write_readings(NEW, perfect(self.items))
         with mock.patch.object(cli.gold, "GOLD_PATH", self.gold):

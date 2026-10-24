@@ -36,7 +36,9 @@ a reject too ("cannot"), with nothing after it computed. The preconditions:
                                            ruleset"; the store only ever holds readings of the current files' version)
 
 Then `not_worse` against the promoted version: any drop in precision or recall, reader or both, on a class with at
-least 20 labeled examples in both (ruling 5), blocks. With no promoted version yet (the first promotion) the
+least 20 labeled examples in both (ruling 5), blocks. Both versions are scored for it on the same items, the
+confirmed ones each version has a reading of (`shared_scores`), so an item the old version never read cannot pass
+for an old miss. With no promoted version yet (the first promotion) the
 thresholds alone decide.
 
 Every ratio is printed with its n and a 95% Wilson interval (gate.py and eval.py's `wilson`), and a hide class with
@@ -74,7 +76,8 @@ from outreach.store import body_sha256
 
 __all__ = ["MIN_CONFIRMED", "MIN_CLASS_N", "MAX_BOTH_FALSE_HIDES", "MAX_READER_FALSE_HIDE_RATE", "MAX_BOTH_MISS_RATE",
            "N_FLOOR", "ClassScore", "Gate", "rules_view", "reader_view", "score", "load_readings",
-           "run_reader_on_gold", "not_worse", "gate", "promote", "table_text", "wilson", "scores_json"]
+           "run_reader_on_gold", "not_worse", "shared_scores", "gate", "promote", "table_text", "wilson",
+           "scores_json"]
 
 # The gate's numbers. Each one's source is in the module docstring.
 MIN_CONFIRMED = 300
@@ -350,6 +353,14 @@ def not_worse(new: list[ClassScore], old: list[ClassScore], *, min_n: int = MIN_
     return lines
 
 
+def shared_scores(items: list[GoldItem], new_readings: dict[str, dict], old_readings: dict[str, dict],
+                  cfg: Config | None = None) -> tuple[list[ClassScore], list[ClassScore]]:
+    """(new, old) scored on the same items: the confirmed ones both versions have a reading of. What `not_worse`
+    compares, so neither side counts an item it never read as a miss."""
+    both = [i for i in items if i.status == "confirmed" and i.gold_id in new_readings and i.gold_id in old_readings]
+    return score(both, new_readings, cfg), score(both, old_readings, cfg)
+
+
 @dataclass
 class Gate:
     """The gate's lines and verdict: `promote`, `reject`, or `cannot` (could not be evaluated, also a reject)."""
@@ -394,10 +405,12 @@ def _by_key(scores: list[ClassScore]) -> dict[tuple[str, str, str], ClassScore]:
 
 
 def gate(items: list[GoldItem], new_scores: list[ClassScore], old_scores: list[ClassScore] | None, *,
-         readings: dict[str, dict], version: str, current_version: str) -> Gate:
+         readings: dict[str, dict], version: str, current_version: str,
+         new_shared: list[ClassScore] | None = None) -> Gate:
     """Whether reader `version` may be promoted, with its numbers. Fail closed: every check must pass, and an
     unmet precondition stops the gate before any threshold is computed. `old_scores` are the promoted version's
-    (None before the first promotion). `current_version` is the version the files make now."""
+    (None before the first promotion) and `new_shared` this version's on the same items (`shared_scores`; default
+    `new_scores`, right only when both read every item). `current_version` is the version the files make now."""
     g = Gate()
     keys = _by_key(new_scores)
     confirmed = [i for i in items if i.status == "confirmed"]
@@ -438,7 +451,7 @@ def gate(items: list[GoldItem], new_scores: list[ClassScore], old_scores: list[C
     if old_scores is None:
         g.note("no promoted version yet: the thresholds above decide")
     else:
-        regressions = not_worse(new_scores, old_scores)
+        regressions = not_worse(new_shared if new_shared is not None else new_scores, old_scores)
         g.check(not regressions, "no class gets worse, reader or both",
                 f"{len(regressions)} regressions" if regressions else "")
         g.lines.extend(f"      {line}" for line in regressions)
@@ -455,7 +468,7 @@ def _write_promoted(config_path: Path, version: str) -> None:
 
 def promote(version: str, items: list[GoldItem], new_scores: list[ClassScore], old_scores: list[ClassScore] | None,
             config_path: Path = CONFIG_PATH, *, readings: dict[str, dict],
-            current_version: str | None = None) -> Gate:
+            current_version: str | None = None, new_shared: list[ClassScore] | None = None) -> Gate:
     """Run the gate and, only when it passes, rewrite the single `promoted_version = "..."` line in `config_path`
     (atomic replace; every other line byte for byte). Raises ValueError with the gate's text, the regressions
     among it, and leaves the file untouched, when it does not pass. Never commits: Devanshu does."""
@@ -463,7 +476,8 @@ def promote(version: str, items: list[GoldItem], new_scores: list[ClassScore], o
         raise ValueError(f"not a reader version (rv- and 12 hex): {version!r}")
     if current_version is None:
         current_version = reader_version(load_reader_config(config_path))
-    result = gate(items, new_scores, old_scores, readings=readings, version=version, current_version=current_version)
+    result = gate(items, new_scores, old_scores, readings=readings, version=version, current_version=current_version,
+                  new_shared=new_shared)
     if not result.ok:
         raise ValueError(result.text())
     _write_promoted(config_path, version)

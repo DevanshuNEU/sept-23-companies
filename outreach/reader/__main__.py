@@ -37,8 +37,9 @@ store.
     uv run python -m outreach.reader promote --version V [--against OLD]
 
 `eval` scores version V (default: the one the files make now) from `readings/<V>.jsonl` beside the gold file, prints the table
-and the gate, and with `--against` the regressions, exiting 1 if there are any. Only `--run` calls a model: it reads
-the gold items through `claude -p` first (seat usage, never from a test). `promote` writes the `promoted_version`
+and the gate, and with `--against` the regressions (both versions scored on the items both read), exiting 1 if there
+are any. Only `--run` calls a model: it reads the gold items through `claude -p` first (seat usage, never from a
+test), and only for the version the files make now (exit 2 for any other `--version`). `promote` writes the `promoted_version`
 line in config.toml only when the gate passes (exit 1 otherwise); `--against` defaults to the promoted version. It
 refuses outside the live checkout unless OUTREACH_DB names a scratch store, and never commits. Neither opens the
 store; after a promotion run `apply`.
@@ -220,19 +221,27 @@ def _evaluate(args: argparse.Namespace, stdout) -> int:
     against = args.against
     if args.command == "promote" and against is None:
         against = cfg.promoted_version or None
+    if args.command == "eval" and args.run and version != current:
+        # The prompt and model read with are the current files', so readings filed under another version would lie.
+        print(f"eval --run: --version {version} is not the version the reader files make now ({current}); "
+              "--run reads only under that one", file=sys.stderr)
+        return 2
     try:
         if args.command == "eval" and args.run:
             run_reader_on_gold(items, claude_runner(cfg), cfg, version, folder=folder)
         readings = evaluate.load_readings(version, folder)
-        old = evaluate.score(items, evaluate.load_readings(against, folder)) if against else None
+        old_readings = evaluate.load_readings(against, folder) if against else None
     except (OSError, RuntimeError, ValueError) as err:
         print(f"{args.command}: {err}", file=sys.stderr)
         return 2
     scores = evaluate.score(items, readings)
+    shared = old = None
+    if old_readings is not None:  # compared on the items both versions read
+        shared, old = evaluate.shared_scores(items, readings, old_readings)
     if args.command == "promote":
         try:
             result = evaluate.promote(version, items, scores, old, CONFIG_PATH, readings=readings,
-                                      current_version=current)
+                                      current_version=current, new_shared=shared)
         except ValueError as err:
             print(str(err), file=stdout)
             return 1
@@ -240,8 +249,9 @@ def _evaluate(args: argparse.Namespace, stdout) -> int:
         print(f"\npromoted {version} in {CONFIG_PATH}. Next: uv run python -m outreach.reader apply (re-combines "
               "the store), then commit config.toml.", file=stdout)
         return 0
-    result = evaluate.gate(items, scores, old, readings=readings, version=version, current_version=current)
-    regressions = evaluate.not_worse(scores, old) if old is not None else []
+    result = evaluate.gate(items, scores, old, readings=readings, version=version, current_version=current,
+                           new_shared=shared)
+    regressions = evaluate.not_worse(shared, old) if old is not None else []
     if args.json:
         print(json.dumps({"version": version, "against": against, "scores": evaluate.scores_json(scores),
                           "regressions": regressions, "gate": {"verdict": result.verdict, "lines": result.lines}},

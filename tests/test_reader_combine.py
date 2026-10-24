@@ -536,6 +536,30 @@ class ApplyTests(StoreCase):
         unpromoted = reader_combiner(self.conn, dataclasses.replace(self.cfg, promoted_version=""))
         self.assertEqual(unpromoted(self.conn, pid, r), Combined(r, True, None, ()))
 
+    def test_the_rules_config_given_to_rebuild_reads_the_reader_location(self):
+        # Review fix 5: us_status reads the reader's location with the config the rules ran with.
+        from outreach.rules.config import load_config
+        custom = load_config()
+        pid = self.posting()
+        self.store_reading(pid, sponsorship=("wont_sponsor", REFUSAL), location=("Boston, MA", "Boston, MA"))
+        seen = []
+        real = combine_module.us_status
+
+        def spy(text, country, cfg, title=None):
+            seen.append(cfg)
+            return real(text, country, cfg, title)
+        with mock.patch.object(combine_module, "us_status", spy):
+            rebuild(self.conn, cfg=custom, combiner=reader_combiner(self.conn, self.cfg, rules_cfg=custom))
+            self.assertTrue(seen)
+            self.assertTrue(all(c is custom for c in seen))
+            seen.clear()
+            apply_reading(self.conn, pid, cfg=self.cfg, rules_cfg=custom)
+            apply_all(self.conn, cfg=self.cfg, rules_cfg=custom)
+            explain(self.conn, pid, cfg=self.cfg, rules_cfg=custom)
+            self.assertEqual(len(seen), 3)
+            self.assertTrue(all(c is custom for c in seen))
+        self.assertEqual(self.row(pid)["provisional"], 0)
+
     def test_reader_combiner_defaults_to_the_shipped_config(self):
         with mock.patch.object(combine_module, "load_reader_config", return_value=self.cfg) as loader:
             reader_combiner(self.conn)

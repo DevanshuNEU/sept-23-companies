@@ -266,26 +266,32 @@ def _untrusted(conn: sqlite3.Connection, post: sqlite3.Row, today: date) -> bool
 
 
 def _combine_stored(conn: sqlite3.Connection, post: sqlite3.Row | None, rules: Decision, version: str,
-                    today: date | None) -> Combined:
+                    today: date | None, rules_cfg: Config | None) -> Combined:
     reading, refused, unreadable = _state_for(conn, post, version)
-    combined = combine(rules, reading, refused=refused, unreadable=unreadable)
+    combined = combine(rules, reading, refused=refused, unreadable=unreadable, cfg=rules_cfg)
     # The trust check costs two queries, so it runs only where it can matter: a row about to be a final hide.
     if not combined.provisional and _hides(combined.decision) and _untrusted(conn, post, _today(today)):
-        combined = combine(rules, reading, refused=refused, unreadable=unreadable, untrusted=True)
+        combined = combine(rules, reading, refused=refused, unreadable=unreadable, cfg=rules_cfg, untrusted=True)
     return combined
 
 
-def reader_combiner(conn: sqlite3.Connection,
-                    cfg: ReaderConfig | None = None) -> Callable[[sqlite3.Connection, int, Decision], Combined]:
+def _decide(post: sqlite3.Row, rules_cfg: Config | None) -> Decision:
+    return decide(PostingInput(post["title"], post["body"] or "", post["location"], post["country"]), rules_cfg)
+
+
+def reader_combiner(conn: sqlite3.Connection, cfg: ReaderConfig | None = None, *,
+                    rules_cfg: Config | None = None) -> Callable[[sqlite3.Connection, int, Decision], Combined]:
     """The `combiner` for `rebuild`, `decide_and_store` and the crawler: the stored reading at
-    `cfg.promoted_version` combined with the rules' decision. It writes nothing itself."""
+    `cfg.promoted_version` combined with the rules' decision. It writes nothing itself. `rules_cfg` is the rules
+    config the caller hands `rebuild` or `decide_and_store` (default: the shipped one), so the reader's location is
+    read with the same word lists as the rules' own."""
     cfg = cfg if cfg is not None else load_reader_config()
     version = cfg.promoted_version
 
     def combiner(c: sqlite3.Connection, posting_id: int, rules: Decision) -> Combined:
         if not version:
             return Combined(rules, True, None, ())
-        return _combine_stored(c, _posting(c, posting_id), rules, version, None)
+        return _combine_stored(c, _posting(c, posting_id), rules, version, None, rules_cfg)
     return combiner
 
 
@@ -342,10 +348,11 @@ def _row_of(combined: Combined) -> dict:
 
 
 def apply_reading(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfig | None = None,
-                  today: date | None = None) -> Combined:
+                  today: date | None = None, rules_cfg: Config | None = None) -> Combined:
     """Decide the posting with the rules, combine with its promoted reading, store the row, raise or clear its
     `reader_disagrees` item and fill an empty pay from the reading. Idempotent: a call that would change nothing
-    writes nothing. Raises `RulesetNotCurrent` as `decide_and_store` does and LookupError for a missing posting."""
+    writes nothing. `rules_cfg` is the rules config (default: the shipped one). Raises `RulesetNotCurrent` as
+    `decide_and_store` does and LookupError for a missing posting."""
     cfg = cfg if cfg is not None else load_reader_config()
     version = cfg.promoted_version
     with atomic(conn, "reader_apply"):
@@ -355,14 +362,14 @@ def apply_reading(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfi
         post = _posting(conn, posting_id)
         if post is None:
             raise LookupError(f"no posting {posting_id}")
-        rules = decide(PostingInput(post["title"], post["body"] or "", post["location"], post["country"]))
-        combined = (_combine_stored(conn, post, rules, version, today) if version
+        rules = _decide(post, rules_cfg)
+        combined = (_combine_stored(conn, post, rules, version, today, rules_cfg) if version
                     else Combined(rules, True, None, ()))
         stored = conn.execute("SELECT * FROM decision WHERE posting_id = ? AND ruleset_version = ?",
                               (posting_id, current[0])).fetchone()
         wanted = _row_of(combined)
         if stored is None or any(stored[k] != v for k, v in wanted.items()):
-            decide_and_store(conn, posting_id, combiner=lambda _c, _p, _d: combined)
+            decide_and_store(conn, posting_id, cfg=rules_cfg, combiner=lambda _c, _p, _d: combined)
         if version:
             reading, refused, _ = _state_for(conn, post, version)
             _sync_item(conn, post, combined, version, utcnow())
@@ -370,7 +377,8 @@ def apply_reading(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfi
     return combined
 
 
-def apply_all(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = None, today: date | None = None) -> int:
+def apply_all(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = None, today: date | None = None,
+              rules_cfg: Config | None = None) -> int:
     """`apply_reading` for every open posting with a reading or a refused queue row at the promoted version (run
     after a rebuild or a promotion: no model call, no crawl). Returns how many were applied."""
     cfg = cfg if cfg is not None else load_reader_config()
@@ -388,13 +396,13 @@ def apply_all(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = None, toda
         reading, _, unreadable = _state_for(conn, post, version)
         if reading is None and not unreadable:
             continue  # the reading is of an older body
-        apply_reading(conn, posting_id, cfg=cfg, today=today)
+        apply_reading(conn, posting_id, cfg=cfg, today=today, rules_cfg=rules_cfg)
         applied += 1
     return applied
 
 
-def explain(conn: sqlite3.Connection, posting_id: int, *,
-            cfg: ReaderConfig | None = None) -> tuple[FieldVerdict, ...]:
+def explain(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfig | None = None,
+            rules_cfg: Config | None = None) -> tuple[FieldVerdict, ...]:
     """The verdicts for the posting, for the API and UI to show flagged fields with both quotes: the promoted
     version's reading when there is one, else the candidate version's. The rules side is decide() on the stored
     text (the stored row holds the combined facts). Read-only."""
@@ -402,10 +410,11 @@ def explain(conn: sqlite3.Connection, posting_id: int, *,
     post = _posting(conn, posting_id)
     if post is None:
         return ()
-    rules = decide(PostingInput(post["title"], post["body"] or "", post["location"], post["country"]))
+    rules = _decide(post, rules_cfg)
+    rules_cfg = rules_cfg if rules_cfg is not None else default_config()
     for version in (cfg.promoted_version, reader_version(cfg)):
         reading, refused, unreadable = _state_for(conn, post, version)
         if reading is not None or unreadable:
-            return compare(rules, reading, refused, default_config())
+            return compare(rules, reading, refused, rules_cfg)
     return ()
 

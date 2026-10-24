@@ -1,0 +1,13 @@
+[2026-10-05 21:00] not signed in to Gmail yet (run: python3 mail/gmail.py auth); nothing sent
+[2026-10-06 09:14] sent to Ada Fenwick <ada.fenwick@example.com> at Kestrel Robotics (1/10 today)
+[2026-10-06 09:31] sent to Bram Okafor <bram.okafor@example.com> at Lumen Freight (2/10 today)
+[2026-10-07 09:20] sent to Cleo Hartmann <cleo.hartmann@example.com> at Marlow Dynamics (1/10 today)
+[2026-10-08 09:18] sent to Dara Venn <dara.venn@example.com> at Pinewood Logistics (1/10 today)
+[2026-10-08 12:00] bounced: dara.venn@example.com
+[2026-10-08 15:05] reply from ada.fenwick@example.com
+[2026-10-09 09:12] send to Emil Strand <emil.strand@example.com> unclear (timed out); will check Sent next run
+[2026-10-09 09:40] unclear send to emil.strand@example.com found in Sent; recorded as sent
+[2026-10-09 10:02] sent to Fern Castillo <fern.castillo@example.com> at Ember Analytics (3/10 today)
+[2026-10-14 09:30] sent follow-up to Cleo Hartmann <cleo.hartmann@example.com> at Marlow Dynamics (1/10 today)
+[2026-10-14 09:50] sent follow-up to Fern Castillo <fern.castillo@example.com> at Ember Analytics (2/10 today)
+[2026-10-20 08:30] (dry run) would send to gus.albrecht@example.com: Question about Fathom Systems (0/10 today, 1 waiting)

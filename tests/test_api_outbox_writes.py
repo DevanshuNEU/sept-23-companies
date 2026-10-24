@@ -220,6 +220,29 @@ class ReplyKindTest(WritesBase):
         self.assertNotEqual(verdicts(self.conn)[lena], "company_held")
         self.assertEqual(res.json()["item"]["touchState"], "open")
 
+    def test_auto_reply_restores_a_bounced_or_closed_thread_and_its_stop(self):
+        cases = (
+            ("bounced", {"bounced_at": "2026-11-06T10:00:00Z"}, {"was": "bounced"}),  # the sender's own "was"
+            ("closed", {"closed_at": "2026-11-07T10:00:00Z", "close_reason": "no_reply"}, None),  # columns only
+        )
+        for before, cols, detail in cases:
+            with self.subTest(before=before):
+                pid = seed.person(self.conn, self.acme, f"Was {before}")
+                tid = seed.touch(self.conn, pid)
+                seed.send_first(self.conn, tid)
+                follow = seed.message(self.conn, tid, 1, "approved", subject="Re: Hello", body="Hi, one more.")
+                sets = ", ".join(f"{k} = ?" for k in cols)
+                self.conn.execute(f"UPDATE touch SET state = 'replied', replied_at = '2026-11-09T10:00:00Z', "
+                                  f"reply_kind = 'unsorted', {sets} WHERE touch_id = ?", (*cols.values(), tid))
+                if detail is not None:
+                    append_event(self.conn, entity="touch", entity_id=tid, kind="replied", actor="sender",
+                                 at="2026-11-09T10:00:00Z", detail=detail, idempotency_key=f"replied-{tid}")
+                res = self.post(f"/api/touches/{tid}/reply-kind", {"kind": "auto_reply", "revision": 1})
+                self.assertEqual(res.status_code, 200, res.text)
+                touch = self.touch_row(tid)
+                self.assertEqual((touch["state"], touch["reply_kind"]), (before, "auto_reply"))
+                self.assertEqual(verdicts(self.conn)[follow], "touch_done")  # the queue's stop still applies
+
     def test_reply_kind_on_a_touch_with_no_reply_is_not_allowed(self):
         seed.send_first(self.conn, self.touch)
         res = self.post(f"/api/touches/{self.touch}/reply-kind", {"kind": "interested", "revision": 1})

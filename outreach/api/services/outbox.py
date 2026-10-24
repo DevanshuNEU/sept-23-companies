@@ -8,8 +8,9 @@ outside it. Any block raises `Blocked` with the fresh checks; the route stores t
 transaction and answers 422. Warns never block.
 
 A said-no or asked-to-stop reply kind applies the outcome writes' own reply effects (`apply_reply_effects`: the
-person's no-go on every channel and every unsent message stopped). An auto-reply sets the thread back to open,
-takes the reply off its outcome row and clears the hold it made, so neither the hold nor the reply stop counts it.
+person's no-go on every channel and every unsent message stopped). An auto-reply puts the thread back as it was
+before the reply (open, bounced or closed), takes the reply off its outcome row and clears the hold it made, so
+neither the hold nor the reply stop counts it.
 """
 import itertools
 import json
@@ -160,6 +161,26 @@ def skip_message(ctx: WriteCtx, message_id: int, revision: int) -> int:
     return row["touch_id"]
 
 
+def state_before_reply(conn: sqlite3.Connection, touch: sqlite3.Row) -> str:
+    """The state a thread had before the reply an auto-reply turned out to be: the sender's own `was` on its newest
+    `replied` event, else bounced when it bounced, closed when it was closed, else open. A bounced or closed thread
+    stays finished, so the queue still stops it (`touch_done`)."""
+    row = conn.execute("SELECT json_extract(detail, '$.was') FROM event WHERE entity = 'touch' AND entity_id = ? "
+                       "AND kind = 'replied' ORDER BY event_id DESC LIMIT 1", (touch["touch_id"],)).fetchone()
+    was = row[0] if row is not None else None
+    if was == "bounced" and touch["bounced_at"] is not None:
+        return "bounced"
+    if was == "closed" and touch["closed_at"] is not None and touch["close_reason"] is not None:
+        return "closed"
+    if was == "open":
+        return "open"
+    if touch["bounced_at"] is not None:
+        return "bounced"
+    if touch["closed_at"] is not None and touch["close_reason"] is not None:
+        return "closed"
+    return "open"
+
+
 def set_reply_kind(ctx: WriteCtx, touch_id: int, kind: str, revision: int) -> int:
     conn = ctx.conn
     touch = conn.execute("SELECT t.*, p.company_id FROM touch t JOIN person p ON p.person_id = t.person_id "
@@ -174,7 +195,8 @@ def set_reply_kind(ctx: WriteCtx, touch_id: int, kind: str, revision: int) -> in
     outcome = conn.execute("SELECT * FROM outreach_touch WHERE email_touch_id = ? AND undone_at IS NULL",
                            (touch_id,)).fetchone()
     if kind == "auto_reply":
-        bump(conn, "touch", "touch_id", touch_id, revision, {"state": "open", "reply_kind": "auto_reply"}, at=ctx.now)
+        bump(conn, "touch", "touch_id", touch_id, revision,
+             {"state": state_before_reply(conn, touch), "reply_kind": "auto_reply"}, at=ctx.now)
         if outcome is not None and outcome["replied_at"] is not None:  # an out-of-office is not an outcome
             correct_outcome(conn, outcome["touch_id"], "replied", at=None, reply_kind=None,
                             revision=outcome["revision"], now=ctx.now)

@@ -13,3 +13,7 @@ quiet_after_days = 21    # then the touch is marked quiet
 
 [search]
 index_top = 3000         # companies outside the browser index are found with a server search
+
+[today]
+linkedin_per_day = 7     # LinkedIn requests a day (#9); the lean Today adds the sender's email slots to it
+proposals_per_slot = 2   # the lean Today proposes this many companies for each slot of its capacity

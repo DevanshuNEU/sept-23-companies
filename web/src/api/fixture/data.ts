@@ -586,7 +586,7 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   const kenjiRole = c.role('Trigger.dev', 'Software Engineer I', 'swe1', RM, 4);
   add({
     touch: T.kenji, person: kenji, company: 'Trigger.dev', group: 'review', state: 'drafted', subject: 'your post on safe task retries', summary: "Near-identical to Ava Moreno's draft",
-    at: et(TODAY, '09:58'), schedule: sched(et(TODAY, '11:05'), 'next_slot', 'Sends after 11:05 ET', 1, 2), body: BODY_KENJI,
+    at: et(TODAY, '09:58'), schedule: sched(et(TODAY, '11:05'), 'spacing', 'Sends after 11:05 ET', 1, 2), body: BODY_KENJI,
     checks: [
       ck('near_identical', 'block', "Near-identical to Ava Moreno's draft (92% the same)", 'Two people at one company comparing notes is the fastest way to lose both. Change the middle paragraph or the ask.', { kind: 'compare', otherMessageId: messageOf(T.ava) }),
       ...passes([
@@ -610,7 +610,7 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   const mintlifyRole = c.role('Mintlify', 'Software Engineer, New Grad', 'new_grad', SF, 6);
   add({
     touch: T.dana, person: dana, company: 'Mintlify', group: 'review', state: 'drafted', subject: 'Software Engineer, New Grad on OPT', summary: 'Recruiter: sends on day 2', at: et(TODAY, '09:47'),
-    schedule: sched(et('2026-11-11', '08:30'), 'recruiter_day_2', 'Sends Wed Nov 11', 2, 1), body: BODY_DANA,
+    schedule: sched(et('2026-11-11', '08:30'), 'recruiter_waits', 'Sends Wed Nov 11', 2, 1), body: BODY_DANA,
     checks: [
       ck('recruiter_title', 'warn', 'Recruiter title', "Recruiters go out on day 2, after engineers and managers. They do not count toward Mintlify's 3 a day, but they do count toward today's 30.", { kind: 'role_kind' }),
       ...passes(['87 words (about 90 for recruiters)', 'Work authorization line up front', 'Mail server found for mintlify.example', '2 links, portfolio first, no shortener, no attachment',
@@ -640,7 +640,7 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   });
   add({
     touch: T.omar, person: c.person('Omar Haddad', 'Co-founder and CTO', 'founder', 'Resend'), company: 'Resend', group: 'review', state: 'drafted', subject: 'your batch api rate limits post',
-    summary: 'All checks passed', at: et(TODAY, '09:36'), schedule: sched(et(TODAY, '10:55'), 'next_slot', 'Sends after 10:55 ET', 0, 3), body: BODY_OMAR,
+    summary: 'All checks passed', at: et(TODAY, '09:36'), schedule: sched(et(TODAY, '10:55'), 'spacing', 'Sends after 10:55 ET', 0, 3), body: BODY_OMAR,
     checks: passes(['98 words (80 to 120)', ...CLEAN_TITLES.slice(0, 6), 'Hook 7 days old (30 at most)', 'Subject unique to him, no "Re:"', 'Plain text']),
     d: { project: 'Saar', role: c.role('Resend', 'Software Engineer, New Grad', 'new_grad', SF, 2), hook: { text: 'His write-up on how the batch API paces sends', on: '2026-11-03' } },
   });
@@ -652,13 +652,13 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   });
   add({
     touch: T.ava, person: c.person('Ava Moreno', 'Software Engineer', 'engineer', 'Trigger.dev'), company: 'Trigger.dev', group: 'review', state: 'drafted', subject: 'your post on durable queues',
-    summary: 'All checks passed', at: et(TODAY, '09:30'), schedule: sched(et(TODAY, '11:05'), 'next_slot', 'Sends after 11:05 ET', 1, 2), body: BODY_AVA,
+    summary: 'All checks passed', at: et(TODAY, '09:30'), schedule: sched(et(TODAY, '11:05'), 'spacing', 'Sends after 11:05 ET', 1, 2), body: BODY_AVA,
     checks: clean(), d: { role: kenjiRole, hook: { text: 'Her post on durable queues', on: '2026-11-01' } },
   });
 
   /* Approved: waiting for a slot. */
   add({ touch: T.jordan, person: c.person('Jordan Price', 'Software Engineer', 'engineer', 'Mintlify'), company: 'Mintlify', group: 'approved', state: 'approved', subject: 'your docs search rewrite',
-    summary: 'Next send. Third Mintlify email today', at: et(TODAY, '10:42'), schedule: sched(et(TODAY, '10:42'), 'next_slot', 'Sends 10:42 ET', 2, 1), checks: clean() });
+    summary: 'Next send. Third Mintlify email today', at: et(TODAY, '10:42'), schedule: sched(et(TODAY, '10:42'), 'ready', 'Sends 10:42 ET', 2, 1), checks: clean() });
   add({ touch: T.arjun, person: c.person('Arjun Mehta', 'Software Engineer', 'engineer', 'Graphite'), company: 'Graphite', group: 'approved', state: 'approved', subject: 'your merge queue post',
     summary: '60 minutes after the last Graphite email', at: et(TODAY, '11:05'), schedule: sched(et(TODAY, '11:05'), 'spacing', 'Sends after 11:05 ET', 2, 1), checks: clean() });
   add({ touch: T.felix, person: c.person('Felix Graham', 'Engineering Manager', 'manager', 'Graphite'), company: 'Graphite', group: 'approved', state: 'approved', subject: "graphite's early career role",
@@ -912,6 +912,7 @@ function buildNoGo(c: Ctx): NoGoView {
       { reason: 'no_sponsorship', count: countOf('no_sponsorship') }, { reason: 'citizenship', count: countOf('citizenship') },
       { reason: 'over_300', count: countOf('over_300') }, { reason: 'removed', count: companies.filter((r) => r.kind === 'removed').length },
     ],
+    hiddenCompanies: [],
   };
 }
 
@@ -1136,6 +1137,7 @@ export function computeShell(db: Pick<FixtureDb, 'today' | 'outbox' | 'linkedin'
     linkedinToReach: db.linkedin.counts.toReach, openReviewItems: db.needsYou.open.length, noGoCount: db.noGo.companies.length + db.noGo.people.length,
     doneCount: db.done.companies.length, sending: { state: s.state, sentToday: s.sentToday, limitToday: s.limitToday },
     repliesThisMonth: db.done.metrics.repliesThisMonth, jobs: db.jobs,
+    plan: { done: 0, total: db.today.picked }, winsUnseen: 0,
   };
 }
 

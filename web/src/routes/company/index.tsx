@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router';
 import { Building2 } from 'lucide-react';
-import { ApiError, pollMs, queryKeys, useClient, type CompanyView } from '@/api';
+import { ApiError, pollMs, queryKeys, usePageClient, type CompanyView } from '@/api';
 import { CloseCompanyDialog } from '@/components/close-company-dialog';
 import { EmptyState, QueryState } from '@/components/state-views';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -47,7 +47,7 @@ function LoadingSkeleton() {
 export default function CompanyPage() {
   const { companyId } = useParams();
   const id = Number(companyId);
-  const client = useClient();
+  const client = usePageClient('company');
   const query = useViewQuery(queryKeys.company(id), () => client.company(id), { pollMs: pollMs.default });
   const view = query.data;
   const actions = useCompanyActions(view);

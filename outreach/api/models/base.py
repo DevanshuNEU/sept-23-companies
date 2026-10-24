@@ -21,3 +21,7 @@ class WireRequest(Wire):
     """Base for request bodies: an unknown field is a 400 that names it, never silently dropped."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+class Empty(Wire):
+    """The answer of a write that has nothing to report: JSON `{}`, never an empty body."""

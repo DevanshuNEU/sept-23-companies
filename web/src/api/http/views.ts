@@ -46,6 +46,7 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   setRoleKind: 'company',
   pauseCompany: 'company',
   resumeCompany: 'company',
+  releaseHold: 'company',
   closeCompany: 'company',
   reopenCompany: 'company',
   pauseSending: 'sending',
@@ -60,5 +61,11 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   done: 'done',
 };
 
+/**
+ * The views that have a method on the client. Only these can be sample data, so only these decide `source` (the
+ * "Sample data" badge) and whether the fixture chunk loads: a view with no method (`plan` so far) has nothing to be.
+ */
+export const SERVED_VIEWS: readonly ViewName[] = ALL_VIEWS.filter((v) => Object.values(VIEW_OF_METHOD).includes(v));
+
 /** The views served by the API unless `?live=` or `VITE_LIVE_VIEWS` says otherwise. Each view's task adds its name. */
-export const DEFAULT_LIVE_VIEWS: readonly ViewName[] = ['health', 'search', 'watch', 'outcomes', 'progress', 'wins', 'linkedin', 'needs-you'];
+export const DEFAULT_LIVE_VIEWS: readonly ViewName[] = ['health', 'search', 'company', 'watch', 'outcomes', 'progress', 'wins', 'linkedin', 'needs-you', 'done', 'today', 'no-go', 'outbox', 'sending', 'shell'];

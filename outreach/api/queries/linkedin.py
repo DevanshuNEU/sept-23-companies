@@ -37,7 +37,7 @@ from outreach.api.queries.company import (
 )
 from outreach.api.queries.outcomes import NOT_SAVED, by_ids, company_refs
 from outreach.api.queries.people import day, live_steps
-from outreach.drafts.followups import company_map, no_go_sets
+from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 from outreach.outcomes.windows import day_bounds_utc, week_bounds
 from outreach.store import log_touch, undo_touch
 
@@ -178,6 +178,28 @@ def linkedin_view(conn: sqlite3.Connection, now: str) -> LinkedInView:
         counts=LinkedInCounts(to_reach=tab.count("to_reach"), waiting=tab.count("waiting"),
                               replied=tab.count("replied"), all=len(everyone)),
     )
+
+
+def to_reach_count(conn: sqlite3.Connection) -> int:
+    """How many people the list shows on the `to_reach` tab: `linkedin_view`'s own filters, counted with no groups,
+    roles or company refs built (the shell polls this). The no-go sets and the merged-company walk are the sender's
+    own (`no_go_sets`, `company_map`), as in the view."""
+    rows = conn.execute("SELECT * FROM person WHERE channel = 'linkedin' ORDER BY person_id").fetchall()
+    if not rows:
+        return 0
+    companies = company_map(conn)
+    no_go_people, no_go_companies = no_go_sets(conn, companies)
+    logs, requested = _logs(conn), _request_times(conn)
+    count = 0
+    for row in rows:
+        survivor = resolve_company(companies, row["company_id"])[-1]
+        company = companies.get(survivor)
+        if company is None or company["status"] in ("removed", "closed") or row["person_id"] in no_go_people \
+                or survivor in no_go_companies:
+            continue  # a closed company's people are listed only once they have a step, never as to reach
+        if _person(row, logs.get(row["person_id"], []), requested.get(row["person_id"])).tab == "to_reach":
+            count += 1
+    return count
 
 
 def _emailed(conn: sqlite3.Connection, parents: dict[int, int]) -> dict[int, int]:

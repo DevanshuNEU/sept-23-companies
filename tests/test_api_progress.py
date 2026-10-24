@@ -291,6 +291,23 @@ class TodayAndPlan(ProgressCase):
         self.entry(3, None, None, state="picked")
         self.assertEqual(self.progress()["today"]["planned"], 2)
 
+    def test_a_find_someone_row_is_done_by_a_request_at_a_merged_duplicate_of_its_company(self):
+        company = self.entry(1, None, None)
+        dup = s.company(self.conn, "Dup", "removed", merged_into=company)
+        kim = s.person(self.conn, dup, "Kim", channel="linkedin")
+        touch(self.conn, dup, kim, sent_at="2026-11-10T13:00:00Z")
+        self.assertEqual(self.progress()["today"]["done"], 1)
+
+    def test_a_find_someone_row_is_done_across_the_family_when_the_entry_sits_on_a_duplicate(self):
+        company = self.entry(1, None, None)
+        survivor = s.company(self.conn, "Survivor", "working")
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ?, "
+                          "paused_at = NULL WHERE company_id = ?", (survivor, company))
+        kim = s.person(self.conn, survivor, "Kim", channel="linkedin")
+        touch(self.conn, survivor, kim, sent_at="2026-11-10T13:00:00Z")
+        view = self.progress()["today"]
+        self.assertEqual((view["planned"], view["done"]), (1, 1))
+
     def test_a_find_someone_row_is_done_when_the_company_has_a_request_since_the_list_date(self):
         company = self.entry(1, None, None)
         self.assertEqual(self.progress()["today"]["done"], 0)

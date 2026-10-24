@@ -119,6 +119,8 @@ class _Writer:
     def run(self) -> WriteResult:
         conn = self.conn
         before = _counts(conn)
+        last = conn.execute("SELECT status FROM job_run WHERE job = 'import' ORDER BY run_id DESC LIMIT 1").fetchone()
+        unfinished = last is not None and last[0] != "ok"  # its postings may have no decision yet
         self.run_id = start_job(conn, "import")
         status, error = "ok", ""
         try:
@@ -137,7 +139,7 @@ class _Writer:
                 with transaction(conn):
                     self.near_names()
                     self.records(self.rest)
-                if self.new_postings:
+                if self.new_postings or unfinished:
                     self.rules()
         except Exception as err:
             if conn.in_transaction:

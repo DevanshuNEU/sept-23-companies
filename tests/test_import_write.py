@@ -474,6 +474,20 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(tuple(row), (other, 1))  # never deactivated by the import
         self.assertIsNone(conn.execute("SELECT 1 FROM board WHERE token = 'zzz'").fetchone())
 
+    def test_a_rerun_after_a_partial_run_rebuilds_the_rules(self):
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        # every company and posting is written, then the last step fails, so no rebuild ran
+        with mock.patch.object(write._Writer, "near_names", side_effect=RuntimeError("stopped")):
+            self.assertEqual(apply_plan(conn, self.plan, now=NOW).status, "partial")
+        rebuilds = conn.execute("SELECT count(*) FROM job_run WHERE job = 'rebuild'").fetchone()[0]
+        self.assertEqual(apply_plan(conn, self.plan, now=NOW).status, "ok")
+        self.assertEqual(conn.execute("SELECT count(*) FROM job_run WHERE job = 'rebuild'").fetchone()[0],
+                         rebuilds + 1)
+        undecided = conn.execute("SELECT count(*) FROM posting p WHERE NOT EXISTS "
+                                 "(SELECT 1 FROM decision d WHERE d.posting_id = p.posting_id)").fetchone()[0]
+        self.assertEqual(undecided, 0)
+
     # -- more of what the sender and the store rely on --
 
     def test_every_name_is_an_alias_of_its_company(self):

@@ -410,6 +410,37 @@ class RemoveRestore(TodayCase):
         self.conn.execute("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?", (self.b,))
         self.assertEqual(self.remove(self.b).json()["code"], "not_allowed")
 
+    def test_a_refusal_names_the_actual_blocker(self):
+        mailed = self.ranked("Mailed", 3.0)
+        li = self.ranked("Li", 2.0)
+        applied = self.ranked("Applied", 1.0)
+        self.set_now(NEXT_DAY)  # a fresh list that still has them: nothing was out when it was built
+        self.view()
+        pat = s.person(self.conn, mailed, "Pat")
+        s.message(self.conn, s.touch(self.conn, pat), 0, "approved")
+        lena = s.person(self.conn, li, "Lena", channel="linkedin")
+        s._insert(self.conn, "outreach_touch", {
+            "person_id": lena, "company_id": li, "channel": "linkedin_request", "sent_at": s.T0,
+            "context": json.dumps({"source": "own", "lane": "own", "roleKind": "engineer", "roleAgeDays": 0,
+                                   "rankerVersion": "r1", "signals": {}, "roleNamed": False}),
+            "created_at": s.T0, "idempotency_key": "li-1"})
+        s._insert(self.conn, "outreach_touch", {
+            "person_id": None, "company_id": applied, "channel": "application", "sent_at": s.T0,
+            "context": json.dumps({"source": "own", "lane": "own", "roleKind": "engineer", "roleAgeDays": 0,
+                                   "rankerVersion": "r1", "signals": {}, "roleNamed": False}),
+            "created_at": s.T0, "idempotency_key": "app-1"})
+        for cid, word in ((mailed, "email"), (li, "LinkedIn"), (applied, "application")):
+            res = self.remove(cid)
+            self.assertEqual((res.status_code, res.json()["code"]), (409, "not_allowed"), res.text)
+            self.assertIn(word, res.json()["message"])
+        # A picked company with only a LinkedIn request says so on unpick as well.
+        self.conn.execute("UPDATE company SET status = 'working' WHERE company_id = ?", (li,))
+        self.conn.execute("UPDATE daily_list_entry SET state = 'picked', decided_at = ? WHERE company_id = ? "
+                          "AND list_date = '2026-11-11'", (NEXT_DAY, li))
+        res = self.unpick(li)
+        self.assertEqual(res.json()["code"], "not_allowed")
+        self.assertIn("LinkedIn", res.json()["message"])
+
     def test_remove_stale_revision_is_a_conflict(self):
         res = self.remove(self.a, revision=7)
         self.assertEqual((res.status_code, res.json()["code"]), (409, "conflict"))
@@ -438,6 +469,16 @@ class RemoveRestore(TodayCase):
         res = self.restore(dup)
         self.assertEqual((res.status_code, res.json()["code"]), (409, "not_allowed"))
         self.assertEqual(self.company(dup)["status"], "removed")
+
+    def test_a_restore_that_lands_on_an_older_days_row_shows_on_todays_list_at_once(self):
+        self.assertEqual(self.remove(self.a).status_code, 200)
+        self.set_now(NEXT_DAY)
+        self.assertEqual(self.names(), ["B"])  # the new day's list has no row for the removed company
+        self.assertEqual(self.restore(self.a).status_code, 200)
+        v = self.view()
+        self.assertEqual([e["company"]["name"] for e in v["backlog"]], ["A"])
+        self.assertEqual(self.entry(self.a, "2026-11-11")["state"], "backlog")
+        self.assertEqual(self.pick(self.a).json()["state"], "picked")  # and it can be picked today
 
     def test_restore_on_a_weekend_keeps_the_row_for_the_next_build(self):
         self.assertEqual(self.remove(self.a).status_code, 200)

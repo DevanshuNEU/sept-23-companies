@@ -396,16 +396,24 @@ def _family(conn: sqlite3.Connection, survivor: int) -> list[int]:
     return sorted(c for c in companies if resolve_company(companies, c)[-1] == survivor)
 
 
-def _mail_is_out(conn: sqlite3.Connection, family: list[int]) -> bool:
-    """Whether anything went to or was cleared for this company: an approved, sending or sent email, or a live touch."""
+def _blocker(conn: sqlite3.Connection, family: list[int]) -> str | None:
+    """What stops a company leaving the picks or being removed, in words: the email approved or sent, the LinkedIn
+    request or message logged, or the application logged. None when nothing has gone out or been cleared for it."""
     marks = ",".join("?" * len(family))
     states = ",".join("?" * len(LIVE_MAIL))
-    mail = conn.execute(
-        f"SELECT 1 FROM message m JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
-        f"WHERE p.company_id IN ({marks}) AND m.state IN ({states}) LIMIT 1", (*family, *LIVE_MAIL)).fetchone()
-    live = conn.execute(f"SELECT 1 FROM outreach_touch WHERE company_id IN ({marks}) AND undone_at IS NULL LIMIT 1",
-                        family).fetchone()
-    return mail is not None or live is not None
+    if conn.execute(
+            f"SELECT 1 FROM message m JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
+            f"WHERE p.company_id IN ({marks}) AND m.state IN ({states}) LIMIT 1", (*family, *LIVE_MAIL)).fetchone():
+        return "email approved or sent"
+    found = {r[0] for r in conn.execute(
+        f"SELECT DISTINCT channel FROM outreach_touch WHERE company_id IN ({marks}) AND undone_at IS NULL", family)}
+    if found & {"linkedin_request", "linkedin_message"}:
+        return "a LinkedIn request or message logged"
+    if "application" in found:
+        return "an application logged"
+    if found:
+        return "a touch logged"
+    return None
 
 
 def _todays_entry(conn: sqlite3.Connection, now: str, survivor: int, name: str) -> sqlite3.Row:
@@ -470,9 +478,10 @@ def pick(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
 
 def _leave_picked(ctx: WriteCtx, row: sqlite3.Row, entry: sqlite3.Row, what: str) -> None:
     """A picked company can leave the picks only while nothing has gone out or been cleared for it."""
-    if _mail_is_out(ctx.conn, _family(ctx.conn, row["company_id"])):
-        raise _refuse(f"{row['name']} already has email approved or sent, so it cannot be {what}. Pause or close it "
-                      f"on its page instead.")
+    blocker = _blocker(ctx.conn, _family(ctx.conn, row["company_id"]))
+    if blocker is not None:
+        raise _refuse(f"{row['name']} already has {blocker}, so it cannot be {what}. Pause or close it on its page "
+                      f"instead.")
     if row["paused_at"] is not None:
         raise _refuse(f"{row['name']} is paused. Resume it first, then {what.replace('moved', 'move')}.")
 
@@ -517,15 +526,16 @@ def backlog(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
 
 def remove(ctx: WriteCtx, company_id: int, reason: str, note: str, revision: int) -> Empty:
     """Take a company off for good: `status removed` with its reason (no `no_go` row is written), and it is never
-    proposed again on its own. One with mail out is closed on its page, not removed."""
+    proposed again on its own. One with email, a LinkedIn request or an application out is closed on its page, not removed."""
     conn = ctx.conn
     row = _survivor_row(conn, company_id)
     survivor, name = row["company_id"], row["name"]
     if row["status"] in ("closed", "removed"):
         raise _refuse(f"{name} is already {row['status']}.")
     _fresh(row, revision)
-    if _mail_is_out(conn, _family(conn, survivor)):
-        raise _refuse(f"{name} already has email approved or sent. Close it on its page instead.")
+    blocker = _blocker(conn, _family(conn, survivor))
+    if blocker is not None:
+        raise _refuse(f"{name} already has {blocker}. Close it on its page instead.")
     if row["paused_at"] is not None:
         raise _refuse(f"{name} is paused. Resume it, or close it on its page.")
     bump(conn, "company", "company_id", survivor, revision,
@@ -538,8 +548,10 @@ def remove(ctx: WriteCtx, company_id: int, reason: str, note: str, revision: int
 
 
 def restore(ctx: WriteCtx, company_id: int, reason: str, revision: int) -> Empty:
-    """Bring a removed company back to the backlog. It needs a reason. Its newest list row becomes a backlog row,
-    so the next build carries it (a merged-away duplicate is not restored here: unmerge it in Needs you)."""
+    """Bring a removed company back to the backlog. It needs a reason. Its row on today's list becomes a backlog row
+    (one is added when its newest row is from an older day), so it shows at once; on a weekend its newest row becomes
+    the backlog row and the next build carries it. A merged-away duplicate is not restored here: unmerge it in
+    Needs you."""
     conn = ctx.conn
     why = reason.strip()
     row = conn.execute("SELECT * FROM company WHERE company_id = ?", (company_id,)).fetchone()
@@ -554,19 +566,24 @@ def restore(ctx: WriteCtx, company_id: int, reason: str, revision: int) -> Empty
     _fresh(row, revision)
     bump(conn, "company", "company_id", company_id, revision,
          {"status": "backlog", "remove_reason": None, "status_note": "", "status_at": ctx.now}, at=ctx.now)
-    newest = conn.execute("SELECT list_date FROM daily_list_entry WHERE company_id = ? ORDER BY list_date DESC LIMIT 1",
-                          (company_id,)).fetchone()
     day = ny_day(ctx.now)
-    if newest is not None:
+    newest = conn.execute("SELECT * FROM daily_list_entry WHERE company_id = ? ORDER BY list_date DESC LIMIT 1",
+                          (company_id,)).fetchone()
+    listed_today = conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is not None
+    if newest is not None and (newest["list_date"] == day or not listed_today):
+        # Today's own row, or a weekend (no list): the newest row becomes the backlog row the next build carries.
         conn.execute("UPDATE daily_list_entry SET state = 'backlog', decided_at = ? WHERE list_date = ? "
                      "AND company_id = ?", (ctx.now, newest["list_date"], company_id))
-    elif conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is not None:
+    elif listed_today:
+        # An older day's row (or none): the company joins today's list, so it shows now and not at the next build.
         rank = conn.execute("SELECT coalesce(max(rank), 0) + 1 FROM daily_list_entry WHERE list_date = ?",
                             (day,)).fetchone()[0]
         conn.execute(
-            "INSERT INTO daily_list_entry(list_date, company_id, list_group, rank, state, why, proposed_at, "
-            "decided_at) VALUES (?, ?, 'any_us_role', ?, 'backlog', ?, ?, ?)",
-            (day, company_id, rank, json.dumps({"rankReason": "Brought back from the removed list by you."}),
+            "INSERT INTO daily_list_entry(list_date, company_id, list_group, rank, state, posting_id, why, "
+            "proposed_at, decided_at) VALUES (?, ?, ?, ?, 'backlog', ?, ?, ?, ?)",
+            (day, company_id, newest["list_group"] if newest else "any_us_role", rank,
+             newest["posting_id"] if newest else None,
+             newest["why"] if newest else json.dumps({"rankReason": "Brought back from the removed list by you."}),
              ctx.now, ctx.now))
     _event(ctx, company_id, "restored", {"text": f"Restored to the backlog: {why}", "reason": why})
     return Empty()

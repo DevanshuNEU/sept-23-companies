@@ -149,3 +149,56 @@ class LiftThenApprove(ApproveBase):
         self.assertIn("no_go_person", [c["code"] for c in blocked.json()["checks"] if c["severity"] == "block"])
         self.assertEqual(self.post(f"/api/no-go/{row}/lift", {"reason": "They changed their mind"}).status_code, 200)
         self.assertEqual(self.approve().status_code, 200)
+
+
+class LiftOnAFamily(NoGoCase):
+    """To him a merged company is one company: lifting its no-go lifts every active no-go of the family."""
+
+    def setUp(self):
+        super().setUp()
+        self.keep = s.company(self.conn, "Keep", "candidate")
+        self.dup = s.company(self.conn, "Keep Inc", "removed", merged_into=self.keep)
+        self.on_dup = no_go(self.conn, company=self.dup, reason="over_300", created_at="2026-11-01T09:00:00Z")
+        self.on_keep = no_go(self.conn, company=self.keep, reason="agency", created_at="2026-11-02T09:00:00Z")
+        self.other = no_go(self.conn, company=s.company(self.conn, "Elsewhere"), reason="other")
+        self.pat = no_go(self.conn, person=s.person(self.conn, self.keep, "Pat"), reason="not_a_fit")
+
+    def active(self) -> set[int]:
+        return {r[0] for r in self.conn.execute("SELECT no_go_id FROM no_go WHERE lifted_at IS NULL")}
+
+    def test_lifting_one_row_lifts_every_active_company_row_of_its_family_in_one_write(self):
+        res = self.lift(self.on_dup, key="lift-family-1")
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(self.active(), {self.other, self.pat})  # another company and a person stay
+        events = self.conn.execute("SELECT entity_id, company_id, idempotency_key FROM event WHERE kind = 'lifted' "
+                                   "ORDER BY event_id").fetchall()
+        self.assertEqual([(e["entity_id"], e["company_id"], e["idempotency_key"]) for e in events],
+                         [(self.on_dup, self.keep, "lift-family-1:0"), (self.on_keep, self.keep, "lift-family-1:1")])
+        for row in self.conn.execute("SELECT * FROM no_go WHERE lifted_at IS NOT NULL"):
+            self.assertEqual((row["lifted_at"], row["lift_reason"]), (NOW, "They now sponsor"))
+
+    def test_the_ranking_and_the_sender_agree_after_the_lift(self):
+        from outreach.drafts.followups import company_map, no_go_sets
+        from outreach.ranking.hide import load_hide_inputs
+        self.assertEqual(self.lift(self.on_keep).status_code, 200)
+        companies = company_map(self.conn)
+        self.assertNotIn(self.keep, no_go_sets(self.conn, companies)[1])
+        canon = {self.keep: self.keep, self.dup: self.keep}
+        inputs = load_hide_inputs(self.conn, canon, frozenset(), {})
+        self.assertNotEqual(inputs[self.keep].no_go, "active")
+        self.assertEqual(inputs[self.keep].no_go, "lifted")
+
+    def test_the_no_go_page_shows_nothing_active_for_the_family(self):
+        self.assertEqual(self.lift(self.on_dup).status_code, 200)
+        ids = [r["target"]["company"]["id"] for r in self.view()["companies"] if r["kind"] == "no_go"]
+        self.assertNotIn(self.keep, ids)
+        self.assertEqual(len(ids), 1)  # only the other company's row is left
+
+    def test_a_second_lift_from_the_other_member_is_not_allowed(self):
+        self.assertEqual(self.lift(self.on_dup).status_code, 200)
+        res = self.lift(self.on_keep, reason="Again")
+        self.assertEqual((res.status_code, res.json()["code"]), (409, "not_allowed"))
+
+    def test_lifting_a_person_row_touches_only_that_row(self):
+        self.assertEqual(self.lift(self.pat).status_code, 200)
+        self.assertEqual(self.active(), {self.on_dup, self.on_keep, self.other})

@@ -5,7 +5,9 @@ Active `no_go` rows for companies and people, plus the companies he removed (a c
 family (the sender's `no_go_sets`). The ranker's own hides come last, from its stored scores, each with the reason
 it stored: so every hide shows why, and a provisional one reads "hidden, pending reader".
 
-A lift sets `lifted_at` and `lift_reason`. The row stays, so automation sees the choice and never adds it back.
+A lift sets `lifted_at` and `lift_reason`. The row stays, so automation sees the choice and never adds it back. A
+lift on a company row lifts every active company row of its merged family, because the sender bars the whole family
+while any one row is active and the ranking reads the family as one.
 """
 import sqlite3
 from collections import Counter
@@ -18,7 +20,7 @@ from outreach.api.models.no_go import (
 )
 from outreach.api.queries.company import IMPORT_SOURCES, company_holds, merge_parents, person_ref, survivor_of
 from outreach.api.queries.outcomes import by_ids, company_refs, people_by_ids
-from outreach.drafts.followups import canonical_company
+from outreach.drafts.followups import canonical_company, company_map, resolve_company
 from outreach.ranking.scores import hidden_list
 from outreach.store.writes import append_event
 
@@ -98,13 +100,24 @@ def lift(ctx: WriteCtx, no_go_id: int, reason: str) -> Empty:
         raise ApiProblem("bad_request", f"Say why you are taking it off the list. {NOT_SAVED}")
     if row["lifted_at"] is not None:
         raise ApiProblem("not_allowed", f"That entry was already taken off the list. {NOT_SAVED}")
-    conn.execute("UPDATE no_go SET lifted_at = ?, lift_reason = ? WHERE no_go_id = ?", (ctx.now, why, no_go_id))
-    if row["company_id"] is not None:
-        company_id = canonical_company(conn, row["company_id"])
-    else:
+    if row["company_id"] is None:
         company_id = canonical_company(conn, conn.execute("SELECT company_id FROM person WHERE person_id = ?",
                                                           (row["person_id"],)).fetchone()[0])
-    append_event(conn, entity="no_go", entity_id=no_go_id, company_id=company_id, kind="lifted", actor="devanshu",
-                 at=ctx.now, idempotency_key=ctx.event_key(0),
-                 detail={"reason": why, "text": f"Taken off the no-go list: {why}"})
+        lifted = [row["no_go_id"]]
+    else:
+        # To him a merged company is one company, and the sender bars the whole family while any of its rows is
+        # active: so a lift on one company row lifts every active company row of the family, in this transaction.
+        company_id = canonical_company(conn, row["company_id"])
+        companies = company_map(conn)
+        family = [c for c in companies if resolve_company(companies, c)[-1] == company_id]
+        marks = ",".join("?" * len(family))
+        others = [r[0] for r in conn.execute(
+            f"SELECT no_go_id FROM no_go WHERE lifted_at IS NULL AND no_go_id <> ? AND company_id IN ({marks}) "
+            "ORDER BY created_at, no_go_id", (no_go_id, *family))]
+        lifted = [no_go_id, *others]
+    for n, lifted_id in enumerate(lifted):
+        conn.execute("UPDATE no_go SET lifted_at = ?, lift_reason = ? WHERE no_go_id = ?", (ctx.now, why, lifted_id))
+        append_event(conn, entity="no_go", entity_id=lifted_id, company_id=company_id, kind="lifted",
+                     actor="devanshu", at=ctx.now, idempotency_key=ctx.event_key(n),
+                     detail={"reason": why, "text": f"Taken off the no-go list: {why}"})
     return Empty()

@@ -28,30 +28,45 @@ this runs on a scratch OUTREACH_DB or not at all. Only `night` calls a model.
 
 `--file` defaults to tests/gold/items.jsonl. `show` remembers what it printed (a `.shown` file next to the items),
 and `confirm --all-shown` confirms those items that are still pending and unchanged since. Only `sample` opens the
-store. `eval` and `promote` (Task 8) are registered and not built yet.
+store.
+
+`eval` and `promote` are the gate (`outreach.reader.evaluate`, where every threshold and its source is stated):
+
+    uv run python -m outreach.reader eval [--version V] [--against OLD] [--run] [--json]
+    uv run python -m outreach.reader promote --version V [--against OLD]
+
+`eval` scores version V (default: the one the files make now) from `tests/gold/readings/<V>.jsonl`, prints the table
+and the gate, and with `--against` the regressions, exiting 1 if there are any. Only `--run` calls a model: it reads
+the gold items through `claude -p` first (seat usage, never from a test). `promote` writes the `promoted_version`
+line in config.toml only when the gate passes (exit 1 otherwise); `--against` defaults to the promoted version. It
+refuses outside the live checkout unless OUTREACH_DB names a scratch store, and never commits. Neither opens the
+store; after a promotion run `apply`.
 """
 from __future__ import annotations
 
 import argparse
 import dataclasses
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
 
 import live_checkout
 from outreach.reader.combine import apply_all, apply_reading
-from outreach.reader import gold
-from outreach.reader.config import load_reader_config
+from outreach.reader import evaluate, gold
+from outreach.reader.config import CONFIG_PATH, load_reader_config
+from outreach.reader.evaluate import run_reader_on_gold
 from outreach.reader.night import APPLIED, claude_runner, run_night
 from outreach.reader.queue import batch_payload, enqueue_missing, next_batch
 from outreach.reader.submit import submit
+from outreach.reader.version import reader_version
 from outreach.rules import RulesetNotCurrent
 from outreach.store import body_sha256, connect
+from outreach.store.db import db_path, is_live_path
 
 __all__ = ["main"]
 
-_LATER = {"eval": "Task 8", "promote": "Task 8"}
 _NIGHT_OK = ("queue_empty", "cap_reached", "session_limit")
 
 
@@ -67,8 +82,17 @@ def _parser() -> argparse.ArgumentParser:
     night.add_argument("--max-batches", type=_positive, default=None, help="calls tonight (default: config)")
     night.add_argument("--max-postings", type=_positive, default=None, help="postings tonight (default: config)")
     _gold_parser(sub)
-    for name, task in _LATER.items():
-        sub.add_parser(name, help=f"not built yet ({task})")
+    ev = sub.add_parser("eval", help="score a reader version on the gold set, with the gate")
+    ev.add_argument("--version", default=None, help="the reader version (default: the one the files make now)")
+    ev.add_argument("--against", default=None, help="compare with this version and list its regressions")
+    ev.add_argument("--run", action="store_true", help="read the gold set through claude -p first (seat usage)")
+    ev.add_argument("--json", action="store_true", help="print JSON instead of the table")
+    pr = sub.add_parser("promote", help="make a version decide postings, when the gate passes")
+    pr.add_argument("--version", required=True)
+    pr.add_argument("--against", default=None, help="the version it must not be worse than (default: promoted)")
+    for p in (ev, pr):
+        p.add_argument("--file", type=Path, default=None, help="the gold items (default: tests/gold/items.jsonl)")
+        p.add_argument("--readings", type=Path, default=None, help="the readings folder (default: tests/gold/readings)")
     return parser
 
 
@@ -167,6 +191,67 @@ def _gold(args: argparse.Namespace, stdout) -> int:
     return 0
 
 
+def _promote_allowed() -> bool:
+    """The live checkout, or a scratch OUTREACH_DB anywhere else."""
+    if live_checkout.is_live():
+        return True
+    scratch = os.environ.get("OUTREACH_DB")
+    return bool(scratch) and not is_live_path(db_path())
+
+
+def _evaluate(args: argparse.Namespace, stdout) -> int:
+    if args.command == "promote" and not _promote_allowed():
+        raise SystemExit("promote only runs from the live checkout, or with OUTREACH_DB set to a scratch store; "
+                         f"this is {live_checkout.REPO_ROOT}.")
+    cfg = load_reader_config(CONFIG_PATH)
+    current = reader_version(cfg)
+    version = args.version or current
+    folder = args.readings if args.readings is not None else gold.GOLD_READINGS
+    items = gold.load_gold(args.file if args.file is not None else gold.GOLD_PATH)
+    against = args.against
+    if args.command == "promote" and against is None:
+        against = cfg.promoted_version or None
+    try:
+        if args.command == "eval" and args.run:
+            run_reader_on_gold(items, claude_runner(cfg), cfg, version, folder=folder)
+        readings = evaluate.load_readings(version, folder)
+        old = evaluate.score(items, evaluate.load_readings(against, folder)) if against else None
+    except (OSError, RuntimeError, ValueError) as err:
+        print(f"{args.command}: {err}", file=sys.stderr)
+        return 2
+    scores = evaluate.score(items, readings)
+    if args.command == "promote":
+        try:
+            result = evaluate.promote(version, items, scores, old, CONFIG_PATH, readings=readings,
+                                      current_version=current)
+        except ValueError as err:
+            print(str(err), file=stdout)
+            return 1
+        print(result.text(), file=stdout)
+        print(f"\npromoted {version} in {CONFIG_PATH}. Next: uv run python -m outreach.reader apply (re-combines "
+              "the store), then commit config.toml.", file=stdout)
+        return 0
+    result = evaluate.gate(items, scores, old, readings=readings, version=version, current_version=current)
+    regressions = evaluate.not_worse(scores, old) if old is not None else []
+    if args.json:
+        print(json.dumps({"version": version, "against": against, "scores": evaluate.scores_json(scores),
+                          "regressions": regressions, "gate": {"verdict": result.verdict, "lines": result.lines}},
+                         ensure_ascii=False), file=stdout)
+    else:
+        confirmed = sum(1 for i in items if i.status == "confirmed")
+        read = sum(1 for i in items if i.status == "confirmed" and i.gold_id in readings)
+        print(f"reader {version}: {confirmed} confirmed items, {read} read", file=stdout)
+        print(evaluate.table_text(scores), file=stdout)
+        print("", file=stdout)
+        print(result.text(), file=stdout)
+        if against:
+            print(f"\nagainst {against}: " + (f"{len(regressions)} regressions" if regressions else "no regressions"),
+                  file=stdout)
+            for line in regressions:
+                print(f"  {line}", file=stdout)
+    return 1 if regressions else 0
+
+
 def _positive(text: str) -> int:
     value = int(text)
     if value < 1:
@@ -202,13 +287,12 @@ def main(argv: list[str] | None = None, *, stdin=None, stdout=None) -> int:
     args = _parser().parse_args(argv)
     stdin = stdin if stdin is not None else sys.stdin
     stdout = stdout if stdout is not None else sys.stdout
-    if args.command in _LATER:
-        print(f"{args.command} is not built yet ({_LATER[args.command]} of #32)", file=sys.stderr)
-        return 2
     if args.command == "night":
         return _night(args, stdout)
     if args.command == "gold":
         return _gold(args, stdout)
+    if args.command in ("eval", "promote"):
+        return _evaluate(args, stdout)
     cfg = load_reader_config()
     conn = connect()  # the store guard: the live store opens only from the live checkout
     try:

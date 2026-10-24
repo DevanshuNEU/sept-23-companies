@@ -75,7 +75,8 @@ from outreach.store import body_sha256
 
 __all__ = ["GOLD_DIR", "GOLD_PATH", "GOLD_READINGS", "STRATA", "STRATUM_NAMES", "HIDE_CLASSES", "TARGET_PER_CLASS",
            "BOUND_TARGET", "FieldReading", "GoldItem", "load_gold", "sample_gold", "pending", "coverage", "confirm",
-           "rules_fields", "value_class", "show_text", "coverage_text", "labels_digest"]
+           "rules_fields", "value_class", "show_text", "coverage_text", "labels_digest", "atomic_write",
+           "check_label"]
 
 GOLD_DIR = Path(__file__).resolve().parents[2] / "tests" / "gold"
 GOLD_PATH = GOLD_DIR / "items.jsonl"
@@ -347,7 +348,7 @@ def sample_gold(conn: sqlite3.Connection, per_class: int, *, seed: int, existing
 
 # ---- confirming ----------------------------------------------------------------------------------------------
 
-def _atomic_write(path: Path, text: str) -> None:
+def atomic_write(path: Path, text: str) -> None:
     """Write `text` to a temp file in the same folder, then `os.replace` it over `path`. A failure before the
     replace leaves `path` as it was and removes the temp file."""
     path = Path(path)
@@ -391,7 +392,7 @@ def confirm(items_path: Path, gold_id: str, *, set_fields: dict[str, FieldReadin
     new_line = json.dumps(done.to_json(), ensure_ascii=False)
     _parse([new_line])  # the same checks load_gold makes, before anything is written
     lines[index] = new_line
-    _atomic_write(Path(items_path), "".join(line + "\n" for line in lines))
+    atomic_write(Path(items_path), "".join(line + "\n" for line in lines))
     return done
 
 
@@ -401,7 +402,7 @@ def append_items(items_path: Path, new: list[dict]) -> None:
     lines = _lines(path) if path.exists() else []
     lines = [line for line in lines if line.strip()] + [json.dumps(i, ensure_ascii=False) for i in new]
     _parse(lines)
-    _atomic_write(path, "".join(line + "\n" for line in lines))
+    atomic_write(path, "".join(line + "\n" for line in lines))
 
 
 def next_id(items: Iterable[GoldItem]) -> int:

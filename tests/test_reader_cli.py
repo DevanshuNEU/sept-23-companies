@@ -187,13 +187,6 @@ class GuardTests(unittest.TestCase):
                 self.assertIn("live checkout", str(caught.exception.code))
         self.assertFalse((folder / "outreach.db").exists())
 
-    def test_later_commands_are_registered_but_not_built(self):
-        for name in ("eval", "promote"):
-            err = io.StringIO()
-            with mock.patch("sys.stderr", err):
-                self.assertEqual(cli.main([name], stdin=io.StringIO(""), stdout=io.StringIO()), 2, name)
-            self.assertIn("not built yet", err.getvalue())
-
 
 class RebuildWiringTests(CliCase):
     def test_rebuild_main_passes_the_reader_combiner_and_applies(self):

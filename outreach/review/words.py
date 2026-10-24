@@ -136,7 +136,10 @@ def reopened(kind: str, previous: Mapping, changed_key: str) -> dict[str, str]:
         before = f"{before} on {day(previous['resolved_at'])}"
     if kind in ("board_unreadable", "board_empty"):
         what = "failed" if kind == "board_unreadable" else "empty"
-        changed = f"a new run of {what} reads started {day(changed_key)}"
+        try:
+            changed = f"a new run of {what} reads started {day(changed_key)}"
+        except ValueError:  # the crawler's key is a time; any other key still says what changed, without the day
+            changed = f"a new run of {what} reads started"
     elif kind in _CHANGED:
         changed = _CHANGED[kind]
     else:

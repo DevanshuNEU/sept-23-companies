@@ -102,6 +102,12 @@ class WordsTest(unittest.TestCase):
             self.assertTrue(out["changed"] and out["previous"], kind)
             self.assertFalse(any(d in v for v in out.values() for d in DASHES), kind)
 
+    def test_reopened_board_key_that_is_not_a_time_still_says_what_changed(self):
+        # The Needs-you view builds this for every open item: one odd key must not break the whole list.
+        out = words.reopened("board_unreadable", {"resolution": "marked_ok", "resolved_at": "2026-11-03T15:00:00Z"},
+                             "streak:2026-11-12")
+        self.assertEqual(out, {"previous": "you marked it ok on Nov 3", "changed": "a new run of failed reads started"})
+
     def test_notes(self):
         self.assertEqual(words.fix_note("size", "45", "LinkedIn company page"),
                          "Size set to 45 by you, from LinkedIn company page")

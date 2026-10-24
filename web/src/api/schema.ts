@@ -582,6 +582,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/review/{review_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen Review */
+        post: operations["reopen_review"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/review/{review_id}/resolve": {
         parameters: {
             query?: never;
@@ -1684,6 +1701,55 @@ export interface components {
              */
             step: "request_sent" | "accepted" | "message_sent" | "replied";
         };
+        /**
+         * MergeCompare
+         * @description Both sides of a merge question (`outreach.review.merge.merge_compare`): `a` is the item's company, `b` the one
+         *     its key names.
+         */
+        MergeCompare: {
+            a: components["schemas"]["MergeSide"];
+            b: components["schemas"]["MergeSide"];
+            /**
+             * Suggestedkeep
+             * @enum {string}
+             */
+            suggestedKeep: "a" | "b";
+            /** Warning */
+            warning: string | null;
+            /** Why */
+            why: string;
+        };
+        /**
+         * MergeSide
+         * @description One company of a merge question, as `outreach.review.merge.MergeSide` reads it.
+         */
+        MergeSide: {
+            /** Aliases */
+            aliases: string[];
+            /** Boards */
+            boards: string[];
+            /** Companyid */
+            companyId: number;
+            /** Domain */
+            domain: string | null;
+            /** Name */
+            name: string;
+            /** Openpostings */
+            openPostings: number;
+            /** People */
+            people: number;
+            /** Size */
+            size: string | null;
+            /** Stage */
+            stage: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "backlog" | "working" | "closed" | "removed";
+            /** Touches */
+            touches: number;
+        };
         /** MessageRevisionBody */
         MessageRevisionBody: {
             /** Revision */
@@ -1698,6 +1764,8 @@ export interface components {
             open: components["schemas"]["ReviewItem"][];
             /** Resolvedthisweek */
             resolvedThisWeek: components["schemas"]["ResolvedReview"][];
+            /** Settledtoday */
+            settledToday: number;
         };
         /** NextDue */
         NextDue: {
@@ -2245,6 +2313,16 @@ export interface components {
             /** Removedat */
             removedAt: string;
         };
+        /** ReopenReviewBody */
+        ReopenReviewBody: {
+            /** Revision */
+            revision: number;
+        };
+        /** Reopened */
+        Reopened: {
+            /** Revision */
+            revision: number;
+        };
         /** ReplyKindBody */
         ReplyKindBody: {
             /**
@@ -2276,6 +2354,8 @@ export interface components {
         ResolvedReview: {
             /** At */
             at: string;
+            /** Canundo */
+            canUndo: boolean;
             /** Companyname */
             companyName: string;
             /** Id */
@@ -2294,6 +2374,8 @@ export interface components {
              * @enum {string}
              */
             resolution: "marked_ok" | "marked_no_go" | "field_edited";
+            /** Revision */
+            revision: number;
         };
         /** RestoreCompanyBody */
         RestoreCompanyBody: {
@@ -2404,6 +2486,7 @@ export interface components {
             kind: "board_unreadable" | "board_empty" | "sponsorship_unclear" | "size_unknown" | "size_guess" | "domain_missing" | "flagged" | "merge_candidate" | "reader_disagrees" | "careers_changed" | "size_check";
             /** Lastokat */
             lastOkAt: string | null;
+            merge: components["schemas"]["MergeCompare"] | null;
             /** Openpostings */
             openPostings: number | null;
             /** Openedat */
@@ -5635,6 +5718,95 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reopen_review: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                review_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReopenReviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Reopened"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -177,9 +177,20 @@ export interface ReviewItem {
   reads: { at: IsoTime; result: ReadResult; detail: string }[]; lastOkAt: IsoTime | null; openPostings: number | null;
   sizeFacts: Fact[]; revision: Revision;
   inPlay: boolean; // being worked, picked or planned: Needs you lists these first and the rest under Later (#11 Task 20)
+  merge: MergeCompare | null; // a merge question's two sides (#16); null for every other kind
 }
-export interface ResolvedReview { id: Id; kind: ReviewKind; companyName: string; resolution: 'marked_ok' | 'marked_no_go' | 'field_edited'; note: string; at: IsoTime; locked: boolean }
-export interface NeedsYouView { asOf: IsoTime; open: ReviewItem[]; resolvedThisWeek: ResolvedReview[]; boardsJob: JobRunSummary | null }
+// One side of a merge question, as outreach.review.merge reads it (#16). `boards` are "<ats>:<token>".
+export interface MergeSide {
+  companyId: Id; name: string; domain: string | null; size: string | null; stage: string | null; aliases: string[];
+  boards: string[]; openPostings: number; people: number; touches: number; status: CompanyStatus;
+}
+// `a` is the item's company, `b` the one its key names; `warning` is said on the confirm for a tie company.
+export interface MergeCompare { a: MergeSide; b: MergeSide; why: string; suggestedKeep: 'a' | 'b'; warning: string | null }
+export interface ResolvedReview {
+  id: Id; kind: ReviewKind; companyName: string; resolution: 'marked_ok' | 'marked_no_go' | 'field_edited'; note: string; at: IsoTime; locked: boolean;
+  revision: Revision; canUndo: boolean; // canUndo: a reopen would take it back (ok, no-go or a merge)
+}
+export interface NeedsYouView { asOf: IsoTime; open: ReviewItem[]; resolvedThisWeek: ResolvedReview[]; boardsJob: JobRunSummary | null; settledToday: number }
 export type ReviewFix =
   | { kind: 'ok' }
   | { kind: 'edit'; field: 'domain' | 'size' | 'sponsorship' | 'board_url'; value: string; source: string }

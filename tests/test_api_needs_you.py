@@ -1,14 +1,29 @@
-"""Needs you: the open review items with their evidence, the one-click fixes, the merge and the unmerge."""
+"""Needs you: the open review items with their evidence, the one-click fixes, the merge and the unmerge.
+
+Since #16 Task 13 every write here goes through `outreach.review` (`apply_fix`, `reopen_item`, `unmerge_company`);
+these tests are the HTTP contract over it.
+"""
 import json
 
+from outreach.crawl.base import ReadResult, Validators
+from outreach.crawl.boardstate import load_board, write_board_state
 from outreach.drafts.followups import company_map, held_survivors, no_go_sets
+from outreach.review.fixes import LOCKED
+from outreach.review.triggers import sweep_needs_you
+from outreach.rules import rebuild
 from outreach.sending import queue, ramp
 from outreach.sending.config import load_config
+from outreach.store import start_job
 from tests import apiseed as s
+from tests import review_seed
 from tests.apitest import NOW, ApiCase
 from tests.sendtest import MON, seed_email_person, seed_message
+from tests.storetest import seed_board, seed_company, seed_posting
 
 TODAY = "2026-11-10"  # NOW in New York
+UNCLEAR = "We may be able to support visa sponsorship for exceptional candidates."
+READ_EMPTY = ReadResult("empty", (), Validators(), http_status=200)
+READ_ERROR = ReadResult("error", (), Validators(), http_status=500, error="HTTP 500")
 KINDS = ("board_unreadable", "board_empty", "sponsorship_unclear", "size_unknown", "size_guess", "domain_missing",
          "flagged", "merge_candidate", "reader_disagrees", "careers_changed", "size_check")
 
@@ -93,7 +108,8 @@ class NeedsYou(ApiCase):
     # ------------------------------------------------------------------------------------------ reads
 
     def test_empty_store_is_an_empty_view(self):
-        self.assertEqual(self.view(), {"asOf": NOW, "open": [], "resolvedThisWeek": [], "boardsJob": None})
+        self.assertEqual(self.view(), {"asOf": NOW, "open": [], "resolvedThisWeek": [], "boardsJob": None,
+                                       "settledToday": 0})
 
     def test_an_item_shows_a_hold_left_on_a_merged_duplicate(self):
         cid = s.company(self.conn, "Acme", "working")
@@ -126,12 +142,18 @@ class NeedsYou(ApiCase):
         self.assertEqual(set(items), set(KINDS))
         for kind, item in items.items():
             self.assertEqual(item["id"], ids[kind])
-            self.assertEqual(item["reason"], f"About {kind}.")
+            if not kind.startswith("board_"):  # a board item's reason is built from the board now (#16)
+                self.assertEqual(item["reason"], f"About {kind}.")
             self.assertEqual((item["ageDays"], item["openedAt"], item["revision"]), (5, "2026-11-05T08:00:00Z", 1))
             self.assertEqual(item["company"], {"id": cid, "name": "Acme", "status": "working", "pausedAt": None,
                                                "heldByTouchId": None, "held": False,
                                                "heldByReply": None, "picked": False})
             self.assertIsNone(item["reopened"])
+        self.assertEqual(items["board_unreadable"]["reason"],
+                         "The Ashby board has answered with an error on every read since Nov 1. An error never closes "
+                         "a company, so its 1 posting stays open with what we last saw on Nov 1.")
+        self.assertEqual(items["board_empty"]["reason"],
+                         "The Ashby board returned no jobs once. Its 1 posting stays open until a second empty read.")
         u = items["board_unreadable"]
         self.assertEqual([(r["result"], r["detail"]) for r in u["reads"]],
                          [("ok", "Ashby board read, 2 postings"), ("error", "HTTP 503")])
@@ -151,14 +173,15 @@ class NeedsYou(ApiCase):
     def test_reopened_item_names_the_change(self):
         cid = s.company(self.conn, "Acme")
         b = s.board(self.conn, cid, "ashby", "acme", last_read="error", error_streak=3)
-        old = s.review(self.conn, cid, "board_unreadable", board_id=b, evidence_key="streak:2026-10-20",
+        # The crawler's key is the run's `streak_since` (#21).
+        old = s.review(self.conn, cid, "board_unreadable", board_id=b, evidence_key="2026-10-20T08:00:00Z",
                        created_at="2026-10-20T08:00:00Z")
         self.ok(self.resolve(old, {"kind": "ok"}))
-        new = s.review(self.conn, cid, "board_unreadable", board_id=b, evidence_key="streak:2026-11-05",
+        new = s.review(self.conn, cid, "board_unreadable", board_id=b, evidence_key="2026-11-05T08:00:00Z",
                        created_at="2026-11-05T08:00:00Z")
         first_size = s.review(self.conn, cid, "size_unknown", evidence_key="no-size")
         item = self.open_items()[new]
-        self.assertEqual(item["reopened"], {"changed": "the board failed again",
+        self.assertEqual(item["reopened"], {"changed": "a new run of failed reads started Nov 5",
                                             "previous": "you marked it ok on Nov 10"})
         self.assertIsNone(self.open_items()[first_size]["reopened"])
 
@@ -182,7 +205,8 @@ class NeedsYou(ApiCase):
         self.assertEqual([i["inPlay"] for i in items], [True, True, True, False, False, False])
         by_company = {i["company"]["id"]: i for i in items}
         self.assertTrue(by_company[picked]["company"]["picked"])
-        self.assertTrue(by_company[picked]["holdsEmail"])  # a picked company's missing domain holds its email
+        # Picked, but no email planned or queued there: its missing domain holds no email (`play.emailing`, #16).
+        self.assertFalse(by_company[picked]["holdsEmail"])
         self.assertFalse(by_company[working]["company"]["picked"])
 
     def test_resolved_this_week_lists_this_new_york_week(self):
@@ -199,7 +223,7 @@ class NeedsYou(ApiCase):
             "resolved_at": "2026-11-09T16:00:00Z"})  # cleared by itself: not one of his
         self.assertEqual(self.view()["resolvedThisWeek"], [{
             "id": this_week, "kind": "flagged", "companyName": "Acme", "resolution": "marked_ok",
-            "note": "Marked ok by you.", "at": NOW, "locked": False}])
+            "note": "Marked ok by you", "at": NOW, "locked": False, "revision": 2, "canUndo": True}])
 
     def test_boards_job_is_the_last_read_boards_run_else_the_crawl(self):
         run(self.conn, "crawl", "2026-11-09T08:00:00Z")
@@ -228,7 +252,7 @@ class NeedsYou(ApiCase):
         self.assertEqual((row["state"], row["resolution"], row["resolved_at"], row["revision"]),
                          ("resolved", "marked_ok", NOW, 2))
         self.assertEqual(self.count("SELECT count(*) FROM event WHERE entity = 'review_item' AND entity_id = ? "
-                                    "AND kind = 'review_resolved' AND actor = 'devanshu'", item), 1)
+                                    "AND kind = 'resolved' AND actor = 'devanshu'", item), 1)
         raise_again = ("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
                        "VALUES ('size_guess', ?, 'Again.', ?, 'rules', ?) ON CONFLICT DO NOTHING")
         self.conn.execute(raise_again, (cid, "guess:linkedin", NOW))
@@ -260,7 +284,7 @@ class NeedsYou(ApiCase):
         row = self.review_row(item)
         self.assertEqual((row["state"], row["resolution"]), ("resolved", "field_edited"))
         (done,) = self.view()["resolvedThisWeek"]
-        self.assertEqual((done["note"], done["locked"]), ("Size set to 45 by you, from Their about page.", True))
+        self.assertEqual((done["note"], done["locked"]), ("Size set to 45 by you, from Their about page", True))
 
     def test_edit_values_are_read_and_a_bad_one_is_refused(self):
         cid = s.company(self.conn, "Acme")
@@ -378,7 +402,7 @@ class NeedsYou(ApiCase):
         self.assertEqual(tuple(alias), (a, "Bolt Labs", "merge"))
         row = self.review_row(item)
         self.assertEqual((row["state"], row["resolution"], row["resolution_note"]),
-                         ("resolved", "field_edited", f"merged into {a}"))
+                         ("resolved", "field_edited", "Merged Bolt Labs into Bolt by you"))
         (event,) = self.conn.execute("SELECT * FROM event WHERE entity = 'company' AND kind = 'merged'").fetchall()
         detail = json.loads(event["detail"])
         self.assertEqual((event["entity_id"], event["actor"], detail["previous_status"], detail["kept_id"]),
@@ -404,7 +428,7 @@ class NeedsYou(ApiCase):
         self.assertIsNone(self.company_row(b)["merged_into"])
         self.assertEqual(self.company_row(b)["status"], "candidate")
         self.assertEqual(self.review_row(item)["resolution"], "marked_ok")
-        self.assertEqual(self.review_row(item)["resolution_note"], "Kept separate by you.")
+        self.assertEqual(self.review_row(item)["resolution_note"], "Kept separate by you")
         self.assertEqual(self.count("SELECT count(*) FROM company_alias"), 0)
 
     def test_merge_is_only_for_a_merge_question_and_a_merge_question_has_no_no_go_or_edit(self):
@@ -575,11 +599,13 @@ class NeedsYou(ApiCase):
 
     def test_a_fix_on_a_merged_away_companys_item_stays_with_that_company_after_an_unmerge(self):
         a, b, item = self.pair()
+        self.ok(self.resolve(item, {"kind": "merge", "keep": "a"}))
+        # Raised on the merged-away company after the merge (the merge settles the items it had then, #16).
         lost_item = s.review(self.conn, b, "flagged")
         domain_item = s.review(self.conn, b, "domain_missing")
-        self.ok(self.resolve(item, {"kind": "merge", "keep": "a"}))
-        self.ok(self.resolve(lost_item, {"kind": "no_go", "reason": "agency", "source": "Their site"}))
+        # The edit first: a company no-go settles the company's other open items (#16).
         self.ok(self.resolve(domain_item, {"kind": "edit", "field": "domain", "value": "boltlabs.io", "source": "Site"}))
+        self.ok(self.resolve(lost_item, {"kind": "no_go", "reason": "agency", "source": "Their site"}))
         self.assertIn(a, no_go_sets(self.conn, company_map(self.conn))[1])  # while merged, it stops the survivor
         self.assertEqual(self.ok(self.get(f"/api/companies/{a}"))["company"]["domain"], "boltlabs.io")
         self.ok(self.unmerge(b, 2))
@@ -621,13 +647,284 @@ class NeedsYou(ApiCase):
         self.assertEqual(self.conn.execute("SELECT active FROM board WHERE board_id = ?", (theirs,)).fetchone()[0], 1)
         self.assertEqual(self.count("SELECT count(*) FROM board WHERE token = 'acme'"), 0)
 
+    # ------------------------------------------------------------------------------------------ through outreach.review
+
+    def reopen(self, review_id: int, revision: int, key: str | None = None):
+        return self.post(f"/api/review/{review_id}/reopen", {"revision": revision}, key=key)
+
+    def crawl(self, board_id: int, result: ReadResult, n: int) -> None:
+        """One crawler read of the board in its own job run (#21's writer), on Oct n."""
+        write_board_state(self.conn, load_board(self.conn, board_id), result, run_id=start_job(self.conn, "read_boards"),
+                          now=f"2026-10-{n:02d}T08:00:00Z", open_postings=1,
+                          next_read_at=f"2026-10-{n:02d}T14:00:00Z", interval_s=21600)
+
+    def messages(self) -> list[tuple]:
+        return [tuple(r) for r in self.conn.execute("SELECT * FROM message ORDER BY message_id")]
+
+    def test_each_trigger_is_resolved_through_the_api(self):
+        # Triggers 1 and 2: the crawler raises them (as #16 Task 12 does).
+        unreadable = seed_board(self.conn, seed_company(self.conn, "Boarded"), token="boarded")
+        for n in (1, 2, 3):
+            self.crawl(unreadable, READ_ERROR, n)
+        emptied = seed_board(self.conn, seed_company(self.conn, "Emptied"), token="emptied")
+        self.crawl(emptied, READ_EMPTY, 4)
+        # Triggers 3, 4 and 5: the sweep raises them.
+        sponsor = seed_company(self.conn, "Sponsor Co")
+        review_seed.seed_plan_row(self.conn, sponsor, TODAY, "picked")
+        seed_posting(self.conn, sponsor, "Software Engineer, New Grad", UNCLEAR, "Boston, MA")
+        rebuild(self.conn)
+        sized = seed_company(self.conn, "Sized Out")
+        review_seed.seed_plan_row(self.conn, sized, TODAY, "picked")
+        mailed = seed_company(self.conn, "Mailed")
+        review_seed.seed_queued_message(self.conn, review_seed.seed_email_person(self.conn, mailed), "drafted")
+        sweep_needs_you(self.conn, now=NOW)
+
+        def open_id(kind: str, company: int) -> int:
+            (row,) = self.conn.execute("SELECT review_id FROM review_item WHERE kind = ? AND company_id = ? "
+                                       "AND state = 'open'", (kind, company)).fetchall()
+            return row[0]
+
+        fixes = {
+            open_id("board_unreadable", load_board(self.conn, unreadable).company_id): {"kind": "ok"},
+            open_id("board_empty", load_board(self.conn, emptied).company_id):
+                {"kind": "no_go", "reason": "not_a_fit", "source": "Their site"},
+            open_id("sponsorship_unclear", sponsor):
+                {"kind": "edit", "field": "sponsorship", "value": "Yes", "source": "Their careers page"},
+            open_id("size_unknown", sized): {"kind": "edit", "field": "size", "value": "11 to 50", "source": "LinkedIn"},
+            open_id("domain_missing", mailed): {"kind": "edit", "field": "domain", "value": "mailed.io", "source": "Site"},
+        }
+        listed = self.open_items()
+        for review_id in fixes:
+            self.assertIn(review_id, listed)
+        for review_id, fix in fixes.items():
+            self.assertEqual(self.ok(self.resolve(review_id, fix, revision=listed[review_id]["revision"])),
+                             {"id": review_id, "revision": listed[review_id]["revision"] + 1})
+        view = self.view()
+        self.assertFalse(set(fixes) & {i["id"] for i in view["open"]})
+        self.assertEqual({r["id"] for r in view["resolvedThisWeek"]} & set(fixes), set(fixes))
+        settled = {r[0]: r[1] for r in self.conn.execute("SELECT review_id, resolution FROM review_item")}
+        # Every producer runs again on the same evidence: nothing comes back.
+        sweep_needs_you(self.conn, now=NOW)
+        self.crawl(unreadable, READ_ERROR, 5)
+        self.crawl(emptied, READ_EMPTY, 6)
+        after = {i["id"]: i for i in self.view()["open"]}
+        for kind, company in (("board_unreadable", load_board(self.conn, unreadable).company_id),
+                              ("board_empty", load_board(self.conn, emptied).company_id),
+                              ("sponsorship_unclear", sponsor), ("size_unknown", sized), ("domain_missing", mailed)):
+            self.assertFalse([i for i in after.values() if (i["kind"], i["company"]["id"]) == (kind, company)], kind)
+        for review_id in fixes:
+            self.assertEqual(self.review_row(review_id)["resolution"], settled[review_id])
+
+    def test_resolve_maps_each_review_error_to_its_envelope_code(self):
+        cid = s.company(self.conn, "Acme")
+        size = s.review(self.conn, cid, "size_unknown", evidence_key="size")
+        sponsorship = s.review(self.conn, cid, "sponsorship_unclear", evidence_key="sp",
+                               posting_id=s.posting(self.conn, cid))
+        res = self.resolve(size, {"kind": "edit", "field": "size", "value": "lots", "source": "LinkedIn"})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Nothing was saved.", self.refused(res, "bad_request")["message"])
+        res = self.resolve(sponsorship, {"kind": "edit", "field": "sponsorship", "value": "No", "source": "Posting"})
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(self.refused(res, "not_allowed")["message"], "Sponsorship No is a no-go. Use Mark no-go.")
+        res = self.resolve(size, {"kind": "edit", "field": "size", "value": "45", "source": "LinkedIn"}, revision=7)
+        self.assertEqual(res.status_code, 409)
+        self.refused(res, "conflict")
+        res = self.resolve(999, {"kind": "ok"})
+        self.assertEqual(res.status_code, 404)
+        self.refused(res, "not_found")
+        self.assertEqual(self.count("SELECT count(*) FROM evidence"), 0)
+        self.assertEqual({self.review_row(i)["state"] for i in (size, sponsorship)}, {"open"})
+        self.assertEqual(self.count("SELECT count(*) FROM event WHERE entity = 'review_item'"), 0)
+
+    def test_edit_size_text_is_parsed_by_the_server(self):
+        cid = s.company(self.conn, "Acme")
+        item = s.review(self.conn, cid, "size_unknown")
+        self.ok(self.resolve(item, {"kind": "edit", "field": "size", "value": "11 to 50", "source": "LinkedIn"}))
+        ev = self.conn.execute("SELECT value, num_low, num_high, locked, source_kind, source_ref FROM evidence").fetchone()
+        self.assertEqual(tuple(ev), ("11-50", 11, 50, 1, "hand", "LinkedIn"))
+
+    def test_reopen_route_puts_an_ok_item_back_and_a_second_call_is_not_allowed(self):
+        cid = s.company(self.conn, "Acme")
+        item = s.review(self.conn, cid, "flagged")
+        self.ok(self.resolve(item, {"kind": "ok"}))
+        self.assertEqual(self.ok(self.reopen(item, 2)), {"revision": 3})
+        row = self.review_row(item)
+        self.assertEqual((row["state"], row["resolution"], row["resolved_at"], row["revision"]), ("open", None, None, 3))
+        self.assertEqual(self.open_items()[item]["revision"], 3)
+        self.assertEqual(self.view()["resolvedThisWeek"], [])
+        res = self.reopen(item, 3)
+        self.assertEqual(res.status_code, 409)
+        self.refused(res, "not_allowed")
+        self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind = 'reopened' AND entity_id = ?", item), 1)
+
+    def test_reopen_of_an_edited_item_is_not_allowed_with_the_lock_message(self):
+        cid = s.company(self.conn, "Acme")
+        item = s.review(self.conn, cid, "size_unknown")
+        self.ok(self.resolve(item, {"kind": "edit", "field": "size", "value": "45", "source": "LinkedIn"}))
+        res = self.reopen(item, 2)
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(self.refused(res, "not_allowed")["message"], LOCKED)
+        self.assertEqual(self.review_row(item)["state"], "resolved")
+        self.assertEqual(self.count("SELECT count(*) FROM evidence WHERE locked = 1"), 1)
+
+    def test_reopen_stale_revision_conflicts(self):
+        cid = s.company(self.conn, "Acme")
+        item = s.review(self.conn, cid, "flagged")
+        self.ok(self.resolve(item, {"kind": "ok"}))
+        res = self.reopen(item, 1)
+        self.assertEqual(res.status_code, 409)
+        self.refused(res, "conflict")
+        self.assertEqual(self.review_row(item)["state"], "resolved")
+        self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind = 'reopened'"), 0)
+
+    def test_double_click_reopen_writes_once(self):
+        cid = s.company(self.conn, "Acme")
+        item = s.review(self.conn, cid, "flagged")
+        self.ok(self.resolve(item, {"kind": "no_go", "reason": "agency", "source": "Their site"}))
+        first = self.reopen(item, 2, key="reopen-click-1")
+        again = self.reopen(item, 2, key="reopen-click-1")
+        self.assertEqual(self.ok(first), {"revision": 3})
+        self.assertEqual((again.status_code, again.headers.get("Idempotent-Replay")), (200, "true"))
+        self.assertEqual(again.json(), first.json())
+        self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind = 'reopened'"), 1)
+        self.assertEqual(self.review_row(item)["revision"], 3)
+        self.assertEqual(self.count("SELECT count(*) FROM no_go WHERE lifted_at IS NULL"), 0)  # the row it added
+
+    def test_view_has_merge_compare_settled_today_and_can_undo(self):
+        a, b, merge = self.pair()
+        s.person(self.conn, b, "Pat Dup")
+        listed = self.open_items()
+        self.assertEqual(listed[merge]["merge"], {
+            "a": {"companyId": a, "name": "Bolt", "domain": None, "size": None, "stage": None, "aliases": [],
+                  "boards": [], "openPostings": 0, "people": 0, "touches": 0, "status": "working"},
+            "b": {"companyId": b, "name": "Bolt Labs", "domain": None, "size": None, "stage": None, "aliases": [],
+                  "boards": [], "openPostings": 0, "people": 1, "touches": 0, "status": "candidate"},
+            "why": f"Maybe one company: Bolt (#{a}) and Bolt Labs (#{b}).", "suggestedKeep": "b", "warning": None})
+        cid = s.company(self.conn, "Acme")
+        other = s.company(self.conn, "Other")
+        ok_item = s.review(self.conn, cid, "flagged", evidence_key="ok")
+        edited = s.review(self.conn, cid, "size_unknown")
+        barred = s.review(self.conn, other, "flagged", evidence_key="no")
+        self.assertIsNone(self.open_items()[ok_item]["merge"])
+        self.assertEqual(self.view()["settledToday"], 0)
+        self.ok(self.resolve(ok_item, {"kind": "ok"}))
+        self.ok(self.resolve(edited, {"kind": "edit", "field": "size", "value": "45", "source": "LinkedIn"}))
+        self.ok(self.resolve(barred, {"kind": "no_go", "reason": "agency", "source": "Their site"}))
+        s._insert(self.conn, "review_item", {
+            "kind": "flagged", "company_id": cid, "reason": "Yesterday.", "evidence_key": "y", "raised_by": "rules",
+            "state": "resolved", "resolution": "marked_ok", "created_at": "2026-11-01T08:00:00Z",
+            "resolved_at": "2026-11-10T04:00:00Z"})  # Nov 9 in New York
+        s._insert(self.conn, "review_item", {
+            "kind": "flagged", "company_id": cid, "reason": "Went away.", "evidence_key": "c", "raised_by": "rules",
+            "state": "resolved", "resolution": "cleared", "created_at": "2026-11-01T08:00:00Z",
+            "resolved_at": "2026-11-10T14:00:00Z"})  # cleared by itself today: not his
+        view = self.view()
+        self.assertEqual(view["settledToday"], 3)
+        rows = {r["id"]: r for r in view["resolvedThisWeek"]}
+        self.assertEqual({rid: (rows[rid]["revision"], rows[rid]["canUndo"], rows[rid]["locked"])
+                          for rid in (ok_item, edited, barred)},
+                         {ok_item: (2, True, False), edited: (2, False, True), barred: (2, True, False)})
+
+    def test_board_reason_is_built_from_the_live_board_state(self):
+        cid = s.company(self.conn, "Acme")
+        b = s.board(self.conn, cid, "ashby", "acme", last_read="empty", empty_streak=2)
+        self.conn.execute("UPDATE board SET streak_since = '2026-11-08T08:00:00Z' WHERE board_id = ?", (b,))
+        for n in range(3):
+            s.posting(self.conn, cid, f"Role {n}", board_id=b, closed_at="2026-11-09T08:00:00Z",
+                      close_reason="board_empty_twice")
+        item = s.review(self.conn, cid, "board_empty", board_id=b, reason="The Ashby board returned no jobs once.")
+        reason = self.open_items()[item]["reason"]
+        self.assertIn("returned no jobs twice in a row, so its 3 postings were closed", reason)
+        self.assertEqual(self.review_row(item)["reason"], "The Ashby board returned no jobs once.")  # stored as raised
+        flagged = s.review(self.conn, cid, "flagged", reason="Stored words.", evidence_key="f")
+        self.assertEqual(self.open_items()[flagged]["reason"], "Stored words.")
+
+    def test_holds_email_comes_from_the_emailing_rule(self):
+        mailing = s.company(self.conn, "Mailing Co")
+        s.message(self.conn, s.touch(self.conn, s.person(self.conn, mailing, "Pat Mail")), 0)  # drafted, open touch
+        size = s.review(self.conn, mailing, "size_unknown", evidence_key="size")
+        sponsorship = s.review(self.conn, mailing, "sponsorship_unclear", evidence_key="sp",
+                               posting_id=s.posting(self.conn, mailing))
+        picked = s.company(self.conn, "Picked Co")
+        plan_entry(self.conn, picked, "picked")  # picked, but no email planned or queued
+        picked_size = s.review(self.conn, picked, "size_unknown", evidence_key="size")
+        items = self.open_items()
+        self.assertTrue(items[size]["holdsEmail"])
+        self.assertFalse(items[sponsorship]["holdsEmail"])
+        self.assertFalse(items[picked_size]["holdsEmail"])
+
+    def test_dismissing_a_careers_item_uses_the_same_fix_and_event(self):
+        cid = s.company(self.conn, "Acme")
+        dismissed = s.review(self.conn, cid, "careers_changed", evidence_key="page-1")
+        resolved = s.review(self.conn, cid, "careers_changed", evidence_key="page-2")
+        self.ok(self.post(f"/api/watch/{dismissed * 4}/dismiss", {}))
+        self.ok(self.resolve(resolved, {"kind": "ok"}))
+        rows = [self.review_row(i) for i in (dismissed, resolved)]
+        self.assertEqual({(r["state"], r["resolution"], r["resolution_note"], r["revision"]) for r in rows},
+                         {("resolved", "marked_ok", "Marked ok by you", 2)})
+        events = {r["entity_id"]: r for r in self.conn.execute(
+            "SELECT entity_id, kind, actor, idempotency_key, detail FROM event WHERE entity = 'review_item'")}
+        self.assertEqual(set(events), {dismissed, resolved})
+        for rid, e in events.items():
+            self.assertEqual((e["kind"], e["actor"], e["idempotency_key"]), ("resolved", "devanshu", f"review-resolved:{rid}:2"))
+        self.assertEqual(json.loads(events[dismissed]["detail"]), json.loads(events[resolved]["detail"]))
+
+    def test_unmerge_route_uses_the_domain_function(self):
+        a, b, item = self.pair(status="working", paused_at="2026-11-02T12:00:00Z", pause_note="After Q1")
+        self.conn.execute("UPDATE company SET status = 'closed', close_reason = 'not_now' WHERE company_id = ?", (a,))
+        before = dict(self.company_row(b))
+        self.ok(self.resolve(item, {"kind": "merge", "keep": "a"}))
+        self.assertEqual(self.ok(self.unmerge(b, before["revision"] + 1)), {"revision": before["revision"] + 2})
+        after = dict(self.company_row(b))
+        self.assertEqual((after["status"], after["close_reason"], after["remove_reason"], after["paused_at"],
+                          after["pause_note"], after["merged_into"]),
+                         ("working", None, None, "2026-11-02T12:00:00Z", "After Q1", None))
+        (event,) = self.conn.execute("SELECT idempotency_key, actor FROM event WHERE kind = 'unmerged'").fetchall()
+        self.assertEqual(tuple(event), (f"company-unmerged:{b}:{before['revision'] + 2}", "devanshu"))
+
+    def test_the_api_never_changes_a_message_for_any_fix(self):
+        cid = s.company(self.conn, "Acme", "working")
+        for state in ("planned", "drafted", "approved"):
+            review_seed.seed_queued_message(self.conn, review_seed.seed_email_person(self.conn, cid), state)
+        person = s.person(self.conn, cid, "Pat Lee")
+        a, b, merge = self.pair()
+        review_seed.seed_queued_message(self.conn, review_seed.seed_email_person(self.conn, b), "drafted")
+        before = self.messages()
+        self.assertEqual(len(before), 4)
+        item = lambda kind, key, **kw: s.review(self.conn, cid, kind, evidence_key=key, **kw)  # noqa: E731
+        ok = item("flagged", "ok")
+        steps = [
+            lambda: self.resolve(ok, {"kind": "ok"}),
+            lambda: self.reopen(ok, 2),
+            lambda: self.resolve(item("size_unknown", "s"), {"kind": "edit", "field": "size", "value": "45",
+                                                             "source": "x"}),
+            lambda: self.resolve(item("domain_missing", "d"), {"kind": "edit", "field": "domain", "value": "acme.io",
+                                                               "source": "x"}),
+            lambda: self.resolve(item("sponsorship_unclear", "p", posting_id=s.posting(self.conn, cid)),
+                                 {"kind": "edit", "field": "sponsorship", "value": "yes", "source": "x"}),
+            lambda: self.post(f"/api/watch/{item('careers_changed', 'w') * 4}/dismiss", {}),
+            lambda: self.resolve(s._insert(self.conn, "review_item", {
+                "kind": "flagged", "company_id": cid, "person_id": person, "reason": "Pat.", "raised_by": "claude",
+                "evidence_key": f"claude-no-go:{person}:said_no", "created_at": NOW}),
+                {"kind": "no_go", "reason": "said_no", "source": "x"}),
+            lambda: self.resolve(merge, {"kind": "merge", "keep": "a"}),
+            lambda: self.reopen(merge, 2),
+            lambda: self.resolve(merge, {"kind": "merge", "keep": "a"}, revision=3),
+            lambda: self.unmerge(b, self.company_row(b)["revision"]),
+            lambda: self.resolve(item("flagged", "n"), {"kind": "no_go", "reason": "said_no", "source": "x"}),
+        ]
+        for n, step in enumerate(steps):
+            with self.subTest(step=n):
+                self.ok(step())
+                self.assertEqual(self.messages(), before)
+
     def test_a_board_conflict_from_add_board_retires_nothing(self):
         from unittest import mock
         cid = s.company(self.conn, "Acme")
         old = s.board(self.conn, cid, "ashby", "acmeold")
         posting = s.posting(self.conn, cid, board_id=old)
         item = s.review(self.conn, cid, "board_unreadable", board_id=old)
-        with mock.patch("outreach.api.queries.needs_you.add_board", return_value="conflict"):
+        with mock.patch("outreach.review.boardfix.add_board", return_value="conflict"):
             res = self.resolve(item, {"kind": "edit", "field": "board_url", "value": "https://jobs.lever.co/acme",
                                       "source": "Their site"})
         self.refused(res, "conflict")

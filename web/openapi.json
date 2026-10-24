@@ -2434,6 +2434,147 @@
         "title": "LoggedStep",
         "type": "object"
       },
+      "MergeCompare": {
+        "description": "Both sides of a merge question (`outreach.review.merge.merge_compare`): `a` is the item's company, `b` the one\nits key names.",
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/MergeSide"
+          },
+          "b": {
+            "$ref": "#/components/schemas/MergeSide"
+          },
+          "suggestedKeep": {
+            "enum": [
+              "a",
+              "b"
+            ],
+            "title": "Suggestedkeep",
+            "type": "string"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "why",
+          "suggestedKeep",
+          "warning"
+        ],
+        "title": "MergeCompare",
+        "type": "object"
+      },
+      "MergeSide": {
+        "description": "One company of a merge question, as `outreach.review.merge.MergeSide` reads it.",
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "boards": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Boards",
+            "type": "array"
+          },
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "openPostings": {
+            "title": "Openpostings",
+            "type": "integer"
+          },
+          "people": {
+            "title": "People",
+            "type": "integer"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "backlog",
+              "working",
+              "closed",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "touches": {
+            "title": "Touches",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "companyId",
+          "name",
+          "domain",
+          "size",
+          "stage",
+          "aliases",
+          "boards",
+          "openPostings",
+          "people",
+          "touches",
+          "status"
+        ],
+        "title": "MergeSide",
+        "type": "object"
+      },
       "MessageRevisionBody": {
         "additionalProperties": false,
         "properties": {
@@ -2478,13 +2619,18 @@
             },
             "title": "Resolvedthisweek",
             "type": "array"
+          },
+          "settledToday": {
+            "title": "Settledtoday",
+            "type": "integer"
           }
         },
         "required": [
           "asOf",
           "open",
           "resolvedThisWeek",
-          "boardsJob"
+          "boardsJob",
+          "settledToday"
         ],
         "title": "NeedsYouView",
         "type": "object"
@@ -4096,6 +4242,33 @@
         "title": "RemovedRow",
         "type": "object"
       },
+      "ReopenReviewBody": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "ReopenReviewBody",
+        "type": "object"
+      },
+      "Reopened": {
+        "properties": {
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "Reopened",
+        "type": "object"
+      },
       "ReplyKindBody": {
         "additionalProperties": false,
         "properties": {
@@ -4189,6 +4362,10 @@
             "title": "At",
             "type": "string"
           },
+          "canUndo": {
+            "title": "Canundo",
+            "type": "boolean"
+          },
           "companyName": {
             "title": "Companyname",
             "type": "string"
@@ -4230,6 +4407,10 @@
             ],
             "title": "Resolution",
             "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
           }
         },
         "required": [
@@ -4239,7 +4420,9 @@
           "resolution",
           "note",
           "at",
-          "locked"
+          "locked",
+          "revision",
+          "canUndo"
         ],
         "title": "ResolvedReview",
         "type": "object"
@@ -4520,6 +4703,16 @@
             ],
             "title": "Lastokat"
           },
+          "merge": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MergeCompare"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "openPostings": {
             "anyOf": [
               {
@@ -4593,7 +4786,8 @@
           "openPostings",
           "sizeFacts",
           "revision",
-          "inPlay"
+          "inPlay",
+          "merge"
         ],
         "title": "ReviewItem",
         "type": "object"
@@ -9623,6 +9817,120 @@
         "summary": "Progress View",
         "tags": [
           "progress"
+        ]
+      }
+    },
+    "/api/review/{review_id}/reopen": {
+      "post": {
+        "operationId": "reopen_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Review Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReopenReviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reopened"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Reopen Review",
+        "tags": [
+          "needs-you"
         ]
       }
     },

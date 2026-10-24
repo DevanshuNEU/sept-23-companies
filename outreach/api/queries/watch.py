@@ -13,7 +13,9 @@ from outreach.api.idempotency import WriteCtx
 from outreach.api.models.company import CompanyRef
 from outreach.api.models.watch import SourceLink, WatchItem, WatchView
 from outreach.api.queries.company import Holds, company_holds, merge_parents, survivor_of
+from outreach.api.queries.needs_you import review_errors
 from outreach.drafts.followups import company_map, no_go_sets
+from outreach.review.fixes import Fix, apply_fix
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
@@ -170,9 +172,10 @@ def _gone() -> ApiProblem:
 def dismiss_item(ctx: WriteCtx, item_id: int) -> None:
     """Take one item off the list, inside the write's transaction.
 
-    A careers item resolves its review item as `marked_ok`, so it leaves Needs you too. A new company is remembered
-    in `watch_dismissal` under its survivor's id. A merge item is decided in Needs you, never here. An item already
-    dismissed is quietly left as it is (no second event).
+    A careers item is settled by `outreach.review`'s Mark ok (`apply_fix(Fix('ok'))`), the same fix and event as in
+    Needs you, so it leaves Needs you too. A new company is remembered in `watch_dismissal` under its survivor's id.
+    A merge item is decided in Needs you, never here. An item already dismissed is quietly left as it is (no second
+    event).
     """
     ref_id, index = divmod(item_id, 4)
     kind = KIND_OF_INDEX.get(index)
@@ -192,16 +195,14 @@ def dismiss_item(ctx: WriteCtx, item_id: int) -> None:
                          actor="devanshu", at=ctx.now, idempotency_key=ctx.event_key(0),
                          detail={"text": "Dismissed from the watch list."})
         return
-    review = conn.execute("SELECT kind, company_id FROM review_item WHERE review_id = ?", (ref_id,)).fetchone()
+    review = conn.execute("SELECT kind, state, revision FROM review_item WHERE review_id = ?", (ref_id,)).fetchone()
     if review is None or review["kind"] != kind:
         raise _gone()
     if kind == "merge_candidate":
         raise ApiProblem("not_allowed", "Decide it in Needs you.")
-    cur = conn.execute(
-        "UPDATE review_item SET state = 'resolved', resolution = 'marked_ok', resolved_at = ?, "
-        "resolution_note = 'Marked fine from the watch list.', revision = revision + 1 "
-        "WHERE review_id = ? AND state = 'open'", (ctx.now, ref_id))
-    if cur.rowcount:
-        append_event(conn, entity="review_item", entity_id=ref_id, company_id=review["company_id"],
-                     kind="review_resolved", actor="devanshu", at=ctx.now, idempotency_key=ctx.event_key(0),
-                     detail={"resolution": "marked_ok", "text": "Careers page change marked fine from the watch list."})
+    if review["state"] != "open":
+        return
+    # The same fix as Mark ok in Needs you (#16): one `resolved` event, the same note. The revision is the one read
+    # just now, in this same write transaction, so nothing can move it in between.
+    with review_errors():
+        apply_fix(conn, ref_id, Fix("ok"), revision=review["revision"], now=ctx.now, actor="devanshu")

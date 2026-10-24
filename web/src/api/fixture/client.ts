@@ -683,7 +683,7 @@ export class FixtureClient implements OutreachClient {
         note = 'Merged by you';
       }
       this.db.needsYou.open = this.db.needsYou.open.filter((r) => r.id !== reviewId);
-      this.db.needsYou.resolvedThisWeek.unshift({ id: reviewId, kind: review.kind, companyName: review.company.name, resolution, note, at: this.now, locked: fix.kind === 'edit' });
+      this.db.needsYou.resolvedThisWeek.unshift({ id: reviewId, kind: review.kind, companyName: review.company.name, resolution, note, at: this.now, locked: fix.kind === 'edit', revision: revision + 1, canUndo: fix.kind !== 'edit' });
       v.reviewItems = v.reviewItems.filter((r) => r.id !== reviewId);
     });
   }

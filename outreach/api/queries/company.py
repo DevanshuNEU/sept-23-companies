@@ -25,7 +25,6 @@ EVENT_LIMIT = 500  # the newest events; a board read every few days adds up
 READS_SHOWN = 10
 DAYS_OF_EMAIL = 3
 IMPORT_SOURCE_KEY = "importSource"  # the key of an import event's detail that names the old place it came from
-EMAIL_HOLDING_KINDS = ("domain_missing", "size_unknown", "size_guess", "size_check")
 IMPORT_SOURCES = ("data_js", "local_storage", "contacts_json", "radar_db", "devboard", "contacted_txt", "devvault_notes")
 TIER_RANK = {"new_grad": 0, "early_career": 1, "swe1": 2, "swe2": 3, "open": 4, "not_stated": 5, "senior": 6}
 STATE_RANK = {"open": 0, "out_of_lane": 1, "hidden": 2, "closed": 3}

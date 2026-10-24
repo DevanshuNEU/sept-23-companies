@@ -265,8 +265,12 @@ class _Writer:
 
     def status(self, c: CompanyIn, company_id: int, active: bool) -> None:
         """The done set's close (or the old tracker's), else `working` when the company has a touch or an
-        application. The import never sets `removed` and never reopens a company he closed."""
+        application. The import never sets `removed` and never reopens a company he closed. It sets a status once:
+        after an earlier import closed the company or made it working, the status is his, and a rerun leaves it."""
         conn = self.conn
+        if conn.execute("SELECT 1 FROM event WHERE idempotency_key IN (?, ?)",
+                        (f"import:close:{company_id}", f"import:working:{company_id}")).fetchone():
+            return
         status = conn.execute("SELECT status FROM company WHERE company_id = ?", (company_id,)).fetchone()[0]
         if c.close and status not in ("closed", "removed"):
             conn.execute("UPDATE company SET status = 'closed', close_reason = ?, status_note = ?, status_at = ?, "

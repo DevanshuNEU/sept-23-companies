@@ -438,6 +438,17 @@ class WriteTest(unittest.TestCase):
         apply_plan(conn, plan, now=NOW)
         self.assertEqual(conn.execute("SELECT count(*) FROM person WHERE name = 'Sam Lee'").fetchone()[0], 3)
 
+    def test_a_rerun_keeps_a_status_he_changed(self):
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        ids = apply_plan(conn, self.plan, now=NOW).ids
+        lumen, kestrel = ids["company:lumenfreight"], ids["company:kestrelrobotics"]
+        conn.execute("UPDATE company SET status = 'backlog' WHERE company_id = ?", (lumen,))
+        conn.execute("UPDATE company SET status = 'working', close_reason = NULL WHERE company_id = ?", (kestrel,))
+        self.assertEqual(apply_plan(conn, self.plan, now=NOW).status, "ok")
+        status = dict(conn.execute("SELECT company_id, status FROM company").fetchall())
+        self.assertEqual((status[lumen], status[kestrel]), ("backlog", "working"))
+
     # -- more of what the sender and the store rely on --
 
     def test_every_name_is_an_alias_of_its_company(self):

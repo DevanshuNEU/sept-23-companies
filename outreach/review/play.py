@@ -9,7 +9,7 @@ import sqlite3
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-__all__ = ["ny_date", "live_company_ids", "in_play", "emailing"]
+__all__ = ["ny_date", "live_company_ids", "recent_list_date", "in_play", "emailing"]
 
 _NEW_YORK = ZoneInfo("America/New_York")
 # A message in one of these states, on an open touch, is an email he is about to send or must look at.
@@ -33,8 +33,10 @@ def live_company_ids(conn: sqlite3.Connection) -> frozenset[int]:
     return frozenset(r[0] for r in rows)
 
 
-def _latest_list(conn: sqlite3.Connection, today: str, planned_days: int) -> str | None:
-    """The newest daily list's date, when it is no more than `planned_days` before `today`; else None."""
+def recent_list_date(conn: sqlite3.Connection, today: str, planned_days: int) -> str | None:
+    """The newest daily list's date, when it is no more than `planned_days` before `today`; else None.
+
+    None also means "no recent plan": a job that needs a plan to judge by (the stale sweep) skips on it."""
     row = conn.execute("SELECT MAX(list_date) FROM daily_list").fetchone()
     if row is None or row[0] is None:
         return None
@@ -54,7 +56,7 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int) -> dict[
     for (cid,) in conn.execute("SELECT company_id FROM company WHERE status = 'working'"):
         if cid in live:
             out[cid] = "picked"
-    when = _latest_list(conn, today, planned_days)
+    when = recent_list_date(conn, today, planned_days)
     if when is not None:
         for row in conn.execute("SELECT company_id, state, person_id FROM daily_list_entry WHERE list_date = ?",
                                 (when,)):
@@ -78,7 +80,7 @@ def emailing(conn: sqlite3.Connection, *, today: str, planned_days: int) -> froz
         "SELECT DISTINCT p.company_id FROM message m JOIN touch t ON t.touch_id = m.touch_id "
         "JOIN person p ON p.person_id = t.person_id "
         f"WHERE t.state = 'open' AND p.email IS NOT NULL AND m.state IN ({marks})", _LIVE_MESSAGE_STATES)}
-    when = _latest_list(conn, today, planned_days)
+    when = recent_list_date(conn, today, planned_days)
     if when is not None:
         found.update(r[0] for r in conn.execute(
             "SELECT company_id FROM daily_list_entry WHERE list_date = ? AND channel = 'email' "

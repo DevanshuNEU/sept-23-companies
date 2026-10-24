@@ -23,6 +23,7 @@ from outreach.review.hand import (NOT_SAVED, normalize_domain, normalize_sponsor
                                   write_hand_fact)
 from outreach.review.items import get_item, resolve_item, settle_siblings, unit
 from outreach.review.kinds import KINDS, NO_GO_REASONS, spec_of
+from outreach.review.merge import _merge
 from outreach.rules.facts import EvidenceDraft
 from outreach.store import append_event, utcnow
 from outreach.store.timefmt import iso_utc
@@ -195,6 +196,33 @@ def _no_go(conn: sqlite3.Connection, row: sqlite3.Row, fix: Fix, revision: int, 
     return new_revision, note, settled
 
 
+def _merge_fix(conn: sqlite3.Connection, row: sqlite3.Row, fix: Fix, revision: int, at: str, actor: str,
+               detail: dict) -> tuple:
+    """Resolve the question, merge the side he did not keep into the one he kept, then settle the loser's other
+    open items. Returns (revision, note, settled)."""
+    other = _int(row["evidence_key"])
+    if other is None:
+        raise ReviewError("not_allowed", "This question does not name a second company.")
+    keep_id, lose_id = (row["company_id"], other) if fix.keep == "a" else (other, row["company_id"])
+    names = dict(conn.execute("SELECT company_id, name FROM company WHERE company_id IN (?, ?)", (keep_id, lose_id)))
+    note = words.merge_note(names.get(lose_id, f"#{lose_id}"), names.get(keep_id, f"#{keep_id}"))
+    # Resolved first, so the merge does not count this question among the ones it answered.
+    new_revision = resolve_item(conn, row["review_id"], resolution="field_edited", note=note, revision=revision,
+                                now=at)
+    pairs = _merge(conn, keep_id=keep_id, lose_id=lose_id, review_id=row["review_id"], at=at, actor=actor)
+    rest = settle_siblings(conn, lose_id, except_id=row["review_id"],
+                           note=words.merged_away_note(names.get(keep_id, f"#{keep_id}")), now=at)
+    detail.update(kept_id=keep_id, merged_id=lose_id)
+    return new_revision, note, tuple(pairs) + rest
+
+
+def _int(text) -> int | None:
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return None
+
+
 def apply_fix(conn: sqlite3.Connection, review_id: int, fix: Fix, *, revision: int, now: str | None = None,
               actor: str = "devanshu") -> FixResult:
     """Settle one open item with one fix, in one write unit, and append its `resolved` event.
@@ -221,7 +249,8 @@ def apply_fix(conn: sqlite3.Connection, review_id: int, fix: Fix, *, revision: i
             resolution = "marked_no_go"
             new_revision, note, settled = _no_go(conn, row, fix, revision, at, detail)
         else:
-            raise ReviewError("not_allowed", "Merging from here is not available yet.")
+            resolution = "field_edited"
+            new_revision, note, settled = _merge_fix(conn, row, fix, revision, at, actor, detail)
         detail.update(resolution=resolution, note=note, settled=list(settled))
         append_event(conn, entity="review_item", kind="resolved", actor=actor, entity_id=review_id,
                      company_id=row["company_id"], at=at, detail=detail,

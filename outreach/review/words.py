@@ -13,7 +13,8 @@ from outreach.review.kinds import NO_GO_REASONS
 
 __all__ = ["clean", "day", "sponsorship_reason", "size_reason", "domain_reason", "board_reason", "reopened",
            "fix_note", "no_go_note", "ok_note", "already_no_go_note", "person_no_go_note", "keep_separate_note",
-           "settled_by_field", "NO_GO_SETTLED"]
+           "settled_by_field", "NO_GO_SETTLED", "TIE_WARNING", "merge_note", "merged_away_note", "same_company_note",
+           "shared_domain_note"]
 
 _NEW_YORK = ZoneInfo("America/New_York")
 _DASHES = str.maketrans({chr(0x2013): "-", chr(0x2014): "-"})
@@ -186,3 +187,24 @@ def settled_by_field(field: str) -> str:
 
 
 NO_GO_SETTLED = "This company is on the no-go list."
+
+TIE_WARNING = "This record collects name-only mentions that could be either company."
+
+
+def merge_note(loser: str, keeper: str) -> str:
+    return clean(f"Merged {loser} into {keeper} by you")
+
+
+def merged_away_note(keeper: str) -> str:
+    """The note on the other open items of the company that a merge took away."""
+    return clean(f"Merged into {keeper}.")
+
+
+def same_company_note(loser: str) -> str:
+    """The note on a merge question that a merge answered: its two sides are one company now, or another open
+    question asks the same pair."""
+    return clean(f"Same company after merging {loser}")
+
+
+def shared_domain_note(domain: str) -> str:
+    return clean(f"{domain} is shared by several employers, so it no longer joins them")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import re
 import sqlite3
 from collections import Counter
 from collections.abc import Collection
@@ -22,7 +23,8 @@ from outreach.review.items import clear_item, decided_before, raise_item, unit
 from outreach.review.play import emailing, in_play, live_company_ids, ny_date, recent_list_date
 from outreach.rules import Decision, passes, ruleset_version
 from outreach.rules.rebuild import stored_decision
-from outreach.store import append_event
+from outreach.sources.keys import registrable_domain
+from outreach.store import append_event, is_shared_key
 from outreach.store.timefmt import ISO_FMT, iso_utc, utcnow
 
 __all__ = ["SyncResult", "sync_size_unknown", "sync_domain_missing", "sync_sponsorship", "clear_gone",
@@ -262,6 +264,17 @@ _STALE_PRODUCERS = (("size_unknown", "daily_list"), ("domain_missing", "sender")
 _STALE_NOTE = "No longer in your plan."
 
 
+# The reason #31's `raise_merge_candidate` writes for a pair joined only by a domain (basis `domain`, or
+# `fein_conflict+domain`): "... Basis domain, confidence strong: both hold the domain acme.io".
+_DOMAIN_BASIS = re.compile(r"Basis (?:fein_conflict\+)?domain, confidence \w+: both hold the domain (\S+?)\.?$")
+
+
+def _shared_domain(conn: sqlite3.Connection, domain: str) -> bool:
+    """The domain, or its registrable root, is a shared key (identity's own test)."""
+    root = registrable_domain(domain)
+    return is_shared_key(conn, "domain", domain) or (root is not None and is_shared_key(conn, "domain", root))
+
+
 def _gone(conn: sqlite3.Connection, now: str, scope: set[int] | None) -> Counter:
     """Clear every open item whose subject went away. Returns the count by kind."""
     found: dict[int, tuple[str, str]] = {}
@@ -269,6 +282,11 @@ def _gone(conn: sqlite3.Connection, now: str, scope: set[int] | None) -> Counter
         for row in conn.execute(sql + " ORDER BY r.review_id"):
             if scope is None or row["company_id"] in scope:
                 found.setdefault(row["review_id"], (row["kind"], _GONE_NOTES[why]))
+    for row in conn.execute("SELECT review_id, company_id, reason FROM review_item WHERE state = 'open' "
+                            "AND kind = 'merge_candidate' ORDER BY review_id"):
+        m = _DOMAIN_BASIS.search(row["reason"])
+        if m and (scope is None or row["company_id"] in scope) and _shared_domain(conn, m.group(1)):
+            found.setdefault(row["review_id"], ("merge_candidate", words.shared_domain_note(m.group(1))))
     by_kind: Counter = Counter()
     with unit(conn):
         for review_id in sorted(found):
@@ -281,7 +299,8 @@ def _gone(conn: sqlite3.Connection, now: str, scope: set[int] | None) -> Counter
 def clear_gone(conn: sqlite3.Connection, *, now: str, company_ids: Collection[int] | None = None) -> int:
     """Clear (with a note saying why) every open item of any kind whose company is merged, removed, closed or on the
     no-go list; a board item whose board is inactive; a `reader_disagrees` item whose posting is closed; and a
-    `merge_candidate` item where either company is merged or removed. A quiet item is never cleared for being quiet.
+    `merge_candidate` item where either company is merged or removed, or whose only basis is a domain that has since
+    become a shared key. A quiet item is never cleared for being quiet.
     Returns how many it cleared."""
     return sum(_gone(conn, now, _scope(company_ids)).values())
 

@@ -16,8 +16,19 @@ outside the live checkout before it reads the config or opens anything, and exit
 login problem or failed calls.
 
 The store is the one at OUTREACH_DB; the default (live) store opens only from the live checkout, so from a worktree
-this runs on a scratch OUTREACH_DB or not at all. Only `night` calls a model. `gold` (Task 7), `eval` and `promote`
-(Task 8) are registered and not built yet.
+this runs on a scratch OUTREACH_DB or not at all. Only `night` calls a model.
+
+`gold` works the labeled set (`outreach.reader.gold`, where the file format and the labeling rules live):
+
+    uv run python -m outreach.reader gold [--file PATH] sample --per-class N --seed S   # needs the store
+    uv run python -m outreach.reader gold [--file PATH] show [--limit N]
+    uv run python -m outreach.reader gold [--file PATH] confirm <gold_id> [--set field=value --quote "..."]...
+    uv run python -m outreach.reader gold [--file PATH] confirm --all-shown
+    uv run python -m outreach.reader gold [--file PATH] coverage
+
+`--file` defaults to tests/gold/items.jsonl. `show` remembers what it printed (a `.shown` file next to the items),
+and `confirm --all-shown` confirms those items that are still pending and unchanged since. Only `sample` opens the
+store. `eval` and `promote` (Task 8) are registered and not built yet.
 """
 from __future__ import annotations
 
@@ -25,19 +36,22 @@ import argparse
 import dataclasses
 import json
 import sys
+from datetime import date
+from pathlib import Path
 
 import live_checkout
 from outreach.reader.combine import apply_all, apply_reading
+from outreach.reader import gold
 from outreach.reader.config import load_reader_config
 from outreach.reader.night import APPLIED, claude_runner, run_night
 from outreach.reader.queue import batch_payload, enqueue_missing, next_batch
 from outreach.reader.submit import submit
 from outreach.rules import RulesetNotCurrent
-from outreach.store import connect
+from outreach.store import body_sha256, connect
 
 __all__ = ["main"]
 
-_LATER = {"gold": "Task 7", "eval": "Task 8", "promote": "Task 8"}
+_LATER = {"eval": "Task 8", "promote": "Task 8"}
 _NIGHT_OK = ("queue_empty", "cap_reached", "session_limit")
 
 
@@ -52,9 +66,105 @@ def _parser() -> argparse.ArgumentParser:
     night = sub.add_parser("night", help="read the queue through claude -p (live checkout only)")
     night.add_argument("--max-batches", type=_positive, default=None, help="calls tonight (default: config)")
     night.add_argument("--max-postings", type=_positive, default=None, help="postings tonight (default: config)")
+    _gold_parser(sub)
     for name, task in _LATER.items():
         sub.add_parser(name, help=f"not built yet ({task})")
     return parser
+
+
+def _gold_parser(sub) -> None:
+    g = sub.add_parser("gold", help="the labeled set: sample, show, confirm, coverage")
+    g.add_argument("--file", type=Path, default=None, help="the items file (default: tests/gold/items.jsonl)")
+    gsub = g.add_subparsers(dest="gold_command", required=True)
+    sample = gsub.add_parser("sample", help="draw postings from the store and append them prelabeled")
+    sample.add_argument("--per-class", type=_positive, required=True)
+    sample.add_argument("--seed", type=int, required=True)
+    show = gsub.add_parser("show", help="print the next pending items for a sitting")
+    show.add_argument("--limit", type=_positive, default=10)
+    conf = gsub.add_parser("confirm", help="confirm an item, with corrections")
+    conf.add_argument("gold_id", nargs="?")
+    conf.add_argument("--set", dest="sets", action="append", default=[], metavar="FIELD=VALUE")
+    conf.add_argument("--quote", dest="quotes", action="append", default=[])
+    conf.add_argument("--all-shown", action="store_true", help="confirm what the last show printed, untouched")
+    gsub.add_parser("coverage", help="confirmed against target per stratum")
+
+
+def _label_value(field: str, text: str):
+    """A --set value as the field holds it: a whole number (or null) for years, text otherwise."""
+    if field in ("years_low", "years_high"):
+        return None if text in ("", "null", "none") else int(text)
+    return text
+
+
+def _shown_path(items: Path) -> Path:
+    return items.with_name(items.name + ".shown")
+
+
+def _gold(args: argparse.Namespace, stdout) -> int:
+    path = args.file if args.file is not None else gold.GOLD_PATH
+    command = args.gold_command
+    if command == "sample":
+        items = gold.load_gold(path) if path.exists() else []
+        conn = connect()  # the store guard: the live store opens only from the live checkout
+        try:
+            new = gold.sample_gold(conn, args.per_class, seed=args.seed,
+                                   existing={body_sha256(i.body) for i in items}, first_id=gold.next_id(items))
+        finally:
+            conn.close()
+        gold.append_items(path, new)
+        print(f"gold: drew {len(new)} postings into {path}", file=stdout)
+        return 0
+    items = gold.load_gold(path)
+    if command == "show":
+        shown = gold.pending(items)[:args.limit]
+        print(gold.show_text(shown), file=stdout)
+        _shown_path(path).write_text(json.dumps({i.gold_id: gold.labels_digest(i) for i in shown}), encoding="utf-8")
+        return 0
+    if command == "coverage":
+        print(gold.coverage_text(items), file=stdout)
+        return 0
+    today = date.today().isoformat()
+    if args.all_shown:
+        if args.gold_id or args.sets:
+            print("gold confirm: --all-shown takes no id and no --set", file=sys.stderr)
+            return 2
+        marks = _shown_path(path)
+        seen = json.loads(marks.read_text(encoding="utf-8")) if marks.exists() else {}
+        by_id = {i.gold_id: i for i in items}
+        done = 0
+        for gold_id, digest in seen.items():
+            item = by_id.get(gold_id)
+            if item is None or item.status != "prelabeled":
+                continue
+            if gold.labels_digest(item) != digest:
+                print(f"gold: {gold_id} changed after show printed it; confirm it by id", file=stdout)
+                continue
+            if not item.labels:
+                print(f"gold: {gold_id} has no labels yet; nothing to confirm", file=stdout)
+                continue
+            gold.confirm(path, gold_id, today=today)
+            done += 1
+        print(f"gold: confirmed {done} of {len(seen)} shown", file=stdout)
+        return 0
+    if not args.gold_id:
+        print("gold confirm: give an id or --all-shown", file=sys.stderr)
+        return 2
+    if len(args.sets) != len(args.quotes):
+        print("gold confirm: each --set needs its --quote (use --quote \"\" for unknown)", file=sys.stderr)
+        return 2
+    try:
+        fixes = {}
+        for pair, quote in zip(args.sets, args.quotes):
+            field, sep, value = pair.partition("=")
+            if not sep:
+                raise ValueError(f"--set {pair!r} is not field=value")
+            fixes[field] = gold.FieldReading(_label_value(field, value), quote)
+        item = gold.confirm(path, args.gold_id, set_fields=fixes, today=today)
+    except ValueError as err:
+        print(f"gold confirm: {err}", file=sys.stderr)
+        return 1
+    print(f"gold: {item.gold_id} confirmed on {item.confirmed_on}", file=stdout)
+    return 0
 
 
 def _positive(text: str) -> int:
@@ -97,6 +207,8 @@ def main(argv: list[str] | None = None, *, stdin=None, stdout=None) -> int:
         return 2
     if args.command == "night":
         return _night(args, stdout)
+    if args.command == "gold":
+        return _gold(args, stdout)
     cfg = load_reader_config()
     conn = connect()  # the store guard: the live store opens only from the live checkout
     try:

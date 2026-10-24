@@ -388,7 +388,8 @@ class GmailClient(MailClient):
                     if gid and gid not in seen:
                         seen.add(gid)
                         added.append(Added(gmail_message_id=gid, thread_id=str(msg.get("threadId", "")),
-                                           labels=tuple(msg.get("labelIds", []) or ())))
+                                           labels=tuple(msg.get("labelIds", []) or ()),
+                                           history_id=str(record["id"]) if record.get("id") else None))
             last = str(res.get("historyId") or last)
             page_token = res.get("nextPageToken")
             if not page_token:

@@ -2,7 +2,8 @@
 
 It adds nothing else: no retries, no parsing, no judgment of a status beyond "did this host push back". The
 declared User-Agent comes from the crawl config. A host that keeps failing trips its bucket and the crawler defers
-that bucket's boards with no streak change (a tripped bucket is an outage, not a finding about any one board).
+that bucket's boards with no streak change (a tripped bucket is an outage, not a finding about any one board). A host
+of an ATS whose reader is switched off (`ats_off`, #46) is never sent to: `HostOff`, a `HostTripped`.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from pathlib import Path
 from outreach.crawl.config import CrawlConfig
 from outreach.net import FetchError, HttpClient, Response
 
-__all__ = ["HostTripped", "bucket_for", "PoliteClient"]
+__all__ = ["HostTripped", "HostOff", "bucket_for", "PoliteClient"]
 
 
 class HostTripped(Exception):
@@ -25,6 +26,16 @@ class HostTripped(Exception):
     def __init__(self, bucket: str):
         super().__init__(f"{bucket}: too many failures, not sending")
         self.bucket = bucket
+
+
+class HostOff(HostTripped):
+    """The host belongs to an ATS whose reader is switched off in config.toml (#46), so the request was not sent. A
+    HostTripped, so every caller treats it as an outage (a deferral, no streak change, no item), never as a finding
+    about a board or a page."""
+
+    def __init__(self, bucket: str, host: str, ats: str, reason: str):
+        Exception.__init__(self, f"{host}: the {ats} reader is switched off ({reason}), not sending")
+        self.bucket, self.host, self.ats, self.reason = bucket, host, ats, reason
 
 
 def bucket_for(host: str, cfg: CrawlConfig) -> str:
@@ -73,8 +84,12 @@ class PoliteClient:
         return merged
 
     def _begin(self, url: str) -> str:
-        """Refuse a tripped bucket, then wait out the bucket's spacing. Returns the bucket."""
+        """Refuse a switched-off ATS's host and a tripped bucket, then wait out the bucket's spacing. Returns the
+        bucket. Every request and every redirect hop starts here, so nothing reaches a switched-off host."""
         bucket = _bucket_of_url(url, self.cfg)
+        ats = self.cfg.off_host(_host(url))
+        if ats is not None:
+            raise HostOff(bucket, _host(url), ats, self.cfg.ats_off[ats])
         if self.tripped(bucket):
             raise HostTripped(bucket)
         interval = self.cfg.host_interval_s.get(bucket, self.cfg.default_host_interval_s)

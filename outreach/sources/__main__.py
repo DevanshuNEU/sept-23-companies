@@ -165,7 +165,8 @@ def _fetch_stapply(dest: Path, factory: ClientFactory) -> tuple[int, dict]:
     folder = dest / "stapply"
     updated = StapplyDirectory.refresh(factory("declared"), folder)
     (folder / _STAPPLY_MARKER).write_text(utcnow() + "\n", encoding="utf-8")  # only a refresh that finished
-    return 0, {"folder": str(folder), "updated": list(updated), "skipped_entries": updated.skipped}
+    return 0, {"folder": str(folder), "updated": list(updated), "skipped_entries": updated.skipped,
+               "excluded_lists": list(updated.excluded), "excluded_rows": updated.excluded_rows}
 
 
 def _stapply_due(root: Path, now: str) -> str | None:
@@ -253,7 +254,8 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
         if reason:
             return {"status": "skipped", "reason": reason}
         _, payload = _fetch_stapply(root, factory)  # downloads only the files whose hash changed
-        return {"status": "ok", "updated": payload["updated"], "skipped_entries": payload["skipped_entries"]}
+        return {"status": "ok", **{k: payload[k] for k in ("updated", "skipped_entries", "excluded_lists",
+                                                             "excluded_rows")}}
 
     def resolve() -> dict:
         status, payload = _resolve(conn)

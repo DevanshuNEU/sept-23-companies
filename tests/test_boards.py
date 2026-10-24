@@ -43,6 +43,13 @@ class AddBoardTest(unittest.TestCase):
         self.assertEqual(json.loads(event["detail"]),
                          {"via": "careers_page", "matched_on": "https://acme.example/careers"})
 
+    def test_add_board_stamps_the_given_now(self):
+        at = "2026-11-10T15:14:00Z"
+        add_board(self.conn, self.acme, BoardRef("greenhouse", "acme"), now=at, **KW)
+        (board,) = self.boards()
+        (event,) = self.events()
+        self.assertEqual((board["created_at"], event["at"]), (at, at))
+
     def test_add_board_event_actor_defaults_to_crawler_and_can_be_given(self):
         add_board(self.conn, self.acme, BoardRef("greenhouse", "acme"), **KW)
         add_board(self.conn, self.acme, BoardRef("lever", "acme"), actor="devanshu", **{**KW, "found_by": "hand"})

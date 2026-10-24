@@ -5,6 +5,10 @@ them from a folder and finds boards by exact normalized name (the key the resear
 the list's slug, or by the row's URL host being the company's own domain. `refresh` keeps the folder current.
 
 Requests carry the shared declared User-Agent and nothing else that names anyone (a bare client gets a 403).
+
+The `wellfound` and `ycombinator` lists (`TERMS_EXCLUDED`) are never downloaded or read (#46): stapply built them by
+scraping sites whose terms forbid it. `refresh` counts the lists and their rows in its result and removes a copy an
+earlier refresh left in the folder.
 """
 from __future__ import annotations
 
@@ -24,8 +28,8 @@ from outreach.net import USER_AGENT, HttpClient
 from outreach.sources.boards import BoardRef, normalize_token
 from outreach.sources.keys import classify_domain, registrable_domain
 
-__all__ = ["MANIFEST_URL", "STAPPLY_ATS", "BoardHit", "RefreshResult", "StapplyDirectory", "board_match_key",
-           "board_token"]
+__all__ = ["MANIFEST_URL", "STAPPLY_ATS", "TERMS_EXCLUDED", "BoardHit", "RefreshResult", "StapplyDirectory",
+           "board_match_key", "board_token"]
 
 MANIFEST_URL = "https://storage.stapply.ai/jobhive/v1/manifest.json"
 MAX_HITS = 3
@@ -39,6 +43,12 @@ STAPPLY_ATS: dict[str, str] = {
         "lever", "paycom", "personio", "pinpoint", "recruitee", "rippling", "smartrecruiters", "successfactors",
         "teamtailor", "workable", "workday")},
     "oracle": "oracle_orc",
+}
+
+# stapply lists that are never downloaded or read, and why (#46, decided 2026-10-23). Neither is in STAPPLY_ATS.
+TERMS_EXCLUDED: dict[str, str] = {
+    "wellfound": "built by scraping wellfound.com, whose terms forbid scraping",
+    "ycombinator": "built by scraping ycombinator.com, whose terms forbid scraping",
 }
 
 _SUFFIXES = re.compile(r"\b(inc|llc|l l c|corp|corporation|co|ltd|limited|the|usa|us|incorporated|company|holdings|"
@@ -104,11 +114,14 @@ class BoardHit:
 
 class RefreshResult(list):
     """The file names `StapplyDirectory.refresh` updated, as a plain list; `skipped` counts the manifest entries it
-    could not use (no `csv` or `sha256`) and passed over."""
+    could not use (no `csv` or `sha256`) and passed over; `excluded` names the `TERMS_EXCLUDED` lists the manifest
+    offered and `excluded_rows` adds up their rows (the manifest's `rows`, 0 when it gives none)."""
 
     def __init__(self, updated=(), skipped: int = 0):
         super().__init__(updated)
         self.skipped = skipped
+        self.excluded: list[str] = []
+        self.excluded_rows = 0
 
 
 _STRENGTH = {"host": 0, "name": 1, "slug": 2}  # a row found two ways is reported by the strongest
@@ -198,7 +211,8 @@ class StapplyDirectory:
         """Download the manifest and every list whose sha256 differs from the file in the folder (a missing file
         differs). Each download is checked against the manifest's hash before it replaces the old file, and the
         manifest is saved last, so the folder never holds a version that does not match its files. Returns the file
-        names updated (a list whose `skipped` counts the entries passed over). One manifest entry with no `csv` or
+        names updated (a list whose `skipped` counts the entries passed over, and whose `excluded` and
+        `excluded_rows` count the `TERMS_EXCLUDED` lists, which are never downloaded). One manifest entry with no `csv` or
         `sha256` is skipped and counted, never a reason to stop; the others are still read. A transport failure
         raises `FetchError`; an HTTP error, a manifest with no lists or a hash mismatch raises `ValueError`. Nothing
         is half written."""
@@ -217,6 +231,12 @@ class StapplyDirectory:
         folder.mkdir(parents=True, exist_ok=True)
         updated = RefreshResult()
         for name, entry in lists.items():
+            if name in TERMS_EXCLUDED:
+                rows = entry.get("rows") if isinstance(entry, dict) else None
+                updated.excluded.append(name)
+                updated.excluded_rows += rows if isinstance(rows, int) and not isinstance(rows, bool) and rows > 0 else 0
+                (folder / f"{name}.csv").unlink(missing_ok=True)  # an earlier refresh's copy: never read
+                continue
             if not _LIST_NAME.fullmatch(name):
                 updated.skipped += 1
                 continue  # a list name is a file name here: never a path

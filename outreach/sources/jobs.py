@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from dataclasses import asdict, dataclass, field
 
 from outreach import identity
+from outreach.crawl import config as crawl_config  # stdlib only: the one [ats_off] list (#46)
 from outreach.identity import StoreResolveReport, resolve_store
 from outreach.sources.base import Source
 from outreach.sources.boards import BoardRef, add_board
@@ -364,11 +365,14 @@ CAREERS_RECHECK_DAYS = 30
 
 
 def _supported_adapters() -> frozenset[str] | None:
-    """The ATS names with a crawler adapter, or None while `outreach.crawl.ats` does not exist (#21)."""
+    """The ATS names the crawler reads: those with an adapter (#21) less the ones the crawler's `[ats_off]` switches
+    off (#46), read from the crawl config so there is one list. None while `outreach.crawl.ats` does not exist."""
     try:
-        return frozenset(importlib.import_module("outreach.crawl.ats").supported_ats())
+        supported = frozenset(importlib.import_module("outreach.crawl.ats").supported_ats())
     except (ImportError, AttributeError):
         return None
+    cfg = crawl_config.load_crawl_config()
+    return frozenset(a for a in supported if cfg.reads(a))
 
 
 def _watch(conn: sqlite3.Connection, company_id: int, url: str, report: FindBoardsReport) -> None:
@@ -489,8 +493,8 @@ def _careers_boards(conn: sqlite3.Connection, company_id: int, name: str, career
 
 
 def _unread_boards(conn: sqlite3.Connection, careers: _Careers, report: FindBoardsReport) -> None:
-    """Companies whose active boards all lack a crawler adapter and which have no watched page get one, so they are
-    never silently unread: the careers page, else an iCIMS board's public host, else nothing (`unreadable_boards`).
+    """Companies whose active boards all lack a crawler adapter, or whose adapter is switched off (#46), and which have
+    no watched page get one, so they are never silently unread: the careers page, else an iCIMS board's public host, else nothing (`unreadable_boards`).
     A company whose careers check errored is left for the next run. While `outreach.crawl.ats` does not exist every
     such company is counted in `adapter_unknown` and left alone."""
     companies = [r for r in _live_companies(
@@ -535,7 +539,7 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
     last careers attempt (oldest first, never tried first, then tier and id): the careers page (see
     `_careers_boards`). A company with a watched page and no board still gets steps 0 and 1, never step 2. With no directory the lookup does not run, and the run
     is `partial` with that said: never a quiet "nothing found". A last pass gives every company whose boards have no
-    crawler adapter a watched page (see `_unread_boards`).
+    crawler adapter, or only a switched-off one, a watched page (see `_unread_boards`).
 
     Returns the job run id and the report. Status `partial` also covers a bad alias, a company that failed and any
     careers check that errored (those companies are asked again next run).

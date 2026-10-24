@@ -167,6 +167,77 @@ class CareersCheckerTest(unittest.TestCase):
 
 
 
+def redirect(location, status=302):
+    return Response(status, "", b"", {"location": location})
+
+
+class SwitchedOffHostTest(unittest.TestCase):
+    """#46: every request and redirect hop of the check goes through the crawler's `[ats_off]` host block, so a
+    careers page that redirects to a switched-off ATS's host sends nothing there. A refused hop is an `error`, never
+    a definite `none`."""
+
+    def check(self, domain, routes, cfg=None):
+        client = FakeClient(routes)
+        result = CareersChecker(client, **({"cfg": cfg} if cfg is not None else {})).check(domain)
+        self.assertEqual(client.unrouted, [])
+        return result, client
+
+    def test_a_careers_page_redirecting_to_smartrecruiters_is_refused_and_an_error(self):
+        result, client = self.check("acme.com", {
+            "https://acme.com/careers": redirect("https://jobs.smartrecruiters.com/Acme")})
+        self.assertEqual(result.kind, "error")
+        self.assertIn("smartrecruiters reader is switched off", result.error)
+        self.assertEqual(client.requests, ["https://acme.com/careers"])
+
+    def test_a_careers_page_redirecting_to_pinpoint_is_refused_and_an_error(self):
+        result, client = self.check("acme.com", {
+            "https://acme.com/careers": redirect("https://acme.com/jobs", 301),
+            "https://acme.com/jobs": redirect("https://acme.pinpointhq.com/")})
+        self.assertEqual(result.kind, "error")
+        self.assertIn("pinpoint reader is switched off", result.error)
+        self.assertEqual(client.requests, ["https://acme.com/careers", "https://acme.com/jobs"])
+
+    def test_a_refused_hop_on_the_homepage_or_the_linked_page_is_an_error_not_none(self):
+        result, client = self.check("acme.com", {
+            "https://acme.com/careers": status_response(404),
+            "https://acme.com/": redirect("https://careers.smartrecruiters.com/Acme")})
+        self.assertEqual(result.kind, "error")
+        self.assertEqual(client.requests, ["https://acme.com/careers", "https://acme.com/"])
+        result, client = self.check("clearpath.ai", {
+            "https://clearpath.ai/careers": status_response(404),
+            "https://clearpath.ai/": page("home_links_join.html"),
+            "https://clearpath.ai/join-us": redirect("https://clearpath.pinpointhq.com/en/postings")})
+        self.assertEqual(result.kind, "error")
+        self.assertNotIn("pinpointhq", " ".join(client.requests))
+
+    def test_a_final_url_on_a_switched_off_host_is_an_error(self):
+        # A client that followed the redirect itself: the page is not read, whatever it says.
+        result, _ = self.check("acme.com", {"https://acme.com/careers": Response(
+            200, "https://acme.pinpointhq.com/", b"<html>Jobs</html>", {})})
+        self.assertEqual(result.kind, "error")
+
+    def test_redirects_are_followed_hop_by_hop_up_to_the_limit(self):
+        result, client = self.check("acme.com", {
+            "https://acme.com/careers": redirect("/company/careers", 301),
+            "https://acme.com/company/careers": Response(200, "", page("plain_page.html").read_bytes(), {})})
+        self.assertEqual((result.kind, result.page_url), ("page", "https://acme.com/company/careers"))
+        loop = {"https://loop.com/careers": redirect("https://loop.com/a"), "https://loop.com/a": redirect("https://loop.com/b"),
+                "https://loop.com/b": redirect("https://loop.com/c"), "https://loop.com/c": redirect("https://loop.com/d")}
+        result, client = self.check("loop.com", loop)
+        self.assertEqual(result.kind, "error")  # the fourth hop is not sent: a 302 left is an unexpected status
+        self.assertEqual(len(client.requests), 4)
+
+    def test_a_reader_turned_back_on_is_followed_again(self):
+        from dataclasses import replace
+        from outreach.crawl.config import load_crawl_config
+        on = replace(load_crawl_config(), ats_off={})
+        result, client = self.check("acme.com", {
+            "https://acme.com/careers": redirect("https://jobs.smartrecruiters.com/acme"),
+            "https://jobs.smartrecruiters.com/acme": Response(200, "", b"<html>Jobs</html>", {})}, cfg=on)
+        self.assertEqual((result.kind, result.boards), ("boards", (BoardRef("smartrecruiters", "acme"),)))
+        self.assertEqual(len(client.requests), 2)
+
+
 class _Local(BaseHTTPRequestHandler):
     seen: list[dict] = []
 

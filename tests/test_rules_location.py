@@ -43,6 +43,38 @@ TEXT_BEATS_COUNTRY = [  # (location, country, expected)
     ("Toronto, ON", "Canada", "no"), ("Remote", "India", "no"), ("Bangalore", "India", "no"), ("", "Canada", "no"),
 ]
 
+# #4 follow-up 2026-10-23: a title that names a non-US country as a whole segment and no US place reads "no", but
+# only when the location text and country give nothing ("unknown"). Whole segments, so "Jordan Lake" is no country.
+TITLE_CASES = [  # (title, location, country, expected)
+    ("Software Engineer II (Venezuela)", "", None, "no"),
+    ("Software Engineer II (Venezuela)", "Remote", None, "no"),
+    ("Software Engineer II (Venezuela)", "Remote", "Remote", "no"),
+    ("Software Engineer - Remote Canada", "", None, "no"),
+    ("Backend Engineer, India", "", None, "no"),
+    ("Backend Engineer (UK)", "", None, "no"),
+    ("Backend Engineer | Mexico", "", None, "no"),
+    # a US place anywhere in the title, or a location that says yes, keeps the posting in
+    ("Software Engineer (US)", "", None, "unknown"),
+    ("Software Engineer, Remote (USA or Canada)", "", None, "unknown"),
+    ("Software Engineer, Remote (Canada or US)", "", None, "unknown"),
+    ("Software Engineer (Mexico, New York)", "", None, "unknown"),
+    ("Software Engineer (India) - Austin", "", None, "unknown"),
+    ("Software Engineer II (Venezuela)", "Austin, TX", None, "yes"),
+    ("Software Engineer II (Venezuela)", "", "United States", "yes"),
+    # names that are also a country or a US place, never a whole segment on their own
+    ("Engineer, Georgia Tech", "", None, "unknown"),
+    ("Software Engineer, Georgia", "", None, "unknown"),
+    ("Jordan Lake Software Engineer", "", None, "unknown"),
+    ("Software Engineer - Jordan", "", None, "unknown"),
+    ("Software Engineer, India Hicks Brand", "", None, "unknown"),
+    ("Software Engineer, Chile Pepper Labs", "", None, "unknown"),
+    ("Software Engineer (Peru, IN)", "", None, "unknown"),
+    ("Software Engineer", "", None, "unknown"),
+    # a known non-US location still says no, a US one still says yes, with or without a title
+    ("Software Engineer", "Toronto, Canada", None, "no"),
+    ("Software Engineer", "Austin, TX", None, "yes"),
+]
+
 
 class UsStatusTest(unittest.TestCase):
     @classmethod
@@ -53,6 +85,15 @@ class UsStatusTest(unittest.TestCase):
         for loc, country, expected in CASES:
             with self.subTest(location=loc, country=country):
                 self.assertEqual(us_status(loc, country, self.cfg), expected)
+
+    def test_title_cases(self):
+        for title, loc, country, expected in TITLE_CASES:
+            with self.subTest(title=title, location=loc, country=country):
+                self.assertEqual(us_status(loc, country, self.cfg, title=title), expected)
+
+    def test_without_a_title_nothing_changes(self):
+        self.assertEqual(us_status("Remote", None, self.cfg), "unknown")
+        self.assertEqual(us_status("Remote", None, self.cfg, title=None), "unknown")
 
     def test_an_unrecognised_country_falls_back_to_the_location(self):
         for loc, country, expected in COUNTRY_CASES:

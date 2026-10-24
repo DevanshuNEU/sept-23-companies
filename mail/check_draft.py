@@ -117,7 +117,7 @@ def check(contact, banned, unconfirmed, others, followup=False):
             if subject and (od.get("subject") or "").strip().lower() == subject.lower():
                 blocks.append(f"subject already used for {o.get('name')} at {o.get('company')}; write a new one")
             if body and _norm(o.get("company")) == _norm(contact.get("company")) and \
-                    difflib.SequenceMatcher(None, body.lower(), (od.get("body") or "").lower()).ratio() >= 0.8:
+                    difflib.SequenceMatcher(None, body.lower(), (od.get("body") or "").lower(), autojunk=False).ratio() >= 0.8:
                 blocks.append(f"near-identical to the draft for {o.get('name')}, a colleague at the same company")
 
     n = len(URL.sub(" ", body).split())

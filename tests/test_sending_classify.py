@@ -111,14 +111,27 @@ class DsnClassTest(unittest.TestCase):
             "5.7.1 5.7.1 Our system has detected that this message is likely unsolicited mail": "policy",
             "550 5.7.1 rejected as spam": "policy",
             "550 5.7.1 blocked by policy": "policy",
-            "421 4.7.28 Gmail has detected an unusual rate of unsolicited mail": "policy",
             "550 5.7.511 Access denied, banned sender": "policy",
-            "450 4.7.500 Server busy, try again later": "policy",
-            "450 4.7.599 Try later": "policy",
         }
         for snippet, expected in cases.items():
             with self.subTest(snippet=snippet):
                 self.assertEqual(dsn_class(dsn(snippet)), expected)
+
+    def test_a_temporary_4_7_code_is_a_delay_notice_never_a_bounce(self):
+        # 4.x.x is "try again later": Gmail keeps trying, so nothing bounced (yet).
+        for snippet in ("421 4.7.28 Gmail has detected an unusual rate of unsolicited mail",
+                        "450 4.7.500 Server busy, try again later", "450 4.7.599 Try later",
+                        "451 4.7.1 Greylisted, please try again", "421 4.7.0 Temporary System Problem"):
+            for subject in ("Delivery Status Notification (Failure)", "Delivery Status Notification (Delay)",
+                            "Undeliverable: Hello"):
+                with self.subTest(snippet=snippet, subject=subject):
+                    got = classify(dsn(snippet, subject=subject, x_failed_recipients="p@acme.co"), ACCOUNT)
+                    self.assertEqual((got.kind, got.dsn_class), ("delay", None))
+                    self.assertNotEqual(dsn_class(dsn(snippet)), "policy")
+
+    def test_a_permanent_code_beside_a_temporary_one_is_still_a_bounce(self):
+        got = classify(dsn("421 4.7.0 try later. Final: 550 5.1.1 The account does not exist"), ACCOUNT)
+        self.assertEqual((got.kind, got.dsn_class), ("bounce", "hard"))
 
     def test_policy_code_without_its_words_is_unknown(self):
         # 5.7.1 alone also covers plain relay refusals, so it needs one of the policy words.

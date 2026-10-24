@@ -78,7 +78,7 @@ export function useCompanyActions(view: CompanyView | undefined) {
       label: `Resumed ${name}.`,
       afterCommit: `Resumed ${name}.`,
       immediate: true,
-      patches: [patchCompany((c) => ({ ...c, pausedAt: null, heldByTouchId: null })), ...refetch(queryKeys.shell, queryKeys.outbox, queryKeys.today)],
+      patches: [patchCompany((c) => ({ ...c, pausedAt: null, heldByTouchId: null, held: false, heldByReply: null })), ...refetch(queryKeys.shell, queryKeys.outbox, queryKeys.today)],
       commit: (o) => withCompanyRevision(o, c, (r) => client.resumeCompany(id, r, o)),
     });
   }, [view, write, client, patchCompany, withCompanyRevision]);

@@ -4,14 +4,20 @@
 the homepage; and the first same-site link on the homepage that looks like a jobs page. Only a 404 or 410 is a
 definite `none`. A fetch error, a 5xx, a 429, a 403 or any other status is `error`: nothing is concluded, so the
 caller leaves no marker and asks again next run (error is not empty).
+
+The checker follows redirects itself, one hop at a time (at most the crawl config's `max_redirects`), and every
+request and hop goes through the crawler's host block (`CrawlConfig.off_host`, the `[ats_off]` list, #46): a hop to
+a switched-off ATS's host is never sent and the check is an `error`, never a definite `none`.
 """
 from __future__ import annotations
 
+import dataclasses
 import urllib.parse
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Literal
 
+from outreach.crawl.config import CrawlConfig, load_crawl_config  # stdlib only: the one [ats_off] list (#46)
 from outreach.net import FetchError, HttpClient, Response
 from outreach.sources.ats_detect import detect_all, detect_unsupported
 from outreach.sources.boards import BoardRef
@@ -20,6 +26,11 @@ __all__ = ["CareersResult", "CareersChecker"]
 
 _LINK_WORDS = ("career", "jobs", "join")
 _SKIPPED_SCHEMES = ("mailto:", "tel:", "javascript:", "#")
+_REDIRECTS = (301, 302, 303, 307, 308)
+
+
+class _Refused(Exception):
+    """A request or redirect hop to a switched-off ATS's host: not sent."""
 
 
 @dataclass(frozen=True)
@@ -52,30 +63,52 @@ def _same_site(host: str, domain: str) -> bool:
 
 
 class CareersChecker:
-    def __init__(self, client: HttpClient):
+    def __init__(self, client: HttpClient, *, cfg: CrawlConfig | None = None):
         self.client = client
+        self.cfg = cfg or load_crawl_config()
+
+    def _allowed(self, url: str) -> None:
+        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+        ats = self.cfg.off_host(host)
+        if ats is not None:
+            raise _Refused(f"{host}: the {ats} reader is switched off ({self.cfg.ats_off[ats]}), not sending")
+
+    def _get(self, url: str) -> Response:
+        """GET `url`, following redirects here so each hop passes the host block first. The answer carries the URL
+        it came from. A redirect left after `max_redirects` hops is returned as it is (an unexpected status)."""
+        self._allowed(url)
+        resp = self.client.get(url, follow_redirects=False)
+        hops = 0
+        while resp.status in _REDIRECTS and resp.headers.get("location") and hops < self.cfg.max_redirects:
+            hops += 1
+            url = urllib.parse.urljoin(resp.url or url, resp.headers["location"])
+            self._allowed(url)
+            resp = self.client.get(url, follow_redirects=False)
+        if resp.url:
+            self._allowed(resp.url)  # a client that followed a redirect on its own: its page is not read
+        return resp if resp.url else dataclasses.replace(resp, url=url)
 
     def check(self, domain: str) -> CareersResult:
         domain = domain.strip().lower()
         careers_url = f"https://{domain}/careers"
         try:
-            resp = self.client.get(careers_url, follow_redirects=True)
+            resp = self._get(careers_url)
             if resp.status == 200:
                 return _read(resp, careers_url, domain)
             if not _is_no(resp.status):
                 return _unexpected(resp, careers_url)
             home_url = f"https://{domain}/"
-            home = self.client.get(home_url, follow_redirects=True)
+            home = self._get(home_url)
             if home.status != 200:
                 return CareersResult("none") if _is_no(home.status) else _unexpected(home, home_url)
             link = _first_link(home, home_url, domain, skip={careers_url.rstrip("/")})
             if link is None:
                 return CareersResult("none")
-            resp = self.client.get(link, follow_redirects=True)
+            resp = self._get(link)
             if resp.status == 200:
                 return _read(resp, link, domain)
             return CareersResult("none") if _is_no(resp.status) else _unexpected(resp, link)
-        except FetchError as err:
+        except (FetchError, _Refused) as err:
             return CareersResult("error", error=str(err))
 
 

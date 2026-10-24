@@ -7,8 +7,8 @@ from pathlib import Path
 
 from outreach.net import USER_AGENT, FetchError, Response
 from outreach.sources.boards import BoardRef
-from outreach.sources.stapply import (MANIFEST_URL, STAPPLY_ATS, BoardHit, StapplyDirectory, board_match_key,
-                                      board_token)
+from outreach.sources.stapply import (MANIFEST_URL, STAPPLY_ATS, TERMS_EXCLUDED, BoardHit, StapplyDirectory,
+                                      board_match_key, board_token)
 from tests.fakes import FakeClient
 
 FIXTURES = Path(__file__).parent / "fixtures" / "stapply"
@@ -208,6 +208,42 @@ class RefreshTest(unittest.TestCase):
         self.assertTrue((self.folder / "manifest.json").is_file())  # the refresh finished
         self.assertEqual(StapplyDirectory.refresh(FakeClient({MANIFEST_URL: json.dumps(manifest).encode()}),
                                                   self.folder).skipped, 5)
+
+    def test_the_wellfound_and_ycombinator_slices_are_never_downloaded_and_their_rows_are_counted(self):
+        # #46: both slices were built by scraping sites whose terms forbid it.
+        self.assertEqual(sorted(TERMS_EXCLUDED), ["wellfound", "ycombinator"])
+        for name, reason in TERMS_EXCLUDED.items():
+            self.assertIn("terms", reason, name)
+        manifest = json.loads(manifest_body(self.files))
+        for name, rows in (("wellfound", 120), ("ycombinator", 30)):
+            manifest["by_ats_companies"][name] = {"csv": url_of(name), "sha256": "ab" * 32, "rows": rows}
+        (self.folder / "wellfound.csv").write_bytes(b"name,slug,url\nOld,old,u\n")  # left by an earlier refresh
+        client = FakeClient({MANIFEST_URL: json.dumps(manifest).encode(),
+                             **{url_of(n): body for n, body in self.files.items()}})
+        updated = StapplyDirectory.refresh(client, self.folder)
+        self.assertEqual(sorted(updated), ["ashby.csv", "greenhouse.csv", "lever.csv"])
+        self.assertNotIn(url_of("wellfound"), client.requests)
+        self.assertNotIn(url_of("ycombinator"), client.requests)
+        self.assertEqual((updated.excluded, updated.excluded_rows, updated.skipped), (["wellfound", "ycombinator"], 150, 0))
+        self.assertFalse((self.folder / "wellfound.csv").exists())  # an old copy is removed, never read
+        self.assertFalse((self.folder / "ycombinator.csv").exists())
+
+    def test_an_excluded_slice_with_no_row_count_counts_zero_rows(self):
+        manifest = json.loads(manifest_body({"ashby": self.files["ashby"]}))
+        manifest["by_ats_companies"]["ycombinator"] = {"csv": url_of("ycombinator"), "sha256": "ab" * 32}
+        client = FakeClient({MANIFEST_URL: json.dumps(manifest).encode(), url_of("ashby"): self.files["ashby"]})
+        updated = StapplyDirectory.refresh(client, self.folder)
+        self.assertEqual((updated.excluded, updated.excluded_rows), (["ycombinator"], 0))
+
+    def test_load_never_reads_an_excluded_slice(self):
+        self.assertFalse(set(TERMS_EXCLUDED) & set(STAPPLY_ATS))
+        folder = folder_with(greenhouse="Acme Robotics,acmerobotics,https://boards.greenhouse.io/acmerobotics\n",
+                             wellfound="Wellco,wellco,https://boards.greenhouse.io/wellco\n",
+                             ycombinator="Ycco,ycco,https://jobs.lever.co/ycco\n")
+        directory = StapplyDirectory.load(folder)
+        self.assertEqual(directory.lookup(["Wellco"], None), [])
+        self.assertEqual(directory.lookup(["Ycco"], None), [])
+        self.assertEqual(len(directory.lookup(["Acme Robotics"], None)), 1)
 
     def test_refresh_uses_a_declared_user_agent(self):
         client = FakeClient({MANIFEST_URL: manifest_body({"ashby": self.files["ashby"]}),

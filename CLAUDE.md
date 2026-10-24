@@ -40,7 +40,9 @@ Live means real contacts and real sends.
 **Only in the live checkout:** `mail/sender.py` (with or without `--dry-run`: a dry run still reads Gmail and saves
 contacts), `mail/server.py` (it owns :3002), `refresh/refresh.py` and its individual steps (`finalcheck.py`,
 `final_merge.py`, `write_level.js` rewrite `dashboard/data.js`), `dashboard/publish.sh`, `mail/add.py` (writes the
-real contact list), `mail/gmail.py auth` (writes the real token). From a worktree, test against the scratch
+real contact list), `mail/gmail.py auth` (writes the real token), `python -m outreach.sending run` (with or
+without `--dry-run`: a dry run still reads Gmail) and `python -m outreach.sending auth`.
+Claude never runs the new sender in any checkout; launchd does. From a worktree, test against the scratch
 settings below. `python -m outreach.install`, and anything else that opens the default store path in any spelling
 (a symlink, a relative path, other letter case), refuses to run outside the live checkout before touching any file;
 with a scratch `OUTREACH_DB` it runs anywhere.
@@ -57,6 +59,15 @@ with a scratch `OUTREACH_DB` it runs anywhere.
 Claude never approves or sends an email; approval is Devanshu's click, sending is the sender's job. Never call
 the mail API on :3002 (`/api/approve`, `/api/save`, `/api/skip`, `/api/unapprove`, `/api/pause`) by any means;
 `.claude/settings.json` denies the obvious curl forms, and the rule covers every other way too.
+
+The same rule covers the new API (`outreach/api`: :3100 in production, `OUTREACH_API_PORT` in a workspace). Never call
+its write routes (approve, unapprove, skip, save, pause, resume, release, send, and every other POST, PUT or DELETE under
+`/api/`) by any means, on any port. `.claude/settings.json` denies curl, wget, httpie (`http`, `https`, `xh`), python,
+node, bun and deno commands that name one of those paths, and WebFetch to a loopback host. The PreToolUse hook
+`.claude/hooks/block_api_writes.py` also refuses any Bash command that names a loopback host (127.x, localhost, [::1],
+0.0.0.0) together with such a path or a write method or body flag, or that builds the host from a variable. Both read
+the command text only, so the rule still covers every other way: never assemble a request to get around them. A
+workspace never binds 3100.
 
 The old dashboard's code (`dashboard/app.js`) always talks to the live mail API on `127.0.0.1:3002`. Preview it only
 on `:3011` (`.claude/launch.json`): the mail API accepts calls only from pages on `:3001`, so a preview there

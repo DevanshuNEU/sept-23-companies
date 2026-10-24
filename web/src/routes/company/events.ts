@@ -17,6 +17,8 @@ const ACTOR_TAG = {
   daily_list: 'Daily list',
   import: 'Imported',
   system: 'System',
+  source: 'Source',
+  reader: 'Reader',
 } satisfies Record<Actor, string>;
 
 // Design 5.6: for imports the tag names the old place the row came from.

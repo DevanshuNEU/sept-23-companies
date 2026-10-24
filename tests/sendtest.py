@@ -9,7 +9,8 @@ from datetime import date, datetime, timezone
 
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
-__all__ = ["MON", "UTC", "iso", "seed_email_person", "seed_message", "seed_sent", "bounce", "put_day"]
+__all__ = ["MON", "UTC", "iso", "seed_email_person", "seed_message", "seed_sent", "bounce", "put_day",
+           "settle_and_send"]
 
 UTC = timezone.utc
 # Monday 2026-11-02, 09:00 in New York (daylight saving ended on the 1st, so UTC-5).
@@ -107,3 +108,30 @@ def put_day(conn: sqlite3.Connection, day: date | str, limit: int, *, outcome: s
     day = day.isoformat() if isinstance(day, date) else day
     conn.execute("INSERT INTO send_day(day, send_limit, outcome, closed_at, created_at) VALUES (?, ?, ?, ?, ?)",
                  (day, limit, outcome, _NOW_SEED if closed else None, _NOW_SEED))
+
+
+def settle_and_send(conn: sqlite3.Connection, client, clock, rng, cfg) -> str | None:
+    """One tick's settle and send steps, in the order Task 13's tick runs them (a test stand-in until it lands):
+    leftover claims; a Sent scan for each unclear send with no transaction open; reconcile and requeue in one
+    transaction; then the queue's pick and one send. Returns what `send_one` returned, the kind of the GmailError
+    it raised, or None when nothing was ready."""
+    from outreach.sending import claim, queue, ramp
+    from outreach.sending.mail import GmailError
+    from outreach.store import transaction
+    now = clock()
+    claim.leftover_claims(conn, iso(now))
+    found = {u.message_id: (*client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
+                            u.rfc_id)
+             for u in claim.unclear(conn)}
+    with transaction(conn):
+        claim.reconcile(conn, found, now=iso(now), cfg=cfg, rng=rng)
+        claim.requeue_failed(conn, now=iso(now), cfg=cfg)
+        day = ramp.open_day(conn, now, cfg)
+    picked = queue.pick(queue.verdicts(conn, now, cfg, day=day, gate=None), queue.load_queue(conn, cfg))
+    if picked is None:
+        return None
+    try:
+        return claim.send_one(conn, client, picked, cfg, now=iso(now), clock=clock, rng=rng,
+                              account=cfg.from_address)
+    except GmailError as err:
+        return err.kind

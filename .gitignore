@@ -22,3 +22,6 @@ __pycache__/
 .DS_Store
 *.pem
 .venv/
+
+# Conductor workspace scratch (the run script's API store lives here)
+.context/

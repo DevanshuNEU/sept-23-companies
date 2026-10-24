@@ -263,6 +263,7 @@ class SchemaTest(unittest.TestCase):
             "mx_check": {"domain": "acme.co", "status": "ok", "checked_at": NOW},
             "win_seen": {"touch_id": self.otouch, "kind": "accepted", "seen_at": NOW},
             "watch_dismissal": {"kind": "new_reason_no_role", "ref_id": 1, "dismissed_at": NOW},
+            "inbound_seen": {"gmail_message_id": "g9", "why": "untracked", "seen_at": NOW},
         }
         return dict(rows[table])
 
@@ -328,7 +329,7 @@ class SchemaTest(unittest.TestCase):
         named = {(t, c) for t in self.tables() for c in self.columns(t)
                  if c == "at" or c.endswith("_at") or c in ("streak_since", "lease_until")}
         self.assertEqual(columns, named)
-        self.assertEqual(len(columns), 84)  # 50 before the pipeline tables (#30), 31 with them, 3 from 0002 (#14)
+        self.assertEqual(len(columns), 85)  # 50 before the pipeline tables (#30), 31 with them, 3 + 1 for #14
         for table, column in sorted(columns):
             self.assertTrue(self._has_base(table), f"no base row for {table}")
             self.assert_bad_value_refused(table, column, bad, f"{column} IS strftime(")

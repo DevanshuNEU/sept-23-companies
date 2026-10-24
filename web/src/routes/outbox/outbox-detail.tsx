@@ -463,7 +463,7 @@ function DetailBody({
       apply: (x) => ({
         ...x,
         reply: x.reply ? { ...x.reply, kind: next } : x.reply,
-        item: release ? { ...x.item, company: { ...x.item.company, heldByTouchId: null } } : x.item,
+        item: release ? { ...x.item, company: { ...x.item.company, heldByTouchId: null, held: false, heldByReply: null } } : x.item,
       }),
     };
     const word: Record<ReplyChoice, string> = {

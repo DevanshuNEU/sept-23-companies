@@ -70,9 +70,13 @@ class MessageMeta:
 
 @dataclass(frozen=True)
 class Added:
+    """One message added to the mailbox. `history_id` is the id of the history record that added it (Gmail's
+    `history[].id`), so a read that stops part way can move the cursor to the last record it finished; None when
+    the client does not know it."""
     gmail_message_id: str
     thread_id: str
     labels: tuple[str, ...]
+    history_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -437,7 +437,7 @@ class HoldsAndStopsTest(Base):
         self.approve()
         self.approve(company=seed_company(self.db, "B"), tz="Asia/Tokyo")
         self.approve_followup("2026-11-20", company=seed_company(self.db, "C"))
-        for gate in ("sender_paused", "signed_out", "old_sender_running"):
+        for gate in ("sender_paused", "signed_out", "old_sender_running", "message_id_unproven"):
             verdicts = self.verdicts_at(gate=gate)
             self.assertEqual(len(verdicts), 3)
             for message, verdict in verdicts.items():

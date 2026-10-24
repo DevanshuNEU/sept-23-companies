@@ -1,0 +1,51 @@
+// The generated types compile against the views: each entry says a name in `types.ts` and the same name in the
+// generated `schema.ts` accept exactly the same values. `pnpm typecheck` compiles this file. Add one entry per
+// name as its API view lands; a mismatch turns the entry's `true` into a type error.
+import type * as T from './types';
+import type { components } from './schema';
+
+type S = components['schemas'];
+
+export type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+
+export const _parity: [
+  Same<T.Check, S['Check']>,
+  Same<T.JobRunSummary, S['JobRunSummary']>,
+  Same<T.ReadQueueStatus, S['ReadQueueStatus']>,
+  Same<T.HealthView, S['HealthView']>,
+  Same<T.Fact, S['Fact']>,
+  Same<T.PostingFlag, S['PostingFlag']>,
+  Same<T.PostingRow, S['PostingRow']>,
+  Same<T.CompanyPerson, S['CompanyPerson']>,
+  Same<T.CompanyEvent, S['CompanyEvent']>,
+  Same<T.ReviewItem, S['ReviewItem']>,
+  Same<T.CompanyView, S['CompanyView']>,
+  Same<T.ScoreSignal, S['ScoreSignal']>,
+  Same<T.ScoreView, S['ScoreView']>,
+  Same<T.SearchCompany, S['SearchCompany']>,
+  Same<T.CompanyHit, S['SearchCompany']>,
+  Same<T.SearchPerson, S['SearchPerson']>,
+  Same<T.SearchIndex, S['SearchIndex']>,
+  Same<T.PostingHit, S['PostingHit']>,
+  Same<T.SourceLink, S['SourceLink']>,
+  Same<T.WatchItem, S['WatchItem']>,
+  Same<T.WatchView, S['WatchView']>,
+  Same<T.PromptTouch, S['PromptTouch']>,
+  Same<T.OutcomePromptView, S['OutcomePromptView']>,
+  Same<T.TouchHistory, S['TouchHistory']>,
+  Same<T.Win, S['Win']>,
+  Same<T.WinsView, S['WinsView']>,
+  Same<T.FunnelStage, S['FunnelStage']>,
+  Same<T.ProgressPeriod, S['ProgressPeriod']>,
+  Same<T.BaseRates, S['BaseRates']>,
+  Same<T.TodayProgress, S['TodayProgress']>,
+  Same<T.ProgressView, S['ProgressView']>,
+  Same<T.Finding, S['Finding']>,
+  Same<T.FindingsView, S['FindingsView']>,
+  Same<T.LinkedInPerson, S['LinkedInPerson']>,
+  Same<T.LinkedInGroup, S['LinkedInGroup']>,
+  Same<T.LinkedInView, S['LinkedInView']>,
+  Same<T.ResolvedReview, S['ResolvedReview']>,
+  Same<T.NeedsYouView, S['NeedsYouView']>,
+  Same<T.ReviewFix, S['ResolveReviewBody']['fix']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

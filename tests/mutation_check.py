@@ -3,6 +3,7 @@
 
     uv run python tests/mutation_check.py            # from the repo root
     uv run python tests/mutation_check.py --list
+    uv run python tests/mutation_check.py --shard 2/6   # only entries whose zero-based index % 6 == 2
 
 NOT part of `unittest discover`, deliberately: it edits source files in place and must never run as a side effect
 of the ordinary suite. Run it after changing the rules or the store.
@@ -41,6 +42,8 @@ CRAWL = ROOT / "outreach" / "crawl"
 RANKING = ROOT / "outreach" / "ranking"
 NET = ROOT / "outreach" / "net.py"
 SOURCES = ROOT / "outreach" / "sources"
+SENDING = ROOT / "outreach" / "sending"
+REFRESH = ROOT / "refresh"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
 # (file, guarantee broken, find, replace, expect). `find` must be exact text from the code as it is now and appear
@@ -386,6 +389,48 @@ MUTATIONS = [
     (CRAWL / "stale.py", "stale_reason reports a closed posting as stale",
      "    if closed_at is not None:\n        return None\n    kinds",
      "    kinds", "test_closed_posting_is_never_stale"),
+    # ---- the off switch (#46): no read a host's robots.txt or terms forbid ----------------------------------------
+    (CRAWL / "config.py", "a switched-off ATS reads again (the switch is ignored)",
+     "        return ats not in self.ats_off\n", "        return True\n",
+     "test_shipped_config_switches_off_smartrecruiters_and_pinpoint_with_a_robots_reason"),
+    (CRAWL / "config.py", "an unknown ATS name under [ats_off] loads, so a misspelled switch turns nothing off",
+     "        if ats not in ATS_HOSTS:\n            raise ValueError(", "        if False:\n            raise ValueError(",
+     "test_an_unknown_ats_name_fails_at_load"),
+    (CRAWL / "polite.py", "the polite client sends to a switched-off ATS's host",
+     "        if ats is not None:\n            raise HostOff(", "        if False:\n            raise HostOff(",
+     "test_every_host_of_a_switched_off_ats_is_refused_with_no_request"),
+    (CRAWL / "tick.py", "the tick selects boards on a switched-off ATS, so they are deferred and their state changes",
+     "supported=reading_ats(cfg), plan_ids=plan_company_ids(conn, plan_date(now)),\n"
+     "                              cfg=cfg, limit=limit or cfg.boards_per_tick)",
+     "supported=reading_ats(replace(cfg, ats_off={})), plan_ids=plan_company_ids(conn, plan_date(now)),\n"
+     "                              cfg=cfg, limit=limit or cfg.boards_per_tick)",
+     "test_a_switched_off_board_keeps_its_state_postings_and_decisions_through_a_tick"),
+    (CRAWL / "tick.py", "read_company_boards selects boards on a switched-off ATS",
+     "supported=reading_ats(cfg), plan_ids=plan_company_ids(conn, plan_date(now)),\n"
+     "                              cfg=cfg, limit=cfg.boards_per_tick, only_company_ids=ids, force=True)",
+     "supported=reading_ats(replace(cfg, ats_off={})), plan_ids=plan_company_ids(conn, plan_date(now)),\n"
+     "                              cfg=cfg, limit=cfg.boards_per_tick, only_company_ids=ids, force=True)",
+     "test_read_company_boards_skips_a_switched_off_board_and_counts_it"),
+    (CRAWL / "tick.py", "the tick report stops counting the switched-off boards",
+     "        off = len(switched_off_boards(conn, cfg.ats_off))\n", "        off = 0\n",
+     "test_a_switched_off_board_keeps_its_state_postings_and_decisions_through_a_tick"),
+    (CRAWL / "probe.py", "the slug probe asks a switched-off ATS",
+     "    asking = [ats for ats in PROBE_ATS if cfg.reads(ats)]", "    asking = list(PROBE_ATS)",
+     "test_slug_probing_asks_no_switched_off_ats"),
+    (CRAWL / "__main__.py", "`read` reads quietly past a switched-off board and exits 0",
+     "        for board in switched_off_boards(conn, cfg.ats_off, only_company_ids=company_ids):",
+     "        for board in []:", "test_read_refuses_a_switched_off_board_in_plain_words"),
+    (CRAWL / "__main__.py", "`probe` sends a list request to a switched-off ATS",
+     "    if ats in cfg.ats_off:\n", "    if False:\n", "test_probe_refuses_a_switched_off_ats_and_sends_nothing"),
+    (SOURCES / "stapply.py", "the stapply refresh downloads the wellfound and ycombinator slices again",
+     "            if name in TERMS_EXCLUDED:\n", "            if False:\n",
+     "test_the_wellfound_and_ycombinator_slices_are_never_downloaded_and_their_rows_are_counted"),
+    (REFRESH / "crawl_more.py", "crawl_more passes boards on a dropped ATS to the crawl again",
+     "    slugs = [s for s in slugs if s[0] not in DROPPED]\n", "",
+     "test_the_refresh_command_line_still_runs"),
+    (REFRESH / "crawl_more.py", "crawl_more says nothing when --only or --skip names a dropped ATS",
+     '        print(f"{ats} is no longer read ({DROPPED[ats]}); carrying on without it", flush=True)',
+     "        pass", "test_only_and_skip_naming_a_dropped_ats_print_one_plain_line_each_and_carry_on"),
     # ---- ranking/ (#6) ----------------------------------------------------------------------------------------
     (RANKING / "hide.py", "write_no_go stops counting a lifted no_go row, so a lifted company is re-added",
      "SELECT 1 FROM no_go WHERE company_id IN (SELECT id FROM grp) LIMIT 1",
@@ -487,6 +532,91 @@ MUTATIONS = [
      "not s.hide.provisional \\\n                        and s.company_id in listed:",
      "not s.hide.provisional:",
      "test_a_company_closed_during_the_compute_gets_no_no_go_row"),
+
+    # ---- sending (#14): the claim, the Sent scan, the ramp, the queue, the classifier, the tick, the guard ----------
+    (SENDING / "claim.py", "the claim moved after client.send, so a crash after Gmail took the email leaves no record",
+     '    if not claim(conn, q, rfc_id=rfc, now=now):\n        return "lost_race"\n    try:\n'
+     '        outgoing = outgoing_for(conn, q, cfg, rfc)\n    except Exception as err:\n'
+     '        failure = GmailError("bad_request", None, f"the email could not be built: {describe_error(err)}")\n'
+     '        record_unclear(conn, q.message_id, failure, at=_stamp(clock()), cfg=cfg, rng=rng)\n'
+     '        raise failure from err\n    try:\n        sent = client.send(outgoing)\n',
+     '    try:\n        outgoing = outgoing_for(conn, q, cfg, rfc)\n    except Exception as err:\n'
+     '        failure = GmailError("bad_request", None, f"the email could not be built: {describe_error(err)}")\n'
+     '        record_unclear(conn, q.message_id, failure, at=_stamp(clock()), cfg=cfg, rng=rng)\n'
+     '        raise failure from err\n    try:\n        sent = client.send(outgoing)\n'
+     '        if not claim(conn, q, rfc_id=rfc, now=now):\n            return "lost_race"\n',
+     "test_send_is_claimed_with_its_message_id_before_the_call"),
+    (SENDING / "gmail.py", "find_sent falls back to a To plus Subject match when the Message-ID differs",
+     'if normalise_message_id(_headers(msg).get("message-id")) == wanted:',
+     'if normalise_message_id(_headers(msg).get("message-id")) == wanted or (\n'
+     '                        _headers(msg).get("to") and _headers(msg).get("subject")):',
+     "test_find_sent_matches_by_message_id_only"),
+    (SENDING / "claim.py", "a miss counts as proof although the scan was incomplete, so a send is called not sent early",
+     "if complete and normalise_message_id(scanned) == normalise_message_id(u.rfc_id)",
+     "if normalise_message_id(scanned) == normalise_message_id(u.rfc_id)",
+     "test_not_found_needs_a_scan_back_to_the_claim"),
+    (SENDING / "claim.py", "the attempt cap is removed, so a failing message is retried for ever",
+     'if max(len(fails), _attempts(conn, row["message_id"])) >= cfg.max_send_attempts:',
+     "if False:",
+     "test_requeue_retries_once_then_stops"),
+    (SENDING / "mail.py", "a bad request becomes retryable, so a bad address is sent again",
+     'RETRYABLE = frozenset({"rate_limit",', 'RETRYABLE = frozenset({"bad_request", "rate_limit",',
+     "test_bad_request_failure_is_not_requeued"),
+    (SENDING / "ramp.py", "a warning day rises like a clean one",
+     '    if outcome == "clean":\n        return _step_up(prev["send_limit"], cfg)',
+     '    if outcome in ("clean", "warning"):\n        return _step_up(prev["send_limit"], cfg)',
+     "test_warning_day_does_not_rise"),
+    (SENDING / "signals.py", "exactly 2% bounces counts as clean (the test becomes <= 2%)",
+     "return rate >= cfg.clean_bounce_rate - 1e-12", "return rate > cfg.clean_bounce_rate + 1e-12",
+     "test_bounce_rate_of_exactly_two_percent_is_a_warning"),
+    (SENDING / "ramp.py", "the ceiling is removed, so the ramp goes past 100",
+     "return min(level + cfg.ramp_step, cfg.ramp_ceiling)", "return level + cfg.ramp_step",
+     "test_ramp_stops_at_100"),
+    (SENDING / "queue.py", "the per-company 60 minute gap is dropped",
+     "if sends and now < max(sends) + gap:", "if False:",
+     "test_second_send_at_one_company_waits_60_minutes"),
+    (SENDING / "queue.py", "the per-company gap is compared with <=, so exactly 60 minutes still waits",
+     "if sends and now < max(sends) + gap:", "if sends and now <= max(sends) + gap:",
+     "test_exactly_60_minutes_after_the_last_send_is_ready"),
+    (SENDING / "queue.py", "the company hold check is removed, so a reply no longer holds the colleagues' email",
+     '    if held:\n        return "company_held", None', '    if False:\n        return "company_held", None',
+     "test_reply_holds_every_queued_message_at_the_company"),
+    (SENDING / "queue.py", "a person's own company is used instead of the surviving one, so a merge is ignored",
+     'company_id=resolve_company(companies, row["person_company"])[-1],', 'company_id=row["person_company"],',
+     "test_person_at_merged_company_sends_under_the_survivor"),
+    (SENDING / "classify.py", "the delay check is removed, so a still-trying notice counts as a bounce",
+     'if (DELAY_SUBJ.search(subject) and klass == "unknown") or temporary:', "if False:",
+     "test_delay_notice_is_not_a_bounce"),
+    (SENDING / "classify.py", "Auto-Submitted is ignored, so an out-of-office reads as a person's reply",
+     '    if h.get("auto-submitted", "no").strip().lower() not in ("no", ""):\n        return True\n    if "x-autoreply"',
+     '    if "x-autoreply"',
+     "test_out_of_office_header_is_not_a_reply"),
+    (SENDING / "tick.py", "the dry run's rollback becomes a commit, so a dry run writes",
+     '                    self.conn.execute("ROLLBACK")', '                    self.conn.execute("COMMIT")',
+     "test_dry_run_writes_nothing"),
+    (SENDING / "__main__.py", "the require_live line is removed, so the sender runs from a worktree",
+     "        live_checkout.require_live(what, root or live_checkout.REPO_ROOT, live_root or live_checkout.LIVE_ROOT)",
+     "        pass",
+     "test_run_refuses_outside_the_live_checkout"),
+    (SENDING / "tick.py", "the account check is removed, so a token for another account sends",
+     "if email.lower() != self.cfg.from_address.lower():", "if False:",
+     "test_wrong_account_sends_nothing"),
+    (SENDING / "followups.py", "follow-ups are due in calendar days, not business days",
+     "due_on = cal.add_business_days(first_sent_on, days, cfg).isoformat()",
+     "due_on = (first_sent_on + __import__(\"datetime\").timedelta(days=days)).isoformat()",
+     "test_followup_due_seven_business_days_later"),
+    (SENDING / "claim.py", "client.send is called inside an open store transaction",
+     "        sent = client.send(outgoing)\n    except GmailError as err:\n        returned = _stamp(clock())",
+     '        conn.execute("BEGIN IMMEDIATE")\n        sent = client.send(outgoing)\n        conn.execute("COMMIT")\n'
+     "    except GmailError as err:\n        returned = _stamp(clock())",
+     "test_no_gmail_call_inside_a_transaction"),
+    (SENDING / "followups.py", "stop_planned moves the row to skipped instead of deleting it",
+     "conn.execute(\"DELETE FROM message WHERE message_id = ? AND state = 'planned'\", (message_id,))",
+     "conn.execute(\"UPDATE message SET state = 'skipped' WHERE message_id = ? AND state = 'planned'\", (message_id,))",
+     "test_lapse_deletes_the_planned_row_and_records_it_on_the_touch"),
+    (SENDING / "ramp.py", "effective_limit returns the start limit on a warning day",
+     "return _step_down(start, cfg) if lowered else start", "return start",
+     "test_effective_limit_is_one_level_lower_after_a_warning"),
 ]
 
 
@@ -532,10 +662,32 @@ def _stop(signum, frame):
     raise SystemExit(128 + signum)  # unwinds through the `finally` that restores the file
 
 
-def main():
+def parse_shard(text):
+    """'I/N' as (I, N) with 0 <= I < N. Anything else is refused, so a typo cannot quietly run nothing."""
+    left, slash, right = text.partition("/")
+    if not (slash and left.isascii() and left.isdigit() and right.isascii() and right.isdigit()):
+        raise argparse.ArgumentTypeError(f"expected I/N with whole numbers, like 2/6, got {text!r}")
+    i, n = int(left), int(right)
+    if n < 1 or i >= n:
+        raise argparse.ArgumentTypeError(f"shard {text!r} is out of range: I must be below N and N at least 1")
+    return i, n
+
+
+def select_shard(items, shard):
+    """The items whose zero-based position % N == I; all of them when there is no shard."""
+    if shard is None:
+        return list(items)
+    i, n = shard
+    return [item for position, item in enumerate(items) if position % n == i]
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--list", action="store_true", help="print mutations and exit")
-    args = ap.parse_args()
+    ap.add_argument("--list", action="store_true", help="print every mutation and exit (a shard does not narrow it)")
+    ap.add_argument("--shard", type=parse_shard, metavar="I/N",
+                    help="run only the mutations whose zero-based index %% N == I; the numbers in the output stay "
+                         "the full-run numbers. Each shard fails on its own missed or skipped entries.")
+    args = ap.parse_args(argv)
 
     if args.list:
         for n, (path, name, _, _, expect) in enumerate(MUTATIONS, start=1):
@@ -565,10 +717,12 @@ def main():
             print("   ", f)
         print("(mutable files are clean in git, so the failure is not a leftover mutation)")
         return 2
-    print(f"baseline green ({len(MUTATIONS)} mutations to apply)\n", flush=True)
+    chosen = select_shard(list(enumerate(MUTATIONS, start=1)), args.shard)
+    which = f" in shard {args.shard[0]}/{args.shard[1]}, of {len(MUTATIONS)}" if args.shard else ""
+    print(f"baseline green ({len(chosen)} mutations to apply{which})\n", flush=True)
 
     caught = missed = skipped = 0
-    for n, (path, name, old, new, expect) in enumerate(MUTATIONS, start=1):
+    for n, (path, name, old, new, expect) in chosen:
         original = path.read_bytes()
         label = f"{n:2} {path.name}: {name}"
         old_b, new_b = old.encode("utf-8"), new.encode("utf-8")

@@ -11,8 +11,8 @@ import sqlite3
 
 from outreach.store.timefmt import iso_utc, utcnow
 
-__all__ = ["name_key", "append_event", "start_job", "finish_job", "body_sha256", "add_alias", "mark_shared_key",
-           "is_shared_key", "log_touch", "record_outcome", "set_reply_kind", "undo_touch"]
+__all__ = ["NAME_ALIAS_SOURCES", "name_key", "append_event", "start_job", "finish_job", "body_sha256", "add_alias",
+           "mark_shared_key", "is_shared_key", "log_touch", "record_outcome", "set_reply_kind", "undo_touch"]
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -101,7 +101,7 @@ def body_sha256(text: str) -> str:
 
 # Sources whose alias key is the raw value lower-cased. Every other source is a company name: `name_key`.
 _RAW_ALIAS_SOURCES = ("fein", "ats", "linkedin")
-_NAME_ALIAS_SOURCES = ("name", "hand", "import", "crawl", "merge", "dba", "legal_name", "formd")
+NAME_ALIAS_SOURCES = ("name", "hand", "import", "crawl", "merge", "dba", "legal_name", "formd")
 
 
 def add_alias(conn: sqlite3.Connection, company_id: int, alias: str, source: str) -> bool:
@@ -114,7 +114,7 @@ def add_alias(conn: sqlite3.Connection, company_id: int, alias: str, source: str
     """
     if source in _RAW_ALIAS_SOURCES:
         key = alias.lower()
-    elif source in _NAME_ALIAS_SOURCES:
+    elif source in NAME_ALIAS_SOURCES:
         key = name_key(alias)
     else:
         raise ValueError(f"unknown alias source {source!r}")

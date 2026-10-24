@@ -299,6 +299,7 @@ class PersonIndex:
         self._folded: dict[str, str] = {}
         self._other_company: set[tuple[str, str]] = set()
         self._ambiguous_keys: set[str] = set()
+        self._candidates: dict[str, list[str]] = {}  # an ambiguous loose person to the people it could be
         self._finalized = False
 
     # -- adding --
@@ -448,6 +449,7 @@ class PersonIndex:
 
     def _ambiguous(self, person: _Person, candidates: list[_Person]) -> None:
         self._ambiguous_keys.add(person.key)
+        self._candidates[person.key] = [p.key for p in candidates]
         self._issue("person_ambiguous", person.company_key, person.records[0],
                     f"{person.name!r} ({', '.join(person.records)}) could be any of "
                     f"{', '.join(p.name for p in candidates)} at {person.company_key}, so it is kept as its own "
@@ -467,6 +469,10 @@ class PersonIndex:
     def people(self) -> list[PersonId]:
         return [self.person(k) for k in sorted(self._people) if k not in self._folded]
 
+    def candidates(self, key: str) -> list[str]:
+        """The people an ambiguous name-only person could be (empty when it is not ambiguous)."""
+        return sorted({self.resolve(k) for k in self._candidates.get(self.resolve(key), [])})
+
     def namesakes(self, key: str) -> list[str]:
         """The other people at the same company with the same name (kept apart by another address or profile)."""
         me = self._people[self.resolve(key)]
@@ -478,9 +484,10 @@ class PersonIndex:
 def carry_stops(people: PersonIndex, touches: Iterable[TouchIn]
                 ) -> tuple[dict[str, tuple[str, str]], list[IssueIn]]:
     """The people who must never be emailed again, as (no_go reason, record id) by resolved person key: everyone
-    whose reply said no or asked to stop in any source, and each same-name person at their company (add_people
-    refuses a same-name person who said no, so a second address never brings them back). Each namesake raises
-    `same_name_stopped`."""
+    whose reply said no or asked to stop in any source, each same-name person at their company (add_people
+    refuses a same-name person who said no, so a second address never brings them back), and, for a name-only
+    person who could be several people ("Dana" with two Danas there), every one of them, since the stop must reach
+    the real one. Each namesake raises `same_name_stopped`, each candidate `ambiguous_stopped`."""
     stops: dict[str, tuple[str, str]] = {}
     for touch in touches:
         if not touch.person_key:
@@ -504,6 +511,18 @@ def carry_stops(people: PersonIndex, touches: Iterable[TouchIn]
                                   f"{them.name} ({them.email or them.linkedin}) has the same name at "
                                   f"{them.company_key}, so they are stopped too. Lift it if they are someone else.",
                                   False))
+    for key, (reason, record) in sorted(stops.copy().items()):
+        me = people.person(key)
+        for other in people.candidates(key):
+            if other in stops:
+                continue
+            stops[other] = (reason, record)
+            them = people.person(other)
+            issues.append(IssueIn("ambiguous_stopped", them.company_key, record,
+                                  f"{me.name!r} ({', '.join(me.records)}) said no or asked to stop and could be "
+                                  f"{them.name} ({them.email or them.linkedin or 'no address'}), so they are stopped "
+                                  f"too. If {me.name!r} is someone else, give the full name in [person_name] for the "
+                                  f"record, or lift the no-go in the app.", False))
     return stops, issues
 
 

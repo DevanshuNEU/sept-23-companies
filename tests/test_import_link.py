@@ -284,6 +284,22 @@ class CarryStopsTest(unittest.TestCase):
         self.assertEqual(codes(issues), ["same_name_stopped"])
         self.assertTrue(all(isinstance(i, IssueIn) and not i.holds for i in issues))
 
+    def test_a_stop_on_an_ambiguous_first_name_stops_every_candidate(self):
+        people = PersonIndex()
+        whitfield = people.add("acme", "Dana Whitfield", email="dana.w@acme.example", record="r:1")
+        price = people.add("acme", "Dana Price", email="dana.p@acme.example", record="r:2")
+        loose = people.add("acme", "Dana", record="contacted_txt:line:5")
+        other = people.add("acme", "Ned Pruitt", email="ned@acme.example", record="r:3")
+        people.finalize()
+        self.assertEqual(len({people.resolve(k) for k in (whitfield, price, loose)}), 3)  # still three people
+        stops, issues = carry_stops(people, [self.touch(loose, "asked_to_stop", "contacted_txt:line:5")])
+        want = ("stop_reply", "contacted_txt:line:5")
+        self.assertEqual(stops, {people.resolve(loose): want, people.resolve(whitfield): want,
+                                 people.resolve(price): want})
+        self.assertNotIn(people.resolve(other), stops)
+        self.assertEqual(codes(issues), ["ambiguous_stopped", "ambiguous_stopped"])
+        self.assertTrue(all("[person_name]" in i.detail and not i.holds for i in issues))
+
     def test_said_no_on_a_folded_mention_stops_the_person(self):
         people = PersonIndex()
         full = people.add("kestrelrobotics", "Dana Whitfield", email="dana@example.com", record="r:1")

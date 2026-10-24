@@ -1,4 +1,5 @@
-"""Key normalizers for identity (#31 Task 4): FEIN, registrable domain, and what kind of domain it is."""
+"""Key normalizers for identity (#31 Task 4): FEIN, registrable domain, what kind of domain it is, and the keys a
+person is matched by (address, LinkedIn profile, name), shared by MCP add_people (#13) and the history import (#17)."""
 import re
 from collections.abc import Sequence
 from typing import Literal
@@ -99,3 +100,28 @@ def shared_count(reason: str) -> int | None:
     m = _SHARED_COUNT.match(reason or "")
     n = int(m.group(1)) if m else 0
     return n if n >= 2 else None
+
+
+# ---- people (#13 add_people and #17 import match people with these, so both see one person the same way) --------
+
+EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s.]+")
+PROFILE = re.compile(r"https://(?:[a-z]{2,3}\.)?linkedin\.com/in/([^/?#\s]+)/?(?:[?#]\S*)?", re.I)
+
+
+def email_key(text: str | None) -> str | None:
+    """An address as the store keeps it (trimmed, lower case), or None when it is not an address."""
+    email = (text or "").strip().lower()
+    return email if EMAIL.fullmatch(email) else None
+
+
+def linkedin_key(url: str | None) -> str | None:
+    """One form of a LinkedIn profile link (`https://www.linkedin.com/in/<slug>`, slug lower case), or None when
+    it is not a profile link."""
+    m = PROFILE.fullmatch((url or "").strip())
+    return f"https://www.linkedin.com/in/{m.group(1).lower()}" if m else None
+
+
+def person_name_key(name: str) -> str:
+    """The comparison key for a person's name: lower case, runs of spaces made one. Letters outside ASCII are kept,
+    so two names in another script never share a key."""
+    return " ".join(name.lower().split())

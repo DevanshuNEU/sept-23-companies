@@ -271,7 +271,7 @@
   - `@dataclass(frozen=True) class NightSummary: status: Literal['queue_empty', 'cap_reached', 'session_limit', 'auth', 'failed']; batches: int; stored: int; partial: int; requeued: int; applied: int; stopped_reason: str`.
   - `run_night(conn, runner: Runner, cfg: ReaderConfig | None = None, *, now=utcnow) -> NightSummary`: records a `job_run` with job `read_postings`; runs `enqueue_missing`; loops until the queue is empty, `max_postings_per_night` postings were handed out, or `max_batches` batches ran. Each batch: `next_batch(batch_size)`, one `runner` call, then `classify_run(result, session_limit_patterns=cfg.session_limit_patterns, auth_patterns=cfg.auth_patterns)`. `session_limit` or `auth`: `release` the batch and stop (job `partial` for a session limit, `failed` for auth). `failed` or a `parse_reply` error: `release` the batch, count a consecutive failure, stop at `max_consecutive_failures`. `ok`: the model's readings get `reader_version` filled in by code (the model does not copy it), go through `submit`, then `apply_reading` for stored and partial results; postings the model skipped are `release`d. After the last batch, and also when the run stops early for any reason (session limit, failures, cap), `run_night` calls `apply_all(conn)` (Task 4) so every posting that has a stored reading or an ended-`refused` queue row has the combined decision, whatever wrote its row last: a crawler redecision or a rebuild that ran without the combiner heals overnight, with no reader call. Never raises on a model or CLI problem; always closes the job.
   - `main` subcommand `night [--max-batches N] [--max-postings N]`: calls `live_checkout.require_live("the reader night job")` first, then `run_night(conn, claude_runner(cfg))`, prints the summary line.
-  - `launchd/com.devanshu.outreach-reader-night.plist.template`: label `com.devanshu.outreach-reader-night`, modeled on `com.devanshu.outreach-refresh.plist`: `StartCalendarInterval` daily at 02:30 (a run missed during sleep fires on wake), command `cd '{{LIVE_CHECKOUT}}' && PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/bin/caffeinate -i /opt/homebrew/bin/python3 -m outreach.reader night >> '{{LOG_PATH}}' 2>&1`; the comment block says: install is Devanshu's step, with the exact `launchctl bootstrap gui/$(id -u) <plist>` line, and `launchctl bootout` to remove.
+  - `launchd/com.devanshu.outreach-reader-night.plist.template` (as first built; the Hand-off's #17 note says what it is now): label `com.devanshu.outreach-reader-night`, modeled on `com.devanshu.outreach-refresh.plist`: `StartCalendarInterval` daily at 02:30 (a run missed during sleep fires on wake), command `cd '{{LIVE_CHECKOUT}}' && PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/bin/caffeinate -i /opt/homebrew/bin/python3 -m outreach.reader night >> '{{LOG_PATH}}' 2>&1`; the comment block says: install is Devanshu's step, with the exact `launchctl bootstrap gui/$(id -u) <plist>` line, and `launchctl bootout` to remove.
 
 - [ ] **Step 1: Write the failing tests** in `tests/test_reader_night.py` with a fake `Runner` that answers each batch from a script, over a scratch store with 45 eligible postings:
   - `test_night_reads_the_queue_in_batches`: fake runner returns valid readings for every posting it is sent (it parses the posting ids from the user message); `batch_size=20`: three batches, 45 stored, status `queue_empty`, job row `ok`.
@@ -458,12 +458,13 @@ says; otherwise `auth` patterns are matched first, then `session_limit`, else `f
 `claude_command` is the reader's flag list; `--safe-mode` in it is unconfirmed until Runbook step 1, and #15 must
 not copy it before that.
 
-**#17 deploy.** The night template departs from the convention #17's `test_every_template_follows_the_one_convention`
-checks: it runs `/bin/zsh -c` with `caffeinate -i` and Homebrew's `python3`, not `{{LIVE_CHECKOUT}}/.venv/bin/python`
-with `WorkingDirectory` and `StandardOutPath`. Task 6 chose `caffeinate` so the Mac stays awake through the night's
-calls. #17 either keeps both (and lets this template through) or rewrites it to the convention with
-`/usr/bin/caffeinate -i {{LIVE_CHECKOUT}}/.venv/bin/python -m outreach.reader night` as the program; either way
-`PATH` must start with `~/.local/bin`, where the `claude` CLI lives. Until #17 ships, the Runbook installs it by hand.
+**#17 deploy.** The night template follows the convention #17's `test_every_template_follows_the_one_convention`
+checks (final review ruling, 2026-10-24): `WorkingDirectory` `{{LIVE_CHECKOUT}}`, `ProgramArguments`
+`[{{LIVE_CHECKOUT}}/.venv/bin/python, -m, outreach.reader, night]`, `StandardOutPath` and `StandardErrorPath` both
+`{{LOG_PATH}}`, no shell, no `PATH` and no other placeholder. `caffeinate` moved into the command: `night` starts
+`/usr/bin/caffeinate -i -w <its pid>`, so the Mac stays awake until the night ends. The `claude` CLI is found on
+`PATH` or at `~/.local/bin/claude` (`night._claude_binary`), so the job needs no `PATH`. #17 installs it like any
+other job; until #17 ships, the Runbook installs it by hand.
 
 **The labeled set.** The real gold file is `~/Library/Application Support/outreach/gold/items.jsonl`, and its readings
 are `readings/<version>.jsonl` beside it (controller ruling, 2026-10-24): outside the repo, so the live checkout stays

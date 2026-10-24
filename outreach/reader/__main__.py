@@ -15,7 +15,8 @@ reader gave up on is shown, flagged, at once.
 
 `night` reads the queue through `claude -p` (`outreach.reader.night`) and prints one summary line. It refuses to run
 outside the live checkout before it reads the config or opens anything, and exits 1 when the night stopped on a
-login problem or failed calls.
+login problem or failed calls. It starts `/usr/bin/caffeinate -i -w <its pid>` first, so the Mac stays awake until
+the night ends (caffeinate exits with it); a Mac without caffeinate reads anyway.
 
 The store is the one at OUTREACH_DB; the default (live) store opens only from the live checkout, so from a worktree
 this runs on a scratch OUTREACH_DB or not at all. Only `night` calls a model.
@@ -52,6 +53,7 @@ import argparse
 import dataclasses
 import json
 import os
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -282,6 +284,10 @@ def _positive(text: str) -> int:
 
 def _night(args: argparse.Namespace, stdout) -> int:
     live_checkout.require_live("the reader night job", live_checkout.REPO_ROOT, live_checkout.LIVE_ROOT)
+    try:  # awake while this process lives; never a reason not to read
+        subprocess.Popen(["/usr/bin/caffeinate", "-i", "-w", str(os.getpid())])
+    except OSError as err:
+        print(f"night: caffeinate did not start ({err}); reading anyway", file=sys.stderr)
     cfg = load_reader_config()
     if args.max_batches is not None:
         cfg = dataclasses.replace(cfg, max_batches=args.max_batches)

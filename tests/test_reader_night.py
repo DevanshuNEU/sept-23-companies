@@ -523,6 +523,7 @@ class CommandTests(NightCase):
                 mock.patch.object(cli, "load_reader_config", side_effect=AssertionError("read the config")), \
                 mock.patch.object(cli, "connect", side_effect=AssertionError("opened the store")), \
                 mock.patch("sqlite3.connect", side_effect=AssertionError("opened a database")), \
+                mock.patch.object(cli.subprocess, "Popen", side_effect=AssertionError("started caffeinate")), \
                 mock.patch.object(night.subprocess, "run", side_effect=AssertionError("ran claude")):
             with self.assertRaises(SystemExit) as caught:
                 cli.main(["night"], stdin=io.StringIO(""), stdout=io.StringIO())
@@ -538,10 +539,13 @@ class CommandTests(NightCase):
                 mock.patch.object(cli, "load_reader_config", return_value=self.cfg), \
                 mock.patch.object(cli, "connect", side_effect=lambda: connect(path)), \
                 mock.patch.object(cli, "claude_runner", return_value=fake) as built, \
+                mock.patch.object(cli.subprocess, "Popen") as caffeinate, \
                 mock.patch.object(night.subprocess, "run", side_effect=AssertionError("ran claude")):
             code = cli.main(["night", "--max-batches", "1", "--max-postings", "15"], stdin=io.StringIO(""),
                             stdout=out)
         self.assertEqual(code, 0)
+        # The Mac stays awake while this process lives: caffeinate watches its pid (it is a fake here).
+        caffeinate.assert_called_once_with(["/usr/bin/caffeinate", "-i", "-w", str(os.getpid())])
         self.assertEqual(built.call_args.args[0].max_batches, 1)
         self.assertEqual(fake.sizes(), [15])
         self.assertIn("cap_reached", out.getvalue())
@@ -552,7 +556,6 @@ class TemplateTests(unittest.TestCase):
     def test_plist_template_is_complete(self):
         text = TEMPLATE.read_text(encoding="utf-8")
         self.assertIn("<string>com.devanshu.outreach-reader-night</string>", text)
-        self.assertIn("-m outreach.reader night", text)
         self.assertEqual(set(re.findall(r"\{\{[^}]*\}\}", text)), {"{{LIVE_CHECKOUT}}", "{{LOG_PATH}}"})
         self.assertIn("launchctl bootstrap gui/$(id -u)", text)
         self.assertIn("launchctl bootout", text)
@@ -566,12 +569,15 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(plist["Label"], "com.devanshu.outreach-reader-night")
         self.assertEqual(plist["StartCalendarInterval"], {"Hour": 2, "Minute": 30})
         self.assertNotIn("StartInterval", plist)
-        shell = plist["ProgramArguments"]
-        self.assertEqual(shell[:2], ["/bin/zsh", "-c"])
-        self.assertEqual(shell[2], "cd '/Users/someone/Desktop/Sept 23 Companies' && "
-                                   "PATH=$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin "
-                                   "/usr/bin/caffeinate -i /opt/homebrew/bin/python3 -m outreach.reader night "
-                                   ">> '/Users/someone/Library/Logs/outreach/reader-night.log' 2>&1")
+        # The deploy tool's one convention (#17, outreach/deploy/jobs.py): the venv python run as a module from the
+        # live checkout, both streams to the log, no shell, no PATH and no other placeholder.
+        live, log = "/Users/someone/Desktop/Sept 23 Companies", "/Users/someone/Library/Logs/outreach/reader-night.log"
+        self.assertEqual(plist["WorkingDirectory"], live)
+        self.assertEqual(plist["ProgramArguments"], [f"{live}/.venv/bin/python", "-m", "outreach.reader", "night"])
+        self.assertEqual((plist["StandardOutPath"], plist["StandardErrorPath"]), (log, log))
+        self.assertNotIn("EnvironmentVariables", plist)
+        for word in ("zsh", "caffeinate", "PATH=", "cd "):
+            self.assertNotIn(word, "".join(re.split(r"<!--.*?-->", text, flags=re.S)))
         plutil = shutil.which("plutil")
         if plutil is None:
             self.skipTest("plutil is not installed")

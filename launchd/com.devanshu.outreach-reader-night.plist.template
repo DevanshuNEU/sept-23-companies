@@ -6,11 +6,14 @@
   combine every stored reading with the rules. One summary line per night in the log. A session limit or an expired
   login stops the night cleanly and gives its leases back; the next night starts where it stopped.
 
-  StartCalendarInterval (not StartInterval), so a run missed while the Mac sleeps fires on wake. caffeinate -i keeps
-  the Mac awake until the night ends. PATH starts with ~/.local/bin, where the claude CLI is installed.
+  StartCalendarInterval (not StartInterval), so a run missed while the Mac sleeps fires on wake. The night command
+  itself starts /usr/bin/caffeinate -i -w <its pid>, so the Mac stays awake until the night ends. The claude CLI is
+  found on PATH or at ~/.local/bin/claude, so the job sets no PATH.
 
-  Placeholders, filled by the deploy tool (#17): {{LIVE_CHECKOUT}} is the live checkout, {{LOG_PATH}} the log file.
-  Nothing else is filled; the store is the default.
+  It follows the deploy tool's one convention (#17, outreach/deploy/jobs.py): WorkingDirectory is the live checkout,
+  the program is the checkout's venv python run as a module, and both streams go to the log. Placeholders, filled by
+  the deploy tool: {{LIVE_CHECKOUT}} is the live checkout, {{LOG_PATH}} the log file. Nothing else is filled; the
+  store is the default.
 
   Not installed by the repo, and never loaded from a worktree. Installing it is Devanshu's step. After filling it in:
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.devanshu.outreach-reader-night.plist
@@ -21,11 +24,14 @@
 <dict>
   <key>Label</key>
   <string>com.devanshu.outreach-reader-night</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/zsh</string>
-    <string>-c</string>
-    <string>cd '{{LIVE_CHECKOUT}}' &amp;&amp; PATH=$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/bin/caffeinate -i /opt/homebrew/bin/python3 -m outreach.reader night &gt;&gt; '{{LOG_PATH}}' 2&gt;&amp;1</string>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.reader</string>
+    <string>night</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>
@@ -34,5 +40,9 @@
     <key>Minute</key>
     <integer>30</integer>
   </dict>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
 </dict>
 </plist>

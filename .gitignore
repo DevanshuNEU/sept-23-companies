@@ -25,6 +25,3 @@ __pycache__/
 
 # Conductor workspace scratch (the run script's API store lives here)
 .context/
-
-# The gold sitting remembers what `gold show` printed (outreach.reader gold)
-tests/gold/*.shown

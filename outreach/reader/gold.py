@@ -9,7 +9,9 @@ reader: Job Radar labels a whole posting apply, maybe or no; here every reading 
     uv run python -m outreach.reader gold confirm --all-shown              # what the last show printed, untouched
     uv run python -m outreach.reader gold coverage                         # confirmed against target per stratum
 
-The file (`tests/gold/items.jsonl`, one JSON object per line):
+The file (`~/Library/Application Support/outreach/gold/items.jsonl` by default, outside the repo so the live checkout
+stays fast-forwardable; `--file` overrides it; one JSON object per line, and `tests/gold/items.jsonl` is an empty
+copy of the format):
 
     {"gold_id": "g0001", "stratum": "sponsorship:wont_sponsor", "title": str, "location": str, "body": str,
      "labels": {<every name in FIELDS>: {"value": ..., "quote": str}},
@@ -73,14 +75,18 @@ from outreach.rules.eligibility import starts_2027
 from outreach.rules.location import us_status
 from outreach.store import body_sha256
 
-__all__ = ["GOLD_DIR", "GOLD_PATH", "GOLD_READINGS", "STRATA", "STRATUM_NAMES", "HIDE_CLASSES", "TARGET_PER_CLASS",
+__all__ = ["GOLD_DIR", "GOLD_PATH", "GOLD_READINGS", "FORMAT_PATH", "STRATA", "STRATUM_NAMES", "HIDE_CLASSES", "TARGET_PER_CLASS",
            "BOUND_TARGET", "FieldReading", "GoldItem", "load_gold", "sample_gold", "pending", "coverage", "confirm",
            "rules_fields", "value_class", "show_text", "coverage_text", "labels_digest", "atomic_write",
            "check_label"]
 
-GOLD_DIR = Path(__file__).resolve().parents[2] / "tests" / "gold"
+# The real set lives outside the repo, so a sitting in the live checkout never edits a tracked file and the checkout
+# stays fast-forwardable (controller ruling, 2026-10-24). Its readings live beside it, one file per reader version.
+GOLD_DIR = Path.home() / "Library" / "Application Support" / "outreach" / "gold"
 GOLD_PATH = GOLD_DIR / "items.jsonl"
 GOLD_READINGS = GOLD_DIR / "readings"
+# The repo keeps only an empty file in the format; tests pass their own paths.
+FORMAT_PATH = Path(__file__).resolve().parents[2] / "tests" / "gold" / "items.jsonl"
 
 # One (name, field, class) per stratum, in the order they are filled: the four hide classes first (they decide what
 # the gate can measure), then the rarer show classes, then "silent", the disagreements and a random draw (field and
@@ -352,6 +358,7 @@ def atomic_write(path: Path, text: str) -> None:
     """Write `text` to a temp file in the same folder, then `os.replace` it over `path`. A failure before the
     replace leaves `path` as it was and removes the temp file."""
     path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:

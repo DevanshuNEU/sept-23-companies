@@ -442,6 +442,29 @@ class EvalCliTests(unittest.TestCase):
         self.assertEqual(data["version"], NEW)
         self.assertIn("gate", data)
 
+    def test_eval_and_promote_default_to_the_real_set_with_its_readings_beside_it(self):
+        self.write_readings(NEW, perfect(self.items))
+        with mock.patch.object(cli.gold, "GOLD_PATH", self.gold):
+            code, out = self.run_cli("eval", "--version", NEW)
+            self.assertEqual(code, 0, out)
+            self.assertIn(f"reader {NEW}: {len(self.items)} confirmed items, {len(self.items)} read", out)
+            code, out = self.run_cli("promote", "--version", NEW)
+            self.assertEqual(code, 0, out)
+        self.assertEqual(load_reader_config(self.config).promoted_version, NEW)
+
+    def test_readings_default_beside_the_file_given(self):
+        self.write_readings(NEW, perfect(self.items))
+        code, out = self.run_cli("eval", "--version", NEW, "--file", str(self.gold))
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"{len(self.items)} read", out)
+
+    def test_eval_on_a_missing_gold_file_is_a_clear_error(self):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            code, _ = self.run_cli("eval", "--file", str(self.dir / "nowhere.jsonl"))
+        self.assertEqual(code, 2)
+        self.assertIn("gold sample", err.getvalue())
+
     def test_eval_run_calls_the_runner_only_with_run(self):
         self.write_readings(NEW, perfect(self.items))
         with mock.patch.object(cli, "claude_runner", side_effect=AssertionError("no runner without --run")):

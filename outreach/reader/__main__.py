@@ -26,7 +26,8 @@ this runs on a scratch OUTREACH_DB or not at all. Only `night` calls a model.
     uv run python -m outreach.reader gold [--file PATH] confirm --all-shown
     uv run python -m outreach.reader gold [--file PATH] coverage
 
-`--file` defaults to tests/gold/items.jsonl. `show` remembers what it printed (a `.shown` file next to the items),
+`--file` defaults to ~/Library/Application Support/outreach/gold/items.jsonl (outside the repo, so the live checkout
+stays fast-forwardable), and the readings live in `readings/` beside it. `show` remembers what it printed (a `.shown` file next to the items),
 and `confirm --all-shown` confirms those items that are still pending and unchanged since. Only `sample` opens the
 store.
 
@@ -35,7 +36,7 @@ store.
     uv run python -m outreach.reader eval [--version V] [--against OLD] [--run] [--json]
     uv run python -m outreach.reader promote --version V [--against OLD]
 
-`eval` scores version V (default: the one the files make now) from `tests/gold/readings/<V>.jsonl`, prints the table
+`eval` scores version V (default: the one the files make now) from `readings/<V>.jsonl` beside the gold file, prints the table
 and the gate, and with `--against` the regressions, exiting 1 if there are any. Only `--run` calls a model: it reads
 the gold items through `claude -p` first (seat usage, never from a test). `promote` writes the `promoted_version`
 line in config.toml only when the gate passes (exit 1 otherwise); `--against` defaults to the promoted version. It
@@ -91,14 +92,14 @@ def _parser() -> argparse.ArgumentParser:
     pr.add_argument("--version", required=True)
     pr.add_argument("--against", default=None, help="the version it must not be worse than (default: promoted)")
     for p in (ev, pr):
-        p.add_argument("--file", type=Path, default=None, help="the gold items (default: tests/gold/items.jsonl)")
-        p.add_argument("--readings", type=Path, default=None, help="the readings folder (default: tests/gold/readings)")
+        p.add_argument("--file", type=Path, default=None, help="the gold items (default: the real set)")
+        p.add_argument("--readings", type=Path, default=None, help="the readings folder (default: beside the file)")
     return parser
 
 
 def _gold_parser(sub) -> None:
     g = sub.add_parser("gold", help="the labeled set: sample, show, confirm, coverage")
-    g.add_argument("--file", type=Path, default=None, help="the items file (default: tests/gold/items.jsonl)")
+    g.add_argument("--file", type=Path, default=None, help="the items file (default: the real set in Application Support)")
     gsub = g.add_subparsers(dest="gold_command", required=True)
     sample = gsub.add_parser("sample", help="draw postings from the store and append them prelabeled")
     sample.add_argument("--per-class", type=_positive, required=True)
@@ -138,6 +139,9 @@ def _gold(args: argparse.Namespace, stdout) -> int:
         gold.append_items(path, new)
         print(f"gold: drew {len(new)} postings into {path}", file=stdout)
         return 0
+    if not path.exists():
+        print(f"gold: no gold file at {path}; run: uv run python -m outreach.reader gold sample", file=sys.stderr)
+        return 2
     items = gold.load_gold(path)
     if command == "show":
         shown = gold.pending(items)[:args.limit]
@@ -206,8 +210,13 @@ def _evaluate(args: argparse.Namespace, stdout) -> int:
     cfg = load_reader_config(CONFIG_PATH)
     current = reader_version(cfg)
     version = args.version or current
-    folder = args.readings if args.readings is not None else gold.GOLD_READINGS
-    items = gold.load_gold(args.file if args.file is not None else gold.GOLD_PATH)
+    path = args.file if args.file is not None else gold.GOLD_PATH
+    folder = args.readings if args.readings is not None else path.parent / "readings"
+    if not path.exists():
+        print(f"{args.command}: no gold file at {path}; run: uv run python -m outreach.reader gold sample",
+              file=sys.stderr)
+        return 2
+    items = gold.load_gold(path)
     against = args.against
     if args.command == "promote" and against is None:
         against = cfg.promoted_version or None

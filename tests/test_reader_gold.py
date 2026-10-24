@@ -1,8 +1,9 @@
 """The labeled set and the sitting commands (#32, Task 7).
 
-Every item here is synthetic: made-up companies and bodies written for the test. Real labels never live in a test;
-they reach `tests/gold/items.jsonl` only through Devanshu's own sittings (`gold confirm`). No network, and no store
-except for `sample_gold`, which reads a scratch one.
+Every item here is synthetic: made-up companies and bodies written for the test, in temp folders the tests pass
+by path. Real labels never live in a test or the repo: they live in ~/Library/Application Support/outreach/gold/
+and come only from Devanshu's own sittings (`gold confirm`). No network, and no store except for `sample_gold`,
+which reads a scratch one.
 """
 import io
 import json
@@ -110,10 +111,19 @@ class LoadGoldTests(GoldCase):
         with self.assertRaises(ValueError):
             load_gold(self.path)
 
-    def test_the_shipped_gold_file_loads(self):
-        self.assertTrue(gold.GOLD_PATH.is_file())
-        self.assertTrue(gold.GOLD_READINGS.is_dir())
-        load_gold()  # empty until Devanshu's first sitting; whatever it holds must load
+    def test_the_real_set_lives_outside_the_repo(self):
+        home = Path.home() / "Library" / "Application Support" / "outreach" / "gold"
+        self.assertEqual(gold.GOLD_PATH, home / "items.jsonl")
+        self.assertEqual(gold.GOLD_READINGS, home / "readings")
+        repo = Path(__file__).resolve().parent.parent
+        self.assertNotIn(repo, gold.GOLD_PATH.parents, "the live checkout must stay fast-forwardable")
+
+    def test_the_repo_keeps_only_the_empty_format_file(self):
+        folder = Path(__file__).resolve().parent / "gold"
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["items.jsonl"])
+        self.assertEqual(gold.FORMAT_PATH, folder / "items.jsonl")
+        self.assertEqual(gold.FORMAT_PATH.read_text(encoding="utf-8"), "")
+        self.assertEqual(load_gold(gold.FORMAT_PATH), [])
 
 
 class SampleGoldTests(unittest.TestCase):
@@ -254,6 +264,30 @@ class CoverageAndShowTests(GoldCase):
         self.assertEqual(code, 1)
 
 
+class DefaultPathTests(GoldCase):
+    def test_every_gold_command_defaults_to_the_real_set(self):
+        self.write(item("g0001", sponsorship=("wont_sponsor", "We do not sponsor visas.")))
+        with mock.patch.object(gold, "GOLD_PATH", self.path):
+            out = io.StringIO()
+            self.assertEqual(cli.main(["gold", "show"], stdout=out), 0)
+            self.assertIn("g0001", out.getvalue())
+            self.assertEqual(cli.main(["gold", "confirm", "g0001"], stdout=io.StringIO()), 0)
+            out = io.StringIO()
+            self.assertEqual(cli.main(["gold", "coverage"], stdout=out), 0)
+            self.assertIn("random", out.getvalue())
+        self.assertEqual(load_gold(self.path)[0].status, "confirmed")
+
+    def test_a_missing_gold_file_is_a_clear_error(self):
+        missing = self.dir / "nowhere" / "items.jsonl"
+        for argv in (["show"], ["coverage"], ["confirm", "g0001"]):
+            with self.subTest(argv=argv):
+                err = io.StringIO()
+                with mock.patch("sys.stderr", err):
+                    code = cli.main(["gold", "--file", str(missing), *argv], stdout=io.StringIO())
+                self.assertEqual(code, 2)
+                self.assertIn("gold sample", err.getvalue())
+
+
 class SampleCliTests(unittest.TestCase):
     def test_gold_sample_appends_prelabeled_items_to_the_file(self):
         conn = fresh_store()
@@ -265,6 +299,10 @@ class SampleCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {"OUTREACH_DB": path_db}):
             path = Path(folder) / "items.jsonl"
             path.write_text(json.dumps(item("g0001")) + "\n", encoding="utf-8")
+            fresh = Path(folder) / "made" / "items.jsonl"  # the real set's folder may not exist yet
+            self.assertEqual(cli.main(["gold", "--file", str(fresh), "sample", "--per-class", "1", "--seed", "3"],
+                                      stdout=io.StringIO()), 0)
+            self.assertTrue(load_gold(fresh))
             code = cli.main(["gold", "--file", str(path), "sample", "--per-class", "2", "--seed", "3"],
                             stdout=io.StringIO())
             self.assertEqual(code, 0)

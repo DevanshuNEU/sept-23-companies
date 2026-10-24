@@ -144,6 +144,13 @@ class CuratedJoinTest(unittest.TestCase):
         self.assertEqual(codes(issues), ["touch_unmatched"])
         self.assertEqual(issues[0].company_key, "pinewoodlogistics")
 
+    def test_unknown_curated_role_is_an_item(self):
+        t = touch(self.ada, "2026-10-06T13:14:00Z")
+        _, issues, _ = join_curated([t], [row(1, role="Software Engineer"), row(2, role="")], companies(),
+                                    people=self.people)
+        self.assertEqual([(i.code, i.record) for i in issues if i.code == "role_unmapped"],
+                         [("role_unmapped", "curated_touches:row:1")])
+
     def test_unknown_req_is_not_a_known_role_named(self):
         t = touch(self.ada, "2026-10-06T16:00:00Z")
         (joined,), _, _ = join_curated([t], [row(1, req="")], companies(), people=self.people)
@@ -212,18 +219,18 @@ class OriginTest(unittest.TestCase):
         elsewhere = touch("lumenfreight/d", "2026-10-02T16:00:00Z", company="lumenfreight",
                           outcomes=[self.reply()])
         self.assertEqual(origin_touch(CO, "2026-10-12", [quiet, answered, later, elsewhere], []),
-                         (answered.key, None))
+                         (answered.key, ()))
 
     def test_the_only_touch_before_or_the_latest_with_an_item(self):
         only = touch(f"{CO}/a", "2026-10-01T16:00:00Z")
         after = touch(f"{CO}/b", "2026-10-20T16:00:00Z")
-        self.assertEqual(origin_touch(CO, "2026-10-12", [only, after], []), (only.key, None))
+        self.assertEqual(origin_touch(CO, "2026-10-12", [only, after], []), (only.key, ()))
         second = touch(f"{CO}/c", "2026-10-05T16:00:00Z")
-        self.assertEqual(origin_touch(CO, "2026-10-12", [only, second, after], []), (second.key, "interview_origin"))
+        self.assertEqual(origin_touch(CO, "2026-10-12", [only, second, after], []), (second.key, ("interview_origin",)))
         # two touches that got a reply: the latest, with an item
         r1 = touch(f"{CO}/a", "2026-10-01T16:00:00Z", outcomes=[self.reply()])
         r2 = touch(f"{CO}/c", "2026-10-05T16:00:00Z", outcomes=[self.reply()])
-        self.assertEqual(origin_touch(CO, "2026-10-12", [r1, r2], []), (r2.key, "interview_origin"))
+        self.assertEqual(origin_touch(CO, "2026-10-12", [r1, r2], []), (r2.key, ("interview_origin",)))
 
     def test_interview_falls_back_to_the_application_touch(self):
         apps = [ApplicationIn(key=f"{CO}|app|1", company_key=CO, posting_key=None, applied_on="2026-09-20", url="",
@@ -233,10 +240,10 @@ class OriginTest(unittest.TestCase):
                 ApplicationIn(key=f"{CO}|app|3", company_key=CO, posting_key=None, applied_on="2026-10-20", url="",
                               outcome="open", outcome_at=None, records=("radar_db:app_event:3",))]
         after = touch(f"{CO}/b", "2026-10-20T16:00:00Z")
-        self.assertEqual(origin_touch(CO, "2026-10-12", [after], apps), (f"{CO}|app|2", None))
+        self.assertEqual(origin_touch(CO, "2026-10-12", [after], apps), (f"{CO}|app|2", ()))
 
     def test_interview_without_touch_gets_an_other_touch_and_an_item(self):
-        self.assertEqual(origin_touch(CO, "2026-10-12", [], []), (None, "interview_origin"))
+        self.assertEqual(origin_touch(CO, "2026-10-12", [], []), (None, ("interview_origin",)))
         made = interview_touch(CO, "2026-10-12", "interview_prep:folder:kestrel-robotics")
         self.assertEqual(made.channel, "other")
         self.assertEqual(made.company_key, CO)
@@ -253,10 +260,12 @@ class OriginTest(unittest.TestCase):
         by_record = overrides(touch_for={rid: "local_storage:company:kestrel"})
         for ov in (by_key, by_record):
             self.assertEqual(origin_touch(CO, "2026-10-12", [answered, cold], [], record=rid, overrides=ov),
-                             (cold.key, None))
+                             (cold.key, ()))
         unknown = overrides(touch_for={rid: "contacted_txt:line:999"})
         self.assertEqual(origin_touch(CO, "2026-10-12", [answered, cold], [], record=rid, overrides=unknown),
-                         (answered.key, "touch_for_unknown"))
+                         (answered.key, ("touch_for_unknown", "interview_origin")))
+        self.assertEqual(origin_touch(CO, "2026-10-12", [], [], record=rid, overrides=unknown),
+                         (None, ("touch_for_unknown", "interview_origin")))
 
     def test_interview_date_prefers_sessions_then_verified_on(self):
         both = SourceRecord("interview_prep", "folder:k", {

@@ -972,27 +972,31 @@ class _Planner:
         one joins a touch a dated one made."""
         for item in sorted(self.later, key=lambda x: x.day is None):
             at_day = noon_ny(item.day) if item.day else None
-            target, code = origin_touch(item.company, at_day, list(touches.values()), list(self.apps.values()),
-                                        record=item.record, overrides=self.ov)
+            target, codes = origin_touch(item.company, at_day, list(touches.values()), list(self.apps.values()),
+                                         record=item.record, overrides=self.ov)
             estimated = item.estimated
-            if target is None:
+            made = target is None
+            if made:
                 t = interview_touch(item.company, item.day or self.today, item.record)
                 touches.setdefault(t.key, t)
                 target = t.key
             if item.day is None and item.explicit:
-                self.issue("date_unknown", item.company, item.record,
-                           f"{item.record} gives no date for the {item.kind}; "
-                           f"{'the import day' if code == 'interview_origin' else 'its touch' + chr(39) + 's date'} "
-                           f"is used.")
+                used = "the import day" if made else "its touch's date"
+                self.issue("date_unknown", item.company, item.record, f"{item.record} gives no date for the "
+                                                                      f"{item.kind}; {used} is used.")
             obj = self.target_of(target, touches)
             start = obj.sent_at if isinstance(obj, TouchIn) else noon_ny(obj.applied_on)
             at = at_day
             if at is None or at < start:
                 at, estimated = start, True
-            if code:
-                self.issue(code, item.company, item.record, f"{item.record}: the {item.kind} at {item.company} was "
-                                                            f"put on {target}. Rule [touch_for] if it came another "
-                                                            f"way.")
+            for code in codes:
+                if code == "touch_for_unknown":
+                    detail = (f"[touch_for] for {item.record} names {self.ov.touch_for.get(item.record)!r}, which is "
+                              f"no touch; the {item.kind} was placed by the usual rules.")
+                else:
+                    detail = (f"{item.record}: the {item.kind} at {item.company} was put on {target}. Rule "
+                              f"[touch_for] if it came another way.")
+                self.issue(code, item.company, item.record, detail)
             new = OutcomeIn(item.kind, at, item.reply_kind, estimated, item.record)
             outcomes, conflict = merge_outcome(obj.outcomes, new)
             if conflict:

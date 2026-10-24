@@ -82,6 +82,10 @@ class VocabTest(unittest.TestCase):
             ("linkedin-referred-me", (["replied", "referred"], "interested")),
             ("bounced", (["bounced"], None)),
             ("said they would pass it on", None), ("maybe", None),
+            ("Please remove me from your list", (["replied"], "asked_to_stop")),
+            ("unsubscribe", (["replied"], "asked_to_stop")),
+            ("asked me to stop emailing", (["replied"], "asked_to_stop")),
+            ("do not contact again", (["replied"], "asked_to_stop")),
         ])
 
     def test_curated_outcome_table(self):

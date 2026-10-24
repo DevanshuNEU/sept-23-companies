@@ -139,6 +139,15 @@ class PersonNameTest(unittest.TestCase):
                 self.assertEqual(parse_person_name(text), want)
 
 
+class RoleAbbreviationTest(unittest.TestCase):
+    def test_em_and_pm_are_names_unless_alone(self):
+        self.assertEqual(parse_person_name("Em Watson"), "Em Watson")
+        self.assertEqual(parse_person_name("Pm Okafor"), "Pm Okafor")
+        for text in ("EM", "pm", "Em."):
+            with self.subTest(text=text):
+                self.assertIsNone(parse_person_name(text))
+
+
 class PersonIndexTest(unittest.TestCase):
     CO = "kestrelrobotics"
 
@@ -362,6 +371,8 @@ class CarryStopsTest(unittest.TestCase):
         self.assertEqual(stops, {people.resolve(a): ("stop_reply", "r:1"), people.resolve(b): ("stop_reply", "r:1")})
         self.assertEqual(codes(issues), ["same_name_stopped"])
         self.assertTrue(all(isinstance(i, IssueIn) and not i.holds for i in issues))
+        self.assertIn("[person_name]", issues[0].detail)
+        self.assertIn("lift the no-go in the app", issues[0].detail)
 
     def test_a_stop_on_an_ambiguous_first_name_stops_every_candidate(self):
         people = PersonIndex()

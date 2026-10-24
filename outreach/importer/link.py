@@ -6,8 +6,11 @@ one, or a company hidden behind another). So the rules join only on an exact key
 raised as an issue for his overrides (`same_company`, `not_same_company`, `person_name`), and his overrides win.
 
 Companies (`CompanyIndex`). The plan's company key is `company_key(name)`: the store's `name_key` (the key #31's
-identity and `company_name_key` use), with one guard: a name whose letters do not all fold to ASCII keeps its own
-key, so two names in another script never collapse into one. data.js companies are the base; every other record
+identity and `company_name_key` use) of the name with accents folded, with one guard: a name whose letters do not
+all fold to ASCII keeps its own key, so two names in another script never collapse into one. The fold is the one
+difference from the store: here "Café Labs" and "Cafe Labs" are one key (`cafelabs`), while the store's `name_key`
+drops the accented letter (`caflabs`). So the writer registers every spelling in `CompanyIn.names` as an alias of
+the company, and a later "Cafe Labs" from any source resolves to it instead of becoming a second company. data.js companies are the base; every other record
 links by that exact key. Near names ("Tidewater" and "Tidewater AI") stay two companies and come back from
 `near_names()` for one merge item each; the writer resolves each company through `identity.resolve_candidate`, which
 is where store-side matching (domain, FEIN, name and state) happens.
@@ -38,7 +41,8 @@ from outreach.importer.vocab import (STOP_KINDS, curated_channel, curated_outcom
 from outreach.sources.keys import email_key, linkedin_key, person_name_key
 from outreach.store import name_key
 
-__all__ = ["company_key", "CompanyIndex", "NEAR_WORDS", "MIN_PREFIX", "ROLE_WORDS", "parse_person_name",
+__all__ = ["company_key", "CompanyIndex", "NEAR_WORDS", "MIN_PREFIX", "ROLE_WORDS", "SOLO_ROLE_WORDS",
+           "parse_person_name",
            "PersonId", "PersonIndex", "placeholder_key", "is_placeholder", "carry_stops", "touch_key", "merge_outcome",
            "join_curated", "origin_touch", "interview_touch", "interview_date"]
 
@@ -227,16 +231,23 @@ class CompanyIndex:
 
 ROLE_WORDS = frozenset({
     "founder", "founders", "cofounder", "cofounders", "co-founder", "co-founders", "cto", "ceo", "coo", "cfo", "vp",
-    "em", "pm", "hr", "recruiter", "recruiters", "recruiting", "talent", "team", "hiring", "manager", "engineer",
+    "hr", "recruiter", "recruiters", "recruiting", "talent", "team", "hiring", "manager", "engineer",
     "engineers", "someone", "unknown",
 })
 
 
+# Role abbreviations that are also given names ("Em Watson"): a role only when they are the whole text.
+SOLO_ROLE_WORDS = frozenset({"em", "pm"})
+
+
 def parse_person_name(text: str | None) -> str | None:
     """The name when the text is 1 to 4 words, each starting with a letter, and no word is a role word
-    ("founders", "the CTO", "hiring team"); else None, and the planner makes a placeholder person."""
+    ("founders", "the CTO", "hiring team") and the text is not a lone "EM" or "PM"; else None, and the planner
+    makes a placeholder person."""
     words = (text or "").split()
     if not 1 <= len(words) <= 4:
+        return None
+    if len(words) == 1 and words[0].lower().strip(".,;:") in SOLO_ROLE_WORDS:
         return None
     if any(not w[0].isalpha() or w.lower().strip(".,;:") in ROLE_WORDS for w in words):
         return None
@@ -588,7 +599,8 @@ def carry_stops(people: PersonIndex, touches: Iterable[TouchIn]
             issues.append(IssueIn("same_name_stopped", them.company_key, record,
                                   f"{me.name} ({me.email or me.linkedin}) said no or asked to stop ({record}); "
                                   f"{them.name} ({them.email or them.linkedin}) has the same name at "
-                                  f"{them.company_key}, so they are stopped too. Lift it if they are someone else.",
+                                  f"{them.company_key}, so they are stopped too. If they are someone else, give "
+                                  f"the full name in [person_name] for the record, or lift the no-go in the app.",
                                   False))
     for key, (reason, record) in sorted(stops.copy().items()):
         me = people.person(key)
@@ -704,6 +716,9 @@ def join_curated(touches: list[TouchIn], rows: list[SourceRecord], companies: Co
             continue
         ck = companies.add(name, rid)
         row_role = role_kind(raw.get("role"))
+        if row_role is None and str(raw.get("role") or "").strip():
+            issues.append(IssueIn("role_unmapped", ck, rid, f"{rid} gives the role {raw.get('role')!r}, which is no "
+                                                            f"role kind; the row fits a touch of any role.", False))
         found = None
         target = touch_for.get(rid)
         if target is not None:
@@ -788,24 +803,30 @@ _POSITIVE = frozenset({"replied", "referred", "accepted", "interview", "offer"})
 
 def origin_touch(company_key_: str, interview_at: str | None, touches: list[TouchIn],
                  applications: list[ApplicationIn], *, record: str | None = None,
-                 overrides: Overrides | None = None) -> tuple[str | None, str | None]:
-    """(the touch or application key an interview is recorded on, the issue code or None). His `touch_for` for the
-    record (a touch or application key, or a record id) wins. Else, at the company: (1) the only touch sent on or
-    before the day with a reply or a positive outcome (with several, the latest, issue `interview_origin`); (2) the
-    only touch before the day; (3) the latest touch before it, issue `interview_origin`; (4) the latest
-    application before it; (5) none: (None, `interview_origin`), and the caller makes an `interview_touch`. With no
-    day known every touch counts as before it."""
+                 overrides: Overrides | None = None) -> tuple[str | None, tuple[str, ...]]:
+    """(the touch or application key an interview is recorded on, the issue codes to raise). His `touch_for` for
+    the record (a touch or application key, or a record id) wins. Else, at the company: (1) the only touch sent on
+    or before the day with a reply or a positive outcome (with several, the latest, issue `interview_origin`); (2)
+    the only touch before the day; (3) the latest touch before it, issue `interview_origin`; (4) the latest
+    application before it; (5) none: (None, `interview_origin`), and the caller makes an `interview_touch`. A
+    `touch_for` that names no touch gives `touch_for_unknown` and `interview_origin` whatever the fallback finds,
+    since the place is then a guess. With no day known every touch counts as before it."""
     day = ny_date(interview_at) if interview_at else None
     code = None
     target = _empty(overrides).touch_for.get(record) if record else None
     if target is not None:
         for t in touches:
             if t.key == target or target in t.records:
-                return t.key, None
+                return t.key, ()
         for a in applications:
             if a.key == target or target in a.records:
-                return a.key, None
+                return a.key, ()
         code = "touch_for_unknown"
+
+    def codes(found: str | None) -> tuple[str, ...]:
+        if code:
+            return (code, "interview_origin")
+        return (found,) if found else ()
 
     def latest(items, when):
         return max(items, key=lambda x: (when(x), x.key)).key
@@ -814,18 +835,18 @@ def origin_touch(company_key_: str, interview_at: str | None, touches: list[Touc
     on_or_before = [t for t in mine if day is None or ny_date(t.sent_at) <= day]
     answered = [t for t in on_or_before if any(o.kind in _POSITIVE for o in t.outcomes)]
     if len(answered) == 1:
-        return answered[0].key, code
+        return answered[0].key, codes(None)
     if answered:
-        return latest(answered, lambda t: t.sent_at), code or "interview_origin"
+        return latest(answered, lambda t: t.sent_at), codes("interview_origin")
     before = [t for t in mine if day is None or ny_date(t.sent_at) < day]
     if len(before) == 1:
-        return before[0].key, code
+        return before[0].key, codes(None)
     if before:
-        return latest(before, lambda t: t.sent_at), code or "interview_origin"
+        return latest(before, lambda t: t.sent_at), codes("interview_origin")
     apps = [a for a in applications if a.company_key == company_key_ and (day is None or a.applied_on < day)]
     if apps:
-        return latest(apps, lambda a: a.applied_on), code
-    return None, code or "interview_origin"
+        return latest(apps, lambda a: a.applied_on), codes(None)
+    return None, codes("interview_origin")
 
 
 def interview_touch(company_key_: str, day: str, record: str) -> TouchIn:

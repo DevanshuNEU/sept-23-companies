@@ -17,7 +17,8 @@ from zoneinfo import ZoneInfo
 from outreach.store import iso_utc
 
 __all__ = [
-    "OUTCOME_KINDS", "TRACKER_KINDS", "REPLY_KINDS", "STOP_KINDS", "OutcomeKind", "role_kind", "ContactPlan",
+    "OUTCOME_KINDS", "TRACKER_KINDS", "REPLY_KINDS", "STOP_KINDS", "STOP_PHRASES", "OutcomeKind", "role_kind",
+    "ContactPlan",
     "contact_status_plan", "note_reply", "curated_outcome", "tracker_stage", "TRACKER_REPLY_KIND", "tracker_channel",
     "curated_channel", "RadarEffect", "radar_event", "band_stage", "FROZEN_ATS", "MAYBE_FROZEN_ATS", "board_frozen",
     "req_named", "followups_count", "NEW_YORK", "NOON_NY", "noon_ny", "ny_date", "to_utc",
@@ -116,11 +117,18 @@ def _copy(reply: Reply) -> Reply:
     return list(reply[0]), reply[1]
 
 
+# Free text in a note that asks not to be written to again: read as a stop, the safe direction.
+STOP_PHRASES = ("please remove me", "remove me from", "unsubscribe", "stop emailing", "stop contacting",
+                "do not contact", "don't contact", "do not email", "don't email", "opt out", "no more emails")
+
+
 def note_reply(text) -> Reply | None:
     """(outcome kinds, reply kind) for a company file `reply` word. Any word starting `linkedin-refer` is an
-    interested reply plus a referral (Pending Devanshu Q14). None for free text: the planner keeps it as an unsorted
-    reply and an item quoting it."""
+    interested reply plus a referral (Pending Devanshu Q14). Free text with a stop phrase (STOP_PHRASES) is a reply
+    asking to stop. None for any other free text: the planner keeps it as an unsorted reply and an item quoting it."""
     key = _norm(text)
+    if any(phrase in key for phrase in STOP_PHRASES):
+        return ["replied"], "asked_to_stop"
     if key.startswith("linkedin-refer"):
         return ["replied", "referred"], "interested"
     found = _NOTE_REPLY.get(key)

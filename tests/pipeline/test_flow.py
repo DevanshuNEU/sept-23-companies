@@ -872,8 +872,8 @@ class ReaderFlowTests(HarnessCase):
 
     def flow(self, *, promote=False, **script):
         h = self.harness()
-        self.assertEqual([n for n, _ in h.stages][:5],
-                         ["discover", "resolve", "find_boards", "read_boards", "read_postings"])
+        names = [n for n, _ in h.stages if n != "import_history"]  # the history stage runs first, on its own rows
+        self.assertEqual(names[:5], ["discover", "resolve", "find_boards", "read_boards", "read_postings"])
         if promote:
             h.reader.promote()
         h.reader.script[stages_reader.HIDE_TITLE].update(script)

@@ -423,6 +423,20 @@ class ApplyTests(StoreCase):
         self.assertEqual(self.row(pid)["sponsorship"], "unclear")
         self.assertEqual(self.row(pid)["provisional"], 1)
 
+    def test_a_stored_reading_whose_own_ids_differ_from_its_row_is_no_evidence(self):
+        # Review fix 3: the fields JSON names another posting, body or version than the row it sits in.
+        for key, wrong in (("posting_id", 999_999), ("body_sha256", "cd" * 32), ("reader_version", OTHER)):
+            pid = self.posting()
+            self.store_reading(pid, sponsorship=("wont_sponsor", REFUSAL))
+            fields = json.loads(self.conn.execute("SELECT fields FROM posting_reading WHERE posting_id = ?",
+                                                  (pid,)).fetchone()[0])
+            fields[key] = wrong
+            self.conn.execute("UPDATE posting_reading SET fields = ? WHERE posting_id = ?", (json.dumps(fields), pid))
+            self.assertEqual(reading_state(self.conn, pid, promoted=VERSION), (None, frozenset(), True), key)
+            apply_reading(self.conn, pid, cfg=self.cfg)
+            row = self.row(pid)
+            self.assertEqual((row["sponsorship"], row["provisional"], row["reader_version"]), ("unclear", 1, None), key)
+
     def test_a_reading_of_an_old_body_is_not_used(self):
         pid = self.posting()
         self.store_reading(pid, sponsorship=("wont_sponsor", REFUSAL))

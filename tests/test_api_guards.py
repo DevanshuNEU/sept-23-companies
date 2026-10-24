@@ -239,6 +239,48 @@ class NoCorsTest(GuardCase):
         self.assert_refused(self.bare.request("TRACE", "/api/guard/read"))
 
 
+class FramingTest(GuardCase):
+    """Review I1: a page on another 127.0.0.1 port is same-site, so it must not be able to frame the app."""
+
+    HARDENING = {"content-security-policy": "frame-ancestors 'none'", "x-frame-options": "DENY",
+                 "x-content-type-options": "nosniff"}
+
+    def assert_hardened(self, reply):
+        for name, value in self.HARDENING.items():
+            self.assertEqual(reply.headers.get(name), value, name)
+
+    def test_every_response_carries_the_frame_and_sniff_headers(self):
+        dist = self.settings.web_dist
+        dist.mkdir(parents=True)
+        (dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+        for path in ("/", "/outbox", "/api/guard/read", "/api/no-such-thing"):
+            with self.subTest(path=path):
+                reply = self.bare.get(path, headers={"Sec-Fetch-Site": "same-site"})
+                self.assertIn(reply.status_code, (200, 404))
+                self.assert_hardened(reply)
+        self.assert_hardened(self.write())
+        refused = self.read({"Host": "evil.example:3100"})
+        self.assertEqual(refused.status_code, 403)
+        self.assert_hardened(refused)
+
+    def test_a_frame_load_from_another_page_is_refused(self):
+        for dest in ("iframe", "frame", "embed", "object", "IFRAME"):
+            for site in ("same-site", "cross-site", "none", None):
+                with self.subTest(dest=dest, site=site):
+                    headers = {"Sec-Fetch-Dest": dest}
+                    if site is not None:
+                        headers["Sec-Fetch-Site"] = site
+                    reply = self.read(headers)
+                    self.assert_refused(reply, "frame")
+                    self.assert_hardened(reply)
+                    self.assertEqual(self.bare.get("/", headers=headers).status_code, 403)
+
+    def test_a_same_origin_frame_and_a_same_site_page_load_are_allowed(self):
+        self.assertEqual(self.read({"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Site": "same-origin"}).status_code, 200)
+        self.assertEqual(self.read({"Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "same-site"}).status_code, 200)
+        self.assertEqual(self.read({"Sec-Fetch-Dest": "empty"}).status_code, 200)
+
+
 class EnvelopeTest(GuardCase):
     def test_the_refusal_is_the_envelope(self):
         reply = self.write(headers={"Origin": None})

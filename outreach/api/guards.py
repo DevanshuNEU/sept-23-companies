@@ -9,8 +9,12 @@ request never has its body read and never reaches a router, a handler or the sta
    origin), `Content-Type: application/json`, and, when the browser sends it, `Sec-Fetch-Site: same-origin`. A
    plain `curl` call sends no Origin, so it is refused; an HTML form cannot send JSON, so it is refused too.
 3. A read (`GET`, `HEAD`) may omit the Origin (browsers leave it off same-origin GETs), but one from outside the set,
-   or `Sec-Fetch-Site: cross-site`, is refused.
+   or `Sec-Fetch-Site: cross-site`, is refused. A read the browser is loading into a frame (`Sec-Fetch-Dest`
+   `iframe`, `frame`, `embed` or `object`) is refused unless `Sec-Fetch-Site` is `same-origin`.
 4. The API never sends CORS headers. Any `access-control-*` header on a response is removed on the way out.
+   Every response, a refusal too, says it may not be framed (`Content-Security-Policy: frame-ancestors 'none'`,
+   `X-Frame-Options: DENY`) and must not be sniffed (`X-Content-Type-Options: nosniff`). A page on another
+   127.0.0.1 port is same-site, so without these it could frame the app and steer a click onto Approve.
 5. `OPTIONS` (a CORS preflight) and every other method are refused: there is nothing to answer.
 
 A refusal is the `403 forbidden` envelope with a plain message that says what was refused. It never echoes the
@@ -22,6 +26,13 @@ from outreach.api.settings import Settings
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 READ_METHODS = frozenset({"GET", "HEAD"})
 JSON = "application/json"
+FRAME_DESTS = frozenset({"iframe", "frame", "embed", "object"})
+HARDENING = (
+    (b"content-security-policy", b"frame-ancestors 'none'"),
+    (b"x-frame-options", b"DENY"),
+    (b"x-content-type-options", b"nosniff"),
+)
+_HARDENING_NAMES = frozenset(name for name, _ in HARDENING)
 
 
 class GuardMiddleware:
@@ -38,11 +49,12 @@ class GuardMiddleware:
         if scope["type"] == "websocket":  # the API has none; refuse before the handshake
             await send({"type": "websocket.close", "code": 1008})
             return
+        send = _hardened(send)
         reason = self.refusal(scope)
         if reason is not None:
             await envelope("forbidden", reason, STATUS["forbidden"])(scope, receive, send)
             return
-        await self.app(scope, receive, _without_cors(send))
+        await self.app(scope, receive, send)
 
     def refusal(self, scope) -> str | None:
         """Why this request is refused, in plain words, or None when it may go on."""
@@ -73,6 +85,9 @@ class GuardMiddleware:
                 return "Refused: a write must come from this app's own page (Sec-Fetch-Site same-origin)."
             return None
         if method in READ_METHODS:
+            dest = one("sec-fetch-dest")
+            if dest is not None and dest.lower() in FRAME_DESTS and (site or "").lower() != "same-origin":
+                return "Refused: this app cannot be loaded in a frame by another page."
             if origin is not None and origin not in self.origins:
                 return "Refused: this Origin is not one of this app's own pages."
             if site is not None and site.lower() == "cross-site":
@@ -87,14 +102,15 @@ def _is_json(content_type: str | None) -> bool:
     return content_type.split(";", 1)[0].strip().lower() == JSON
 
 
-def _without_cors(send):
+def _hardened(send):
+    """Drop every CORS header and any framing or sniffing header a handler set, then add ours."""
     async def guarded(message):
         if message["type"] == "http.response.start":
             message = dict(message)
             message["headers"] = [
                 (name, value) for name, value in message.get("headers", ())
-                if not name.lower().startswith(b"access-control-")
-            ]
+                if not name.lower().startswith(b"access-control-") and name.lower() not in _HARDENING_NAMES
+            ] + list(HARDENING)
         await send(message)
 
     return guarded

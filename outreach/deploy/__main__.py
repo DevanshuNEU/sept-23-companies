@@ -16,6 +16,7 @@ from pathlib import Path
 import live_checkout
 from outreach.deploy.jobs import NEW_JOBS, OLD_JOBS, DeployError, Job, render
 from outreach.deploy.launchctl import Runner, SystemRunner
+from outreach.store.db import DEFAULT_PATH as LIVE_STORE
 
 DEFAULT_AGENTS_DIR = Path("~/Library/LaunchAgents").expanduser()
 DEFAULT_LOG_DIR = Path("~/Library/Logs/outreach").expanduser()
@@ -32,8 +33,10 @@ ROLLBACK_REMINDER = ("The old sender is paused in the old dashboard. Run python 
 
 
 class Context:
-    def __init__(self, runner: Runner, agents_dir: Path, root: str, live_root: str, log_dir: Path):
+    def __init__(self, runner: Runner, agents_dir: Path, root: str, live_root: str, log_dir: Path,
+                 store_path: Path):
         self.runner = runner
+        self.store_path = store_path  # the store the jobs open (their default); only checked to exist, never opened
         self.agents_dir = agents_dir
         self.root = root
         self.live_root = live_root
@@ -97,6 +100,9 @@ def install_problems(ctx: Context, skip: set[str]) -> list[str]:
             problems.append(f"{job.label}: required template {job.template} is missing ({job.owner} adds it)")
     if not (Path(ctx.live_root) / VENV_PYTHON).exists():
         problems.append(f"{VENV_PYTHON} is missing in the live checkout: run uv sync there first")
+    if not ctx.store_path.exists():
+        problems.append(f"the live store {ctx.store_path} is missing: run uv run python -m outreach.install first "
+                        "(switch step S6)")
     if not (Path(ctx.live_root) / WEB_INDEX).exists():
         problems.append(f"{WEB_INDEX} is missing: build the web app first (switch step S10)")
     return problems
@@ -269,7 +275,8 @@ COMMANDS = {"plan": cmd_plan, "install": cmd_install, "retire-old": cmd_retire_o
 
 
 def main(argv: list[str] | None = None, *, runner: Runner | None = None, agents_dir: Path | None = None,
-         root: str | None = None, live_root: str | None = None, log_dir: Path | None = None) -> int:
+         root: str | None = None, live_root: str | None = None, log_dir: Path | None = None,
+         store_path: Path | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m outreach.deploy", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -286,6 +293,7 @@ def main(argv: list[str] | None = None, *, runner: Runner | None = None, agents_
         root=root if root is not None else live_checkout.REPO_ROOT,
         live_root=live_root if live_root is not None else live_checkout.LIVE_ROOT,
         log_dir=Path(log_dir) if log_dir is not None else DEFAULT_LOG_DIR,
+        store_path=Path(store_path) if store_path is not None else Path(LIVE_STORE),
     )
     try:
         return COMMANDS[args.command](ctx, args)

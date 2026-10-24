@@ -919,10 +919,11 @@ checkout `~/Desktop/Sept 23 Companies`. If a check fails, stop and roll back (R-
   reach 0 with no `import_not_in_sent`.
 - **S10. Build the web app.** `cd web && pnpm install --frozen-lockfile && pnpm build && cd ..`
   Check: `ls web/dist/index.html` exists.
-- **S11. Install the new jobs.** `uv run python -m outreach.deploy plan`, read it, then
-  `uv run python -m outreach.deploy install`
+- **S11. Install the new jobs.** `uv run python -m outreach.api --check` (it must print ok before the API job is
+  installed: it opens the store S6 made, and install also refuses while that store is missing), then
+  `uv run python -m outreach.deploy plan`, read it, then `uv run python -m outreach.deploy install`
   Check: `uv run python -m outreach.deploy status` shows each new label loaded, `com.devanshu.outreach-sources` and
-  `com.devanshu.outreach-needs-you` among them; `uv run python -m outreach.api --check` prints ok;
+  `com.devanshu.outreach-needs-you` among them;
   http://127.0.0.1:3100 opens Today and the health view lists the jobs. Register the MCP server with the command #13
   puts in CLAUDE.md (`python -m outreach.mcp --print-registration` prints it; no launchd job). The cold-email skill
   merged at S5 already drafts through it.

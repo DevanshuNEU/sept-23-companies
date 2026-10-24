@@ -251,6 +251,9 @@ class DeployCase(unittest.TestCase):
         self.agents = base / "LaunchAgents"
         self.agents.mkdir()
         self.logs = base / "Logs" / "outreach"
+        self.store = base / "Application Support" / "outreach" / "outreach.db"  # stands in for the live store
+        self.store.parent.mkdir(parents=True)
+        self.store.write_bytes(b"")
         for job in OLD_JOBS:
             (self.agents / job.plist).write_text(minimal(job.label).replace("outreach.example", job.label),
                                                 encoding="utf-8")
@@ -262,7 +265,7 @@ class DeployCase(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = main(list(argv), runner=self.runner, agents_dir=self.agents, root=str(root or self.live),
-                        live_root=str(self.live), log_dir=self.logs)
+                        live_root=str(self.live), log_dir=self.logs, store_path=self.store)
         return code, out.getvalue(), err.getvalue()
 
     def set_old_config(self, config) -> None:
@@ -386,6 +389,21 @@ class InstallTest(DeployCase):
                 self.assertEqual(self.runner.changes(), [])
                 self.assertEqual(snapshot(self.agents), before)
                 missing.write_bytes(saved)
+
+    def test_install_refuses_without_the_live_store(self):
+        self.store.unlink()
+        before = snapshot(self.agents)
+        code, _, err = self.main("install")
+        self.assertEqual(code, 1)
+        self.assertIn(str(self.store), err)
+        self.assertIn("outreach.install", err)
+        self.assertEqual(self.runner.changes(), [])
+        self.assertEqual(snapshot(self.agents), before)
+        self.assertFalse(self.store.exists())  # checked, never created
+        code, out, _ = self.main("plan")
+        self.assertIn("Install would refuse", out)
+        self.assertIn(str(self.store), out)
+        self.assertFalse(self.store.exists())
 
     def test_install_refuses_a_bad_template_before_writing_anything(self):
         path = self.live / "launchd" / "com.devanshu.outreach-sources.plist.template"

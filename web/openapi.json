@@ -3488,6 +3488,24 @@
         "title": "Ping",
         "type": "object"
       },
+      "PlanProgress": {
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "done",
+          "total"
+        ],
+        "title": "PlanProgress",
+        "type": "object"
+      },
       "PostingFlag": {
         "description": "One field where the reader and the phrase rules disagree (or the reader could not say), with both quotes.",
         "properties": {
@@ -5425,6 +5443,85 @@
           "end"
         ],
         "title": "SendingWindow",
+        "type": "object"
+      },
+      "ShellSummary": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "capacityToday": {
+            "title": "Capacitytoday",
+            "type": "integer"
+          },
+          "doneCount": {
+            "title": "Donecount",
+            "type": "integer"
+          },
+          "draftsToReview": {
+            "title": "Draftstoreview",
+            "type": "integer"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobRunSummary"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "linkedinToReach": {
+            "title": "Linkedintoreach",
+            "type": "integer"
+          },
+          "noGoCount": {
+            "title": "Nogocount",
+            "type": "integer"
+          },
+          "openReviewItems": {
+            "title": "Openreviewitems",
+            "type": "integer"
+          },
+          "pickedToday": {
+            "title": "Pickedtoday",
+            "type": "integer"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/PlanProgress"
+          },
+          "repliesThisMonth": {
+            "title": "Repliesthismonth",
+            "type": "integer"
+          },
+          "sending": {
+            "$ref": "#/components/schemas/SenderSummary"
+          },
+          "unhandledReplies": {
+            "title": "Unhandledreplies",
+            "type": "integer"
+          },
+          "winsUnseen": {
+            "title": "Winsunseen",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asOf",
+          "pickedToday",
+          "capacityToday",
+          "unhandledReplies",
+          "draftsToReview",
+          "linkedinToReach",
+          "openReviewItems",
+          "noGoCount",
+          "doneCount",
+          "sending",
+          "repliesThisMonth",
+          "jobs",
+          "plan",
+          "winsUnseen"
+        ],
+        "title": "ShellSummary",
         "type": "object"
       },
       "SourceLink": {
@@ -10158,6 +10255,77 @@
         "summary": "Resume Sending",
         "tags": [
           "sending"
+        ]
+      }
+    },
+    "/api/shell": {
+      "get": {
+        "operationId": "shell_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShellSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Shell Summary",
+        "tags": [
+          "shell"
         ]
       }
     },

@@ -62,4 +62,4 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
 };
 
 /** The views served by the API unless `?live=` or `VITE_LIVE_VIEWS` says otherwise. Each view's task adds its name. */
-export const DEFAULT_LIVE_VIEWS: readonly ViewName[] = ['health', 'search', 'company', 'watch', 'outcomes', 'progress', 'wins', 'linkedin', 'needs-you', 'done', 'today', 'no-go'];
+export const DEFAULT_LIVE_VIEWS: readonly ViewName[] = ['health', 'search', 'company', 'watch', 'outcomes', 'progress', 'wins', 'linkedin', 'needs-you', 'done', 'today', 'no-go', 'outbox', 'sending', 'shell'];

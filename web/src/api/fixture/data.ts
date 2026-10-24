@@ -1137,6 +1137,7 @@ export function computeShell(db: Pick<FixtureDb, 'today' | 'outbox' | 'linkedin'
     linkedinToReach: db.linkedin.counts.toReach, openReviewItems: db.needsYou.open.length, noGoCount: db.noGo.companies.length + db.noGo.people.length,
     doneCount: db.done.companies.length, sending: { state: s.state, sentToday: s.sentToday, limitToday: s.limitToday },
     repliesThisMonth: db.done.metrics.repliesThisMonth, jobs: db.jobs,
+    plan: { done: 0, total: db.today.picked }, winsUnseen: 0,
   };
 }
 

@@ -701,6 +701,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/shell": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Shell Summary */
+        get: operations["shell_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/today": {
         parameters: {
             query?: never;
@@ -2027,6 +2044,13 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** PlanProgress */
+        PlanProgress: {
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+        };
         /**
          * PostingFlag
          * @description One field where the reader and the phrase rules disagree (or the reader could not say), with both quotes.
@@ -2677,6 +2701,35 @@ export interface components {
             end: string;
             /** Start */
             start: string;
+        };
+        /** ShellSummary */
+        ShellSummary: {
+            /** Asof */
+            asOf: string;
+            /** Capacitytoday */
+            capacityToday: number;
+            /** Donecount */
+            doneCount: number;
+            /** Draftstoreview */
+            draftsToReview: number;
+            /** Jobs */
+            jobs: components["schemas"]["JobRunSummary"][];
+            /** Linkedintoreach */
+            linkedinToReach: number;
+            /** Nogocount */
+            noGoCount: number;
+            /** Openreviewitems */
+            openReviewItems: number;
+            /** Pickedtoday */
+            pickedToday: number;
+            plan: components["schemas"]["PlanProgress"];
+            /** Repliesthismonth */
+            repliesThisMonth: number;
+            sending: components["schemas"]["SenderSummary"];
+            /** Unhandledreplies */
+            unhandledReplies: number;
+            /** Winsunseen */
+            winsUnseen: number;
         };
         /** SourceLink */
         SourceLink: {
@@ -6109,6 +6162,71 @@ export interface operations {
             };
             /** @description blocked or idempotency_mismatch: the write changed nothing */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    shell_summary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShellSummary"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

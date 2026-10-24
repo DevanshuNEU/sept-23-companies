@@ -77,6 +77,7 @@ export interface ShellSummary {
   linkedinToReach: number; openReviewItems: number; noGoCount: number; doneCount: number;
   sending: { state: SenderState; sentToday: number; limitToday: number };
   repliesThisMonth: number; jobs: JobRunSummary[];
+  plan: { done: number; total: number }; winsUnseen: number; // today's plan rows done of planned, and wins not yet seen (#33)
 }
 export interface SearchCompany { id: Id; name: string; aliases: string[]; domain: string | null; status: CompanyStatus; statusLine: string; inProgress: boolean }
 export interface SearchPerson { id: Id; companyId: Id; companyName: string; name: string; title: string; email: string | null; statusLine: string }

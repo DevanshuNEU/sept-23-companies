@@ -180,6 +180,35 @@ def linkedin_view(conn: sqlite3.Connection, now: str) -> LinkedInView:
     )
 
 
+def to_reach_count(conn: sqlite3.Connection) -> int:
+    """How many people the list shows on the `to_reach` tab: `linkedin_view`'s own filters, counted with no groups,
+    roles or company refs built, and without loading every company (the shell polls this): only the companies
+    these people belong to are read."""
+    rows = conn.execute("SELECT * FROM person WHERE channel = 'linkedin' ORDER BY person_id").fetchall()
+    if not rows:
+        return 0
+    parents = merge_parents(conn)
+    no_go_people, no_go_companies = set(), set()
+    for r in conn.execute("SELECT person_id, company_id FROM no_go WHERE lifted_at IS NULL"):
+        if r["person_id"] is not None:
+            no_go_people.add(r["person_id"])
+        else:
+            no_go_companies.add(survivor_of(parents, r["company_id"]))
+    survivors = {r["person_id"]: survivor_of(parents, r["company_id"]) for r in rows}
+    status = {r["company_id"]: r["status"] for r in by_ids(
+        conn, "SELECT company_id, status FROM company WHERE company_id IN ({ids})", set(survivors.values()))}
+    logs, requested = _logs(conn), _request_times(conn)
+    count = 0
+    for row in rows:
+        survivor = survivors[row["person_id"]]
+        if status.get(survivor) in (None, "removed", "closed") or row["person_id"] in no_go_people \
+                or survivor in no_go_companies:
+            continue  # a closed company's people are listed only once they have a step, never as to reach
+        if _person(row, logs.get(row["person_id"], []), requested.get(row["person_id"])).tab == "to_reach":
+            count += 1
+    return count
+
+
 def _emailed(conn: sqlite3.Connection, parents: dict[int, int]) -> dict[int, int]:
     """Per company (its survivor): people whose first email went out."""
     counts: dict[int, int] = defaultdict(int)

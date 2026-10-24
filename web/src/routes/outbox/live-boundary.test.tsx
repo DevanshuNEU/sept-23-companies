@@ -10,13 +10,16 @@ import { renderWithApp } from '@/test/render';
 import OutboxPage from './index';
 
 /**
- * On the default live views the Outbox is sample data while the company view is live. Its company actions must
- * then stay on the sample side: a fixture company id must never reach the real store.
+ * An Outbox on sample data while the company view is live. Its company actions must then stay on the sample side:
+ * a fixture company id must never reach the real store. The Outbox is live by default now (with sending and the
+ * shell), so this pins the views to the state the rule is about: the defaults without those three.
  */
+const VIEWS = DEFAULT_LIVE_VIEWS.filter((v) => v !== 'outbox' && v !== 'sending' && v !== 'shell');
+
 function boundary() {
   const transport = { get: vi.fn(async () => ({})), send: vi.fn(async () => ({})) };
   const sample = new FixtureClient(buildFixture());
-  const client = composeClient({ live: createHttpClient(transport as unknown as Transport), sample, views: DEFAULT_LIVE_VIEWS });
+  const client = composeClient({ live: createHttpClient(transport as unknown as Transport), sample, views: VIEWS });
   return { transport, sample, client };
 }
 
@@ -29,10 +32,10 @@ async function open(touchId: number, name: string) {
 
 const closeTab = () => act(async () => void window.dispatchEvent(new Event('pagehide')));
 
-describe('the sample Outbox on the default live views', () => {
-  it('is not a live view by default', () => {
-    expect(DEFAULT_LIVE_VIEWS).not.toContain('outbox');
-    expect(DEFAULT_LIVE_VIEWS).toContain('company');
+describe('the sample Outbox beside live views', () => {
+  it('runs with the company view live and the Outbox on sample data', () => {
+    expect(VIEWS).not.toContain('outbox');
+    expect(VIEWS).toContain('company');
   });
 
   it('Pause and Close never reach the live transport', async () => {

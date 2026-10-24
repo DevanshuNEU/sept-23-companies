@@ -1,6 +1,6 @@
 # Docs map
 
-Decisions live in GitHub issue #9. This folder holds the design, plans, and the research behind them.
+Decisions live in GitHub issue #9. After the switch (#17) the live system is the `outreach/` package, `web/` and the launchd jobs in `launchd/`; `mail/`, `refresh/` and `dashboard/` are the retired old system, kept for rollback. This folder holds the design, plans, and the research behind them.
 
 ## Current
 
@@ -39,7 +39,7 @@ Decisions live in GitHub issue #9. This folder holds the design, plans, and the 
 | `superpowers/plans/2026-10-21-web-experience.md` | #33: the people plan, outcomes, progress, wins and the finish line (mockups first) |
 | `superpowers/plans/2026-10-21-integration-review.md` | Cross-plan review of the eight plans and how each finding was resolved |
 | `superpowers/plans/2026-10-22-sending-engine.md` | #14: the new sender: ramp, spacing, follow-up, holds, stop rules, the two-week simulation (migrations 0002 and 0003) |
-| `superpowers/plans/2026-10-22-import-and-switch-over.md` | #17: import all history (interviews included), the rehearsal, the deploy tool and the switch runbook (migration 0004). Part A (the importer, `outreach/importer/`) is built; Parts B1 and B2 follow |
+| `superpowers/plans/2026-10-22-import-and-switch-over.md` | #17: import all history (interviews included), the rehearsal, the deploy tool and the switch runbook (migration 0004). Part A (the importer, `outreach/importer/`) and B1 (the deploy tool, `outreach/deploy/`) are built; B2 (CLAUDE.md, this map and the cold-email skill) merges on switch day. The runbook in this plan is the switch: rehearsal (R1), switch day (S1 to S14) and rollback (R-back) |
 | `superpowers/plans/2026-10-22-retire-job-radar.md` | #5: retire Job Radar after its history is imported |
 | `superpowers/plans/2026-10-22-needs-you.md` | #16: the five Needs-you triggers, the sweep, one-click fixes, merge and unmerge |
 | `superpowers/plans/2026-10-22-mcp-server.md` | #13: the local MCP server for the Claude side session, with enforced limits |

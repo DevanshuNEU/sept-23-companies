@@ -247,6 +247,21 @@ class PureCombineTests(unittest.TestCase):
         silent = combine(rules(), reading())
         self.assertFalse(silent.provisional)  # the rules claim nothing, so there is nothing to confirm
 
+    def test_a_rules_sponsor_is_final_only_when_the_reader_agrees(self):
+        # Final review: a reader that says silent, or a different sponsor stance, does not confirm the rules' yes or
+        # opt_only, so the row stays provisional (shown, nothing raised: neither side would hide).
+        cases = (("yes", ("silent", "")), ("yes", ("opt_only", "OPT and STEM OPT only")),
+                 ("opt_only", ("will_sponsor", WILL)), ("opt_only", ("silent", "")))
+        for stance, said in cases:
+            with self.subTest(rules=stance, reader=said[0]):
+                c = combine(rules(sponsorship=stance, sponsorship_quote=WILL), reading(sponsorship=said))
+                self.assertEqual(verdict(c, "sponsorship").state, "disagree")
+                self.assertTrue(passes(c.decision))
+                self.assertEqual((c.provisional, c.reader_version, c.raised), (True, None, ()))
+        agreed = combine(rules(sponsorship="opt_only", sponsorship_quote=WILL),
+                         reading(sponsorship=("opt_only", "OPT and STEM OPT only")))
+        self.assertEqual((agreed.provisional, agreed.reader_version), (False, VERSION))
+
     def test_a_reading_with_no_version_is_never_final(self):
         # Review fix 4: a final row names its reader; a reading that names none decides nothing for good.
         for version in ("", "   "):

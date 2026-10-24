@@ -17,8 +17,8 @@ counterpart). Four fields can hide a posting (`HIDE_FIELDS`); the others only fl
   posting the reader does not call engineering is no evidence about the role ranking would hide the company for.
 
 When a row is final (controller rulings 1 and 2, 2026-10-23): `provisional = 0` only when a reading at the promoted
-version exists for the posting's current body, nothing is raised, the reader did not leave a rules sponsor (yes or
-opt_only) unconfirmed, and, if the combined row still hides, the posting is neither stale nor on a doubtful board. Everything else stays provisional with no reader version: no reading, an
+version exists for the posting's current body, nothing is raised, a rules sponsor (yes or opt_only) has the
+reader's agreement, and, if the combined row still hides, the posting is neither stale nor on a doubtful board. Everything else stays provisional with no reader version: no reading, an
 unreadable posting (relaxed and flagged), any raised field, and an agreed hide on a posting ranking does not trust.
 
 A reading counts only for the posting's current body hash at `promoted_version` (config.toml; "" means none, so
@@ -94,10 +94,10 @@ def _hides(d: Decision) -> bool:
 
 
 def _unconfirmed_sponsor(rules: Decision, verdicts: tuple[FieldVerdict, ...]) -> bool:
-    """The rules read a sponsor (yes or opt_only) and the reader did not say: a final row would tell ranking the
-    reader confirmed the wording."""
+    """The rules read a sponsor (yes or opt_only) and the reader did not say the same (unknown, refused, silent or
+    another stance): a final row would tell ranking the reader confirmed the wording."""
     return rules.sponsorship in ("yes", "opt_only") and any(
-        v.field == "sponsorship" and v.state == "missing" for v in verdicts)
+        v.field == "sponsorship" and v.state != "agree" for v in verdicts)
 
 
 def _state(known: bool, agrees: bool, rules_claims: bool) -> State:

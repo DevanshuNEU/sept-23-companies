@@ -1,0 +1,8 @@
+# The three numbers the Needs you sweep uses (#16). Each must be 1 or more.
+[sweep]
+# Trigger 3 looks at companies in play and the top this-many of the ranked list.
+sponsorship_top_n = 150
+# A company with a picked row, or a named person, on a daily list this many days old counts as in play.
+planned_days = 4
+# An open size or domain item that no list or queue has touched for this many days clears itself.
+stale_days = 14

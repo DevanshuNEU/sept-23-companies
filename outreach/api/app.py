@@ -16,6 +16,7 @@ from outreach.api.guards import GuardMiddleware
 from outreach.api.idempotency import prune_at_startup
 from outreach.api.models.ping import Ping
 from outreach.api.queries import sending
+from outreach.api.static import StaticMiddleware
 from outreach.api.settings import Settings, settings_from_env
 from outreach.store.db import guard
 from outreach.store.timefmt import utcnow
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
     app.include_router(api, responses=openapi.ERROR_RESPONSES)
     errors.install(app)
     openapi.install(app)
+    app.add_middleware(StaticMiddleware, web_dist=settings.web_dist)  # the built web app, inside gzip and the guard
     app.add_middleware(GZipMiddleware, minimum_size=1024)  # responses over 1 KB; the guard below stays outermost
     # Added last so it is the outermost middleware: a refused request never reaches the body parser or a router.
     app.add_middleware(GuardMiddleware, settings=settings)

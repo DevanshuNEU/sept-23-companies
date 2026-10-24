@@ -247,6 +247,15 @@ class PureCombineTests(unittest.TestCase):
         silent = combine(rules(), reading())
         self.assertFalse(silent.provisional)  # the rules claim nothing, so there is nothing to confirm
 
+    def test_a_reading_with_no_version_is_never_final(self):
+        # Review fix 4: a final row names its reader; a reading that names none decides nothing for good.
+        for version in ("", "   "):
+            r = rules(sponsorship="no", sponsorship_quote=REFUSAL)
+            c = combine(r, reading(version, sponsorship=("wont_sponsor", REFUSAL)))
+            self.assertEqual((c.provisional, c.reader_version), (True, None), repr(version))
+            shown = combine(rules(), reading(version))
+            self.assertEqual((shown.provisional, shown.reader_version), (True, None), repr(version))
+
     def test_two_hides_one_agreed_one_relaxed_stays_hidden_and_provisional(self):
         r = rules(sponsorship="no", sponsorship_quote=REFUSAL, citizenship=True,
                   citizenship_quote="Must be a US citizen.")

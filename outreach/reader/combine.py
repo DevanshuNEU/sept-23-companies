@@ -187,7 +187,8 @@ def combine(rules: Decision, reading: PostingReading | None, *, refused: frozens
     cfg = cfg if cfg is not None else default_config()
     verdicts = compare(rules, reading, refused, cfg)
     decision = _relax(rules, verdicts)
-    provisional = reading is None
+    # A final row names its reader, so a reading with no version (or only spaces) decides nothing for good.
+    provisional = reading is None or not isinstance(reading.reader_version, str) or not reading.reader_version.strip()
     draft = Combined(decision, provisional, None, verdicts)
     if draft.raised or (untrusted and _hides(decision)) or _unconfirmed_sponsor(rules, verdicts):
         provisional = True

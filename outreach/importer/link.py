@@ -176,7 +176,9 @@ class CompanyIndex:
 
     def near_names(self) -> list[tuple[str, str]]:
         """Pairs of keys that may be one company: one is the other plus or minus a trailing word from NEAR_WORDS or
-        a parenthetical, or one key starts with the other and the shorter has at least MIN_PREFIX characters.
+        a parenthetical, one key starts with the other and the shorter has at least MIN_PREFIX characters, or one
+        name's words are the first words of the other's at any length ("Acme" and "Acme Robotics"; never "Arc" and
+        "Arcadia"). Only an item is raised.
         Never a pair he ruled `not_same_company`, and never two data.js twins (`base_same_key` covers those)."""
         keys = self.keys()
         known = set(keys)
@@ -207,6 +209,16 @@ class CompanyIndex:
             i = bisect.bisect_right(keys, key)
             while i < len(keys) and keys[i].startswith(key):
                 offer(key, keys[i])
+                i += 1
+        # one name's words are the first words of another's ("Acme", "Acme Robotics"), at any length
+        spelled = sorted({(tuple(_WORD.findall(_PAREN.sub("", name).lower())), key)
+                          for key in keys for name in self._names[key]})
+        for words, key in spelled:
+            if not words:
+                continue
+            i = bisect.bisect_right(spelled, (words, chr(0x10FFFF)))
+            while i < len(spelled) and spelled[i][0][:len(words)] == words:
+                offer(key, spelled[i][1])
                 i += 1
         return sorted(pairs)
 

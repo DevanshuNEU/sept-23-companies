@@ -70,6 +70,20 @@ class CompanyIndexTest(unittest.TestCase):
         idx.add("Tidalwave Bio", "contacted_txt:line:4")
         self.assertEqual(idx.near_names(), [("tidal", "tidalwavebio")])  # five characters is enough
 
+    def test_whole_word_prefix_is_a_near_name_at_any_length(self):
+        idx = CompanyIndex(overrides())
+        idx.add("Acme", "contacted_txt:line:1")
+        idx.add("Acme Robotics", "contacted_txt:line:2")
+        idx.add("Arc", "contacted_txt:line:3")
+        idx.add("Arcadia", "contacted_txt:line:4")
+        idx.add("Bo", "contacted_txt:line:5")
+        idx.add("Bo Health Partners", "contacted_txt:line:6")
+        self.assertEqual(idx.near_names(), [("acme", "acmerobotics"), ("bo", "bohealthpartners")])
+        idx = CompanyIndex(overrides(not_same_company=frozenset({frozenset({"Acme", "Acme Robotics"})})))
+        idx.add("Acme", "contacted_txt:line:1")
+        idx.add("Acme Robotics", "contacted_txt:line:2")
+        self.assertEqual(idx.near_names(), [])
+
     def test_same_company_override_by_record_id_moves_only_that_record(self):
         idx = CompanyIndex(overrides(same_company={"curated_touches:row:3": "Tidewater AI"}))
         a = idx.add("Tidewater AI", "data_js:company:tidewater", base=True)

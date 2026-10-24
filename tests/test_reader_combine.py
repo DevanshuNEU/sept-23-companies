@@ -522,6 +522,28 @@ class ApplyTests(StoreCase):
         self.assertEqual(self.conn.execute("SELECT pay FROM posting WHERE posting_id = ?", (pid,)).fetchone()[0],
                          "stated by the board")
 
+    def test_the_pay_fill_writes_one_event(self):
+        # Review fix 6: a change to a posting row is on the record.
+        pid = self.posting(body=REFUSAL + " Pay is $120,000 to $140,000." + FILLER * 8)
+        self.store_reading(pid, pay=("$120,000 to $140,000", "$120,000 to $140,000"))
+        apply_reading(self.conn, pid, cfg=self.cfg)
+        apply_reading(self.conn, pid, cfg=self.cfg)
+        events = self.conn.execute("SELECT * FROM event WHERE entity = 'posting' AND entity_id = ?", (pid,)).fetchall()
+        self.assertEqual([(e["kind"], e["actor"], e["company_id"]) for e in events],
+                         [("pay_from_reading", "reader", self.company)])
+        self.assertEqual(json.loads(events[0]["detail"])["pay"], "$120,000 to $140,000")
+        self.assertEqual(json.loads(events[0]["detail"])["reader_version"], VERSION)
+
+    def test_a_pay_quote_no_longer_in_the_text_fills_nothing(self):
+        # Review fix 6: the pay quote is checked again against the current title, location and body.
+        pid = self.posting(location="Boston, MA ($150k)")
+        self.store_reading(pid, pay=("$150k", "$150k"))
+        self.conn.execute("UPDATE posting SET location = 'Boston, MA' WHERE posting_id = ?", (pid,))
+        self.assertIn("pay", reading_state(self.conn, pid, promoted=VERSION)[1])
+        apply_reading(self.conn, pid, cfg=self.cfg)
+        self.assertEqual(self.conn.execute("SELECT pay FROM posting WHERE posting_id = ?", (pid,)).fetchone()[0], "")
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM event WHERE entity = 'posting'").fetchone()[0], 0)
+
     def test_apply_reading_raises_when_the_ruleset_is_not_current(self):
         pid = self.posting()
         self.conn.execute("UPDATE ruleset SET is_current = 0")

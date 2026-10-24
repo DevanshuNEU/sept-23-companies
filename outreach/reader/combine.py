@@ -23,8 +23,8 @@ unreadable posting (relaxed and flagged), any raised field, and an agreed hide o
 
 A reading counts only for the posting's current body hash at `promoted_version` (config.toml; "" means none, so
 nothing is final and nothing the reader said changes a row). A newer candidate version runs in shadow: `explain`
-shows it, it decides nothing. The title and location are not in the body hash, so each hide field's quote is checked
-again against the current title, location and body; a quote no longer there counts as refused.
+shows it, it decides nothing. The title and location are not in the body hash, so the quote of each hide field and
+of pay is checked again against the current title, location and body; a quote no longer there counts as refused.
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ from outreach.rules import Decision, PostingInput, RulesetNotCurrent, decide, de
 from outreach.rules.config import Config, default_config
 from outreach.rules.eligibility import starts_2027
 from outreach.rules.location import us_status
-from outreach.store import atomic, body_sha256, utcnow
+from outreach.store import append_event, atomic, body_sha256, utcnow
 
 __all__ = ["HIDE_FIELDS", "FieldVerdict", "Combined", "compare", "combine", "reading_state", "apply_reading",
            "apply_all", "explain", "reader_combiner"]
@@ -204,15 +204,21 @@ def _posting(conn: sqlite3.Connection, posting_id: int) -> sqlite3.Row | None:
         (posting_id,)).fetchone()
 
 
+# The fields whose quotes are checked again at combine time: the four that can hide, and pay, which is written to
+# the posting row.
+_RECHECKED = HIDE_FIELDS + ("pay",)
+
+
 def _gone_quotes(reading: PostingReading, post: sqlite3.Row) -> set[str]:
-    """Hide fields stating a fact whose quote (or free-text value) is no longer in the title, location or body."""
+    """Rechecked fields stating a fact whose quote (or free-text value) is no longer in the title, location or
+    body."""
     parts = (post["title"] or "", post["location"] or "", post["body"] or "")
 
     def found(text: str, floor: int) -> bool:
         return any(quote_in_body(text, part, min_words=floor) for part in parts)
 
     gone = set()
-    for name in HIDE_FIELDS:
+    for name in _RECHECKED:
         f = reading.fields[name]
         if f.value in _NO_FACT:
             continue
@@ -334,12 +340,20 @@ def _sync_item(conn: sqlite3.Connection, post: sqlite3.Row, combined: Combined, 
 
 def _fill_pay(conn: sqlite3.Connection, post: sqlite3.Row, reading: PostingReading | None,
               refused: frozenset[str]) -> None:
-    """Pay stated only in the body reaches `posting.pay` (ruling 8), never over a pay the source gave."""
+    """Pay stated only in the posting text reaches `posting.pay` (ruling 8), never over a pay the source gave, with
+    a `pay_from_reading` event. A pay refused at submit, or whose quote has left the text, fills nothing."""
     if reading is None or "pay" in refused or post["pay"]:
         return
     pay = reading.fields["pay"].value
-    if isinstance(pay, str) and pay.strip():
-        conn.execute("UPDATE posting SET pay = ? WHERE posting_id = ? AND pay = ''", (pay.strip(), post["posting_id"]))
+    if not isinstance(pay, str) or not pay.strip():
+        return
+    filled = conn.execute("UPDATE posting SET pay = ? WHERE posting_id = ? AND pay = ''",
+                          (pay.strip(), post["posting_id"])).rowcount
+    if filled:
+        append_event(conn, entity="posting", kind="pay_from_reading", actor="reader", entity_id=post["posting_id"],
+                     company_id=post["company_id"],
+                     detail={"pay": pay.strip(), "quote": reading.fields["pay"].quote,
+                             "reader_version": reading.reader_version, "body_sha256": reading.body_sha256})
 
 
 def _row_of(combined: Combined) -> dict:

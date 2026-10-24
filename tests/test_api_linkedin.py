@@ -626,3 +626,16 @@ class Reads(LinkedInCase):
         progress = self.ok(self.get("/api/progress"))
         week = next(st for st in progress["week"]["stages"] if st["stage"] == "requests")
         self.assertEqual(week["count"], 2)
+
+
+class ToReachCountUsesTheSendersNoGoSets(ApiCase):
+    def test_to_reach_count_reads_the_no_go_sets_the_sender_reads(self):
+        from unittest import mock
+        from outreach.api.queries import linkedin as queries
+        company = s.company(self.conn, "Acme", "candidate")
+        s.person(self.conn, company, "Pat", channel="linkedin")
+        self.assertEqual(queries.to_reach_count(self.conn), 1)
+        with mock.patch.object(queries, "no_go_sets", return_value=(set(), {company})):
+            self.assertEqual(queries.to_reach_count(self.conn), 0)
+        with mock.patch.object(queries, "no_go_sets", return_value=({1}, set())):
+            self.assertEqual(queries.to_reach_count(self.conn), 0)

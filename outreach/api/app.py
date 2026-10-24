@@ -15,17 +15,21 @@ from outreach.api.config import load_config
 from outreach.api.guards import GuardMiddleware
 from outreach.api.idempotency import prune_at_startup
 from outreach.api.models.ping import Ping
+from outreach.api.queries import sending
 from outreach.api.settings import Settings, settings_from_env
 from outreach.store.db import guard
 from outreach.store.timefmt import utcnow
 
 
-def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=None,
+               old_sender_loaded=None) -> FastAPI:
     """Build the app.
 
     `clock` returns the current time as canonical UTC text (tests inject a fixed one). `mx_resolvers` replaces the
-    mail-server lookups (tests inject fakes). The store is not opened here: each request opens its own connection.
-    Like every entry point, this refuses the live store anywhere but the live checkout.
+    mail-server lookups (tests inject fakes). `old_sender_loaded` says whether the old mailer's launchd job is
+    loaded, which the sending status needs and the store cannot say (default: ask `launchctl`, see
+    `outreach.api.queries.sending.old_sender_check`). The store is not opened here: each request opens its own
+    connection. Like every entry point, this refuses the live store anywhere but the live checkout.
     """
     settings = settings or settings_from_env()
     guard(settings.db_path)
@@ -57,6 +61,7 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
     app.state.settings = settings
     app.state.clock = clock or utcnow
     app.state.mx_resolvers = mx_resolvers
+    app.state.old_sender_loaded = old_sender_loaded or sending.old_sender_check()
     app.state.config = load_config()
     app.state.sweeper_tasks = []
 

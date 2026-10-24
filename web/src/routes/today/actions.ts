@@ -1,7 +1,7 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   queryKeys,
-  useClient,
+  usePageClient,
   type DailyEntry,
   type Id,
   type RemoveReason,
@@ -72,7 +72,7 @@ const WRITES = ['pick', 'unpick', 'backlog'] as const;
  * last commit's result.
  */
 export function useTodayActions() {
-  const client = useClient();
+  const client = usePageClient('today');
   const write = usePendingWrite();
   const { cancel } = usePendingControls();
   const queryClient = useQueryClient();

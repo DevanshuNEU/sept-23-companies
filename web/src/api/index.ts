@@ -2,12 +2,12 @@ import type { OutreachClient } from './client';
 import type { Scenario } from './fixture/data';
 import { composeClient, parseLiveViews } from './compose';
 import { createHttpClient } from './http/client';
-import { ALL_VIEWS, DEFAULT_LIVE_VIEWS } from './http/views';
+import { DEFAULT_LIVE_VIEWS, SERVED_VIEWS } from './http/views';
 
 export type * from './types';
 export type { OutreachClient, WriteOptions, ApiErrorCode } from './client';
 export { ApiError } from './client';
-export { ClientProvider, useClient } from './provider';
+export { ClientProvider, useClient, usePageClient } from './provider';
 export { queryKeys, pollMs, newRequestId } from './keys';
 
 /**
@@ -19,7 +19,7 @@ export { queryKeys, pollMs, newRequestId } from './keys';
 export async function createClient(search: string = location.search): Promise<OutreachClient> {
   const views = parseLiveViews(search, import.meta.env.VITE_LIVE_VIEWS as string | undefined, DEFAULT_LIVE_VIEWS);
   const live = createHttpClient();
-  if (ALL_VIEWS.every((v) => views.includes(v))) return composeClient({ live, sample: null, views });
+  if (SERVED_VIEWS.every((v) => views.includes(v))) return composeClient({ live, sample: null, views });
   const sample = await sampleClient(search);
   return views.length === 0 ? sample : composeClient({ live, sample, views });
 }

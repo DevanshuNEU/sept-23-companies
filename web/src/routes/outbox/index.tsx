@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { usePanelRef } from 'react-resizable-panels';
 import { Mail, X } from 'lucide-react';
-import { pollMs, queryKeys, useClient, type Id, type OutboxView, type SendingStatus, type ShellSummary } from '@/api';
+import { pollMs, queryKeys, usePageClient, type Id, type OutboxView, type SendingStatus, type ShellSummary } from '@/api';
 import { EmptyState, QueryState, StateBanner } from '@/components/state-views';
 import { Button } from '@/components/ui/button';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -83,7 +83,7 @@ function DetailPlaceholder() {
 
 /** Spec 5.3: the sending strip, then the list and the selected email side by side. */
 export default function OutboxPage() {
-  const client = useClient();
+  const client = usePageClient('outbox');
   const outbox = useViewQuery(queryKeys.outbox, () => client.outbox(), { pollMs: pollMs.outbox });
   const edits = useEdits();
   const queryClient = useQueryClient();

@@ -34,6 +34,8 @@ class ApiCase(unittest.TestCase):
         banned = folder / "banned_phrases.txt"
         banned.write_text("synergy\n", encoding="utf-8")
         self.now = NOW
+        self.old_sender = False  # whether the old mailer's launchd job reads as loaded (a test sets it)
+        self.mx_resolvers = []  # no network: a mail-server lookup asks nobody (unknown) unless a test adds one
         self.settings = Settings(
             db_path=self.conn.execute("PRAGMA database_list").fetchone()["file"],
             host="127.0.0.1",
@@ -48,7 +50,8 @@ class ApiCase(unittest.TestCase):
 
     def build(self):
         """(Re)build the app and the client for this test's store."""
-        self.app = create_app(self.settings, clock=lambda: self.now)
+        self.app = create_app(self.settings, clock=lambda: self.now, mx_resolvers=self.mx_resolvers,
+                              old_sender_loaded=lambda: self.old_sender)
         # raise_server_exceptions=False: a bug is the clean 500 envelope a browser would see, and the test asserts it.
         self.client = TestClient(
             self.app, base_url=BASE_URL, headers={"Origin": ORIGIN}, raise_server_exceptions=False

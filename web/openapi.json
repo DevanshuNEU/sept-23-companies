@@ -224,6 +224,67 @@
         "title": "CheckSpan",
         "type": "object"
       },
+      "CloseCompanyBody": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "referral",
+              "interview",
+              "no_sponsorship",
+              "no_referrals",
+              "already_hired",
+              "not_now",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reason",
+          "revision"
+        ],
+        "title": "CloseCompanyBody",
+        "type": "object"
+      },
+      "ClosedBreakdown": {
+        "properties": {
+          "bounced": {
+            "default": 0,
+            "title": "Bounced",
+            "type": "integer"
+          },
+          "companyClosed": {
+            "default": 0,
+            "title": "Companyclosed",
+            "type": "integer"
+          },
+          "skipped": {
+            "default": 0,
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bounced",
+          "skipped",
+          "companyClosed"
+        ],
+        "title": "ClosedBreakdown",
+        "type": "object"
+      },
       "CompanyBoard": {
         "properties": {
           "ats": {
@@ -639,6 +700,40 @@
         "title": "CompanyRef",
         "type": "object"
       },
+      "CompanyResumed": {
+        "description": "A resume: how many drafted or approved emails were waiting on the pause, and the new revision.",
+        "properties": {
+          "released": {
+            "title": "Released",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "released",
+          "revision"
+        ],
+        "title": "CompanyResumed",
+        "type": "object"
+      },
+      "CompanyRevisionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "CompanyRevisionBody",
+        "type": "object"
+      },
       "CompanyTouch": {
         "properties": {
           "messages": {
@@ -810,6 +905,71 @@
         "title": "CompanyView",
         "type": "object"
       },
+      "CompanyWritten": {
+        "description": "The company's new revision, after a pause, close or reopen.",
+        "properties": {
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "CompanyWritten",
+        "type": "object"
+      },
+      "CompareMatch": {
+        "properties": {
+          "aEnd": {
+            "title": "Aend",
+            "type": "integer"
+          },
+          "aStart": {
+            "title": "Astart",
+            "type": "integer"
+          },
+          "bEnd": {
+            "title": "Bend",
+            "type": "integer"
+          },
+          "bStart": {
+            "title": "Bstart",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "aStart",
+          "aEnd",
+          "bStart",
+          "bEnd"
+        ],
+        "title": "CompareMatch",
+        "type": "object"
+      },
+      "CompareSide": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "messageId": {
+            "title": "Messageid",
+            "type": "integer"
+          },
+          "personName": {
+            "title": "Personname",
+            "type": "string"
+          }
+        },
+        "required": [
+          "messageId",
+          "personName",
+          "body"
+        ],
+        "title": "CompareSide",
+        "type": "object"
+      },
       "CorrectionBody": {
         "additionalProperties": false,
         "description": "Set one outcome to `at` (any ISO-8601 time) or clear it (`at` null), from the touch's history.",
@@ -855,6 +1015,392 @@
         "title": "CorrectionBody",
         "type": "object"
       },
+      "DailyCompany": {
+        "properties": {
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "heldByReply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "heldByTouchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heldbytouchid"
+          },
+          "hq": {
+            "title": "Hq",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pausedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pausedat"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "backlog",
+              "working",
+              "closed",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "pausedAt",
+          "heldByTouchId",
+          "held",
+          "heldByReply",
+          "domain",
+          "hq"
+        ],
+        "title": "DailyCompany",
+        "type": "object"
+      },
+      "DailyEntry": {
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/DailyCompany"
+          },
+          "domainFact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "draftCount": {
+            "title": "Draftcount",
+            "type": "integer"
+          },
+          "firstProposedOn": {
+            "title": "Firstproposedon",
+            "type": "string"
+          },
+          "listGroup": {
+            "enum": [
+              "level_role",
+              "intern_junior",
+              "any_us_role",
+              "reason_no_role"
+            ],
+            "title": "Listgroup",
+            "type": "string"
+          },
+          "mailServerOk": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mailserverok"
+          },
+          "otherRoles": {
+            "items": {
+              "$ref": "#/components/schemas/OtherRole"
+            },
+            "title": "Otherroles",
+            "type": "array"
+          },
+          "peopleCount": {
+            "title": "Peoplecount",
+            "type": "integer"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleToName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "size": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sponsorship": {
+            "enum": [
+              "has_sponsored",
+              "says_yes",
+              "says_no",
+              "opt_only",
+              "unclear",
+              "not_stated"
+            ],
+            "title": "Sponsorship",
+            "type": "string"
+          },
+          "sponsorshipFact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "proposed",
+              "picked",
+              "backlog",
+              "removed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "company",
+          "listGroup",
+          "rank",
+          "state",
+          "revision",
+          "role",
+          "size",
+          "stage",
+          "sponsorship",
+          "sponsorshipFact",
+          "domainFact",
+          "mailServerOk",
+          "why",
+          "otherRoles",
+          "peopleCount",
+          "draftCount",
+          "firstProposedOn"
+        ],
+        "title": "DailyEntry",
+        "type": "object"
+      },
+      "DoneCompany": {
+        "properties": {
+          "closedAt": {
+            "title": "Closedat",
+            "type": "string"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "howStarted": {
+            "title": "Howstarted",
+            "type": "string"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "boolean"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "interview",
+              "referral"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "outcomeLabel": {
+            "title": "Outcomelabel",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": [
+          "company",
+          "outcome",
+          "outcomeLabel",
+          "closedAt",
+          "howStarted",
+          "imported",
+          "role",
+          "note"
+        ],
+        "title": "DoneCompany",
+        "type": "object"
+      },
+      "DoneMetrics": {
+        "properties": {
+          "interviews": {
+            "title": "Interviews",
+            "type": "integer"
+          },
+          "referrals": {
+            "title": "Referrals",
+            "type": "integer"
+          },
+          "repliesPerWeek": {
+            "items": {
+              "$ref": "#/components/schemas/WeekReplies"
+            },
+            "title": "Repliesperweek",
+            "type": "array"
+          },
+          "repliesThisMonth": {
+            "title": "Repliesthismonth",
+            "type": "integer"
+          },
+          "replyRate": {
+            "$ref": "#/components/schemas/ReplyRate"
+          }
+        },
+        "required": [
+          "repliesThisMonth",
+          "repliesPerWeek",
+          "replyRate",
+          "referrals",
+          "interviews"
+        ],
+        "title": "DoneMetrics",
+        "type": "object"
+      },
+      "DoneView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "companies": {
+            "items": {
+              "$ref": "#/components/schemas/DoneCompany"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/DoneMetrics"
+          }
+        },
+        "required": [
+          "asOf",
+          "companies",
+          "metrics"
+        ],
+        "title": "DoneView",
+        "type": "object"
+      },
+      "DraftCompare": {
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/CompareSide"
+          },
+          "b": {
+            "$ref": "#/components/schemas/CompareSide"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/CompareMatch"
+            },
+            "title": "Matches",
+            "type": "array"
+          },
+          "similarity": {
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "similarity",
+          "matches"
+        ],
+        "title": "DraftCompare",
+        "type": "object"
+      },
       "EffortLine": {
         "properties": {
           "count": {
@@ -871,6 +1417,12 @@
           "count"
         ],
         "title": "EffortLine",
+        "type": "object"
+      },
+      "Empty": {
+        "description": "The answer of a write that has nothing to report: JSON `{}`, never an empty body.",
+        "properties": {},
+        "title": "Empty",
         "type": "object"
       },
       "ErrorEnvelope": {
@@ -1346,6 +1898,95 @@
         "title": "HeldBy",
         "type": "object"
       },
+      "HeldMessage": {
+        "properties": {
+          "dueOn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dueon"
+          },
+          "personName": {
+            "title": "Personname",
+            "type": "string"
+          },
+          "seq": {
+            "enum": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "title": "Seq",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "drafted",
+              "approved",
+              "sending",
+              "send_unknown",
+              "sent",
+              "failed",
+              "skipped"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "touchId": {
+            "title": "Touchid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "touchId",
+          "personName",
+          "state",
+          "seq",
+          "dueOn"
+        ],
+        "title": "HeldMessage",
+        "type": "object"
+      },
+      "HiddenCompany": {
+        "description": "A company the ranker hides, with the reason it stored. `provisional` is \"hidden, pending reader\".",
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "kind": {
+            "enum": [
+              "no_go",
+              "over_size",
+              "no_sponsorship"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "company",
+          "kind",
+          "reason",
+          "provisional"
+        ],
+        "title": "HiddenCompany",
+        "type": "object"
+      },
       "HoldingReply": {
         "description": "The newest reply holding the company: on any channel, so a LinkedIn reply shows as an email one does.",
         "properties": {
@@ -1488,6 +2129,21 @@
           "late"
         ],
         "title": "JobRunSummary",
+        "type": "object"
+      },
+      "LiftNoGoBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "LiftNoGoBody",
         "type": "object"
       },
       "LinkedInCounts": {
@@ -1778,6 +2434,21 @@
         "title": "LoggedStep",
         "type": "object"
       },
+      "MessageRevisionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "MessageRevisionBody",
+        "type": "object"
+      },
       "NeedsYouView": {
         "properties": {
           "asOf": {
@@ -1816,6 +2487,846 @@
           "boardsJob"
         ],
         "title": "NeedsYouView",
+        "type": "object"
+      },
+      "NextDue": {
+        "properties": {
+          "on": {
+            "title": "On",
+            "type": "string"
+          },
+          "seq": {
+            "enum": [
+              1,
+              2,
+              3
+            ],
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seq",
+          "on"
+        ],
+        "title": "NextDue",
+        "type": "object"
+      },
+      "NextSend": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "personName": {
+            "title": "Personname",
+            "type": "string"
+          },
+          "touchId": {
+            "title": "Touchid",
+            "type": "integer"
+          },
+          "tz": {
+            "title": "Tz",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "tz",
+          "touchId",
+          "personName",
+          "companyName"
+        ],
+        "title": "NextSend",
+        "type": "object"
+      },
+      "NextStep": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "review_drafts",
+              "fix_review",
+              "answer_reply",
+              "nothing",
+              "paused"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "NextStep",
+        "type": "object"
+      },
+      "NoGoRow": {
+        "properties": {
+          "addedAt": {
+            "title": "Addedat",
+            "type": "string"
+          },
+          "importSource": {
+            "anyOf": [
+              {
+                "enum": [
+                  "data_js",
+                  "local_storage",
+                  "contacts_json",
+                  "radar_db",
+                  "devboard",
+                  "contacted_txt",
+                  "devvault_notes"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importsource"
+          },
+          "kind": {
+            "const": "no_go",
+            "title": "Kind",
+            "type": "string"
+          },
+          "noGoId": {
+            "title": "Nogoid",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "quote": {
+            "title": "Quote",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "no_sponsorship",
+              "citizenship",
+              "over_300",
+              "defence_contractor",
+              "agency",
+              "said_no",
+              "stop_reply",
+              "not_a_fit",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "devanshu",
+              "rules",
+              "reply",
+              "import",
+              "claude"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "sourceRef": {
+            "title": "Sourceref",
+            "type": "string"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "target": {
+            "discriminator": {
+              "mapping": {
+                "company": "#/components/schemas/NoGoTargetCompany",
+                "person": "#/components/schemas/NoGoTargetPerson"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoGoTargetCompany"
+              },
+              {
+                "$ref": "#/components/schemas/NoGoTargetPerson"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "kind",
+          "noGoId",
+          "target",
+          "reason",
+          "quote",
+          "note",
+          "source",
+          "sourceRef",
+          "sourceUrl",
+          "importSource",
+          "addedAt"
+        ],
+        "title": "NoGoRow",
+        "type": "object"
+      },
+      "NoGoTargetCompany": {
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "kind": {
+            "const": "company",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "company"
+        ],
+        "title": "NoGoTargetCompany",
+        "type": "object"
+      },
+      "NoGoTargetPerson": {
+        "properties": {
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "kind": {
+            "const": "person",
+            "title": "Kind",
+            "type": "string"
+          },
+          "person": {
+            "$ref": "#/components/schemas/PersonRef"
+          }
+        },
+        "required": [
+          "kind",
+          "person",
+          "companyName"
+        ],
+        "title": "NoGoTargetPerson",
+        "type": "object"
+      },
+      "NoGoView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "companies": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "no_go": "#/components/schemas/NoGoRow",
+                  "removed": "#/components/schemas/RemovedRow"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/NoGoRow"
+                },
+                {
+                  "$ref": "#/components/schemas/RemovedRow"
+                }
+              ]
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "countsByReason": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonCount"
+            },
+            "title": "Countsbyreason",
+            "type": "array"
+          },
+          "hiddenCompanies": {
+            "items": {
+              "$ref": "#/components/schemas/HiddenCompany"
+            },
+            "title": "Hiddencompanies",
+            "type": "array"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/NoGoRow"
+            },
+            "title": "People",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "companies",
+          "people",
+          "countsByReason",
+          "hiddenCompanies"
+        ],
+        "title": "NoGoView",
+        "type": "object"
+      },
+      "NotReady": {
+        "properties": {
+          "reason": {
+            "enum": [
+              "weekend",
+              "not_built",
+              "job_failed"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "text"
+        ],
+        "title": "NotReady",
+        "type": "object"
+      },
+      "OtherRole": {
+        "properties": {
+          "firstSeenAt": {
+            "title": "Firstseenat",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "firstSeenAt"
+        ],
+        "title": "OtherRole",
+        "type": "object"
+      },
+      "OutboxCounts": {
+        "properties": {
+          "approved": {
+            "default": 0,
+            "title": "Approved",
+            "type": "integer"
+          },
+          "checking": {
+            "default": 0,
+            "title": "Checking",
+            "type": "integer"
+          },
+          "closed": {
+            "default": 0,
+            "title": "Closed",
+            "type": "integer"
+          },
+          "paused": {
+            "default": 0,
+            "title": "Paused",
+            "type": "integer"
+          },
+          "replied": {
+            "default": 0,
+            "title": "Replied",
+            "type": "integer"
+          },
+          "review": {
+            "default": 0,
+            "title": "Review",
+            "type": "integer"
+          },
+          "sending": {
+            "default": 0,
+            "title": "Sending",
+            "type": "integer"
+          },
+          "sent": {
+            "default": 0,
+            "title": "Sent",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "replied",
+          "review",
+          "approved",
+          "sending",
+          "checking",
+          "sent",
+          "paused",
+          "closed"
+        ],
+        "title": "OutboxCounts",
+        "type": "object"
+      },
+      "OutboxDetail": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "bounceReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bouncereason"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "firstSentAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firstsentat"
+          },
+          "followups": {
+            "items": {
+              "$ref": "#/components/schemas/OutboxFollowup"
+            },
+            "title": "Followups",
+            "type": "array"
+          },
+          "gmailThreadUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gmailthreadurl"
+          },
+          "held": {
+            "items": {
+              "$ref": "#/components/schemas/HeldMessage"
+            },
+            "title": "Held",
+            "type": "array"
+          },
+          "hook": {
+            "$ref": "#/components/schemas/OutboxHook"
+          },
+          "item": {
+            "$ref": "#/components/schemas/OutboxItem"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutboxReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleToName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "savedAt": {
+            "title": "Savedat",
+            "type": "string"
+          },
+          "savedBy": {
+            "enum": [
+              "claude",
+              "devanshu",
+              "sender",
+              "import"
+            ],
+            "title": "Savedby",
+            "type": "string"
+          },
+          "thread": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadMessage"
+            },
+            "title": "Thread",
+            "type": "array"
+          },
+          "touchRevision": {
+            "title": "Touchrevision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asOf",
+          "item",
+          "body",
+          "hook",
+          "project",
+          "role",
+          "checks",
+          "savedBy",
+          "savedAt",
+          "followups",
+          "firstSentAt",
+          "gmailThreadUrl",
+          "reply",
+          "touchRevision",
+          "held",
+          "thread",
+          "bounceReason"
+        ],
+        "title": "OutboxDetail",
+        "type": "object"
+      },
+      "OutboxFollowup": {
+        "properties": {
+          "dueOn": {
+            "title": "Dueon",
+            "type": "string"
+          },
+          "sentAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sentat"
+          },
+          "seq": {
+            "enum": [
+              1,
+              2,
+              3
+            ],
+            "title": "Seq",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "drafted",
+              "approved",
+              "sending",
+              "send_unknown",
+              "sent",
+              "failed",
+              "skipped"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "dueOn",
+          "sentAt",
+          "state"
+        ],
+        "title": "OutboxFollowup",
+        "type": "object"
+      },
+      "OutboxHook": {
+        "properties": {
+          "on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "on"
+        ],
+        "title": "OutboxHook",
+        "type": "object"
+      },
+      "OutboxItem": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "blockCount": {
+            "title": "Blockcount",
+            "type": "integer"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "group": {
+            "enum": [
+              "replied",
+              "review",
+              "approved",
+              "sending",
+              "checking",
+              "sent",
+              "paused",
+              "closed"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "messageId": {
+            "title": "Messageid",
+            "type": "integer"
+          },
+          "nextDue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NextDue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "person": {
+            "$ref": "#/components/schemas/PersonRef"
+          },
+          "preview": {
+            "title": "Preview",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seq": {
+            "enum": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "title": "Seq",
+            "type": "integer"
+          },
+          "sortKey": {
+            "title": "Sortkey",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "drafted",
+              "approved",
+              "sending",
+              "send_unknown",
+              "sent",
+              "failed",
+              "skipped"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "touchId": {
+            "title": "Touchid",
+            "type": "integer"
+          },
+          "touchState": {
+            "enum": [
+              "open",
+              "replied",
+              "bounced",
+              "closed"
+            ],
+            "title": "Touchstate",
+            "type": "string"
+          },
+          "warnCount": {
+            "title": "Warncount",
+            "type": "integer"
+          },
+          "worst": {
+            "anyOf": [
+              {
+                "enum": [
+                  "block",
+                  "warn",
+                  "pass"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst"
+          }
+        },
+        "required": [
+          "touchId",
+          "messageId",
+          "seq",
+          "state",
+          "touchState",
+          "group",
+          "sortKey",
+          "person",
+          "company",
+          "subject",
+          "preview",
+          "summary",
+          "worst",
+          "blockCount",
+          "warnCount",
+          "at",
+          "schedule",
+          "nextDue",
+          "revision"
+        ],
+        "title": "OutboxItem",
+        "type": "object"
+      },
+      "OutboxReply": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "from": {
+            "title": "From",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "unsorted",
+              "interested",
+              "not_now",
+              "said_no",
+              "asked_to_stop",
+              "auto_reply"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "at",
+          "text",
+          "kind"
+        ],
+        "title": "OutboxReply",
+        "type": "object"
+      },
+      "OutboxView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "closedBreakdown": {
+            "$ref": "#/components/schemas/ClosedBreakdown"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/OutboxCounts"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OutboxItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "sending": {
+            "$ref": "#/components/schemas/SendingStatus"
+          }
+        },
+        "required": [
+          "asOf",
+          "sending",
+          "items",
+          "counts",
+          "closedBreakdown"
+        ],
+        "title": "OutboxView",
         "type": "object"
       },
       "OutcomeBody": {
@@ -1882,6 +3393,21 @@
           "touches"
         ],
         "title": "OutcomePromptView",
+        "type": "object"
+      },
+      "PauseSendingBody": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "PauseSendingBody",
         "type": "object"
       },
       "PersonRef": {
@@ -1960,6 +3486,24 @@
           "ok"
         ],
         "title": "Ping",
+        "type": "object"
+      },
+      "PlanProgress": {
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "done",
+          "total"
+        ],
+        "title": "PlanProgress",
         "type": "object"
       },
       "PostingFlag": {
@@ -2375,6 +3919,229 @@
         "title": "ReadQueueStatus",
         "type": "object"
       },
+      "ReasonCount": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "no_sponsorship",
+                  "citizenship",
+                  "over_300",
+                  "defence_contractor",
+                  "agency",
+                  "said_no",
+                  "stop_reply",
+                  "not_a_fit",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "removed",
+                "type": "string"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "reason",
+          "count"
+        ],
+        "title": "ReasonCount",
+        "type": "object"
+      },
+      "RemoveCompanyBody": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "not_a_fit",
+              "already_in_touch",
+              "bigger_than_it_looks",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reason",
+          "revision"
+        ],
+        "title": "RemoveCompanyBody",
+        "type": "object"
+      },
+      "RemovedCompany": {
+        "properties": {
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "heldByReply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "heldByTouchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heldbytouchid"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pausedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pausedat"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "backlog",
+              "working",
+              "closed",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "pausedAt",
+          "heldByTouchId",
+          "held",
+          "heldByReply",
+          "revision"
+        ],
+        "title": "RemovedCompany",
+        "type": "object"
+      },
+      "RemovedRow": {
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/RemovedCompany"
+          },
+          "kind": {
+            "const": "removed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "removeReason": {
+            "title": "Removereason",
+            "type": "string"
+          },
+          "removedAt": {
+            "title": "Removedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "company",
+          "removeReason",
+          "note",
+          "removedAt"
+        ],
+        "title": "RemovedRow",
+        "type": "object"
+      },
+      "ReplyKindBody": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "interested",
+              "not_now",
+              "said_no",
+              "asked_to_stop",
+              "auto_reply"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "revision"
+        ],
+        "title": "ReplyKindBody",
+        "type": "object"
+      },
+      "ReplyRate": {
+        "description": "Of the emails first sent this month, how many have a reply (a cohort, so the rate is never above 1).",
+        "properties": {
+          "firstEmails": {
+            "title": "Firstemails",
+            "type": "integer"
+          },
+          "replies": {
+            "title": "Replies",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "replies",
+          "firstEmails"
+        ],
+        "title": "ReplyRate",
+        "type": "object"
+      },
       "ResolveReviewBody": {
         "additionalProperties": false,
         "properties": {
@@ -2475,6 +4242,47 @@
           "locked"
         ],
         "title": "ResolvedReview",
+        "type": "object"
+      },
+      "RestoreCompanyBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reason",
+          "revision"
+        ],
+        "title": "RestoreCompanyBody",
+        "type": "object"
+      },
+      "ResumeSendingBody": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledgeBlock": {
+            "default": false,
+            "title": "Acknowledgeblock",
+            "type": "boolean"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "ResumeSendingBody",
         "type": "object"
       },
       "ReviewCompany": {
@@ -2887,6 +4695,34 @@
         "title": "ReviewResolved",
         "type": "object"
       },
+      "RoleKindBody": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "engineer",
+              "manager",
+              "founder",
+              "recruiter",
+              "alum",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "revision"
+        ],
+        "title": "RoleKindBody",
+        "type": "object"
+      },
       "RoleToName": {
         "properties": {
           "firstSeenAt": {
@@ -2949,6 +4785,104 @@
           "start2027"
         ],
         "title": "RoleToName",
+        "type": "object"
+      },
+      "SaveMessageBody": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "subject": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "body",
+          "revision"
+        ],
+        "title": "SaveMessageBody",
+        "type": "object"
+      },
+      "Schedule": {
+        "properties": {
+          "companySentToday": {
+            "title": "Companysenttoday",
+            "type": "integer"
+          },
+          "companySlotsLeft": {
+            "title": "Companyslotsleft",
+            "type": "integer"
+          },
+          "earliestAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Earliestat"
+          },
+          "reason": {
+            "enum": [
+              "ready",
+              "sender_paused",
+              "signed_out",
+              "old_sender_running",
+              "message_id_unproven",
+              "not_business_day",
+              "daily_limit",
+              "spacing",
+              "window",
+              "bad_timezone",
+              "followup_not_due",
+              "company_paused",
+              "company_held",
+              "per_company_limit",
+              "per_company_gap",
+              "recruiter_waits",
+              "no_address",
+              "no_thread",
+              "company_closed",
+              "no_go",
+              "reply_stop",
+              "touch_done"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tz": {
+            "title": "Tz",
+            "type": "string"
+          }
+        },
+        "required": [
+          "earliestAt",
+          "tz",
+          "reason",
+          "text",
+          "companySentToday",
+          "companySlotsLeft"
+        ],
+        "title": "Schedule",
         "type": "object"
       },
       "ScoreConfidence": {
@@ -3327,6 +5261,269 @@
         "title": "SenderSummary",
         "type": "object"
       },
+      "SendingSignals": {
+        "properties": {
+          "bounceRate3d": {
+            "title": "Bouncerate3D",
+            "type": "number"
+          },
+          "gmailErrorsToday": {
+            "title": "Gmailerrorstoday",
+            "type": "integer"
+          },
+          "stopRepliesToday": {
+            "title": "Stoprepliestoday",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bounceRate3d",
+          "gmailErrorsToday",
+          "stopRepliesToday"
+        ],
+        "title": "SendingSignals",
+        "type": "object"
+      },
+      "SendingStatus": {
+        "properties": {
+          "gmailMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gmailmessage"
+          },
+          "lastStepDown": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SendingStepDown"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limitToday": {
+            "title": "Limittoday",
+            "type": "integer"
+          },
+          "nextLimitIfClean": {
+            "title": "Nextlimitifclean",
+            "type": "integer"
+          },
+          "nextSend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NextSend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "noneReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nonereason"
+          },
+          "pausedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pausedat"
+          },
+          "pausedReason": {
+            "title": "Pausedreason",
+            "type": "string"
+          },
+          "rampLevel": {
+            "title": "Ramplevel",
+            "type": "integer"
+          },
+          "rampLevels": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ramplevels",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "sentToday": {
+            "title": "Senttoday",
+            "type": "integer"
+          },
+          "signals": {
+            "$ref": "#/components/schemas/SendingSignals"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "paused_by_you",
+              "paused_hard_block",
+              "outside_window",
+              "weekend",
+              "signed_out"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/components/schemas/SendingWindow"
+          }
+        },
+        "required": [
+          "state",
+          "pausedReason",
+          "pausedAt",
+          "gmailMessage",
+          "sentToday",
+          "limitToday",
+          "rampLevel",
+          "rampLevels",
+          "nextLimitIfClean",
+          "lastStepDown",
+          "signals",
+          "window",
+          "nextSend",
+          "noneReason",
+          "revision"
+        ],
+        "title": "SendingStatus",
+        "type": "object"
+      },
+      "SendingStepDown": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "reason"
+        ],
+        "title": "SendingStepDown",
+        "type": "object"
+      },
+      "SendingWindow": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SendingWindow",
+        "type": "object"
+      },
+      "ShellSummary": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "capacityToday": {
+            "title": "Capacitytoday",
+            "type": "integer"
+          },
+          "doneCount": {
+            "title": "Donecount",
+            "type": "integer"
+          },
+          "draftsToReview": {
+            "title": "Draftstoreview",
+            "type": "integer"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobRunSummary"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "linkedinToReach": {
+            "title": "Linkedintoreach",
+            "type": "integer"
+          },
+          "noGoCount": {
+            "title": "Nogocount",
+            "type": "integer"
+          },
+          "openReviewItems": {
+            "title": "Openreviewitems",
+            "type": "integer"
+          },
+          "pickedToday": {
+            "title": "Pickedtoday",
+            "type": "integer"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/PlanProgress"
+          },
+          "repliesThisMonth": {
+            "title": "Repliesthismonth",
+            "type": "integer"
+          },
+          "sending": {
+            "$ref": "#/components/schemas/SenderSummary"
+          },
+          "unhandledReplies": {
+            "title": "Unhandledreplies",
+            "type": "integer"
+          },
+          "winsUnseen": {
+            "title": "Winsunseen",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asOf",
+          "pickedToday",
+          "capacityToday",
+          "unhandledReplies",
+          "draftsToReview",
+          "linkedinToReach",
+          "openReviewItems",
+          "noGoCount",
+          "doneCount",
+          "sending",
+          "repliesThisMonth",
+          "jobs",
+          "plan",
+          "winsUnseen"
+        ],
+        "title": "ShellSummary",
+        "type": "object"
+      },
       "SourceLink": {
         "properties": {
           "label": {
@@ -3343,6 +5540,53 @@
           "url"
         ],
         "title": "SourceLink",
+        "type": "object"
+      },
+      "StillEmailing": {
+        "properties": {
+          "budget": {
+            "title": "Budget",
+            "type": "integer"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "day": {
+            "title": "Day",
+            "type": "integer"
+          },
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "emailed": {
+            "title": "Emailed",
+            "type": "integer"
+          },
+          "nextStep": {
+            "$ref": "#/components/schemas/NextStep"
+          },
+          "state": {
+            "enum": [
+              "emailing",
+              "held",
+              "paused",
+              "waiting"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "company",
+          "day",
+          "days",
+          "emailed",
+          "budget",
+          "nextStep",
+          "state"
+        ],
+        "title": "StillEmailing",
         "type": "object"
       },
       "ThreadMessage": {
@@ -3436,6 +5680,92 @@
           "replied"
         ],
         "title": "TodayProgress",
+        "type": "object"
+      },
+      "TodayView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "backlog": {
+            "items": {
+              "$ref": "#/components/schemas/DailyEntry"
+            },
+            "title": "Backlog",
+            "type": "array"
+          },
+          "builtAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Builtat"
+          },
+          "capacity": {
+            "title": "Capacity",
+            "type": "integer"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "listJob": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notReady": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotReady"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "picked": {
+            "title": "Picked",
+            "type": "integer"
+          },
+          "proposed": {
+            "items": {
+              "$ref": "#/components/schemas/DailyEntry"
+            },
+            "title": "Proposed",
+            "type": "array"
+          },
+          "stillEmailing": {
+            "items": {
+              "$ref": "#/components/schemas/StillEmailing"
+            },
+            "title": "Stillemailing",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "date",
+          "builtAt",
+          "capacity",
+          "picked",
+          "notReady",
+          "proposed",
+          "backlog",
+          "stillEmailing",
+          "listJob"
+        ],
+        "title": "TodayView",
         "type": "object"
       },
       "TouchHistory": {
@@ -3762,6 +6092,24 @@
         "title": "WatchView",
         "type": "object"
       },
+      "WeekReplies": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "weekOf": {
+            "title": "Weekof",
+            "type": "string"
+          }
+        },
+        "required": [
+          "weekOf",
+          "count"
+        ],
+        "title": "WeekReplies",
+        "type": "object"
+      },
       "Win": {
         "properties": {
           "at": {
@@ -4056,6 +6404,1032 @@
         ]
       }
     },
+    "/api/companies/{company_id}/backlog": {
+      "post": {
+        "operationId": "backlog_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyEntry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Backlog Company",
+        "tags": [
+          "today"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/close": {
+      "post": {
+        "operationId": "close_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseCompanyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyWritten"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Close Company",
+        "tags": [
+          "company"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/pause": {
+      "post": {
+        "operationId": "pause_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyWritten"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Pause Company",
+        "tags": [
+          "company"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/pick": {
+      "post": {
+        "operationId": "pick_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyEntry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Pick Company",
+        "tags": [
+          "today"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/release-hold": {
+      "post": {
+        "operationId": "release_hold",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyResumed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Release Hold",
+        "tags": [
+          "company"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/remove": {
+      "post": {
+        "operationId": "remove_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveCompanyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Empty"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Remove Company",
+        "tags": [
+          "today"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/reopen": {
+      "post": {
+        "operationId": "reopen_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyWritten"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Reopen Company",
+        "tags": [
+          "company"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/restore": {
+      "post": {
+        "operationId": "restore_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreCompanyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Empty"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Restore Company",
+        "tags": [
+          "today"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/resume": {
+      "post": {
+        "operationId": "resume_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyResumed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Resume Company",
+        "tags": [
+          "company"
+        ]
+      }
+    },
     "/api/companies/{company_id}/score": {
       "get": {
         "operationId": "company_score",
@@ -4251,6 +7625,191 @@
         "summary": "Unmerge Company",
         "tags": [
           "needs-you"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/unpick": {
+      "post": {
+        "operationId": "unpick_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyEntry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Unpick Company",
+        "tags": [
+          "today"
+        ]
+      }
+    },
+    "/api/done": {
+      "get": {
+        "operationId": "done_view",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoneView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Done View",
+        "tags": [
+          "done"
         ]
       }
     },
@@ -4781,6 +8340,462 @@
         ]
       }
     },
+    "/api/messages/{message_id}/approve": {
+      "post": {
+        "operationId": "approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Approve",
+        "tags": [
+          "outbox"
+        ]
+      }
+    },
+    "/api/messages/{message_id}/save": {
+      "post": {
+        "operationId": "save_message",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMessageBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Save Message",
+        "tags": [
+          "outbox"
+        ]
+      }
+    },
+    "/api/messages/{message_id}/skip": {
+      "post": {
+        "operationId": "skip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Skip",
+        "tags": [
+          "outbox"
+        ]
+      }
+    },
+    "/api/messages/{message_id}/unapprove": {
+      "post": {
+        "operationId": "unapprove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageRevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Unapprove",
+        "tags": [
+          "outbox"
+        ]
+      }
+    },
     "/api/needs-you": {
       "get": {
         "operationId": "needs_you",
@@ -4852,6 +8867,441 @@
         ]
       }
     },
+    "/api/no-go": {
+      "get": {
+        "operationId": "no_go_view",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoGoView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "No Go View",
+        "tags": [
+          "no-go"
+        ]
+      }
+    },
+    "/api/no-go/{no_go_id}/lift": {
+      "post": {
+        "operationId": "lift_no_go",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "no_go_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "No Go Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiftNoGoBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Empty"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Lift No Go",
+        "tags": [
+          "no-go"
+        ]
+      }
+    },
+    "/api/outbox": {
+      "get": {
+        "operationId": "outbox",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Outbox",
+        "tags": [
+          "outbox"
+        ]
+      }
+    },
+    "/api/outbox/compare": {
+      "get": {
+        "operationId": "compare_drafts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "messageId",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Messageid",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "otherMessageId",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Othermessageid",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftCompare"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Compare Drafts",
+        "tags": [
+          "outbox"
+        ]
+      }
+    },
+    "/api/outbox/{touch_id}": {
+      "get": {
+        "operationId": "outbox_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "touch_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Touch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Outbox Detail",
+        "tags": [
+          "outbox"
+        ]
+      }
+    },
     "/api/outcomes/prompt": {
       "get": {
         "operationId": "outcome_prompt",
@@ -4920,6 +9370,120 @@
         "summary": "Outcome Prompt",
         "tags": [
           "outcomes"
+        ]
+      }
+    },
+    "/api/people/{person_id}/role-kind": {
+      "post": {
+        "operationId": "set_role_kind",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Person Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleKindBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonRef"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Set Role Kind",
+        "tags": [
+          "company"
         ]
       }
     },
@@ -5421,6 +9985,421 @@
         ]
       }
     },
+    "/api/sending": {
+      "get": {
+        "operationId": "sending_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendingStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Sending Status",
+        "tags": [
+          "sending"
+        ]
+      }
+    },
+    "/api/sending/pause": {
+      "post": {
+        "operationId": "pause_sending",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseSendingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendingStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Pause Sending",
+        "tags": [
+          "sending"
+        ]
+      }
+    },
+    "/api/sending/resume": {
+      "post": {
+        "operationId": "resume_sending",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeSendingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendingStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Resume Sending",
+        "tags": [
+          "sending"
+        ]
+      }
+    },
+    "/api/shell": {
+      "get": {
+        "operationId": "shell_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShellSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Shell Summary",
+        "tags": [
+          "shell"
+        ]
+      }
+    },
+    "/api/today": {
+      "get": {
+        "operationId": "today",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodayView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Today",
+        "tags": [
+          "today"
+        ]
+      }
+    },
     "/api/touches": {
       "post": {
         "operationId": "log_touch",
@@ -5848,6 +10827,120 @@
         "summary": "Correct Outcome",
         "tags": [
           "outcomes"
+        ]
+      }
+    },
+    "/api/touches/{touch_id}/reply-kind": {
+      "post": {
+        "operationId": "set_reply_kind",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "touch_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Touch Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplyKindBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Set Reply Kind",
+        "tags": [
+          "outbox"
         ]
       }
     },

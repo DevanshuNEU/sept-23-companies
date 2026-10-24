@@ -69,7 +69,7 @@ from outreach.reader.gold import (GOLD_READINGS, HIDE_CLASSES, GoldItem, atomic_
                                   value_class)
 from outreach.reader.night import Runner, classify_run, parse_reply
 from outreach.reader.types import ALLOWED, FIELDS, INT_FIELDS, TEXT_FIELDS, FieldReading, PostingReading
-from outreach.reader.version import reader_version
+from outreach.reader.version import VERSION_PATTERN, reader_version
 from outreach.rules import PostingInput, decide
 from outreach.rules.config import Config, default_config
 from outreach.store import body_sha256
@@ -94,7 +94,7 @@ _PREDICTORS: tuple[Predictor, ...] = ("reader", "rules", "both")
 _READER_ONLY = ("years_high", "remote", "pay")
 _FIXED_CLASSES = {"location": ("us", "non_us"), "start_date": ("starts_2027", "other"), "pay": ("stated",)}
 _HIDE = set(HIDE_CLASSES)
-_VERSION = re.compile(r"rv-[0-9a-f]{12}\Z")
+_VERSION = VERSION_PATTERN
 _PROMOTED_LINE = re.compile(r'^promoted_version = "[^"\n]*"$', re.MULTILINE)
 
 

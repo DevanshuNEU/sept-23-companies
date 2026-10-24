@@ -22,7 +22,8 @@ reader's agreement, and, if the combined row still hides, the posting is neither
 unreadable posting (relaxed and flagged), any raised field, and an agreed hide on a posting ranking does not trust.
 
 A reading counts only for the posting's current body hash at `promoted_version` (config.toml; "" means none, so
-nothing is final and nothing the reader said changes a row). A newer candidate version runs in shadow: `explain`
+nothing is final and nothing the reader said changes a row; any value that is not `rv-` and 12 hex, a side version
+included, counts as none too: `version.promoted_version`). A newer candidate version runs in shadow: `explain`
 shows it, it decides nothing. The title and location are not in the body hash, so the quote of each hide field and
 of pay is checked again against the current title, location and body; a quote no longer there counts as refused.
 """
@@ -40,7 +41,7 @@ from outreach.ranking.common import doubtful_board_ids
 from outreach.reader.config import ReaderConfig, load_reader_config
 from outreach.reader.submit import min_words
 from outreach.reader.types import FIELDS, TEXT_FIELDS, PostingReading, _collapse, quote_in_body
-from outreach.reader.version import reader_version, side_version
+from outreach.reader.version import promoted_version, reader_version, side_version
 from outreach.rules import Decision, PostingInput, RulesetNotCurrent, decide, decide_and_store, ruleset_version
 from outreach.rules.config import Config, default_config
 from outreach.rules.eligibility import starts_2027
@@ -292,7 +293,7 @@ def reader_combiner(conn: sqlite3.Connection, cfg: ReaderConfig | None = None, *
     config the caller hands `rebuild` or `decide_and_store` (default: the shipped one), so the reader's location is
     read with the same word lists as the rules' own."""
     cfg = cfg if cfg is not None else load_reader_config()
-    version = cfg.promoted_version
+    version = promoted_version(cfg)
 
     def combiner(c: sqlite3.Connection, posting_id: int, rules: Decision) -> Combined:
         if not version:
@@ -368,7 +369,7 @@ def apply_reading(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfi
     writes nothing. `rules_cfg` is the rules config (default: the shipped one). Raises `RulesetNotCurrent` as
     `decide_and_store` does and LookupError for a missing posting."""
     cfg = cfg if cfg is not None else load_reader_config()
-    version = cfg.promoted_version
+    version = promoted_version(cfg)
     with atomic(conn, "reader_apply"):
         current = conn.execute("SELECT ruleset_version FROM ruleset WHERE is_current = 1").fetchone()
         if current is None or current[0] != ruleset_version():
@@ -399,7 +400,7 @@ def apply_all(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = None, toda
     provisional. Open `reader_disagrees` items raised under another version are closed. Returns how many postings
     were applied."""
     cfg = cfg if cfg is not None else load_reader_config()
-    version = cfg.promoted_version
+    version = promoted_version(cfg)
     ids: set[int] = set()
     if version:
         for (posting_id,) in conn.execute(
@@ -444,7 +445,7 @@ def explain(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfig | No
         return ()
     rules = _decide(post, rules_cfg)
     rules_cfg = rules_cfg if rules_cfg is not None else default_config()
-    for version in (cfg.promoted_version, reader_version(cfg), side_version(cfg)):
+    for version in (promoted_version(cfg), reader_version(cfg), side_version(cfg)):
         reading, refused, unreadable = _state_for(conn, post, version)
         if reading is not None or unreadable:
             return compare(rules, reading, refused, rules_cfg)

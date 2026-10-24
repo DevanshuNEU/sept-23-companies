@@ -462,6 +462,23 @@ class ApplyTests(StoreCase):
                                  [("resolved", "cleared")])
                 self.assertEqual(self.row(current)["provisional"], 0 if promoted else 1)
 
+    def test_only_an_rv_version_in_config_can_make_a_row_final(self):
+        # Grok second review: a side- or malformed promoted_version is treated as none, so its readings never make
+        # a hide final.
+        for bad in (side_version(self.cfg), "rv-0000000000AA", "rv-0000000000aa ", "rv-00aa", "x" + VERSION):
+            with self.subTest(promoted=bad):
+                pid = self.posting()
+                self.store_reading(pid, version=bad, sponsorship=("wont_sponsor", REFUSAL))
+                cfg = dataclasses.replace(self.cfg, promoted_version=bad)
+                self.assertTrue(apply_reading(self.conn, pid, cfg=cfg).provisional)
+                self.assertTrue(reader_combiner(self.conn, cfg)(self.conn, pid, combine_module._decide(
+                    combine_module._posting(self.conn, pid), None)).provisional)
+                apply_all(self.conn, cfg=cfg)
+                self.assertEqual((self.row(pid)["provisional"], self.row(pid)["reader_version"]), (1, None))
+        good = self.posting()
+        self.store_reading(good, sponsorship=("wont_sponsor", REFUSAL))
+        self.assertFalse(apply_reading(self.conn, good, cfg=self.cfg).provisional)
+
     def test_an_unreadable_queue_row_fails_open_and_raises_an_item(self):
         pid = self.posting()
         self.queue_row(pid)

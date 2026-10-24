@@ -786,8 +786,8 @@ Retell and Distyl.
     `com.devanshu.outreach-sender` (#14, required), `com.devanshu.outreach-crawl` (#21, required; #21 renames its
     file to this name and drops its own install step), `com.devanshu.outreach-sources` (#31 Task 16: each source when
     due, then resolve and board finding; required, because the switch retires the old discovery at S12 and new
-    companies must keep arriving; Pending Devanshu Q3), `com.devanshu.outreach-needs-you` (#16, required: the
-    sweep is the only producer of triggers 3 to 5), `com.devanshu.outreach-reader-night` (#32),
+    companies must keep arriving; Pending Devanshu Q3), `com.devanshu.outreach-needs-you` (#16; the sweep is
+    the only producer of triggers 3 to 5, but it is optional until #16 lands, ruling 2026-10-24), `com.devanshu.outreach-reader-night` (#32),
     `com.devanshu.outreach-prepare` and `com.devanshu.outreach-plan` (#15's two templates). `OLD_JOBS`:
     `com.devanshu.outreach-mail-sender`, `com.devanshu.outreach-mail-server`, `com.devanshu.outreach-dashboard`,
     `com.devanshu.outreach-refresh`. (#5 adds `com.devanshu.jobradar`.)
@@ -922,8 +922,10 @@ checkout `~/Desktop/Sept 23 Companies`. If a check fails, stop and roll back (R-
 - **S11. Install the new jobs.** `uv run python -m outreach.api --check` (it must print ok before the API job is
   installed: it opens the store S6 made, and install also refuses while that store is missing), then
   `uv run python -m outreach.deploy plan`, read it, then `uv run python -m outreach.deploy install`
-  Check: `uv run python -m outreach.deploy status` shows each new label loaded, `com.devanshu.outreach-sources` and
-  `com.devanshu.outreach-needs-you` among them;
+  Check: `uv run python -m outreach.deploy status` shows the four required labels loaded
+  (`com.devanshu.outreach-api`, `-sender`, `-crawl` and `-sources`); each optional label (`-needs-you`,
+  `-reader-night`, `-prepare`, `-plan`) is loaded only when its template is in the repo, and until #16, #32 and #15
+  land, install prints it as skipped and status shows it not loaded with its plist missing (ruling 2026-10-24);
   http://127.0.0.1:3100 opens Today and the health view lists the jobs. Register the MCP server with the command #13
   puts in CLAUDE.md (`python -m outreach.mcp --print-registration` prints it; no launchd job). The cold-email skill
   merged at S5 already drafts through it.
@@ -1032,8 +1034,8 @@ and big-by-filings verdicts (A10: size evidence and hidden, no-go, Needs you), w
 - **#30 harness:** the final wave 2 `STREAM_STAGES` map (Task 15) is added once, by whichever of #14, #16, #17 and #13
   merges first; the others add only their stage file and invariant.
 - **#16 (Needs you):** this plan raises every import item through `outreach.review.raise_item(raised_by='import',
-  actor='import')` (its PR 1 merges before Part A's Task 11) and installs `com.devanshu.outreach-needs-you` as a
-  required job. Every import item's key starts `import:`, so the Needs-you view can group them (M11).
+  actor='import')` (its PR 1 merges before Part A's Task 11) and installs `com.devanshu.outreach-needs-you` (optional
+  until #16 lands, ruling 2026-10-24). Every import item's key starts `import:`, so the Needs-you view can group them (M11).
 - **#13 (MCP):** the switch needs #13 merged: its Task 16 writes the cold-email skill text that PR B2 carries, and S11
   registers the server in the live checkout.
 - **#5 (retire Job Radar):** branches after PR B1 (Tasks 17 and 18) merges; S3, S8 and S12 call its steps.

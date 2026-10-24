@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The API (#11): the new app and its API on http://127.0.0.1:3100, from the live checkout only (outreach.api refuses
+  port 3100 anywhere else). RunAtLoad starts it at login; KeepAlive starts it again if it stops.
+
+  It serves the built web app from web/dist in the checkout. Build it before installing this job (switch step S10:
+  in web/, pnpm install with the frozen lockfile, then pnpm build; the deploy tool refuses to install without it).
+  Without a build, pages answer 503 with that hint and /api keeps working. A new build needs no restart.
+
+  Placeholders, filled by the deploy tool (#17), which also installs this: {{LIVE_CHECKOUT}} is the live checkout,
+  {{LOG_PATH}} the log file. Nothing else is filled; the store is the default.
+
+  Not installed by the repo, and never loaded from a worktree. To install by hand after filling it in:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.devanshu.outreach-api.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-api</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.api</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

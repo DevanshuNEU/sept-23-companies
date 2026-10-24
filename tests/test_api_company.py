@@ -497,10 +497,21 @@ class CompanyPage(ApiCase):
     def test_flags_from_the_real_reader(self):
         cid = s.company(self.conn)
         p = s.posting(self.conn, cid, "Engineer")
-        s.decision(self.conn, p, sponsorship="yes", sponsorship_quote="We sponsor visas.")
+        s.decision(self.conn, p, sponsorship="yes", sponsorship_quote="We sponsor visas for this role.")
+        # A real stored reading (#32's format, the body's hash, the candidate version explain falls back to) whose
+        # value says the opposite of its quote: explain recomputes the rules from the body and flags the field.
+        from outreach.reader.config import load_reader_config
+        from outreach.reader.version import reader_version
+        from outreach.store import body_sha256
+        from tests.test_contracts import reading_json
+        body = "We sponsor visas for this role."
+        self.conn.execute("INSERT INTO posting_body(posting_id, body, body_sha256) VALUES (?, ?, ?)",
+                          (p, body, body_sha256(body)))
+        raw = reading_json(sponsorship=("wont_sponsor", "sponsor visas for this role"))
+        raw.update(posting_id=p, body_sha256=body_sha256(body), reader_version=reader_version(load_reader_config()))
         self.conn.execute(
-            "INSERT INTO posting_body(posting_id, body, body_sha256) VALUES (?, 'We cannot sponsor visas.', ?)", (p, "a" * 64))
-        self._reading(p, sponsorship="wont_sponsor")
+            "INSERT INTO posting_reading(posting_id, body_sha256, reader_version, read_at, fields, verified) "
+            "VALUES (?, ?, ?, ?, ?, 1)", (p, raw["body_sha256"], raw["reader_version"], NOW, json.dumps(raw)))
         flags = self.view(cid)["postings"][0]["flags"]
         self.assertEqual([f["field"] for f in flags], ["sponsorship"])
         self.assertEqual((flags[0]["readerValue"], flags[0]["rulesValue"]), ("wont_sponsor", "yes"))

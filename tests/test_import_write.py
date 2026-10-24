@@ -449,6 +449,31 @@ class WriteTest(unittest.TestCase):
         status = dict(conn.execute("SELECT company_id, status FROM company").fetchall())
         self.assertEqual((status[lumen], status[kestrel]), ("backlog", "working"))
 
+    def test_a_board_another_company_claims_is_left_alone(self):
+        from outreach.importer.model import BoardIn
+        from outreach.sources.boards import BoardRef, add_board
+        from outreach.store import add_alias
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        other = conn.execute("INSERT INTO company(name, status, status_at, created_at) "
+                             "VALUES ('Other Co', 'candidate', ?, ?)", (NOW, NOW)).lastrowid
+        add_alias(conn, other, "ashby:zzz", "ats")  # a claim with no board row
+        add_board(conn, other, BoardRef("ashby", "yyy"), via="hand", matched_on="hand", found_by="hand")
+        kestrel = self.plan.companies["kestrelrobotics"]
+        extra = (("ashby", "zzz"), ("ashby", "yyy"))
+        plan = dataclasses.replace(
+            self.plan, companies={**self.plan.companies,
+                                  "kestrelrobotics": dataclasses.replace(kestrel, boards=kestrel.boards + extra)},
+            boards={**self.plan.boards, **{ref: BoardIn(ref[0], ref[1], "kestrelrobotics", False, ("r:1",))
+                                           for ref in extra}})
+        result = apply_plan(conn, plan, now=NOW)
+        self.assertEqual(result.status, "ok", result.error)
+        self.assertNotIn("board:ashby:zzz", result.ids)
+        self.assertNotIn("board:ashby:yyy", result.ids)
+        row = conn.execute("SELECT company_id, active FROM board WHERE ats = 'ashby' AND token = 'yyy'").fetchone()
+        self.assertEqual(tuple(row), (other, 1))  # never deactivated by the import
+        self.assertIsNone(conn.execute("SELECT 1 FROM board WHERE token = 'zzz'").fetchone())
+
     # -- more of what the sender and the store rely on --
 
     def test_every_name_is_an_alias_of_its_company(self):

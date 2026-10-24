@@ -289,10 +289,17 @@ class _Writer:
     # -- boards and postings --
 
     def board(self, ref: tuple[str, str], company_id: int) -> None:
+        """The board through `add_board`; frozen ones made inactive. A board another company claims (a board row or
+        only its alias) is left as it is: `add_board` raised the merge item, and the import touches nothing of
+        another company's."""
         board = self.plan.boards[ref]
-        add_board(self.conn, company_id, BoardRef(*ref), via="import", matched_on="import", found_by="import",
-                  actor="import", now=self.now)
+        result = add_board(self.conn, company_id, BoardRef(*ref), via="import", matched_on="import",
+                           found_by="import", actor="import", now=self.now)
+        if result not in ("added", "exists"):
+            return
         row = self.conn.execute("SELECT board_id, active FROM board WHERE ats = ? AND token = ?", ref).fetchone()
+        if row is None:
+            return
         self.ids[f"board:{ref[0]}:{ref[1]}"] = row["board_id"]
         if not board.active and row["active"]:
             self.conn.execute("UPDATE board SET active = 0 WHERE board_id = ?", (row["board_id"],))

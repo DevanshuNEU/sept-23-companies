@@ -19,6 +19,8 @@ class ApiConfig:
     reask_after_days: int
     quiet_after_days: int
     search_index_top: int
+    linkedin_per_day: int
+    proposals_per_slot: int
 
 
 def load_config(path: Path = DEFAULT_PATH) -> ApiConfig:
@@ -38,6 +40,8 @@ def load_config(path: Path = DEFAULT_PATH) -> ApiConfig:
         reask_after_days=number("outcomes", "reask_after_days"),
         quiet_after_days=number("outcomes", "quiet_after_days"),
         search_index_top=number("search", "index_top"),
+        linkedin_per_day=number("today", "linkedin_per_day"),
+        proposals_per_slot=number("today", "proposals_per_slot"),
     )
     if config.quiet_after_days <= config.prompt_after_days:
         raise ConfigError("[outcomes] quiet_after_days must be larger than prompt_after_days")

@@ -77,6 +77,7 @@ export interface ShellSummary {
   linkedinToReach: number; openReviewItems: number; noGoCount: number; doneCount: number;
   sending: { state: SenderState; sentToday: number; limitToday: number };
   repliesThisMonth: number; jobs: JobRunSummary[];
+  plan: { done: number; total: number }; winsUnseen: number; // today's plan rows done of planned, and wins not yet seen (#33)
 }
 export interface SearchCompany { id: Id; name: string; aliases: string[]; domain: string | null; status: CompanyStatus; statusLine: string; inProgress: boolean }
 export interface SearchPerson { id: Id; companyId: Id; companyName: string; name: string; title: string; email: string | null; statusLine: string }
@@ -87,7 +88,7 @@ export interface PostingHit { postingId: Id; title: string; companyId: Id; compa
 // Today (spec 13.2)
 export interface DailyEntry {
   company: CompanyRef & { domain: string | null; hq: string };
-  listGroup: 'level_role' | 'any_us_role'; rank: number; state: 'proposed' | 'picked' | 'backlog' | 'removed'; revision: Revision;
+  listGroup: 'level_role' | 'intern_junior' | 'any_us_role' | 'reason_no_role'; rank: number; state: 'proposed' | 'picked' | 'backlog' | 'removed'; revision: Revision;
   role: RoleToName | null; size: Fact | null; stage: Fact | null; sponsorship: SponsorshipShown;
   sponsorshipFact: Fact | null; domainFact: Fact | null; mailServerOk: boolean | null; // needs #4 0002 (stored MX check)
   why: string; otherRoles: { title: string; firstSeenAt: IsoTime }[]; peopleCount: number; draftCount: number;
@@ -121,9 +122,14 @@ export interface Check {
   code: string; severity: CheckSeverity; title: string; detail: string; fix: CheckFix | null;
   spans: { field: 'subject' | 'body'; start: number; end: number }[];
 }
-export interface Schedule { // derived
-  earliestAt: IsoTime | null; tz: string;
-  reason: 'next_slot' | 'per_company_limit' | 'spacing' | 'recruiter_day_2' | 'window' | 'daily_limit';
+// The sender's own reason an approved email waits, goes now (`ready`) or never goes (a stop): the queue's REASONS.
+export type ScheduleReason =
+  | 'ready' | 'sender_paused' | 'signed_out' | 'old_sender_running' | 'message_id_unproven' | 'not_business_day'
+  | 'daily_limit' | 'spacing' | 'window' | 'bad_timezone' | 'followup_not_due' | 'company_paused' | 'company_held'
+  | 'per_company_limit' | 'per_company_gap' | 'recruiter_waits' | 'no_address' | 'no_thread'
+  | 'company_closed' | 'no_go' | 'reply_stop' | 'touch_done';
+export interface Schedule { // derived: the sender's verdict for an approved email (a draft has none)
+  earliestAt: IsoTime | null; tz: string; reason: ScheduleReason;
   text: string; companySentToday: number; companySlotsLeft: number;
 }
 export interface OutboxItem {
@@ -189,9 +195,13 @@ export interface NoGoRow {
   addedAt: IsoTime;
 }
 export interface RemovedRow { kind: 'removed'; company: CompanyRef & { revision: Revision }; removeReason: string; note: string; removedAt: IsoTime }
+// A company the ranker hides, with the reason it stored. provisional: "hidden, pending reader".
+export type HideKind = 'no_go' | 'over_size' | 'no_sponsorship';
+export interface HiddenCompany { company: CompanyRef; kind: HideKind; reason: string; provisional: boolean }
 export interface NoGoView {
   asOf: IsoTime; companies: (NoGoRow | RemovedRow)[]; people: NoGoRow[];
   countsByReason: { reason: NoGoReason | 'removed'; count: number }[];
+  hiddenCompanies: HiddenCompany[];
 }
 
 // Company (spec 13.7)

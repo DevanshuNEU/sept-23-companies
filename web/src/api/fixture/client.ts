@@ -508,6 +508,22 @@ export class FixtureClient implements OutreachClient {
     });
   }
 
+  releaseHold(companyId: Id, revision: Revision, o: WriteOptions): Promise<{ released: number }> {
+    return this.write(o, () => {
+      const v = this.fresh(companyId, revision);
+      const heldBy = v.company.heldByTouchId;
+      if (heldBy === null && !v.company.held) throw notAllowed(`${v.company.name} is not held by a reply`);
+      let released = 0;
+      const holder = heldBy === null ? undefined : this.db.details[heldBy];
+      if (holder) { released += holder.held.length; holder.held = []; }
+      this.db.linkedin.groups.forEach((g) => { if (g.company.id === companyId) g.heldBy = null; });
+      this.touchCompany(companyId, { heldByTouchId: null, held: false, heldByReply: null }, ['hold_released', 'Hold released by you']);
+      const still = this.db.today.stillEmailing.find((s) => s.company.id === companyId);
+      if (still && still.state === 'held') still.state = 'emailing';
+      return { released };
+    });
+  }
+
   /** Close a company: off Today, its open drafts to Closed, plus the no-go or Done row the reason calls for. */
   private shut(v: CompanyView, reason: CloseReason, note: string, noGo: NoGoReason | null): void {
     const id = v.company.id;

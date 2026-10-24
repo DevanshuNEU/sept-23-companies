@@ -8,7 +8,7 @@ from outreach.api.db import read_conn
 from outreach.api.errors import ApiProblem
 from outreach.api.models.health import HealthView, JobKind, JobRunSummary
 from outreach.api.queries import jobs
-from outreach.api.queries.sender import sender_summary
+from outreach.api.queries.sending import sender_summary
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -16,6 +16,7 @@ router = APIRouter(prefix="/health", tags=["health"])
 @router.get("", response_model=HealthView)
 def health(request: Request, clock: Clock = Depends(get_clock)) -> HealthView:
     now = clock()
+    old_sender = request.app.state.old_sender_loaded()  # outside the read: it may ask launchctl
     with read_conn(request) as conn:
         return HealthView(
             as_of=now,
@@ -24,7 +25,7 @@ def health(request: Request, clock: Clock = Depends(get_clock)) -> HealthView:
             read_queue=jobs.read_queue_status(conn, now),
             boards=jobs.board_counts(conn, now),
             watched_pages=jobs.watched_page_counts(conn, now),
-            sender=sender_summary(conn, now),
+            sender=sender_summary(conn, now, old_sender_loaded=old_sender),
         )
 
 

@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { useClient, type DraftCompare, type Id } from '@/api';
+import { usePageClient, type DraftCompare, type Id } from '@/api';
 import { QueryState } from '@/components/state-views';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -61,7 +61,7 @@ function Compared({ c }: { c: DraftCompare }) {
 
 /** Mounted only while open, so the comparison is fetched when he asks for it. */
 function CompareBody({ messageId, otherMessageId }: { messageId: Id; otherMessageId: Id }) {
-  const client = useClient();
+  const client = usePageClient('outbox');
   const query = useViewQuery(['compare', messageId, otherMessageId], () => client.compareDrafts(messageId, otherMessageId));
   return (
     <QueryState query={query} skeleton={<Skeleton className="h-48 w-full" />} empty={null}>

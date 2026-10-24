@@ -248,9 +248,10 @@ describe('Company page', () => {
     expect(close).toHaveBeenCalledWith(BROWSERBASE, 'interview', '', 2, { requestId: expect.any(String), keepalive: true });
   });
 
-  it('R asks first, listing the held emails, then resumes', async () => {
+  it('R asks first, listing the held emails, then releases the hold of a company that is not paused', async () => {
     const { client } = await open();
-    const resume = vi.spyOn(client, 'resumeCompany');
+    const resume = vi.spyOn(client, 'releaseHold');
+    const unpause = vi.spyOn(client, 'resumeCompany');
     act(() => {
       press('r');
     });
@@ -260,6 +261,21 @@ describe('Company page', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Resume company' }));
     await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
     expect(resume.mock.calls[0]?.slice(0, 2)).toEqual([BROWSERBASE, 1]);
+    expect(unpause).not.toHaveBeenCalled();
+  });
+
+  it('Resume on a paused company clears his pause', async () => {
+    const { client } = await open(`/companies/${companyId('Cartesia')}`);
+    const unpause = vi.spyOn(client, 'resumeCompany');
+    const release = vi.spyOn(client, 'releaseHold');
+    act(() => {
+      press('r');
+    });
+    const dialog = await screen.findByRole('alertdialog', { name: 'Resume Cartesia' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Resume company' }));
+    await waitFor(() => expect(unpause).toHaveBeenCalledTimes(1));
+    expect(unpause.mock.calls[0]?.[0]).toBe(companyId('Cartesia'));
+    expect(release).not.toHaveBeenCalled();
   });
 
   it('a done company shows Done and reopens from the More menu after asking', async () => {

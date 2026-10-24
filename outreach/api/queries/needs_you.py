@@ -239,6 +239,24 @@ def _boards_job(conn: sqlite3.Connection, now: str) -> JobRunSummary | None:
     return None
 
 
+def open_count(conn: sqlite3.Connection) -> int:
+    """How many items `needs_you_view` lists as open: every open item, less a merge question that is settled (its two
+    companies are one now, or the second cannot be read). The shell polls this."""
+    plain = conn.execute("SELECT count(*) FROM review_item WHERE state = 'open' AND kind <> 'merge_candidate'").fetchone()[0]
+    merges = conn.execute("SELECT company_id, evidence_key FROM review_item WHERE state = 'open' "
+                          "AND kind = 'merge_candidate'").fetchall()
+    if not merges:
+        return plain
+    parents = merge_parents(conn)
+    known = {r[0] for r in conn.execute("SELECT company_id FROM company")}
+    count = 0
+    for r in merges:
+        other = _int(r["evidence_key"])
+        if other is not None and other in known and survivor_of(parents, other) != survivor_of(parents, r["company_id"]):
+            count += 1
+    return plain + count
+
+
 def needs_you_view(conn: sqlite3.Connection, now: str) -> NeedsYouView:
     parents = merge_parents(conn)
     rows = conn.execute("SELECT * FROM review_item WHERE state = 'open' ORDER BY created_at, review_id").fetchall()

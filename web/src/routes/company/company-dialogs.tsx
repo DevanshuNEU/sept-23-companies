@@ -1,5 +1,5 @@
 import { useViewQuery } from '@/pending/pending';
-import { queryKeys, useClient, type CompanyView, type Id, type MessageState } from '@/api';
+import { queryKeys, usePageClient, type CompanyView, type Id, type MessageState } from '@/api';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,14 +36,14 @@ function List({ query }: { query: { data: string[] | undefined; isError: boolean
 
 /** The emails a reply is holding: read from the reply's own detail. */
 function HeldByReply({ touchId }: { touchId: Id }) {
-  const client = useClient();
+  const client = usePageClient('company');
   const query = useViewQuery(queryKeys.outboxDetail(touchId), () => client.outboxDetail(touchId));
   return <List query={{ data: query.data?.held.map((h) => line(h.personName, h.seq, h.state)), isError: query.isError }} />;
 }
 
 /** The emails a pause is holding: the company's items in the Outbox's Paused group. */
 function PausedItems({ companyId }: { companyId: Id }) {
-  const client = useClient();
+  const client = usePageClient('company');
   const query = useViewQuery(queryKeys.outbox, () => client.outbox());
   const items = query.data?.items.filter((i) => i.company.id === companyId && i.group === 'paused');
   return <List query={{ data: items?.map((i) => line(i.person.name, i.seq, i.state)), isError: query.isError }} />;

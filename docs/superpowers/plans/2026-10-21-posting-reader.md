@@ -475,8 +475,9 @@ up: git does not hold it.
 - Ruling 4 asked for `--json-schema`; `claude_command` does not pass it yet. `parse_reply` skips code fences and prose
   and `submit` validates everything, so a malformed answer costs a re-read, never a wrong fact.
 - The session-limit and expired-login texts in `[night]` are guesses until the first real run prints them.
-- A rules `no_go` row ranking wrote from a final refusal stays after a rollback of the promotion; the Runbook's
-  rollback lists them for lifting by hand.
+- A rules `no_go` row ranking wrote from a final refusal, and a pay filled from a reading, stay after a rollback of
+  the promotion; the Runbook's rollback lists both (the `no_go` rows and the `pay_from_reading` events) for a fix by
+  hand.
 
 ## Runbook: the first real run (Devanshu runs every step)
 
@@ -628,9 +629,18 @@ outreach.ranking rank` to see them now).
 `apply` re-applies every open posting whose row is final under a version that is no longer promoted: with no promoted
 version every such row goes back to provisional, with an older one promoted again each row is combined with that
 version's reading. It closes the open `reader_disagrees` items raised under the rolled-back version. The `sqlite3`
-line prints nothing, or only the version now promoted. Rules `no_go` rows written while it was promoted stay; list them with
-`sqlite3 -readonly "$DB" "select company_id, reason, created_at from no_go where source = 'rules' and lifted_at is null order by created_at desc"`
-and lift the ones made after the promotion by hand. Stopping the night job is step 4's `bootout`.
+line prints nothing, or only the version now promoted. Two things the rolled-back version wrote stay, and `apply`
+does not undo them; list both and fix them by hand:
+
+- Rules `no_go` rows written while it was promoted:
+  `sqlite3 -readonly "$DB" "select company_id, reason, created_at from no_go where source = 'rules' and lifted_at is null order by created_at desc"`.
+  Lift the ones made after the promotion.
+- Pay filled from its readings (`posting.pay` was empty and the reading stated one), one `pay_from_reading` event
+  each, with the version in its detail:
+  `sqlite3 -readonly "$DB" "select entity_id as posting_id, json_extract(detail, '$.pay'), at from event where kind = 'pay_from_reading' and json_extract(detail, '$.reader_version') = 'rv-...' order by at desc"`
+  (the rolled-back version). Clear `posting.pay` on the ones that are wrong.
+
+Stopping the night job is step 4's `bootout`.
 
 ## Self-review (against the spec and issue)
 

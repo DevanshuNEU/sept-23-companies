@@ -13,6 +13,7 @@ no-go and no edit.
 from __future__ import annotations
 
 import dataclasses
+import json
 import sqlite3
 from dataclasses import dataclass
 from typing import Literal
@@ -23,12 +24,12 @@ from outreach.review.hand import (NOT_SAVED, normalize_domain, normalize_sponsor
                                   write_hand_fact)
 from outreach.review.items import get_item, resolve_item, settle_siblings, unit
 from outreach.review.kinds import KINDS, NO_GO_REASONS, spec_of
-from outreach.review.merge import _merge
+from outreach.review.merge import _merge, unmerge_company
 from outreach.rules.facts import EvidenceDraft
 from outreach.store import append_event, utcnow
 from outreach.store.timefmt import iso_utc
 
-__all__ = ["Fix", "FixResult", "apply_fix"]
+__all__ = ["Fix", "FixResult", "apply_fix", "reopen_item", "can_undo"]
 
 _FIX_KINDS = ("ok", "edit", "no_go", "merge")
 _PERSON_KEY = "claude-no-go:"
@@ -256,3 +257,103 @@ def apply_fix(conn: sqlite3.Connection, review_id: int, fix: Fix, *, revision: i
                      company_id=row["company_id"], at=at, detail=detail,
                      idempotency_key=f"review-resolved:{review_id}:{new_revision}")
     return FixResult(review_id, new_revision, resolution, note, row["company_id"], tuple(settled))
+
+
+# ---------------------------------------------------------------------------------------------- undo
+
+LOCKED = "A value you set is locked and cannot be taken back here."
+_LIFT_REASON = "Undone from Needs you"
+
+
+def _resolve_detail(conn: sqlite3.Connection, row: sqlite3.Row) -> dict | None:
+    """The detail of the `resolved` event that wrote the item's current resolution, or None (an item settled before
+    this package wrote that event)."""
+    found = conn.execute("SELECT at, detail FROM event WHERE entity = 'review_item' AND kind = 'resolved' "
+                         "AND entity_id = ? ORDER BY event_id DESC LIMIT 1", (row["review_id"],)).fetchone()
+    if found is None or found["at"] != row["resolved_at"]:
+        return None
+    detail = json.loads(found["detail"])
+    return detail if detail.get("resolution") == row["resolution"] else None
+
+
+def _undo_plan(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    """What taking this settling back would do, or the plain reason it cannot be taken back (`not_allowed`)."""
+    if row["state"] != "resolved":
+        raise ReviewError("not_allowed", "This item is open. There is nothing to take back.")
+    resolution = row["resolution"]
+    if resolution == "cleared":
+        raise ReviewError("not_allowed", "This item cleared by itself. There is nothing to take back.")
+    detail = _resolve_detail(conn, row) or {}
+    plan = {"previous_resolution": resolution, "settled": list(detail.get("settled") or []), "lift": None,
+            "unmerge": None}
+    if resolution == "marked_no_go":
+        if not detail:
+            raise ReviewError("not_allowed", "This no-go was set before it could be taken back here. "
+                                             "Lift it from the no-go list.")
+        if detail.get("no_go_created"):
+            found = conn.execute("SELECT lifted_at FROM no_go WHERE no_go_id = ?", (detail["no_go_id"],)).fetchone()
+            if found is None or found["lifted_at"] is not None:
+                raise ReviewError("not_allowed", "That no-go was lifted since. There is nothing to take back.")
+            plan["lift"] = detail["no_go_id"]
+    elif resolution == "field_edited":
+        if row["kind"] != "merge_candidate":
+            raise ReviewError("not_allowed", LOCKED)
+        found = conn.execute(
+            "SELECT entity_id, detail FROM event WHERE entity = 'company' AND kind = 'merged' "
+            "AND json_extract(detail, '$.review_id') = ? ORDER BY event_id DESC LIMIT 1",
+            (row["review_id"],)).fetchone()
+        if found is None:
+            raise ReviewError("not_allowed", "There is no merge to take back.")
+        lose_id, kept_id = found["entity_id"], json.loads(found["detail"]).get("kept_id")
+        merged_into = conn.execute("SELECT merged_into FROM company WHERE company_id = ?", (lose_id,)).fetchone()
+        if merged_into is not None and merged_into[0] is not None:
+            if merged_into[0] != kept_id:
+                raise ReviewError("not_allowed", "That company was merged again since. Unmerge it from its page.")
+            plan["unmerge"] = lose_id
+        # Unmerged from the company page since: only the question goes back open.
+    return plan
+
+
+def can_undo(conn: sqlite3.Connection, review_id: int) -> bool:
+    """Whether `reopen_item` would take this item's settling back. Writes nothing."""
+    try:
+        _undo_plan(conn, get_item(conn, review_id))
+    except ReviewError:
+        return False
+    return True
+
+
+def reopen_item(conn: sqlite3.Connection, review_id: int, *, revision: int, now: str | None = None,
+                actor: str = "devanshu") -> FixResult:
+    """Take back an ok, a no-go or a merge after the Undo window: the item goes back open (resolution, time and
+    note cleared, revision up). A no-go lifts the row it added (`Undone from Needs you`) and leaves a row that was
+    already there; a merge is unmerged. The items the settling cleared come back open too, when nothing has moved
+    them since. Appends a `reopened` event.
+
+    `not_allowed` for an edit (locked), a cleared item, an open item and a no-go lifted since; `conflict` on a
+    stale revision.
+    """
+    at = iso_utc(now) if now else utcnow()
+    with unit(conn):
+        row = get_item(conn, review_id)
+        plan = _undo_plan(conn, row)
+        if row["revision"] != revision:
+            raise ReviewError("conflict", f"This item changed since you loaded it. {NOT_SAVED}")
+        if plan["lift"] is not None:
+            conn.execute("UPDATE no_go SET lifted_at = ?, lift_reason = ? WHERE no_go_id = ? AND lifted_at IS NULL",
+                         (at, _LIFT_REASON, plan["lift"]))
+        if plan["unmerge"] is not None:
+            company_revision = conn.execute("SELECT revision FROM company WHERE company_id = ?",
+                                            (plan["unmerge"],)).fetchone()[0]
+            unmerge_company(conn, plan["unmerge"], revision=company_revision, now=at, actor=actor)
+        reopen = ("UPDATE review_item SET state = 'open', resolution = NULL, resolved_at = NULL, resolution_note = '', "
+                  "revision = revision + 1 WHERE review_id = ? AND state = 'resolved'")
+        conn.execute(reopen + " AND revision = ?", (review_id, revision))
+        restored = [rid for rid in plan["settled"] if conn.execute(
+            reopen + " AND resolution = 'cleared' AND resolved_at = ?", (rid, row["resolved_at"])).rowcount]
+        new_revision = revision + 1
+        append_event(conn, entity="review_item", kind="reopened", actor=actor, entity_id=review_id,
+                     company_id=row["company_id"], at=at, idempotency_key=f"review-reopened:{review_id}:{new_revision}",
+                     detail={"previous_resolution": plan["previous_resolution"], "lifted_no_go_id": plan["lift"],
+                             "unmerged_id": plan["unmerge"], "reopened": restored})
+    return FixResult(review_id, new_revision, "open", "", row["company_id"], ())

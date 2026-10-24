@@ -14,7 +14,10 @@ of four ways (`classify_run`):
   the reply gave no reading for goes back to the queue with its attempt used.
 - session_limit or auth: the batch is released (no attempt counted) and the night stops, job `partial` for a limit
   and `failed` for a login. The next night starts where this one stopped.
-- failed (a non-zero exit, a timeout, a missing binary, a reply with no readable JSON): a call with several postings
+- a broken CLI (the binary is missing, or a failed call says "unknown option" or "not found": a flag or a model
+  name the installed CLI does not take): every call would fail the same way, so the batch is released (no attempt
+  counted) and the night stops, job `failed`, with the CLI's words in the error.
+- failed (a non-zero exit, a timeout, a reply with no readable JSON): a call with several postings
   in it cannot say which one broke it, so the batch is released (no attempt counted) and its postings are read one
   per call; a failed call with one posting in it uses that posting's attempt. A poison posting (a body that always
   breaks the call) so runs out of leases and ends refused, which shows it, flagged, instead of blocking the queue
@@ -50,7 +53,7 @@ from outreach.reader.version import reader_version
 from outreach.rules import RulesetNotCurrent
 from outreach.store import describe_error, finish_job, start_job, utcnow
 
-__all__ = ["APPLIED", "READER_CWD", "RunResult", "Runner", "NightSummary", "classify_run", "parse_reply",
+__all__ = ["APPLIED", "CLI_BROKEN_PATTERNS", "READER_CWD", "RunResult", "Runner", "NightSummary", "classify_run", "parse_reply",
            "claude_command", "claude_runner", "run_night"]
 
 # Where `claude -p` runs: a folder of its own, outside every repo, so no project CLAUDE.md is found from it.
@@ -63,6 +66,9 @@ Outcome = Literal["ok", "session_limit", "auth", "failed"]
 Status = Literal["queue_empty", "cap_reached", "session_limit", "auth", "failed"]
 _JOB_STATUS = {"queue_empty": "ok", "cap_reached": "ok", "session_limit": "partial", "auth": "failed",
                "failed": "failed"}
+# Lower-case text in a failed call that means the CLI itself is broken (a flag or a model it does not know, a
+# missing binary), not the posting: no attempt is spent and the night stops.
+CLI_BROKEN_PATTERNS = ("unknown option", "not found")
 _DECODER = json.JSONDecoder()
 _MAX_DETAIL = 300
 
@@ -248,9 +254,11 @@ class _Night:
             self.handed += len(self.leased)
             attempts = self._attempts()
             outcome, detail, readings = self._call()
-            if outcome in ("session_limit", "auth"):
+            if outcome in ("session_limit", "auth", "cli_broken"):
                 self.requeued += len(self.leased)
                 self.give_back()
+                if outcome == "cli_broken":
+                    return "failed", f"the claude CLI is broken, no attempt spent: {detail}"
                 return outcome, detail
             if outcome == "ok":
                 usable = self._usable(readings or [])
@@ -281,11 +289,13 @@ class _Night:
             out[r.posting_id] = row["attempts"]
         return out
 
-    def _call(self) -> tuple[Outcome, str, list[dict] | None]:
+    def _call(self) -> tuple[Outcome | Literal["cli_broken"], str, list[dict] | None]:
         payload = json.dumps(batch_payload(self.conn, self.leased), ensure_ascii=False)
         try:
             result = self.runner(self.prompt, payload, self.cfg.model)
-        except Exception as err:  # noqa: BLE001 - a timeout, a missing binary: a failed call, never the night's end
+        except FileNotFoundError as err:  # no claude binary to run
+            return "cli_broken", _short(describe_error(err)), None
+        except Exception as err:  # noqa: BLE001 - a timeout: a failed call, never the night's end
             return "failed", _short(describe_error(err)), None
         if not isinstance(result, RunResult):
             return "failed", f"the runner returned {type(result).__name__}, not a RunResult", None
@@ -293,6 +303,9 @@ class _Night:
                                auth_patterns=self.cfg.auth_patterns)
         if outcome != "ok":
             detail = _short(f"exit {result.returncode}: {result.stderr.strip() or result.stdout.strip()}")
+            text = f"{result.stdout}\n{result.stderr}".lower()
+            if outcome == "failed" and any(p in text for p in CLI_BROKEN_PATTERNS):
+                return "cli_broken", detail, None
             return outcome, detail, None
         try:
             return "ok", "", parse_reply(result.stdout)

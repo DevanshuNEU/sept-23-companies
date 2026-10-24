@@ -329,6 +329,26 @@ class StopTests(NightCase):
                 self.assertNotIn("leased", self.states())
                 self.assertEqual(self.job()["status"], "failed")
 
+    def test_a_broken_cli_releases_without_spending_an_attempt_and_stops(self):
+        # Final review: a missing binary or a flag the CLI does not know fails every call the same way; that is not
+        # the posting's fault, so no attempt is spent and the night stops at once.
+        answers = (FileNotFoundError(2, "No such file or directory", "claude"),
+                   RunResult(1, "", "error: unknown option '--safe-mode'"),
+                   RunResult(1, "", "zsh: command not found: claude"),
+                   RunResult(1, envelope("Model claude-haiku-9 not found", is_error=True), ""))
+        for answer in answers:
+            with self.subTest(answer=repr(answer)[:60]):
+                self.conn.execute("DELETE FROM read_queue")
+                if not self.conn.execute("SELECT count(*) FROM posting").fetchone()[0]:
+                    self.postings(45)
+                fake = Fake(lambda n, p, answer=answer: answer)
+                summary = self.run_night(fake)
+                self.assertEqual((summary.status, summary.batches, summary.requeued), ("failed", 1, 20))
+                self.assertIn("claude CLI", summary.stopped_reason)
+                self.assertEqual(len(fake.calls), 1)
+                self.assert_all_back(attempts=0)
+                self.assertEqual(self.job()["status"], "failed")
+
     def test_a_non_zero_exit_and_an_error_result_are_failed_runs(self):
         for result in (RunResult(2, "", "Error: something broke"), RunResult(0, envelope("boom", is_error=True), ""),
                        RunResult(0, "not json at all", "")):

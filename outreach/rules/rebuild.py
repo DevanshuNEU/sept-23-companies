@@ -15,9 +15,11 @@ not part of the ruleset hash (rebuild.py is in NOT_RULES). With no combiner ever
 no reader version, so a re-decide never keeps an earlier reader's agreement.
 
 `python -m outreach.rules.rebuild` runs a rebuild on the store at OUTREACH_DB (the live path only in the live
-checkout) and prints the flip report.
+checkout) with the reader's combiner when the reader package is there, then the reader's `apply_all`, and prints
+the flip report.
 """
 import argparse
+import importlib
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -314,6 +316,17 @@ def record_evidence(conn: sqlite3.Connection, company_id: int, drafts: list[Evid
     return len(added)
 
 
+def _reader_combine():
+    """The reader's combine module (#32), loaded lazily so this module never imports the reader; None only when
+    the reader package or that module is missing. An import error inside the reader propagates."""
+    try:
+        return importlib.import_module("outreach.reader.combine")
+    except ModuleNotFoundError as err:
+        if err.name in ("outreach.reader", "outreach.reader.combine"):
+            return None
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     argparse.ArgumentParser(
         prog="python -m outreach.rules.rebuild",
@@ -321,7 +334,13 @@ def main(argv: list[str] | None = None) -> int:
     ).parse_args(argv)
     conn = connect()
     try:
-        print("\n".join(rebuild(conn).lines()))
+        combine = _reader_combine()
+        if combine is None:
+            report = rebuild(conn)
+        else:
+            report = rebuild(conn, combiner=combine.reader_combiner(conn))
+            combine.apply_all(conn)  # raise and clear the reader's review items for the new rows
+        print("\n".join(report.lines()))
     finally:
         conn.close()
     return 0

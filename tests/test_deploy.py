@@ -5,6 +5,7 @@ reads or writes ~/Library/LaunchAgents.
 """
 import contextlib
 import io
+import json
 import os
 import plistlib
 import re
@@ -242,6 +243,8 @@ class DeployCase(unittest.TestCase):
         (self.live / ".venv" / "bin" / "python").write_text("", encoding="utf-8")
         (self.live / "web" / "dist").mkdir(parents=True)
         (self.live / "web" / "dist" / "index.html").write_text("<!doctype html>", encoding="utf-8")
+        (self.live / "mail").mkdir()
+        self.set_old_config({"paused": True, "pausedWhy": "paused by you"})  # S1: paused in the old dashboard
         self.agents = base / "LaunchAgents"
         self.agents.mkdir()
         self.logs = base / "Logs" / "outreach"
@@ -258,6 +261,13 @@ class DeployCase(unittest.TestCase):
             code = main(list(argv), runner=self.runner, agents_dir=self.agents, root=str(root or self.live),
                         live_root=str(self.live), log_dir=self.logs)
         return code, out.getvalue(), err.getvalue()
+
+    def set_old_config(self, config) -> None:
+        path = self.live / "mail" / "config.json"
+        if config is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(config if isinstance(config, str) else json.dumps(config), encoding="utf-8")
 
     def elsewhere(self) -> Path:
         other = temp_dir(self, "outreach-deploy-worktree-")
@@ -520,6 +530,33 @@ class RollbackTest(DeployCase):
             if job.label != "com.devanshu.outreach-dashboard":
                 self.assertIn(job.label, self.runner.loaded_labels)
         self.assertIn(REMINDER, out)
+
+    def test_rollback_leaves_the_old_sender_off_until_it_is_paused(self):
+        sender = OLD_JOBS[0]
+        self.assertEqual(sender.label, "com.devanshu.outreach-mail-sender")
+        for config in ({"paused": False}, {}, {"paused": "true"}, None, "not json"):
+            with self.subTest(config=config):
+                self.main("install")
+                self.main("retire-old")
+                self.set_old_config(config)
+                config_before, calls = snapshot(self.live / "mail"), len(self.runner.calls)
+                code, out, err = self.main("rollback")
+                self.assertEqual(code, 1)
+                self.assertIn("Pause sending in the old dashboard (back on :3001), then run rollback again.", err)
+                self.assertFalse((self.agents / sender.plist).exists())
+                self.assertTrue((self.agents / f"{sender.plist}.disabled").exists())
+                self.assertNotIn(sender.label, self.runner.loaded_labels)
+                self.assertNotIn(("bootstrap", sender.plist), self.runner.calls[calls:])
+                for job in OLD_JOBS[1:]:
+                    self.assertTrue((self.agents / job.plist).exists())
+                    self.assertIn(job.label, self.runner.loaded_labels)
+                self.assertEqual(snapshot(self.live / "mail"), config_before)  # read, never written
+                # He pauses in the old dashboard, then runs rollback again.
+                self.set_old_config({"paused": True})
+                code, _, err = self.main("rollback")
+                self.assertEqual(code, 0, err)
+                self.assertTrue((self.agents / sender.plist).exists())
+                self.assertIn(sender.label, self.runner.loaded_labels)
 
     def test_rollback_before_any_install_only_reloads_what_is_not_loaded(self):
         self.runner.loaded_labels.discard("com.devanshu.outreach-mail-server")

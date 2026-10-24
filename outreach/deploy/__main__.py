@@ -8,6 +8,7 @@ way on rollback; a plist install would replace is kept as `<plist>.before-switch
 files, so a set-aside file stays on disk and does nothing.
 """
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -22,6 +23,9 @@ DISABLED = ".disabled"
 BEFORE_SWITCH = ".before-switch"
 VENV_PYTHON = ".venv/bin/python"
 WEB_INDEX = "web/dist/index.html"
+OLD_SENDER = "com.devanshu.outreach-mail-sender"
+OLD_CONFIG = "mail/config.json"
+PAUSE_FIRST = "Pause sending in the old dashboard (back on :3001), then run rollback again."
 ROLLBACK_REMINDER = ("The old sender is paused in the old dashboard. Run python -m outreach.importer rollback-check "
                      "before you unpause it.")
 
@@ -56,6 +60,19 @@ def set_aside(path: Path, suffix: str) -> Path:
         n += 1
     path.rename(target)
     return target
+
+
+def old_sender_paused(live_root: str) -> tuple[bool, str]:
+    """Whether the old mailer's live config says `paused: true`, and what it says otherwise. Read only."""
+    path = Path(live_root) / OLD_CONFIG
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False, f"{OLD_CONFIG} is missing"
+    except (OSError, ValueError) as err:
+        return False, f"{OLD_CONFIG} could not be read ({err})"
+    paused = config.get("paused") if isinstance(config, dict) else None
+    return paused is True, f"{OLD_CONFIG} says paused is {json.dumps(paused)}"
 
 
 def plist_state(ctx: Context, job: Job) -> str:
@@ -207,6 +224,12 @@ def cmd_rollback(ctx: Context, _args) -> int:
             failed.append(f"{job.label}: {err}")
     for job in OLD_JOBS:
         try:
+            if job.label == OLD_SENDER and not ctx.runner.loaded(job.label):
+                paused, said = old_sender_paused(ctx.live_root)
+                if not paused:  # an unpaused old sender would start sending the moment it loads
+                    print(f"{job.label}: left off ({said})", flush=True)
+                    failed.append(f"{job.label}: {said}. {PAUSE_FIRST}")
+                    continue
             if not ctx.plist(job).exists() and ctx.disabled(job).exists():
                 ctx.disabled(job).rename(ctx.plist(job))
             if not ctx.plist(job).exists():

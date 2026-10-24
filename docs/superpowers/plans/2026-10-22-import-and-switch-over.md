@@ -885,7 +885,9 @@ checkout `~/Desktop/Sept 23 Companies`. If a check fails, stop and roll back (R-
   `launchctl bootout gui/$(id -u)/com.devanshu.outreach-mail-sender`
   Do not log out or restart the Mac until S12: the old plist stays on disk until then, and a login would load the old
   sender again (it fails safe, since #14's sender refuses to claim while the old label is loaded, but it costs the day).
-  Check: `launchctl print gui/$(id -u)/com.devanshu.outreach-mail-sender` says it could not find the service;
+  Check: `mail/config.json` shows paused (`grep '"paused"' mail/config.json` prints `"paused": true`; R-back's
+  rollback leaves the old sender off until it does); `launchctl print gui/$(id -u)/com.devanshu.outreach-mail-sender`
+  says it could not find the service;
   `uv run python -m outreach.importer preflight` says `Unclear sends: 0`. If not: wait 10 minutes after the last send
   attempt (the old sender settles an unclear send only 10 minutes after it, `NOT_SENT_AFTER_MIN`), then run
   `python3 mail/sender.py --dry-run` once in the live checkout (his step: it reads Gmail and saves contacts), then

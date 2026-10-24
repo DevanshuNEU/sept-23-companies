@@ -11,9 +11,9 @@ all fold to ASCII keeps its own key, so two names in another script never collap
 difference from the store: here "Café Labs" and "Cafe Labs" are one key (`cafelabs`), while the store's `name_key`
 drops the accented letter (`caflabs`). So the writer registers every spelling in `CompanyIn.names` as an alias of
 the company, and a later "Cafe Labs" from any source resolves to it instead of becoming a second company. data.js
-companies are the base; every other record links by that exact key. Near names ("Tidewater" and "Tidewater AI") stay two companies and come back from
-`near_names()` for one merge item each; the writer resolves each company through `identity.resolve_candidate`, which
-is where store-side matching (domain, FEIN, name and state) happens.
+companies are the base; every other record links by that exact key. Near names ("Tidewater" and "Tidewater AI") stay
+two companies and come back from `near_names()` for one merge item each; the writer resolves each company through
+`identity.resolve_candidate`, which is where store-side matching (domain, FEIN, name and state) happens.
 
 People (`PersonIndex`), matched the way MCP `add_people` matches (`outreach.sources.keys`): by address anywhere,
 else by LinkedIn profile anywhere (one normal form), else by name at the company. The name joins wait for

@@ -20,6 +20,7 @@ from typing import Literal
 
 from outreach.review import words
 from outreach.review.errors import ReviewError
+from outreach.review.boardfix import edit_board
 from outreach.review.hand import (NOT_SAVED, normalize_domain, normalize_sponsorship, parse_hand_size,
                                   write_hand_fact)
 from outreach.review.items import clear_item, get_item, resolve_item, settle_siblings, unit
@@ -128,7 +129,7 @@ def _edit(conn: sqlite3.Connection, row: sqlite3.Row, fix: Fix, revision: int, a
     """Parse, resolve, write the locked hand fact, settle the family. Returns (revision, note, settled)."""
     field, source = fix.field, _source(fix)
     if field == "board_url":
-        raise ReviewError("not_allowed", "Replacing a job board from here is not available yet.")
+        return _edit_board(conn, row, fix, revision, at, detail)
     if field == "size":
         draft = parse_hand_size(fix.value)
     elif field == "domain":
@@ -148,6 +149,23 @@ def _edit(conn: sqlite3.Connection, row: sqlite3.Row, fix: Fix, revision: int, a
     detail["evidence_id"] = write_hand_fact(conn, company_id, draft, posting_id=posting_id, now=at)
     settled = settle_siblings(conn, company_id, kinds=_family(field), except_id=row["review_id"],
                               note=words.settled_by_field(field), now=at)
+    return new_revision, note, settled
+
+
+def _edit_board(conn: sqlite3.Connection, row: sqlite3.Row, fix: Fix, revision: int, at: str, detail: dict) -> tuple:
+    """Replace the board the item is about (`boardfix.edit_board`), resolve, and settle the other board items about
+    that same board. A board item about another board of the company stays open: that board is not fixed.
+    Returns (revision, note, settled)."""
+    source = _source(fix)
+    new = edit_board(conn, row, fix.value.strip(), source, now=at, actor="devanshu", detail=detail)
+    detail.update(field="board_url", value=new, source=source)
+    note = words.fix_note("board_url", new, source)
+    new_revision = resolve_item(conn, row["review_id"], resolution="field_edited", note=note, revision=revision,
+                                now=at)
+    siblings = [r[0] for r in conn.execute(
+        "SELECT review_id FROM review_item WHERE state = 'open' AND board_id = ? AND review_id <> ? "
+        "ORDER BY review_id", (row["board_id"], row["review_id"]))]
+    settled = tuple(i for i in siblings if clear_item(conn, i, words.settled_by_field("job board"), at))
     return new_revision, note, settled
 
 

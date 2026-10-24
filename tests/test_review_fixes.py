@@ -165,10 +165,9 @@ class OkAndEditTest(FixBase):
         item = self.item("flagged")
         self.refused("bad_request", item, Fix("delete"))
 
-    def test_board_edit_and_unknown_review_item(self):
+    def test_board_edit_needs_a_source_and_unknown_review_item(self):
         board = self.item("board_unreadable")
-        self.refused("not_allowed", board, Fix("edit", field="board_url", value="https://jobs.lever.co/acme",
-                                               source="Their site"))
+        self.refused("bad_request", board, Fix("edit", field="board_url", value="https://jobs.lever.co/acme"))
         self.assertEqual(self.row(board)["state"], "open")
         self.refused("not_found", 999, Fix("ok"))
 

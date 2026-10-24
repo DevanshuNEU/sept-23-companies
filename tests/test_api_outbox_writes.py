@@ -371,5 +371,62 @@ class ReleaseHoldTest(WritesBase):
         self.assertEqual(self.post("/api/companies/999/release-hold", {"revision": 1}).status_code, 404)
 
 
+class RepeatTest(WritesBase):
+    """Review Focus 1 for every Outbox write: one key twice replays, a second key is refused and writes nothing."""
+
+    def writes(self):
+        """(name, path, body) for each write, each on a fresh row that can take it."""
+        drafted = seed.message(self.conn, seed.touch(self.conn, seed.person(self.conn, self.acme, "Dee")), 0)
+        approved = seed.message(self.conn, seed.touch(self.conn, seed.person(self.conn, self.acme, "Abe")), 0,
+                                "approved")
+        skipped = seed.message(self.conn, seed.touch(self.conn, seed.person(self.conn, self.acme, "Ski")), 0)
+        self.replied_by_email()
+        return (
+            ("save", f"/api/messages/{drafted}/save", {"subject": "New subject", "body": "New body", "revision": 1}),
+            ("unapprove", f"/api/messages/{approved}/unapprove", {"revision": 1}),
+            ("skip", f"/api/messages/{skipped}/skip", {"revision": 1}),
+            ("reply-kind", f"/api/touches/{self.touch}/reply-kind", {"kind": "not_now", "revision": 1}),
+            ("release-hold", f"/api/companies/{self.acme}/release-hold", {"revision": self.revision()}),
+        )
+
+    def counts(self):
+        return (self.conn.execute("SELECT COUNT(*) FROM event").fetchone()[0],
+                self.conn.execute("SELECT sum(revision) FROM message").fetchone()[0],
+                self.conn.execute("SELECT sum(revision) FROM touch").fetchone()[0],
+                self.conn.execute("SELECT sum(revision) FROM company").fetchone()[0])
+
+    def test_one_key_twice_writes_once_and_replays(self):
+        for name, path, body in self.writes():
+            with self.subTest(write=name):
+                first = self.post(path, body, key=f"repeat-{name}")
+                self.assertEqual(first.status_code, 200, first.text)
+                after = self.counts()
+                again = self.post(path, body, key=f"repeat-{name}")
+                self.assertEqual((again.status_code, again.headers.get("Idempotent-Replay")), (200, "true"))
+                self.assertEqual(again.json(), first.json())
+                self.assertEqual(self.counts(), after)
+
+    def test_a_second_key_is_refused_and_writes_nothing(self):
+        for name, path, body in self.writes():
+            with self.subTest(write=name):
+                self.assertEqual(self.post(path, body, key=f"first-{name}").status_code, 200)
+                after = self.counts()
+                res = self.post(path, body, key=f"second-{name}")
+                self.assertIn(res.json()["code"], ("conflict", "not_allowed"), res.text)
+                self.assertEqual(self.counts(), after)
+
+
+class ReleaseScopeTest(ReleaseHoldTest):
+    def test_a_release_leaves_an_unrelated_held_company_alone(self):
+        other = seed.company(self.conn, "Other Co", status="working")
+        self.linkedin_reply(self.pat, "2026-11-09T10:00:00Z", "li-pat")
+        self.linkedin_reply(seed.person(self.conn, other, "Oli Other"), "2026-11-09T11:00:00Z", "li-oli")
+        self.assertEqual(self.held(), {self.acme, other})
+        self.assertEqual(self.release().status_code, 200)
+        self.assertEqual(self.held(), {other})
+        self.assertEqual({r[0] for r in self.conn.execute("SELECT entity_id FROM event WHERE kind = 'hold_released'")},
+                         {self.acme})
+
+
 if __name__ == "__main__":
     unittest.main()

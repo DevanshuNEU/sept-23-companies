@@ -192,16 +192,28 @@ class ApproveTest(ApproveBase):
         self.assertEqual(self.events(), [])
 
     def test_approve_a_failed_message_is_not_allowed(self):
-        for state in ("approved", "sending", "send_unknown", "failed"):
-            self.conn.execute("UPDATE message SET state = ?, approved_at = ?, pending_rfc_id = ?, claimed_at = ? "
-                              "WHERE message_id = ?",
-                              (state, NOW, "<p@x>" if state in ("sending", "send_unknown") else None,
-                               NOW if state in ("sending", "send_unknown") else None, self.mid))
-        res = self.approve()
-        self.assertEqual(res.status_code, 409, res.text)
-        self.assertEqual(res.json()["code"], "not_allowed")
-        self.assertEqual(res.json()["message"], "Only a draft can be approved.")
-        self.assertEqual(self.message()["state"], "failed")
+        path = ("approved", "sending", "send_unknown", "failed")  # the only way the store reaches each
+        # Only one message is ever `sending`, so the one left there is walked last.
+        for state in ("approved", "send_unknown", "failed", "sending"):
+            n = path.index(state)
+            with self.subTest(state=state):
+                pid = seed.person(self.conn, self.acme, f"Walk {state}")
+                mid = seed.message(self.conn, seed.touch(self.conn, pid), 0, subject=f"S {state}", body=BODY)
+                self.conn.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?",
+                                  (NOW, mid))
+                for step in path[1:n + 1]:
+                    claimed = step in ("sending", "send_unknown")
+                    self.conn.execute("UPDATE message SET state = ?, pending_rfc_id = ?, claimed_at = ? "
+                                      "WHERE message_id = ?",
+                                      (step, f"<p{mid}@x>" if claimed else None, NOW if claimed else None, mid))
+                self.assertEqual(self.message(mid)["state"], state)
+                res = self.approve(mid)
+                self.assertEqual(res.status_code, 409, res.text)
+                self.assertEqual(res.json()["code"], "not_allowed")
+                self.assertEqual(res.json()["message"], "Only a draft can be approved.")
+                row = self.message(mid)
+                self.assertEqual((row["state"], row["revision"]), (state, 1))
+        self.assertEqual(self.events(), [])
 
     def test_approve_a_sent_message_is_not_allowed(self):
         tid = seed.touch(self.conn, seed.person(self.conn, self.acme, "Sent Sue"))

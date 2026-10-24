@@ -244,13 +244,33 @@ _URL = re.compile(r"^https?://\S+$", re.I)
 
 
 def _lenient_linkedin(text: str) -> str | None:
-    """The profile key for a link written loosely (no scheme, http), as add_people would store it."""
+    """The profile key for a link written loosely, as add_people would store it: no scheme or http, a one to three
+    letter subdomain (`m.linkedin.com`, `uk.linkedin.com`), and a `/details/...` page of the profile."""
     url = text.strip()
     if re.match(r"^http://", url, re.I):
         url = "https://" + url[7:]
     elif not re.match(r"^https://", url, re.I):
         url = "https://" + url
+    url = re.sub(r"^https://[a-z]{1,3}\.linkedin\.com/", "https://www.linkedin.com/", url, flags=re.I)
+    url = re.sub(r"^(https://(?:www\.)?linkedin\.com/in/[^/?#\s]+)/details/\S*$", r"\1", url, flags=re.I)
     return linkedin_key(url)
+
+
+def _name_words(name: str) -> list[str]:
+    """A name's words, lower case with accents folded ("José García" gives jose, garcia)."""
+    folded = "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))
+    return re.findall(r"[^\W\d_]+", folded.lower())
+
+
+def _may_be(a: str, b: str) -> bool:
+    """Whether two names could be one person's: two full names share the surname ("Dana R. Whitfield" and "Dana
+    Whitfield"); a one-word name is the other's first or last word ("Jose" and "José García")."""
+    x, y = _name_words(a), _name_words(b)
+    if not x or not y:
+        return False
+    if len(x) > 1 and len(y) > 1:
+        return x[-1] == y[-1]
+    return bool({x[0], x[-1]} & {y[0], y[-1]})
 
 
 @dataclass(frozen=True)
@@ -324,7 +344,10 @@ class PersonIndex:
         found = _lenient_linkedin(str(text))
         if found is None and _URL.match(str(text).strip()):
             found = str(text).strip()  # a link that is not a profile link is kept as written, matched exactly
-        if found is None:
+            self._issue("linkedin_unparsed", company, record, f"{record} gives {found!r} as a LinkedIn link; it is "
+                                                              f"not a profile link, so it is kept as written and "
+                                                              f"matches only that exact link.")
+        elif found is None:
             self._issue("linkedin_unparsed", company, record, f"{record} gives {str(text).strip()!r} as a LinkedIn "
                                                               f"link; it is not one, so it was left out.")
         return found
@@ -439,6 +462,18 @@ class PersonIndex:
                             f"{person.name} at {person.company_key}. If not, give the full name in [person_name].")
             elif len(targets) > 1:
                 self._ambiguous(person, [self._people[k] for k in sorted(targets)])
+        for person in loose:  # folded into no one: name the people it might have been, never merge
+            if person.key in self._folded or person.key in self._ambiguous_keys:
+                continue
+            near = [p for p in live if p is not person and p.company_key == person.company_key
+                    and p.key not in self._folded and p.key not in self._ambiguous_keys
+                    and _may_be(person.name, p.name)]
+            if near:
+                self._issue("person_unmatched", person.company_key, person.records[0],
+                            f"{person.name!r} ({', '.join(person.records)}) matched no one at {person.company_key}, "
+                            f"so it is its own person; it shares a name with "
+                            f"{', '.join(f'{p.name} ({p.email or p.linkedin or 'no address'})' for p in near)}. If it "
+                            f"is one of them, give the full name in [person_name] for the record.")
         return dict(self._folded)
 
     def _join_namesakes(self) -> None:

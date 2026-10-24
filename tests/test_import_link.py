@@ -239,6 +239,37 @@ class PersonIndexTest(unittest.TestCase):
                 self.assertIn("dana@example.com", people.issues[0].detail)
                 self.assertIn("https://www.linkedin.com/in/dana-w", people.issues[0].detail)
 
+    def test_a_loose_name_that_folds_into_no_one_names_the_near_people(self):
+        for anchored, loose in (("Dana R. Whitfield", "Dana Whitfield"), ("José García", "Jose")):
+            with self.subTest(loose=loose):
+                people = PersonIndex()
+                full = people.add(self.CO, anchored, email="dana@example.com", record="r:1")
+                bare = people.add(self.CO, loose, record="contacted_txt:line:5")
+                people.add(self.CO, "Ned Pruitt", email="ned@example.com", record="r:2")
+                people.finalize()
+                self.assertNotEqual(people.resolve(full), people.resolve(bare))  # an item, never a merge
+                self.assertEqual(codes(people.issues), ["person_unmatched"])
+                self.assertIn(anchored, people.issues[0].detail)
+                self.assertNotIn("Ned Pruitt", people.issues[0].detail)
+
+    def test_mobile_and_details_linkedin_links_are_the_profile(self):
+        people = PersonIndex()
+        a = people.add(self.CO, "Dana Whitfield", linkedin="https://m.linkedin.com/in/Dana-W", record="r:1")
+        b = people.add(self.CO, "Dana W", linkedin="https://www.linkedin.com/in/dana-w/details/experience/",
+                       record="r:2")
+        c = people.add(self.CO, "D. Whitfield", linkedin="linkedin.com/in/dana-w", record="r:3")
+        people.finalize()
+        self.assertEqual(len({people.resolve(k) for k in (a, b, c)}), 1)
+        self.assertEqual(people.person(a).linkedin, "https://www.linkedin.com/in/dana-w")
+        self.assertEqual(people.issues, [])
+
+    def test_a_link_that_is_not_a_profile_is_an_item(self):
+        people = PersonIndex()
+        a = people.add(self.CO, "Dana Whitfield", linkedin="https://www.linkedin.com/company/acme", record="r:1")
+        people.finalize()
+        self.assertEqual(codes(people.issues), ["linkedin_unparsed"])
+        self.assertEqual(people.person(a).linkedin, "https://www.linkedin.com/company/acme")  # matched exactly only
+
     def test_address_known_at_another_company_is_one_person_and_an_item(self):
         people = PersonIndex()
         a = people.add("tidewaterai", "Ivo Marsh", email="ivo@tidewater.example", record="r:1")

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from outreach.sending.config import load_config as load_send_config
 from outreach.sending.status import sending_snapshot
+from outreach.store.writes import append_event
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
 
@@ -137,19 +138,77 @@ class Build(TodayCase):
         self.assertEqual((e["peopleCount"], e["draftCount"]), (2, 1))
         self.assertIn("Acme is hiring a new grad engineer", e["why"])
 
-    def test_capacity_is_seven_linkedin_plus_the_senders_email_slots(self):
-        self.ranked("A")
+    def send_limit(self) -> int:
         cfg = load_send_config()
         snap = sending_snapshot(self.conn, datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc), cfg)
         self.assertGreater(snap.limit_today, 0)
-        v = self.view()
-        self.assertEqual(v["capacity"], 7 + snap.limit_today - snap.sent_today)
+        return snap.limit_today
 
-    def test_a_paused_sender_gives_no_email_slots(self):
+    def prove(self):
+        """The sender waits for every message until Gmail is shown to keep the Message-ID it sets."""
+        append_event(self.conn, entity="message", entity_id=1, kind="import_verified", actor="sender",
+                     at="2026-11-01T12:00:00Z", idempotency_key="proof")
+
+    def test_capacity_is_seven_linkedin_plus_the_senders_effective_limit(self):
         self.ranked("A")
+        self.prove()
+        self.assertEqual(self.view()["capacity"], 7 + self.send_limit())
+
+    def test_capacity_does_not_depend_on_what_was_sent_today(self):
+        self.prove()
+        limit = self.send_limit()
+        self.ranked("A")
+        s.send_first(self.conn, s.touch(self.conn, s.person(self.conn, s.company(self.conn, "Elsewhere"), "Pat")),
+                     "2026-11-10T14:00:00Z")  # one email already went out today
+        self.assertEqual(self.get("/api/sending").json()["sentToday"], 1)
+        self.assertEqual(self.view()["capacity"], 7 + limit)
+
+    def test_no_email_slots_while_the_sender_is_paused_signed_out_or_unproven(self):
+        self.ranked("A")
+        self.assertEqual(self.view()["capacity"], 7)  # nothing proves the Message-ID yet: the sender waits
+        self.prove()
         revision = self.get("/api/sending").json()["revision"]
         self.assertEqual(self.post("/api/sending/pause", {"revision": revision}).status_code, 200)
+        self.assertEqual(self.get("/api/today").json()["capacity"], 7)  # paused: no email slots
+        self.conn.execute("UPDATE sender SET paused = 0, pause_kind = NULL, paused_reason = '', paused_at = NULL")
+        self.conn.execute("DELETE FROM daily_list_entry")  # a new day's list would be built from the same rule
+        self.conn.execute("DELETE FROM daily_list")
+        self.assertEqual(self.view()["capacity"], 7 + self.send_limit())
+        self.conn.execute("UPDATE sender SET auth_state = 'signed_out'")
+        self.conn.execute("DELETE FROM daily_list_entry")
+        self.conn.execute("DELETE FROM daily_list")
         self.assertEqual(self.view()["capacity"], 7)
+
+    def test_a_broken_sending_config_adds_no_slots_and_does_not_break_the_page(self):
+        from unittest import mock
+        self.ranked("A")
+        with mock.patch("outreach.api.queries.today.load_send_config", side_effect=ValueError("ramp_step is wrong")):
+            res = self.get("/api/today")
+        self.assertEqual((res.status_code, res.json()["capacity"]), (200, 7))
+
+    def test_a_broken_sending_config_does_not_break_still_emailing(self):
+        from unittest import mock
+        a = self.ranked("A")
+        self.view()
+        self.assertEqual(self.pick(a).status_code, 200)
+        s.send_first(self.conn, s.touch(self.conn, s.person(self.conn, a, "Pat")), "2026-11-10T16:00:00Z")
+        self.set_now(NEXT_DAY)
+        with mock.patch("outreach.api.queries.today.load_send_config", side_effect=ValueError("bad")):
+            res = self.get("/api/today")
+        self.assertEqual(res.status_code, 200, res.text)
+        [row] = res.json()["stillEmailing"]
+        self.assertEqual((row["company"]["name"], row["day"], row["emailed"]), ("A", 1, 1))
+
+    def test_shell_and_today_agree_on_capacity_before_the_list_is_built_and_on_a_weekend(self):
+        self.ranked("A")
+        self.prove()
+        before = self.get("/api/shell").json()["capacityToday"]
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM daily_list").fetchone()[0], 0)  # the shell builds nothing
+        self.assertEqual(before, self.get("/api/today").json()["capacity"])
+        self.assertEqual(before, self.get("/api/shell").json()["capacityToday"])  # and once built
+        self.set_now(SATURDAY)
+        self.assertEqual(self.get("/api/shell").json()["capacityToday"], self.get("/api/today").json()["capacity"])
+        self.assertEqual(self.get("/api/today").json()["capacity"], 7)  # the sender sends nothing on a Saturday
 
     def test_a_weekend_has_no_list_and_still_shows_the_backlog(self):
         a = self.ranked("A")

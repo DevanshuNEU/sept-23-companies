@@ -84,11 +84,12 @@ class Shell(ApiCase):
         body = self.shell()
         self.assertEqual(set(body), FIELDS)
         self.assertEqual(body["asOf"], NOW)
-        for key in ("pickedToday", "capacityToday", "unhandledReplies", "draftsToReview", "linkedinToReach",
+        for key in ("pickedToday", "unhandledReplies", "draftsToReview", "linkedinToReach",
                     "openReviewItems", "noGoCount", "doneCount", "repliesThisMonth", "winsUnseen"):
             self.assertEqual(body[key], 0, key)
         self.assertEqual([j["job"] for j in body["jobs"]], ["rebuild"])  # the store's own install run
         self.assertEqual(body["plan"], {"done": 0, "total": 0})
+        self.assertEqual(body["capacityToday"], 7)  # no list yet: the one capacity rule, LinkedIn alone while the sender waits
         self.assertEqual(body["sending"]["sentToday"], 0)
         health = self.get("/api/health").json()["sender"]
         self.assertEqual(body["sending"], health)

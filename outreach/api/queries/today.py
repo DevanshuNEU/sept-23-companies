@@ -12,8 +12,9 @@ transaction, so the same people stay in the same places all day and a pick stick
   (an outreach touch not undone, or a first email sent), no active no-go (through the merged family), no reply hold.
   Only a candidate or backlog company is proposed (a working one is already picked; closed and removed are done);
 - how many: `proposals_per_slot` times the day's capacity, best score first, ranks 1 up;
-- capacity: `linkedin_per_day` (7, #9) plus the sender's email slots (`outreach.sending.status`: its effective
-  limit today minus what went out, 0 while it is paused or signed out), at most 60 (the table's CHECK);
+- capacity: `linkedin_per_day` (7, #9) plus the sender's effective limit for the day (`outreach.sending.status`; not
+  reduced by what went out), none while it is paused, signed out or gated (Message-ID unproven), at most 60 (the
+  table's CHECK). The shell uses the same rule (`capacity_from`);
 - the backlog: a company whose newest earlier row is `backlog` and whose status is still `backlog` comes back as a
   backlog row. An unpicked proposal does not carry: the ranking proposes it again if it still ranks.
 
@@ -41,14 +42,13 @@ from outreach.api.queries.company import (
 )
 from outreach.api.queries.outbox import stored_checks
 from outreach.api.queries.outcomes import by_ids, company_refs
-from outreach.api.queries.sending import moment
+from outreach.api.queries.sending import SenderRead, read_sender
 from outreach.api.revisions import bump
 from outreach.drafts.followups import canonical_company, company_map, held_survivors, no_go_sets, resolve_company
 from outreach.outcomes.windows import ny_day
 from outreach.ranking.scores import latest_version, ranked_list
 from outreach.sending import calendar
 from outreach.sending.config import load_config as load_send_config
-from outreach.sending.status import sending_snapshot
 from outreach.store import transaction
 from outreach.store.writes import append_event
 
@@ -66,16 +66,19 @@ NOT_BUILT_TEXT = "Today's list is not ready. No ranking has run yet, so there is
 
 # ---------------------------------------------------------------------------------------------- capacity
 
+def capacity_from(read: SenderRead, cfg: ApiConfig) -> int:
+    """The one capacity rule, for Today and the shell: LinkedIn per day plus the sender's effective limit for the day
+    (not what it has sent so far, so the number never depends on when Today is first opened). The sender adds no
+    email slots when it is paused or signed out, when the tick's gate is shut (an old sender still running, a
+    Message-ID not yet proven), or when its config cannot be loaded."""
+    snap = read.snapshot
+    email = 0 if snap is None or read.gate is not None or snap.state in STOPPED_STATES else snap.limit_today
+    return min(MAX_CAPACITY, cfg.linkedin_per_day + email)
+
+
 def capacity_for(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sender_loaded: bool) -> int:
-    """LinkedIn per day plus the sender's email slots. A sending config the sender cannot load means it sends
-    nothing, so it adds no slots (the same reading health takes)."""
-    try:
-        send_cfg = load_send_config()
-    except (ValueError, OSError):
-        return min(MAX_CAPACITY, cfg.linkedin_per_day)
-    snap = sending_snapshot(conn, moment(now), send_cfg, old_sender_loaded=old_sender_loaded)
-    slots = 0 if snap.state in STOPPED_STATES else max(0, snap.limit_today - snap.sent_today)
-    return min(MAX_CAPACITY, cfg.linkedin_per_day + slots)
+    """`capacity_from` for a page that does not need the sender's line too."""
+    return capacity_from(read_sender(conn, now, old_sender_loaded=old_sender_loaded), cfg)
 
 
 def _weekday(day: str) -> bool:
@@ -316,7 +319,10 @@ def _still_emailing(conn: sqlite3.Connection, now: str, day: str, parents: dict[
         drafts.setdefault(owner_of[m["company_id"]], []).append(m)
     refs = company_refs(conn, set(companies), holds=holds)
     today = date.fromisoformat(day)
-    cfg = load_send_config()
+    try:
+        cfg = load_send_config()
+    except (ValueError, OSError):
+        cfg = None  # the day count needs the sender's calendar; without it every company reads as day 1
     out = []
     for cid, row in sorted(companies.items(), key=lambda kv: (picked[kv[0]], kv[0])):
         ref = refs[cid]
@@ -333,7 +339,7 @@ def _still_emailing(conn: sqlite3.Connection, now: str, day: str, parents: dict[
             state, step = "emailing", NextStep(kind="review_drafts", text=f"{len(waiting)} draft{'' if len(waiting) == 1 else 's'} to review")
         else:
             state, step = "waiting", NextStep(kind="nothing", text="Nothing. Follow-ups are scheduled")
-        gone = calendar.business_days_between(date.fromisoformat(picked[cid]), today, cfg)
+        gone = 0 if cfg is None else calendar.business_days_between(date.fromisoformat(picked[cid]), today, cfg)
         out.append(StillEmailing(
             company=ref, day=max(1, min(DAYS_OF_EMAIL, 1 + gone)), days=DAYS_OF_EMAIL, emailed=emailed.get(cid, 0),
             budget=max(budget.get(cid, 0), emailed.get(cid, 0)), next_step=step, state=state))

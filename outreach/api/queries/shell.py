@@ -10,11 +10,12 @@ sidebar never disagrees with the page it links to. The ones with no view of thei
 """
 import sqlite3
 
+from outreach.api.config import ApiConfig
 from outreach.api.models.shell import PlanProgress, ShellSummary
 from outreach.api.queries import done, jobs, linkedin, needs_you, no_go, progress, today
 from outreach.api.queries.company import merge_parents, survivor_of
 from outreach.api.queries.outcomes import by_ids
-from outreach.api.queries.sending import sender_summary
+from outreach.api.queries.sending import read_sender, summary_of
 from outreach.outcomes.windows import ny_day
 
 _DRAFTS = (
@@ -36,16 +37,17 @@ def drafts_to_review(conn: sqlite3.Connection) -> int:
     return sum(1 for c in ids if survivor_of(parents, c) in open_company)
 
 
-def shell_summary(conn: sqlite3.Connection, now: str, *, old_sender_loaded: bool) -> ShellSummary:
+def shell_summary(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sender_loaded: bool) -> ShellSummary:
     day = ny_day(now)
     built = conn.execute("SELECT capacity FROM daily_list WHERE list_date = ?", (day,)).fetchone()
+    sender = read_sender(conn, now, old_sender_loaded=old_sender_loaded)  # one snapshot for the line and the capacity
     planned, finished = progress.plan_counts(conn, day)
     return ShellSummary(
-        as_of=now, picked_today=today.picked_count(conn, day), capacity_today=built["capacity"] if built is not None else 0,
+        as_of=now, picked_today=today.picked_count(conn, day), capacity_today=built["capacity"] if built is not None else today.capacity_from(sender, cfg),
         unhandled_replies=conn.execute("SELECT count(*) FROM touch WHERE state = 'replied' "
                                        "AND reply_kind = 'unsorted'").fetchone()[0],
         drafts_to_review=drafts_to_review(conn), linkedin_to_reach=linkedin.to_reach_count(conn),
         open_review_items=needs_you.open_count(conn), no_go_count=no_go.no_go_count(conn),
-        done_count=done.done_count(conn), sending=sender_summary(conn, now, old_sender_loaded=old_sender_loaded),
+        done_count=done.done_count(conn), sending=summary_of(sender),
         replies_this_month=done.replies_this_month(conn, now), jobs=jobs.last_runs(conn, now),
         plan=PlanProgress(done=finished, total=planned), wins_unseen=progress.wins_unseen(conn))

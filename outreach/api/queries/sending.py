@@ -11,6 +11,7 @@ A pause never overwrites a hard block, so a plain resume can never clear one.
 import logging
 import sqlite3
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 from outreach.api.errors import ApiProblem
@@ -23,6 +24,7 @@ from outreach.sending import calendar as cal
 from outreach.sending import signals
 from outreach.sending.config import SendConfig, load_config
 from outreach.sending.status import SendingSnapshot, sending_snapshot
+from outreach.sending.status import _gate as tick_gate  # the one gate the queue and the strip share
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
@@ -90,17 +92,37 @@ def sending_status(conn: sqlite3.Connection, now: str, cfg: SendConfig, *, old_s
         next_send=_next_send(conn, snap), none_reason=snap.none_reason, revision=snap.revision)
 
 
-def sender_summary(conn: sqlite3.Connection, now: str, *, old_sender_loaded: bool) -> SenderSummary:
-    """Health's sender line: the snapshot's state, today's sends and today's limit. A sending config the sender
-    cannot load means nothing is being sent, so it reads as stopped (`paused_hard_block`, 0 of 0) instead of
-    failing the whole health view."""
+@dataclass(frozen=True)
+class SenderRead:
+    """One read of the sender for a page that needs both its line and its day's room: the snapshot (None when the
+    sending config cannot be loaded, which means nothing is being sent) and the tick's own gate, the reason the
+    whole tick sends nothing (`sender_paused`, `signed_out`, `old_sender_running`, `message_id_unproven`)."""
+
+    snapshot: SendingSnapshot | None
+    gate: str | None
+
+
+def read_sender(conn: sqlite3.Connection, now: str, *, old_sender_loaded: bool) -> SenderRead:
     try:
         cfg = load_config()
     except (ValueError, OSError) as err:
         log.warning("The sending config could not be loaded: %s", err)
+        return SenderRead(None, None)
+    return SenderRead(sending_snapshot(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded),
+                      tick_gate(conn, old_sender_loaded))  # the tick's own order, never a copy of it
+
+
+def summary_of(read: SenderRead) -> SenderSummary:
+    """Health's sender line: the snapshot's state, today's sends and today's limit. No snapshot (a sending config the
+    sender cannot load) reads as stopped (`paused_hard_block`, 0 of 0) instead of failing the whole view."""
+    if read.snapshot is None:
         return SenderSummary(state="paused_hard_block", sent_today=0, limit_today=0)
-    snap = sending_snapshot(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded)
-    return SenderSummary(state=snap.state, sent_today=snap.sent_today, limit_today=snap.limit_today)
+    return SenderSummary(state=read.snapshot.state, sent_today=read.snapshot.sent_today,
+                         limit_today=read.snapshot.limit_today)
+
+
+def sender_summary(conn: sqlite3.Connection, now: str, *, old_sender_loaded: bool) -> SenderSummary:
+    return summary_of(read_sender(conn, now, old_sender_loaded=old_sender_loaded))
 
 
 # ---------------------------------------------------------------------------------------------- writes

@@ -14,4 +14,4 @@ def shell_summary(request: Request, clock: Clock = Depends(get_clock)) -> ShellS
     now = clock()
     old_sender = request.app.state.old_sender_loaded()  # outside the read: it may ask launchctl
     with read_conn(request) as conn:
-        return shell.shell_summary(conn, now, old_sender_loaded=old_sender)
+        return shell.shell_summary(conn, now, request.app.state.config, old_sender_loaded=old_sender)

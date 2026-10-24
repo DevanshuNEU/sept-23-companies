@@ -314,6 +314,57 @@ class WriteTest(unittest.TestCase):
             conn.close()
             self.assertEqual({s: source_digest(p) for s, p in manifest.paths.items()}, before)
 
+    # -- reruns on a later backup (review fixes) --
+
+    def rerun(self, *changes):
+        """A store with the base plan applied, then a plan from the records with `changes` applied on top."""
+        records = self.records
+        for record_id, change in changes:
+            out = []
+            for r in records:
+                if rid(r) == record_id:
+                    r = dataclasses.replace(r, raw=change(dict(r.raw)))
+                out.append(r)
+            records = out
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        first = apply_plan(conn, self.plan, now=NOW)
+        second = apply_plan(conn, build_plan(records, overrides(), now=NOW, send_cfg=CFG), now=NOW)
+        return conn, first, second
+
+    def test_a_draft_sent_between_backups_gets_its_first_send_and_never_stays_sendable(self):
+        def sent(raw):
+            return {**raw, "status": "sent", "sentAt": "2026-10-21T09:00:00-04:00", "messageId": "gm-c07",
+                    "threadId": "th-c07", "rfcMessageId": "<c07.fixture@example.com>",
+                    "history": raw["history"] + [{"at": "2026-10-21T09:00:00-04:00", "what": "sent"}]}
+        conn, first, second = self.rerun(("contacts_json:contact:c07", sent))
+        self.assertEqual(second.status, "ok", second.error)
+        gus = first.ids["person:fathomsystems/gus.albrecht@example.com"]
+        touch = conn.execute("SELECT * FROM touch WHERE person_id = ?", (gus,)).fetchone()
+        self.assertEqual((touch["first_sent_at"], touch["first_rfc_id"], touch["gmail_thread_id"]),
+                         ("2026-10-21T13:00:00Z", "<c07.fixture@example.com>", "th-c07"))
+        states = [r[0] for r in conn.execute("SELECT state FROM message WHERE touch_id = ? AND seq = 0",
+                                             (touch["touch_id"],))]
+        self.assertEqual(len(states), 1)
+        self.assertNotIn(states[0], ("planned", "drafted", "approved", "failed"))
+        self.assertEqual(conn.execute("SELECT count(*) FROM outreach_touch WHERE email_touch_id = ?",
+                                      (touch["touch_id"],)).fetchone()[0], 1)
+        items = conn.execute("SELECT * FROM review_item WHERE evidence_key LIKE 'import:sent_after_import:%'"
+                             ).fetchall()
+        self.assertEqual(len(items), 1)
+
+    def test_a_follow_up_sent_between_backups_never_stays_sendable(self):
+        def followed_up(raw):
+            return {**raw, "status": "followup_sent", "followupSentAt": "2026-10-20T09:30:00-04:00"}
+        conn, first, _ = self.rerun(("contacts_json:contact:c05", followed_up))
+        emil = first.ids["person:cobaltharbor/emil.strand@example.com"]
+        rows = conn.execute("SELECT m.seq, m.state FROM message m JOIN touch t USING(touch_id) WHERE t.person_id = ? "
+                            "ORDER BY m.seq", (emil,)).fetchall()
+        self.assertEqual(rows[0]["state"], "sent")
+        self.assertNotIn(rows[1]["state"], ("planned", "drafted", "approved", "failed"))
+        self.assertEqual(conn.execute("SELECT count(*) FROM review_item WHERE evidence_key LIKE "
+                                      "'import:sent_after_import:%'").fetchone()[0], 1)
+
     # -- more of what the sender and the store rely on --
 
     def test_every_name_is_an_alias_of_its_company(self):

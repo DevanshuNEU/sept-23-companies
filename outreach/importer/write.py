@@ -446,6 +446,11 @@ class _Writer:
                          idempotency_key=key)
         else:
             touch_id = row["touch_id"]
+            if sent0 and row["first_sent_at"] is None:  # the first email went out after the last import
+                conn.execute("UPDATE touch SET first_sent_at = ?, first_rfc_id = ?, gmail_thread_id = "
+                             "coalesce(gmail_thread_id, ?), updated_at = ?, revision = revision + 1 "
+                             "WHERE touch_id = ? AND first_sent_at IS NULL",
+                             (sent0, mail.rfc0, mail.thread_id, self.now, touch_id))
             if row["state"] == "open" and state != "open":  # a new fact (a reply, a bounce); nothing is overwritten
                 conn.execute("UPDATE touch SET state = ?, close_reason = ?, replied_at = ?, reply_kind = ?, "
                              "bounced_at = coalesce(bounced_at, ?), closed_at = ?, updated_at = ?, "
@@ -473,6 +478,8 @@ class _Writer:
                                                     "placeholder and is never put in a header"})
 
         subject0 = mail.subject0 or ""
+        self.sent_since(touch_id, company_id, 0, mail.sent0_at, t)
+        self.sent_since(touch_id, company_id, 1, mail.sent1_at, t)
         if 0 not in have and contact and mail.body0:
             if mail.sent0_at:
                 rfc = mail.rfc0 or PLACEHOLDER_RFC.format(contact=contact, seq=0)
@@ -502,6 +509,36 @@ class _Writer:
                 insert(1, "drafted", subject1, mail.body1, due_on=mail.due1_on)
             elif mail.due1_on and mail.touch_state == "open":
                 insert(1, "planned", "", "", due_on=mail.due1_on)
+
+    def sent_since(self, touch_id: int, company_id: int, seq: int, sent_at: str | None, t: TouchIn) -> None:
+        """A message the store still holds as sendable that the sources say went out (the old mailer sent it after
+        the last import): it is made unsendable (`skipped`; the import never approves, so it cannot record the send
+        on the message) and an item says so. A message in flight (`sending`, `send_unknown`) is left to the sender
+        and the item says that instead."""
+        if not sent_at:
+            return
+        conn = self.conn
+        row = conn.execute("SELECT message_id, state FROM message WHERE touch_id = ? AND seq = ?",
+                           (touch_id, seq)).fetchone()
+        if row is None or row["state"] in ("sent", "skipped"):
+            return
+        what = "first email" if seq == 0 else "follow-up"
+        name = self.plan.people[t.person_key].name
+        if row["state"] in ("planned", "drafted", "approved", "failed"):
+            conn.execute("UPDATE message SET state = 'skipped', updated_at = ?, revision = revision + 1 "
+                         "WHERE message_id = ?", (self.now, row["message_id"]))
+            append_event(conn, entity="message", kind="skipped", actor="import", entity_id=row["message_id"],
+                         company_id=company_id, at=self.now,
+                         idempotency_key=f"import:sent-after-import:{row['message_id']}",
+                         detail={"why": "sent by the old mailer after the last import", "sent_at": sent_at,
+                                 "was": row["state"]})
+            said = (f"The old mailer sent the {what} to {name} on {ny_date(sent_at)}, after the last import, so "
+                    f"the store's {row['state']} copy was skipped and can never be sent.")
+        else:
+            said = (f"The old mailer sent the {what} to {name} on {ny_date(sent_at)}, and the store's copy is "
+                    f"{row['state']} in the new sender. Check Gmail Sent before anything else goes to them.")
+        self._flag(company_id, f"import:sent_after_import:{touch_id}:{seq}", said,
+                   person_id=self.ids.get(f"person:{t.person_key}"))
 
     def outcomes(self, touch_id: int, company_id: int, outcomes: Iterable[OutcomeIn], *, channel: str,
                  person_id: int | None) -> bool:

@@ -392,6 +392,52 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(apply_plan(conn, self.plan, now=NOW).status, "ok")
         self.assertEqual(conn.execute("SELECT count(*) FROM no_go WHERE lifted_at IS NULL").fetchone()[0], 0)
 
+    def test_a_person_whose_key_changes_between_backups_is_one_person(self):
+        line = SourceRecord("contacted_txt", "line:50", {
+            "line": "2026-10-13 - Harbor Lane - Wren Ashby", "kind": "touch", "date": "2026-10-13",
+            "company": "Harbor Lane", "rest": "Wren Ashby", "people": [{"name": "Wren Ashby", "note": None}]})
+        note = SourceRecord("devvault_notes", "file:reached-out/harbor-lane.md", {
+            "path": "reached-out/harbor-lane.md", "folder": "reached-out", "frontmatter": {
+                "company": "Harbor Lane", "people": [{"name": "Wren Ashby", "email": "wren.ashby@example.com",
+                                                      "linkedin": "https://www.linkedin.com/in/wren-ashby",
+                                                      "sent": "2026-10-13"}]}})
+        first = build_plan(self.records + [line], overrides(), now=NOW, send_cfg=CFG)
+        second = build_plan(self.records + [line, note], overrides(), now=NOW, send_cfg=CFG)
+        self.assertIn("harborlane/wren ashby", first.people)
+        self.assertIn("harborlane/wren.ashby@example.com", second.people)
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        apply_plan(conn, first, now=NOW)
+        result = apply_plan(conn, second, now=NOW)
+        self.assertEqual(result.status, "ok", result.error)
+        rows = conn.execute("SELECT * FROM person WHERE name = 'Wren Ashby'").fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["email"], rows[0]["linkedin_url"]),
+                         ("wren.ashby@example.com", "https://www.linkedin.com/in/wren-ashby"))
+        self.assertEqual(conn.execute("SELECT count(*) FROM touch WHERE person_id = ?",
+                                      (rows[0]["person_id"],)).fetchone()[0], 1)
+        self.assertEqual(conn.execute("SELECT count(*) FROM outreach_touch WHERE person_id = ?",
+                                      (rows[0]["person_id"],)).fetchone()[0], 1)
+        self.assertEqual(apply_plan(conn, second, now=NOW).written, {"job_run": 1})
+
+    def test_namesakes_the_planner_kept_apart_stay_apart_in_one_run(self):
+        lines = [SourceRecord("contacted_txt", f"line:{50 + n}", {
+            "line": "2026-10-13 - Harbor Lane - Sam Lee", "kind": "touch", "date": "2026-10-13",
+            "company": "Harbor Lane", "rest": "Sam Lee", "people": [{"name": "Sam Lee", "note": None}]})
+            for n in range(1)]
+        note = SourceRecord("devvault_notes", "file:reached-out/harbor-lane.md", {
+            "path": "reached-out/harbor-lane.md", "folder": "reached-out", "frontmatter": {
+                "company": "Harbor Lane", "people": [
+                    {"name": "Sam Lee", "email": "sam@harbor.example", "sent": "2026-10-14"},
+                    {"name": "Sam Lee", "email": "sam.lee@harbor.example", "sent": "2026-10-15"}]}})
+        plan = build_plan(self.records + lines + [note], overrides(), now=NOW, send_cfg=CFG)
+        sams = [k for k in plan.people if k.startswith("harborlane/")]
+        self.assertEqual(len(sams), 3)  # two addresses and the ambiguous name-only mention
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        apply_plan(conn, plan, now=NOW)
+        self.assertEqual(conn.execute("SELECT count(*) FROM person WHERE name = 'Sam Lee'").fetchone()[0], 3)
+
     # -- more of what the sender and the store rely on --
 
     def test_every_name_is_an_alias_of_its_company(self):

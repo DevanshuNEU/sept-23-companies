@@ -37,7 +37,7 @@ from outreach.rules.facts import EvidenceDraft
 from outreach.rules.rebuild import rebuild
 from outreach.sources.base import Candidate
 from outreach.sources.boards import BoardRef, add_board
-from outreach.sources.keys import US_STATES
+from outreach.sources.keys import US_STATES, person_name_key
 from outreach.sources.tiers import register_source
 from outreach.store import (add_alias, append_event, body_sha256, describe_error, finish_job, iso_utc, log_touch,
                             name_key, record_outcome, start_job, transaction)
@@ -346,6 +346,17 @@ class _Writer:
                                f"(person {person_id}); the import's history was put on that person. Check which "
                                f"company they are at.", person_id=None)
                 detail = {"reused": True}
+            elif (same := self._earlier_import(p, company_id)) is not None:
+                # The same person under another plan key (a backup that adds their address): one row, filled in.
+                person_id = same
+                conn.execute(
+                    "UPDATE person SET email = coalesce(email, ?), linkedin_url = coalesce(linkedin_url, ?), "
+                    "channel = CASE WHEN coalesce(email, ?) IS NOT NULL THEN 'email' ELSE channel END, "
+                    "linkedin_reason = CASE WHEN coalesce(email, ?) IS NOT NULL THEN NULL ELSE linkedin_reason END, "
+                    "updated_at = ?, revision = revision + 1 WHERE person_id = ? "
+                    "AND (email IS NULL AND ? IS NOT NULL OR linkedin_url IS NULL AND ? IS NOT NULL)",
+                    (p.email, p.linkedin_url, p.email, p.email, self.now, person_id, p.email, p.linkedin_url))
+                detail = {"reused": True, "matched": "name"}
             else:
                 channel = "linkedin" if p.linkedin_url and not p.email else "email"
                 notes = f"Imported from {', '.join(p.records)}." if p.placeholder else ""
@@ -363,6 +374,30 @@ class _Writer:
         for reason, record in p.no_go:
             self._no_go(company_id=None, person_id=person_id, reason=reason, quote="", record=record)
         return person_id
+
+    def _earlier_import(self, p: PersonIn, company_id: int) -> int | None:
+        """The one person an earlier import wrote at this company with the same name and no address or profile
+        that disagrees (the planner's same-name rule), else None. Two such people are someone to sort, not a
+        guess."""
+        if p.placeholder:
+            return None
+        conn = self.conn
+        mine = set(self.ids[k] for k in self.ids if k.startswith("person:"))  # this run's people are the plan's
+        found = set()
+        for row in conn.execute(
+                "SELECT DISTINCT p.person_id, p.company_id, p.name, p.email, p.linkedin_url FROM person p "
+                "JOIN event e ON e.entity = 'person' AND e.kind = 'imported' AND e.entity_id = p.person_id "
+                "WHERE p.added_by = 'import'"):
+            if person_name_key(row["name"]) != person_name_key(p.name):
+                continue
+            if follow_merged(conn, row["company_id"]) != follow_merged(conn, company_id):
+                continue
+            if (row["email"] and p.email and row["email"] != p.email) or \
+                    (row["linkedin_url"] and p.linkedin_url and row["linkedin_url"] != p.linkedin_url):
+                continue
+            found.add(row["person_id"])
+        found -= mine
+        return found.pop() if len(found) == 1 else None
 
     # -- touches --
 

@@ -519,6 +519,19 @@ class ApplyTests(StoreCase):
         apply_reading(self.conn, pid, cfg=self.cfg)
         self.assertEqual(self.row(pid)["provisional"], 1)
 
+    def test_an_engineering_quote_gone_from_the_title_leaves_a_hide_provisional(self):
+        # Grok second review: the engineering verdict guards a final hide, so its quote is checked again too.
+        pid = self.posting()
+        self.store_reading(pid, sponsorship=("wont_sponsor", REFUSAL))  # engineering quotes the title
+        apply_reading(self.conn, pid, cfg=self.cfg)
+        self.assertEqual(self.row(pid)["provisional"], 0)
+        self.conn.execute("UPDATE posting SET title = 'Backend Software Engineer' WHERE posting_id = ?", (pid,))
+        self.assertIn("engineering", reading_state(self.conn, pid, promoted=VERSION)[1])
+        combined = apply_reading(self.conn, pid, cfg=self.cfg)
+        self.assertIn("engineering", [v.field for v in combined.raised])
+        row = self.row(pid)
+        self.assertEqual((row["sponsorship"], row["provisional"]), ("no", 1))
+
     def test_a_hide_quote_no_longer_in_the_text_counts_as_refused(self):
         # The title and location are not in the body hash, so a quote checked against them at submit time can be
         # gone later. A hide field whose quote is gone is missing, never an agreement.

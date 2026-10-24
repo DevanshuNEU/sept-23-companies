@@ -24,8 +24,8 @@ unreadable posting (relaxed and flagged), any raised field, and an agreed hide o
 A reading counts only for the posting's current body hash at `promoted_version` (config.toml; "" means none, so
 nothing is final and nothing the reader said changes a row; any value that is not `rv-` and 12 hex, a side version
 included, counts as none too: `version.promoted_version`). A newer candidate version runs in shadow: `explain`
-shows it, it decides nothing. The title and location are not in the body hash, so the quote of each hide field and
-of pay is checked again against the current title, location and body; a quote no longer there counts as refused.
+shows it, it decides nothing. The title and location are not in the body hash, so the quote of each hide field, of
+engineering and of pay is checked again against the current title, location and body; a quote no longer there counts as refused.
 """
 from __future__ import annotations
 
@@ -205,9 +205,9 @@ def _posting(conn: sqlite3.Connection, posting_id: int) -> sqlite3.Row | None:
         (posting_id,)).fetchone()
 
 
-# The fields whose quotes are checked again at combine time: the four that can hide, and pay, which is written to
-# the posting row.
-_RECHECKED = HIDE_FIELDS + ("pay",)
+# The fields whose quotes are checked again at combine time: the four that can hide, engineering, which a final hide
+# needs (a title edit can drop its quote), and pay, which is written to the posting row.
+_RECHECKED = HIDE_FIELDS + ("engineering", "pay")
 
 
 def _gone_quotes(reading: PostingReading, post: sqlite3.Row) -> set[str]:

@@ -1,6 +1,6 @@
 import type { OutreachClient } from './client';
 import { clientForPage, composeClient } from './compose';
-import { ALL_VIEWS, VIEW_OF_METHOD, type ViewName } from './http/views';
+import { ALL_VIEWS, DEFAULT_LIVE_VIEWS, SERVED_VIEWS, VIEW_OF_METHOD, type ViewName } from './http/views';
 
 const loaded = vi.hoisted(() => ({ client: 0, data: 0 }));
 
@@ -41,8 +41,17 @@ describe('composeClient', () => {
     const live = labelled('live', 'live');
     const sample = labelled('sample', 'sample');
     expect(composeClient({ live, sample, views: [] }).source).toBe('sample');
-    expect(composeClient({ live, sample, views: ALL_VIEWS.filter((v) => v !== 'wins') }).source).toBe('sample');
+    expect(composeClient({ live, sample, views: ALL_VIEWS.filter((v) => v !== 'done') }).source).toBe('sample');
     expect(composeClient({ live, sample, views: ALL_VIEWS }).source).toBe('live');
+  });
+
+  it('a view with no method on the client does not keep the Sample badge on', () => {
+    // `plan` has no entry in VIEW_OF_METHOD: nothing on the client could be sample data for it.
+    const live = labelled('live', 'live');
+    const sample = labelled('sample', 'sample');
+    expect(SERVED_VIEWS).not.toContain('plan');
+    expect(composeClient({ live, sample, views: SERVED_VIEWS }).source).toBe('live');
+    expect(composeClient({ live, sample, views: SERVED_VIEWS.filter((v) => v !== 'shell') }).source).toBe('sample');
   });
 
   it('a method of a view that is not live yet fails loudly instead of returning nothing', () => {
@@ -107,6 +116,14 @@ describe('createClient', () => {
     expect(parseLiveViews('', 'wins, watch', ['today'])).toEqual(['wins', 'watch']);
     expect(parseLiveViews('?scenario=default', undefined, ['today'])).toEqual(['today']);
     expect(parseLiveViews('?live=plan', 'all', ['today'])).toEqual(['plan']);
+  });
+
+  it('the default views give a live client and never load the fixture chunk', async () => {
+    expect(SERVED_VIEWS.every((v) => DEFAULT_LIVE_VIEWS.includes(v))).toBe(true);
+    const c = await make('');
+    expect(c.source).toBe('live');
+    expect(loaded.client).toBe(0);
+    expect(loaded.data).toBe(0);
   });
 
   it('an env of all makes the whole client live', async () => {

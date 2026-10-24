@@ -15,7 +15,10 @@ copy of the format):
 
     {"gold_id": "g0001", "stratum": "sponsorship:wont_sponsor", "title": str, "location": str, "body": str,
      "labels": {<every name in FIELDS>: {"value": ..., "quote": str}},
-     "status": "prelabeled" | "confirmed", "confirmed_on": "YYYY-MM-DD" | null}
+     "status": "prelabeled" | "confirmed", "confirmed_on": "YYYY-MM-DD" | null, "country": str | null}
+
+`country` is the posting's structured country (the rules read it with the location, as combine does); it may be left
+out, which means none.
 
 Bodies are stored in the file (public postings), so tests and eval never need the store. `stratum` names the draw
 the item came from: `"<field>:<class>"` for a rare class, `"random"` or `"disagree"`. A `prelabeled` item may have
@@ -115,6 +118,7 @@ TARGET_PER_CLASS = 30
 BOUND_TARGET = 150
 
 _ITEM_KEYS = ("gold_id", "stratum", "title", "location", "body", "labels", "status", "confirmed_on")
+_OPTIONAL_KEYS = ("country",)
 _STATUSES = ("prelabeled", "confirmed")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 _NO_FACT = ("unknown", "silent", None, "")
@@ -135,12 +139,13 @@ class GoldItem:
     labels: dict[str, FieldReading]
     status: str
     confirmed_on: str | None
+    country: str | None = None
 
     def to_json(self) -> dict:
         return {"gold_id": self.gold_id, "stratum": self.stratum, "title": self.title, "location": self.location,
                 "body": self.body,
                 "labels": {name: {"value": f.value, "quote": f.quote} for name, f in self.labels.items()},
-                "status": self.status, "confirmed_on": self.confirmed_on}
+                "status": self.status, "confirmed_on": self.confirmed_on, "country": self.country}
 
 
 # ---- reading and checking the file ------------------------------------------------------------------------------
@@ -174,12 +179,14 @@ def _item(obj, line: int) -> GoldItem:
     if not isinstance(obj, dict):
         raise bad("an item must be an object")
     missing = [k for k in _ITEM_KEYS if k not in obj]
-    extra = [k for k in obj if k not in _ITEM_KEYS]
+    extra = [k for k in obj if k not in _ITEM_KEYS + _OPTIONAL_KEYS]
     if missing or extra:
         raise bad(f"missing {', '.join(missing)}" if missing else f"unexpected {', '.join(map(str, extra))}")
     for key in ("gold_id", "stratum", "title", "location", "body"):
         if not isinstance(obj[key], str):
             raise bad(f"{key} must be text")
+    if not isinstance(obj.get("country"), (str, type(None))):
+        raise bad("country must be text or null")
     if not obj["gold_id"].strip():
         raise bad("gold_id must not be empty")
     if obj["stratum"] not in STRATUM_NAMES:
@@ -215,7 +222,7 @@ def _item(obj, line: int) -> GoldItem:
             raise bad(f"{obj['gold_id']}: {err}") from None
         labels[name] = label
     return GoldItem(obj["gold_id"], obj["stratum"], obj["title"], obj["location"], obj["body"], labels,
-                    obj["status"], when)
+                    obj["status"], when, obj.get("country"))
 
 
 def _parse(lines: list[str]) -> list[GoldItem]:
@@ -307,7 +314,7 @@ def _candidates(conn: sqlite3.Connection, cfg: ReaderConfig, rules_cfg: Config) 
         if d.lane not in ("engineering", "intern"):
             continue
         out.append({"posting_id": row["posting_id"], "title": row["title"], "location": row["location"] or "",
-                    "body": body, "sha": body_sha256(body), "rules": rules_fields(d)})
+                    "country": row["country"], "body": body, "sha": body_sha256(body), "rules": rules_fields(d)})
     return out
 
 
@@ -348,7 +355,7 @@ def sample_gold(conn: sqlite3.Connection, per_class: int, *, seed: int, existing
             picked.append((name, c))
             taken += 1
     return [{"gold_id": f"g{first_id + n:04d}", "stratum": name, "title": c["title"], "location": c["location"],
-             "body": c["body"], "labels": {}, "status": "prelabeled", "confirmed_on": None}
+             "body": c["body"], "labels": {}, "status": "prelabeled", "confirmed_on": None, "country": c["country"]}
             for n, (name, c) in enumerate(picked)]
 
 

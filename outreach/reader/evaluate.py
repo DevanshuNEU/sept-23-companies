@@ -125,19 +125,19 @@ class ClassScore:
 # ---- the three views -------------------------------------------------------------------------------------------
 
 def rules_view(item: GoldItem, cfg: Config | None = None) -> dict[str, str | None]:
-    """`decide()` on the item's title, body and location, as one class per field in the reader's words: sponsorship
+    """`decide()` on the item's title, body, location and country (as combine.py decides), as one class per field in the reader's words: sponsorship
     no is wont_sponsor and unclear unknown, citizenship true is yes else unknown, eligibility excluded is yes else
     unknown, us is a location class (us, non_us, unknown), lane is engineering, tier is level, years_asked is
     years_low (as text). None where the rules have no counterpart (years_high, remote, pay)."""
     if cfg is None or cfg is default_config():
-        return dict(_rules_default(item.title, item.body, item.location))
-    return rules_fields(decide(PostingInput(item.title, item.body, item.location), cfg))
+        return dict(_rules_default(item.title, item.body, item.location, item.country))
+    return rules_fields(decide(PostingInput(item.title, item.body, item.location, item.country), cfg))
 
 
 @lru_cache(maxsize=8192)
-def _rules_default(title: str, body: str, location: str) -> tuple:
+def _rules_default(title: str, body: str, location: str, country: str | None) -> tuple:
     """`rules_fields` under the shipped rules config, remembered: eval scores the same items many times."""
-    return tuple(rules_fields(decide(PostingInput(title, body, location))).items())
+    return tuple(rules_fields(decide(PostingInput(title, body, location, country))).items())
 
 
 def _blank(name: str):

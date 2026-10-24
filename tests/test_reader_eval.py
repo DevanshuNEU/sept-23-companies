@@ -107,6 +107,11 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(set(plain), set(FIELDS))
         self.assertIsNone(plain["pay"])
 
+    def test_rules_view_reads_the_structured_country(self):
+        remote = make("g8", where="Remote")
+        self.assertEqual(rules_view(remote)["location"], "unknown")
+        self.assertEqual(rules_view(dataclasses.replace(remote, country="Canada"))["location"], "non_us")
+
     def test_reader_view_blanks_an_unquoted_fact(self):
         item = make("g1", REFUSAL, sponsorship=("wont_sponsor", REFUSAL))
         seen = reader_view(fields(item, sponsorship=("wont_sponsor", "no visa sponsorship is offered")), item)

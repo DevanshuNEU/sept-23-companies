@@ -111,6 +111,18 @@ class LoadGoldTests(GoldCase):
         with self.assertRaises(ValueError):
             load_gold(self.path)
 
+    def test_country_is_optional_and_kept(self):
+        # Final review: eval's rules view needs the posting's structured country, as combine passes it.
+        self.write(item("g0001"), item("g0002") | {"country": "Canada"})
+        old, new = load_gold(self.path)
+        self.assertEqual((old.country, new.country), (None, "Canada"))
+        self.assertEqual(new.to_json()["country"], "Canada")
+        self.write(new.to_json())
+        self.assertEqual(load_gold(self.path)[0], new)
+        self.write(item() | {"country": 7})
+        with self.assertRaises(ValueError):
+            load_gold(self.path)
+
     def test_the_real_set_lives_outside_the_repo(self):
         home = Path.home() / "Library" / "Application Support" / "outreach" / "gold"
         self.assertEqual(gold.GOLD_PATH, home / "items.jsonl")
@@ -149,6 +161,12 @@ class SampleGoldTests(unittest.TestCase):
         later = sample_gold(self.conn, 2, seed=7, existing=seen)
         self.assertTrue(later)
         self.assertFalse(seen & {body_sha256(i["body"]) for i in later})
+
+    def test_sample_gold_carries_the_posting_country(self):
+        (pid,) = self.post(1, "We are a small team.", location="Remote")
+        self.conn.execute("UPDATE posting SET country = 'Canada' WHERE posting_id = ?", (pid,))
+        (drawn,) = sample_gold(self.conn, 5, seed=1, existing=set())
+        self.assertEqual((drawn["stratum"], drawn["country"]), ("location:non_us", "Canada"))
 
     def test_sample_gold_fills_each_stratum_up_to_availability(self):
         self.post(2, "We do not sponsor visas.")

@@ -200,7 +200,7 @@
   - `combine(rules: Decision, reading: PostingReading | None, *, refused: frozenset[str] = frozenset(), unreadable: bool = False, cfg: Config | None = None) -> Combined`: pure. No reading and not `unreadable`: the rules' decision unchanged, `provisional=True`, `reader_version=None`, no verdicts. Otherwise relax every rules hide whose state is not `agree` (see the decisions above), `provisional=False`, `reader_version=reading.reader_version` (for `unreadable` with no reading: every hide field is `missing`, `reader_version=None`, `provisional=False`).
   - `reading_state(conn, posting_id: int, *, promoted: str) -> tuple[PostingReading | None, frozenset[str], bool]`: the reading stored for the posting's current body hash at version `promoted` (`None` when `promoted` is empty), its `refused_fields`, and whether the queue row for that key is `refused` with no reading (unreadable).
   - `apply_reading(conn, posting_id: int, *, cfg: ReaderConfig | None = None) -> Combined`: decides with the rules (`decide()` on the stored title, body, location, country), combines, upserts the `decision` row under the current ruleset (`provisional`, `reader_version` included), raises one `reader_disagrees` review item per posting when `raised` is non-empty (`raised_by 'reader'`, `evidence_key = f"{version}:{sha[:12]}:{','.join(sorted(fields))}"`, `reason` naming each field with both values and the reader's quote), and clears an open `reader_disagrees` item for the posting with resolution `cleared` when `raised` is empty. Idempotent: a second call changes nothing. Raises `RulesetNotCurrent` as `decide_and_store` does.
-  - `apply_all(conn, *, cfg=None) -> int`: `apply_reading` for every open posting that has a reading or an unreadable queue row for its current hash (run after a rebuild or a promotion; no API, no crawl). Returns the count.
+  - `apply_all(conn, *, cfg=None) -> int`: `apply_reading` for every open posting that has a reading or an unreadable queue row for its current hash (run after a rebuild or a promotion; no API, no crawl), and for every open posting whose row is final under another reader version, `""` included, so a rollback returns them to provisional; open `reader_disagrees` items raised under another version are closed. Returns the count.
   - `explain(conn, posting_id: int, *, cfg=None) -> tuple[FieldVerdict, ...]`: the verdicts for the posting under the promoted version if there is one, else under the candidate version, for the API and UI to show "flagged" fields and both quotes. Read-only.
   - `reader_combiner(conn, cfg: ReaderConfig | None = None) -> Callable[[sqlite3.Connection, int, Decision], Combined]`: the callable the CLI, the crawler (#21) and the flow test pass as `combiner`; it looks up `reading_state` for the posting at `cfg.promoted_version` and calls `combine`.
   - `rebuild.rebuild(..., combiner=None)` and `rebuild.decide_and_store(..., combiner=None)`: `combiner: Callable[[sqlite3.Connection, int, Decision], Combined] | None`; when given, its `decision`, `provisional` and `reader_version` are what get compared (flips) and written. The shared `_UPSERT` gains `provisional` and `reader_version`; with no combiner it writes `1` and NULL, so a re-decided row with changed facts never keeps an old `provisional = 0`. `rebuild.py` does not import `outreach.reader` (the CLI passes `combiner`); it is in `NOT_RULES`, so the ruleset hash does not move.
@@ -611,13 +611,21 @@ and deploy it as `CLAUDE.md` says.
     sqlite3 -readonly "$DB" "select provisional, count(*) from current_decision group by provisional"
     sqlite3 -readonly "$DB" "select count(*) from review_item where kind = 'reader_disagrees' and state = 'open'"
 
-`apply` prints how many postings it combined. From here an agreed, verified hide is final, a disputed one is shown and
+`apply` prints how many postings it combined. It also returns to provisional every final row an earlier promoted
+version made and closes the open `reader_disagrees` items raised under any version but this one. From here an
+agreed, verified hide is final, a disputed one is shown and
 raised in Needs you, and the night job keeps reading. The next rank run sees the final hides (`uv run python -m
 outreach.ranking rank` to see them now).
 
 **Rollback.** `git revert` the promotion commit, merge and deploy, then in the live checkout
-`uv run python -m outreach.rules.rebuild` (it re-decides every open posting with the reader's combiner, which with no
-promoted version leaves every row provisional). Rules `no_go` rows written while it was promoted stay; list them with
+
+    uv run python -m outreach.reader apply
+    sqlite3 -readonly "$DB" "select reader_version, count(*) from current_decision where provisional = 0 group by 1"
+
+`apply` re-applies every open posting whose row is final under a version that is no longer promoted: with no promoted
+version every such row goes back to provisional, with an older one promoted again each row is combined with that
+version's reading. It closes the open `reader_disagrees` items raised under the rolled-back version. The `sqlite3`
+line prints nothing, or only the version now promoted. Rules `no_go` rows written while it was promoted stay; list them with
 `sqlite3 -readonly "$DB" "select company_id, reason, created_at from no_go where source = 'rules' and lifted_at is null order by created_at desc"`
 and lift the ones made after the promotion by hand. Stopping the night job is step 4's `bootout`.
 

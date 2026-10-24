@@ -429,6 +429,30 @@ class ApplyTests(StoreCase):
         self.assertEqual(apply_all(self.conn, cfg=dataclasses.replace(self.cfg, promoted_version="")), 0)
         self.assertEqual(self.row(pid)["provisional"], 1)
 
+    def test_apply_all_returns_final_rows_of_another_version_to_provisional(self):
+        # Final review: a promotion rolled back (or replaced) must not leave the old version's final hides standing,
+        # nor its open disagreements in Needs you.
+        old = dataclasses.replace(self.cfg, promoted_version=OTHER)
+        hidden, disputed, current = self.posting(), self.posting(), self.posting()
+        self.store_reading(hidden, version=OTHER, sponsorship=("wont_sponsor", REFUSAL))
+        self.store_reading(disputed, version=OTHER, sponsorship=("will_sponsor", "sponsor visas for this role"))
+        self.store_reading(current, version=VERSION, sponsorship=("wont_sponsor", REFUSAL))
+        self.assertEqual(apply_all(self.conn, cfg=old), 2)
+        self.assertEqual((self.row(hidden)["provisional"], self.row(hidden)["reader_version"]), (0, OTHER))
+        self.assertEqual([i["state"] for i in self.items(disputed)], ["open"])
+        for promoted in (VERSION, ""):
+            with self.subTest(promoted=promoted):
+                apply_all(self.conn, cfg=old)  # back to OTHER's state, its item open again
+                self.assertEqual(self.row(hidden)["provisional"], 0)
+                self.assertEqual([i["state"] for i in self.items(disputed)], ["open"])
+                applied = apply_all(self.conn, cfg=dataclasses.replace(self.cfg, promoted_version=promoted))
+                self.assertEqual(applied, 2 if promoted else 1)
+                row = self.row(hidden)
+                self.assertEqual((row["provisional"], row["reader_version"], row["sponsorship"]), (1, None, "no"))
+                self.assertEqual([(i["state"], i["resolution"]) for i in self.items(disputed)],
+                                 [("resolved", "cleared")])
+                self.assertEqual(self.row(current)["provisional"], 0 if promoted else 1)
+
     def test_an_unreadable_queue_row_fails_open_and_raises_an_item(self):
         pid = self.posting()
         self.queue_row(pid)

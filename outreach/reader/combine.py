@@ -393,26 +393,44 @@ def apply_reading(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfi
 
 def apply_all(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = None, today: date | None = None,
               rules_cfg: Config | None = None) -> int:
-    """`apply_reading` for every open posting with a reading or a refused queue row at the promoted version (run
-    after a rebuild or a promotion: no model call, no crawl). Returns how many were applied."""
+    """`apply_reading` for every open posting with a reading or a refused queue row at the promoted version, and for
+    every open posting whose current row is final under any other reader version (run after a rebuild, a promotion
+    or a rollback: no model call, no crawl). With no promoted version ("") that returns every final row to
+    provisional. Open `reader_disagrees` items raised under another version are closed. Returns how many postings
+    were applied."""
     cfg = cfg if cfg is not None else load_reader_config()
     version = cfg.promoted_version
-    if not version:
-        return 0
-    ids = [r[0] for r in conn.execute(
-        "SELECT p.posting_id FROM posting p WHERE p.closed_at IS NULL AND (EXISTS (SELECT 1 FROM posting_reading r "
-        "WHERE r.posting_id = p.posting_id AND r.reader_version = ?) OR EXISTS (SELECT 1 FROM read_queue q "
-        "WHERE q.posting_id = p.posting_id AND q.reader_version = ? AND q.state = 'refused')) ORDER BY p.posting_id",
-        (version, version))]
-    applied = 0
-    for posting_id in ids:
-        post = _posting(conn, posting_id)
-        reading, _, unreadable = _state_for(conn, post, version)
-        if reading is None and not unreadable:
-            continue  # the reading is of an older body
+    ids: set[int] = set()
+    if version:
+        for (posting_id,) in conn.execute(
+                "SELECT p.posting_id FROM posting p WHERE p.closed_at IS NULL AND (EXISTS (SELECT 1 FROM "
+                "posting_reading r WHERE r.posting_id = p.posting_id AND r.reader_version = ?) OR EXISTS (SELECT 1 "
+                "FROM read_queue q WHERE q.posting_id = p.posting_id AND q.reader_version = ? "
+                "AND q.state = 'refused'))", (version, version)):
+            post = _posting(conn, posting_id)
+            reading, _, unreadable = _state_for(conn, post, version)
+            if reading is not None or unreadable:  # else the reading is of an older body
+                ids.add(posting_id)
+    # A final row made under a version that no longer decides: a rollback, or a newer promotion.
+    ids.update(r[0] for r in conn.execute(
+        "SELECT d.posting_id FROM decision d JOIN posting p ON p.posting_id = d.posting_id "
+        "WHERE p.closed_at IS NULL AND d.provisional = 0 AND coalesce(d.reader_version, '') <> ? "
+        "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1)", (version,)))
+    for posting_id in sorted(ids):
         apply_reading(conn, posting_id, cfg=cfg, today=today, rules_cfg=rules_cfg)
-        applied += 1
-    return applied
+    _close_other_versions(conn, version)
+    return len(ids)
+
+
+def _close_other_versions(conn: sqlite3.Connection, version: str) -> None:
+    """Resolve, as cleared, every open `reader_disagrees` item whose evidence names another reader version (its key
+    starts with the version it was raised under; with no promoted version, every one)."""
+    prefix = f"{version}:" if version else ""
+    with atomic(conn, "reader_close_items"):
+        conn.execute(
+            "UPDATE review_item SET state = 'resolved', resolution = 'cleared', resolved_at = ?, "
+            "revision = revision + 1 WHERE kind = 'reader_disagrees' AND state = 'open' "
+            "AND (? = '' OR substr(evidence_key, 1, length(?)) <> ?)", (utcnow(), prefix, prefix, prefix))
 
 
 def explain(conn: sqlite3.Connection, posting_id: int, *, cfg: ReaderConfig | None = None,

@@ -317,11 +317,16 @@ def clear_gone(conn: sqlite3.Connection, *, now: str, company_ids: Collection[in
     return sum(_gone(conn, now, _scope(company_ids)).values())
 
 
-def _stale(conn: sqlite3.Connection, now: str, cfg: ReviewConfig, scope: set[int] | None) -> Counter | None:
-    """Clear this plan's items that are old and out of play. None when it did not run for want of a recent list."""
+def _stale(conn: sqlite3.Connection, now: str, cfg: ReviewConfig,
+           scope: set[int] | None) -> tuple[Counter | None, list[str]]:
+    """Clear this plan's items that are old and out of play. Returns the counts by kind and the steps it held back.
+
+    The counts are None when it did not run for want of a recent list. Old sponsorship items are held (nothing
+    cleared for them, one note in the second value) when the ranked list is empty: the top-N is then unknown, and
+    "not in the top" read from missing input is not a reason to clear."""
     today = ny_date(now)
     if recent_list_date(conn, today, cfg.planned_days) is None:
-        return None
+        return None, []
     cutoff = (datetime.fromisoformat(now.replace("Z", "+00:00")) - timedelta(days=cfg.stale_days)
               ).astimezone(timezone.utc).strftime(ISO_FMT)
     pairs = " OR ".join("(kind = ? AND raised_by = ?)" for _ in _STALE_PRODUCERS)
@@ -330,30 +335,37 @@ def _stale(conn: sqlite3.Connection, now: str, cfg: ReviewConfig, scope: set[int
                        f"AND created_at <= ? AND ({pairs}) ORDER BY review_id", (cutoff, *args)).fetchall()
     old = [r for r in old if scope is None or r["company_id"] in scope]
     by_kind: Counter = Counter()
+    notes: list[str] = []
     if not old:
-        return by_kind
+        return by_kind, notes
     play = in_play(conn, today=today, planned_days=cfg.planned_days)
     mailing = emailing(conn, today=today, planned_days=cfg.planned_days)
     top = _top_company_ids(conn, cfg.sponsorship_top_n) if any(
         r["kind"] == "sponsorship_unclear" for r in old) else set()
+    no_ranking = not top and any(r["kind"] == "sponsorship_unclear" for r in old)
     with unit(conn):
         for row in old:
             cid, kind = row["company_id"], row["kind"]
+            if kind == "sponsorship_unclear" and no_ranking:
+                continue
             held = {"size_unknown": cid in play, "domain_missing": cid in mailing,
                     "sponsorship_unclear": cid in play or cid in top}[kind]
             if not held and clear_item(conn, row["review_id"], _STALE_NOTE, now):
                 by_kind[kind] += 1
-    return by_kind
+    if no_ranking:
+        notes.append(f"sponsorship items: no ranked list, so none was cleared for leaving the top "
+                     f"{cfg.sponsorship_top_n}")
+    return by_kind, notes
 
 
 def clear_stale(conn: sqlite3.Connection, *, now: str, cfg: ReviewConfig | None = None,
                 company_ids: Collection[int] | None = None) -> int:
     """Clear this plan's open items (`rules`, `daily_list`, `sender`) older than `stale_days` whose company is out of
-    play (a domain item: not being emailed; a sponsorship item: also not in the top-N), with the note `No longer in
-    your plan.` It runs only when a daily list exists within `planned_days`: with none, a failed plan job would clear
+    play (a domain item: not being emailed; a sponsorship item: also not in the top-N, and never while the ranked
+    list is empty), with the note `No longer in your plan.` It runs only when a daily list exists within `planned_days`: with none, a failed plan job would clear
     everything, so it clears nothing and returns 0 (`sweep_needs_you` says so in its report). Returns how many it
     cleared."""
-    got = _stale(conn, iso_utc(now), cfg or load_review_config(), _scope(company_ids))
+    got, _ = _stale(conn, iso_utc(now), cfg or load_review_config(), _scope(company_ids))
     return 0 if got is None else sum(got.values())
 
 
@@ -397,7 +409,8 @@ def sweep_needs_you(conn: sqlite3.Connection, *, now: str | None = None, company
         cleared[kind] += result.cleared
         if result.skipped:
             skipped.append(f"{kind}: {result.skipped}")
-    stale = _stale(conn, at, cfg, _scope(company_ids))
+    stale, held = _stale(conn, at, cfg, _scope(company_ids))
+    skipped.extend(held)
     if stale is None:
         skipped.append("stale items: no recent daily list, so nothing was cleared for being out of the plan")
     else:

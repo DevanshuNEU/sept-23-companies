@@ -194,6 +194,29 @@ class TriggerCompanyTest(unittest.TestCase):
         self.assertEqual(self.size(), SyncResult(0, 0))
         self.assertEqual(len(self.items()), 40)
 
+    def test_a_size_he_settled_on_a_merged_duplicate_is_not_asked_again_on_the_keeper(self):
+        keeper, dupe = self.picked("Keeper"), self.company("Keeper Inc")
+        self.size(company_ids=[keeper])
+        # He settled the question while it sat on the duplicate; the merge then moved the plan to the keeper.
+        self.conn.execute("UPDATE review_item SET company_id = ?", (dupe,))
+        resolve_item(self.conn, self.items()[0]["review_id"], resolution="marked_ok", note="ok", revision=1)
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
+                          "WHERE company_id = ?", (keeper, dupe))
+        self.assertEqual(self.size(), SyncResult(0, 0))
+        self.assertEqual(len(self.items()), 1)
+
+    def test_a_merged_picked_and_emailed_company_gets_its_items_on_the_keeper(self):
+        loser_a, keeper_a, loser_b, keeper_b = (self.company(n) for n in ("A", "A Inc", "B", "B Inc"))
+        seed_plan_row(self.conn, loser_a, TODAY, "picked")
+        seed_queued_message(self.conn, seed_email_person(self.conn, loser_b), "drafted")
+        for loser, keeper in ((loser_a, keeper_a), (loser_b, keeper_b)):
+            seed_status(self.conn, loser, "removed")
+            self.conn.execute("UPDATE company SET merged_into = ? WHERE company_id = ?", (keeper, loser))
+        self.assertEqual(self.size(), SyncResult(1, 0))
+        self.assertEqual(self.domain(), SyncResult(1, 0))
+        self.assertEqual([r["company_id"] for r in self.items()], [keeper_a])
+        self.assertEqual([r["company_id"] for r in self.items("domain_missing")], [keeper_b])
+
     def test_no_review_item_text_holds_an_en_or_em_dash(self):
         self.picked("Dash" + chr(0x2014) + "Co")
         self.size()

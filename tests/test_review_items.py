@@ -215,6 +215,21 @@ class ItemsTest(unittest.TestCase):
                                          evidence_key="still-open"))
         self.assertEqual(still_open.state, "open")
 
+    def test_decided_before_sees_a_decision_on_a_company_merged_into_this_one(self):
+        keeper, dupe, far = self.company, seed_company(self.conn, "Dupe"), seed_company(self.conn, "Far")
+        for loser, into in ((dupe, keeper), (far, dupe)):
+            self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
+                              "WHERE company_id = ?", (into, loser))
+        item = raise_item(self.conn, kind="size_unknown", company_id=far, reason="Nobody has recorded its size.",
+                          evidence_key="no-size", raised_by="daily_list")
+        self.assertIsNone(decided_before(self.conn, kind="size_unknown", company_id=keeper, evidence_key="no-size"))
+        resolve_item(self.conn, item.review_id, resolution="marked_ok", note="", revision=1)
+        for asking in (keeper, dupe, far):
+            found = decided_before(self.conn, kind="size_unknown", company_id=asking, evidence_key="no-size")
+            self.assertEqual(found["review_id"], item.review_id)
+        self.assertIsNone(decided_before(self.conn, kind="size_unknown", company_id=seed_company(self.conn),
+                                         evidence_key="no-size"))
+
     def test_resolve_item_checks_revision_and_state(self):
         made = self.raise_()
         with self.assertRaises(ReviewError) as stale:

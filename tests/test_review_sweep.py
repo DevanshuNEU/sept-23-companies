@@ -132,15 +132,39 @@ class ClearStaleTest(SweepBase):
         c = seed_item(self.conn, "size_unknown", young)
         d = seed_item(self.conn, "domain_missing", out)
         e = seed_item(self.conn, "sponsorship_unclear", out)
+        ranked = [SimpleNamespace(company_id=in_play)]  # a known ranked list that does not hold `out`
         crawler = seed_item(self.conn, "domain_missing", out, raised_by="crawler")
         other = seed_item(self.conn, "flagged", out)
         for review_id in (a, b, d, e, crawler, other):
             self.old(review_id)
         self.old(c, days=3)
-        self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 3)
+        with mock.patch("outreach.ranking.scores.ranked_list", return_value=ranked):
+            self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 3)
         self.assertEqual([self.state(i)[0] for i in (a, c, crawler, other)], ["open"] * 4)
         for review_id in (b, d, e):
             self.assertEqual(self.state(review_id), ("resolved", "cleared", "No longer in your plan."))
+
+    def test_with_no_ranked_list_old_sponsorship_items_are_held_and_the_report_says_so(self):
+        out = self.company("Out")
+        self.plan(self.company())
+        a = seed_item(self.conn, "sponsorship_unclear", out)
+        b = seed_item(self.conn, "size_unknown", out)
+        self.old(a)
+        self.old(b)
+        self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 1)  # only the size item
+        self.assertEqual((self.state(a)[0], self.state(b)[0]), ("open", "resolved"))
+        report = sweep_needs_you(self.conn, now=NOW, cfg=CFG)
+        self.assertEqual(self.state(a)[0], "open")
+        self.assertTrue(any("no ranked list" in s for s in report.skipped), report.skipped)
+        with mock.patch("outreach.ranking.scores.ranked_list", return_value=[SimpleNamespace(company_id=-1)]):
+            later = sweep_needs_you(self.conn, now="2026-11-10T16:00:00Z", cfg=CFG)
+        self.assertEqual(later.cleared, {"sponsorship_unclear": 1})
+        self.assertFalse(any("no ranked list" in s for s in later.skipped), later.skipped)
+
+    def test_no_ranked_list_is_not_reported_when_no_old_sponsorship_item_is_waiting(self):
+        self.plan(self.company())
+        report = sweep_needs_you(self.conn, now=NOW, cfg=CFG)
+        self.assertFalse(any("no ranked list" in s for s in report.skipped), report.skipped)
 
     def test_the_boundary_is_stale_days(self):
         out = self.company()
@@ -201,6 +225,21 @@ class SweepTest(SweepBase):
         later = sweep_needs_you(self.conn, now="2026-11-10T15:40:00Z", cfg=CFG)
         self.assertFalse(later.changed)
         self.assertEqual(self.marks("review_item"), items)
+
+    def test_a_merge_does_not_make_the_sweep_drop_a_picked_or_emailed_company(self):
+        picked, mailer = self.build()
+        sweep_needs_you(self.conn, now=NOW, cfg=CFG)
+        keeper_a, keeper_b = self.company("Picked Inc"), self.company("Mailer Labs")
+        for loser, keeper in ((picked, keeper_a), (mailer, keeper_b)):
+            seed_status(self.conn, loser, "removed")
+            self.conn.execute("UPDATE company SET merged_into = ? WHERE company_id = ?", (keeper, loser))
+        report = sweep_needs_you(self.conn, now="2026-11-10T16:00:00Z", cfg=CFG)
+        self.assertEqual(report.raised.get("size_unknown"), 1)
+        self.assertEqual(report.raised.get("domain_missing"), 1)
+        open_ = {(r["kind"], r["company_id"]) for r in self.conn.execute(
+            "SELECT kind, company_id FROM review_item WHERE state = 'open' AND kind IN "
+            "('size_unknown', 'domain_missing')")}
+        self.assertEqual(open_, {("size_unknown", keeper_a), ("domain_missing", keeper_b)})
 
     def test_sweep_clears_what_went_away_and_reports_it_by_kind(self):
         picked, _ = self.build()

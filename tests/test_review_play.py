@@ -90,6 +90,53 @@ class PlayTest(unittest.TestCase):
         seed_queued_message(self.conn, person, "drafted")
         self.assertNotIn(bad["no_go"], self.email())
 
+    def merge(self, loser, keeper):
+        seed_status(self.conn, loser, "removed")
+        self.conn.execute("UPDATE company SET merged_into = ? WHERE company_id = ?", (keeper, loser))
+
+    def test_a_company_merged_after_it_was_picked_is_in_play_as_its_keeper(self):
+        loser, keeper = self.company(), self.company()
+        seed_plan_row(self.conn, loser, TODAY, "picked")
+        self.merge(loser, keeper)
+        self.assertEqual(self.play(), {keeper: "picked"})
+
+    def test_a_planned_row_on_a_merged_company_plans_its_keeper_and_picked_still_wins(self):
+        loser, keeper, other = self.company(), self.company(), self.company()
+        seed_plan_row(self.conn, loser, TODAY, "proposed", person_id=seed_email_person(self.conn, loser))
+        seed_plan_row(self.conn, keeper, TODAY, "picked")
+        self.merge(loser, keeper)
+        self.assertEqual(self.play(), {keeper: "picked"})
+        chained = self.company()
+        seed_plan_row(self.conn, other, TODAY, "proposed", person_id=seed_email_person(self.conn, other))
+        self.merge(other, chained)
+        self.assertEqual(self.play(), {keeper: "picked", chained: "planned"})
+
+    def test_a_company_merged_after_it_was_emailed_is_emailing_as_its_keeper(self):
+        loser, keeper = self.company(), self.company()
+        seed_queued_message(self.conn, seed_email_person(self.conn, loser), "drafted")
+        self.merge(loser, keeper)
+        self.assertEqual(self.email(), frozenset({keeper}))
+
+    def test_an_email_row_on_a_merged_company_counts_for_its_keeper(self):
+        loser, keeper = self.company(), self.company()
+        seed_plan_row(self.conn, loser, TODAY, "proposed", person_id=seed_email_person(self.conn, loser))
+        self.merge(loser, keeper)
+        self.assertEqual(self.email(), frozenset({keeper}))
+
+    def test_an_active_no_go_on_a_duplicate_bars_the_keeper_and_a_lifted_one_does_not(self):
+        keeper, dupe, far = self.company(status="working"), self.company(), self.company()
+        self.merge(dupe, keeper)
+        self.merge(far, dupe)  # a chain: far into dupe into keeper
+        self.conn.execute("INSERT INTO no_go(company_id, reason, source, created_at) "
+                          "VALUES (?, 'other', 'devanshu', '2026-11-01T00:00:00Z')", (far,))
+        self.assertNotIn(keeper, live_company_ids(self.conn))
+        self.assertEqual(self.play(), {})
+        seed_queued_message(self.conn, seed_email_person(self.conn, keeper), "drafted")
+        self.assertEqual(self.email(), frozenset())
+        self.conn.execute("UPDATE no_go SET lifted_at = '2026-11-02T00:00:00Z', lift_reason = 'back'")
+        self.assertIn(keeper, live_company_ids(self.conn))
+        self.assertEqual(self.play(), {keeper: "picked"})
+
     def test_backlog_company_is_live(self):
         cid = self.company(status="backlog")
         self.assertIn(cid, live_company_ids(self.conn))

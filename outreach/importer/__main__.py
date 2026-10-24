@@ -6,6 +6,7 @@
     report           the stored report of the newest (or --run-id) import run, and import_record counts
     reconcile        old mailer sends against the store's sent messages; exit 1 when one is missing
     rollback-check   people the new sender emailed after --since whom the old mailer could email again
+    rehearse         the whole import on copies, into a scratch folder and store (real data: live checkout only)
 
 Every store is opened with `outreach.store.connect()`, whose guard refuses the live store outside the live
 checkout before any file is touched. Use a scratch `OUTREACH_DB` anywhere else. Sources are only read.
@@ -14,17 +15,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 from collections import Counter
 from pathlib import Path
 
+import live_checkout
 from outreach.importer.manifest import load_manifest, load_overrides
 from outreach.importer.plan import READERS, build_plan, read_all
 from outreach.importer.records import SOURCES, SourceError
-from outreach.importer.report import check_report, count_report, render_report, report_from_json, report_to_json
+from outreach.importer.rehearse import default_into, import_twice, rehearse
+from outreach.importer.report import check_report, count_report, render_report, report_from_json
 from outreach.importer.vocab import contact_status_plan
-from outreach.importer.write import apply_plan
 from outreach.sending.config import load_config
 from outreach.sources.keys import email_key
 from outreach.store import connect, iso_utc, utcnow
@@ -40,7 +41,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m outreach.importer",
                                      description="Import Devanshu's outreach history into the store (#17).")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("preflight", "dry-run", "run", "report", "reconcile", "rollback-check"):
+    for name in ("preflight", "dry-run", "run", "report", "reconcile", "rollback-check", "rehearse"):
         sub = commands.add_parser(name)
         sub.add_argument("--manifest", type=Path, default=None, help="sources file (default: the committed one)")
         sub.add_argument("--overrides", type=Path, default=None, help="his rulings (default: the manifest's)")
@@ -49,6 +50,9 @@ def _parser() -> argparse.ArgumentParser:
             sub.add_argument("--run-id", type=int, default=None)
         if name == "rollback-check":
             sub.add_argument("--since", required=True, help="the switch time, ISO 8601")
+        if name == "rehearse":
+            sub.add_argument("--into", type=Path, default=None,
+                             help="scratch folder (default ~/Desktop/outreach-scratch/import-rehearsal/<date>)")
     return parser
 
 
@@ -61,17 +65,6 @@ def _plan(args, manifest):
     overrides = load_overrides(args.overrides or manifest.overrides)
     plan = build_plan(records, overrides, now=args.now, send_cfg=load_config())
     return records, plan
-
-
-def _marks(conn: sqlite3.Connection) -> dict[str, tuple[int, int]]:
-    """(rows, highest rowid) per table: what a second run must leave unchanged."""
-    marks = {}
-    for name, sql in conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'table' ORDER BY name"):
-        if "WITHOUT ROWID" in (sql or "").upper():
-            marks[name] = (conn.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0], 0)
-        else:
-            marks[name] = tuple(conn.execute(f'SELECT count(*), coalesce(max(rowid), 0) FROM "{name}"').fetchone())
-    return marks
 
 
 # -- commands ------------------------------------------------------------------------------------------------------
@@ -120,38 +113,17 @@ def run(args, manifest) -> int:
     conn = connect()
     try:
         records, plan = _plan(args, manifest)
-        failures = check_report(count_report(plan, records))
-        if failures:
-            print(render_report(count_report(plan, records)))
-            print("Refused: the check failed, nothing was written.")
-            return 1
-        result = apply_plan(conn, plan, now=args.now)
-        report = count_report(plan, records, written=result.written)
-        _store_report(conn, result.run_id, report)
-        print(render_report(report))
-        if result.status != "ok":
-            print(f"The run ended {result.status}: {result.error}. Run it again to finish.")
-            return 1
-        before = _marks(conn)
-        again = apply_plan(conn, plan, now=args.now)
-        _store_report(conn, again.run_id, count_report(plan, records, written=again.written))
-        after = _marks(conn)
-        changed = sorted(t for t in after if t != "job_run" and after[t] != before.get(t))
-        if again.status != "ok" or changed:
-            print(f"Second run changed: {', '.join(changed) or again.error}")
-            return 1
-        print("Second run changed nothing")
-        return 0
+        _, lines, failures = import_twice(conn, plan, records, now=args.now)
     finally:
         conn.close()
+    print("\n".join(lines))
+    return 1 if failures else 0
 
 
-def _store_report(conn: sqlite3.Connection, run_id: int, report) -> None:
-    """The count report beside the writer's own summary in `job_run.summary` (an update of the run's own row)."""
-    row = conn.execute("SELECT summary FROM job_run WHERE run_id = ?", (run_id,)).fetchone()
-    summary = json.loads(row[0] or "{}")
-    summary["report"] = report_to_json(report)
-    conn.execute("UPDATE job_run SET summary = ? WHERE run_id = ?", (json.dumps(summary, sort_keys=True), run_id))
+def rehearse_command(args, manifest) -> int:
+    into = args.into or default_into(args.now)
+    _, failures = rehearse(manifest, into, now=args.now, real=args.manifest is None)
+    return 1 if failures else 0
 
 
 def report(args, manifest) -> int:
@@ -239,12 +211,14 @@ def rollback_check(args, manifest) -> int:
 
 
 COMMANDS = {"preflight": preflight, "dry-run": dry_run, "run": run, "report": report, "reconcile": reconcile,
-            "rollback-check": rollback_check}
+            "rollback-check": rollback_check, "rehearse": rehearse_command}
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     args.now = iso_utc(args.now) if args.now else utcnow()
+    if args.command == "rehearse" and args.manifest is None:
+        live_checkout.require_live("the rehearsal on real data")  # before his files are even listed
     try:
         manifest = load_manifest(args.manifest)
     except SourceError as err:

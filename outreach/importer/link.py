@@ -13,10 +13,12 @@ links by that exact key. Near names ("Tidewater" and "Tidewater AI") stay two co
 is where store-side matching (domain, FEIN, name and state) happens.
 
 People (`PersonIndex`), matched the way MCP `add_people` matches (`outreach.sources.keys`): by address anywhere,
-else by LinkedIn profile anywhere (one normal form), else by name at the company. Then, for a mention with no
-address and no profile (a `contacted.txt` line), `finalize()` folds it into the one person at the company with the
-same name, or whose first name it is; with two such people it stays its own person and raises an issue. Folding at
-the end makes the result the same whatever order the sources come in. A same-name person with a different address
+else by LinkedIn profile anywhere (one normal form), else by name at the company. The name joins wait for
+`finalize()`: same-name people whose anchors do not disagree join in pairs (an address and a profile, with a
+`same_person` issue naming both), then a mention with no address and no profile (a `contacted.txt` line) folds
+into the one person at the company with the same name, or whose first name it is; with two such people it stays
+its own person and raises an issue. Deciding at the end makes the result the same whatever order the sources come
+in. A same-name person with a different address
 is someone else (MCP's `same_name_as`), and a stop on one reaches the other (`carry_stops`, MCP's same-name refusal).
 """
 from __future__ import annotations
@@ -383,18 +385,9 @@ class PersonIndex:
             return self._join(by_email or by_page, company_key_, email, linkedin, record)
         if not email and not linkedin:
             return self._new(f"{company_key_}/{person_name_key(name)}", company_key_, name, None, None, record)
-        namesakes = [p for p in self._people.values() if p.company_key == company_key_ and p.anchored
-                     and not p.placeholder and p.name_key == person_name_key(name)]
-        fits = [p for p in namesakes if p.compatible(email, linkedin)]
-        if len(fits) == 1:
-            return self._join(fits[0], company_key_, email, linkedin, record)
-        key = self._new(f"{company_key_}/{email or linkedin}", company_key_, name, email, linkedin, record)
-        if namesakes:
-            self._issue("same_name", company_key_, record,
-                        f"{name} ({email or linkedin}) has the same name as "
-                        f"{', '.join(f'{p.name} ({p.email or p.linkedin})' for p in namesakes)} at {company_key_} "
-                        f"and another address or profile, so they are kept as two people.")
-        return key
+        # A same-name person with an address or profile is joined (or not) in finalize(), on the whole set, so the
+        # order the sources come in never changes who is one person.
+        return self._new(f"{company_key_}/{email or linkedin}", company_key_, name, email, linkedin, record)
 
     def placeholder(self, company_key_: str, record: str, role_kind: str = "other") -> str:
         """Someone the record never named: their own person, never joined to anyone."""
@@ -419,8 +412,9 @@ class PersonIndex:
         if self._finalized:
             return dict(self._folded)
         self._finalized = True
+        self._join_namesakes()
         loose = [p for p in self._people.values() if not p.anchored and not p.placeholder]
-        live = [p for p in self._people.values() if not p.placeholder]
+        live = [p for p in self._people.values() if not p.placeholder and p.key not in self._folded]
         for person in loose:  # the same full name
             same = [p for p in live if p.anchored and p.company_key == person.company_key
                     and p.name_key == person.name_key]
@@ -446,6 +440,44 @@ class PersonIndex:
             elif len(targets) > 1:
                 self._ambiguous(person, [self._people[k] for k in sorted(targets)])
         return dict(self._folded)
+
+    def _join_namesakes(self) -> None:
+        """Same-name people at one company, each with an address or a profile: two join when neither has an anchor
+        that disagrees with the other and each is the only such fit of the other (an address and a profile, say),
+        with a `same_person` issue naming both anchors, because a split is the worse mistake. A profile that fits
+        two people with different addresses joins neither. Who stays apart raises `same_name`. Decided on the
+        whole set, so the order of the sources does not matter."""
+        groups: dict[tuple[str, str], list[_Person]] = {}
+        for p in sorted(self._people.values(), key=lambda p: p.key):
+            if p.anchored and not p.placeholder:
+                groups.setdefault((p.company_key, p.name_key), []).append(p)
+        for (company, _), members in groups.items():
+            if len(members) < 2:
+                continue
+            fits = {p.key: [q for q in members if q is not p and p.compatible(q.email, q.linkedin)] for p in members}
+            pairs = sorted({tuple(sorted((p.key, fits[p.key][0].key))) for p in members
+                            if len(fits[p.key]) == 1 and [x.key for x in fits[fits[p.key][0].key]] == [p.key]})
+            for a, b in pairs:
+                into, other = self._people[a], self._people[b]
+                if other.email and not into.email:
+                    into, other = other, into
+                was = f"{into.name} ({into.email or into.linkedin}, {', '.join(into.records)})"
+                self._fold(other, into)
+                for attr, index in (("email", self._by_email), ("linkedin", self._by_linkedin)):
+                    value = getattr(other, attr)
+                    if value and not getattr(into, attr):
+                        setattr(into, attr, value)
+                        index[value] = into.key
+                self._issue("same_person", company, other.records[0],
+                            f"{other.name} ({other.email or other.linkedin}, {', '.join(other.records)}) is taken as "
+                            f"{was}: the same name at {company} and no address or profile that disagrees. If they "
+                            f"are two people, give one record another name in [person_name].")
+            apart = [p for p in members if p.key not in self._folded]
+            for p in apart[1:]:
+                self._issue("same_name", company, p.records[0],
+                            f"{p.name} ({p.email or p.linkedin}) has the same name as "
+                            f"{', '.join(f'{q.name} ({q.email or q.linkedin})' for q in apart if q is not p)} at "
+                            f"{company} and another address or profile, so they are kept as separate people.")
 
     def _ambiguous(self, person: _Person, candidates: list[_Person]) -> None:
         self._ambiguous_keys.add(person.key)

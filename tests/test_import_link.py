@@ -205,6 +205,40 @@ class PersonIndexTest(unittest.TestCase):
         self.assertNotIn(people.resolve(bare), {people.resolve(a), people.resolve(b)})  # never a guess
         self.assertEqual(codes(people.issues), ["person_ambiguous", "same_name"])
 
+    def test_same_name_join_does_not_depend_on_source_order(self):
+        mentions = {"A": {"email": "dana@acme.example"}, "P": {"linkedin": "https://www.linkedin.com/in/dana-w"},
+                    "B": {"email": "dana.w@other.example"}}
+
+        def people_for(order):
+            people = PersonIndex()
+            keys = {tag: people.add("acme", "Dana Whitfield", record=f"r:{tag}", **mentions[tag]) for tag in order}
+            people.finalize()
+            return frozenset(frozenset(t for t in keys if people.resolve(keys[t]) == people.resolve(keys[x]))
+                             for x in keys)
+
+        results = {order: people_for(order) for order in ("APB", "ABP", "PBA", "BPA")}
+        self.assertEqual(len(set(results.values())), 1, results)
+        # with two addresses, the profile could be either Dana: never a guess
+        self.assertEqual(results["APB"], frozenset({frozenset("A"), frozenset("B"), frozenset("P")}))
+
+    def test_same_name_with_no_conflicting_anchor_joins_and_says_so(self):
+        for order in ("AP", "PA"):
+            with self.subTest(order=order):
+                people = PersonIndex()
+                keys = {}
+                for tag in order:
+                    keys[tag] = people.add(self.CO, "Dana Whitfield", record=f"r:{tag}", **(
+                        {"email": "dana@example.com"} if tag == "A"
+                        else {"linkedin": "https://www.linkedin.com/in/dana-w"}))
+                people.finalize()
+                self.assertEqual(people.resolve(keys["A"]), people.resolve(keys["P"]))
+                person = people.person(keys["P"])
+                self.assertEqual((person.email, person.linkedin), ("dana@example.com",
+                                                                   "https://www.linkedin.com/in/dana-w"))
+                self.assertEqual(codes(people.issues), ["same_person"])
+                self.assertIn("dana@example.com", people.issues[0].detail)
+                self.assertIn("https://www.linkedin.com/in/dana-w", people.issues[0].detail)
+
     def test_address_known_at_another_company_is_one_person_and_an_item(self):
         people = PersonIndex()
         a = people.add("tidewaterai", "Ivo Marsh", email="ivo@tidewater.example", record="r:1")

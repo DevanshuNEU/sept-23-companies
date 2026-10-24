@@ -134,28 +134,38 @@ def cmd_status(ctx: Context, _args) -> int:
 
 
 def install_one(ctx: Context, job: Job, text: str) -> str:
-    runner, target, data = ctx.runner, ctx.plist(job), text.encode("utf-8")
+    """Install one job. The new file is linted before anything is booted out or moved, so a failed lint changes nothing."""
+    runner, target, disabled, data = ctx.runner, ctx.plist(job), ctx.disabled(job), text.encode("utf-8")
+    # A plist an earlier rollback set aside counts as the existing one, and is taken back.
+    existing = target if target.exists() else disabled if disabled.exists() else None
     notes = []
-    if not target.exists() and ctx.disabled(job).exists():  # set aside by an earlier rollback: take it back
-        ctx.disabled(job).rename(target)
-        notes.append(f"took back {target.name}{DISABLED}")
-    if target.exists():
-        if target.read_bytes() == data:
-            runner.lint(target)
-            if runner.loaded(job.label):
-                return f"{job.label}: unchanged, already loaded"
-            runner.bootstrap(target)
-            return f"{job.label}: unchanged, loaded"
+    if existing is not None and existing.read_bytes() == data:
+        runner.lint(existing)
+        if existing == disabled:
+            disabled.rename(target)
+            notes.append(f"took back {disabled.name}")
+        if runner.loaded(job.label):
+            return f"{job.label}: unchanged, already loaded" + (f"; {'; '.join(notes)}" if notes else "")
+        runner.bootstrap(target)
+        return f"{job.label}: unchanged, loaded" + (f"; {'; '.join(notes)}" if notes else "")
+    partial = target.with_name(target.name + ".installing")  # not *.plist, so launchd never reads it
+    partial.write_bytes(data)
+    try:
+        runner.lint(partial)
+    except BaseException:
+        partial.unlink()  # this run's own scratch copy, never anything that was here before
+        raise
+    if existing is not None:
         if runner.loaded(job.label):
             runner.bootout(job.label)
             notes.append("booted out the running copy")
+        if existing == disabled:  # named after the plist, as any other replaced plist is
+            disabled.rename(target)
         notes.append(f"kept the old plist as {set_aside(target, BEFORE_SWITCH).name}")
-    partial = target.with_name(target.name + ".installing")  # not *.plist, so launchd never reads it
-    partial.write_bytes(data)
-    os.replace(partial, target)
-    runner.lint(target)
-    if runner.loaded(job.label):  # loaded from a plist that is gone: replace the running copy
+    elif runner.loaded(job.label):  # loaded from a plist that is gone: replace the running copy
         runner.bootout(job.label)
+        notes.append("booted out the running copy")
+    os.replace(partial, target)
     runner.bootstrap(target)
     return f"{job.label}: installed and loaded ({target})" + (f"; {'; '.join(notes)}" if notes else "")
 

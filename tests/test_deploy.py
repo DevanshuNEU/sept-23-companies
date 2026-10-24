@@ -324,7 +324,7 @@ class InstallTest(DeployCase):
         self.assertEqual(code, 0, err)
         expected = []
         for job in REQUIRED:
-            expected += [("lint", job.plist), ("bootstrap", job.plist)]
+            expected += [("lint", f"{job.plist}.installing"), ("bootstrap", job.plist)]
             self.assertEqual((self.agents / job.plist).read_bytes(), self.rendered(job))
             self.assertIn(job.label, self.runner.loaded_labels)
         self.assertEqual(self.runner.changes(), expected)
@@ -438,6 +438,39 @@ class InstallTest(DeployCase):
         self.assertIn("invalid", err)
         self.assertNotIn(("bootstrap", "com.devanshu.outreach-sender.plist"), self.runner.changes())
         self.assertNotIn("com.devanshu.outreach-sender", self.runner.loaded_labels)
+        self.assertFalse((self.agents / "com.devanshu.outreach-sender.plist").exists())
+
+    def test_a_failed_lint_changes_nothing(self):
+        # A running hand-made copy of the job: the lint runs on the new file before anything is booted out or moved.
+        api = self.agents / "com.devanshu.outreach-api.plist"
+        api.write_bytes(minimal("com.devanshu.outreach-api").encode("utf-8"))
+        self.runner.loaded_labels.add("com.devanshu.outreach-api")
+        before, loaded = snapshot(self.agents), set(self.runner.loaded_labels)
+        self.runner.fail_lint.add("com.devanshu.outreach-api")
+        code, _, err = self.main("install")
+        self.assertEqual(code, 1)
+        self.assertIn("invalid", err)
+        self.assertEqual(snapshot(self.agents), before)
+        self.assertEqual(self.runner.loaded_labels, loaded)
+        self.assertEqual(self.runner.changes(), [("lint", "com.devanshu.outreach-api.plist.installing")])
+
+    def test_a_differing_disabled_plist_is_kept_as_before_switch(self):
+        disabled = self.agents / "com.devanshu.outreach-api.plist.disabled"
+        old = minimal("com.devanshu.outreach-api").encode("utf-8")
+        disabled.write_bytes(old)
+        code, _, err = self.main("install")
+        self.assertEqual(code, 0, err)
+        self.assertFalse(disabled.exists())
+        self.assertEqual((self.agents / "com.devanshu.outreach-api.plist.before-switch").read_bytes(), old)
+        self.assertEqual((self.agents / "com.devanshu.outreach-api.plist").read_bytes(), self.rendered(NEW_JOBS[0]))
+
+    def test_a_failed_lint_does_not_take_back_a_disabled_plist(self):
+        disabled = self.agents / "com.devanshu.outreach-api.plist.disabled"
+        disabled.write_bytes(minimal("com.devanshu.outreach-api").encode("utf-8"))
+        before = snapshot(self.agents)
+        self.runner.fail_lint.add("com.devanshu.outreach-api")
+        self.assertEqual(self.main("install")[0], 1)
+        self.assertEqual(snapshot(self.agents), before)
 
 
 class RetireOldTest(DeployCase):

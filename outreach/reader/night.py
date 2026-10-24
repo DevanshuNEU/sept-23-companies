@@ -26,6 +26,11 @@ of four ways (`classify_run`):
   failed call of several postings does not count, since the calls that follow it, one posting each, say whose it
   was.
 
+The stop phrases (a limit, a login, a broken CLI) are matched only against the CLI's own error output
+(`error_text`), never the model's reply, and a phrase the batch's own text also holds does not count (an error that
+echoes the prompt quotes the posting). So a posting that says "usage limit" or "authentication" is never a stop: it
+fails like any other poison posting.
+
 The night also stops at `max_postings_per_night` postings handed out or `max_batches` calls. However it stops, it
 then runs `apply_all`, so every posting with a stored reading or an ended-refused row has the combined decision,
 whatever wrote its decision row last. The job row is always closed; an error that is not the model's or the CLI's
@@ -53,8 +58,8 @@ from outreach.reader.version import reader_version
 from outreach.rules import RulesetNotCurrent
 from outreach.store import describe_error, finish_job, start_job, utcnow
 
-__all__ = ["APPLIED", "CLI_BROKEN_PATTERNS", "READER_CWD", "RunResult", "Runner", "NightSummary", "classify_run", "parse_reply",
-           "claude_command", "claude_runner", "run_night"]
+__all__ = ["APPLIED", "CLI_BROKEN_PATTERNS", "READER_CWD", "RunResult", "Runner", "NightSummary", "classify_run",
+           "error_text", "parse_reply", "claude_command", "claude_runner", "run_night"]
 
 # Where `claude -p` runs: a folder of its own, outside every repo, so no project CLAUDE.md is found from it.
 READER_CWD = Path.home() / "Library" / "Application Support" / "outreach" / "reader-cwd"
@@ -134,16 +139,30 @@ def _envelope(stdout: str) -> dict | None:
     return _first(stdout or "", _result_object)
 
 
+def error_text(result: RunResult) -> str:
+    """The CLI's own error output of a call, lower case: stderr, plus the error line on stdout (the `result` of an
+    error object, or the whole of a stdout that holds no result object). Never the `result` of an object that is not
+    an error: that is the model's reply, which may quote the posting."""
+    envelope = _envelope(result.stdout)
+    if envelope is None:
+        line = result.stdout or ""
+    elif envelope.get("is_error") is True:
+        line = str(envelope.get("result") or "")
+    else:
+        line = ""
+    return f"{line}\n{result.stderr or ''}".lower()
+
+
 def classify_run(result: RunResult, *, session_limit_patterns: Sequence[str],
                  auth_patterns: Sequence[str]) -> Outcome:
     """How a call ended. A call that exited 0 with a result object that is not an error is `ok`, whatever its text
     says (a reading may quote a posting that mentions a usage limit). Otherwise the patterns are matched, ignoring
-    case, against stdout and stderr: `auth` first, then `session_limit`, else `failed`. Stdout that holds no result
-    object at all counts as an error."""
+    case, against the CLI's own error output (`error_text`), never the model's reply: `auth` first, then
+    `session_limit`, else `failed`. Stdout that holds no result object at all counts as an error."""
     envelope = _envelope(result.stdout)
     if result.returncode == 0 and envelope is not None and envelope.get("is_error") is not True:
         return "ok"
-    text = f"{result.stdout}\n{result.stderr}".lower()
+    text = error_text(result)
     if any(p.lower() in text for p in auth_patterns):
         return "auth"
     if any(p.lower() in text for p in session_limit_patterns):
@@ -303,14 +322,30 @@ class _Night:
                                auth_patterns=self.cfg.auth_patterns)
         if outcome != "ok":
             detail = _short(f"exit {result.returncode}: {result.stderr.strip() or result.stdout.strip()}")
-            text = f"{result.stdout}\n{result.stderr}".lower()
-            if outcome == "failed" and any(p in text for p in CLI_BROKEN_PATTERNS):
-                return "cli_broken", detail, None
-            return outcome, detail, None
+            return self._stop_kind(error_text(result)), detail, None
         try:
             return "ok", "", parse_reply(result.stdout)
         except ValueError as err:
             return "failed", _short(f"unreadable reply: {err}"), None
+
+    def _stop_kind(self, text: str) -> Outcome | Literal["cli_broken"]:
+        """A failed call's kind from the CLI's error output. A phrase that is also in the batch's own text (an error
+        that echoes the prompt quotes the posting) says nothing about the CLI, so it does not count: the call is a
+        plain failure, and the posting that broke it takes the normal failure path."""
+        batch = " ".join(" ".join((r.title or "", r.body or "")) for r in self.leased).lower()
+        batch += " " + " ".join(str(p.get("location") or "")
+                                for p in batch_payload(self.conn, self.leased)["postings"]).lower()
+
+        def said(patterns: Sequence[str]) -> bool:
+            return any(p.lower() in text and p.lower() not in batch for p in patterns)
+
+        if said(self.cfg.auth_patterns):
+            return "auth"
+        if said(self.cfg.session_limit_patterns):
+            return "session_limit"
+        if said(CLI_BROKEN_PATTERNS):
+            return "cli_broken"
+        return "failed"
 
     def _usable(self, readings: list) -> list[dict]:
         """The readings that answer a posting of this batch, by posting id and body hash; the first one per posting.

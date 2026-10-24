@@ -349,6 +349,37 @@ class StopTests(NightCase):
                 self.assert_all_back(attempts=0)
                 self.assertEqual(self.job()["status"], "failed")
 
+    def test_a_posting_that_quotes_a_stop_phrase_is_not_a_stop(self):
+        # Grok second review: a failed call whose output quotes the posting must not read as a login problem, a
+        # session limit or a broken CLI. The posting takes the normal failure path and the others are read.
+        others = self.postings(44)
+        lead = ("Two-factor authentication, a usage limit per tenant, unknown option flags and file not found "
+                "errors are what you will fix.")
+        (poison,) = self.postings(1, lead=lead)
+        def answer(n, payload):
+            ours = [p for p in payload["postings"] if p["posting_id"] == poison]
+            if ours:  # the CLI echoes the prompt it could not take, posting and all
+                return RunResult(1, "", "Error: prompt is too long: " + ours[0]["body"])
+            return good(n, payload)
+        fake = Fake(answer)
+        summary = self.run_night(fake, self.promoted)
+        self.assertEqual(summary.status, "queue_empty", summary.stopped_reason)
+        self.assertEqual({self.row(pid)["state"] for pid in others}, {"done"})
+        self.assertEqual((self.row(poison)["state"], self.row(poison)["attempts"]), ("queued", 1))
+        for _ in range(self.cfg.max_attempts):
+            self.assertEqual(self.run_night(fake, self.promoted).status, "queue_empty")
+        self.assertEqual(self.row(poison)["state"], "refused")
+
+    def test_the_model_text_of_a_failed_call_is_not_matched(self):
+        def kind(result):
+            return classify_run(result, session_limit_patterns=self.cfg.session_limit_patterns,
+                                auth_patterns=self.cfg.auth_patterns)
+        quoted = json.dumps({"readings": [], "note": "the posting asks for authentication work under a usage limit"})
+        self.assertEqual(kind(RunResult(1, envelope(quoted), "")), "failed")  # a reply, not the CLI's error
+        self.assertEqual(kind(RunResult(1, envelope(LIMIT_TEXT, is_error=True), "")), "session_limit")
+        self.assertEqual(kind(RunResult(1, "", "Not logged in. Please run /login")), "auth")
+        self.assertEqual(kind(RunResult(0, LIMIT_TEXT, "")), "session_limit")
+
     def test_a_non_zero_exit_and_an_error_result_are_failed_runs(self):
         for result in (RunResult(2, "", "Error: something broke"), RunResult(0, envelope("boom", is_error=True), ""),
                        RunResult(0, "not json at all", "")):

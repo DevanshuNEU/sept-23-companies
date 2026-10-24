@@ -488,6 +488,22 @@ class WriteTest(unittest.TestCase):
                                  "(SELECT 1 FROM decision d WHERE d.posting_id = p.posting_id)").fetchone()[0]
         self.assertEqual(undecided, 0)
 
+    def test_repeat_issue_keys_do_not_depend_on_order(self):
+        from outreach.importer.model import IssueIn
+        a = IssueIn("role_unmapped", "acme", "devvault_notes:file:a.md", "gives Dana the role 'boss'", False)
+        b = IssueIn("role_unmapped", "acme", "devvault_notes:file:a.md", "gives Sam the role 'chief'", False)
+        lone = IssueIn("reply_text", "acme", "devvault_notes:file:a.md", "said maybe", False)
+
+        def keys(issues):
+            found = write._Writer._issue_keys(tuple(issues))
+            return {issue.detail: found[i] for i, issue in enumerate(issues)}
+        self.assertEqual(keys([a, b, lone]), keys([lone, b, a]))
+        got = keys([a, b, lone])
+        self.assertEqual(got[lone.detail], "import:reply_text:devvault_notes:file:a.md")
+        self.assertNotEqual(got[a.detail], got[b.detail])
+        self.assertTrue(all(k.startswith("import:role_unmapped:devvault_notes:file:a.md:") for k in
+                            (got[a.detail], got[b.detail])))
+
     # -- more of what the sender and the store rely on --
 
     def test_every_name_is_an_alias_of_its_company(self):

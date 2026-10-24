@@ -18,6 +18,7 @@ row or `send_day`, or opens a source.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import re
 import sqlite3
@@ -681,15 +682,18 @@ class _Writer:
 
     @staticmethod
     def _issue_keys(issues: tuple[IssueIn, ...]) -> dict[int, str]:
-        """Each issue's evidence key: its own (`ruled_out`), else `import:<code>:<record>`, with `:<n>` for the
-        n-th repeat, so two issues of one record are two items."""
-        seen: Counter = Counter()
+        """Each issue's evidence key: its own (`ruled_out`), else `import:<code>:<record>`. When one record raises
+        several issues of one code at one company, each key ends with a short hash of its detail, so the key is
+        the same whatever order the issues come in, and two issues of one record are two items."""
+        def base(issue: IssueIn) -> str:
+            return issue.key or f"import:{issue.code}:{issue.record}"
+        repeats = Counter((base(i), i.company_key) for i in issues)
         keys = {}
-        for i, issue in enumerate(issues):
-            base = issue.key or f"import:{issue.code}:{issue.record}"
-            seen[(base, issue.company_key)] += 1
-            n = seen[(base, issue.company_key)]
-            keys[i] = base if n == 1 else f"{base}:{n}"
+        for n, issue in enumerate(issues):
+            key = base(issue)
+            if repeats[(key, issue.company_key)] > 1:
+                key = f"{key}:{hashlib.sha256(issue.detail.encode('utf-8')).hexdigest()[:10]}"
+            keys[n] = key
         return keys
 
     def _flag(self, company_id: int, evidence_key: str, reason: str, *, person_id: int | None = None) -> None:

@@ -37,7 +37,7 @@ from outreach.api.queries.company import (
 )
 from outreach.api.queries.outcomes import NOT_SAVED, by_ids, company_refs
 from outreach.api.queries.people import day, live_steps
-from outreach.drafts.followups import company_map, no_go_sets
+from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 from outreach.outcomes.windows import day_bounds_utc, week_bounds
 from outreach.store import log_touch, undo_touch
 
@@ -182,26 +182,19 @@ def linkedin_view(conn: sqlite3.Connection, now: str) -> LinkedInView:
 
 def to_reach_count(conn: sqlite3.Connection) -> int:
     """How many people the list shows on the `to_reach` tab: `linkedin_view`'s own filters, counted with no groups,
-    roles or company refs built, and without loading every company (the shell polls this): only the companies
-    these people belong to are read."""
+    roles or company refs built (the shell polls this). The no-go sets and the merged-company walk are the sender's
+    own (`no_go_sets`, `company_map`), as in the view."""
     rows = conn.execute("SELECT * FROM person WHERE channel = 'linkedin' ORDER BY person_id").fetchall()
     if not rows:
         return 0
-    parents = merge_parents(conn)
-    no_go_people, no_go_companies = set(), set()
-    for r in conn.execute("SELECT person_id, company_id FROM no_go WHERE lifted_at IS NULL"):
-        if r["person_id"] is not None:
-            no_go_people.add(r["person_id"])
-        else:
-            no_go_companies.add(survivor_of(parents, r["company_id"]))
-    survivors = {r["person_id"]: survivor_of(parents, r["company_id"]) for r in rows}
-    status = {r["company_id"]: r["status"] for r in by_ids(
-        conn, "SELECT company_id, status FROM company WHERE company_id IN ({ids})", set(survivors.values()))}
+    companies = company_map(conn)
+    no_go_people, no_go_companies = no_go_sets(conn, companies)
     logs, requested = _logs(conn), _request_times(conn)
     count = 0
     for row in rows:
-        survivor = survivors[row["person_id"]]
-        if status.get(survivor) in (None, "removed", "closed") or row["person_id"] in no_go_people \
+        survivor = resolve_company(companies, row["company_id"])[-1]
+        company = companies.get(survivor)
+        if company is None or company["status"] in ("removed", "closed") or row["person_id"] in no_go_people \
                 or survivor in no_go_companies:
             continue  # a closed company's people are listed only once they have a step, never as to reach
         if _person(row, logs.get(row["person_id"], []), requested.get(row["person_id"])).tab == "to_reach":

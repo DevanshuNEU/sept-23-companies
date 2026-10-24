@@ -68,28 +68,38 @@ def plan_counts(conn: sqlite3.Connection, today: str) -> tuple[int, int]:
     this reads `daily_list_entry` (today's rows), `outreach_touch`, and for email rows `touch` and `message`.
 
     Planned is today's rows that are not removed and not skipped (a skip sets the entry to `backlog`: it is carried
-    to tomorrow, not today's work). LEAN (until #15): only a `picked` row of a company still being worked is planned, because the lean Today also
-    stores its proposals as rows, and a proposal is not work he took on. A row is done when every step has happened since the New York start of `today`:
+    to tomorrow, not today's work). LEAN (until #15): only a `picked` row counts, and only while its company (its
+    survivor) is still being worked, because the lean Today also stores its proposals as rows and a proposal is not
+    work he took on. A row is done when every step has happened since the New York start of `today`:
 
     - an email row, once its first message left `drafted` (approved, or sent without an approval time) today;
     - a LinkedIn row, when the person has a `linkedin_request` or `linkedin_message` touch, and, when the row names a
       role, an `application` touch for that posting;
-    - a find-someone row (no person), when the company has any `linkedin_request` or `email` touch.
+    - a find-someone row (no person), when the company, across its merged family, has any `linkedin_request` or
+      `email` touch.
     """
-    entries = conn.execute(
-        "SELECT e.company_id, e.person_id, e.channel, e.posting_id FROM daily_list_entry e "
-        "JOIN company c ON c.company_id = e.company_id WHERE e.list_date = ? AND e.state = 'picked' "
-        "AND c.status = 'working'", (today,)).fetchall()
+    parents = merge_parents(conn)
+    picked = conn.execute("SELECT company_id, person_id, channel, posting_id FROM daily_list_entry "
+                          "WHERE list_date = ? AND state = 'picked'", (today,)).fetchall()
+    working = {r[0] for r in by_ids(conn, "SELECT company_id FROM company WHERE status = 'working' "
+                                         "AND company_id IN ({ids})", {survivor_of(parents, e[0]) for e in picked})}
+    entries = [e for e in picked if survivor_of(parents, e["company_id"]) in working]
     start = day_bounds_utc(today)[0]
 
     def has(sql: str, *args) -> bool:
         return conn.execute(f"SELECT 1 FROM outreach_touch WHERE undone_at IS NULL AND sent_at >= ? AND {sql} LIMIT 1",
                             (start, *args)).fetchone() is not None
 
+    def family(company_id: int) -> list[int]:
+        owner = survivor_of(parents, company_id)
+        return [owner, *sorted(c for c in parents if survivor_of(parents, c) == owner)]
+
     done = 0
     for e in entries:
         if e["person_id"] is None:
-            finished = has("company_id = ? AND channel IN ('linkedin_request','email')", e["company_id"])
+            ids = family(e["company_id"])
+            finished = has(f"company_id IN ({','.join('?' * len(ids))}) AND channel IN ('linkedin_request','email')",
+                           *ids)
         elif e["channel"] == "email":
             finished = conn.execute(
                 "SELECT 1 FROM touch t JOIN message m ON m.touch_id = t.touch_id "

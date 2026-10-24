@@ -220,6 +220,15 @@ class ReplyKindTest(WritesBase):
         self.assertNotEqual(verdicts(self.conn)[lena], "company_held")
         self.assertEqual(res.json()["item"]["touchState"], "open")
 
+        # Re-marked as a person's reply: the outcome row has its reply again, and the company is held again.
+        res = self.post(f"/api/touches/{self.touch}/reply-kind", {"kind": "interested", "revision": 2})
+        self.assertEqual(res.status_code, 200, res.text)
+        outcome = self.conn.execute("SELECT replied_at, reply_kind FROM outreach_touch WHERE email_touch_id = ?",
+                                    (self.touch,)).fetchone()
+        self.assertEqual(tuple(outcome), ("2026-11-09T10:00:00Z", "interested"))
+        self.assertIn(self.acme, self.held())
+        self.assertEqual(verdicts(self.conn)[lena], "company_held")
+
     def test_auto_reply_restores_a_bounced_or_closed_thread_and_its_stop(self):
         cases = (
             ("bounced", {"bounced_at": "2026-11-06T10:00:00Z"}, {"was": "bounced"}),  # the sender's own "was"
@@ -242,6 +251,40 @@ class ReplyKindTest(WritesBase):
                 touch = self.touch_row(tid)
                 self.assertEqual((touch["state"], touch["reply_kind"]), (before, "auto_reply"))
                 self.assertEqual(verdicts(self.conn)[follow], "touch_done")  # the queue's stop still applies
+
+    def test_re_marking_an_auto_reply_as_human_holds_the_company_again(self):
+        # An imported thread: no outcome row, no replied event, and a release on record from before.
+        append_event(self.conn, entity="company", entity_id=self.acme, company_id=self.acme, kind="hold_released",
+                     actor="devanshu", at="2026-11-08T10:00:00Z", idempotency_key="old-release")
+        seed.send_first(self.conn, self.touch)
+        self.conn.execute("UPDATE touch SET origin = 'import', state = 'open', replied_at = '2026-11-07T10:00:00Z', "
+                          "reply_kind = 'auto_reply' WHERE touch_id = ?", (self.touch,))
+        _, lena = self.approved_colleague()
+        self.assertNotIn(self.acme, self.held())
+        res = self.post(f"/api/touches/{self.touch}/reply-kind", {"kind": "interested", "revision": 1})
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(self.touch_row()["state"], "replied")
+        self.assertEqual(self.conn.execute("SELECT held_by_touch FROM company WHERE company_id = ?",
+                                           (self.acme,)).fetchone()[0], self.touch)
+        self.assertIn(self.acme, self.held())
+        self.assertEqual(verdicts(self.conn)[lena], "company_held")
+
+    def test_a_human_kind_change_never_re_holds_a_released_company(self):
+        self.replied_by_email()
+        self.assertEqual(self.post(f"/api/companies/{self.acme}/release-hold",
+                                   {"revision": self.revision()}).status_code, 200)
+        res = self.post(f"/api/touches/{self.touch}/reply-kind", {"kind": "not_now", "revision": 1})
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertNotIn(self.acme, self.held())
+
+    def test_the_same_kind_again_under_a_new_key_is_not_allowed_and_writes_nothing(self):
+        self.replied_by_email(kind="interested")
+        before = self.conn.execute("SELECT COUNT(*) FROM event").fetchone()[0]
+        res = self.post(f"/api/touches/{self.touch}/reply-kind", {"kind": "interested", "revision": 1})
+        self.assertEqual(res.status_code, 409, res.text)
+        self.assertEqual(res.json()["code"], "not_allowed")
+        self.assertEqual(self.touch_row()["revision"], 1)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM event").fetchone()[0], before)
 
     def test_reply_kind_on_a_touch_with_no_reply_is_not_allowed(self):
         seed.send_first(self.conn, self.touch)

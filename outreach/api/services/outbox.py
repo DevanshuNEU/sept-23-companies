@@ -21,7 +21,7 @@ from outreach.api.idempotency import WriteCtx
 from outreach.api.queries.outcomes import apply_reply_effects
 from outreach.api.revisions import bump
 from outreach.drafts.checks import draft_input, email_domain, run_checks
-from outreach.drafts.followups import canonical_company
+from outreach.drafts.followups import canonical_company, company_map, resolve_company
 from outreach.outcomes.correct import correct_outcome
 from outreach.sending.followups import stop_planned
 from outreach.store.writes import append_event
@@ -161,6 +161,19 @@ def skip_message(ctx: WriteCtx, message_id: int, revision: int) -> int:
     return row["touch_id"]
 
 
+def hold_again(ctx: WriteCtx, survivor: int, touch_id: int, key: str) -> None:
+    """An auto-reply re-marked as a person's reply holds the company, as the sender's own reply does: the thread
+    holds the survivor when no company of its merged family holds yet."""
+    companies = company_map(ctx.conn)
+    if any(row["held_by_touch"] is not None for cid, row in companies.items()
+           if resolve_company(companies, cid)[-1] == survivor):
+        return
+    ctx.conn.execute("UPDATE company SET held_by_touch = ?, held_at = ?, revision = revision + 1 WHERE company_id = ?",
+                     (touch_id, ctx.now, survivor))
+    append_event(ctx.conn, entity="company", entity_id=survivor, company_id=survivor, kind="held", actor="devanshu",
+                 at=ctx.now, idempotency_key=key, detail={"touch_id": touch_id})
+
+
 def state_before_reply(conn: sqlite3.Connection, touch: sqlite3.Row) -> str:
     """The state a thread had before the reply an auto-reply turned out to be: the sender's own `was` on its newest
     `replied` event, else bounced when it bounced, closed when it was closed, else open. A bounced or closed thread
@@ -191,7 +204,10 @@ def set_reply_kind(ctx: WriteCtx, touch_id: int, kind: str, revision: int) -> in
         raise ApiProblem("not_allowed", f"This email has no reply to sort. {NOT_SAVED}")
     if touch["revision"] != revision:
         raise ApiProblem("conflict", f"The reply changed since you loaded it. {NOT_SAVED}")
+    if touch["reply_kind"] == kind:
+        raise ApiProblem("not_allowed", f"This reply is already marked {kind.replace('_', ' ')}. {NOT_SAVED}")
     survivor = canonical_company(conn, touch["company_id"])
+    keys = (ctx.event_key(n) for n in itertools.count(1))
     outcome = conn.execute("SELECT * FROM outreach_touch WHERE email_touch_id = ? AND undone_at IS NULL",
                            (touch_id,)).fetchone()
     if kind == "auto_reply":
@@ -203,12 +219,20 @@ def set_reply_kind(ctx: WriteCtx, touch_id: int, kind: str, revision: int) -> in
         conn.execute("UPDATE company SET held_by_touch = NULL, held_at = NULL, revision = revision + 1 "
                      "WHERE held_by_touch = ?", (touch_id,))
     else:
+        counted = touch["reply_kind"] != "auto_reply"  # the reply already holds the company and stops the person
         bump(conn, "touch", "touch_id", touch_id, revision, {"state": "replied", "reply_kind": kind}, at=ctx.now)
-        if outcome is not None:
-            at = outcome["replied_at"] or max(touch["replied_at"], outcome["sent_at"])
-            correct_outcome(conn, outcome["touch_id"], "replied", at=at, reply_kind=kind,
-                            revision=outcome["revision"], now=ctx.now)
-        keys = (ctx.event_key(n) for n in itertools.count(1))
+        if outcome is not None and outcome["replied_at"] is not None:
+            # Only the kind changes, so no new reply is recorded: a hold he released stays released.
+            conn.execute("UPDATE outreach_touch SET reply_kind = ?, revision = revision + 1 WHERE touch_id = ?",
+                         (kind, outcome["touch_id"]))
+            append_event(conn, entity="outreach_touch", entity_id=outcome["touch_id"], company_id=survivor,
+                         kind="reply_kind_set", actor="devanshu", at=ctx.now, idempotency_key=next(keys),
+                         detail={"from": outcome["reply_kind"], "to": kind})
+        elif outcome is not None:  # the auto-reply had taken the reply back: it is a reply again
+            correct_outcome(conn, outcome["touch_id"], "replied", at=max(touch["replied_at"], outcome["sent_at"]),
+                            reply_kind=kind, revision=outcome["revision"], now=ctx.now)
+        if not counted:
+            hold_again(ctx, survivor, touch_id, next(keys))
         apply_reply_effects(conn, {"person_id": touch["person_id"], "company_id": survivor, "touch_id": touch_id},
                             kind, now=ctx.now, keys=keys)
     append_event(conn, entity="touch", entity_id=touch_id, company_id=survivor, kind="reply_kind_set",

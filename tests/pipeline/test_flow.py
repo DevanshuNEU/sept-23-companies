@@ -846,7 +846,8 @@ class RulesStageTests(HarnessCase):
         company = seed_company(h.conn, "Kestrel Robotics")
         posting = seed_posting(h.conn, company, "Software Engineer, New Grad", body, "Boston, MA")
         h.run()
-        raw = reading_json()
+        # The reading confirms what the body says ("We sponsor work visas"): a final row needs the reader to agree.
+        raw = reading_json(sponsorship=("will_sponsor", "We sponsor work visas"))
         raw.update(posting_id=posting, body_sha256=body_sha256(body))
         reading = PostingReading.from_json(raw)
         h.conn.execute(

@@ -233,6 +233,20 @@ class PureCombineTests(unittest.TestCase):
         shown = combine(rules(), reading(engineering=("no", "a sales role")))
         self.assertEqual((shown.provisional, shown.raised), (False, ()))  # nothing hides: only a flag
 
+    def test_a_rules_yes_the_reader_does_not_confirm_is_not_final(self):
+        # Review fix 2: a final row tells ranking the reader confirmed the sponsorship wording.
+        for stance in ("yes", "opt_only"):
+            r = rules(sponsorship=stance, sponsorship_quote=WILL)
+            for c in (combine(r, reading()),
+                      combine(r, reading(sponsorship=("will_sponsor", WILL)), refused=frozenset({"sponsorship"}))):
+                self.assertEqual(verdict(c, "sponsorship").state, "missing")
+                self.assertTrue(passes(c.decision))
+                self.assertEqual((c.provisional, c.reader_version, c.raised), (True, None, ()), stance)
+        confirmed = combine(rules(sponsorship="yes", sponsorship_quote=WILL), reading(sponsorship=("will_sponsor", WILL)))
+        self.assertFalse(confirmed.provisional)
+        silent = combine(rules(), reading())
+        self.assertFalse(silent.provisional)  # the rules claim nothing, so there is nothing to confirm
+
     def test_two_hides_one_agreed_one_relaxed_stays_hidden_and_provisional(self):
         r = rules(sponsorship="no", sponsorship_quote=REFUSAL, citizenship=True,
                   citizenship_quote="Must be a US citizen.")

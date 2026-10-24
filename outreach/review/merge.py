@@ -21,11 +21,12 @@ from outreach.identity import follow_merged
 from outreach.review import words
 from outreach.review.errors import ReviewError
 from outreach.review.hand import NOT_SAVED
-from outreach.review.items import clear_item, get_item, unit
+from outreach.review.items import clear_item, get_item, raise_item, unit
 from outreach.store import add_alias, append_event, utcnow
 from outreach.store.timefmt import iso_utc
 
-__all__ = ["MergeSide", "MergeCompare", "merge_compare", "merge_companies", "unmerge_company"]
+__all__ = ["MergeSide", "MergeCompare", "merge_compare", "merge_companies", "unmerge_company",
+           "follow_merge_questions"]
 
 MERGED_ELSEWHERE = ("One of these was already merged into another company. Keep them separate here, then merge from "
                     "that company's page.")
@@ -133,40 +134,68 @@ def _refuse_lost_stop(keep: sqlite3.Row, lose: sqlite3.Row) -> None:
         raise ReviewError("not_allowed", _LOST_STOP["paused"])
 
 
-def _settle_pairs(conn: sqlite3.Connection, lose_id: int, loser_name: str, at: str) -> list[int]:
-    """Clear the open merge questions the merge answered: those naming the loser (or a company merged into it)
-    whose two sides now resolve to one company, or whose pair another open question already asks."""
-    gone = {r[0] for r in conn.execute(
-        "WITH RECURSIVE gone(id) AS (SELECT ? UNION SELECT c.company_id FROM company c JOIN gone g "
-        "ON c.merged_into = g.id) SELECT id FROM gone", (lose_id,))}
-    rows = conn.execute("SELECT review_id, company_id, evidence_key FROM review_item WHERE state = 'open' "
-                        "AND kind = 'merge_candidate' ORDER BY review_id").fetchall()
-    pairs: dict[int, frozenset[int]] = {}
+def follow_merge_questions(conn: sqlite3.Connection, *, at: str, naming: set[int] | None = None,
+                           scope: set[int] | None = None) -> tuple[list[int], list[int]]:
+    """Answer the open merge questions that have a side merged into another company, followed through
+    `merged_into`. Returns (the questions cleared, the questions raised or reopened).
+
+    A question whose two sides are one company now, or whose followed pair another open question already asks, is
+    cleared ("Same company after merging <loser>"). Any other still asks a real pair, so the followed pair is raised
+    the way `raise_merge_candidate` does (lower id, higher id as the key, `raised_by 'source'`, the old reason after
+    "After merging <loser>: "), and the old one is cleared ("Moved to <keeper> after merging <loser>"). The raise
+    never touches a pair he settled, and a pair the system cleared comes back open. `naming` limits it to questions
+    that name one of those companies (a merge passes the loser and what was merged into it); `scope` to questions
+    whose company is in it (the sweep's company filter).
+    """
+    rows = conn.execute("SELECT * FROM review_item WHERE state = 'open' AND kind = 'merge_candidate' "
+                        "ORDER BY review_id").fetchall()
+    companies = {r["company_id"]: r for r in conn.execute("SELECT company_id, name, merged_into FROM company")}
+    followed: dict[int, frozenset[int]] = {}
     for r in rows:
         other = _int(r["evidence_key"])
-        if other is None:
+        if other is None or other not in companies:
             continue
         try:
-            pairs[r["review_id"]] = frozenset((follow_merged(conn, r["company_id"]), follow_merged(conn, other)))
+            followed[r["review_id"]] = frozenset((follow_merged(conn, r["company_id"]), follow_merged(conn, other)))
         except (LookupError, ValueError):
-            continue
-    asked = Counter(pairs.values())
-    note = words.same_company_note(loser_name)
-    cleared = []
+            continue  # a loop is corruption: the sweep's other rules clear it
+    asked = Counter(followed.values())
+    cleared: list[int] = []
+    raised: list[int] = []
     for r in rows:
         rid = r["review_id"]
-        if rid not in pairs or (r["company_id"] not in gone and _int(r["evidence_key"]) not in gone):
+        if rid not in followed:
             continue
-        pair = pairs[rid]
-        if (len(pair) == 1 or asked[pair] > 1) and clear_item(conn, rid, note, at):
+        sides = (r["company_id"], _int(r["evidence_key"]))
+        moved = next((c for c in sides if companies[c]["merged_into"] is not None), None)
+        if moved is None or (naming is not None and not naming & set(sides)) or (
+                scope is not None and r["company_id"] not in scope):
+            continue
+        pair = followed[rid]
+        loser = companies[moved]["name"]
+        if len(pair) == 1 or asked[pair] > 1:
+            if clear_item(conn, rid, words.same_company_note(loser), at):
+                asked[pair] -= 1
+                cleared.append(rid)
+            continue
+        low, high = sorted(pair)
+        got = raise_item(conn, kind="merge_candidate", company_id=low, evidence_key=str(high), raised_by="source",
+                         reason=words.clean(f"After merging {loser}: {r['reason']}"), now=at)
+        if got.created or got.reopened:
+            raised.append(got.review_id)
+        if got.state == "open":
+            asked[pair] += 1
+        keeper = companies[follow_merged(conn, moved)]["name"]
+        if clear_item(conn, rid, words.moved_pair_note(loser, keeper), at):
             asked[pair] -= 1
             cleared.append(rid)
-    return cleared
+    return cleared, raised
 
 
 def _merge(conn: sqlite3.Connection, *, keep_id: int, lose_id: int, review_id: int | None, at: str,
-           actor: str) -> list[int]:
-    """The merge itself. Returns the merge questions it settled."""
+           actor: str) -> tuple[list[int], list[int]]:
+    """The merge itself. Returns (the merge questions it cleared, the ones it raised: see
+    `follow_merge_questions`)."""
     keep, lose = _company(conn, keep_id), _company(conn, lose_id)
     if keep is None or lose is None:
         raise ReviewError("not_found", f"There is no company {keep_id if keep is None else lose_id}.")
@@ -201,7 +230,10 @@ def _merge(conn: sqlite3.Connection, *, keep_id: int, lose_id: int, review_id: i
                      "previous_pause_note": lose["pause_note"], "kept_id": keep_id, "review_id": review_id,
                      "alias_added": alias_added,
                      "text": words.clean(f"Merged into {keep['name']} (#{keep_id}) by you.")})
-    return _settle_pairs(conn, lose_id, lose["name"], at)
+    gone = {r[0] for r in conn.execute(
+        "WITH RECURSIVE gone(id) AS (SELECT ? UNION SELECT c.company_id FROM company c JOIN gone g "
+        "ON c.merged_into = g.id) SELECT id FROM gone", (lose_id,))}
+    return follow_merge_questions(conn, at=at, naming=gone)
 
 
 def merge_companies(conn: sqlite3.Connection, *, keep_id: int, lose_id: int, review_id: int | None = None,
@@ -209,7 +241,7 @@ def merge_companies(conn: sqlite3.Connection, *, keep_id: int, lose_id: int, rev
     """Merge `lose_id` into `keep_id`: the loser gets `merged_into`, status `removed` and remove reason `merged`
     (its close reason and pause are cleared, as the company CHECKs need, and kept in the `merged` event for an
     unmerge); the loser's name becomes an alias of the keeper unless its key is taken; merge questions the merge
-    answered are settled. `conflict` when either company is already merged or the merge would loop; `not_allowed`
+    answered are settled and the ones that still ask a real pair move to the keeper. `conflict` when either company is already merged or the merge would loop; `not_allowed`
     when it would release mail the loser stops, or for one company twice; `not_found` for no such company."""
     at = iso_utc(now) if now else utcnow()
     with unit(conn):

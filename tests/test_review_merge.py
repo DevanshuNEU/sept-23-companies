@@ -3,7 +3,7 @@ import unittest
 
 from outreach.review import ReviewError, words
 from outreach.review.config import ReviewConfig
-from outreach.review.fixes import Fix, apply_fix
+from outreach.review.fixes import Fix, apply_fix, reopen_item
 from outreach.review.items import raise_item
 from outreach.review.merge import MergeCompare, MergeSide, merge_companies, merge_compare, unmerge_company
 from outreach.review.triggers import sweep_needs_you
@@ -12,6 +12,7 @@ from tests import apiseed as s
 from tests.storetest import fresh_store
 
 NOW = "2026-11-10T15:00:00Z"
+LATER = "2026-11-10T16:00:00Z"
 CFG = ReviewConfig(sponsorship_top_n=150, planned_days=4, stale_days=14)
 
 try:
@@ -43,6 +44,11 @@ class MergeBase(unittest.TestCase):
 
     def item(self, rid):
         return self.conn.execute("SELECT * FROM review_item WHERE review_id = ?", (rid,)).fetchone()
+
+    def open_pair(self, x, y):
+        low, high = sorted((x, y))
+        return self.conn.execute("SELECT * FROM review_item WHERE kind = 'merge_candidate' AND company_id = ? "
+                                 "AND evidence_key = ? AND state = 'open'", (low, str(high))).fetchone()
 
     def merged_event(self, lose_id):
         return self.conn.execute("SELECT * FROM event WHERE entity = 'company' AND kind = 'merged' AND entity_id = ? "
@@ -223,7 +229,78 @@ class MergeTest(MergeBase):
         self.assertEqual((self.item(ab)["resolution"], self.item(ab)["resolution_note"]), ("cleared", note))
         self.assertEqual((self.item(ac)["resolution"], self.item(ac)["resolution_note"]), ("cleared", note))
         self.assertEqual(self.item(bc)["state"], "open")  # the pair that still stands is kept
-        self.assertEqual(self.item(ad)["state"], "open")  # (b, d) is still a question, and only this item asks it
+        # (b, d) is still a question and only this item asked it: it moves to the keeper.
+        self.assertEqual((self.item(ad)["resolution"], self.item(ad)["resolution_note"]),
+                         ("cleared", "Moved to Mesh Systems after merging Mesh"))
+        self.assertEqual(self.open_pair(b, d)["raised_by"], "source")
+
+
+class MovedPairTest(MergeBase):
+    """A merge question that pairs the loser with a third company still asks a real question: it moves to the
+    keeper, and an undo takes the move back (review 8-10, Important 1)."""
+
+    def open_questions(self):
+        return {(r["company_id"], int(r["evidence_key"])) for r in self.conn.execute(
+            "SELECT company_id, evidence_key FROM review_item WHERE kind = 'merge_candidate' AND state = 'open'")}
+
+    def test_a_merge_fix_moves_a_question_with_a_third_company_to_the_keeper_and_undo_takes_it_back(self):
+        a = s.company(self.conn, "Mesh")
+        b = s.company(self.conn, "Mesh Systems", "working")
+        d = s.company(self.conn, "Mesh Inc")
+        ab, ad = self.question(a, b), self.question(a, d)
+        result = apply_fix(self.conn, ab, Fix("merge", keep="b"), revision=1, now=NOW)
+        self.assertEqual((self.item(ad)["resolution"], self.item(ad)["resolution_note"]),
+                         ("cleared", "Moved to Mesh Systems after merging Mesh"))
+        moved = self.open_pair(b, d)
+        self.assertTrue(moved["reason"].startswith("After merging Mesh: "), moved["reason"])
+        self.assertEqual(self.open_questions(), {(b, d)})
+        self.assertIn(ad, result.settled)
+        detail = json.loads(self.conn.execute(
+            "SELECT detail FROM event WHERE entity = 'review_item' AND kind = 'resolved' AND entity_id = ?",
+            (ab,)).fetchone()[0])
+        self.assertEqual(detail["raised"], [moved["review_id"]])
+        sweep_needs_you(self.conn, now=NOW, cfg=CFG)
+        self.assertEqual(self.open_questions(), {(b, d)})  # the sweep leaves the moved question alone
+        reopen_item(self.conn, ab, revision=2, now=LATER)
+        self.assertIsNone(self.company(a)["merged_into"])
+        self.assertEqual(self.open_questions(), {(a, b), (a, d)})
+        self.assertEqual(self.item(moved["review_id"])["resolution"], "cleared")
+
+    def test_a_question_where_the_loser_is_the_higher_id_moves_too_and_survives_the_sweep(self):
+        x = s.company(self.conn, "Bolt Group")
+        a = s.company(self.conn, "Bolt")
+        b = s.company(self.conn, "Bolt Labs", "working")
+        ab, xa = self.question(a, b), self.question(x, a)
+        apply_fix(self.conn, ab, Fix("merge", keep="b"), revision=1, now=NOW)
+        sweep_needs_you(self.conn, now=NOW, cfg=CFG)
+        self.assertEqual(self.open_questions(), {(x, b)})
+        self.assertEqual(self.item(xa)["resolution"], "cleared")
+        reopen_item(self.conn, ab, revision=2, now=LATER)
+        self.assertEqual(self.open_questions(), {(a, b), (x, a)})
+
+    def test_the_sweep_moves_a_question_whose_side_another_writer_merged(self):
+        c = s.company(self.conn, "Nova")
+        a = s.company(self.conn, "Nova Labs")
+        keep = s.company(self.conn, "Nova AI", "working")
+        ca = self.question(c, a)
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
+                          "WHERE company_id = ?", (keep, a))
+        sweep_needs_you(self.conn, now=NOW, cfg=CFG)
+        self.assertEqual((self.item(ca)["resolution"], self.item(ca)["resolution_note"]),
+                         ("cleared", "Moved to Nova AI after merging Nova Labs"))
+        self.assertEqual(self.open_questions(), {(c, keep)})
+
+    def test_a_moved_pair_he_already_settled_stays_settled(self):
+        c = s.company(self.conn, "Nova")
+        a = s.company(self.conn, "Nova Labs")
+        keep = s.company(self.conn, "Nova AI", "working")
+        settled = self.question(c, keep)
+        apply_fix(self.conn, settled, Fix("ok"), revision=1, now=NOW)
+        ca, ak = self.question(c, a), self.question(a, keep)
+        apply_fix(self.conn, ak, Fix("merge", keep="b"), revision=1, now=NOW)
+        self.assertEqual(self.item(ca)["resolution"], "cleared")
+        self.assertEqual((self.item(settled)["state"], self.item(settled)["resolution"]), ("resolved", "marked_ok"))
+        self.assertEqual(self.open_questions(), set())
 
 
 class UnmergeTest(MergeBase):

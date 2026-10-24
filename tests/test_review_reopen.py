@@ -96,6 +96,36 @@ class ReopenTest(ReopenBase):
         (row,) = self.no_gos()
         self.assertEqual((row["person_id"], row["lift_reason"]), (person, "Undone from Needs you"))
 
+    def test_undoing_one_of_two_no_go_confirmations_keeps_the_row_the_other_relies_on(self):
+        person = s.person(self.conn, self.cid, "Pat Lee")
+        first = self.item(person_id=person, key=f"claude-no-go:{person}:said_no")
+        second = self.item(person_id=person, key=f"claude-no-go:{person}:stop_reply")
+        self.fix(first, Fix("no_go", source="Their reply"))
+        self.fix(second, Fix("no_go", source="Their second reply"))
+        self.assertTrue(can_undo(self.conn, first))
+        self.reopen(first, 2)
+        (row,) = self.no_gos()
+        self.assertIsNone(row["lifted_at"])  # the second confirmation still stands
+        self.assertEqual(self.row(first)["state"], "open")
+        self.reopen(second, 2)  # the last confirmation taken back: the row the first one added is lifted
+        (row,) = self.no_gos()
+        self.assertEqual(row["lift_reason"], "Undone from Needs you")
+
+    def test_undoing_a_no_go_keeps_the_row_when_an_api_settled_item_names_the_same_person(self):
+        person = s.person(self.conn, self.cid, "Pat Lee")
+        first = self.item(person_id=person, key=f"claude-no-go:{person}:said_no")
+        self.fix(first, Fix("no_go", source="Their reply"))
+        api_item = s._insert(self.conn, "review_item", {
+            "kind": "flagged", "company_id": self.cid, "person_id": person, "reason": "Pat again.",
+            "evidence_key": "api", "raised_by": "claude", "state": "resolved", "resolution": "marked_no_go",
+            "resolved_at": NOW, "created_at": NOW})
+        s._insert(self.conn, "event", {
+            "at": NOW, "recorded_at": NOW, "entity": "review_item", "entity_id": api_item, "company_id": self.cid,
+            "kind": "review_resolved", "actor": "devanshu",
+            "detail": json.dumps({"fix": "no_go", "no_go_created": False, "person_id": person})})
+        self.reopen(first, 2)
+        self.assertIsNone(self.no_gos()[0]["lifted_at"])
+
     def test_reopen_a_merge_unmerges_and_reopens(self):
         b = s.company(self.conn, "Acme Labs", "backlog")
         rid = self.item("merge_candidate", key=str(b), raised_by="source")

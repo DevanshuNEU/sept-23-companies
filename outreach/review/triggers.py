@@ -20,6 +20,7 @@ from outreach.ranking.common import canonical_ids
 from outreach.review import words
 from outreach.review.config import ReviewConfig, load_review_config
 from outreach.review.items import clear_item, decided_before, raise_item, unit
+from outreach.review.merge import follow_merge_questions
 from outreach.review.play import emailing, in_play, live_company_ids, ny_date, recent_list_date
 from outreach.rules import Decision, passes, ruleset_version
 from outreach.rules.rebuild import stored_decision
@@ -275,8 +276,19 @@ def _shared_domain(conn: sqlite3.Connection, domain: str) -> bool:
     return is_shared_key(conn, "domain", domain) or (root is not None and is_shared_key(conn, "domain", root))
 
 
-def _gone(conn: sqlite3.Connection, now: str, scope: set[int] | None) -> Counter:
-    """Clear every open item whose subject went away. Returns the count by kind."""
+def _gone(conn: sqlite3.Connection, now: str, scope: set[int] | None, raised: Counter | None = None) -> Counter:
+    """Clear every open item whose subject went away. Returns the count by kind; the merge questions it moved to a
+    keeper are added to `raised`.
+
+    A merge question with a merged side is answered first, by the same rule a merge uses
+    (`follow_merge_questions`): one that still asks a real pair moves to the company it was merged into, so the
+    `merged` and `merge` rules below only see questions that rule left alone."""
+    by_kind: Counter = Counter()
+    with unit(conn):
+        moved_from, moved_to = follow_merge_questions(conn, at=now, scope=scope)
+    by_kind["merge_candidate"] += len(moved_from)
+    if raised is not None and moved_to:
+        raised["merge_candidate"] += len(moved_to)
     found: dict[int, tuple[str, str]] = {}
     for why, sql in _GONE_QUERIES:
         for row in conn.execute(sql + " ORDER BY r.review_id"):
@@ -287,7 +299,6 @@ def _gone(conn: sqlite3.Connection, now: str, scope: set[int] | None) -> Counter
         m = _DOMAIN_BASIS.search(row["reason"])
         if m and (scope is None or row["company_id"] in scope) and _shared_domain(conn, m.group(1)):
             found.setdefault(row["review_id"], ("merge_candidate", words.shared_domain_note(m.group(1))))
-    by_kind: Counter = Counter()
     with unit(conn):
         for review_id in sorted(found):
             kind, note = found[review_id]
@@ -299,7 +310,8 @@ def _gone(conn: sqlite3.Connection, now: str, scope: set[int] | None) -> Counter
 def clear_gone(conn: sqlite3.Connection, *, now: str, company_ids: Collection[int] | None = None) -> int:
     """Clear (with a note saying why) every open item of any kind whose company is merged, removed, closed or on the
     no-go list; a board item whose board is inactive; a `reader_disagrees` item whose posting is closed; and a
-    `merge_candidate` item where either company is merged or removed, or whose only basis is a domain that has since
+    `merge_candidate` item where either company is removed (a question with a merged side that still asks a real
+    pair moves to the company it was merged into instead), or whose only basis is a domain that has since
     become a shared key. A quiet item is never cleared for being quiet.
     Returns how many it cleared."""
     return sum(_gone(conn, now, _scope(company_ids)).values())
@@ -377,7 +389,7 @@ def sweep_needs_you(conn: sqlite3.Connection, *, now: str | None = None, company
     raised: Counter = Counter()
     cleared: Counter = Counter()
     skipped: list[str] = []
-    cleared.update(_gone(conn, at, _scope(company_ids)))
+    cleared.update(_gone(conn, at, _scope(company_ids), raised))
     for kind, sync in (("size_unknown", sync_size_unknown), ("domain_missing", sync_domain_missing),
                        ("sponsorship_unclear", sync_sponsorship)):
         result = sync(conn, now=at, company_ids=company_ids, cfg=cfg)

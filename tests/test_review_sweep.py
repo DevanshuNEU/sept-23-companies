@@ -110,6 +110,10 @@ class ClearGoneTest(SweepBase):
         self.assertEqual(clear_gone(self.conn, now=NOW), 2)
         self.assertEqual((self.state(live)[0], self.state(merged)[0], self.state(gone)[0]),
                          ("open", "resolved", "resolved"))
+        # The merged side's question still asks a real pair, so it moved to the company it was merged into.
+        moved = self.conn.execute("SELECT company_id, evidence_key FROM review_item WHERE kind = 'merge_candidate' "
+                                  "AND state = 'open' AND review_id NOT IN (?, ?, ?)", (live, merged, gone)).fetchall()
+        self.assertEqual([tuple(r) for r in moved], [(a, str(c))])
 
 
 class ClearStaleTest(SweepBase):

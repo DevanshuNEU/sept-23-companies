@@ -22,7 +22,7 @@ from outreach.review import words
 from outreach.review.errors import ReviewError
 from outreach.review.hand import (NOT_SAVED, normalize_domain, normalize_sponsorship, parse_hand_size,
                                   write_hand_fact)
-from outreach.review.items import get_item, resolve_item, settle_siblings, unit
+from outreach.review.items import clear_item, get_item, resolve_item, settle_siblings, unit
 from outreach.review.kinds import KINDS, NO_GO_REASONS, spec_of
 from outreach.review.merge import _merge, unmerge_company
 from outreach.rules.facts import EvidenceDraft
@@ -33,6 +33,7 @@ __all__ = ["Fix", "FixResult", "apply_fix", "reopen_item", "can_undo"]
 
 _FIX_KINDS = ("ok", "edit", "no_go", "merge")
 _PERSON_KEY = "claude-no-go:"
+_NOT_MERGE = tuple(k for k in KINDS if k != "merge_candidate")
 
 
 @dataclass(frozen=True)
@@ -173,10 +174,13 @@ def _no_go(conn: sqlite3.Connection, row: sqlite3.Row, fix: Fix, revision: int, 
                          (target,)).fetchone()
     created = found is None
     if created:
-        no_go_id = conn.execute(
+        cur = conn.execute(
             f"INSERT INTO no_go({column}, reason, quote, note, source, source_ref, created_at) "
             "VALUES (?, ?, ?, 'From Needs you.', 'devanshu', ?, ?) ON CONFLICT DO NOTHING",
-            (target, reason, quote, source, at)).lastrowid
+            (target, reason, quote, source, at))
+        if cur.rowcount != 1:  # never record another row's id as the one this fix added
+            raise sqlite3.IntegrityError("the no-go row was not written")
+        no_go_id = cur.lastrowid
     else:
         no_go_id = found[0]
     if not created:
@@ -200,7 +204,9 @@ def _no_go(conn: sqlite3.Connection, row: sqlite3.Row, fix: Fix, revision: int, 
 def _merge_fix(conn: sqlite3.Connection, row: sqlite3.Row, fix: Fix, revision: int, at: str, actor: str,
                detail: dict) -> tuple:
     """Resolve the question, merge the side he did not keep into the one he kept, then settle the loser's other
-    open items. Returns (revision, note, settled)."""
+    open items. Its other merge questions are answered by the merge (`follow_merge_questions`): one that still asks
+    a real pair moves to the keeper, and the raised ids go in the event so an undo takes them back. Returns
+    (revision, note, settled)."""
     other = _int(row["evidence_key"])
     if other is None:
         raise ReviewError("not_allowed", "This question does not name a second company.")
@@ -210,10 +216,10 @@ def _merge_fix(conn: sqlite3.Connection, row: sqlite3.Row, fix: Fix, revision: i
     # Resolved first, so the merge does not count this question among the ones it answered.
     new_revision = resolve_item(conn, row["review_id"], resolution="field_edited", note=note, revision=revision,
                                 now=at)
-    pairs = _merge(conn, keep_id=keep_id, lose_id=lose_id, review_id=row["review_id"], at=at, actor=actor)
-    rest = settle_siblings(conn, lose_id, except_id=row["review_id"],
+    pairs, raised = _merge(conn, keep_id=keep_id, lose_id=lose_id, review_id=row["review_id"], at=at, actor=actor)
+    rest = settle_siblings(conn, lose_id, kinds=_NOT_MERGE, except_id=row["review_id"],
                            note=words.merged_away_note(names.get(keep_id, f"#{keep_id}")), now=at)
-    detail.update(kept_id=keep_id, merged_id=lose_id)
+    detail.update(kept_id=keep_id, merged_id=lose_id, raised=raised)
     return new_revision, note, tuple(pairs) + rest
 
 
@@ -276,6 +282,32 @@ def _resolve_detail(conn: sqlite3.Connection, row: sqlite3.Row) -> dict | None:
     return detail if detail.get("resolution") == row["resolution"] else None
 
 
+def _made_here(conn: sqlite3.Connection, no_go_id: int) -> bool:
+    """Whether a fix here wrote this no-go row. A row he added on the no-go list, or an import, is never lifted
+    by an undo here."""
+    return conn.execute(
+        "SELECT 1 FROM event WHERE entity = 'review_item' AND kind = 'resolved' "
+        "AND json_extract(detail, '$.no_go_id') = ? AND json_extract(detail, '$.no_go_created') = 1 LIMIT 1",
+        (no_go_id,)).fetchone() is not None
+
+
+def _relied_on(conn: sqlite3.Connection, no_go: sqlite3.Row, except_id: int) -> bool:
+    """Whether another item he still has settled as a no-go stands on this row: its latest `resolved` event names
+    the row, or the API's `review_resolved` event names the same person or company."""
+    for (text,) in conn.execute(
+            "SELECT (SELECT e.detail FROM event e WHERE e.entity = 'review_item' AND e.entity_id = r.review_id "
+            "AND e.kind IN ('resolved', 'review_resolved') ORDER BY e.event_id DESC LIMIT 1) FROM review_item r "
+            "WHERE r.state = 'resolved' AND r.resolution = 'marked_no_go' AND r.review_id <> ?", (except_id,)):
+        detail = json.loads(text) if text else {}
+        if detail.get("no_go_id") == no_go["no_go_id"]:
+            return True
+        if no_go["person_id"] is not None and detail.get("person_id") == no_go["person_id"]:
+            return True
+        if no_go["company_id"] is not None and detail.get("company_id") == no_go["company_id"]:
+            return True
+    return False
+
+
 def _undo_plan(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     """What taking this settling back would do, or the plain reason it cannot be taken back (`not_allowed`)."""
     if row["state"] != "resolved":
@@ -285,16 +317,18 @@ def _undo_plan(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
         raise ReviewError("not_allowed", "This item cleared by itself. There is nothing to take back.")
     detail = _resolve_detail(conn, row) or {}
     plan = {"previous_resolution": resolution, "settled": list(detail.get("settled") or []), "lift": None,
-            "unmerge": None}
+            "unmerge": None, "raised": list(detail.get("raised") or [])}
     if resolution == "marked_no_go":
         if not detail:
             raise ReviewError("not_allowed", "This no-go was set before it could be taken back here. "
                                              "Lift it from the no-go list.")
-        if detail.get("no_go_created"):
-            found = conn.execute("SELECT lifted_at FROM no_go WHERE no_go_id = ?", (detail["no_go_id"],)).fetchone()
-            if found is None or found["lifted_at"] is not None:
+        found = conn.execute("SELECT * FROM no_go WHERE no_go_id = ?", (detail.get("no_go_id"),)).fetchone()
+        if found is not None and found["lifted_at"] is not None:
+            if detail.get("no_go_created"):
                 raise ReviewError("not_allowed", "That no-go was lifted since. There is nothing to take back.")
-            plan["lift"] = detail["no_go_id"]
+        elif found is not None and _made_here(conn, found["no_go_id"]) and not _relied_on(conn, found,
+                                                                                         row["review_id"]):
+            plan["lift"] = found["no_go_id"]
     elif resolution == "field_edited":
         if row["kind"] != "merge_candidate":
             raise ReviewError("not_allowed", LOCKED)
@@ -326,8 +360,9 @@ def can_undo(conn: sqlite3.Connection, review_id: int) -> bool:
 def reopen_item(conn: sqlite3.Connection, review_id: int, *, revision: int, now: str | None = None,
                 actor: str = "devanshu") -> FixResult:
     """Take back an ok, a no-go or a merge after the Undo window: the item goes back open (resolution, time and
-    note cleared, revision up). A no-go lifts the row it added (`Undone from Needs you`) and leaves a row that was
-    already there; a merge is unmerged. The items the settling cleared come back open too, when nothing has moved
+    note cleared, revision up). A no-go lifts the row a fix here added (`Undone from Needs you`), unless another
+    item he still has settled as a no-go stands on it, and leaves a row that was already there; a merge is
+    unmerged and the merge questions it moved to the keeper are cleared. The items the settling cleared come back open too, when nothing has moved
     them since. Appends a `reopened` event.
 
     `not_allowed` for an edit (locked), a cleared item, an open item and a no-go lifted since; `conflict` on a
@@ -346,6 +381,7 @@ def reopen_item(conn: sqlite3.Connection, review_id: int, *, revision: int, now:
             company_revision = conn.execute("SELECT revision FROM company WHERE company_id = ?",
                                             (plan["unmerge"],)).fetchone()[0]
             unmerge_company(conn, plan["unmerge"], revision=company_revision, now=at, actor=actor)
+        taken_back = [rid for rid in plan["raised"] if clear_item(conn, rid, words.MERGE_TAKEN_BACK, at)]
         reopen = ("UPDATE review_item SET state = 'open', resolution = NULL, resolved_at = NULL, resolution_note = '', "
                   "revision = revision + 1 WHERE review_id = ? AND state = 'resolved'")
         conn.execute(reopen + " AND revision = ?", (review_id, revision))
@@ -355,5 +391,6 @@ def reopen_item(conn: sqlite3.Connection, review_id: int, *, revision: int, now:
         append_event(conn, entity="review_item", kind="reopened", actor=actor, entity_id=review_id,
                      company_id=row["company_id"], at=at, idempotency_key=f"review-reopened:{review_id}:{new_revision}",
                      detail={"previous_resolution": plan["previous_resolution"], "lifted_no_go_id": plan["lift"],
-                             "unmerged_id": plan["unmerge"], "reopened": restored})
+                             "unmerged_id": plan["unmerge"], "reopened": restored,
+                             "cleared": taken_back})
     return FixResult(review_id, new_revision, "open", "", row["company_id"], ())

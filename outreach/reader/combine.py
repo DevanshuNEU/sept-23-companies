@@ -13,7 +13,8 @@ counterpart). Four fields can hide a posting (`HIDE_FIELDS`); the others only fl
 - A reader hide the rules do not claim (reader `wont_sponsor`, rules `silent`) never hides. A real quote can carry
   the opposite value (a flipped negation), so the rules are the guard.
 - A hide field that disagrees or is missing where either side would hide is `raised`: one `reader_disagrees` review
-  item for the posting.
+  item for the posting. So is the engineering field, when it is not `agree` and the row still hides: a refusal on a
+  posting the reader does not call engineering is no evidence about the role ranking would hide the company for.
 
 When a row is final (controller rulings 1 and 2, 2026-10-23): `provisional = 0` only when a reading at the promoted
 version exists for the posting's current body, nothing is raised, and, if the combined row still hides, the posting
@@ -79,9 +80,12 @@ class Combined:
 
     @property
     def raised(self) -> tuple[FieldVerdict, ...]:
-        """The hide fields the two sides do not agree on, where either side would hide."""
-        return tuple(v for v in self.verdicts if v.field in HIDE_FIELDS and v.state in ("disagree", "missing")
-                     and (v.would_hide_rules or v.would_hide_reader))
+        """The hide fields the two sides do not agree on, where either side would hide; and, while the row still
+        hides, an engineering verdict that is not `agree` (the reader doubts the lane the hide rests on)."""
+        hides = _hides(self.decision)
+        return tuple(v for v in self.verdicts if v.state in ("disagree", "missing") and (
+            (v.field in HIDE_FIELDS and (v.would_hide_rules or v.would_hide_reader))
+            or (v.field == "engineering" and hides)))
 
 
 def _hides(d: Decision) -> bool:

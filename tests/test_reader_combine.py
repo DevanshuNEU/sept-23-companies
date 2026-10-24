@@ -48,8 +48,10 @@ def blank(name):
 
 
 def reading(version=VERSION, **over) -> PostingReading:
-    """Every field unknown or empty, then `over` as (value, quote)."""
+    """Engineering yes (the lane every rules answer here has), every other field unknown or empty, then `over` as
+    (value, quote)."""
     fields = {name: blank(name) for name in FIELDS}
+    fields["engineering"] = FieldReading("yes", "Software Engineer, New Grad")
     for name, (value, quote) in over.items():
         fields[name] = FieldReading(value, quote)
     return PostingReading(7, SHA, version, fields)
@@ -218,6 +220,18 @@ class PureCombineTests(unittest.TestCase):
         self.assertIsNone(c.reader_version)
         shown = combine(rules(), reading(), untrusted=True)
         self.assertFalse(shown.provisional)  # nothing hides, so nothing needs the trust
+
+    def test_an_agreed_hide_the_reader_says_is_not_engineering_stays_provisional(self):
+        # Review fix 1: the reader doubts the lane, so the hide it agreed to is not evidence enough to be final.
+        r = rules(sponsorship="no", sponsorship_quote=REFUSAL)
+        for engineering in (("no", "a sales role"), ("unknown", "")):
+            c = combine(r, reading(sponsorship=("wont_sponsor", REFUSAL), engineering=engineering))
+            self.assertFalse(passes(c.decision), engineering)
+            self.assertTrue(c.provisional, engineering)
+            self.assertIsNone(c.reader_version)
+            self.assertEqual([v.field for v in c.raised], ["engineering"], engineering)
+        shown = combine(rules(), reading(engineering=("no", "a sales role")))
+        self.assertEqual((shown.provisional, shown.raised), (False, ()))  # nothing hides: only a flag
 
     def test_two_hides_one_agreed_one_relaxed_stays_hidden_and_provisional(self):
         r = rules(sponsorship="no", sponsorship_quote=REFUSAL, citizenship=True,
@@ -437,6 +451,28 @@ class ApplyTests(StoreCase):
         self.conn.execute("UPDATE board SET active = 1 WHERE board_id = ?", (board,))
         apply_reading(self.conn, pid, cfg=self.cfg)
         self.assertEqual(self.row(pid)["provisional"], 0)
+
+    def test_an_agreed_refusal_the_reader_calls_not_engineering_writes_no_no_go(self):
+        from outreach.crawl.stale import load_stale
+        from outreach.ranking.common import canonical_ids, doubtful_board_ids
+        from outreach.ranking.config import default_ranker_config
+        from outreach.ranking.hide import decide_hide, load_hide_inputs, write_no_go
+        for engineering in (("no", "a sales role"), ("unknown", "")):
+            pid = self.posting()
+            self.store_reading(pid, sponsorship=("wont_sponsor", REFUSAL), engineering=engineering)
+            apply_reading(self.conn, pid, cfg=self.cfg)
+            row = self.row(pid)
+            self.assertEqual((row["sponsorship"], row["provisional"], row["reader_version"]), ("no", 1, None))
+            items = self.items(pid)
+            self.assertEqual([(i["state"], i["evidence_key"].rsplit(":", 1)[1]) for i in items],
+                             [("open", "engineering")])
+            inputs = load_hide_inputs(self.conn, canonical_ids(self.conn), doubtful_board_ids(self.conn),
+                                      load_stale(self.conn, date(2026, 10, 24)))[self.company]
+            hide = decide_hide(inputs, default_ranker_config())
+            self.assertTrue(hide.provisional)
+            self.assertFalse(write_no_go(self.conn, self.company, hide))
+            self.conn.execute("UPDATE posting SET closed_at = ?, close_reason = 'hand' WHERE posting_id = ?",
+                              (utcnow(), pid))
 
     def test_pay_from_the_body_fills_an_empty_posting_pay(self):
         pid = self.posting(body=REFUSAL + " Pay is $120,000 to $140,000." + FILLER * 8)

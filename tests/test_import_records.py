@@ -153,6 +153,10 @@ path = "~/scratch/overrides.toml"
         try:
             with self.assertRaises(sqlite3.OperationalError):
                 conn.execute("INSERT INTO meta(key, value) VALUES ('x', 'y')")
+            # the open mode is the guarantee, not the pragma: with query_only off the file still refuses a write
+            conn.execute("PRAGMA query_only = OFF")
+            with self.assertRaises(sqlite3.OperationalError):
+                conn.execute("INSERT INTO meta(key, value) VALUES ('x', 'y')")
             self.assertGreater(conn.execute("SELECT count(*) FROM posting").fetchone()[0], 0)
         finally:
             conn.close()

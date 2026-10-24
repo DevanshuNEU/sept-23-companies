@@ -291,6 +291,13 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT count(*) FROM review_item").fetchone()[0], count)
         conn.close()
 
+    def test_approved_contact_is_stored_as_a_drafted_message_never_approved(self):
+        gus = self.one("SELECT touch_id FROM touch WHERE person_id = ?",
+                       self.person("fathomsystems/gus.albrecht@example.com"))[0]
+        self.assertEqual([m["state"] for m in self.rows("SELECT state FROM message WHERE touch_id = ?", gus)],
+                         ["drafted"])
+        self.assertEqual(self.one("SELECT count(*) FROM message WHERE state = 'approved'")[0], 0)
+
     def test_ruled_out_company_stays_visible_with_its_note(self):
         salt = self.company("saltmarshbio")
         self.assertNotEqual(self.one("SELECT status FROM company WHERE company_id = ?", salt)[0], "removed")

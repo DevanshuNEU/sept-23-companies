@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   The API (#11): the new app and its API on http://127.0.0.1:3100, from the live checkout only (outreach.api refuses
-  port 3100 anywhere else). RunAtLoad starts it at login; KeepAlive starts it again if it stops.
+  port 3100 anywhere else). RunAtLoad starts it at login; KeepAlive starts it again if it stops, at most once a
+  minute (ThrottleInterval 60), so a start that keeps failing (no store yet, port taken) does not spin.
 
   It serves the built web app from web/dist in the checkout. Build it before installing this job (switch step S10:
   in web/, pnpm install with the frozen lockfile, then pnpm build; the deploy tool refuses to install without it).
@@ -30,6 +31,8 @@
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
   <key>StandardOutPath</key>
   <string>{{LOG_PATH}}</string>
   <key>StandardErrorPath</key>

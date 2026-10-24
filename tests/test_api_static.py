@@ -137,9 +137,10 @@ class TemplateTest(unittest.TestCase):
         self.assertEqual(plist["ProgramArguments"], [f"{live}/.venv/bin/python", "-m", "outreach.api"])
         self.assertIs(plist["KeepAlive"], True)
         self.assertIs(plist["RunAtLoad"], True)
+        self.assertEqual(plist["ThrottleInterval"], 60)  # a crash loop (no store, port taken) restarts once a minute
         self.assertEqual((plist["StandardOutPath"], plist["StandardErrorPath"]), (log, log))
         self.assertEqual(sorted(plist), ["KeepAlive", "Label", "ProgramArguments", "RunAtLoad", "StandardErrorPath",
-                                         "StandardOutPath", "WorkingDirectory"])
+                                         "StandardOutPath", "ThrottleInterval", "WorkingDirectory"])
 
     def test_template_says_how_to_build_the_app_and_that_it_is_not_installed_here(self):
         raw = TEMPLATE.read_text(encoding="utf-8")

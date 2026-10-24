@@ -1,3 +1,4 @@
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -141,3 +142,38 @@ class MigrateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImportRecordMigrationTest(unittest.TestCase):
+    """0004 rebuilds import_record; the rows a store already holds come through the rebuild unchanged."""
+
+    def test_migration_0004_keeps_existing_import_records(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        old = Path(tmp.name)
+        for version, _name, path in migration_files():
+            if version <= 3:
+                shutil.copy(path, old / path.name)
+        conn = sqlite3.connect(":memory:", isolation_level=None)
+        self.addCleanup(conn.close)
+        conn.execute("PRAGMA foreign_keys = ON")
+        self.assertEqual(migrate(conn, old), 3)
+        at = "2026-10-19T12:00:00Z"
+        conn.execute("INSERT INTO job_run(job, started_at) VALUES ('import', ?)", (at,))
+        rows = [
+            (1, "data_js", "company:1", '{"a":1}', "a" * 64, "skipped", "ruled out", None, None),
+            (1, "contacted_txt", "line:2", '{"b":2}', "b" * 64, "imported", "", "touch", 7),
+        ]
+        for row in rows:
+            conn.execute(
+                "INSERT INTO import_record(run_id, source, source_key, raw, raw_sha256, outcome, reason, entity,"
+                " entity_id, imported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (*row, at))
+        columns = "import_id, run_id, source, source_key, raw, raw_sha256, outcome, reason, entity, entity_id, imported_at"
+        before = [tuple(r) for r in conn.execute(f"SELECT {columns} FROM import_record ORDER BY import_id")]
+        self.assertEqual(len(before), 2)
+        self.assertEqual(migrate(conn), latest_version())
+        after = [tuple(r) for r in conn.execute(f"SELECT {columns} FROM import_record ORDER BY import_id")]
+        self.assertEqual(after, before)
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE tbl_name = 'import_record'")}
+        self.assertTrue({"import_record_no_update", "import_record_no_delete", "import_record_run"} <= names)
+        self.assertIn(4, [r[0] for r in conn.execute("SELECT version FROM schema_migration")])

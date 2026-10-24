@@ -308,7 +308,8 @@ class SchemaTest(unittest.TestCase):
 
     def test_migration_is_recorded(self):
         row = self.db.execute("SELECT version, name FROM schema_migration").fetchall()
-        self.assertEqual([(r[0], r[1]) for r in row][:2], [(1, "initial"), (2, "sending")])
+        self.assertEqual([(r[0], r[1]) for r in row][:4], [
+            (1, "initial"), (2, "sending"), (3, "inbound_seen"), (4, "import_history")])
         self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], len(row))
 
     def test_store_is_sound(self):
@@ -707,6 +708,33 @@ class SchemaTest(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             insert(self.db, "touch", {"person_id": sender_made, "origin": "sender", "first_sent_at": NOW,
                                       "created_at": NOW, "updated_at": NOW})
+
+    def test_import_record_accepts_the_new_sources(self):
+        for source in ("interview_prep", "curated_touches", "send_log"):
+            with self.subTest(source=source):
+                insert(self.db, "import_record", {**self.base_row("import_record"), "source": source})
+        self.assert_row_refused("import_record", {**self.base_row("import_record"), "source": "gmail"}, "CHECK")
+
+    def test_import_record_held_has_no_entity_and_a_reason(self):
+        held = {**self.base_row("import_record"), "outcome": "held", "reason": "send never settled"}
+        self.assert_row_refused("import_record", held, "CHECK")  # a held record names no entity
+        self.assert_row_refused("import_record", {**held, "entity": None, "entity_id": None, "reason": ""}, "CHECK")
+        insert(self.db, "import_record", {**held, "entity": None, "entity_id": None})
+        # a skipped record still has no entity, and an imported or merged one still has one
+        skipped = {**held, "outcome": "skipped", "entity": None, "entity_id": None, "source_key": "s"}
+        insert(self.db, "import_record", skipped)
+        self.assert_row_refused("import_record", {**skipped, "source_key": "t", "entity_id": self.company}, "CHECK")
+        self.assert_row_refused("import_record", {**self.base_row("import_record"), "source_key": "u",
+                                                  "entity": None, "entity_id": None}, "CHECK")
+
+    def test_import_record_is_still_append_only_after_0004(self):
+        import_id = insert(self.db, "import_record", {**self.base_row("import_record"), "source": "send_log"})
+        self.assert_refused("UPDATE import_record SET reason = 'other' WHERE import_id = ?", (import_id,),
+                            "append-only")
+        self.assert_refused("DELETE FROM import_record WHERE import_id = ?", (import_id,), "append-only")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM import_record").fetchone()[0], 1)
+        index = self.db.execute("SELECT sql FROM sqlite_master WHERE name = 'import_record_run'").fetchone()
+        self.assertIn("run_id, source, outcome", index[0])
 
     # ---- review, linkedin, sender ---------------------------------------
 

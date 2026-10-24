@@ -30,8 +30,8 @@ switch day, at S5, and it closes #17 after the Monday check (S14).
 **Depends on:** #30 (merged). Part A also needs #31 Tasks 7, 8 and 10 (`outreach/identity.py`,
 `outreach/sources/jobs.py::register_source`, `outreach/sources/boards.py`) and #11 Task 9
 (`outreach/outcomes/context.py::build_context`) and #14 Task 2 (`outreach/sending/config.py::load_config`,
-`outreach/sending/calendar.py::add_business_days`) and #14 Task 1 (migration 0002 on master, since this plan's 0003
-follows it) and #16 PR 1 (`outreach.review.raise_item`, Task 11); a builder who finds them missing stops and says so,
+`outreach/sending/calendar.py::add_business_days`) and #14 Task 1 (migration 0002 on master, and its 0003 inbound_seen, since this plan's 0004
+follows them) and #16 PR 1 (`outreach.review.raise_item`, Task 11); a builder who finds them missing stops and says so,
 and never writes a local copy. PR B1 needs nothing beyond master (templates that do not exist yet are skipped by
 name). The switch (PR B2 and the runbook) needs #11 (including Task 19's release-hold action), #12 (with #33), #13,
 #14, #16 and #21 merged, per the issue, and #31 Task 16's `launchd/com.devanshu.outreach-sources.plist.template` (B8 of the
@@ -48,7 +48,7 @@ integration review): the switch must not retire the old discovery without its re
 - Writers use `INSERT ... ON CONFLICT DO NOTHING` (or `DO UPDATE` where a row must change), never `INSERT OR IGNORE` or `INSERT OR REPLACE`. Timestamps are canonical UTC (`iso_utc`); dates are `date(x)`.
 - Nothing is hidden on import. An ambiguous record is imported and raises a review item; a record that cannot be placed at all is `held`, and a held record blocks the real run. A skip is allowed only with a reason from `EXPLAINED_SKIPS` (Task 12). Error is not empty: a missing or unreadable required source fails the run with its name, never reads as zero records.
 - The only new hides the import writes are the ones Devanshu already ruled (2026-10-19 in #9): the old dashboard's 41 cleared defence contractors and 1 agency become `no_go` rows; "well over 500 people" becomes size evidence. Every other old verdict is evidence plus a review item, shown.
-- Migration `0003_import_history.sql` (version 3) is this plan's only schema change (Task 1); #14's `0002_sending.sql` is version 2 and lands first. `0001_initial.sql` is frozen: #31's in-place `company_name_key` edit (with its strong column) is the last in-place edit of 0001; every later schema change is a numbered migration, renumbered on rebase.
+- Migration `0004_import_history.sql` (version 4) is this plan's only schema change (Task 1); #14's `0002_sending.sql` (version 2) and `0003_inbound_seen.sql` (version 3) land first. `0001_initial.sql` is frozen: #31's in-place `company_name_key` edit (with its strong column) is the last in-place edit of 0001; every later schema change is a numbered migration, renumbered on rebase.
 - Leave `dashboard/data.js`, `dashboard/index.html` and `dashboard/app.js` untouched: the old dashboard's existing "Download a backup of your tracker" button (`dashboard/app.js:546`, export at `:712`) already exports every tracker field as `outreach.v1`. Settled (integration review A1): only #9's Build line, which asks for an "Export tracking" button, is edited to say so.
 - Light load: an import of the real data is one process; no parallel runs, no stress tests on his Mac.
 - Never use ports 3001, 3002, 3011, 3013 or 5173 from a workspace.
@@ -69,7 +69,7 @@ integration review): the switch must not retire the old discovery without its re
 ## Sources and their shape
 
 The importer reads ten sources. Paths come from `outreach/importer/sources.toml` (committed, real default paths) or a
-manifest the rehearsal writes. `import_record.source` values after migration 0003 are in the first column.
+manifest the rehearsal writes. `import_record.source` values after migration 0004 are in the first column.
 
 | `source` | File (default path) | One record is | Notes |
 |---|---|---|---|
@@ -91,7 +91,7 @@ Excluded on purpose: `~/Desktop/DevVault/tool-crowding/outreach/contacted.txt` (
 
 | File | Responsibility |
 |---|---|
-| `outreach/store/migrations/0003_import_history.sql` | Create: rebuild `import_record` with the new sources and the `held` outcome (Task 1) |
+| `outreach/store/migrations/0004_import_history.sql` | Create: rebuild `import_record` with the new sources and the `held` outcome (Task 1) |
 | `outreach/importer/__init__.py` | Create: `IMPORTER_VERSION`, `__all__` |
 | `outreach/importer/records.py` | Create: `SourceRecord`, `SourceError`, source hashing, the read-only radar open |
 | `outreach/importer/manifest.py`, `outreach/importer/sources.toml` | Create: source paths and the overrides file |
@@ -117,10 +117,10 @@ Excluded on purpose: `~/Desktop/DevVault/tool-crowding/outreach/contacted.txt` (
 
 ---
 
-## Task 1: Migration 0003 for the import record
+## Task 1: Migration 0004 for the import record
 
 **Files:**
-- Create: `outreach/store/migrations/0003_import_history.sql`
+- Create: `outreach/store/migrations/0004_import_history.sql`
 - Test: `tests/test_store_schema.py` (add), `tests/test_store_migrate.py` (add)
 
 **Interfaces:**
@@ -137,12 +137,12 @@ Excluded on purpose: `~/Desktop/DevVault/tool-crowding/outreach/contacted.txt` (
 - [ ] **Step 1: Write the failing tests.**
   - `test_import_record_accepts_the_new_sources` (`interview_prep`, `curated_touches`, `send_log` each insert).
   - `test_import_record_held_has_no_entity_and_a_reason` (`held` with `entity_id` set raises; with no reason raises; with a reason and no entity inserts).
-  - `test_import_record_is_still_append_only_after_0003` (UPDATE and DELETE raise).
-  - `test_migration_0003_keeps_existing_import_records`: build a store at version 2 (`migrate` with a directory holding only 0001 and 0002), insert two `import_record` rows, migrate a version 2 store to 3, both rows are there unchanged. Assertions that do not depend on the number use `latest_version()` (`outreach.store.migrate`), so a later migration does not break them.
-- [ ] **Step 2: Run** `uv run python -m unittest tests.test_store_schema tests.test_store_migrate -v`. Expected: the new tests FAIL (CHECK, no 0003).
+  - `test_import_record_is_still_append_only_after_0004` (UPDATE and DELETE raise).
+  - `test_migration_0004_keeps_existing_import_records`: build a store at version 3 (`migrate` with a directory holding only 0001 to 0003), insert two `import_record` rows, migrate a version 3 store to 4, both rows are there unchanged. Assertions that do not depend on the number use `latest_version()` (`outreach.store.migrate`), so a later migration does not break them.
+- [ ] **Step 2: Run** `uv run python -m unittest tests.test_store_schema tests.test_store_migrate -v`. Expected: the new tests FAIL (CHECK, no 0004).
 - [ ] **Step 3: Write the migration.**
 - [ ] **Step 4: Run** the full suite `uv run python -m unittest discover -s tests -t .` and `uv run python tests/mutation_check.py`. Expected: all OK, `missed 0`.
-- [ ] **Step 5: Commit** `Store: migration 0003, import records gain three sources and the held outcome (#17)`.
+- [ ] **Step 5: Commit** `Store: migration 0004, import records gain three sources and the held outcome (#17)`.
 
 ## Task 2: Records, manifest, overrides and the fixture set
 
@@ -904,7 +904,7 @@ checkout `~/Desktop/Sept 23 Companies`. If a check fails, stop and roll back (R-
 - **S5. Merge PR B2** (Task 19: CLAUDE.md, docs and the cold-email skill, docs only) and pull: `git pull --ff-only https://github.com/DevanshuNEU/sept-23-companies.git master && uv sync && uv run python -m unittest discover -s tests -t .`
   Check: `OK`, and `git log -1` names PR B2.
 - **S6. Install the new store.** `uv run python -m outreach.install`
-  Check: it prints the store path under `~/Library/Application Support/outreach/`, `store at version 3` (or the
+  Check: it prints the store path under `~/Library/Application Support/outreach/`, `store at version 4` (or the
   latest), and a ruleset line.
 - **S7. Import, dry run.** `uv run python -m outreach.importer dry-run`
   Check: `Unexplained losses: 0`; the counts match the last rehearsal plus what changed since (a new tracker export,
@@ -1017,8 +1017,8 @@ and big-by-filings verdicts (A10: size evidence and hidden, no-go, Needs you), w
   the ones due on or after the import date, Task 10), skips `@outreach.invalid` Message-IDs, checks imported sent mail
   with `verify_imported`, refuses to send while the old job is loaded, and ships
   `launchd/com.devanshu.outreach-sender.plist.template` under the one convention (Task 17). This plan consumes its
-  `load_config` and `add_business_days` (Task 2 there) and needs its migration 0002 (Task 1 there) on master, since
-  0003 follows it.
+  `load_config` and `add_business_days` (Task 2 there) and needs its migrations 0002 (Task 1 there) and 0003 on master, since
+  0004 follows them.
 - **#21 (crawler):** its template is renamed `launchd/com.devanshu.outreach-crawl.plist.template` under the one
   convention (no hard-coded checkout or Python path), and its own Deploy step 4 (copy and bootstrap) is dropped: S11
   installs it, and before the switch there is no live store. Imported postings use `<ats>:<token>:<native_id>` and
@@ -1035,7 +1035,7 @@ and big-by-filings verdicts (A10: size evidence and hidden, no-go, Needs you), w
   registers the server in the live checkout.
 - **#5 (retire Job Radar):** branches after PR B1 (Tasks 17 and 18) merges; S3, S8 and S12 call its steps.
 - **#9:** the Build line's "Export tracking" button is edited to name the existing backup button (A1).
-- **Schema:** migration `0003_import_history.sql` (rebuilds `import_record`), version 3, after #14's 0002.
+- **Schema:** migration `0004_import_history.sql` (rebuilds `import_record`), version 4, after #14's 0002 and 0003.
 
 ## Self-review
 
@@ -1049,7 +1049,7 @@ and big-by-filings verdicts (A10: size evidence and hidden, no-go, Needs you), w
   rehearsal (R1) and Monday (S14). Devanshu's rulings: interview history (Tasks 4, 9, 10), the write helpers (11),
   dry run first (13), reversible (18, R-back), live steps marked with checks (runbook), ambiguous to review items
   (10, 11).
-- **Integration review.** B1 migration 0003 (Task 1, S6); B5 three PRs, the deploy tool before the rehearsal (Branches,
+- **Integration review.** B1 migration 0004 (Task 1, S6); B5 three PRs, the deploy tool before the rehearsal (Branches,
   Tasks 18, 19, S5); B6 `confidence='weak'` (Task 11); B7 `RULED_OUT` kept visible (Tasks 2, 10, 11, 16); B8 the
   sources job required (Task 17, S11); B9 the skill in PR B2 (Task 19); I5 one launchd convention (Task 17); I17
   follow-ups only when due after the import (Tasks 10, 12); S4, S5, S9, S10 runbook wording (R1, S1, S4); S6

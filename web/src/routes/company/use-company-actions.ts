@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { queryKeys, useClient, type CloseReason, type CompanyView, type Revision, type ShellSummary, type WriteOptions } from '@/api';
+import { queryKeys, usePageClient, type CloseReason, type CompanyView, type Revision, type ShellSummary, type WriteOptions } from '@/api';
 import { usePendingWrite, type Patch } from '@/pending/pending';
 import { newestRevision, noteRevision, withRevision } from '@/pending/revisions';
 import { CLOSE_WORD } from './company-status';
@@ -28,7 +28,7 @@ const TAIL: Record<CloseReason, string> = {
  * newest revision known: on screen when it was asked for, in the cache, or from a read.
  */
 export function useCompanyActions(view: CompanyView | undefined) {
-  const client = useClient();
+  const client = usePageClient('company');
   const queryClient = useQueryClient();
   const write = usePendingWrite();
 

@@ -4,7 +4,7 @@ import { ChevronDown, CircleCheck, Lock } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
-  useClient,
+  usePageClient,
   type Id,
   type JobRunSummary,
   type NeedsYouView,
@@ -155,7 +155,7 @@ function NeedsYouSkeleton() {
 }
 
 function OpenItems({ data }: { data: NeedsYouView }) {
-  const client = useClient();
+  const client = usePageClient('needs-you');
   const navigate = useNavigate();
   const write = usePendingWrite();
   const [editing, setEditing] = useState<Id | null>(null);
@@ -301,7 +301,7 @@ function OpenItems({ data }: { data: NeedsYouView }) {
 
 /** Needs you (design 5.4): every review item with its reason and a one-click fix. A fix is locked. */
 export default function NeedsYouPage() {
-  const client = useClient();
+  const client = usePageClient('needs-you');
   const query = useViewQuery(queryKeys.needsYou, () => client.needsYou(), { pollMs: pollMs.default });
   const job = query.data?.boardsJob ?? null;
   return (

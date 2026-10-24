@@ -5,7 +5,7 @@ import { Archive, CalendarX, Inbox, Terminal } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
-  useClient,
+  usePageClient,
   type DailyEntry,
   type Id,
   type JobRunSummary,
@@ -345,7 +345,7 @@ function TodayContent({ t, limitToday }: { t: TodayView; limitToday: number | un
  * Every group, why, capacity and not-ready reason comes from the client; the page lays them out.
  */
 export default function TodayPage() {
-  const client = useClient();
+  const client = usePageClient('today');
   const today = useViewQuery(queryKeys.today, () => client.today(), { pollMs: pollMs.default });
   const shell = useViewQuery(queryKeys.shell, () => client.shell(), { pollMs: pollMs.default });
   return (

@@ -7,7 +7,7 @@ import { ALL_VIEWS, DEFAULT_LIVE_VIEWS } from './http/views';
 export type * from './types';
 export type { OutreachClient, WriteOptions, ApiErrorCode } from './client';
 export { ApiError } from './client';
-export { ClientProvider, useClient } from './provider';
+export { ClientProvider, useClient, usePageClient } from './provider';
 export { queryKeys, pollMs, newRequestId } from './keys';
 
 /**

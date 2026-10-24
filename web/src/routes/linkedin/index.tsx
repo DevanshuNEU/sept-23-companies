@@ -5,7 +5,7 @@ import { Search, Users } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
-  useClient,
+  usePageClient,
   type Id,
   type LinkedInGroup,
   type LinkedInPerson,
@@ -159,7 +159,7 @@ function TableSkeleton() {
 
 /** LinkedIn list (design 5.2): who to reach per company, which role to name, and a log of what happened. */
 export default function LinkedInPage() {
-  const client = useClient();
+  const client = usePageClient('linkedin');
   const navigate = useNavigate();
   const write = usePendingWrite();
   const query = useViewQuery(queryKeys.linkedin, () => client.linkedin(), { pollMs: pollMs.default });

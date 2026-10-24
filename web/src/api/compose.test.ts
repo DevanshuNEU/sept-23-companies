@@ -1,5 +1,5 @@
 import type { OutreachClient } from './client';
-import { composeClient } from './compose';
+import { clientForPage, composeClient } from './compose';
 import { ALL_VIEWS, VIEW_OF_METHOD, type ViewName } from './http/views';
 
 const loaded = vi.hoisted(() => ({ client: 0, data: 0 }));
@@ -113,5 +113,26 @@ describe('createClient', () => {
     vi.stubEnv('VITE_LIVE_VIEWS', 'all');
     expect((await make('')).source).toBe('live');
     expect(loaded.client).toBe(0);
+  });
+});
+
+describe('clientForPage', () => {
+  it('a page on sample data sends every method to sample, its writes to a live view too', async () => {
+    const live = labelled('live', 'live');
+    const sample = labelled('sample', 'sample');
+    const c = composeClient({ live, sample, views: ['company'] });
+    const outboxPage = clientForPage(c, 'outbox');
+    expect(await outboxPage.pauseCompany(1, 1, { requestId: 'r' })).toBe('sample');
+    expect(await outboxPage.company(1)).toBe('sample');
+    expect(live.pauseCompany).not.toHaveBeenCalled();
+  });
+
+  it('a live page keeps the composed client, and a plain client is its own scope', async () => {
+    const live = labelled('live', 'live');
+    const sample = labelled('sample', 'sample');
+    const c = composeClient({ live, sample, views: ['company'] });
+    expect(clientForPage(c, 'company')).toBe(c);
+    expect(await clientForPage(c, 'company').outbox()).toBe('sample');
+    expect(clientForPage(sample, 'outbox')).toBe(sample);
   });
 });

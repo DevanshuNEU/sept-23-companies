@@ -8,7 +8,7 @@ import {
   newRequestId,
   pollMs,
   queryKeys,
-  useClient,
+  usePageClient,
   type Check,
   type CheckFix,
   type Id,
@@ -222,7 +222,7 @@ function DetailBody({
   detail: OutboxDetail;
   items: OutboxItem[];
 }) {
-  const client = useClient();
+  const client = usePageClient('outbox');
   // Unsaved text per email, so J, K, another view and back never throw it away.
   const edits = useEdits();
   const queryClient = useQueryClient();
@@ -698,7 +698,7 @@ function DetailBody({
 
 /** Spec 5.3, the detail pane: the selected email, its checks and its actions. */
 export function OutboxDetailPane({ touchId, items }: { touchId: Id; items: OutboxItem[] }) {
-  const client = useClient();
+  const client = usePageClient('outbox');
   const query = useViewQuery(queryKeys.outboxDetail(touchId), () => client.outboxDetail(touchId), { pollMs: pollMs.outbox });
   return (
     <QueryState query={query} skeleton={<DetailSkeleton />} empty={null}>

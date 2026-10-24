@@ -4,6 +4,20 @@ import { ALL_VIEWS, VIEW_OF_METHOD, type ViewName } from './http/views';
 
 type MethodName = keyof typeof VIEW_OF_METHOD;
 
+/** Where a composed client keeps its page scope (see `clientForPage`); not part of `OutreachClient`. */
+const PAGE_SCOPE = Symbol('pageScope');
+type Scoped = { [PAGE_SCOPE]?: (page: ViewName) => OutreachClient };
+
+/**
+ * The client one page talks to. A page whose own view is live gets the composed client. A page on sample data
+ * gets the sample client for every method, its writes too: otherwise a sample page could send a fixture id to a
+ * live write of another view (the sample Outbox pausing a real company). A plain client (a test's fixture) is
+ * its own scope.
+ */
+export function clientForPage(client: OutreachClient, page: ViewName): OutreachClient {
+  return (client as OutreachClient & Scoped)[PAGE_SCOPE]?.(page) ?? client;
+}
+
 /**
  * One client from two: each method goes to `live` when its view is in `views`, else to `sample`. `source` is `'live'`
  * only when every view is live, so the "Sample data" badge never hides sample data. A method with no implementation
@@ -25,6 +39,13 @@ export function composeClient({ live, sample, views }: { live: LiveMethods; samp
       return method.apply(side, args);
     };
   }
+  let sampleOnly: OutreachClient | null = null; // built on first use: built here, it would build its own, forever
+  Object.defineProperty(client, PAGE_SCOPE, {
+    value: (page: ViewName) => {
+      if (on.has(page) || !sample) return client as unknown as OutreachClient;
+      return (sampleOnly ??= composeClient({ live, sample, views: [] }));
+    },
+  });
   return client as unknown as OutreachClient;
 }
 

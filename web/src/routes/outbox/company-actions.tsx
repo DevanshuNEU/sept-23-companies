@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   queryKeys,
-  useClient,
+  usePageClient,
   type CloseReason,
   type CompanyRef,
   type CompanyView,
@@ -62,7 +62,7 @@ export function useCompanyActions({
   /** Lines for the resume dialog: what will send again. */
   willResume: string[];
 }): { held: boolean; pause: () => void; askResume: () => void; askClose: () => void; dialogs: ReactNode } {
-  const client = useClient();
+  const client = usePageClient('outbox');
   const queryClient = useQueryClient();
   const write = usePendingWrite();
   const [resuming, setResuming] = useState(false);

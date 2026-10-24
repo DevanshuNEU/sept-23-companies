@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { Ban, Search } from 'lucide-react';
-import { pollMs, queryKeys, useClient, type NoGoReason, type NoGoView, type ShellSummary } from '@/api';
+import { pollMs, queryKeys, usePageClient, type NoGoReason, type NoGoView, type ShellSummary } from '@/api';
 import { EmptyState, QueryState } from '@/components/state-views';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -69,7 +69,7 @@ function TableSkeleton() {
 }
 
 export default function NoGoPage() {
-  const client = useClient();
+  const client = usePageClient('no-go');
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
   const query = useViewQuery(queryKeys.noGo, () => client.noGo(), { pollMs: pollMs.default });

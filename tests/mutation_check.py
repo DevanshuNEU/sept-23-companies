@@ -43,6 +43,7 @@ RANKING = ROOT / "outreach" / "ranking"
 NET = ROOT / "outreach" / "net.py"
 SOURCES = ROOT / "outreach" / "sources"
 SENDING = ROOT / "outreach" / "sending"
+IMPORTER = ROOT / "outreach" / "importer"
 REFRESH = ROOT / "refresh"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
@@ -617,6 +618,48 @@ MUTATIONS = [
     (SENDING / "ramp.py", "effective_limit returns the start limit on a warning day",
      "return _step_down(start, cfg) if lowered else start", "return start",
      "test_effective_limit_is_one_level_lower_after_a_warning"),
+
+    # ---- importer/ (#17 Part A) ---------------------------------------------------------------------------------
+    (IMPORTER / "write.py", "a plan with a held record is applied instead of refused",
+     "    held = plan.held()\n    if held:", "    held = plan.held()\n    if False:",
+     "test_held_plan_is_refused_before_any_write"),
+    (IMPORTER / "report.py", "a skip with any reason counts as explained",
+     "for reason in sorted(set(c.skipped) - EXPLAINED_SKIPS):", "for reason in sorted(set()):",
+     "test_unknown_skip_reason_fails_the_check"),
+    (IMPORTER / "plan.py", "visaDenied also writes a no-go, so a hand note becomes a hide",
+     '            hand.append(EvidenceDraft("sponsorship", "no", "confirmed", "hand", ref, visa))\n',
+     '            hand.append(EvidenceDraft("sponsorship", "no", "confirmed", "hand", ref, visa))\n'
+     '            self.c(key).no_go.append(("defence_contractor", visa))\n',
+     "test_visa_denied_is_hand_evidence_and_an_item_not_a_no_go"),
+    (IMPORTER / "records.py", "Job Radar's database is opened read-write",
+     'f"file:{path}?mode=ro"', 'f"file:{path}?mode=rw"',
+     "test_open_radar_is_read_only"),
+    (IMPORTER / "write.py", "an approved old contact is stored as approved, so it can send without his click",
+     '                message_id = insert(0, "drafted", subject0 or "(no subject)", mail.body0)',
+     '                message_id = insert(0, "approved" if mail.old_approval else "drafted", subject0 or "(no subject)", '
+     "mail.body0)",
+     "test_approved_contact_is_stored_as_a_drafted_message_never_approved"),
+    (IMPORTER / "write.py", "imported wins are not marked seen, so switch day announces them all",
+     "        if kind in _WINS or (kind == \"replied\" and reply_kind == \"interested\"):\n"
+     "            self.conn.execute(\"INSERT INTO win_seen",
+     "        if False:\n            self.conn.execute(\"INSERT INTO win_seen",
+     "test_imported_wins_are_marked_seen"),
+    (IMPORTER / "write.py", "a company the old dashboard ruled out is removed from view",
+     '            self._flag(company_id, self.issue_keys[index], self.plan.issues[index].detail)\n',
+     '            self._flag(company_id, self.issue_keys[index], self.plan.issues[index].detail)\n'
+     '            if self.plan.issues[index].code == "ruled_out":\n'
+     '                self.conn.execute("UPDATE company SET status = \'removed\' WHERE company_id = ?", (company_id,))\n',
+     "test_ruled_out_company_stays_visible_with_its_note"),
+    (IMPORTER / "write.py", "the near-name merge candidate loses its weak confidence",
+     'they may be one company", confidence="weak")', 'they may be one company")',
+     "test_near_name_item_has_weak_confidence_and_basis_import_near_name"),
+    (IMPORTER / "plan.py", "a follow-up due before the import date is planned anyway",
+     "                    if due < self.today:\n                        self.followups_not_planned += 1",
+     "                    if False:\n                        self.followups_not_planned += 1",
+     "test_follow_up_due_before_the_import_is_not_planned_and_counted"),
+    (IMPORTER / "plan.py", "a sent contact with no company is held as a settleable record again",
+     '            if "sent" in (plan.message0, plan.message1):', "            if False:",
+     "test_skip_record_cannot_settle_a_sent_contact_with_no_company"),
 ]
 
 

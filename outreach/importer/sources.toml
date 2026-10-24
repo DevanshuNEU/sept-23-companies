@@ -1,0 +1,17 @@
+# Where each source lives. `~` is the home folder, `{live}` is the live checkout, `{mail_home}` is
+# OUTREACH_MAIL_HOME when it is set and `{live}/mail` otherwise. `local_storage` is a glob: the newest match by
+# name is read. The overrides file sits outside the repo because it holds his data.
+[paths]
+data_js = "{live}/dashboard/data.js"
+local_storage = "~/Desktop/outreach-scratch/import/outreach-backup-*.json"
+contacts_json = "{mail_home}/contacts.json"
+send_log = "{mail_home}/send.log"
+radar_db = "~/Desktop/DevVault/job-search/pipeline/radar.db"
+devboard = "~/Desktop/devboard/job-state.json"
+contacted_txt = "~/Desktop/DevVault/job-search/outreach/contacted.txt"
+devvault_notes = "~/Desktop/DevVault/job-search/outreach/companies"
+interview_prep = "~/Desktop/DevVault/job-search/interview-prep/companies"
+curated_touches = "~/Desktop/outreach-scratch/recon/curated_touches.csv"
+
+[overrides]
+path = "~/Desktop/outreach-scratch/import/overrides.toml"

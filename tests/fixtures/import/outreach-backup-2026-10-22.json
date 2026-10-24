@@ -1,0 +1,12 @@
+{
+  "kestrel": {"stage": "Interviewing", "contact": "Ada Fenwick", "channel": "Email", "reached": "2026-10-06",
+              "repliedOn": "2026-10-08", "next": "", "notes": "Call booked for the 14th."},
+  "lumen": {"stage": "Referral asked", "contact": "Bram Okafor", "channel": "Email", "reached": "2026-10-06",
+            "repliedOn": "", "next": "2026-10-12", "notes": ""},
+  "orbital": {"stage": "Not started", "contact": "", "channel": "", "reached": "", "repliedOn": "", "next": "",
+              "notes": "", "skipped": "2026-10-03"},
+  "quarry": {"stage": "Researching", "contact": "", "channel": "", "reached": "", "repliedOn": "", "next": "",
+             "notes": "Size looks too big."},
+  "tidewater": {"stage": "Not started", "contact": "", "channel": "", "reached": "", "repliedOn": "", "next": "",
+                "notes": ""}
+}

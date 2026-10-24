@@ -60,6 +60,38 @@ def _fixture_companies(h):
     return {r["name"]: r["company_id"] for r in rows}
 
 
+IMPORT_FIXTURE = {"heronworks": "Heron Works", "pebbleforge": "Pebble Forge"}
+
+
+@invariant("import_history")
+def importer_wrote_the_history_once_and_a_second_run_changes_nothing(h):
+    """Counts only the two pipeline import fixture companies (by the import's `company_source` link). The interview
+    company is done; its touch has the interview and the win is marked seen; every record of the run has an
+    outcome; and the same plan applied again changes no table but `job_run`."""
+    from outreach.importer.write import apply_plan
+    from tests.importtest import all_marks
+    rows = h.conn.execute("SELECT c.company_id, c.name, c.status, c.close_reason FROM company c "
+                          "JOIN company_source s USING (company_id) WHERE s.source_name = 'import'").fetchall()
+    names = sorted(r["name"] for r in rows)
+    assert names == sorted(IMPORT_FIXTURE.values()), f"import made {names}"
+    heron = next(r for r in rows if r["name"] == "Heron Works")
+    assert (heron["status"], heron["close_reason"]) == ("closed", "interview"), tuple(heron)
+    touch = h.conn.execute("SELECT touch_id, interview_at FROM outreach_touch WHERE company_id = ? "
+                           "AND interview_at IS NOT NULL", (heron["company_id"],)).fetchall()
+    assert len(touch) == 1, f"Heron Works touches with an interview: {len(touch)}"
+    seen = h.conn.execute("SELECT kind FROM win_seen WHERE touch_id = ?", (touch[0]["touch_id"],)).fetchall()
+    assert "interview" in {r[0] for r in seen}, "the imported interview is marked seen"
+    run_id = h.import_result.run_id
+    records = h.conn.execute("SELECT outcome FROM import_record WHERE run_id = ?", (run_id,)).fetchall()
+    assert len(records) == len(h.import_plan.records) and all(r[0] for r in records), \
+        f"{len(records)} import records for {len(h.import_plan.records)} source records"
+    before = all_marks(h.conn)
+    apply_plan(h.conn, h.import_plan, now=h.import_now)
+    after = all_marks(h.conn)
+    changed = sorted(t for t in after if t != "job_run" and after[t] != before[t])
+    assert not changed, f"a second import changed {changed}"
+
+
 @invariant("discover")
 def sources_discover_made_the_three_fixture_companies(h):
     ids = _fixture_companies(h)
@@ -252,13 +284,22 @@ class HarnessCase(unittest.TestCase):
         return h
 
 
+class ImporterFlowTests(HarnessCase):
+    def test_import_history_runs_first_and_keeps_its_invariant(self):
+        h = self.harness()
+        self.assertEqual(h.stages[0][0], "import_history")
+        h.stages[0][1]()
+        INVARIANTS["import_history"](h)
+
+
 class SourcesFlowTests(HarnessCase):
     def test_sources_flow_invariants(self):
         h = self.harness()
-        self.assertEqual([n for n, _ in h.stages][:3], ["discover", "resolve", "find_boards"])
+        sources = [(n, run) for n, run in h.stages if n in ("discover", "resolve", "find_boards")]
+        self.assertEqual([n for n, _ in sources], ["discover", "resolve", "find_boards"])
         for name in ("discover", "resolve", "find_boards"):
             self.assertIn(name, INVARIANTS)
-        for name, run in h.stages[:3]:
+        for name, run in sources:
             run()
             INVARIANTS[name](h)  # after each stage, not only at the end
 
@@ -288,7 +329,8 @@ class CrawlFlowTests(HarnessCase):
 
     def flow(self):
         h = self.harness()
-        self.assertEqual([n for n, _ in h.stages][:4], ["discover", "resolve", "find_boards", "read_boards"])
+        names = [n for n, _ in h.stages if n != "import_history"]  # the history stage runs first, on its own rows
+        self.assertEqual(names[:4], ["discover", "resolve", "find_boards", "read_boards"])
         for name, run in h.stages:
             run()
             if name in INVARIANTS:

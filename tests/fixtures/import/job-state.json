@@ -1,0 +1,8 @@
+{
+  "greenhouse:kestrel:1001": {"company": "Kestrel Robotics", "title": "Software Engineer, New Grad", "url": "https://jobs.example.com/kestrel/1001", "posted": "2026-10-01", "status": "applied", "updated": "2026-10-03T10:00:00Z"},
+  "ashby:marlow:aa-11": {"company": "Marlow Dynamics", "title": "Platform Engineer", "url": "https://jobs.example.com/marlow/aa-11", "posted": "2026-09-29", "status": "new", "updated": "2026-10-02T10:00:00Z"},
+  "lever:tidewater:6f1c0a52": {"company": "Tidewater AI", "title": "Machine Learning Engineer", "url": "https://jobs.example.com/tidewater/6f1c0a52", "posted": "2026-10-05", "status": "saved", "updated": "2026-10-06T10:00:00Z"},
+  "workday:acme:wd5:External:R-1": {"company": "Cobalt Harbor", "title": "Systems Engineer I", "url": "https://acme.wd5.example.com/External/job/R-1", "posted": "2026-10-04", "status": "new", "updated": "2026-10-05T10:00:00Z"},
+  "hcafe:fixture-9": {"company": "Ember Analytics", "title": "Data Engineer", "url": "https://jobs.example.com/hcafe/9", "posted": "2026-10-02", "status": "new", "updated": "2026-10-02T10:00:00Z"},
+  "apify:fixture-12": {"company": "Juniper Optics", "title": "Firmware Engineer", "url": "https://jobs.example.com/apify/12", "posted": "2026-10-03", "status": "new", "updated": "2026-10-03T10:00:00Z"}
+}

@@ -16,10 +16,12 @@ source that breaks the person_source rules rejects every person and writes nothi
   address never brings such a person back as someone fresh and draftable; a namesake who may be emailed does not
   stop the add, which is flagged `same_name_as:<id>`. An address and a profile of two different people is
   `two_people`.
+
+The address, profile and name keys come from `outreach.sources.keys`, which the history import (#17) matches people
+with too, so a person the import brought in is the person this tool finds.
 """
 from __future__ import annotations
 
-import re
 import sqlite3
 from datetime import date
 from typing import Literal
@@ -31,24 +33,11 @@ from outreach.mcp.guard import Grant
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
 from outreach.mcp.tools.reads import MAX_ID, Family, company_row, marks, resolve
 from outreach.mcp.tools.research import DATE, HTTPS, is_linkedin
+from outreach.sources.keys import EMAIL, linkedin_key
+from outreach.sources.keys import person_name_key as name_key
 from outreach.store import append_event, transaction
 
 __all__ = ["TOOLS", "linkedin_key"]
-
-EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s.]+")
-PROFILE = re.compile(r"https://(?:[a-z]{2,3}\.)?linkedin\.com/in/([^/?#\s]+)/?(?:[?#]\S*)?", re.I)
-
-
-def linkedin_key(url: str | None) -> str | None:
-    """One form of a LinkedIn profile link (`https://www.linkedin.com/in/<slug>`, slug lower case), or None when
-    it is not a profile link."""
-    m = PROFILE.fullmatch((url or "").strip())
-    return f"https://www.linkedin.com/in/{m.group(1).lower()}" if m else None
-
-
-def name_key(name: str) -> str:
-    return " ".join(name.lower().split())
-
 
 class SourceIn(Input):
     kind: Literal["profile", "team", "context", "email", "post"]

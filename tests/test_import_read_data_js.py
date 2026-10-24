@@ -64,6 +64,12 @@ class ReadDataJsTest(unittest.TestCase):
         with self.assertRaises(SourceError):
             list(read_data_js(path))
 
+    def test_data_js_cannot_reach_process_through_window(self):
+        path = self.js("window.COMPANIES = []; window.RULED_OUT = []; window.REFERENCE = {};\n"
+                       "window.META = {leak: window.constructor.constructor('return typeof process')()};\n")
+        with self.assertRaises(SourceError):
+            list(read_data_js(path))
+
     def test_a_script_that_never_ends_is_a_source_error(self):
         path = self.js("while (true) {}\n")
         with mock.patch.object(module, "VM_TIMEOUT_MS", 300):

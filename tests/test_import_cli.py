@@ -137,6 +137,20 @@ class CliTest(unittest.TestCase):
         self.assertIn("gus.albrecht@example.com", out)
         self.assertIn("approved", out)
 
+    def test_rollback_check_lists_a_message_still_in_flight(self):
+        self.assertEqual(self.cli("run")[0], 0)
+        conn = self.store()
+        gus = conn.execute("SELECT m.message_id FROM message m JOIN touch t USING(touch_id) JOIN person p "
+                           "USING(person_id) WHERE p.email = 'gus.albrecht@example.com'").fetchone()[0]
+        at = "2026-10-26T14:00:00Z"
+        conn.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?", (at, gus))
+        conn.execute("UPDATE message SET state = 'sending', pending_rfc_id = '<new-2@example.com>', claimed_at = ? "
+                     "WHERE message_id = ?", (at, gus))
+        code, out = self.cli("rollback-check", "--since", "2026-10-25T00:00:00Z")
+        self.assertEqual(code, 1)
+        self.assertIn("gus.albrecht@example.com", out)
+        self.assertIn("Check Gmail Sent", out)
+
     def test_run_on_the_live_path_from_a_worktree_exits_through_the_guard(self):
         live = self.tmp / "live" / "outreach.db"
         live.parent.mkdir()
@@ -152,6 +166,18 @@ class CliTest(unittest.TestCase):
                     self.assertIn("live checkout", str(cm.exception))
         self.assertEqual(source_digest(live), before)
         self.assertEqual(os.listdir(live.parent), ["outreach.db"])
+
+    def test_run_on_real_files_from_a_worktree_exits_before_reading_or_writing(self):
+        before = self.store().execute("SELECT count(*) FROM import_record").fetchone()[0]
+        with mock.patch.object(live_checkout, "is_live", return_value=False):
+            with self.assertRaises(SystemExit) as cm:  # no --manifest: the committed manifest, his real files
+                main(["run", "--now", NOW])
+            self.assertIn("live checkout", str(cm.exception))
+            with mock.patch("outreach.importer.__main__.is_real", return_value=True):
+                with self.assertRaises(SystemExit) as cm:  # a manifest that names his real paths
+                    self.cli("run")
+                self.assertIn("live checkout", str(cm.exception))
+        self.assertEqual(self.store().execute("SELECT count(*) FROM import_record").fetchone()[0], before)
 
 
 if __name__ == "__main__":

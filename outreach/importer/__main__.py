@@ -23,7 +23,7 @@ import live_checkout
 from outreach.importer.manifest import load_manifest, load_overrides
 from outreach.importer.plan import READERS, build_plan, read_all
 from outreach.importer.records import SOURCES, SourceError
-from outreach.importer.rehearse import default_into, import_twice, rehearse
+from outreach.importer.rehearse import default_into, import_twice, is_real, rehearse
 from outreach.importer.report import check_report, count_report, render_report, report_from_json
 from outreach.importer.vocab import contact_status_plan
 from outreach.sending.config import load_config
@@ -110,6 +110,8 @@ def dry_run(args, manifest) -> int:
 
 
 def run(args, manifest) -> int:
+    if is_real(manifest):  # his real files, named by path: only the live checkout copies his history
+        live_checkout.require_live("the import run on real data")
     conn = connect()
     try:
         records, plan = _plan(args, manifest)
@@ -194,8 +196,10 @@ def rollback_check(args, manifest) -> int:
     conn = connect()
     try:
         rows = conn.execute(
-            "SELECT p.name, p.email, m.seq, m.sent_at FROM message m JOIN touch t USING(touch_id) "
-            "JOIN person p USING(person_id) WHERE m.state = 'sent' AND m.sent_at >= ? ORDER BY m.sent_at",
+            "SELECT p.name, p.email, m.seq, m.state, coalesce(m.sent_at, m.claimed_at, m.updated_at) AS at "
+            "FROM message m JOIN touch t USING(touch_id) JOIN person p USING(person_id) "
+            "WHERE m.state IN ('sent', 'sending', 'send_unknown') "
+            "AND coalesce(m.sent_at, m.claimed_at, m.updated_at) >= ? ORDER BY 5",
             (since,)).fetchall()
     finally:
         conn.close()
@@ -203,10 +207,11 @@ def rollback_check(args, manifest) -> int:
     if not found:
         print("Nothing to check")
         return 0
-    print(f"Emailed by the new sender since {since} and still sendable in the old mailer: {len(found)}")
+    print(f"Emailed (or being emailed) by the new sender since {since} and still sendable in the old mailer: {len(found)}")
     for r in found:
-        print(f"  {r['name']} <{r['email']}> {'first email' if r['seq'] == 0 else 'follow-up'} at {r['sent_at']}; "
-              f"old mailer status {status[r['email']]}. Mark it in contacts.json before the old mailer runs.")
+        unsure = " Check Gmail Sent first: the send may already have gone out." if r["state"] != "sent" else ""
+        print(f"  {r['name']} <{r['email']}> {'first email' if r['seq'] == 0 else 'follow-up'} at {r['at']}; "
+              f"old mailer status {status[r['email']]}. Mark it in contacts.json before the old mailer runs.{unsure}")
     return 1
 
 
@@ -219,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
     args.now = iso_utc(args.now) if args.now else utcnow()
     if args.command == "rehearse" and args.manifest is None:
         live_checkout.require_live("the rehearsal on real data")  # before his files are even listed
+    if args.command == "run" and args.manifest is None:
+        live_checkout.require_live("the import run on real data")
     try:
         manifest = load_manifest(args.manifest)
     except SourceError as err:

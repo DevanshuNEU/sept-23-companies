@@ -335,6 +335,12 @@ class PlanTest(unittest.TestCase):
         plan = self.plan(records, ov=overrides(skip_record={"contacts_json:contact:c05": "it went out"}))
         self.assertEqual(plan.held(), ("contacts_json:contact:c05",))
 
+    def test_skip_record_cannot_settle_a_sent_contact_with_no_company(self):
+        records = self.changed("contacts_json:contact:c02", lambda r: {**r, "company": ""})
+        plan = self.plan(records, ov=overrides(skip_record={"contacts_json:contact:c02": "no company"}))
+        self.assertIn("contacts_json:contact:c02", plan.held())
+        self.assertEqual(self.outcome(plan, "contacts_json:contact:c02").reason, "sent_unplaced")
+
     def test_a_said_no_reply_stops_the_person(self):
         def no(raw):
             fm = dict(raw["frontmatter"])

@@ -460,6 +460,10 @@ class _Planner:
                                              f"it may or may not have been sent. Let the old mailer settle it (it "
                                              f"checks Sent) and export again.")
         if not company:
+            if "sent" in (plan.message0, plan.message1):
+                return self.hold(rid, "sent_unplaced", f"{rid} ({c.get('name')}) was sent by the old mailer but names "
+                                                       f"no company; add the company in the old mailer and export "
+                                                       f"again. A skip cannot settle a sent email.")
             return self.hold(rid, "unparsed_record", f"{rid} names no company.")
         key = self.companies.add(company, rid)
         base = self.base_ids.get(_text(c.get("companyId")))

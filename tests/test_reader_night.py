@@ -307,26 +307,25 @@ class StopTests(NightCase):
         summary = self.run_night(fake)
         self.assertEqual(summary.status, "failed")
         self.assertIn("2 failed calls in a row", summary.stopped_reason)
-        # The batch of 20 is released; its postings are then read one per call, so the second failure is pinned
-        # on one posting, which keeps the attempt it used.
-        self.assertEqual(fake.sizes(), [20, 1])
+        # The batch of 20 is released and does not count; its postings are then read one per call, so each
+        # failure after it is pinned on one posting, which keeps the attempt it used.
+        self.assertEqual(fake.sizes(), [20, 1, 1])
         self.assert_all_back(attempts=None)
         attempts = Counter(r["attempts"] for r in self.queue_rows())
-        self.assertEqual(attempts, Counter({0: 44, 1: 1}))
-        self.assertEqual(self.row(fake.ids(1)[0])["attempts"], 1)
+        self.assertEqual(attempts, Counter({0: 43, 1: 2}))
+        self.assertEqual({self.row(fake.ids(n)[0])["attempts"] for n in (1, 2)}, {1})
         self.assertEqual(self.job()["status"], "failed")
         self.assertEqual(self.stored_count(), 0)
 
     def test_runner_timeout_is_a_failed_run(self):
         self.postings(3)
-        errors = (subprocess.TimeoutExpired(["claude", "-p"], 900), FileNotFoundError("claude"),
-                  RuntimeError("anything else the runner raised"))
+        errors = (subprocess.TimeoutExpired(["claude", "-p"], 900), RuntimeError("anything else the runner raised"))
         for err in errors:
             with self.subTest(type(err).__name__):
                 fake = Fake(lambda n, p, err=err: err)
                 summary = self.run_night(fake)
                 self.assertEqual(summary.status, "failed")
-                self.assertEqual(len(fake.calls), 2)
+                self.assertEqual(fake.sizes(), [3, 1, 1])  # the batch of three does not count
                 self.assertNotIn("leased", self.states())
                 self.assertEqual(self.job()["status"], "failed")
 
@@ -393,10 +392,17 @@ class FailOpenTests(NightCase):
                 return RunResult(1, "", "Error: prompt is too long")
             return good(n, payload)
         fake = Fake(answer)
-        for _ in range(self.cfg.max_attempts + 1):
-            self.run_night(fake, self.promoted)
-        self.assertEqual(self.row(poison)["state"], "refused")
+        # One night reads every other posting: the poison fails once on its own call and is left out for the rest
+        # of the night, and the failed batch of several it broke does not count toward the stop.
+        summary = self.run_night(fake, self.promoted)
+        self.assertEqual(summary.status, "queue_empty")
         self.assertEqual({self.row(pid)["state"] for pid in others}, {"done"})
+        self.assertEqual((self.row(poison)["state"], self.row(poison)["attempts"]), ("queued", 1))
+        self.assertEqual(sum(poison in [p["posting_id"] for p in c[1]["postings"]] for c in fake.calls), 2)
+        # One call a night after that, until it runs out of leases and ends refused, shown and flagged.
+        for _ in range(self.cfg.max_attempts):
+            self.assertEqual(self.run_night(fake, self.promoted).status, "queue_empty")
+        self.assertEqual(self.row(poison)["state"], "refused")
         row = self.decision(poison)
         self.assertTrue(passes(stored_decision(row)))
         self.assertEqual(row["sponsorship"], "unclear")

@@ -205,13 +205,14 @@ def refresh_priorities(conn: sqlite3.Connection, *, cfg: ReaderConfig | None = N
 
 
 def next_batch(conn: sqlite3.Connection, limit: int, *, cfg: ReaderConfig | None = None, version: str | None = None,
-               now: str | None = None, today: date | None = None) -> list[ReadRequest]:
+               now: str | None = None, today: date | None = None,
+               skip: Iterable[int] = ()) -> list[ReadRequest]:
     """Lease up to `limit` postings for `version`, best priority first (newest first within a priority).
 
     A row is up for lease when it is queued, or leased with a deadline before `now`. Each one handed out gets
     `lease_minutes` from `now` and one more attempt. Rows that are skipped and left exactly as they are, whatever
-    their state: a stale posting (`today`, default today in UTC) and a company with a final hide (held). That covers
-    an expired lease too, which `refresh_priorities` does not touch. A row that has used `max_attempts` leases is
+    their state: a stale posting (`today`, default today in UTC), a company with a final hide (held) and a posting
+    id in `skip` (the night job's postings that failed tonight). That covers an expired lease too, which `refresh_priorities` does not touch. A row that has used `max_attempts` leases is
     set refused ("gave up after N leases") and takes no slot. A row whose body is gone or no longer matches its
     hash (the body changed after it was queued: `enqueue` makes a new key for the new body) is refused too, so a
     reading is never made of text the hash does not name.
@@ -227,6 +228,7 @@ def next_batch(conn: sqlite3.Connection, limit: int, *, cfg: ReaderConfig | None
     canon = _canon(conn)
     out: list[ReadRequest] = []
     seen: set[int] = set()  # rows looked at and skipped, so the loop never fetches one again
+    skipped = json.dumps(sorted({int(pid) for pid in skip}))
     with transaction(conn):  # BEGIN IMMEDIATE: the lock is taken before the rows are read
         while len(out) < limit:
             rows = conn.execute(
@@ -236,8 +238,9 @@ def next_batch(conn: sqlite3.Connection, limit: int, *, cfg: ReaderConfig | None
                 "WHERE q.priority > ? AND q.reader_version = ? "
                 "AND (q.state = 'queued' OR (q.state = 'leased' AND q.lease_until < ?)) "
                 "AND q.rowid NOT IN (SELECT value FROM json_each(?)) "
+                "AND q.posting_id NOT IN (SELECT value FROM json_each(?)) "
                 "ORDER BY q.priority DESC, q.posting_id DESC LIMIT ?",
-                (HELD, version, now, json.dumps(sorted(seen)), limit - len(out))).fetchall()
+                (HELD, version, now, json.dumps(sorted(seen)), skipped, limit - len(out))).fetchall()
             if not rows:
                 break
             stale = load_stale(conn, today, posting_ids=[r["posting_id"] for r in rows])

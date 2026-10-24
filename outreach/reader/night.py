@@ -18,7 +18,10 @@ of four ways (`classify_run`):
   in it cannot say which one broke it, so the batch is released (no attempt counted) and its postings are read one
   per call; a failed call with one posting in it uses that posting's attempt. A poison posting (a body that always
   breaks the call) so runs out of leases and ends refused, which shows it, flagged, instead of blocking the queue
-  every night. `max_consecutive_failures` failed calls in a row stop the night.
+  every night. A posting whose own call failed tonight is left out of every later lease this night, so one poison
+  posting never stops the others being read. `max_consecutive_failures` failed calls in a row stop the night; a
+  failed call of several postings does not count, since the calls that follow it, one posting each, say whose it
+  was.
 
 The night also stops at `max_postings_per_night` postings handed out or `max_batches` calls. However it stops, it
 then runs `apply_all`, so every posting with a stored reading or an ended-refused row has the combined decision,
@@ -215,6 +218,7 @@ class _Night:
         self.prompt = cfg.prompt_path.read_text(encoding="utf-8")
         self.batches = self.handed = self.stored = self.partial = self.requeued = self.applied = 0
         self.leased: list[ReadRequest] = []
+        self.failed: set[int] = set()  # postings whose own call failed tonight: no more leases this night
 
     def summary(self, status: Status, reason: str) -> NightSummary:
         return NightSummary(status, self.batches, self.stored, self.partial, self.requeued, self.applied, reason)
@@ -235,7 +239,8 @@ class _Night:
             if self.handed >= cfg.max_postings_per_night:
                 return "cap_reached", f"{self.handed} postings (max_postings_per_night)"
             size = min(1 if singles else cfg.batch_size, cfg.max_postings_per_night - self.handed)
-            self.leased = next_batch(self.conn, size, cfg=cfg, version=self.version, now=self.now())
+            self.leased = next_batch(self.conn, size, cfg=cfg, version=self.version, now=self.now(),
+                                     skip=self.failed)
             if not self.leased:
                 return "queue_empty", ""
             singles = max(singles - 1, 0)
@@ -254,8 +259,9 @@ class _Night:
                     self._submit(usable, attempts)
                     continue
                 detail = "the reply had a reading for none of the postings it was sent"
-            failures += 1
             if len(self.leased) == 1:
+                failures += 1
+                self.failed.add(self.leased[0].posting_id)
                 self.requeued += requeue(self.conn, self.leased, f"call failed: {detail}", attempts=attempts)
                 self.leased = []
             else:

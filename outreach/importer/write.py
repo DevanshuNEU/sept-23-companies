@@ -247,12 +247,12 @@ class _Writer:
                          idempotency_key=f"import:note:{record}:{same}:{company_id}")
 
     def _no_go(self, *, company_id: int | None, person_id: int | None, reason: str, quote: str, record: str) -> None:
-        """One no-go with source `import`, unless one is active for the reason, or he lifted the import's own (a
-        lifted import no-go is his choice: never added back)."""
+        """One no-go with source `import`, unless the company or person already has an active one (the store keeps
+        one active no-go each, whatever its reason) or he lifted the import's own (his choice: never added back)."""
         column, value = ("company_id", company_id) if person_id is None else ("person_id", person_id)
         ref = f"import:{record}"
         found = self.conn.execute(
-            f"SELECT 1 FROM no_go WHERE {column} = ? AND reason = ? AND (lifted_at IS NULL OR source_ref = ?)",
+            f"SELECT 1 FROM no_go WHERE {column} = ? AND (lifted_at IS NULL OR (reason = ? AND source_ref = ?))",
             (value, reason, ref)).fetchone()
         if found:
             return

@@ -365,6 +365,33 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT count(*) FROM review_item WHERE evidence_key LIKE "
                                       "'import:sent_after_import:%'").fetchone()[0], 1)
 
+    def test_a_second_no_go_reason_never_blocks_the_run(self):
+        orbital = self.plan.companies["orbitalfoods"]
+        two = dataclasses.replace(orbital, no_go=orbital.no_go + (("agency", "also an agency"),))
+        companies = {**self.plan.companies, "orbitalfoods": two}
+        ada_key = "kestrelrobotics/ada.fenwick@example.com"
+        ada = self.plan.people[ada_key]
+        said_no = dataclasses.replace(ada, no_go=(("said_no", "devvault_notes:file:a.md"),))
+        stop = dataclasses.replace(ada, no_go=(("stop_reply", "devvault_notes:file:b.md"),))
+        first = dataclasses.replace(self.plan, companies=companies, people={**self.plan.people, ada_key: said_no})
+        second = dataclasses.replace(self.plan, companies=companies, people={**self.plan.people, ada_key: stop})
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        for plan in (first, second, second):
+            result = apply_plan(conn, plan, now=NOW)
+            self.assertEqual(result.status, "ok", result.error)
+        active = conn.execute("SELECT company_id, person_id, reason FROM no_go WHERE lifted_at IS NULL").fetchall()
+        self.assertEqual(sorted((r["reason"]) for r in active), ["defence_contractor", "said_no"])
+
+    def test_a_lifted_import_no_go_is_never_added_back(self):
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        ids = apply_plan(conn, self.plan, now=NOW).ids
+        conn.execute("UPDATE no_go SET lifted_at = ?, lift_reason = 'not cleared' WHERE company_id = ?",
+                     (NOW, ids["company:orbitalfoods"]))
+        self.assertEqual(apply_plan(conn, self.plan, now=NOW).status, "ok")
+        self.assertEqual(conn.execute("SELECT count(*) FROM no_go WHERE lifted_at IS NULL").fetchone()[0], 0)
+
     # -- more of what the sender and the store rely on --
 
     def test_every_name_is_an_alias_of_its_company(self):

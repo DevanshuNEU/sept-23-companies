@@ -62,4 +62,7 @@ export const _parity: [
   Same<T.NoGoView, S['NoGoView']>,
   Same<T.DoneCompany, S['DoneCompany']>,
   Same<T.DoneView, S['DoneView']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<T.DailyEntry, S['DailyEntry']>,
+  Same<T.StillEmailing, S['StillEmailing']>,
+  Same<T.TodayView, S['TodayView']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

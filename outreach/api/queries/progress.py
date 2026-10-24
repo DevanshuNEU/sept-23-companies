@@ -68,7 +68,8 @@ def plan_counts(conn: sqlite3.Connection, today: str) -> tuple[int, int]:
     this reads `daily_list_entry` (today's rows), `outreach_touch`, and for email rows `touch` and `message`.
 
     Planned is today's rows that are not removed and not skipped (a skip sets the entry to `backlog`: it is carried
-    to tomorrow, not today's work). A row is done when every step has happened since the New York start of `today`:
+    to tomorrow, not today's work). LEAN (until #15): only a `picked` row is planned, because the lean Today also
+    stores its proposals as rows, and a proposal is not work he took on. A row is done when every step has happened since the New York start of `today`:
 
     - an email row, once its first message left `drafted` (approved, or sent without an approval time) today;
     - a LinkedIn row, when the person has a `linkedin_request` or `linkedin_message` touch, and, when the row names a
@@ -77,7 +78,7 @@ def plan_counts(conn: sqlite3.Connection, today: str) -> tuple[int, int]:
     """
     entries = conn.execute(
         "SELECT company_id, person_id, channel, posting_id FROM daily_list_entry "
-        "WHERE list_date = ? AND state NOT IN ('removed', 'backlog')", (today,)).fetchall()
+        "WHERE list_date = ? AND state = 'picked'", (today,)).fetchall()
     start = day_bounds_utc(today)[0]
 
     def has(sql: str, *args) -> bool:

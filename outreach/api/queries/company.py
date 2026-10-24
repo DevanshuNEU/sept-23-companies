@@ -412,6 +412,9 @@ def _sponsorship_shown(best: dict, role, live_postings, evidence_rows) -> str:
     return "not_stated"
 
 
+sponsorship_shown = _sponsorship_shown  # the lean Today shows the same word on its rows
+
+
 def _board(boards) -> CompanyBoard | None:
     if not boards:
         return None

@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company_id}/backlog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Backlog Company */
+        post: operations["backlog_company"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company_id}/close": {
         parameters: {
             query?: never;
@@ -55,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company_id}/pick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pick Company */
+        post: operations["pick_company"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company_id}/release-hold": {
         parameters: {
             query?: never;
@@ -72,6 +106,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove Company */
+        post: operations["remove_company"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company_id}/reopen": {
         parameters: {
             query?: never;
@@ -83,6 +134,23 @@ export interface paths {
         put?: never;
         /** Reopen Company */
         post: operations["reopen_company"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Company */
+        post: operations["restore_company"];
         delete?: never;
         options?: never;
         head?: never;
@@ -134,6 +202,23 @@ export interface paths {
         put?: never;
         /** Unmerge Company */
         post: operations["unmerge_company"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/companies/{company_id}/unpick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unpick Company */
+        post: operations["unpick_company"];
         delete?: never;
         options?: never;
         head?: never;
@@ -610,6 +695,23 @@ export interface paths {
         put?: never;
         /** Resume Sending */
         post: operations["resume_sending"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Today */
+        get: operations["today"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1110,6 +1212,69 @@ export interface components {
             /** Revision */
             revision: number;
         };
+        /** DailyCompany */
+        DailyCompany: {
+            /** Domain */
+            domain: string | null;
+            /** Held */
+            held: boolean;
+            heldByReply: components["schemas"]["HoldingReply"] | null;
+            /** Heldbytouchid */
+            heldByTouchId: number | null;
+            /** Hq */
+            hq: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Pausedat */
+            pausedAt: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "backlog" | "working" | "closed" | "removed";
+        };
+        /** DailyEntry */
+        DailyEntry: {
+            company: components["schemas"]["DailyCompany"];
+            domainFact: components["schemas"]["Fact"] | null;
+            /** Draftcount */
+            draftCount: number;
+            /** Firstproposedon */
+            firstProposedOn: string;
+            /**
+             * Listgroup
+             * @enum {string}
+             */
+            listGroup: "level_role" | "intern_junior" | "any_us_role" | "reason_no_role";
+            /** Mailserverok */
+            mailServerOk: boolean | null;
+            /** Otherroles */
+            otherRoles: components["schemas"]["OtherRole"][];
+            /** Peoplecount */
+            peopleCount: number;
+            /** Rank */
+            rank: number;
+            /** Revision */
+            revision: number;
+            role: components["schemas"]["RoleToName"] | null;
+            size: components["schemas"]["Fact"] | null;
+            /**
+             * Sponsorship
+             * @enum {string}
+             */
+            sponsorship: "has_sponsored" | "says_yes" | "says_no" | "opt_only" | "unclear" | "not_stated";
+            sponsorshipFact: components["schemas"]["Fact"] | null;
+            stage: components["schemas"]["Fact"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "proposed" | "picked" | "backlog" | "removed";
+            /** Why */
+            why: string;
+        };
         /** DoneCompany */
         DoneCompany: {
             /** Closedat */
@@ -1540,6 +1705,16 @@ export interface components {
             /** Tz */
             tz: string;
         };
+        /** NextStep */
+        NextStep: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "review_drafts" | "fix_review" | "answer_reply" | "nothing" | "paused";
+            /** Text */
+            text: string;
+        };
         /** NoGoRow */
         NoGoRow: {
             /** Addedat */
@@ -1606,6 +1781,23 @@ export interface components {
             hiddenCompanies: components["schemas"]["HiddenCompany"][];
             /** People */
             people: components["schemas"]["NoGoRow"][];
+        };
+        /** NotReady */
+        NotReady: {
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "weekend" | "not_built" | "job_failed";
+            /** Text */
+            text: string;
+        };
+        /** OtherRole */
+        OtherRole: {
+            /** Firstseenat */
+            firstSeenAt: string;
+            /** Title */
+            title: string;
         };
         /** OutboxCounts */
         OutboxCounts: {
@@ -1978,6 +2170,21 @@ export interface components {
             /** Reason */
             reason: ("no_sponsorship" | "citizenship" | "over_300" | "defence_contractor" | "agency" | "said_no" | "stop_reply" | "not_a_fit" | "other") | "removed";
         };
+        /** RemoveCompanyBody */
+        RemoveCompanyBody: {
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "not_a_fit" | "already_in_touch" | "bigger_than_it_looks" | "other";
+            /** Revision */
+            revision: number;
+        };
         /** RemovedCompany */
         RemovedCompany: {
             /** Held */
@@ -2063,6 +2270,13 @@ export interface components {
              * @enum {string}
              */
             resolution: "marked_ok" | "marked_no_go" | "field_edited";
+        };
+        /** RestoreCompanyBody */
+        RestoreCompanyBody: {
+            /** Reason */
+            reason: string;
+            /** Revision */
+            revision: number;
         };
         /** ResumeSendingBody */
         ResumeSendingBody: {
@@ -2471,6 +2685,24 @@ export interface components {
             /** Url */
             url: string;
         };
+        /** StillEmailing */
+        StillEmailing: {
+            /** Budget */
+            budget: number;
+            company: components["schemas"]["CompanyRef"];
+            /** Day */
+            day: number;
+            /** Days */
+            days: number;
+            /** Emailed */
+            emailed: number;
+            nextStep: components["schemas"]["NextStep"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "emailing" | "held" | "paused" | "waiting";
+        };
         /** ThreadMessage */
         ThreadMessage: {
             /** At */
@@ -2503,6 +2735,27 @@ export interface components {
             replied: number;
             /** Requests */
             requests: number;
+        };
+        /** TodayView */
+        TodayView: {
+            /** Asof */
+            asOf: string;
+            /** Backlog */
+            backlog: components["schemas"]["DailyEntry"][];
+            /** Builtat */
+            builtAt: string | null;
+            /** Capacity */
+            capacity: number;
+            /** Date */
+            date: string;
+            listJob: components["schemas"]["JobRunSummary"] | null;
+            notReady: components["schemas"]["NotReady"] | null;
+            /** Picked */
+            picked: number;
+            /** Proposed */
+            proposed: components["schemas"]["DailyEntry"][];
+            /** Stillemailing */
+            stillEmailing: components["schemas"]["StillEmailing"][];
         };
         /** TouchHistory */
         TouchHistory: {
@@ -2746,6 +2999,95 @@ export interface operations {
             };
         };
     };
+    backlog_company: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanyRevisionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyEntry"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     close_company: {
         parameters: {
             query?: never;
@@ -2924,6 +3266,95 @@ export interface operations {
             };
         };
     };
+    pick_company: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanyRevisionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyEntry"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     release_hold: {
         parameters: {
             query?: never;
@@ -3013,6 +3444,95 @@ export interface operations {
             };
         };
     };
+    remove_company: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveCompanyBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Empty"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     reopen_company: {
         parameters: {
             query?: never;
@@ -3035,6 +3555,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CompanyWritten"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    restore_company: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreCompanyBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Empty"];
                 };
             };
             /** @description bad_request: the request was not valid */
@@ -3280,6 +3889,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Unmerged"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    unpick_company: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanyRevisionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyEntry"];
                 };
             };
             /** @description bad_request: the request was not valid */
@@ -5411,6 +6109,71 @@ export interface operations {
             };
             /** @description blocked or idempotency_mismatch: the write changed nothing */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    today: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodayView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

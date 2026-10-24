@@ -104,6 +104,41 @@ class ServeTest(BuiltAppCase):
                 self.assertNotIn(SCRIPT, reply.text)
 
 
+class SymlinkedBuildTest(ApiCase):
+    """A link inside web/dist that points out of it never serves the outside bytes (Grok review)."""
+
+    OUTSIDE = '{"token": "outside the build"}'
+
+    def setUp(self):
+        super().setUp()
+        self.dist = self.settings.web_dist
+        self.dist.mkdir(parents=True)
+        self.outside = self.dist.parent / "outreach-mail"  # stands in for a secrets folder
+        self.outside.mkdir()
+        (self.outside / "token.json").write_text(self.OUTSIDE, encoding="utf-8")
+
+    def assert_never_outside(self, reply):
+        self.assertIn(reply.status_code, (404, 503), reply.text)
+        self.assertNotIn("outside the build", reply.text)
+
+    def test_an_assets_folder_that_links_outside_is_refused(self):
+        (self.dist / "index.html").write_text(INDEX, encoding="utf-8")
+        os.symlink(self.outside, self.dist / "assets")
+        self.assert_never_outside(self.get("/assets/token.json"))
+        self.assertIsNone(static.asset_path(self.dist, "/assets/token.json"))
+
+    def test_an_index_that_links_outside_is_refused(self):
+        os.symlink(self.outside / "token.json", self.dist / "index.html")
+        for path in ("/", "/outbox", "/index.html"):
+            with self.subTest(path=path):
+                self.assert_never_outside(self.get(path))
+
+    def test_a_link_inside_the_build_still_serves(self):
+        (self.dist / "real.html").write_text(INDEX, encoding="utf-8")
+        os.symlink(self.dist / "real.html", self.dist / "index.html")
+        self.assertEqual(self.get("/").text, INDEX)
+
+
 class NotBuiltTest(ApiCase):
     def test_missing_build_is_a_503_page_and_api_still_works(self):
         self.assertFalse(self.settings.web_dist.exists())

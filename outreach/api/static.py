@@ -4,9 +4,11 @@ A plain ASGI layer inside the guards. It answers only `GET` and `HEAD` for paths
 on to the routers unchanged, so an unknown `/api` path is still the JSON 404 envelope and a wrong method still 405.
 
 - `/assets/<file>`: the hashed build output, `Cache-Control: public, max-age=31536000, immutable`. A file that is not
-  inside `web_dist/assets` after resolving links and dots is a 404, never anything else on disk.
+  inside `web_dist/assets` after resolving links and dots is a 404, never anything else on disk, and an `assets`
+  folder that is itself a link out of `web_dist` serves nothing.
 - Every other page path: `index.html` with `Cache-Control: no-store`, so client-side routes reload.
-- No build: a plain 503 that says how to build it. `/api` keeps working.
+- No build: a plain 503 that says how to build it. `/api` keeps working. An `index.html` that resolves outside
+  `web_dist` counts as no build.
 - `/openapi.json`, `/docs` and `/redoc` go to the routers (404): the schema is never a public route.
 """
 from pathlib import Path
@@ -30,7 +32,10 @@ def asset_path(web_dist: Path, request_path: str) -> Path | None:
     if not request_path.startswith("/assets/") or "\x00" in request_path:
         return None
     try:
-        assets = (Path(web_dist) / "assets").resolve()
+        root = Path(web_dist).resolve()
+        assets = (root / "assets").resolve()
+        if not assets.is_relative_to(root) or assets == root:  # the assets folder links out of the build
+            return None
         candidate = (assets / request_path.removeprefix("/assets/").lstrip("/")).resolve()
         if candidate == assets or not candidate.is_relative_to(assets) or not candidate.is_file():
             return None
@@ -42,7 +47,7 @@ def asset_path(web_dist: Path, request_path: str) -> Path | None:
 class StaticMiddleware:
     def __init__(self, app, web_dist: Path):
         self.app = app
-        self.web_dist = Path(web_dist)
+        self.root = Path(web_dist).resolve()  # the jail: every file served resolves inside it
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
@@ -53,12 +58,22 @@ class StaticMiddleware:
         await self.response(path)(scope, receive, send)
 
     def response(self, path: str):
-        index = self.web_dist / "index.html"
-        if not index.is_file():
+        index = self.index()
+        if index is None:
             return PlainTextResponse(NOT_BUILT, status_code=503, headers={"Cache-Control": NO_STORE})
         if path.startswith("/assets/"):
-            found = asset_path(self.web_dist, path)
+            found = asset_path(self.root, path)
             if found is None:
                 return envelope("not_found", "No such file in the built app.", STATUS["not_found"])
             return FileResponse(found, headers={"Cache-Control": IMMUTABLE})
         return FileResponse(index, media_type="text/html", headers={"Cache-Control": NO_STORE})
+
+    def index(self) -> Path | None:
+        """The resolved `index.html` when it is a file inside the build, else None."""
+        try:
+            index = (self.root / "index.html").resolve()
+            if index.is_relative_to(self.root) and index != self.root and index.is_file():
+                return index
+        except (OSError, ValueError):
+            pass
+        return None

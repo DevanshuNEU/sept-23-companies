@@ -463,6 +463,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notes/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Note */
+        put: operations["save_note"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notes/{note_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Reason */
+        post: operations["confirm_reason"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/outbox": {
         parameters: {
             query?: never;
@@ -559,6 +593,74 @@ export interface paths {
         get: operations["ping"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Plan */
+        get: operations["plan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan/{entry_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Log Applied */
+        post: operations["log_applied"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan/{entry_id}/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Log Request */
+        post: operations["log_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan/{entry_id}/skip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Skip Row */
+        post: operations["skip_row"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1234,6 +1336,11 @@ export interface components {
             /** Personname */
             personName: string;
         };
+        /** ConfirmReasonBody */
+        ConfirmReasonBody: {
+            /** Revision */
+            revision: number;
+        };
         /**
          * CorrectionBody
          * @description Set one outcome to `at` (any ISO-8601 time) or clear it (`at` null), from the touch's history.
@@ -1413,6 +1520,13 @@ export interface components {
             sourceRef: string;
             /** Value */
             value: string;
+        };
+        /** FindSomeone */
+        FindSomeone: {
+            /** Handoff */
+            handoff: string;
+            /** Searchurl */
+            searchUrl: string;
         };
         /** Finding */
         Finding: {
@@ -1658,6 +1772,42 @@ export interface components {
             /** Requeststhisweek */
             requestsThisWeek: number;
         };
+        /** LinkedinMonth */
+        LinkedinMonth: {
+            /** Hardlimit */
+            hardLimit: number;
+            /** Hardused */
+            hardUsed: number;
+            /** Limit */
+            limit: number;
+            /** Used */
+            used: number;
+        };
+        /**
+         * LogAppliedBody
+         * @description He applied to the row's role. `idempotencyKey` is `plan:<entryId>:apply`.
+         */
+        LogAppliedBody: {
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Postingid */
+            postingId: number;
+            /** Revision */
+            revision: number;
+        };
+        /**
+         * LogRequestBody
+         * @description He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one
+         *     touch per key, whatever the request id.
+         */
+        LogRequestBody: {
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Personid */
+            personId: number;
+            /** Revision */
+            revision: number;
+        };
         /**
          * LogStepBody
          * @description A step he took on LinkedIn by hand. `replyKind` goes with `replied` and nothing else; an out-of-office is
@@ -1874,6 +2024,47 @@ export interface components {
              * @enum {string}
              */
             reason: "weekend" | "not_built" | "job_failed";
+            /** Text */
+            text: string;
+        };
+        /** NoteDraft */
+        NoteDraft: {
+            /** Chars */
+            chars: number;
+            /** Checks */
+            checks: components["schemas"]["Check"][];
+            /** Facts */
+            facts: components["schemas"]["NoteFact"][];
+            /** Maxchars */
+            maxChars: number;
+            /** Needsyourline */
+            needsYourLine: boolean;
+            /** Noteid */
+            noteId: number;
+            /** Reasonline */
+            reasonLine: string;
+            /**
+             * Reasonstate
+             * @enum {string}
+             */
+            reasonState: "proposed" | "confirmed" | "written";
+            /** Revision */
+            revision: number;
+            /** Savedat */
+            savedAt: string;
+            /**
+             * Savedby
+             * @enum {string}
+             */
+            savedBy: "claude" | "devanshu" | "sender" | "import";
+            /** Text */
+            text: string;
+        };
+        /** NoteFact */
+        NoteFact: {
+            /** Innote */
+            inNote: boolean;
+            source: components["schemas"]["SourceLink"];
             /** Text */
             text: string;
         };
@@ -2112,12 +2303,124 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** PlanCompany */
+        PlanCompany: {
+            /** Domain */
+            domain: string | null;
+            /** Held */
+            held: boolean;
+            heldByReply: components["schemas"]["HoldingReply"] | null;
+            /** Heldbytouchid */
+            heldByTouchId: number | null;
+            /** Hq */
+            hq: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Pausedat */
+            pausedAt: string | null;
+            /** Revision */
+            revision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "backlog" | "working" | "closed" | "removed";
+        };
+        /** PlanPerson */
+        PlanPerson: {
+            foundOn: components["schemas"]["SourceLink"] | null;
+            person: components["schemas"]["PersonRef"];
+        };
         /** PlanProgress */
         PlanProgress: {
             /** Done */
             done: number;
             /** Total */
             total: number;
+        };
+        /** PlanRow */
+        PlanRow: {
+            /** Applyurl */
+            applyUrl: string | null;
+            /** Carriedfrom */
+            carriedFrom: string | null;
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "linkedin_request" | "email";
+            company: components["schemas"]["PlanCompany"];
+            /** Emailtouchid */
+            emailTouchId: number | null;
+            /** Entryid */
+            entryId: number;
+            findSomeone: components["schemas"]["FindSomeone"] | null;
+            /**
+             * Lane
+             * @enum {string}
+             */
+            lane: "level_role" | "intern_junior" | "any_us_role" | "reason_no_role";
+            note: components["schemas"]["NoteDraft"] | null;
+            person: components["schemas"]["PlanPerson"] | null;
+            /** Position */
+            position: number;
+            /** Reason */
+            reason: string;
+            /** Reasonsources */
+            reasonSources: components["schemas"]["SourceLink"][];
+            /** Revision */
+            revision: number;
+            role: components["schemas"]["RoleToName"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "todo" | "done" | "skipped";
+            /** Steps */
+            steps: components["schemas"]["PlanStep"][];
+        };
+        /** PlanStep */
+        PlanStep: {
+            /** At */
+            at: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "request" | "apply";
+            /** Touchid */
+            touchId: number | null;
+        };
+        /** PlanView */
+        PlanView: {
+            /** Asof */
+            asOf: string;
+            /** Builtat */
+            builtAt: string | null;
+            /** Date */
+            date: string;
+            /** Done */
+            done: number;
+            linkedinMonth: components["schemas"]["LinkedinMonth"];
+            listJob: components["schemas"]["JobRunSummary"] | null;
+            notReady: components["schemas"]["NotReady"] | null;
+            /** Rows */
+            rows: components["schemas"]["PlanRow"][];
+            tomorrow: components["schemas"]["Tomorrow"];
+            /** Total */
+            total: number;
+            week: components["schemas"]["PlanWeek"];
+        };
+        /** PlanWeek */
+        PlanWeek: {
+            /** Accepts */
+            accepts: number;
+            /** Replies */
+            replies: number;
+            /** Requests */
+            requests: number;
         };
         /**
          * PostingFlag
@@ -2582,6 +2885,15 @@ export interface components {
             /** Subject */
             subject: string;
         };
+        /** SaveNoteBody */
+        SaveNoteBody: {
+            /** Reasonline */
+            reasonLine: string;
+            /** Revision */
+            revision: number;
+            /** Text */
+            text: string;
+        };
         /** Schedule */
         Schedule: {
             /** Companysenttoday */
@@ -2814,6 +3126,14 @@ export interface components {
             /** Winsunseen */
             winsUnseen: number;
         };
+        /**
+         * SkipRowBody
+         * @description Carry the row to tomorrow.
+         */
+        SkipRowBody: {
+            /** Revision */
+            revision: number;
+        };
         /** SourceLink */
         SourceLink: {
             /** Label */
@@ -2892,6 +3212,24 @@ export interface components {
             proposed: components["schemas"]["DailyEntry"][];
             /** Stillemailing */
             stillEmailing: components["schemas"]["StillEmailing"][];
+        };
+        /** Tomorrow */
+        Tomorrow: {
+            /** Preview */
+            preview: components["schemas"]["TomorrowRow"][];
+            /** Text */
+            text: string;
+            /** Total */
+            total: number;
+        };
+        /** TomorrowRow */
+        TomorrowRow: {
+            /** Companyname */
+            companyName: string;
+            /** Personname */
+            personName: string | null;
+            /** Roletitle */
+            roleTitle: string | null;
         };
         /** TouchHistory */
         TouchHistory: {
@@ -5261,6 +5599,184 @@ export interface operations {
             };
         };
     };
+    save_note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveNoteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteDraft"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    confirm_reason: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmReasonBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteDraft"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     outbox: {
         parameters: {
             query?: never;
@@ -5653,6 +6169,338 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    log_applied: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogAppliedBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanRow"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    log_request: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogRequestBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanRow"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    skip_row: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkipRowBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanRow"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

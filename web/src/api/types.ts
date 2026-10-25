@@ -286,6 +286,39 @@ export interface Finding { id: Id; text: string; counts: { label: string; count:
 // month is the report's label; the findings' counts read every touch so far.
 export interface FindingsView { asOf: IsoTime; month: IsoDate; reportedOn: IsoDate | null; findings: Finding[]; changes: { at: IsoTime; text: string }[] }
 
+// The people plan (#33 seam, #11 Task 10): the day's people, one row each, with the state the API derives.
+export type ListGroup = 'level_role' | 'intern_junior' | 'reason_no_role' | 'any_us_role'; // widens DailyEntry.listGroup
+export type StepKind = 'request' | 'apply';
+export interface NoteFact { text: string; source: SourceLink; inNote: boolean }     // a public-page fact and its link
+export interface NoteDraft {
+  noteId: Id; text: string; chars: number; maxChars: number;                         // maxChars from config, never hard-coded in the UI
+  reasonLine: string; reasonState: 'proposed' | 'confirmed' | 'written';             // the one line that says why this person; Claude only proposes it
+  needsYourLine: boolean;                                                            // derived: reasonState === 'proposed'
+  facts: NoteFact[]; checks: Check[]; savedBy: SavedBy; savedAt: IsoTime; revision: Revision;
+}
+export interface PlanStep { kind: StepKind; touchId: Id | null; at: IsoTime | null }  // at null: not done yet
+export interface PlanRow {
+  entryId: Id; position: number; channel: 'linkedin_request' | 'email'; lane: ListGroup;
+  company: CompanyRef & { domain: string | null; hq: string; revision: Revision };
+  person: { person: PersonRef; foundOn: SourceLink | null } | null;                  // null: find someone
+  role: RoleToName | null; applyUrl: string | null;                                  // null with no role
+  reason: string; reasonSources: SourceLink[];                                       // derived: one reason and where it comes from
+  note: NoteDraft | null;
+  findSomeone: { searchUrl: string; handoff: string } | null;                        // set only when person is null
+  emailTouchId: Id | null;                                                           // channel 'email': the Outbox item
+  steps: PlanStep[];                                                                 // linkedin_request: request, then apply when there is a role
+  state: 'todo' | 'done' | 'skipped';                                                // derived
+  carriedFrom: IsoDate | null; revision: Revision;
+}
+export interface PlanView {
+  asOf: IsoTime; date: IsoDate; builtAt: IsoTime | null; listJob: JobRunSummary | null;
+  notReady: { reason: 'weekend' | 'not_built' | 'job_failed'; text: string } | null;
+  rows: PlanRow[]; done: number; total: number;
+  linkedinMonth: { used: number; limit: number; hardUsed: number; hardLimit: number };   // plan quota, and every request against the hard total
+  tomorrow: { total: number; text: string; preview: { companyName: string; personName: string | null; roleTitle: string | null }[] };
+  week: { requests: number; accepts: number; replies: number };
+}
+
 // Done (spec 13.8)
 export interface DoneCompany { company: CompanyRef; outcome: 'interview' | 'referral'; outcomeLabel: string; closedAt: IsoTime; howStarted: string; imported: boolean; role: string | null; note: string }
 export interface DoneView {

@@ -107,7 +107,9 @@ class Shell(ApiCase):
         self.assertEqual(body["doneCount"], 2)
         self.assertEqual(body["repliesThisMonth"], 3)
         self.assertEqual({j["job"] for j in body["jobs"]}, {"rank", "rebuild"})
-        self.assertEqual(body["plan"], {"done": 1, "total": 2})
+        # The seeded list is the lean Today's (no row names a channel, no plan job built it): it is no people plan,
+        # so the plan count is 0 of 0, as GET /api/plan says (not_built). A built plan is counted in test_api_plan.
+        self.assertEqual(body["plan"], {"done": 0, "total": 0})
         self.assertEqual(body["winsUnseen"], 2)
         self.conn.execute("INSERT INTO win_seen(touch_id, kind, seen_at) VALUES (?, 'accepted', ?)", (ids["wins"][0], NOW))
         self.assertEqual(self.shell()["winsUnseen"], 1)
@@ -128,6 +130,8 @@ class Shell(ApiCase):
         self.assertEqual((body["doneCount"], body["repliesThisMonth"]), (len(done["companies"]), done["metrics"]["repliesThisMonth"]))
         progress = self.get("/api/progress").json()["today"]
         self.assertEqual(body["plan"], {"done": progress["done"], "total": progress["planned"]})
+        plan = self.get("/api/plan").json()
+        self.assertEqual(body["plan"], {"done": plan["done"], "total": plan["total"]})
         self.assertEqual(body["winsUnseen"], self.get("/api/wins").json()["unseen"])
         today = self.get("/api/today").json()
         self.assertEqual((body["pickedToday"], body["capacityToday"]), (today["picked"], today["capacity"]))

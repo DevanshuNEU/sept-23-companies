@@ -56,6 +56,14 @@ beforeEach(() => {
 });
 
 describe('AppShell sidebar', () => {
+  it('is branded Knock, with a K in the logo square', async () => {
+    await shell();
+    const brand = sidebar().querySelector<HTMLElement>('[data-slot="sidebar-header"] .font-semibold');
+    expect(brand).toHaveTextContent('KKnock');
+    expect(within(sidebar()).queryByText('Outreach')).toBeNull();
+    expect(within(sidebar()).getByText('K')).toHaveAttribute('aria-hidden', 'true');
+  });
+
   it('shows the counts by each view', async () => {
     await shell();
     expect(within(nav(/^Today/)).getByText('2 of 7')).toBeInTheDocument();

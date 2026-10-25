@@ -1,4 +1,4 @@
-# Outreach
+# Knock
 
 Devanshu's job-search system: finds small, hiring companies, drafts cold referral emails in his voice, and
 sends them from his Gmail. The goal it serves is **replies per month**.

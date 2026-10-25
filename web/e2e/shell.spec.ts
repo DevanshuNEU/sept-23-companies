@@ -2,7 +2,7 @@ import { expect, test } from './fixtures';
 
 test('app loads on 5173 with no console errors', async ({ page, consoleErrors }) => {
   await page.goto('/');
-  await expect(page.getByText('Outreach', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Knock', { exact: true }).first()).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
 

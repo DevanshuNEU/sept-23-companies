@@ -6,7 +6,8 @@ from outreach.plan.contact import contact_states, load_contact_states
 from outreach.plan.outbound import Outbound
 from outreach.ranking.common import canonical_ids
 from outreach.store.writes import log_touch
-from tests.plan_seed import TODAY, seed_outbound, seed_person, seed_scored_company
+from tests.plan_seed import (TODAY, seed_email_touch, seed_log_only, seed_message, seed_outbound, seed_person,
+                             seed_scored_company)
 from tests.storetest import fresh_store
 
 CFG = default_plan_config()
@@ -99,6 +100,74 @@ class ContactStateTest(unittest.TestCase):
         self.assertEqual((got[survivor].status, got[survivor].last_person_id, got[survivor].people_contacted),
                          ("waiting", person, 1))
         self.assertEqual(got[free].status, "free")
+
+
+class QueuedAndThreadStateTest(unittest.TestCase):
+    """Review fixes A, C and D, read through the store: a live thread, a queued email and a log accept all keep a
+    company from taking a second person."""
+
+    def setUp(self):
+        self.conn = fresh_store()
+        self.company = seed_scored_company(self.conn, "Acme", 5.0, ["level_role"])
+        self.person = seed_person(self.conn, self.company, "Ada")
+
+    def status(self):
+        return load_contact_states(self.conn, [self.company], canonical_ids(self.conn), TODAY, CFG)[self.company]
+
+    def test_a_queued_row_waits_however_old_it_is(self):
+        old = Outbound(person_id=1, company_id=1, channel="email", sent_on=ago(40), anchor_on=ago(40), accepted=False,
+                       replied=False, progressed=False, lane=None, context_source="own", source="queued_email",
+                       queued=True)
+        self.assertEqual(state([old]).status, "waiting")
+        self.assertEqual(state([old]).reason, "Email queued, no answer yet")
+
+    def test_a_log_accept_keeps_an_old_request_waiting(self):
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", ago(20))
+        self.assertEqual(self.status().status, "stale")
+        seed_log_only(self.conn, self.person, "accepted", ago(1))
+        self.assertEqual(self.status().status, "waiting")
+        seed_log_only(self.conn, self.person, "replied", ago(0))
+        self.assertEqual(self.status().status, "engaged")
+
+    def test_a_live_thread_with_a_recent_followup_is_waiting_on_day_fourteen(self):
+        touch = seed_email_touch(self.conn, self.person, ago(20), company_id=self.company, outreach=True)
+        seed_message(self.conn, touch, 0, "sent", sent_on=ago(20))
+        self.assertEqual(self.status().status, "stale")
+        seed_message(self.conn, touch, 1, "sent", sent_on=ago(3), due_on=ago(10))
+        got = self.status()
+        self.assertEqual((got.status, got.last_anchor), ("waiting", ago(3)))
+
+    def test_a_queued_followup_keeps_the_thread_waiting(self):
+        touch = seed_email_touch(self.conn, self.person, ago(15), company_id=self.company, outreach=True)
+        seed_message(self.conn, touch, 0, "sent", sent_on=ago(15))
+        self.assertEqual(self.status().status, "stale")
+        seed_message(self.conn, touch, 1, "drafted", due_on=ago(2))
+        self.assertEqual(self.status().status, "waiting")
+
+    def test_a_first_email_in_the_outbox_blocks_the_company(self):
+        self.assertEqual(self.status().status, "free")
+        seed_message(self.conn, seed_email_touch(self.conn, self.person, None), 0, "approved")
+        got = self.status()
+        self.assertEqual((got.status, got.people_contacted, got.last_person_id), ("waiting", 1, self.person))
+
+    def test_a_first_email_at_a_merged_away_duplicate_blocks_the_survivor(self):
+        dup = seed_scored_company(self.conn, "Acme Inc", 1.0, [])
+        other = seed_person(self.conn, dup, "Dee")
+        seed_message(self.conn, seed_email_touch(self.conn, other, None), 0, "drafted")
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'duplicate', merged_into = ? "
+                          "WHERE company_id = ?", (self.company, dup))
+        self.assertEqual(self.status().status, "waiting")
+
+    def test_a_replied_legacy_email_stays_engaged_when_its_outreach_touch_was_undone(self):
+        touch = seed_email_touch(self.conn, self.person, ago(30), state="replied")
+        from outreach.store.writes import undo_touch
+        outreach = log_touch(self.conn, person_id=self.person, company_id=self.company, channel="email",
+                             sent_at=f"{ago(30)}T15:00:00Z", context={
+                                 "source": "own", "lane": None, "roleKind": None, "roleAgeDays": None,
+                                 "rankerVersion": None, "signals": {}, "roleNamed": False},
+                             email_touch_id=touch, idempotency_key="e-undone")
+        undo_touch(self.conn, outreach, at=f"{ago(29)}T15:00:00Z", revision=1)
+        self.assertEqual(self.status().status, "engaged")
 
 
 if __name__ == "__main__":

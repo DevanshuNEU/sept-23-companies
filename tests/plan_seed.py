@@ -14,7 +14,8 @@ from outreach.store.timefmt import utcnow
 from outreach.store.writes import log_touch, record_outcome
 
 __all__ = ["TODAY", "seed_scored_company", "seed_person", "seed_source", "seed_outbound", "seed_log_only",
-           "seed_send_day"]
+           "seed_send_day",
+           "seed_email_touch", "seed_message"]
 
 TODAY = date(2026, 11, 10)
 _counter = itertools.count(1)
@@ -114,3 +115,52 @@ def seed_log_only(conn: sqlite3.Connection, person_id: int, kind: str, on: date,
 def seed_send_day(conn: sqlite3.Connection, day: date, limit: int, outcome: str | None = None) -> None:
     conn.execute("INSERT INTO send_day(day, send_limit, outcome, created_at) VALUES (?, ?, ?, ?)",
                  (day.isoformat(), limit, outcome, utcnow()))
+
+
+def seed_email_touch(conn: sqlite3.Connection, person_id: int, first_sent_on: date | None, *, state: str = "open",
+                     company_id: int | None = None, outreach: bool = False) -> int:
+    """A legacy email `touch` for the person, its first email sent on `first_sent_on` (None: not sent yet). With
+    `outreach` and a `company_id` it also gets the `outreach_touch` the sender writes at the first send."""
+    now = utcnow()
+    first = _at(first_sent_on) if first_sent_on else None
+    later = _at(first_sent_on, 17) if first_sent_on else now
+    touch_id = conn.execute(
+        "INSERT INTO touch(person_id, origin, state, first_sent_at, replied_at, reply_kind, closed_at, close_reason, "
+        "created_at, updated_at) VALUES (?, 'import', ?, ?, ?, ?, ?, ?, ?, ?)",
+        (person_id, state, first, later if state == "replied" else None, "interested" if state == "replied" else None,
+         later if state == "closed" else None, "no_reply" if state == "closed" else None, now, now)).lastrowid
+    if outreach:
+        context = {"source": "own", "lane": None, "roleKind": None, "roleAgeDays": None, "rankerVersion": None,
+                   "signals": {}, "roleNamed": False}
+        log_touch(conn, person_id=person_id, company_id=company_id, channel="email", sent_at=first, context=context,
+                  email_touch_id=touch_id, idempotency_key=f"plan-seed-email-{next(_counter)}")
+    return touch_id
+
+
+def seed_message(conn: sqlite3.Connection, touch_id: int, seq: int, state: str, *, sent_on: date | None = None,
+                 due_on: date | None = None) -> int:
+    """A message in `state` (planned, drafted, approved, sending, send_unknown, failed, skipped or sent). The store
+    makes a message born planned, drafted or sent and moves it by UPDATE, so this does the same."""
+    now = utcnow()
+    n = next(_counter)
+    born = "sent" if state == "sent" else ("planned" if state == "planned" else "drafted")
+    if seq >= 1 and due_on is None:
+        due_on = date(2026, 11, 12)
+    full = born != "planned"
+    message_id = conn.execute(
+        "INSERT INTO message(touch_id, seq, state, subject, body, due_on, sent_at, rfc_message_id, created_at, "
+        "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (touch_id, seq, born, "s" if full else "", "b" if full else "", due_on.isoformat() if due_on else None,
+         _at(sent_on) if state == "sent" else None, f"<plan-seed-{n}@x>" if state == "sent" else None, now,
+         now)).lastrowid
+    steps = {"approved": ("approved",), "sending": ("approved", "sending"),
+             "send_unknown": ("approved", "sending", "send_unknown"),
+             "failed": ("approved", "sending", "send_unknown", "failed")}.get(state, ())
+    for step in steps:
+        held = step in ("sending", "send_unknown")
+        conn.execute("UPDATE message SET state = ?, approved_at = ?, pending_rfc_id = ?, claimed_at = ? "
+                     "WHERE message_id = ?", (step, now, f"<plan-seed-p{n}@x>" if held else None,
+                                              now if held else None, message_id))
+    if state == "skipped":
+        conn.execute("UPDATE message SET state = 'skipped' WHERE message_id = ?", (message_id,))
+    return message_id

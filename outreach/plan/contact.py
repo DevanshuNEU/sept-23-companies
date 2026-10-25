@@ -1,7 +1,8 @@
 """Company contact state and the 14-day no-answer rule (#15, Task 5).
 
 One person per company at a time: a company is `waiting` while any outbound touch (LinkedIn or email, either
-channel) has an anchor date under `linkedin.rotate_days` old with no reply; `engaged` when anyone replied or a
+channel) has an anchor date under `linkedin.rotate_days` old with no reply, or an email is still queued (a
+follow-up to go, or a first email in the Outbox); `engaged` when anyone replied or a
 referral, interview or offer exists (never auto-rotated); `stale` when it has outbound touches and none is waiting or
 engaged; `free` with none. Only `free` and `stale` companies are eligible, and the caller decides how far `stale`
 rotates. Pure over `Outbound` rows; `load_contact_states` adds the store read.
@@ -36,6 +37,8 @@ def _days(n: int) -> str:
 
 
 def _waiting_reason(row: Outbound, today: date) -> str:
+    if row.queued:
+        return "Email queued, no answer yet"
     when = _days((today - row.anchor_on).days)
     if row.channel == "email":
         what = "Email sent"
@@ -54,12 +57,13 @@ def _state(company_id: int, rows: list[Outbound], today: date, rotate_days: int)
     newest = max(rows, key=lambda o: (o.anchor_on, o.sent_on, o.person_id or 0))
     people = {o.person_id for o in rows if o.person_id is not None}
     email_people = {o.person_id for o in rows if o.person_id is not None and o.channel == "email"}
-    waiting = [o for o in rows if (today - o.anchor_on).days < rotate_days]
+    # A queued email (a follow-up still to go, or a first email in the Outbox) is in play however old it is.
+    waiting = [o for o in rows if o.queued or (today - o.anchor_on).days < rotate_days]
     if any(o.replied or o.progressed for o in rows):
         status, reason = "engaged", ("A referral or interview is in progress" if any(o.progressed for o in rows)
                                      else "Someone replied")
     elif waiting:
-        status, reason = "waiting", _waiting_reason(max(waiting, key=lambda o: (o.anchor_on, o.sent_on)), today)
+        status, reason = "waiting", _waiting_reason(max(waiting, key=lambda o: (o.queued, o.anchor_on, o.sent_on)), today)
     else:
         status, reason = "stale", f"No answer for {(today - newest.anchor_on).days} days"
     return ContactState(company_id, status, len(people), len(email_people), newest.person_id, newest.anchor_on,

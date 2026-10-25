@@ -258,13 +258,13 @@ _ALIAS_SAID = {  # (with the value, without it)
 
 
 _PIECE_MAX = 160
-_UNSAFE = str.maketrans("", "", "<>&")
+_UNSAFE = str.maketrans("", "", "<>")  # `&` stays: the web shows these as escaped text
 
 
 def _piece(value) -> str:
     """Outside text (a name, a domain, a board, an alias value, a quote) made fit to sit inside a sentence: as text,
-    without `<`, `>` and `&`, every run of whitespace (newlines too) one space, at most 160 characters (a longer one
-    is cut and ends in three periods), and no en or em dash. None is empty text."""
+    without `<` and `>` (`&` stays, as in "AT&T"), every run of whitespace (newlines too) one space, at most 160
+    characters (a longer one is cut and ends in three periods), and no en or em dash. None is empty text."""
     text = " ".join(("" if value is None else str(value)).translate(_UNSAFE).split())
     if len(text) > _PIECE_MAX:
         text = text[:_PIECE_MAX - 3].rstrip() + "..."

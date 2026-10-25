@@ -317,7 +317,7 @@ class PlainReasonsTest(unittest.TestCase):
         self.assertTrue(text.strip())
         self.assertNotIn("\n", text)
         self.assertNotIn("\r", text)
-        for c in "<>&":
+        for c in "<>":
             self.assertNotIn(c, text)
         self.assertLess(len(text), 700)
         self.assertEqual(text, words.clean(text))
@@ -343,7 +343,7 @@ class PlainReasonsTest(unittest.TestCase):
             with self.subTest(text=str(text)[:80]):
                 self.assertIsNotNone(text)
                 self.assert_one_short_line(text)
-        self.assertIn("Acme Corp img src=x onerror=alert(1) Co shares its domain", outs[0])
+        self.assertIn("Acme Corp img src=x onerror=alert(1) & Co shares its domain", outs[0])
         self.assertIn("...", outs[2])
         self.assertIn("...", outs[9])
 
@@ -354,6 +354,24 @@ class PlainReasonsTest(unittest.TestCase):
         reader = self.reader(verdict("sponsorship", "silent", "wont_sponsor", "We cannot sponsor. " * 260))
         for rid in (size, reader):
             self.assert_one_short_line(self.shown(rid))
+
+    def test_an_ampersand_in_a_name_survives(self):
+        """The web shows these as escaped text, so `&` is safe and "Johnson & Johnson" must not lose it."""
+        for name in ("Johnson & Johnson", "AT&T"):
+            with self.subTest(name=name):
+                self.assertTrue(words.shared_domain_size_reason(name, "jnj.com", 2).startswith(f"{name} shares"))
+                self.assertEqual(words.merge_reason("alias:dba", f"r has the dba {name!r} (key x), which already "
+                                                                 "belongs to #2"),
+                                 f'Both go by the name "{name}", so they may be one company.')
+                self.assertIn(f'"{name}"', words.merge_reason(
+                    "name", f"r: the same name ({name}), but the state is CA here and NY there"))
+                self.assertIn(f'line and reads it as no sponsorship: "{name} cannot sponsor visas."',
+                              words.reader_reason([("sponsorship", "silent", "wont_sponsor",
+                                                    f"{name} cannot sponsor visas.")]))
+                self.assertIn(f"reads the place as {name} Tower", words.reader_reason(
+                    [("location", "no", f"{name} Tower", f"{name} Tower")]))
+        self.conn.execute("UPDATE company SET name = 'AT&T' WHERE company_id = ?", (self.a,))
+        self.assertTrue(self.shown(self.shared("AT&T", "2 other employers")).startswith("AT&T shares its domain"))
 
     def test_a_null_or_empty_stored_reason_never_crashes(self):
         for kind in ("merge_candidate", "size_check", "reader_disagrees", "board_empty", "size_unknown"):

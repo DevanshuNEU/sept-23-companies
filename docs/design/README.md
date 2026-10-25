@@ -1,4 +1,4 @@
-# Outreach platform: UI and UX design (#12)
+# Knock: UI and UX design (#12)
 
 Status: draft for Devanshu's approval. No React code starts until he signs off on this file and the mockups.
 Decision record: issue #9 wins over everything here. Architecture: `docs/superpowers/specs/2026-10-18-outreach-platform-design.md`

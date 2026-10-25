@@ -292,9 +292,9 @@ export function AppSidebar({ onSearch }: { onSearch?: () => void }) {
         <div className="flex h-8 items-center justify-between pr-1 pl-2">
           <span className="flex items-center gap-2 font-semibold">
             <span aria-hidden className="grid size-6 place-items-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
-              O
+              K
             </span>
-            Outreach
+            Knock
           </span>
           <Button variant="ghost" size="icon-sm" className="size-7" aria-label="Switch theme" onClick={toggle}>
             {resolved === 'dark' ? <Sun aria-hidden /> : <Moon aria-hidden />}

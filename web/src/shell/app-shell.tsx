@@ -137,7 +137,7 @@ function Crumbs() {
           </>
         ) : (
           <BreadcrumbItem>
-            <BreadcrumbPage className="font-medium">{VIEW_TITLE[view] ?? 'Outreach'}</BreadcrumbPage>
+            <BreadcrumbPage className="font-medium">{VIEW_TITLE[view] ?? 'Knock'}</BreadcrumbPage>
           </BreadcrumbItem>
         )}
       </BreadcrumbList>

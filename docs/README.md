@@ -1,5 +1,7 @@
 # Docs map
 
+The app is called Knock. Its internal names stay `outreach` on purpose (the Python package, launchd labels, the store path, `OUTREACH_*` variables, the MCP server name), so nothing running has to move.
+
 Decisions live in GitHub issue #9. After the switch (#17) the live system is the `outreach/` package, `web/` and the launchd jobs in `launchd/`; `mail/`, `refresh/` and `dashboard/` are the retired old system, kept for rollback. This folder holds the design, plans, and the research behind them.
 
 ## Current

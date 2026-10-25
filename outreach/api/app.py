@@ -52,7 +52,7 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
 
     app = FastAPI(
         lifespan=lifespan,
-        title="Outreach API",
+        title="Knock API",
         version="0.1.0",
         docs_url=None,
         redoc_url=None,

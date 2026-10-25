@@ -17,6 +17,8 @@ CONTEXT = json.dumps({"source": "own", "lane": "own", "roleKind": "engineer", "r
 
 
 class TodayCase(ApiCase):
+    lean_today = True  # these tests are about the lean build on read, so they turn it on
+
     def ranked(self, name: str, points: float = 5.0, *, lanes=("level_role",), status="candidate", role=True,
                hide=None, **cols) -> int:
         cid = s.company(self.conn, name, status, **cols)
@@ -64,6 +66,20 @@ class TodayCase(ApiCase):
 
     def events(self, kind):
         return self.conn.execute("SELECT * FROM event WHERE kind = ?", (kind,)).fetchall()
+
+
+class LeanBuildOff(TodayCase):
+    lean_today = False  # as shipped
+
+    def test_with_the_default_setting_a_read_never_builds_a_list(self):
+        self.ranked("High", 9.0)
+        v = self.view()
+        self.assertEqual((v["notReady"]["reason"], v["proposed"], v["builtAt"]), ("not_built", [], None))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM daily_list").fetchone()[0], 0)
+
+    def test_the_shipped_config_has_the_lean_build_off(self):
+        from outreach.api.config import load_config
+        self.assertFalse(load_config().lean_build)
 
 
 class Build(TodayCase):

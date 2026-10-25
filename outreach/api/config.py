@@ -7,7 +7,7 @@ DEFAULT_PATH = Path(__file__).with_name("config.toml")
 
 
 class ConfigError(ValueError):
-    """A number in config.toml is missing or not a positive whole number."""
+    """A number in config.toml is missing or not a positive whole number, or a switch is not true or false."""
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,7 @@ class ApiConfig:
     search_index_top: int
     linkedin_per_day: int
     proposals_per_slot: int
+    lean_build: bool  # the lean Today builds a list on its first weekday read (off: the plan job builds the day)
 
 
 def load_config(path: Path = DEFAULT_PATH) -> ApiConfig:
@@ -30,6 +31,12 @@ def load_config(path: Path = DEFAULT_PATH) -> ApiConfig:
         value = raw.get(section, {}).get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ConfigError(f"[{section}] {key} must be a whole number of 1 or more, got {value!r}")
+        return value
+
+    def switch(section: str, key: str) -> bool:
+        value = raw.get(section, {}).get(key)
+        if not isinstance(value, bool):
+            raise ConfigError(f"[{section}] {key} must be true or false, got {value!r}")
         return value
 
     config = ApiConfig(
@@ -42,6 +49,7 @@ def load_config(path: Path = DEFAULT_PATH) -> ApiConfig:
         search_index_top=number("search", "index_top"),
         linkedin_per_day=number("today", "linkedin_per_day"),
         proposals_per_slot=number("today", "proposals_per_slot"),
+        lean_build=switch("today", "lean_build"),
     )
     if config.quiet_after_days <= config.prompt_after_days:
         raise ConfigError("[outcomes] quiet_after_days must be larger than prompt_after_days")

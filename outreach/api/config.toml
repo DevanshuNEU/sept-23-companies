@@ -17,3 +17,6 @@ index_top = 3000         # companies outside the browser index are found with a 
 [today]
 linkedin_per_day = 7     # LinkedIn requests a day (#9); the lean Today adds the sender's email slots to it
 proposals_per_slot = 2   # the lean Today proposes this many companies for each slot of its capacity
+# Whether the lean Today builds a list on its first weekday read. Off: the plan job (#15, 08:00) builds the day, and a
+# list built here first would make it stop with "already built" and leave no people plan for that date.
+lean_build = false

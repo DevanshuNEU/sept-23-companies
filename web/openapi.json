@@ -970,6 +970,21 @@
         "title": "CompareSide",
         "type": "object"
       },
+      "ConfirmReasonBody": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "ConfirmReasonBody",
+        "type": "object"
+      },
       "CorrectionBody": {
         "additionalProperties": false,
         "description": "Set one outcome to `at` (any ISO-8601 time) or clear it (`at` null), from the touch's history.",
@@ -1568,6 +1583,24 @@
           "observedOn"
         ],
         "title": "Fact",
+        "type": "object"
+      },
+      "FindSomeone": {
+        "properties": {
+          "handoff": {
+            "title": "Handoff",
+            "type": "string"
+          },
+          "searchUrl": {
+            "title": "Searchurl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "searchUrl",
+          "handoff"
+        ],
+        "title": "FindSomeone",
         "type": "object"
       },
       "Finding": {
@@ -2315,6 +2348,92 @@
         "title": "LinkedInView",
         "type": "object"
       },
+      "LinkedinMonth": {
+        "properties": {
+          "hardLimit": {
+            "title": "Hardlimit",
+            "type": "integer"
+          },
+          "hardUsed": {
+            "title": "Hardused",
+            "type": "integer"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "used": {
+            "title": "Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "used",
+          "limit",
+          "hardUsed",
+          "hardLimit"
+        ],
+        "title": "LinkedinMonth",
+        "type": "object"
+      },
+      "LogAppliedBody": {
+        "additionalProperties": false,
+        "description": "He applied to the row's role. `idempotencyKey` is `plan:<entryId>:apply`.",
+        "properties": {
+          "idempotencyKey": {
+            "pattern": "^[A-Za-z0-9:._-]{1,200}$",
+            "title": "Idempotencykey",
+            "type": "string"
+          },
+          "postingId": {
+            "maximum": 4.611686018427388e+18,
+            "minimum": 1.0,
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "postingId",
+          "idempotencyKey",
+          "revision"
+        ],
+        "title": "LogAppliedBody",
+        "type": "object"
+      },
+      "LogRequestBody": {
+        "additionalProperties": false,
+        "description": "He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one\ntouch per key, whatever the request id.",
+        "properties": {
+          "idempotencyKey": {
+            "pattern": "^[A-Za-z0-9:._-]{1,200}$",
+            "title": "Idempotencykey",
+            "type": "string"
+          },
+          "personId": {
+            "maximum": 4.611686018427388e+18,
+            "minimum": 1.0,
+            "title": "Personid",
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "personId",
+          "idempotencyKey",
+          "revision"
+        ],
+        "title": "LogRequestBody",
+        "type": "object"
+      },
       "LogStepBody": {
         "additionalProperties": false,
         "description": "A step he took on LinkedIn by hand. `replyKind` goes with `replied` and nothing else; an out-of-office is\nnot a reply, so `auto_reply` is not a kind here.",
@@ -2956,6 +3075,113 @@
           "text"
         ],
         "title": "NotReady",
+        "type": "object"
+      },
+      "NoteDraft": {
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/NoteFact"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "maxChars": {
+            "title": "Maxchars",
+            "type": "integer"
+          },
+          "needsYourLine": {
+            "title": "Needsyourline",
+            "type": "boolean"
+          },
+          "noteId": {
+            "title": "Noteid",
+            "type": "integer"
+          },
+          "reasonLine": {
+            "title": "Reasonline",
+            "type": "string"
+          },
+          "reasonState": {
+            "enum": [
+              "proposed",
+              "confirmed",
+              "written"
+            ],
+            "title": "Reasonstate",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "savedAt": {
+            "title": "Savedat",
+            "type": "string"
+          },
+          "savedBy": {
+            "enum": [
+              "claude",
+              "devanshu",
+              "sender",
+              "import"
+            ],
+            "title": "Savedby",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "noteId",
+          "text",
+          "chars",
+          "maxChars",
+          "reasonLine",
+          "reasonState",
+          "needsYourLine",
+          "facts",
+          "checks",
+          "savedBy",
+          "savedAt",
+          "revision"
+        ],
+        "title": "NoteDraft",
+        "type": "object"
+      },
+      "NoteFact": {
+        "properties": {
+          "inNote": {
+            "title": "Innote",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceLink"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "source",
+          "inNote"
+        ],
+        "title": "NoteFact",
         "type": "object"
       },
       "OtherRole": {
@@ -3634,6 +3860,121 @@
         "title": "Ping",
         "type": "object"
       },
+      "PlanCompany": {
+        "properties": {
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "heldByReply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "heldByTouchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heldbytouchid"
+          },
+          "hq": {
+            "title": "Hq",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pausedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pausedat"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "backlog",
+              "working",
+              "closed",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "pausedAt",
+          "heldByTouchId",
+          "held",
+          "heldByReply",
+          "domain",
+          "hq",
+          "revision"
+        ],
+        "title": "PlanCompany",
+        "type": "object"
+      },
+      "PlanPerson": {
+        "properties": {
+          "foundOn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "person": {
+            "$ref": "#/components/schemas/PersonRef"
+          }
+        },
+        "required": [
+          "person",
+          "foundOn"
+        ],
+        "title": "PlanPerson",
+        "type": "object"
+      },
       "PlanProgress": {
         "properties": {
           "done": {
@@ -3650,6 +3991,310 @@
           "total"
         ],
         "title": "PlanProgress",
+        "type": "object"
+      },
+      "PlanRow": {
+        "properties": {
+          "applyUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applyurl"
+          },
+          "carriedFrom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carriedfrom"
+          },
+          "channel": {
+            "enum": [
+              "linkedin_request",
+              "email"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "company": {
+            "$ref": "#/components/schemas/PlanCompany"
+          },
+          "emailTouchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emailtouchid"
+          },
+          "entryId": {
+            "title": "Entryid",
+            "type": "integer"
+          },
+          "findSomeone": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FindSomeone"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lane": {
+            "enum": [
+              "level_role",
+              "intern_junior",
+              "any_us_role",
+              "reason_no_role"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoteDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanPerson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reasonSources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceLink"
+            },
+            "title": "Reasonsources",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleToName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "todo",
+              "done",
+              "skipped"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entryId",
+          "position",
+          "channel",
+          "lane",
+          "company",
+          "person",
+          "role",
+          "applyUrl",
+          "reason",
+          "reasonSources",
+          "note",
+          "findSomeone",
+          "emailTouchId",
+          "steps",
+          "state",
+          "carriedFrom",
+          "revision"
+        ],
+        "title": "PlanRow",
+        "type": "object"
+      },
+      "PlanStep": {
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "kind": {
+            "enum": [
+              "request",
+              "apply"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "touchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Touchid"
+          }
+        },
+        "required": [
+          "kind",
+          "touchId",
+          "at"
+        ],
+        "title": "PlanStep",
+        "type": "object"
+      },
+      "PlanView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "builtAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Builtat"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "linkedinMonth": {
+            "$ref": "#/components/schemas/LinkedinMonth"
+          },
+          "listJob": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notReady": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotReady"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/PlanRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "tomorrow": {
+            "$ref": "#/components/schemas/Tomorrow"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "week": {
+            "$ref": "#/components/schemas/PlanWeek"
+          }
+        },
+        "required": [
+          "asOf",
+          "date",
+          "builtAt",
+          "listJob",
+          "notReady",
+          "rows",
+          "done",
+          "total",
+          "linkedinMonth",
+          "tomorrow",
+          "week"
+        ],
+        "title": "PlanView",
+        "type": "object"
+      },
+      "PlanWeek": {
+        "properties": {
+          "accepts": {
+            "title": "Accepts",
+            "type": "integer"
+          },
+          "replies": {
+            "title": "Replies",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests",
+          "accepts",
+          "replies"
+        ],
+        "title": "PlanWeek",
         "type": "object"
       },
       "PostingFlag": {
@@ -5010,6 +5655,33 @@
         "title": "SaveMessageBody",
         "type": "object"
       },
+      "SaveNoteBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reasonLine": {
+            "maxLength": 500,
+            "title": "Reasonline",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "text": {
+            "maxLength": 3000,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "reasonLine",
+          "revision"
+        ],
+        "title": "SaveNoteBody",
+        "type": "object"
+      },
       "Schedule": {
         "properties": {
           "companySentToday": {
@@ -5718,6 +6390,22 @@
         "title": "ShellSummary",
         "type": "object"
       },
+      "SkipRowBody": {
+        "additionalProperties": false,
+        "description": "Carry the row to tomorrow.",
+        "properties": {
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "SkipRowBody",
+        "type": "object"
+      },
       "SourceLink": {
         "properties": {
           "label": {
@@ -5960,6 +6648,69 @@
           "listJob"
         ],
         "title": "TodayView",
+        "type": "object"
+      },
+      "Tomorrow": {
+        "properties": {
+          "preview": {
+            "items": {
+              "$ref": "#/components/schemas/TomorrowRow"
+            },
+            "title": "Preview",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "text",
+          "preview"
+        ],
+        "title": "Tomorrow",
+        "type": "object"
+      },
+      "TomorrowRow": {
+        "properties": {
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "personName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personname"
+          },
+          "roleTitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roletitle"
+          }
+        },
+        "required": [
+          "companyName",
+          "personName",
+          "roleTitle"
+        ],
+        "title": "TomorrowRow",
         "type": "object"
       },
       "TouchHistory": {
@@ -9246,6 +9997,234 @@
         ]
       }
     },
+    "/api/notes/{note_id}": {
+      "put": {
+        "operationId": "save_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Note Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveNoteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteDraft"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Save Note",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/notes/{note_id}/confirm": {
+      "post": {
+        "operationId": "confirm_reason",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Note Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmReasonBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteDraft"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Confirm Reason",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
     "/api/outbox": {
       "get": {
         "operationId": "outbox",
@@ -9747,6 +10726,419 @@
           }
         },
         "summary": "Ping"
+      }
+    },
+    "/api/plan": {
+      "get": {
+        "operationId": "plan",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Plan",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/{entry_id}/apply": {
+      "post": {
+        "operationId": "log_applied",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogAppliedBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanRow"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Log Applied",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/{entry_id}/request": {
+      "post": {
+        "operationId": "log_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanRow"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Log Request",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/{entry_id}/skip": {
+      "post": {
+        "operationId": "skip_row",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkipRowBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanRow"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Skip Row",
+        "tags": [
+          "plan"
+        ]
       }
     },
     "/api/progress": {

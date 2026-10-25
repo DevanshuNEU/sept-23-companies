@@ -4,7 +4,7 @@ import path from 'node:path';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
-import type { ReviewItem } from '@/api';
+import { ApiError, type ReviewItem } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture, type Scenario } from '@/api/fixture/data';
 import { SidebarProvider } from '@/components/ui/sidebar';
@@ -372,6 +372,14 @@ describe('Needs you', () => {
     expect(turso).toHaveTextContent('Set to about 45 by you, from LinkedIn 11 to 50. To change it, set it again on the company page.');
   });
 
+  it('Resolved groups its rows by the real day', async () => {
+    const user = userEvent.setup();
+    await openReview();
+    await user.click(screen.getByRole('button', { name: 'Show' }));
+    const groupRows = screen.getAllByRole('row').filter((r) => r.querySelectorAll('td').length === 1).map((r) => r.textContent);
+    expect(groupRows).toEqual(['Today', 'Earlier this week', 'Fri Nov 6', 'Thu Nov 5']);
+  });
+
   it("Undo calls reopenReview with the row's revision and the item returns", async () => {
     const user = userEvent.setup();
     const { client } = await open();
@@ -386,6 +394,63 @@ describe('Needs you', () => {
     expect(await screen.findByRole('article', { name: 'Railway' })).toBeInTheDocument();
     expect(screen.queryByRole('row', { name: /^Railway/ })).not.toBeInTheDocument();
     await waitFor(() => expect(needsYouLink()).toHaveAccessibleName('Needs you, 6 open'));
+  });
+
+  it('after a no-go commits and the list refetches, its Resolved row has Undo and the day counts it once', async () => {
+    const user = userEvent.setup();
+    const { client } = await open();
+    const hex = await reviewOf(client, 'Hex');
+    select('Hex');
+    press('n');
+    const dialog = await screen.findByRole('alertdialog', { name: 'Add Hex to the no-go list?' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Source' }), 'Hex careers FAQ');
+    await user.click(within(dialog).getByRole('button', { name: 'Mark no-go' }));
+    await waitFor(async () => expect((await client.needsYou()).open.some((r) => r.id === hex.id)).toBe(false));
+    await waitFor(() => expect(progress()).toHaveTextContent(/^1 settled today, 4 open$/));
+    await user.click(screen.getByRole('button', { name: 'Show' }));
+    const row = await screen.findByRole('row', { name: /^Hex/ });
+    expect(await within(row).findByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    expect(progress()).toHaveTextContent(/^1 settled today, 4 open$/);
+  });
+
+  it('a double click on Undo in Resolved sends one reopen', async () => {
+    const { client } = await open();
+    const reopen = vi.spyOn(client, 'reopenReview');
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    const undo = within(await screen.findByRole('row', { name: /^Railway/ })).getByRole('button', { name: 'Undo' });
+    fireEvent.click(undo);
+    fireEvent.click(undo);
+    await screen.findByRole('article', { name: 'Railway' });
+    expect(reopen).toHaveBeenCalledTimes(1);
+  });
+
+  it('a slow reopen changes nothing on screen until it answers, and its Undo is off meanwhile', async () => {
+    const { client } = await open();
+    let answer: () => void = () => undefined;
+    vi.spyOn(client, 'reopenReview').mockImplementation(() => new Promise<void>((resolve) => { answer = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    const row = await screen.findByRole('row', { name: /^Railway/ });
+    fireEvent.click(within(row).getByRole('button', { name: 'Undo' }));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.getByRole('row', { name: /^Railway/ })).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /^Railway/ })).getByRole('button', { name: 'Undo' })).toBeDisabled();
+    expect(needsYouLink()).toHaveAccessibleName('Needs you, 5 open');
+    expect(screen.queryByRole('article', { name: 'Railway' })).not.toBeInTheDocument();
+    await act(async () => answer());
+  });
+
+  it('a failed reopen leaves the Resolved row and the counts as they were, and says so', async () => {
+    const { client } = await open();
+    vi.spyOn(client, 'reopenReview').mockRejectedValue(new ApiError('conflict', 'This item changed since you loaded it. Nothing was saved.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    fireEvent.click(within(await screen.findByRole('row', { name: /^Railway/ })).getByRole('button', { name: 'Undo' }));
+    expect(await screen.findByText('This item changed since you loaded it. Nothing was saved.')).toBeInTheDocument();
+    const row = screen.getByRole('row', { name: /^Railway/ });
+    await waitFor(() => expect(within(row).getByRole('button', { name: 'Undo' })).toBeEnabled());
+    expect(needsYouLink()).toHaveAccessibleName('Needs you, 5 open');
+    expect(progress()).toHaveTextContent(/^5 open$/);
   });
 
   it('Undo on a merge from Resolved splits the two companies again', async () => {

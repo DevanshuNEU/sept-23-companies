@@ -82,4 +82,31 @@ describe('MergeCompare', () => {
     expect(screen.getByText(/^Mesh is suggested because 3 people are on file there\./)).toBeInTheDocument();
     expect(screen.getByText('This record collects name-only mentions that could be either company.')).toBeInTheDocument();
   });
+
+  it('on a tie in touches and people it gives the API reason and claims nothing about age', () => {
+    const item = mergeItem();
+    if (!item.merge) throw new Error('no merge');
+    item.merge = {
+      ...item.merge,
+      a: { ...item.merge.a, touches: 2, people: 1 },
+      b: { ...item.merge.b, touches: 2, people: 1 },
+      suggestedKeep: 'b',
+      why: 'Both names come down to "mesh".',
+    };
+    const { container } = show(item);
+    const line = container.querySelector('[data-why]')?.textContent ?? '';
+    expect(line).toBe(
+      "Both names come down to \"mesh\". Merging keeps Mesh, folds Mesh Systems into it, and sends anything found later under Mesh Systems' name to Mesh. You can undo it from Resolved.",
+    );
+    expect(line).not.toMatch(/older|suggested because/);
+  });
+
+  it('never gives the side with fewer touches as the reason', () => {
+    const item = mergeItem();
+    if (!item.merge) throw new Error('no merge');
+    // The API keeps b here for a reason the counts do not show (b has fewer touches but more people).
+    item.merge = { ...item.merge, a: { ...item.merge.a, touches: 3, people: 0 }, b: { ...item.merge.b, touches: 1, people: 4 }, suggestedKeep: 'b' };
+    const { container } = show(item);
+    expect(container.querySelector('[data-why]')?.textContent).toMatch(/^Mesh is suggested because 4 people are on file there\./);
+  });
 });

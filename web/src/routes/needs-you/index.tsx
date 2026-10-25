@@ -1,7 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
 import { ChevronDown, CircleCheck, Lock, Undo2 } from 'lucide-react';
 import {
+  ApiError,
+  newRequestId,
   pollMs,
   queryKeys,
   usePageClient,
@@ -32,6 +36,8 @@ import { NoGoDialog, type NoGoStart } from './no-go-dialog';
 import { mergeName, possessive } from './merge-compare';
 import { EDIT_FIELD, ReviewItemRow, TRIGGER, hasNoGo } from './review-item';
 import { SettledPanel } from './settled-panel';
+import { resolvedGroups } from './groups';
+import { settleView, type Settling } from './patches';
 
 type Section = { id: string; title: string; items: ReviewItem[] };
 
@@ -139,7 +145,7 @@ function SectionTitle({ id, title, count, children }: { id: string; title: strin
   );
 }
 
-function ResolvedRow({ row, asOf, onUndo }: { row: ResolvedReview; asOf: string; onUndo: (r: ResolvedReview) => void }) {
+function ResolvedRow({ row, asOf, busy, onUndo }: { row: ResolvedReview; asOf: string; busy: boolean; onUndo: (r: ResolvedReview) => void }) {
   const today = ageDays(row.at, asOf) === 0;
   return (
     <TableRow>
@@ -158,7 +164,7 @@ function ResolvedRow({ row, asOf, onUndo }: { row: ResolvedReview; asOf: string;
         {row.canUndo ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button type="button" variant="outline" size="sm" onClick={() => onUndo(row)}>
+              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => onUndo(row)}>
                 <Undo2 aria-hidden />
                 Undo
               </Button>
@@ -187,48 +193,37 @@ function GroupRow({ title }: { title: string }) {
 }
 
 /**
- * What he settled this week, collapsed, grouped Today and Earlier this week. An ok, a no-go or a merge has Undo
+ * What he settled this week, collapsed, grouped by the real day (Today, Earlier this week, then a date). An ok, a no-go or a merge has Undo
  * (`canUndo`, from the API); a value he set is locked and says how to change it.
  */
 function Resolved({ data }: { data: NeedsYouView }) {
   const [open, setOpen] = useState(false);
   const client = usePageClient('needs-you');
-  const write = usePendingWrite();
   const rows = data.resolvedThisWeek;
-  const today = rows.filter((r) => ageDays(r.at, data.asOf) === 0);
-  const earlier = rows.filter((r) => ageDays(r.at, data.asOf) !== 0);
+  const groups = resolvedGroups(rows, data.asOf);
 
-  // An immediate write: the row leaves Resolved and the count rises at once, and the refetch brings the item back open.
-  const undo = (r: ResolvedReview) => {
-    const words = undoWords(r).toast;
-    write({
-      id: `unresolve:${r.id}`,
-      label: words,
-      afterCommit: words,
-      patches: [
-        {
-          key: queryKeys.needsYou,
-          apply: (d: NeedsYouView) => ({
-            ...d,
-            resolvedThisWeek: d.resolvedThisWeek.filter((x) => x.id !== r.id),
-            settledToday: ageDays(r.at, d.asOf) === 0 ? Math.max(0, d.settledToday - 1) : d.settledToday,
-          }),
-        },
-        {
-          key: queryKeys.shell,
-          apply: (s: ShellSummary) => ({
-            ...s,
-            openReviewItems: s.openReviewItems + 1,
-            noGoCount: r.resolution === 'marked_no_go' ? Math.max(0, s.noGoCount - 1) : s.noGoCount,
-          }),
-        },
-      ],
-      commit: (o) => client.reopenReview(r.id, r.revision, o),
-      immediate: true,
-    });
+  // Undo from Resolved changes nothing on screen until the server has taken the settling back: then the list and the
+  // sidebar refetch and the item is open again. While the call is out its Undo is off, so a double click sends one
+  // reopen. A refusal leaves everything as it was and says why.
+  const queryClient = useQueryClient();
+  const inFlight = useRef(new Set<Id>());
+  const [busy, setBusy] = useState<ReadonlySet<Id>>(new Set());
+  const undo = async (r: ResolvedReview) => {
+    if (inFlight.current.has(r.id)) return;
+    inFlight.current.add(r.id);
+    setBusy(new Set(inFlight.current));
+    try {
+      await client.reopenReview(r.id, r.revision, { requestId: newRequestId() });
+      toast(undoWords(r).toast);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'The change did not go through. Nothing was saved. Try again.');
+    } finally {
+      await Promise.all([queryKeys.needsYou, queryKeys.shell].map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })));
+      inFlight.current.delete(r.id);
+      setBusy(new Set(inFlight.current));
+    }
   };
 
-  const grouped = today.length > 0 && earlier.length > 0;
   return (
     <Collapsible open={open} onOpenChange={setOpen} asChild>
       <section aria-labelledby="ny-resolved">
@@ -244,13 +239,13 @@ function Resolved({ data }: { data: NeedsYouView }) {
           <div className="rounded-lg border">
             <Table>
               <TableBody>
-                {grouped ? <GroupRow title="Today" /> : null}
-                {today.map((r) => (
-                  <ResolvedRow key={r.id} row={r} asOf={data.asOf} onUndo={undo} />
-                ))}
-                {grouped ? <GroupRow title="Earlier this week" /> : null}
-                {earlier.map((r) => (
-                  <ResolvedRow key={r.id} row={r} asOf={data.asOf} onUndo={undo} />
+                {groups.map((g) => (
+                  <Fragment key={g.title}>
+                    {groups.length > 1 ? <GroupRow title={g.title} /> : null}
+                    {g.rows.map((r) => (
+                      <ResolvedRow key={r.id} row={r} asOf={data.asOf} busy={busy.has(r.id)} onUndo={(row) => void undo(row)} />
+                    ))}
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>
@@ -323,20 +318,12 @@ function OpenItems({ data }: { data: NeedsYouView }) {
    */
   const patchesFor = (
     r: ReviewItem,
-    settled: Pick<ResolvedReview, 'resolution' | 'note' | 'locked'>,
+    settled: Settling,
     extra?: (s: ShellSummary) => Partial<ShellSummary>,
   ): Patch[] => [
     {
       key: queryKeys.needsYou,
-      apply: (d: NeedsYouView) => ({
-        ...d,
-        open: d.open.filter((x) => x.id !== r.id),
-        settledToday: d.settledToday + 1,
-        resolvedThisWeek: [
-          { id: r.id, kind: r.kind, companyName: r.company.name, at: d.asOf, revision: r.revision + 1, canUndo: false, ...settled },
-          ...d.resolvedThisWeek.filter((x) => x.id !== r.id),
-        ],
-      }),
+      apply: (d: NeedsYouView) => settleView(d, r, settled),
     },
     { key: queryKeys.shell, apply: (s: ShellSummary) => ({ ...s, openReviewItems: Math.max(0, s.openReviewItems - 1), ...extra?.(s) }) },
   ];

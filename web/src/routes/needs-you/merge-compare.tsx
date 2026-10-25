@@ -47,18 +47,19 @@ const statusWord = (s: MergeSide) =>
   companyStatus({ id: s.companyId, name: s.name, status: s.status, pausedAt: null, heldByTouchId: null, held: false, heldByReply: null }).label;
 
 /**
- * Why the API suggests the side it does, in its own order (more touches, then more people, then the older record),
- * and what a merge does. Built from the counts on screen, so it never says more than the table shows.
+ * Why the API suggests the side it does, from the counts on screen: more touches there, else more people there.
+ * When neither count favors the suggested side, the API's own reason stands in; the page never claims age, which
+ * `MergeSide` does not carry. Then what a merge does.
  */
-function whyLine(keeper: MergeSide, other: MergeSide): string {
+function whyLine(keeper: MergeSide, other: MergeSide, why: string): string {
   const because =
-    keeper.touches !== other.touches
-      ? `your ${count(keeper.touches, 'touch is', 'touches are')} there`
-      : keeper.people !== other.people
-        ? `${count(keeper.people, 'person is', 'people are')} on file there`
-        : 'it is the older record';
+    keeper.touches > other.touches
+      ? `${keeper.name} is suggested because your ${count(keeper.touches, 'touch is', 'touches are')} there.`
+      : keeper.people > other.people
+        ? `${keeper.name} is suggested because ${count(keeper.people, 'person is', 'people are')} on file there.`
+        : why.trim().replace(/([^.!?])$/, '$1.');
   return (
-    `${keeper.name} is suggested because ${because}. Merging keeps ${keeper.name}, folds ${other.name} into it, and sends ` +
+    `${because} Merging keeps ${keeper.name}, folds ${other.name} into it, and sends ` +
     `anything found later under ${possessive(other.name)} name to ${keeper.name}. You can undo it from Resolved.`
   );
 }
@@ -153,7 +154,7 @@ export function MergeCompare({
             </TableBody>
           </Table>
         </div>
-        <p className="max-w-[760px] text-xs text-muted-foreground">{whyLine(keeper, other)}</p>
+        <p data-why className="max-w-[760px] text-xs text-muted-foreground">{whyLine(keeper, other, m.why)}</p>
       </div>
     </>
   );

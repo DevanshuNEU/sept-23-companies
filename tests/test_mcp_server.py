@@ -26,9 +26,9 @@ from tests.storetest import fresh_store
 from tests.test_mcp_boundary import forbidden
 
 ROOT = Path(__file__).resolve().parent.parent
-READ_TOOLS = {"ranked_companies", "company", "person", "followups_due"}
+READ_TOOLS = {"ranked_companies", "company", "person", "followups_due", "prepare_targets"}
 WRITE_TOOLS = {"record_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people",
-               "save_linkedin_note", "reader_next", "reader_submit"}
+               "save_linkedin_note", "reader_next", "reader_submit", "submit_candidates"}
 PINNED_TOOLS = READ_TOOLS | WRITE_TOOLS
 FORBIDDEN_PROPERTIES = frozenset({
     "state", "approved", "approved_at", "approve", "send", "sent", "sent_at", "skip", "unapprove", "pause", "paused",
@@ -181,7 +181,10 @@ def walk_schema(schema: dict, defs: dict, where: str):
 
 class RealToolsTest(unittest.TestCase):
     def test_tool_list_is_pinned(self):
-        self.assertEqual({s.name for s in server.tool_specs()}, PINNED_TOOLS)
+        names = [s.name for s in server.tool_specs()]
+        self.assertEqual(set(names), PINNED_TOOLS)
+        self.assertEqual(len(names), 15)
+        self.assertEqual(len(set(names)), 15)
 
     def test_only_the_write_tools_declare_grants(self):
         self.assertEqual({s.name for s in server.tool_specs() if s.grants}, WRITE_TOOLS)

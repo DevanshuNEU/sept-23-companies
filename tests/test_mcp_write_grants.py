@@ -39,6 +39,10 @@ PINNED = {
                                                                         "last_error"}))},
     "reader_submit": {"read_queue": Grant(insert=True, update=frozenset({"state", "lease_until", "last_error"})),
                       "posting_reading": INSERT, "event": INSERT},
+    "submit_candidates": {"person": INSERT, "person_source": INSERT, "event": INSERT,
+                          "linkedin_draft": Grant(insert=True, update=frozenset({
+                              "posting_id", "body", "reason_line", "facts", "checks", "prepared_by_version",
+                              "updated_at", "revision"}))},
 }
 
 
@@ -262,6 +266,27 @@ class GrantsCase(McpCase):
                       else "unknown", "quote": ""} for n in FIELDS}
         self.check_tool("reader_submit", self.reader_outside(pid), {"readings": [
             {"posting_id": pid, "body_sha256": item["body_sha256"], "fields": fields}]})
+
+    def test_submit_candidates_cannot_write_beyond_its_grants(self):
+        bolt = seed.company(self.db, "Bolt Robotics")
+        seed.score(self.db, bolt, {"role": 5.0})
+        self.db.execute("UPDATE company_score SET signals = json_set(signals, '$.reasons', json('[]'))")
+        with mock.patch.dict(os.environ, {"OUTREACH_MAIL_HOME": str(FIXTURE_BANNED.parent / "plan")}):
+            self.check_tool("submit_candidates", [
+                ("UPDATE person SET email = 'x@bolt.example' WHERE person_id = ?", (self.pat,)),
+                ("UPDATE person SET notes = 'x' WHERE person_id = ?", (self.pat,)),
+                ("INSERT INTO person(company_id, name, role_kind, channel, linkedin_reason, added_by, created_at, "
+                 "updated_at) VALUES (?, 'Dev Anshu', 'engineer', 'linkedin', 'no_email', 'devanshu', ?, ?)",
+                 (bolt, NOW, NOW)),
+                ("INSERT INTO linkedin_draft(person_id, body, reason_line, reason_state, saved_by, created_at, "
+                 "updated_at) VALUES (?, 'Hi', 'x', 'written', 'devanshu', ?, ?)", (self.pat, NOW, NOW)),
+                ("UPDATE company SET status = 'working' WHERE company_id = ?", (bolt,)),
+                ("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+                 "VALUES ('flagged', ?, 'x', 'k6', 'claude', ?)", (bolt, NOW)),
+            ], {"company_id": bolt, "candidates": [{
+                "name": "Grace Hopper", "role_kind": "engineer",
+                "sources": [{"kind": "team", "url": "https://bolt.example/team",
+                             "quote": "Grace Hopper, Software Engineer at Bolt Robotics"}]}]})
 
 
 if __name__ == "__main__":

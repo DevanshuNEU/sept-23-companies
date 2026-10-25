@@ -474,7 +474,11 @@ def role_to_name(role: dict | None) -> RoleToName | None:
 
 def to_event(r: sqlite3.Row) -> CompanyEvent:
     detail = json.loads(r["detail"])
-    text = detail.get("text") if isinstance(detail.get("text"), str) and detail["text"] else r["kind"].replace("_", " ").capitalize()
+    # `text` is the line an event carries for people. A review item's settling (`resolved`, `cleared`) carries its
+    # `note` instead; other entities' notes (an import's close note) are not sentences for the history.
+    keys = ("text", "note") if r["entity"] == "review_item" else ("text",)
+    text = next((detail[k] for k in keys if isinstance(detail.get(k), str) and detail[k]),
+                r["kind"].replace("_", " ").capitalize())
     source = None
     if r["actor"] == "import":
         source = detail.get(IMPORT_SOURCE_KEY) if detail.get(IMPORT_SOURCE_KEY) in IMPORT_SOURCES else None

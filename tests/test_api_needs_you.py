@@ -918,6 +918,37 @@ class NeedsYou(ApiCase):
                 self.ok(step())
                 self.assertEqual(self.messages(), before)
 
+    def test_the_company_history_says_what_he_did_for_each_fix(self):
+        cid = s.company(self.conn, "Acme")
+        flagged = s.review(self.conn, cid, "flagged", evidence_key="f")
+        size = s.review(self.conn, cid, "size_unknown", evidence_key="s")
+        old = s.board(self.conn, cid, "ashby", "acmeold", last_read="error", error_streak=3)
+        board = s.review(self.conn, cid, "board_unreadable", board_id=old, evidence_key="b")
+        self.ok(self.resolve(flagged, {"kind": "ok"}))
+        self.ok(self.resolve(size, {"kind": "edit", "field": "size", "value": "45", "source": "LinkedIn"}))
+        self.ok(self.reopen(flagged, 2))
+        self.ok(self.resolve(board, {"kind": "edit", "field": "board_url", "value": "https://jobs.lever.co/acme",
+                                     "source": "Their site"}))
+        texts = {(e["kind"], e["text"]) for e in self.ok(self.get(f"/api/companies/{cid}"))["events"]}
+        for want in (("resolved", "Marked ok by you"), ("resolved", "Size set to 45 by you, from LinkedIn"),
+                     ("hand_set", "Size set to 45 by you, from LinkedIn"), ("reopened", "Undone by you, so it is open again"),
+                     ("resolved", "Job board set to lever:acme by you, from Their site"),
+                     ("replaced", "Job board replaced by lever:acme by you, from Their site")):
+            self.assertIn(want, texts)
+        bare = {("resolved", "Resolved"), ("reopened", "Reopened"), ("hand_set", "Hand set"), ("replaced", "Replaced")}
+        self.assertFalse(texts & bare, texts)
+
+    def test_a_merge_loop_does_not_break_the_view(self):
+        a = s.company(self.conn, "Loop A", "removed", remove_reason="merged")
+        b = s.company(self.conn, "Loop B", "removed", remove_reason="merged", merged_into=a)
+        self.conn.execute("UPDATE company SET merged_into = ? WHERE company_id = ?", (b, a))  # store corruption
+        cid = s.company(self.conn, "Acme", "working")
+        item = s.review(self.conn, cid, "size_unknown")
+        listed = self.open_items()
+        self.assertIn(item, listed)
+        self.assertFalse(listed[item]["inPlay"])  # unknown this time, never a 500 that blocks every fix
+        self.ok(self.resolve(item, {"kind": "ok"}))
+
     def test_a_board_conflict_from_add_board_retires_nothing(self):
         from unittest import mock
         cid = s.company(self.conn, "Acme")

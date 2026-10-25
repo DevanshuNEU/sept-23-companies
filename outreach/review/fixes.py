@@ -351,7 +351,7 @@ def _undo_plan(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
         if row["kind"] != "merge_candidate":
             raise ReviewError("not_allowed", LOCKED)
         found = conn.execute(
-            "SELECT entity_id, detail FROM event WHERE entity = 'company' AND kind = 'merged' "
+            "SELECT event_id, entity_id, detail FROM event WHERE entity = 'company' AND kind = 'merged' "
             "AND json_extract(detail, '$.review_id') = ? ORDER BY event_id DESC LIMIT 1",
             (row["review_id"],)).fetchone()
         if found is None:
@@ -359,8 +359,13 @@ def _undo_plan(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
         lose_id, kept_id = found["entity_id"], json.loads(found["detail"]).get("kept_id")
         merged_into = conn.execute("SELECT merged_into FROM company WHERE company_id = ?", (lose_id,)).fetchone()
         if merged_into is not None and merged_into[0] is not None:
-            if merged_into[0] != kept_id:
-                raise ReviewError("not_allowed", "That company was merged again since. Unmerge it from its page.")
+            # Only the company's latest merge can be taken back: `unmerge_company` restores what the latest
+            # `merged` event recorded, so undoing an older one would undo a merge another question owns.
+            latest = conn.execute("SELECT max(event_id) FROM event WHERE entity = 'company' AND kind = 'merged' "
+                                  "AND entity_id = ?", (lose_id,)).fetchone()[0]
+            if merged_into[0] != kept_id or latest != found["event_id"]:
+                raise ReviewError("not_allowed", "That company was merged again since. Undo the later merge first, "
+                                                 "or unmerge it from its page.")
             plan["unmerge"] = lose_id
         # Unmerged from the company page since: only the question goes back open.
     return plan
@@ -389,9 +394,10 @@ def reopen_item(conn: sqlite3.Connection, review_id: int, *, revision: int, now:
     at = iso_utc(now) if now else utcnow()
     with unit(conn):
         row = get_item(conn, review_id)
-        plan = _undo_plan(conn, row)
+        # The revision first: a second tab that loaded the settled item learns it changed, not that it is open.
         if row["revision"] != revision:
             raise ReviewError("conflict", f"This item changed since you loaded it. {NOT_SAVED}")
+        plan = _undo_plan(conn, row)
         if plan["lift"] is not None:
             conn.execute("UPDATE no_go SET lifted_at = ?, lift_reason = ? WHERE no_go_id = ? AND lifted_at IS NULL",
                          (at, _LIFT_REASON, plan["lift"]))
@@ -408,7 +414,8 @@ def reopen_item(conn: sqlite3.Connection, review_id: int, *, revision: int, now:
         new_revision = revision + 1
         append_event(conn, entity="review_item", kind="reopened", actor=actor, entity_id=review_id,
                      company_id=row["company_id"], at=at, idempotency_key=f"review-reopened:{review_id}:{new_revision}",
-                     detail={"previous_resolution": plan["previous_resolution"], "lifted_no_go_id": plan["lift"],
+                     detail={"text": words.UNDONE_TEXT,
+                             "previous_resolution": plan["previous_resolution"], "lifted_no_go_id": plan["lift"],
                              "unmerged_id": plan["unmerge"], "reopened": restored,
                              "cleared": taken_back})
     return FixResult(review_id, new_revision, "open", "", row["company_id"], ())

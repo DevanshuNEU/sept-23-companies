@@ -28,11 +28,28 @@ class HandSizeTest(unittest.TestCase):
         draft = parse_hand_size("about 45")
         self.assertEqual((draft.fact, draft.source_kind, draft.quote), ("size", "hand", "about 45"))
 
+    def test_size_text_follows_the_old_api_grammar(self):
+        # The whole text is a number, a range or N+, with an optional "about" and "people" (#11 Task 20's hand_size).
+        cases = {
+            "450": ("450", 450, 450, "confirmed"), "45 people": ("45", 45, 45, "confirmed"),
+            "about 450": ("450", 450, 450, "estimate"), "~45": ("45", 45, 45, "estimate"),
+            "11 to 50": ("11-50", 11, 50, "estimate"), "11-50": ("11-50", 11, 50, "estimate"),
+            "11 - 50 employees": ("11-50", 11, 50, "estimate"), "500+": ("500+", 500, None, "estimate"),
+            "guess 45": ("45", 45, 45, "guess"), "about 45 guess": ("45", 45, 45, "guess"),
+        }
+        for text, want in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.read(text), want)
+
+    def test_a_size_inside_a_sentence_is_refused(self):
+        # A loose sentence must never become a locked size: an estimate over 300 hides a company.
+        for text in ("450 people today", "lots", "maybe 450 or so", "about 45 in Boston", "50 to 11", "0-50", "45x"):
+            with self.subTest(text=text), self.assertRaises(ReviewError) as caught:
+                parse_hand_size(text)
+            self.assertEqual((caught.exception.code, caught.exception.message),
+                             ("bad_request", "A size is a number like 45, or a range like 11 to 50. Nothing was saved."))
+
     def test_size_refusals(self):
-        with self.assertRaises(ReviewError) as caught:
-            parse_hand_size("lots")
-        self.assertEqual((caught.exception.code, caught.exception.message),
-                         ("bad_request", "Could not read a size from 'lots'. Try 45 or 11 to 50. Nothing was saved."))
         for text in ("0", "", "   "):
             with self.subTest(text=text), self.assertRaises(ReviewError) as caught:
                 parse_hand_size(text)

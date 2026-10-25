@@ -152,6 +152,37 @@ class ReopenTest(ReopenBase):
         self.assertEqual(self.row(rid)["state"], "open")
         self.assertEqual(self.conn.execute("SELECT count(*) FROM event WHERE kind = 'unmerged'").fetchone()[0], 1)
 
+    def test_undo_of_an_older_merge_is_refused_when_the_company_was_merged_again_since(self):
+        from outreach.review.merge import unmerge_company
+        b = s.company(self.conn, "Acme Labs")
+        first = self.item("merge_candidate", key=str(b), raised_by="source")
+        self.fix(first, Fix("merge", keep="a"))  # B into A
+        unmerge_company(self.conn, b, revision=2, now=NOW)  # from the company page; the first stays resolved
+        self.conn.execute("UPDATE company SET status = 'closed', close_reason = 'not_now', revision = revision + 1 "
+                          "WHERE company_id = ?", (b,))
+        self.conn.execute("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?",
+                          (self.cid,))  # a closed company merges only into one that stops mail too
+        second = self.item("merge_candidate", company_id=b, key=str(self.cid), raised_by="source")
+        self.fix(second, Fix("merge", keep="b"))  # B into A again, from another question
+        self.assertFalse(can_undo(self.conn, first))
+        message = self.refused("not_allowed", first, 2)
+        self.assertIn("merged again", message)
+        lost = self.conn.execute("SELECT merged_into, status FROM company WHERE company_id = ?", (b,)).fetchone()
+        self.assertEqual(tuple(lost), (self.cid, "removed"))
+        self.assertEqual((self.row(first)["state"], self.row(second)["state"]), ("resolved", "resolved"))
+        # The later merge is the one to take back, and it restores what that merge recorded.
+        self.assertTrue(can_undo(self.conn, second))
+        self.reopen(second, 2)
+        lost = self.conn.execute("SELECT merged_into, status, close_reason FROM company WHERE company_id = ?",
+                                 (b,)).fetchone()
+        self.assertEqual(tuple(lost), (None, "closed", "not_now"))
+
+    def test_a_second_tab_reopening_after_the_first_gets_a_conflict(self):
+        rid = self.item()
+        self.fix(rid, Fix("ok"))
+        self.reopen(rid, 2)  # the first tab
+        self.assertIn("changed since you loaded it", self.refused("conflict", rid, 2))  # the second, on what it loaded
+
     def test_reopen_an_edit_is_not_allowed_with_the_lock_message(self):
         rid = self.item("size_unknown", key="no-size", raised_by="daily_list")
         self.fix(rid, Fix("edit", field="size", value="45", source="LinkedIn"))

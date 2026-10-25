@@ -14,7 +14,8 @@ from outreach.review.kinds import NO_GO_REASONS
 __all__ = ["clean", "day", "sponsorship_reason", "size_reason", "domain_reason", "board_reason", "reopened",
            "fix_note", "no_go_note", "ok_note", "already_no_go_note", "person_no_go_note", "keep_separate_note",
            "settled_by_field", "NO_GO_SETTLED", "TIE_WARNING", "merge_note", "merged_away_note", "same_company_note",
-           "shared_domain_note", "moved_pair_note", "MERGE_TAKEN_BACK"]
+           "shared_domain_note", "moved_pair_note", "MERGE_TAKEN_BACK", "UNDONE_TEXT", "hand_set_text",
+           "board_replaced_text"]
 
 _NEW_YORK = ZoneInfo("America/New_York")
 _DASHES = str.maketrans({chr(0x2013): "-", chr(0x2014): "-"})
@@ -215,6 +216,23 @@ def moved_pair_note(loser: str, keeper: str) -> str:
 
 
 MERGE_TAKEN_BACK = "The merge it came from was taken back."
+
+# The company history's line for an item he took back with Undo (`reopened` event).
+UNDONE_TEXT = "Undone by you, so it is open again"
+
+
+def hand_set_text(field: str, value: str, source: str) -> str:
+    """The company history's line for a hand fact (`hand_set` event)."""
+    if field in _FIELD_LABELS:
+        return fix_note(field, value, source)
+    text = f"{field.replace('_', ' ').capitalize()} set to {value} by you"
+    return clean(f"{text}, from {source.strip()}" if source and source.strip() else text)
+
+
+def board_replaced_text(new: str, source: str) -> str:
+    """The company history's line for a board he replaced (`replaced` event)."""
+    text = f"Job board replaced by {new} by you"
+    return clean(f"{text}, from {source.strip()}" if source and source.strip() else text)
 
 
 def shared_domain_note(domain: str) -> str:

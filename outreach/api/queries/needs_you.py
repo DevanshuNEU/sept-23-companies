@@ -9,6 +9,7 @@ package's own unit is a savepoint in it). This module holds no SQL that writes: 
 `ReviewError` into the `ApiProblem` with the same code and message, and the result into the answer.
 """
 import contextlib
+import logging
 import sqlite3
 from collections.abc import Iterator
 from datetime import datetime
@@ -35,6 +36,8 @@ from outreach.review.merge import merge_compare
 from outreach.review.merge import unmerge_company as review_unmerge
 from outreach.review.play import emailing, in_play
 from outreach.store.timefmt import ISO_FMT
+
+log = logging.getLogger("outreach.api")
 
 SIZE_KINDS = ("size_unknown", "size_guess", "size_check")
 HIS_RESOLUTIONS = ("marked_ok", "marked_no_go", "field_edited")
@@ -116,8 +119,14 @@ def review_items(conn: sqlite3.Connection, rows: list[sqlite3.Row], parents: dic
     picked = {survivor_of(parents, r[0]) for r in conn.execute(
         "SELECT company_id FROM daily_list_entry WHERE list_date = ? AND state = 'picked'", (today,))}
     planned_days = load_review_config().planned_days
-    playing = in_play(conn, today=today, planned_days=planned_days)
-    mailing = emailing(conn, today=today, planned_days=planned_days)
+    try:
+        playing = in_play(conn, today=today, planned_days=planned_days)
+        mailing = emailing(conn, today=today, planned_days=planned_days)
+    except ValueError:
+        # A `merged_into` loop (store corruption) stops `canonical_ids`. The list still shows every item and every
+        # fix still works; only the in-play order and the holds-email flag are unknown for this request.
+        log.warning("Needs you: a merged_into loop in the store; in-play and emailing are skipped for this request.")
+        playing, mailing = {}, frozenset()
     holds = company_holds(conn)  # a hold left on a merged-away duplicate holds the survivor; so does any reply
 
     moment = datetime.strptime(now, ISO_FMT)

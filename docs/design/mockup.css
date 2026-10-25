@@ -541,6 +541,39 @@ details.passed ul { display: grid; gap: 4px; padding: 0 12px 12px 38px; font-siz
 .runs i { width: 10px; height: 10px; border-radius: 2px; background: var(--ok-dot); }
 .runs i.err { background: var(--bad-dot); }
 .runs i.nil { background: var(--warn-dot); }
+.ny-progress { margin-top: 2px; font-size: 14px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.page-head .ny-progress + .lede { margin-top: 6px; }
+.ny-item .wide { grid-column: 2 / -1; display: grid; gap: 8px; }
+.ny-edit .btns { display: flex; gap: 6px; }
+.ny-edit.radios { grid-template-columns: auto minmax(0, 1fr) auto; }
+.ny-radios { display: flex; align-items: center; gap: 14px; height: 32px; font-size: 13px; }
+.ny-radios label { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+.ny-radios input { accent-color: var(--primary); margin: 0; }
+/* merge confirm: the two companies side by side; a differing fact carries a mark and the word, never color alone */
+.ny-compare { max-width: 760px; }
+.ny-compare .table th { height: auto; padding-top: 8px; padding-bottom: 8px; vertical-align: top; }
+.ny-compare .table th.co { color: var(--foreground); font-weight: 600; }
+.ny-compare .table th.co .cell-sub { font-weight: 400; margin-top: 2px; }
+.ny-compare .table td.k { width: 128px; color: var(--muted-foreground); white-space: nowrap; }
+.ny-compare .table td.v { width: 40%; }
+.ny-compare tr.same td.v { color: var(--muted-foreground); }
+.ny-compare tr.diff td.v { font-weight: 500; }
+.differs { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--foreground); white-space: nowrap; }
+.differs .i { width: 14px; height: 14px; }
+.ny-locked { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
+.ny-locked .i { width: 14px; height: 14px; }
+/* the finish line: All settled. */
+.ny-settled { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 4px 12px; padding: 20px 24px; }
+.ny-settled > .i { width: 20px; height: 20px; margin-top: 2px; color: var(--muted-foreground); }
+.ny-settled > div { display: grid; gap: 16px; min-width: 0; }
+.ny-done { display: grid; border-top: 1px solid var(--border); }
+.ny-done > div { display: grid; grid-template-columns: 148px minmax(0, 1fr) auto 48px; gap: 12px; align-items: center; min-height: 36px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.ny-done b { font-weight: 500; }
+.ny-done .when { color: var(--muted-foreground); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+/* review device only: switches between mockup states, not part of the app */
+.mock-states { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 6px 6px 6px 12px; border: 1px dashed var(--ring); border-radius: var(--radius); }
+.mock-states .tabs { margin-left: auto; }
+[data-when][hidden] { display: none; }
 
 /* ======================= view: Company ======================= */
 .co-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; align-items: start; margin-bottom: 16px; }

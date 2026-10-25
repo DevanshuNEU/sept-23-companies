@@ -13,7 +13,7 @@ keys and tabs. All data in them is fake; email addresses use `.example` domains.
 | Today | `today.html` | 18 proposals in two groups, 3 of 5 picked, preview panel, remove dialog |
 | LinkedIn list | `linkedin.html` | people grouped by company, role to name, request to reply progress |
 | Outbox | `outbox.html` | reply holding a company, blocked drafts, recruiter warning, follow-up 2, ramp at 20 of 30 |
-| Needs you | `needs-you.html` | all five triggers, one mid-edit, one waiting 11 days |
+| Needs you | `needs-you.html` | four states, switched by a dashed "Mockup state" bar: Morning (all five triggers, one mid-edit, one waiting 11 days), Duplicates and Undo (the merge confirm, Company details, Resolved with Undo, "2 settled today, 3 open"), Every kind (each other kind with its fixes), All settled |
 | No-go list | `no-go.html` | companies and people with reason, evidence and source |
 | Company page | `company.html` | Browserbase held by a reply, six tabs |
 | Done | `done.html` | Crusoe, Retell AI, Distyl AI, a referral, replies per month |
@@ -152,8 +152,9 @@ own keys in section 16.6.
 | Key | Action |
 |---|---|
 | E | Edit the field, with a source |
-| O | Mark ok |
-| N | Mark no-go, with a reason |
+| O | Mark ok; on a possible duplicate, keep the two companies separate |
+| N | Mark no-go, with a reason (does nothing on a possible duplicate, which has no no-go) |
+| M | Merge into the suggested company (possible duplicates only; merging into the other one is a click, with no key) |
 | ⌘Enter | Save and lock (inside the edit form) |
 
 ### No-go list
@@ -395,30 +396,63 @@ shows Withdraw approval (U) until the sender claims it.
 ### 5.4 Needs you
 
 **Purpose.** Every review item from #9 and #16 with its reason and a one-click fix. A fix is locked so automation
-never overwrites it.
+never overwrites it. The page has a finish line: when nothing is open, it says so and shows what he settled.
 
-**Layout.** Sections by what the item holds up: "Holding up email" first (missing email domain for a company he
-is emailing; unknown size for a company he picked), then Sponsorship (unclear wording), then Job boards (board
-unreadable 3 runs in a row; zero jobs 2 runs in a row). Below, "Resolved this week", collapsed.
+**Layout.** Under the title, one progress line in grey: "2 settled today, 3 open". With nothing settled yet it reads
+"5 open" (no zero shown as a score); when nothing is open the line goes away and the settled panel says it instead.
+Then sections by what the item holds up, always in this order, an empty one left out: "Holding up email" (any item
+for a company he is emailing whose kind can stop a draft: missing domain, unknown or doubtful size), "Sponsorship"
+(unclear wording, postings that disagree), "Company details" (size and domain items that hold nothing up yet),
+"Job boards" (unreadable, zero jobs, careers page unreadable), "Possible duplicates" (merge questions), "Other"
+(the reader disagrees, a doubtful board match, Claude's suggestions, a changed careers page). Below, "Resolved this
+week", collapsed.
 
-**Elements.** Each item: icon, company, trigger badge, context badge (Picked today), age ("Opened Mon Nov 9", or
-an amber "Waiting 11 days" once older than 7 days), one plain sentence on what is wrong and what it affects, the
-evidence (a quoted posting line with a link; a run strip of the last reads, green ok, red error, amber empty), and
-the actions on the right. Edit opens an inline form in the row: the field (domain, size, sponsorship Yes, No or
-Unclear, board URL), a Source field (required), and Save and lock.
+**Elements.** Each item: icon, company, trigger badge, context badge (Picked today, Claude suggests), age ("Opened
+Mon Nov 9", or an amber "Waiting 11 days" once older than 7 days), one plain sentence on what is wrong and what it
+affects, the evidence with its source link (a quoted posting or profile line; a run strip of the last reads, green
+ok, red error, amber empty, with the run in words beside it), and the actions on the right. Edit opens an inline
+form in the row: the field (domain, size, sponsorship Yes, OPT only, Unclear or No, board URL), a Source field
+(required), Cancel, and Save and lock. While the form is open, Mark ok is hidden; Mark no-go stays. Sponsorship No
+opens the no-go dialog, since it is the same outcome. A size takes a number or a band ("34", "about 45", "11 to 50").
 
-**States.** Empty: "Nothing needs you. New items appear after each board read and when you pick a company."
-Stale: if the last board read is older than its schedule, the shared stale banner sits on top, because board
-items depend on it.
+Trigger badges are amber, the "look at it, nothing is stopped" color of section 8. The one exception is a missing
+email domain under "Holding up email", which is red because no draft for that company can be approved until it is
+fixed. A waiting item never turns red, however long it waits.
+
+- **Merge row** (a `merge_candidate`). The head names both companies ("Mesh Systems and Mesh"), the reason sentence
+  says what matched and what did not. Below, the two companies side by side: a column each, headed by the name and
+  its status ("Working since Nov 4", "Backlog"), the suggested one with a grey "Suggested" badge. Rows: Domain,
+  Size, Stage, Boards, Open postings, People, Touches. A row whose values differ ends in a "≠ Differs" mark and
+  shows its values in medium weight; a row that matches shows its values in grey. Color is never the signal. One
+  line under the table says why the suggestion ("your 6 touches are there"), what merging does, and that it can be
+  undone from Resolved. Actions: "Merge into Mesh Systems" (M, the suggested one, outline), "Merge into Mesh"
+  (no key), "Keep separate" (O). No Mark no-go.
+- **A person suggestion from Claude** (`flagged`, key `claude-no-go:`) shows the person, the quoted reason and
+  "Nothing changes until you choose. Mark no-go adds him, not the company." Its dialog lists person reasons.
+- **Resolved this week**: company, the kind as a grey badge, what he did in words, when, and on the right either
+  **Undo** (an ok, a no-go or a merge; a tooltip says what Undo does) or a lock with "Edited, locked" (a value he
+  set). An edited row's text ends with how to change it: "To change it, set it again on the company page." Rows
+  are grouped Today and Earlier this week.
+- **Settled panel** ("All settled."), shown in place of the list when nothing is open and he settled something
+  today: a grey check, the heading (the focus target), "You settled 5 today.", one line per item settled today
+  (company, what he did, "Locked" for an edit, the time), "Boards are read again Thu Nov 12 at 08:00. New items
+  appear after each board read and when you pick a company." and the next place to go: "Open the Outbox" (G O)
+  with "7 drafts wait for review there." when the shell has drafts.
+
+**States.** Settled: the panel above. Empty with nothing settled today: "Nothing needs you. New items appear after
+each board read and when you pick a company." Stale: if the last board read is older than its schedule, the shared
+stale banner sits on top, because board items depend on it.
 
 **Actions.**
 
 | Action | Confirmation | Undo |
 |---|---|---|
-| Mark ok | none | Z |
-| Edit field, Save and lock | none (the source is required) | Z; later, edit again |
-| Mark no-go | Dialog with a reason and a source | Z, or take it off the No-go list |
+| Mark ok | none | Z for 8 seconds, then Undo in Resolved |
+| Edit field, Save and lock | none (the source is required) | Z for 8 seconds; after that it stays locked: set it again on the company page |
+| Mark no-go | Dialog with a reason and a source | Z, then Undo in Resolved (also takes it off the no-go list, unless it was there before) |
 | Sponsorship set to No | same dialog as Mark no-go (it is the same outcome) | same |
+| Merge into either company | none (the comparison is the confirmation) | Z, then Undo in Resolved (makes two companies again) |
+| Keep separate | none | Z, then Undo in Resolved |
 
 A resolved item returns only when its evidence changes, and then it says what changed ("Reopened: LinkedIn now
 shows 51 to 200, you set about 45 on Nov 6").
@@ -628,12 +662,26 @@ triangle for warnings, check for passed, reply arrow for replies, pause for paus
 - Never say Send on a button. Approve says it waits for the sender: "Approved. Sends after 10:55 ET."
 - Times are shown in the recipient's zone with its abbreviation when it is about sending (10:42 ET), and in his own
   zone without one otherwise.
+- Progress is plain counts in grey: "2 settled today, 3 open". No zero as a score ("5 open", not "0 settled today, 5
+  open"), no percentages, no bars that empty out.
+- Never "streak", "missed", "overdue", "behind" or "keep it up", and no praise ("Great job"). A finish line states the
+  fact: "All settled." A waiting item says how long, in amber at most: "Waiting 11 days".
+- A settled item says what was done, by whom and from where: "Size set to 34 by you, from the LinkedIn company
+  page". A row that cannot be undone says so and how to change it: "Edited, locked" and "To change it, set it again
+  on the company page."
+- Undo's toast says what came back: "Undone. Ambergate's sponsorship question is open again."
+- A reason names both sides when it is a choice: "Mark no-go if the reader is right; mark ok to keep the rules'
+  reading." A suggestion from Claude says nothing happens until he chooses.
 
 ## 12. Accessibility
 
 - **Contrast** (computed, WCAG 2.1): body text 19.9:1; secondary text 5.3:1 on white, 4.8:1 on the active-row
   grey; status text on its soft background: ok 4.8, warn 4.8, bad 5.9, info 6.2, idle 7.0. In dark mode every
-  pair is 5.8:1 or higher. Primary button text 17:1, destructive 4.8:1.
+  pair is 5.8:1 or higher. Primary button text 17:1, destructive 4.8:1. Needs you additions (light, dark): progress
+  line 5.3, 7.8; merge head name on the table head grey 19.1, 18.1, its status line 5.1, 7.4; grey fact labels and
+  matching values 5.3, 7.6 (5.0, 6.7 on row hover); "Differs" and differing values 19.9, 18.7; hints in the active
+  row 4.8, 6.7; amber badges 4.8, 10.6 (8.9 in the active row). One shared style is under 4.5: in dark mode a tab's
+  count on the selected tab is 4.1:1 (`.tab .count` on `--input`), on every page that has tabs.
 - **Focus order:** sidebar, top bar, then the view in reading order: strip, list, detail, footer actions. In the
   Outbox, Tab from the list goes to the detail's first control; Esc from the editor returns to the list row.
   Focus is always visible (2 px ring). Dialogs trap focus and return it on close.
@@ -752,10 +800,13 @@ missing_domain), company id and name, `holds_email` (derived: true for missing d
 company), opened_at, age in days, reopened_from (previous resolution and what changed), evidence: for sponsorship,
 the quote, posting id, title, url, first seen; for boards, the last N reads from `board` and `job_run` (at, result
 ok, empty or error, HTTP status or error text), last ok read, open posting count; for size, the evidence rows.
-Resolved this week: item, resolution (ok, edited with value, no-go), by, at, locked.
+Resolved this week: item, resolution (ok, edited with value, no-go, merged), by, at, locked, revision, `canUndo`.
+For a merge item, `merge`: both companies (name, status, domain, size, stage, boards, open postings, people,
+touches) and `suggestedKeep`. `settledToday` for the progress line and the settled panel, and the next board read
+time (from the shell's health).
 
 Actions: mark ok, edit field (field: domain, size, sponsorship, board url; value; source required), mark no-go
-(reason, source). Each resolution locks the value and writes an `events` row; the item stays resolved unless its
+(reason, source), merge (keep a or b), reopen (Undo from Resolved, for ok, no-go and merge). Each resolution locks the value and writes an `events` row; the item stays resolved unless its
 evidence changes.
 
 ### 13.6 No-go list

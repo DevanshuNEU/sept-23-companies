@@ -45,7 +45,8 @@
     plus: '<path d="M5 12h14M12 5v14"/>',
     chart: '<path d="M5 21v-6M12 21V3M19 21V9"/>',
     award: '<path d="m15.477 12.89 1.515 8.526a.5.5 0 0 1-.81.47l-3.58-2.687a1 1 0 0 0-1.197 0l-3.586 2.686a.5.5 0 0 1-.81-.469l1.514-8.526"/><circle cx="12" cy="8" r="6"/>',
-    flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>'
+    flag: '<path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/>',
+    differs: '<path d="M5 9h14M5 15h14M19 5 5 19"/>'
   };
   var sprite = '<svg xmlns="http://www.w3.org/2000/svg" style="display:none">' +
     Object.keys(P).map(function (k) { return '<symbol id="' + k + '" viewBox="0 0 24 24">' + P[k] + '</symbol>'; }).join("") + "</svg>";
@@ -97,6 +98,12 @@
   });
 
   /* ---------- tabs ---------- */
+  /* [data-when="panelA panelB"] shows only while one of those tab panels is shown (a sidebar count per mockup state). */
+  function syncWhen() {
+    document.querySelectorAll("[data-when]").forEach(function (el) {
+      el.hidden = !el.getAttribute("data-when").split(" ").some(function (id) { var p = document.getElementById(id); return p && !p.hidden; });
+    });
+  }
   document.querySelectorAll('[role="tablist"]').forEach(function (list) {
     list.addEventListener("click", function (e) {
       var tab = e.target.closest('[role="tab"]'); if (!tab) return;
@@ -104,8 +111,13 @@
         var on = t === tab; t.setAttribute("aria-selected", on);
         var p = document.getElementById(t.getAttribute("aria-controls")); if (p) p.hidden = !on;
       });
+      syncWhen();
     });
   });
+  /* review helper: ?tab=<panel id> opens that tab on load */
+  var tabq = /[?&]tab=([\w-]+)/.exec(location.search);
+  if (tabq) { var tq = document.querySelector('[role="tab"][aria-controls="' + tabq[1] + '"]'); if (tq) tq.click(); }
+  syncWhen();
 
   /* ---------- list movement: j/k, arrows, enter, x ---------- */
   var rows = function () { return Array.prototype.slice.call(document.querySelectorAll("[data-row]")).filter(function (r) { return r.offsetParent !== null; }); };

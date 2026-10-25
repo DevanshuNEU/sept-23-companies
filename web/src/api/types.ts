@@ -88,7 +88,7 @@ export interface PostingHit { postingId: Id; title: string; companyId: Id; compa
 // Today (spec 13.2)
 export interface DailyEntry {
   company: CompanyRef & { domain: string | null; hq: string };
-  listGroup: 'level_role' | 'intern_junior' | 'any_us_role' | 'reason_no_role'; rank: number; state: 'proposed' | 'picked' | 'backlog' | 'removed'; revision: Revision;
+  listGroup: ListGroup; rank: number; state: 'proposed' | 'picked' | 'backlog' | 'removed'; revision: Revision;
   role: RoleToName | null; size: Fact | null; stage: Fact | null; sponsorship: SponsorshipShown;
   sponsorshipFact: Fact | null; domainFact: Fact | null; mailServerOk: boolean | null; // needs #4 0002 (stored MX check)
   why: string; otherRoles: { title: string; firstSeenAt: IsoTime }[]; peopleCount: number; draftCount: number;

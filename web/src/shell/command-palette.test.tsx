@@ -279,6 +279,21 @@ describe('CommandPalette', () => {
     expect(where()).toBe('/needs-you');
   });
 
+  it('lists Progress and Wins under Go to, with their chords', async () => {
+    const user = userEvent.setup();
+    await shell();
+    press('/');
+    const dialog = await palette();
+    const goTo = within(dialog).getByText('Go to').closest('[cmdk-group]') as HTMLElement;
+    for (const [name, caps] of [['Progress', ['G', 'P']], ['Wins', ['G', 'W']]] as const) {
+      const row = within(goTo).getByRole('option', { name: new RegExp(`^${name}`) });
+      expect([...row.querySelectorAll('[data-slot="kbd"]')].map((k) => k.textContent)).toEqual(caps);
+    }
+    await user.type(search(), 'wins');
+    await user.click(await screen.findByRole('option', { name: /Wins/ }));
+    expect(where()).toBe('/wins');
+  });
+
   it('runs Toggle theme from Actions', async () => {
     const user = userEvent.setup();
     await shell();
@@ -423,6 +438,17 @@ describe('ShortcutSheet', () => {
     expect(within(sheet).getByText('Approve this email')).toBeInTheDocument();
     expect(within(sheet).getByText('Go to Today')).toBeInTheDocument();
     expect(within(sheet).getByText('Search and commands')).toBeInTheDocument();
+  });
+
+  it('lists the g p and g w chords under Everywhere', async () => {
+    await shell();
+    press('?', { shiftKey: true });
+    const sheet = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' });
+    const everywhere = within(sheet).getByRole('region', { name: 'Everywhere' });
+    for (const [label, second] of [['Go to Progress', 'P'], ['Go to Wins', 'W']] as const) {
+      const caps = [...(within(everywhere).getByText(label).closest('li')?.querySelectorAll('[data-slot="kbd"]') ?? [])];
+      expect(caps.map((k) => k.textContent)).toEqual(['G', second]);
+    }
   });
 
   it('shows the keys as caps, with a chord as two', async () => {

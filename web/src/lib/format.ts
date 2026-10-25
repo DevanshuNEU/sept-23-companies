@@ -45,6 +45,11 @@ export function formatLocalTime(at: IsoTime): string {
   return `${p.hour}:${p.minute}`;
 }
 
+/** "9:02": the time of day in the app's zone with no leading zero, as the plan, finish and win views write it. */
+export function formatClockTime(at: IsoTime): string {
+  return formatLocalTime(at).replace(/^0(?=\d:)/, '');
+}
+
 export function parseIsoDate(d: IsoDate): { y: number; m: number; d: number } {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
   if (!match) throw new Error(`Not a calendar date: ${d}`);
@@ -114,4 +119,28 @@ export function formatAge(at: IsoTime, asOf: IsoTime): string {
   const n = ageDays(at, asOf);
   if (n <= 0) return 'today';
   return n === 1 ? '1 day ago' : `${n} days ago`;
+}
+
+const LONG_DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' });
+const WEEKDAY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' });
+
+/** Noon UTC on a calendar date, read in UTC, so no zone moves the day. */
+const noonOf = (on: IsoDate) => {
+  const { y, m, d } = parseIsoDate(on);
+  return new Date(Date.UTC(y, m - 1, d, 12));
+};
+
+/** "Tuesday, November 10" for a calendar date (the plan's day). */
+export function formatLongDate(on: IsoDate): string {
+  return LONG_DAY.format(noonOf(on));
+}
+
+/**
+ * The day a row was carried from: "Monday" within the last week, "Mon Nov 2" before that. The distance comes from
+ * `asOf`, never the real clock.
+ */
+export function formatCarriedDay(from: IsoDate, asOf: IsoTime): string {
+  const noon = noonOf(from);
+  const days = ageDays(noon.toISOString(), asOf);
+  return days >= 1 && days <= 6 ? WEEKDAY.format(noon) : formatDueDay(from);
 }

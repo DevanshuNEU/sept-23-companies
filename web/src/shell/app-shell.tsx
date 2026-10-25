@@ -23,10 +23,13 @@ import { ShortcutSheet } from './shortcut-sheet';
 
 const VIEW_TITLE: Record<string, string> = {
   today: 'Today',
+  proposals: 'All proposed companies',
   outbox: 'Outbox',
   linkedin: 'LinkedIn list',
   'needs-you': 'Needs you',
   'no-go': 'No-go list',
+  progress: 'Progress',
+  wins: 'Wins',
   done: 'Done',
 };
 
@@ -37,6 +40,8 @@ const GO: [key: string, path: string, name: string][] = [
   ['n', '/needs-you', 'Needs you'],
   ['x', '/no-go', 'No-go'],
   ['d', '/done', 'Done'],
+  ['p', '/progress', 'Progress'],
+  ['w', '/wins', 'Wins'],
 ];
 
 /** The first path segment names the view: `/outbox/12?sel=12` is the `outbox` view. */

@@ -20,6 +20,8 @@ export interface PendingWrite {
   commit: (o: WriteOptions) => Promise<unknown>;
   /** Commit at once, with the patches and a toast but no Undo. */
   immediate?: boolean;
+  /** With `immediate`: no toast either, for a write that is not worth a word (marking wins seen). A failure still toasts. */
+  silent?: boolean;
 }
 
 interface Overlay {
@@ -77,7 +79,7 @@ class PendingStore {
     ]);
 
     if (write.immediate) {
-      toast(write.label, { id: toastId });
+      if (!write.silent) toast(write.label, { id: toastId });
       // A known revision goes out in this same task (`withRevision` reads first only when it knows none).
       void this.run(write, requestId, toastId, { requestId, keepalive: true });
       return;
@@ -110,6 +112,11 @@ class PendingStore {
   cancel(id: string): boolean {
     const entry = this.queue.find((e) => e.write.id === id);
     return entry ? this.undo(entry) : false;
+  }
+
+  /** True from the moment a write with this id is queued until its commit and refetch settle (an undo ends it too). */
+  isPending(id: string): boolean {
+    return this.active.has(id);
   }
 
   /**
@@ -257,13 +264,24 @@ export function usePendingWrite(): (w: PendingWrite) => void {
 /**
  * `undoLast` (bound to `z`) drops the newest write still in its window; `flushPending` commits them all now;
  * `cancel(id)` drops the write with that id if it is still in its window (a view uses it when the next action
- * on a thing is the opposite of a pending one, so nothing is sent).
+ * on a thing is the opposite of a pending one, so nothing is sent). `isPending(id)` says whether a write with that id
+ * is queued or still settling, so a repeat press can stay silent instead of saying "already logged".
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function usePendingControls(): { undoLast: () => boolean; flushPending: () => Promise<void>; cancel: (id: string) => boolean } {
+export function usePendingControls(): {
+  undoLast: () => boolean;
+  flushPending: () => Promise<void>;
+  cancel: (id: string) => boolean;
+  isPending: (id: string) => boolean;
+} {
   const { store } = usePendingContext();
   return useMemo(
-    () => ({ undoLast: () => store.undoLast(), flushPending: () => store.flush(), cancel: (id: string) => store.cancel(id) }),
+    () => ({
+      undoLast: () => store.undoLast(),
+      flushPending: () => store.flush(),
+      cancel: (id: string) => store.cancel(id),
+      isPending: (id: string) => store.isPending(id),
+    }),
     [store],
   );
 }

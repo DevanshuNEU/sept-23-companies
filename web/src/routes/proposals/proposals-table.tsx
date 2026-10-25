@@ -27,9 +27,9 @@ const LEVEL: Record<LevelTier, string | null> = {
 
 const GROUP_LABEL: Record<DailyEntry['listGroup'], string> = {
   level_role: 'Role at your level: new grad, early career, SWE I, SWE II',
-  intern_junior: 'Internship or junior role',
+  intern_junior: 'Intern or junior work you can do on OPT',
+  reason_no_role: 'No role yet, a reason to reach out',
   any_us_role: 'Open US engineering role, level not named',
-  reason_no_role: 'A reason to reach out, no open role',
 };
 
 const HEAD = 'h-9 bg-subtle px-3 text-[13px] text-muted-foreground';

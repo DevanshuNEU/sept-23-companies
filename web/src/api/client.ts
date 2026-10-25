@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -46,4 +46,26 @@ export interface OutreachClient {
 
   company(companyId: Id): Promise<CompanyView>;
   done(): Promise<DoneView>;
+
+  // Plan, outcomes, progress, wins (#33)
+  plan(): Promise<PlanView>;
+  outcomePrompt(): Promise<OutcomePromptView>;
+  wins(): Promise<WinsView>;
+  progress(): Promise<ProgressView>;
+  findings(): Promise<FindingsView>;
+  watchList(): Promise<WatchView>;
+  score(companyId: Id): Promise<ScoreView>; // 'not_found' for an unknown company
+
+  // Idempotency keys are `plan:<entryId>:request` and `plan:<entryId>:apply`, sent in the body: the same key again (any request id, any
+  // revision) answers with the row and writes nothing. A new key checks the row's `revision` like every other row write: a stale one is
+  // 'conflict' (#11's API checks it on step logs too). A step already logged under another key, a removed company's row, a paused or
+  // no-go company are 'not_allowed'; a person or role that is not the row's is the API's bad_request, which reads as 'not_allowed'.
+  logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>;
+  logApplied(entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>; // 'not_allowed' with no role
+  logOutcome(touchId: Id, kind: OutcomeKind, revision: Revision, o: WriteOptions, replyKind?: Exclude<ReplyKind, 'unsorted' | 'auto_reply'>): Promise<{ revision: Revision }>;
+  skipRow(entryId: Id, revision: Revision, o: WriteOptions): Promise<PlanRow>; // carried to tomorrow; 'not_allowed' on a done row
+  saveNote(noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions): Promise<NoteDraft>;
+  confirmReason(noteId: Id, revision: Revision, o: WriteOptions): Promise<NoteDraft>; // reasonState becomes 'confirmed'; 'not_allowed' with an empty line
+  markWinsSeen(winIds: Id[], o: WriteOptions): Promise<void>; // 'not_found' for an unknown id
+  dismissWatch(itemId: Id, o: WriteOptions): Promise<void>;
 }

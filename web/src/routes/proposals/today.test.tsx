@@ -3,34 +3,20 @@ import userEvent from '@testing-library/user-event';
 import type { TodayView } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture, type Scenario } from '@/api/fixture/data';
-import { SidebarProvider } from '@/components/ui/sidebar';
-import { AppSidebar } from '@/shell/app-sidebar';
 import { renderWithApp } from '@/test/render';
 import TodayPage from './index';
 
-/** Today next to the real sidebar, so the "N of 5" count by Today can be watched. */
-function Page() {
-  return (
-    <SidebarProvider>
-      <AppSidebar />
-      <TodayPage />
-    </SidebarProvider>
-  );
-}
-
 async function open(client = new FixtureClient()) {
-  const view = renderWithApp(<Page />, { route: '/today', client });
+  const view = renderWithApp(<TodayPage />, { route: '/proposals', client });
   await screen.findByRole('checkbox', { name: 'Pick Pylon' });
   return view;
 }
 
 async function openScenario(scenario: Scenario) {
-  return renderWithApp(<Page />, { route: '/today', client: new FixtureClient(buildFixture(scenario)) });
+  return renderWithApp(<TodayPage />, { route: '/proposals', client: new FixtureClient(buildFixture(scenario)) });
 }
 
 const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
-const sidebar = () => document.querySelector<HTMLElement>('[data-slot="sidebar"]') ?? document.body;
-const todayCount = () => within(sidebar()).getByRole('link', { name: /^Today/ });
 const box = (name: string) => screen.getByRole('checkbox', { name: `Pick ${name}` });
 const rowOf = (name: string) => {
   const tr = box(name).closest('tr');
@@ -82,14 +68,14 @@ describe('Today', () => {
 
     select('Pylon');
     press('x');
-    expect(within(todayCount()).getByText('4 of 5')).toBeInTheDocument();
+    expect(capValue('Picked today')).toHaveTextContent('4 of 5');
     expect(await screen.findByText('Picked Pylon')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Undo' }).length).toBeGreaterThan(0);
     expect(box('Pylon')).toBeChecked();
 
     select('Baseten');
     press('x');
-    expect(within(todayCount()).getByText('5 of 5')).toBeInTheDocument();
+    expect(capValue('Picked today')).toHaveTextContent('5 of 5');
     expect(capValue('Picked today')).toHaveTextContent('5 of 5');
 
     const inngest = box('Inngest');
@@ -117,7 +103,7 @@ describe('Today', () => {
     await open();
     select('Resend');
     press('x');
-    expect(within(todayCount()).getByText('2 of 5')).toBeInTheDocument();
+    expect(capValue('Picked today')).toHaveTextContent('2 of 5');
     expect(await screen.findByText('Unpicked Resend')).toBeInTheDocument();
   });
 
@@ -238,10 +224,10 @@ describe('Today', () => {
       select('Pylon');
       press('x');
       expect(box('Pylon')).toBeChecked();
-      expect(within(todayCount()).getByText('4 of 5')).toBeInTheDocument();
+      expect(capValue('Picked today')).toHaveTextContent('4 of 5');
       press('x');
       expect(box('Pylon')).not.toBeChecked();
-      expect(within(todayCount()).getByText('3 of 5')).toBeInTheDocument();
+      expect(capValue('Picked today')).toHaveTextContent('3 of 5');
       expect(screen.queryByText('Picked Pylon')).not.toBeInTheDocument();
 
       flushPage();
@@ -262,7 +248,7 @@ describe('Today', () => {
       expect(box('Resend')).not.toBeChecked();
       press('x');
       expect(box('Resend')).toBeChecked();
-      expect(within(todayCount()).getByText('3 of 5')).toBeInTheDocument();
+      expect(capValue('Picked today')).toHaveTextContent('3 of 5');
 
       flushPage();
       await idle();
@@ -285,7 +271,7 @@ describe('Today', () => {
         press('x');
         await settle(0);
         expect(box('Pylon')).toBeChecked();
-        expect(within(todayCount()).getByText('4 of 5')).toBeInTheDocument();
+        expect(capValue('Picked today')).toHaveTextContent('4 of 5');
         // The toasts of the two cancelled writes are dismissed; one live "Picked Pylon" with Undo stays.
         await settle(1000);
         const live = screen.getAllByText('Picked Pylon').filter((el) => el.closest('[data-sonner-toast]')?.getAttribute('data-removed') !== 'true');
@@ -337,7 +323,7 @@ describe('Today', () => {
 
       select('Pylon');
       press('x');
-      expect(within(todayCount()).getByText('4 of 5')).toBeInTheDocument();
+      expect(capValue('Picked today')).toHaveTextContent('4 of 5');
       press('r');
       const dialog = await screen.findByRole('dialog', { name: 'Remove Pylon for good?' });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
@@ -345,7 +331,7 @@ describe('Today', () => {
       await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
       expect(remove).toHaveBeenCalledWith(pylon.company.id, 'not_a_fit', '', pylon.revision, expect.objectContaining({ requestId: expect.any(String) }));
       await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Pick Pylon' })).not.toBeInTheDocument());
-      expect(within(todayCount()).getByText('3 of 5')).toBeInTheDocument();
+      expect(capValue('Picked today')).toHaveTextContent('3 of 5');
 
       flushPage();
       await idle();
@@ -360,7 +346,7 @@ describe('Today', () => {
     const [railway] = data.today.proposed.splice(at, 1);
     if (!railway) throw new Error('No Railway in the fixture');
     data.today.proposed.splice(1, 0, railway);
-    renderWithApp(<Page />, { route: '/today', client: new FixtureClient(data) });
+    renderWithApp(<TodayPage />, { route: '/proposals', client: new FixtureClient(data) });
     await screen.findByRole('checkbox', { name: 'Pick Pylon' });
 
     select('Pylon');

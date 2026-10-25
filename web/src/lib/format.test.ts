@@ -1,4 +1,4 @@
-import { ageDays, formatAge, formatDay, formatDayTime, formatDue, formatDueDay, formatLocalTime, formatMonth, formatRecipientTime, formatWeekdayTime, parseIsoDate } from '@/lib/format';
+import { ageDays, formatAge, formatCarriedDay, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatLongDate, formatMonth, formatRecipientTime, formatWeekdayTime, parseIsoDate } from '@/lib/format';
 
 const ASOF = '2026-11-10T15:14:00Z'; // Tuesday 10:14 in Boston
 
@@ -37,6 +37,15 @@ describe('formatLocalTime', () => {
   it('reads the app zone, America/New_York, with no zone suffix', () => {
     expect(formatLocalTime('2026-11-10T15:14:00Z')).toBe('10:14');
     expect(formatLocalTime('2026-10-30T14:14:00Z')).toBe('10:14');
+  });
+});
+
+describe('formatClockTime', () => {
+  it('is the time of day in the app zone with no leading zero, as the plan views write it', () => {
+    expect(formatClockTime('2026-11-10T14:02:00Z')).toBe('9:02');
+    expect(formatClockTime('2026-11-10T15:14:00Z')).toBe('10:14');
+    expect(formatClockTime('2026-11-10T05:05:00Z')).toBe('0:05');
+    expect(formatClockTime('2026-10-30T13:41:00Z')).toBe('9:41');
   });
 });
 
@@ -127,5 +136,23 @@ describe('formatMonth', () => {
   it('names the month of an instant in the app zone', () => {
     expect(formatMonth('2026-11-10T15:14:00Z')).toBe('November');
     expect(formatMonth('2026-11-01T03:30:00Z')).toBe('October'); // 23:30 EDT on Oct 31
+  });
+});
+
+describe('formatLongDate', () => {
+  it('writes a calendar date with its weekday and month in full', () => {
+    expect(formatLongDate('2026-11-10')).toBe('Tuesday, November 10');
+    expect(formatLongDate('2026-11-14')).toBe('Saturday, November 14');
+  });
+});
+
+describe('formatCarriedDay', () => {
+  const asOf = '2026-11-10T15:14:00Z';
+  it('names the weekday within the last week', () => {
+    expect(formatCarriedDay('2026-11-09', asOf)).toBe('Monday');
+    expect(formatCarriedDay('2026-11-04', asOf)).toBe('Wednesday');
+  });
+  it('writes the date from a week back', () => {
+    expect(formatCarriedDay('2026-11-03', asOf)).toBe('Tue Nov 3');
   });
 });

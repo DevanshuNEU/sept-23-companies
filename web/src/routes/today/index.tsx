@@ -1,47 +1,36 @@
-import { useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
+import { useId, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
-import { Archive, CalendarX, Inbox, Terminal } from 'lucide-react';
+import { HelpCircle, Terminal } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
   usePageClient,
-  type DailyEntry,
   type Id,
-  type JobRunSummary,
-  type TodayView,
+  type PlanRow,
+  type PlanView,
+  type StepKind,
 } from '@/api';
-import { EmptyState, QueryState, StateBanner } from '@/components/state-views';
+import { DayRail } from '@/components/day-rail';
+import { QueryState } from '@/components/state-views';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useHotkeys, type Binding } from '@/keyboard/hotkeys';
-import { useListNav } from '@/keyboard/list-nav';
-import { formatDayTime } from '@/lib/format';
-import { useUrlState } from '@/lib/url-state';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { isMac, useHotkeys, type Binding } from '@/keyboard/hotkeys';
+import { useListNav, type RowProps } from '@/keyboard/list-nav';
+import { formatLongDate } from '@/lib/format';
+import { openExternal, safeHref } from '@/lib/safe-href';
 import { useViewQuery } from '@/pending/pending';
-import { openExternal } from '@/lib/safe-href';
-import { useTodayActions } from './actions';
-import { groupInOrder } from './grouping';
-import { PreviewPanel } from './preview-panel';
-import { ProposalsTable } from './proposals-table';
-import { RemoveDialog } from './remove-dialog';
-import { StillEmailingTable } from './still-emailing';
-
-type List = 'proposed' | 'backlog';
-
-const LONG_DATE = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric' });
-/** "Tuesday, November 10": the day of `asOf` in the app's zone. */
-const longDate = (asOf: string) => LONG_DATE.format(new Date(asOf));
+import { RemoveDialog } from '@/routes/proposals/remove-dialog';
+import { EmailRowPanel } from './email-row-panel';
+import { FinishPanel } from './finish-panel';
+import { FindSomeonePanel } from './find-someone-panel';
+import type { NoteEdit } from './note-editor';
+import { KeyHint, PersonPanel, type PanelActions } from './plan-panel';
+import { PlanEmpty, PlanJobBanner, PlanNotReady, PlanSkeleton } from './plan-states';
+import { nextTodoAfter } from './plan-steps';
+import { usePlanActions } from './use-plan-actions';
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const capacityText = (capacity: number) => `Today's limit carries ${capacity} companies. Unpick one first.`;
-
-/** The block he pastes in the side terminal so Claude adds people for the company. */
-function handoffOf(e: DailyEntry): string {
-  const role = e.role ? `Role to name: ${e.role.title}.` : 'Role to name: none yet.';
-  return `Add people for ${e.company.name} (company ${e.company.id}).\n${role}`;
-}
 
 async function copy(text: string, done: string) {
   try {
@@ -52,277 +41,291 @@ async function copy(text: string, done: string) {
   }
 }
 
-function CapItem({ k, children, sub }: { k: string; children: ReactNode; sub?: ReactNode }) {
+/** The row's name as the rail and the live region say it. */
+function nameOf(row: PlanRow): string {
+  if (row.channel === 'email') return `${row.company.name} by email`;
+  return `${row.person?.person.name ?? 'Find someone'} at ${row.company.name}`;
+}
+
+/** Whether logging this step is the one that finishes the row, so the selection moves on. */
+const finishes = (row: PlanRow, kind: StepKind) =>
+  row.state === 'todo' && row.steps.some((s) => s.kind === kind && s.at === null) && row.steps.every((s) => s.kind === kind || s.at !== null);
+
+/** The rows as they are once this one is no longer to do, for `nextTodoAfter`. */
+const without = (rows: PlanRow[], entryId: Id): PlanRow[] => rows.map((r) => (r.entryId === entryId ? { ...r, state: 'done' } : r));
+
+function PlanHead({ plan }: { plan: PlanView }) {
+  const { used, limit, hardUsed, hardLimit } = plan.linkedinMonth;
+  // Once nothing is left to do, the head says what carried over, as the finish line does (design 16.2).
+  const finished = plan.rows.length > 0 && plan.rows.every((r) => r.state !== 'todo');
+  const carried = finished ? plan.rows.filter((r) => r.state === 'skipped').length : 0;
   return (
-    <div className="grid content-start gap-0.5 border-r px-4 py-3 last:border-r-0">
-      <dt className="text-xs text-muted-foreground">{k}</dt>
-      <dd className="text-xl leading-7 font-semibold tracking-tight tabular-nums">{children}</dd>
-      {sub ? <dd className="text-xs text-muted-foreground">{sub}</dd> : null}
+    <div className="flex flex-none items-end gap-4 border-b px-6 pt-5 pb-4">
+      <div>
+        <h2 className="text-xl leading-7 font-semibold tracking-[-0.01em]">{formatLongDate(plan.date)}</h2>
+        {plan.notReady ? null : (
+          <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums">{`${plural(plan.total, 'person', 'people')}, ${plan.done} done${carried > 0 ? `, ${carried} carried over` : ''}`}</p>
+        )}
+      </div>
+      <div className="ml-auto flex items-center gap-2 text-[13px]">
+        <p data-quota="month" className="flex items-baseline gap-1.5 tabular-nums">
+          <span className="text-muted-foreground">Requests this month</span> <b className="font-semibold">{used}</b>{' '}
+          <span className="text-muted-foreground">{`of ${limit}`}</span>
+        </p>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" aria-label="About this limit" className="rounded-sm text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+              <HelpCircle aria-hidden className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-64">
+            {`The plan uses ${limit} of LinkedIn's ${hardLimit} a month. ${hardUsed} of ${hardLimit} are used, counting requests sent outside the plan.`}
+          </TooltipContent>
+        </Tooltip>
+      </div>
     </div>
   );
 }
 
-function Capacity({ t }: { t: TodayView }) {
-  const held = t.stillEmailing.filter((s) => s.state === 'held').length;
-  const paused = t.stillEmailing.filter((s) => s.state === 'paused').length;
-  const stillSub = [held ? `${held} held by a reply` : '', paused ? `${paused} paused` : ''].filter(Boolean).join(', ');
-  const atLevel = t.proposed.filter((e) => e.listGroup === 'level_role').length;
-  return (
-    <dl aria-label="Capacity" className="mb-5 grid grid-cols-4 overflow-hidden rounded-md border">
-      <CapItem
-        k="Picked today"
-        sub={
-          <span aria-hidden className="mt-1.5 flex gap-1">
-            {Array.from({ length: t.capacity }, (_, i) => (
-              <i key={i} data-on={i < t.picked} className="h-1.5 w-[18px] rounded-[2px] bg-muted data-[on=true]:bg-foreground" />
-            ))}
-          </span>
-        }
-      >
-        {t.picked} <small className="text-[13px] font-normal tracking-normal text-muted-foreground">{`of ${t.capacity}`}</small>
-      </CapItem>
-      <CapItem k="Still emailing" sub={stillSub || undefined}>
-        {t.stillEmailing.length}
-      </CapItem>
-      <CapItem k="Proposed" sub={atLevel ? `${atLevel} with a role at your level` : undefined}>
-        {t.proposed.length}
-      </CapItem>
-      <CapItem k="Backlog" sub="Unpicked roll here at 08:00 tomorrow">
-        {t.backlog.length}
-      </CapItem>
-    </dl>
-  );
-}
-
-/** The shared stale banner when the daily list job failed or is late, with the job's error. */
-function ListJobBanner({ job }: { job: JobRunSummary | null }) {
-  if (!job) return null;
-  if (job.status === 'failed') {
-    return (
-      <div className="mb-4">
-        <StateBanner tone="warn" title={`Daily list failed ${formatDayTime(job.startedAt)}`}>
-          {job.error || 'The job stopped without an error message.'}
-        </StateBanner>
-      </div>
-    );
-  }
-  if (job.late) {
-    return (
-      <div className="mb-4">
-        <StateBanner tone="warn" title="Daily list is late">
-          {job.expectedNextAt ? `It was expected ${formatDayTime(job.expectedNextAt)}.` : 'It has not run on time.'}
-        </StateBanner>
-      </div>
-    );
-  }
-  return null;
-}
-
-function SectionTitle({ title, count, right }: { title: string; count: number; right?: ReactNode }) {
-  return (
-    <div className="mt-6 mb-2 flex items-center gap-2">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      <span className="text-sm text-muted-foreground tabular-nums">{count}</span>
-      {right ? <div className="ml-auto">{right}</div> : null}
-    </div>
-  );
-}
-
-function TodaySkeleton() {
-  return (
-    <div aria-hidden className="grid gap-3">
-      <Skeleton className="h-7 w-64" />
-      <Skeleton className="h-4 w-[32rem]" />
-      <div className="mt-2 grid grid-cols-4 gap-3">
-        {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-[76px]" />
-        ))}
-      </div>
-      {Array.from({ length: 8 }, (_, i) => (
-        <Skeleton key={i} className="h-9 w-full" />
-      ))}
-    </div>
-  );
-}
-
-function TodayContent({ t, limitToday }: { t: TodayView; limitToday: number | undefined }) {
+/**
+ * The plan with people on it: the day rail on the left, the selected person's work on the right (design 16.1).
+ *
+ * The first row to do is selected on arrival and pinned: it is read once, when the plan first shows, so a row
+ * that finishes or a poll that reorders never moves the selection. Once he moves, the selection lives in the URL.
+ * Every key acts on the row he moved to last (`useHotkeys` with the selection), and follows the same rules as its
+ * button.
+ */
+function PlanWork({ plan }: { plan: PlanView }) {
   const navigate = useNavigate();
-  const actions = useTodayActions();
-  const [tabRaw, setTab] = useUrlState('tab', 'proposed');
-  const tab: List = tabRaw === 'backlog' ? 'backlog' : 'proposed';
-  const [removing, setRemoving] = useState<DailyEntry | null>(null);
+  const actions = usePlanActions();
+  const [pinned] = useState(() => plan.rows.find((r) => r.state === 'todo')?.entryId);
+  const [edits, setEdits] = useState<ReadonlyMap<Id, NoteEdit>>(new Map());
+  const [removing, setRemoving] = useState<PlanRow | null>(null);
+  // The panel's heading takes focus after a save or a confirm, so focus never drops to the page.
+  const headingId = useId();
+  const noteFieldId = `${headingId}-note`;
 
-  const rows = tab === 'proposed' ? t.proposed : t.backlog;
-  // The table lists rows group by group, so j and k walk that order, not the API's.
-  const ids = groupInOrder(rows, (e) => e.listGroup).flatMap((g) => g.items.map((e) => e.company.id));
-  const byId = new Map(rows.map((e) => [e.company.id, e]));
-  const { selected, select, rowProps } = useListNav<number>({
+  const rows = plan.rows;
+  const ids = rows.map((r) => r.entryId);
+  const byId = new Map(rows.map((r) => [r.entryId, r]));
+  const { selected, select, rowProps } = useListNav<Id>({
     ids,
-    onOpen: (id) => navigate(`/companies/${id}`),
-    announce: (id) => byId.get(id)?.company.name ?? '',
+    initial: pinned,
+    onOpen: (id) => {
+      const row = byId.get(id);
+      if (row) navigate(`/companies/${row.company.id}`);
+    },
+    announce: (id) => {
+      const row = byId.get(id);
+      return row ? nameOf(row) : '';
+    },
   });
-  const current = selected === null ? null : (byId.get(selected) ?? null);
+  const allDone = rows.every((r) => r.state !== 'todo');
 
-  const atCapacity = t.picked >= t.capacity;
-  const blockedText = atCapacity ? capacityText(t.capacity) : null;
-  const picks = [...t.proposed, ...t.backlog].filter((e) => e.state === 'picked');
+  // The finish line takes the work panel the moment no row is to do (design 16.2) and stays until he picks a
+  // person on the rail. `id` is the row he was on, so a click on it still counts as picking. Arriving on a plan
+  // that is already finished with a person in the URL shows that person, as the link asked.
+  const [arrivedDone] = useState(allDone);
+  const [fin, setFin] = useState<{ id: Id | null; browsing: boolean } | null>(null);
+  if (!allDone && fin !== null) setFin(null);
+  else if (allDone && fin === null) setFin({ id: selected, browsing: arrivedDone && selected !== null });
+  else if (fin !== null && !fin.browsing && selected !== fin.id) setFin({ ...fin, browsing: true });
+  const showFinish = allDone && fin !== null && !fin.browsing;
+  const current = showFinish || selected === null ? null : (byId.get(selected) ?? null);
 
-  /** After a row leaves the list (backlog, remove), the cursor moves to the next row, or the one before at the end. */
-  const moveOn = (id: Id) => {
-    const at = ids.indexOf(id);
-    const next = ids[at + 1] ?? ids[at - 1];
-    if (next !== undefined) select(next);
+  const focusPanel = () => requestAnimationFrame(() => document.getElementById(headingId)?.focus());
+  const moveOn = (row: PlanRow) => {
+    const next = nextTodoAfter(without(rows, row.entryId), row.entryId);
+    if (next !== null) select(next);
   };
+  const setEdit = (noteId: Id, edit: NoteEdit | null) =>
+    setEdits((m) => {
+      const next = new Map(m);
+      if (edit) next.set(noteId, edit);
+      else next.delete(noteId);
+      return next;
+    });
 
-  const toggle = (e: DailyEntry) => {
-    if (e.state === 'picked') return actions.unpick(e);
-    if (atCapacity) {
-      toast(capacityText(t.capacity));
-      return;
-    }
-    actions.pick(e);
+  /* ------------------------------------------------------------------ what each key and button does */
+
+  const log = (row: PlanRow, kind: StepKind) => {
+    const done = finishes(row, kind);
+    const queued = kind === 'request' ? actions.logRequest(row) : actions.logApplied(row);
+    if (queued && done) moveOn(row);
   };
-  const toBacklog = (e: DailyEntry) => {
-    if (tab !== 'proposed' || e.state === 'backlog') return;
-    moveOn(e.company.id);
-    actions.backlog(e);
+  const carry = (row: PlanRow) => {
+    if (actions.skip(row)) moveOn(row);
   };
-  const copyPicks = () => {
-    if (picks.length === 0) {
-      toast('No picks yet. Press X on a company to pick it.');
-      return;
-    }
-    void copy(picks.map(handoffOf).join('\n\n'), `Copied ${plural(picks.length, 'company', 'companies')} for the side terminal.`);
+  /** Not a fit opens its dialog only when the API could remove the company; else it says why, once. */
+  const askNotAFit = (row: PlanRow) => {
+    const blocked = actions.notAFitRefusal(row);
+    if (blocked) return void toast(blocked);
+    setRemoving(row);
   };
-  const copyTitle = (e: DailyEntry) => {
-    if (e.role) void copy(e.role.title, `Copied: ${e.role.title}`);
+  /** An open edit that differs from the saved note: Copy would copy the saved text, so it waits for Save. */
+  const unsavedEdit = (row: PlanRow): boolean => {
+    const draft = row.note ? edits.get(row.note.noteId) : undefined;
+    return draft !== undefined && row.note !== null && (draft.text !== row.note.text || draft.line !== row.note.reasonLine);
   };
-  const openPosting = (e: DailyEntry) => {
-    if (e.role) openExternal(e.role.url);
+  const copyNote = (row: PlanRow) => {
+    if (row.findSomeone) return void copy(row.findSomeone.handoff, 'Copied the handoff for Claude.');
+    const note = row.note;
+    if (!note) return void toast(row.channel === 'email' ? 'No note on this row. Review the email in the Outbox.' : 'No note on this row yet.');
+    if (actions.noteSaving(note.noteId)) return void toast('Not copied. The note is saving, and the checks run again first.');
+    if (unsavedEdit(row)) return void toast(`Not copied. Save your edit first (${isMac() ? 'Cmd+S' : 'Ctrl+S'}), then copy.`);
+    if (note.checks.length === 0) return void toast('Not copied. The checks have not run yet. Try again in a moment.');
+    const blocks = note.checks.filter((c) => c.severity === 'block').length;
+    if (blocks > 0) return void toast(`Not copied. ${plural(blocks, 'check blocks', 'checks block')} this note. Fix it, then copy.`);
+    const unlinked = note.facts.filter((f) => f.inNote && !safeHref(f.source.url)).length;
+    const done =
+      unlinked === 0
+        ? 'Copied the note.'
+        : unlinked === 1
+          ? 'Copied. One fact has no link: check it before you send.'
+          : `Copied. ${unlinked} facts have no link: check them before you send.`;
+    void copy(note.text, done);
   };
+  const copyAllHandoffs = () => {
+    const handoffs = rows.flatMap((r) => (r.state === 'todo' && r.findSomeone ? [r.findSomeone.handoff] : []));
+    if (handoffs.length === 0) return void toast('Nothing copied. No row today needs someone found.');
+    void copy(handoffs.join('\n\n'), `Copied ${plural(handoffs.length, 'handoff', 'handoffs')} for Claude.`);
+  };
+  const edit = (row: PlanRow) => {
+    const note = row.note;
+    if (!note) return void toast(row.findSomeone ? 'No note yet. Claude writes it once someone is found.' : 'No note on this row.');
+    if (!edits.has(note.noteId)) setEdit(note.noteId, { text: note.text, line: note.reasonLine });
+    // Focus goes into the editor only when he starts an edit, never when he comes back to a row with a kept one.
+    requestAnimationFrame(() => document.getElementById(noteFieldId)?.focus());
+  };
+  const save = (row: PlanRow) => {
+    const note = row.note;
+    const draft = note ? edits.get(note.noteId) : undefined;
+    if (!note || !draft) return;
+    setEdit(note.noteId, null);
+    if (draft.text !== note.text || draft.line !== note.reasonLine) actions.saveNote(row, draft.text, draft.line);
+    focusPanel();
+  };
+  const cancelEdit = (row: PlanRow) => {
+    if (row.note) setEdit(row.note.noteId, null);
+    focusPanel();
+  };
+  const confirm = (row: PlanRow) => {
+    const note = row.note;
+    if (!note) return void toast('No line to confirm on this row.');
+    if (actions.noteSaving(note.noteId)) return void toast('Not confirmed. The note is saving. Press Y again once it is saved.');
+    if (actions.confirming(note.noteId)) return;
+    if (note.reasonState !== 'proposed') return void toast('The line is already yours.');
+    actions.confirmReason(row);
+    focusPanel();
+  };
+  const open = (url: string | null | undefined, none: string) => {
+    if (!openExternal(url)) toast(none);
+  };
+  const panelActions = (row: PlanRow): PanelActions => ({
+    onLog: (kind) => log(row, kind),
+    onCarry: () => carry(row),
+    onNotFit: () => askNotAFit(row),
+    onCopy: () => copyNote(row),
+    onEdit: () => edit(row),
+    onConfirm: () => confirm(row),
+    onEditChange: (e) => {
+      if (row.note) setEdit(row.note.noteId, e);
+    },
+    onSave: () => save(row),
+    onCancelEdit: () => cancelEdit(row),
+  });
+
+  /* ------------------------------------------------------------------ keys */
 
   const group = 'Today';
+  const on = (run: (row: PlanRow) => void) => () => {
+    if (current) run(current);
+  };
+  const has = current !== null;
+  const editing = current?.note ? edits.has(current.note.noteId) : false;
   const onRow: Binding[] = [
-    { keys: 'x', label: 'Pick or unpick', group, enabled: current !== null, run: () => current && toggle(current) },
-    {
-      keys: 'b',
-      label: 'Move to the backlog',
-      group,
-      enabled: current !== null && tab === 'proposed' && current.state !== 'backlog',
-      run: () => current && toBacklog(current),
-    },
-    { keys: 'r', label: 'Remove with a reason', group, enabled: current !== null, run: () => setRemoving(current) },
-    { keys: 'c', label: 'Copy role title', group, enabled: current?.role != null, run: () => current && copyTitle(current) },
-    { keys: 'o', label: 'Open the posting', group, enabled: current?.role != null, run: () => current && openPosting(current) },
+    { keys: 'l', label: 'Open profile', group, enabled: has, run: on((r) => open(r.person?.person.linkedinUrl, r.person ? `No profile link for ${r.person.person.name}.` : 'Nobody on this row yet. Press S to search.')) },
+    { keys: 'o', label: 'Open role', group, enabled: has, run: on((r) => open(r.role?.url, 'No role on this row.')) },
+    { keys: 'a', label: 'Open the apply page', group, enabled: has, run: on((r) => open(r.applyUrl, 'No apply page on this row.')) },
+    { keys: 's', label: 'Open LinkedIn search', group, enabled: has, run: on((r) => open(r.findSomeone?.searchUrl, 'This row already has someone. Press L to open their profile.')) },
+    { keys: 'c', label: 'Copy the note or handoff', group, enabled: has, run: on(copyNote) },
+    { keys: 'e', label: 'Edit the note', group, enabled: has, run: on(edit) },
+    { keys: 'y', label: 'Confirm your line', group, enabled: has, run: on(confirm) },
+    { keys: 'r', label: 'Log request sent', group, enabled: has, run: on((r) => log(r, 'request')) },
+    { keys: 'p', label: 'Log applied', group, enabled: has, run: on((r) => log(r, 'apply')) },
+    { keys: 'x', label: 'Carry to tomorrow', group, enabled: has, run: on(carry) },
+    // Only a row to do has a Not a fit button, so only a row to do answers n.
+    { keys: 'n', label: 'Not a fit', group, enabled: current?.state === 'todo', run: on(askNotAFit) },
+    { keys: 'mod+s', label: 'Save the note', group, enabled: editing, run: on(save) },
   ];
-  // These act on the selected company, so a key right after j, k or a click waits for that move to render.
+  // These act on the selected person, so a key right after j, k or a click waits for that move to render.
   useHotkeys(onRow, { selection: selected });
-  useHotkeys([
-    { keys: 'shift+c', label: 'Copy picks for Claude', group, run: copyPicks },
-    { keys: '1', label: 'Proposed tab', group, run: () => setTab('proposed') },
-    { keys: '2', label: 'Backlog tab', group, run: () => setTab('backlog') },
-  ]);
+  useHotkeys([{ keys: 'shift+c', label: 'Copy every find-someone handoff', group, run: copyAllHandoffs }]);
 
-  const tableActions = { onToggle: toggle, onBacklog: toBacklog, onRemove: (e: DailyEntry) => setRemoving(e) };
-  const lede = `Pick up to ${t.capacity} companies.${
-    limitToday === undefined
-      ? ''
-      : ` Today's limit of ${limitToday} emails carries that many new companies on top of follow-ups and day 2 and 3 sends.`
-  }`;
+  /* ------------------------------------------------------------------ layout */
 
-  const proposedBody = t.notReady ? (
-    <EmptyState
-      icon={CalendarX}
-      title={t.notReady.text}
-      action={
-        t.backlog.length > 0 ? (
-          <Button variant="outline" size="sm" onClick={() => setTab('backlog')}>
-            Open the backlog
-          </Button>
-        ) : undefined
-      }
-    />
-  ) : t.proposed.length === 0 ? (
-    <EmptyState icon={Inbox} title="No companies were proposed today.">
-      The next list is built at 08:00 on weekdays.
-    </EmptyState>
-  ) : (
-    <ProposalsTable entries={t.proposed} list="proposed" asOf={t.asOf} blockedText={blockedText} rowProps={rowProps} actions={tableActions} />
+  let panel = (
+    <p className="max-w-[62ch] text-sm text-muted-foreground">
+      {allDone ? 'Nothing is left to do on the plan. Pick anyone on the left to see what you did.' : 'Pick a person on the left to see their work.'}
+    </p>
   );
-  const backlogBody =
-    t.backlog.length === 0 ? (
-      <EmptyState icon={Archive} title="The backlog is empty.">
-        Unpicked proposals roll here at the next 08:00 run.
-      </EmptyState>
-    ) : (
-      <ProposalsTable entries={t.backlog} list="backlog" asOf={t.asOf} blockedText={blockedText} rowProps={rowProps} actions={tableActions} />
-    );
+  if (current) {
+    const a = panelActions(current);
+    const note = current.note;
+    const state = {
+      edit: note ? (edits.get(note.noteId) ?? null) : null,
+      saving: note ? actions.noteSaving(note.noteId) : false,
+      unsaved: unsavedEdit(current),
+      fieldId: noteFieldId,
+    };
+    panel =
+      current.channel === 'email' ? (
+        <EmailRowPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} headingId={headingId} />
+      ) : current.person === null ? (
+        <FindSomeonePanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} headingId={headingId} />
+      ) : (
+        <PersonPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} note={state} headingId={headingId} />
+      );
+  }
+
+  // With the finish line showing, no row is selected: the finish node is the one marked, as in the mockup.
+  const railProps = (id: Id): RowProps => {
+    const props = rowProps(id);
+    return {
+      ...props,
+      'aria-selected': showFinish ? false : props['aria-selected'],
+      'data-active': showFinish ? false : props['data-active'],
+      onClick: () => {
+        setFin((f) => (f === null ? f : { ...f, browsing: true }));
+        props.onClick();
+      },
+    };
+  };
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_380px]">
-      <section aria-label="Today's companies" className="min-h-0 overflow-y-auto">
-        <div className="max-w-[1360px] px-6 pt-5 pb-12">
-          <div className="mb-4 flex items-end gap-4">
-            <div>
-              <h2 className="text-xl font-semibold tracking-tight">{longDate(t.asOf)}</h2>
-              <p className="mt-0.5 text-[13px] text-muted-foreground">{lede}</p>
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-              <Button variant="outline" onClick={copyPicks}>
-                <Terminal aria-hidden />
-                Copy picks for Claude
-              </Button>
-            </div>
-          </div>
-
-          <ListJobBanner job={t.listJob} />
-          <Capacity t={t} />
-
-          <SectionTitle title="Still emailing" count={t.stillEmailing.length} right={<span className="text-xs text-muted-foreground">Picked on earlier days</span>} />
-          {t.stillEmailing.length === 0 ? (
-            <div className="rounded-md border">
-              <EmptyState icon={Inbox} title="No companies are being emailed.">
-                Pick companies below to start.
-              </EmptyState>
-            </div>
-          ) : (
-            <StillEmailingTable rows={t.stillEmailing} />
-          )}
-
-          <Tabs value={tab} onValueChange={(v) => setTab(v === 'backlog' ? 'backlog' : 'proposed')} className="gap-0">
-            <SectionTitle
-              title={tab === 'proposed' ? 'Proposed' : 'Backlog'}
-              count={rows.length}
-              right={
-                <TabsList aria-label="Proposal list" className="h-[34px]">
-                  <TabsTrigger value="proposed" className="px-3 text-[13px]">
-                    Proposed<span className="text-xs text-muted-foreground tabular-nums">{t.proposed.length}</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="backlog" className="px-3 text-[13px]">
-                    Backlog<span className="text-xs text-muted-foreground tabular-nums">{t.backlog.length}</span>
-                  </TabsTrigger>
-                </TabsList>
-              }
-            />
-            <TabsContent value="proposed">{proposedBody}</TabsContent>
-            <TabsContent value="backlog">{backlogBody}</TabsContent>
-          </Tabs>
+    <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] max-[1100px]:grid-cols-1 max-[1100px]:overflow-y-auto">
+      <div className="min-h-0 overflow-y-auto border-r px-3 pt-4 pb-6 max-[1100px]:overflow-visible max-[1100px]:border-r-0 max-[1100px]:border-b">
+        <DayRail rows={rows} rowProps={railProps} tomorrow={plan.tomorrow} allDone={allDone} asOf={plan.asOf} />
+        <div className="mx-3 mt-6 grid justify-items-start gap-2">
+          <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="shift+c" onClick={copyAllHandoffs}>
+            <Terminal aria-hidden />
+            Copy every find-someone handoff
+            <span aria-hidden className="inline-flex gap-0.5">
+              <KeyHint k="⇧" />
+              <KeyHint k="C" />
+            </span>
+          </Button>
+          <Link
+            to="/proposals"
+            className="ml-2.5 rounded-sm text-xs text-muted-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            All proposed companies
+          </Link>
         </div>
+      </div>
+      <section aria-label={showFinish ? 'Finish' : 'Selected person'} className="min-w-0 overflow-y-auto px-8 pt-5 pb-12 max-[1100px]:overflow-visible">
+        {showFinish ? <FinishPanel plan={plan} /> : panel}
       </section>
-
-      <PreviewPanel
-        entry={current}
-        list={tab}
-        asOf={t.asOf}
-        handoff={current ? handoffOf(current) : ''}
-        actions={{
-          onToggle: () => current && toggle(current),
-          onBacklog: () => current && toBacklog(current),
-          onRemove: () => setRemoving(current),
-          onCopyTitle: () => current && copyTitle(current),
-          onCopyHandoff: () => current && void copy(handoffOf(current), 'Copied the handoff for Claude.'),
-        }}
-      />
 
       <RemoveDialog
         name={removing?.company.name ?? ''}
@@ -331,37 +334,42 @@ function TodayContent({ t, limitToday }: { t: TodayView; limitToday: number | un
           if (!o) setRemoving(null);
         }}
         onRemove={(reason, note) => {
-          if (!removing) return;
-          if (removing.company.id === selected) moveOn(removing.company.id);
-          actions.remove(removing, reason, note);
+          if (removing && actions.notAFit(removing, reason, note)) moveOn(removing);
         }}
       />
     </div>
   );
 }
 
+function PlanContent({ plan }: { plan: PlanView }) {
+  const failed = plan.listJob && (plan.listJob.status === 'failed' || plan.listJob.late);
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <PlanHead plan={plan} />
+      {failed ? (
+        <div className="flex-none px-6 pt-4">
+          <PlanJobBanner job={plan.listJob} />
+        </div>
+      ) : null}
+      {plan.notReady ? <PlanNotReady plan={plan} /> : plan.rows.length === 0 ? <PlanEmpty /> : <PlanWork plan={plan} />}
+    </div>
+  );
+}
+
 /**
- * Today (design 5.1): pick today's companies from the proposals, see the companies still being emailed.
- * Every group, why, capacity and not-ready reason comes from the client; the page lays them out.
+ * Today as a plan of people (design 16.1): about 7 people in order, one next step each, ending in a finish line.
+ * Every reason, state, count and not-ready line comes from the client; the page lays them out. The phase-1 picks
+ * and backlog live at /proposals.
  */
 export default function TodayPage() {
-  const client = usePageClient('today');
-  const today = useViewQuery(queryKeys.today, () => client.today(), { pollMs: pollMs.default });
-  const shell = useViewQuery(queryKeys.shell, () => client.shell(), { pollMs: pollMs.default });
+  const client = usePageClient('plan');
+  const plan = useViewQuery(queryKeys.plan, () => client.plan(), { pollMs: pollMs.default });
   return (
     <div className="h-full min-h-0">
       {/* The view's name for the outline; the visible heading is the date. */}
       <h1 className="sr-only">Today</h1>
-      <QueryState
-        query={today}
-        skeleton={
-          <div className="px-6 pt-5">
-            <TodaySkeleton />
-          </div>
-        }
-        empty={null}
-      >
-        {(t) => <TodayContent t={t} limitToday={shell.data?.sending.limitToday} />}
+      <QueryState query={plan} skeleton={<PlanSkeleton />} empty={null}>
+        {(p) => <PlanContent plan={p} />}
       </QueryState>
     </div>
   );

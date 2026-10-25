@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { NavLink } from 'react-router';
-import { Activity, Ban, Building2, CalendarCheck, CircleAlert, CircleCheck, Moon, Search, Send, Sun } from 'lucide-react';
+import { Activity, Award, Ban, Building2, CalendarCheck, ChartColumn, CircleAlert, CircleCheck, Moon, Search, Send, Sun } from 'lucide-react';
 import { pollMs, queryKeys, useClient, type JobRunSummary, type SenderState, type ShellSummary } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -104,6 +104,8 @@ function CountBadge({ value, tone, dot = false }: { value: number; tone: 'ok' | 
 }
 
 function ViewItems({ s }: { s: ShellSummary | undefined }) {
+  // The count is people done of today's plan; with nothing planned (a weekend, no list yet) there is no count.
+  const planned = s !== undefined && s.plan.total > 0;
   const outboxParts = s
     ? [
         s.unhandledReplies > 0 ? plural(s.unhandledReplies, 'reply to handle', 'replies to handle') : '',
@@ -114,8 +116,8 @@ function ViewItems({ s }: { s: ShellSummary | undefined }) {
     <SidebarGroup className="px-0 pt-2 pb-1">
       <nav aria-label="Views">
         <SidebarMenu className="gap-0.5">
-          <NavItem to="/today" icon={CalendarCheck} label="Today" described={s && `${s.pickedToday} of ${s.capacityToday} picked`}>
-            {s ? <Count value={`${s.pickedToday} of ${s.capacityToday}`} /> : null}
+          <NavItem to="/today" icon={CalendarCheck} label="Today" described={planned ? `${s.plan.done} of ${s.plan.total} done` : undefined}>
+            {planned ? <Count value={`${s.plan.done} of ${s.plan.total}`} /> : null}
           </NavItem>
           <NavItem to="/outbox" icon={Send} label="Outbox" described={outboxParts.join(', ') || undefined}>
             {s && s.unhandledReplies > 0 ? <CountBadge value={s.unhandledReplies} tone="ok" dot /> : null}
@@ -126,6 +128,23 @@ function ViewItems({ s }: { s: ShellSummary | undefined }) {
           </NavItem>
           <NavItem to="/needs-you" icon={CircleAlert} label="Needs you" described={s && s.openReviewItems > 0 ? `${s.openReviewItems} open` : undefined}>
             {s && s.openReviewItems > 0 ? <CountBadge value={s.openReviewItems} tone="warn" /> : null}
+          </NavItem>
+        </SidebarMenu>
+      </nav>
+    </SidebarGroup>
+  );
+}
+
+function ResultItems({ s }: { s: ShellSummary | undefined }) {
+  const fresh = s !== undefined && s.winsUnseen > 0;
+  return (
+    <SidebarGroup className="px-0 pt-2 pb-1">
+      <nav aria-label="Results">
+        <SidebarGroupLabel className="text-muted-foreground">Results</SidebarGroupLabel>
+        <SidebarMenu className="gap-0.5">
+          <NavItem to="/progress" icon={ChartColumn} label="Progress" />
+          <NavItem to="/wins" icon={Award} label="Wins" described={fresh ? `${s.winsUnseen} new` : undefined}>
+            {fresh ? <CountBadge value={s.winsUnseen} tone="ok" dot /> : null}
           </NavItem>
         </SidebarMenu>
       </nav>
@@ -257,7 +276,7 @@ function Footer({ s }: { s: ShellSummary | undefined }) {
 }
 
 /**
- * The left sidebar (spec section 2): the views with their counts, the lists, recent companies, and a
+ * The left sidebar (spec section 2): the views with their counts, the results (Progress and Wins), the lists, recent companies, and a
  * footer with the sender, replies this month and the last board read. Every count comes from the shell
  * summary; the browser computes none of them. `onSearch` opens the command palette (Task 13 mounts it).
  */
@@ -294,6 +313,7 @@ export function AppSidebar({ onSearch }: { onSearch?: () => void }) {
       </SidebarHeader>
       <SidebarContent className="gap-0 px-2">
         <ViewItems s={s} />
+        <ResultItems s={s} />
         <ListItems s={s} />
         <RecentItems />
       </SidebarContent>

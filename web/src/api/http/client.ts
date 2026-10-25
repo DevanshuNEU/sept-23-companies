@@ -1,5 +1,5 @@
 import type { OutreachClient, WriteOptions } from '../client';
-import type { CompanyHit, FindingsView, Id, LinkedInPerson, LinkedInStep, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressView, ReplyKind, Revision, ScoreView, WatchView, WinsView } from '../types';
+import type { CompanyHit, Id, LinkedInPerson, LinkedInStep, Revision } from '../types';
 import { companyMethods, searchMethods } from './company';
 import { companyWriteMethods } from './company-writes';
 import { doneMethods } from './done';
@@ -20,26 +20,10 @@ import { watchMethods } from './watch';
 /** The methods the API serves so far. Each view's task adds one factory below. */
 export type LiveMethods = Partial<Omit<OutreachClient, 'source'>> & {
   searchCompanies?: (q: string) => Promise<CompanyHit[]>;
-  score?: (companyId: Id) => Promise<ScoreView>; // not on `OutreachClient` until #33 adds it; 'not_found' for no score
-  // Not on `OutreachClient` until #33 adds them.
-  plan?: () => Promise<PlanView>;
-  logRequest?: (entryId: Id, input: { personId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions) => Promise<PlanRow>;
-  logApplied?: (entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions) => Promise<PlanRow>; // 'not_allowed' with no role
-  skipRow?: (entryId: Id, revision: Revision, o: WriteOptions) => Promise<PlanRow>; // carried to tomorrow; 'not_allowed' on a done row
-  saveNote?: (noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions) => Promise<NoteDraft>;
-  confirmReason?: (noteId: Id, revision: Revision, o: WriteOptions) => Promise<NoteDraft>; // an empty line: the API's bad_request, which the page sees as 'not_allowed' with the server's message (errors.ts)
-  watchList?: () => Promise<WatchView>;
-  dismissWatch?: (itemId: Id, o: WriteOptions) => Promise<void>;
-  outcomePrompt?: () => Promise<OutcomePromptView>;
-  progress?: () => Promise<ProgressView>;
-  findings?: () => Promise<FindingsView>;
-  wins?: () => Promise<WinsView>;
-  markWinsSeen?: (winIds: Id[], o: WriteOptions) => Promise<void>;
   // Not on `OutreachClient`: the page undoes before a write commits, so only the API knows a committed undo.
   undoLinkedIn?: (personId: Id, step: LinkedInStep, o: WriteOptions) => Promise<LinkedInPerson>;
   // Not on `OutreachClient` until #16 adds the merge confirm and its undo: take a merged company back out.
   unmergeCompany?: (companyId: Id, revision: Revision, o: WriteOptions) => Promise<{ revision: Revision }>;
-  logOutcome?: (touchId: Id, kind: OutcomeKind, revision: Revision, o: WriteOptions, replyKind?: Exclude<ReplyKind, 'unsorted' | 'auto_reply'>) => Promise<{ revision: Revision }>;
 };
 export type HttpClient = LiveMethods & { readonly source: 'live' };
 

@@ -607,3 +607,153 @@ details.passed ul { display: grid; gap: 4px; padding: 0 12px 12px 38px; font-siz
 .state-box { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .state-box > .label { display: block; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--subtle); font-size: 12px; color: var(--muted-foreground); font-weight: 500; }
 .state-box > .inner { padding: 12px; display: grid; gap: 10px; }
+
+/* ======================= #33: Today as a plan, Progress, Wins, Score =======================
+   Four families only, all on the tokens above (no new token, no new hue): the day rail, the note block,
+   the ledger and its bars, and the win banner. Everything else on those pages reuses the classes above. */
+
+/* ---------- day rail: the day as a line of people, ending in a finish node ---------- */
+.rail-split { display: grid; grid-template-columns: 320px minmax(0, 1fr); flex: 1; min-height: 0; }
+.rail-split [hidden], .content [hidden] { display: none !important; } /* the attribute wins over flex and grid classes */
+.work [tabindex="-1"]:focus { outline: none; } /* a heading that takes focus after the last step needs no ring */
+.rail-col { border-right: 1px solid var(--border); padding: 16px 12px 24px; overflow-y: auto; }
+.rail { display: grid; }
+.rail-opt {
+  position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 12px;
+  align-items: start; padding: 10px 12px; border-radius: calc(var(--radius) - 2px); cursor: default;
+}
+.rail-opt:hover { background: color-mix(in srgb, var(--muted) 55%, transparent); }
+.rail-opt.is-active { background: var(--muted); }
+/* the connecting line: from under this node to the next node */
+.rail-opt::before {
+  content: ""; position: absolute; left: 21.5px; top: 32px; bottom: -10px; width: 1px; background: var(--border);
+}
+.rail-opt.is-done::before { background: var(--muted-foreground); }
+.rail-opt.rail-finish::before { display: none; }
+.rail-node {
+  position: relative; z-index: 1; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  border: 1.5px solid var(--muted-foreground); background: var(--background); color: var(--background);
+}
+.rail-node .i { width: 12px; height: 12px; stroke-width: 3; visibility: hidden; }
+.rail-opt.is-done .rail-node .i, .rail-finish .rail-node .i { visibility: visible; }
+.rail-opt.is-active .rail-node { border: 2px solid var(--foreground); }
+.rail-opt.is-done .rail-node { border-color: var(--foreground); background: var(--foreground); }
+.rail-opt.is-logged .rail-node { border-color: var(--info-dot); background: var(--info-bg); color: var(--info); }
+.rail-opt.is-logged .rail-node::after { content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--info-dot); }
+.rail-opt.is-carried .rail-node { background: linear-gradient(90deg, var(--muted-foreground) 50%, var(--background) 50%); }
+.rail-opt.rail-finish .rail-node { border-style: dashed; color: var(--muted-foreground); }
+.rail-opt.rail-finish.is-done .rail-node { border-style: solid; color: var(--background); }
+.rail-who { min-width: 0; display: grid; gap: 1px; }
+.rail-who b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-who .n { color: var(--muted-foreground); font-variant-numeric: tabular-nums; font-weight: 400; margin-right: 6px; }
+.rail-who .sub, .rail-who .sub2 { font-size: 13px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-who .sub2 { font-size: 12px; line-height: 16px; }
+.rail-word { font-size: 12px; line-height: 20px; color: var(--muted-foreground); white-space: nowrap; }
+.rail-opt.is-logged .rail-word { color: var(--info); }
+.rail-opt.is-done .rail-word { color: var(--foreground); }
+
+/* the work panel beside the rail: one person, one next step */
+.work { padding: 20px 32px 48px; overflow-y: auto; min-width: 0; }
+.work-inner { max-width: 720px; display: grid; gap: 16px; }
+.work-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: start; }
+.work-head .meta { grid-column: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; color: var(--muted-foreground); }
+.work-reason { font-size: 16px; line-height: 24px; max-width: 62ch; }
+.work-sources { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 12px; color: var(--muted-foreground); }
+.work-sources a { display: inline-flex; align-items: center; gap: 4px; }
+.work-role { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 13px; }
+.work-act { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.work-act .spacer { flex: 1; }
+.work-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: -4px; }
+.work-foot .spacer { flex: 1; }
+.work-below { max-width: 720px; display: grid; gap: 8px; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); }
+.work-below details > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; height: 32px; font-size: 14px; font-weight: 500; }
+.work-below details > summary::-webkit-details-marker { display: none; }
+.work-below details > summary .count { color: var(--muted-foreground); font-weight: 400; font-variant-numeric: tabular-nums; }
+.work-below details > summary .chev { color: var(--muted-foreground); transition: transform 120ms; }
+.work-below details[open] > summary .chev { transform: rotate(90deg); }
+.plan-steps { display: inline-flex; align-items: center; gap: 14px; font-size: 13px; color: var(--muted-foreground); }
+.plan-steps span { display: inline-flex; align-items: center; gap: 6px; }
+.plan-steps .mk { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--muted-foreground); display: grid; place-items: center; }
+.plan-steps .on { color: var(--foreground); }
+.plan-steps .on .mk { border-color: var(--foreground); background: var(--foreground); color: var(--background); }
+.plan-steps .mk .i { width: 9px; height: 9px; stroke-width: 3.5; visibility: hidden; }
+.plan-steps .on .mk .i { visibility: visible; }
+
+/* ---------- note block: the note to send, its facts and their links ---------- */
+.note { border: 1px solid var(--border); border-radius: var(--radius); background: var(--subtle); }
+.note-head { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.note-head b { font-weight: 500; }
+.note-head .chars { margin-left: auto; font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.note-text { padding: 14px 16px; font-size: 14px; line-height: 22px; max-width: 62ch; white-space: pre-wrap; }
+.note-edit { display: block; width: calc(100% - 24px); margin: 12px; min-height: 120px; padding: 10px 12px; border: 1px solid var(--input); border-radius: calc(var(--radius) - 2px); background: var(--background); font-size: 14px; line-height: 22px; resize: vertical; }
+.note-line { display: grid; gap: 2px; padding: 0 16px 12px; font-size: 13px; }
+.note-line .k { font-size: 12px; color: var(--muted-foreground); }
+.note-ask { margin: 12px 16px; padding: 12px 14px; display: grid; gap: 8px; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); background: var(--background); font-size: 13px; }
+.note-ask q { quotes: none; font-size: 14px; line-height: 22px; }
+.note-facts { display: grid; gap: 6px; padding: 12px 16px; border-top: 1px solid var(--border); font-size: 13px; }
+.note-facts .k { font-size: 12px; color: var(--muted-foreground); }
+.note-facts li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; align-items: start; }
+.note-facts li .i { margin-top: 2px; color: var(--muted-foreground); width: 14px; height: 14px; }
+.note-facts .src { font-size: 12px; color: var(--muted-foreground); }
+.note-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }
+.note-foot .spacer { flex: 1; }
+
+/* ---------- ledger: counts beside their denominators, one thin monochrome bar ----------
+   One series, so no legend: the column head names it. The bar grows from one baseline, square there and
+   rounded 4 px at the data end, and never draws a non-zero count under 2 px. Every value is also a number
+   in the same row, so the bar never gates a value. */
+table.ledger { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.ledger th { height: 32px; padding: 0 12px; text-align: left; font-weight: 500; font-size: 12px; color: var(--muted-foreground); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.ledger td { height: 40px; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.ledger tr:last-child td { border-bottom: 0; }
+.ledger .num, .ledger th.num { text-align: right; width: 1%; white-space: nowrap; }
+.ledger .stage { font-weight: 500; white-space: nowrap; }
+.ledger .rate { white-space: nowrap; }
+.ledger .rate .of { color: var(--muted-foreground); }
+.ledger .zero { color: var(--muted-foreground); }
+.ledger .why { color: var(--muted-foreground); max-width: 52ch; }
+.ledger .why a { color: var(--foreground); }
+.ledger.is-muted td { color: var(--muted-foreground); }
+.ledger.is-muted .stage { color: var(--foreground); }
+.lbar { position: relative; display: block; width: 240px; height: 20px; }
+.lbar::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: var(--border); }
+.lbar > i { position: absolute; left: 1px; top: 6px; height: 8px; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--muted-foreground); }
+.lbar.is-zero > i { display: none; }
+.ledger-scale { font-size: 12px; color: var(--muted-foreground); }
+/* signed bar for score shares: positive grows right of the axis, negative grows left */
+.sbar { position: relative; display: block; width: 200px; height: 20px; }
+.sbar::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--border); }
+.sbar > i { position: absolute; top: 6px; height: 8px; min-width: 2px; background: var(--muted-foreground); }
+.sbar > i.pos { left: calc(50% + 1px); border-radius: 0 4px 4px 0; }
+.sbar > i.neg { right: 50%; border-radius: 4px 0 0 4px; }
+.sbar > .neutral { position: absolute; left: calc(50% + 10px); top: 1px; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
+/* effort: work done, counts first, read top to bottom */
+.ledger-effort { display: grid; gap: 0; }
+.ledger-effort li { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: baseline; gap: 12px; padding: 6px 0; font-size: 14px; }
+.ledger-effort li b { font-size: 20px; line-height: 28px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.ledger-effort.small li { padding: 2px 0; }
+.ledger-effort.small li b { font-size: 14px; line-height: 20px; }
+
+/* ---------- win banner: the one moment that moves ----------
+   A 240 ms fade and a check that draws once. The global reduced-motion rule above turns both off, and
+   the banner and check render complete without them. */
+.win {
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 2px 12px; align-items: start;
+  padding: 12px 16px; border: 1px solid var(--ok-bd); border-radius: var(--radius); background: var(--ok-bg); color: var(--foreground);
+}
+.win-mark { width: 24px; height: 24px; fill: none; stroke: var(--ok); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.win-mark path { stroke-dasharray: 24; stroke-dashoffset: 0; }
+.win-lines { display: grid; gap: 2px; font-size: 14px; line-height: 24px; }
+.win-lines .when { color: var(--muted-foreground); font-size: 13px; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.win-lines .more { font-size: 13px; color: var(--muted-foreground); }
+.win-act { display: flex; align-items: center; gap: 8px; }
+.win-in { animation: win-in 240ms ease-out both; }
+.win-in .win-mark path { animation: win-draw 240ms ease-out 120ms both; }
+@keyframes win-in { from { opacity: 0; } }
+@keyframes win-draw { from { stroke-dashoffset: 24; } }
+
+@media (max-width: 1100px) {
+  .rail-split { grid-template-columns: 1fr; overflow-y: auto; }
+  .rail-col, .work { overflow: visible; }
+  .rail-col { border-right: 0; border-bottom: 1px solid var(--border); }
+}

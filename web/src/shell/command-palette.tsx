@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router';
 import {
   Activity,
   Ban,
+  Award,
   Briefcase,
   Building2,
   CalendarCheck,
+  ChartColumn,
   CircleAlert,
   CircleCheck,
   Copy,
@@ -135,6 +137,8 @@ const VIEWS: { name: string; path: string; icon: LucideIcon; keys: string }[] = 
   { name: 'Needs you', path: '/needs-you', icon: CircleAlert, keys: 'g n' },
   { name: 'No-go list', path: '/no-go', icon: Ban, keys: 'g x' },
   { name: 'Done companies', path: '/done', icon: CircleCheck, keys: 'g d' },
+  { name: 'Progress', path: '/progress', icon: ChartColumn, keys: 'g p' },
+  { name: 'Wins', path: '/wins', icon: Award, keys: 'g w' },
 ];
 
 type Action = { id: string; label: string; sub: string; icon: LucideIcon; run: () => void };

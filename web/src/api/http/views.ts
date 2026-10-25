@@ -59,11 +59,27 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   liftNoGo: 'no-go',
   company: 'company',
   done: 'done',
+  // The people plan and its writes (#33, #11 Tasks 10 and 11); Not a fit is the Today view's removeCompany.
+  plan: 'plan',
+  logRequest: 'plan',
+  logApplied: 'plan',
+  skipRow: 'plan',
+  saveNote: 'plan',
+  confirmReason: 'plan',
+  outcomePrompt: 'outcomes',
+  logOutcome: 'outcomes',
+  progress: 'progress',
+  findings: 'progress',
+  wins: 'wins',
+  markWinsSeen: 'wins',
+  watchList: 'watch',
+  dismissWatch: 'watch',
+  score: 'company',
 };
 
 /**
  * The views that have a method on the client. Only these can be sample data, so only these decide `source` (the
- * "Sample data" badge) and whether the fixture chunk loads: a view with no method on `OutreachClient` (`plan` until #33 adds it) has nothing to be.
+ * "Sample data" badge) and whether the fixture chunk loads: a view with no method on `OutreachClient` has nothing to be.
  */
 export const SERVED_VIEWS: readonly ViewName[] = ALL_VIEWS.filter((v) => Object.values(VIEW_OF_METHOD).includes(v));
 

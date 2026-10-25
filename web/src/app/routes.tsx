@@ -9,8 +9,11 @@ import {
   NoGoPage,
   OutboxPage,
   ParentReads,
+  ProgressPage,
+  ProposalsPage,
   ToToday,
   TodayPage,
+  WinsPage,
 } from '@/app/pages';
 
 /**
@@ -20,12 +23,15 @@ import {
  */
 export const viewRoutes: RouteObject[] = [
   { path: 'today', element: <TodayPage /> },
+  { path: 'proposals', element: <ProposalsPage /> },
   { path: 'outbox', element: <OutboxPage />, children: [{ path: ':touchId', element: <ParentReads /> }] },
   { path: 'linkedin', element: <LinkedInPage /> },
   { path: 'needs-you', element: <NeedsYouPage /> },
   { path: 'no-go', element: <NoGoPage />, children: [{ path: 'people', element: <ParentReads /> }] },
   { path: 'companies/:companyId', element: <CompanyPage /> },
   { path: 'done', element: <DonePage /> },
+  { path: 'progress', element: <ProgressPage /> },
+  { path: 'wins', element: <WinsPage /> },
 ];
 
 export const routes: RouteObject[] = [

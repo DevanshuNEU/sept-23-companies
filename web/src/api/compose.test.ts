@@ -45,12 +45,13 @@ describe('composeClient', () => {
     expect(composeClient({ live, sample, views: ALL_VIEWS }).source).toBe('live');
   });
 
-  it('a view with no method on the client does not keep the Sample badge on', () => {
-    // `plan` has no entry in VIEW_OF_METHOD: nothing on the client could be sample data for it.
+  it('every view has a method on the client, so each one decides the Sample badge', () => {
+    // `plan` joined VIEW_OF_METHOD with the people plan's methods (#33): no view is left without one.
     const live = labelled('live', 'live');
     const sample = labelled('sample', 'sample');
-    expect(SERVED_VIEWS).not.toContain('plan');
+    expect(SERVED_VIEWS).toEqual(ALL_VIEWS);
     expect(composeClient({ live, sample, views: SERVED_VIEWS }).source).toBe('live');
+    expect(composeClient({ live, sample, views: SERVED_VIEWS.filter((v) => v !== 'plan') }).source).toBe('sample');
     expect(composeClient({ live, sample, views: SERVED_VIEWS.filter((v) => v !== 'shell') }).source).toBe('sample');
   });
 

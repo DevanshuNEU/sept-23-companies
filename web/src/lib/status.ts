@@ -1,7 +1,9 @@
 import type {
+  Channel,
   CompanyRef,
   JobKind,
   JobRunSummary,
+  ListGroup,
   LinkedInStep,
   MessageState,
   NoGoReason,
@@ -10,6 +12,8 @@ import type {
   ReviewKind,
   SponsorshipShown,
   TouchState,
+  WatchKind,
+  WinKind,
 } from '@/api';
 
 export type Tone = 'ok' | 'info' | 'warn' | 'bad' | 'idle';
@@ -137,3 +141,33 @@ export function companyStatus(c: CompanyRef): Status {
   if (c.pausedAt !== null) return { label: 'Paused', tone: 'idle', icon: 'pause' };
   return byCompanyStatus[c.status];
 }
+
+export const channelLabel = {
+  linkedin_request: 'LinkedIn request',
+  linkedin_message: 'LinkedIn message',
+  email: 'Email',
+  application: 'Application',
+  hn_reply: 'HN reply',
+  other: 'Other',
+} satisfies Record<Channel, string>;
+
+export const laneLabel = {
+  level_role: 'Role at your level',
+  intern_junior: 'Intern or junior work',
+  reason_no_role: 'Reason to reach out',
+  any_us_role: 'Open US role',
+} satisfies Record<ListGroup, string>;
+
+export const winKindLabel = {
+  accepted: 'Accepted',
+  replied: 'Replied',
+  referred: 'Referral',
+  interview: 'Interview',
+  offer: 'Offer',
+} satisfies Record<WinKind, string>;
+
+export const watchKindLabel = {
+  careers_changed: 'Careers page changed',
+  new_reason_no_role: 'New company to reach',
+  merge_candidate: 'Possible duplicate',
+} satisfies Record<WatchKind, string>;

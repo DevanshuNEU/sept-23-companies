@@ -137,20 +137,29 @@ def save_linkedin_draft(conn: sqlite3.Connection, *, person_id: int, body: str, 
         checks_json = json.dumps([c.to_json() for c in checks])
         now = utcnow()
         if stored is None:
-            draft_id = conn.execute(
+            # Another writer may have saved this person's first draft since the read above: the unique person
+            # key turns that into a stale write, not a raw IntegrityError.
+            cur = conn.execute(
                 "INSERT INTO linkedin_draft(person_id, posting_id, body, reason_line, reason_state, facts, checks, "
-                "saved_by, prepared_by_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "saved_by, prepared_by_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(person_id) DO NOTHING",
                 (person_id, posting_id, body, reason_line, state, _facts_json(facts), checks_json, saved_by,
-                 prepared_by_version, now, now)).lastrowid
+                 prepared_by_version, now, now))
+            if cur.rowcount == 0:
+                raise LookupError(f"person {person_id} got a draft from another writer first")
+            draft_id = cur.lastrowid
         else:
             draft_id = stored["draft_id"]
-            conn.execute(
+            # The revision read above is in the WHERE, so a writer that got in between makes this change nothing.
+            cur = conn.execute(
                 "UPDATE linkedin_draft SET posting_id = ?, body = ?, reason_line = ?, reason_state = ?, facts = ?, "
                 "checks = ?, saved_by = ?, prepared_by_version = ?, updated_at = ?, revision = revision + 1 "
-                "WHERE draft_id = ?",
+                "WHERE draft_id = ? AND revision = ?",
                 (posting_id if posting_id is not None else stored["posting_id"], body, reason_line, state,
                  _facts_json(facts), checks_json, saved_by, prepared_by_version or stored["prepared_by_version"],
-                 now, draft_id))
+                 now, draft_id, stored["revision"]))
+            if cur.rowcount == 0:
+                raise LookupError(f"draft {draft_id} was changed by another writer")
         saved = get_draft_by_id(conn, draft_id)
         append_event(conn, entity="linkedin", kind="draft_saved", actor=saved_by, entity_id=draft_id,
                      company_id=person["company_id"],
@@ -179,10 +188,12 @@ def confirm_reason(conn: sqlite3.Connection, draft_id: int, revision: int, *, cf
         current = _draft(stored)
         checks = check_note(current.body, current.reason_line, "confirmed", current.facts, cfg=cfg,
                             banned=banned_list, unconfirmed=unconfirmed_list)
-        conn.execute(
+        cur = conn.execute(
             "UPDATE linkedin_draft SET reason_state = 'confirmed', saved_by = 'devanshu', checks = ?, "
-            "updated_at = ?, revision = revision + 1 WHERE draft_id = ?",
-            (json.dumps([c.to_json() for c in checks]), utcnow(), draft_id))
+            "updated_at = ?, revision = revision + 1 WHERE draft_id = ? AND revision = ?",
+            (json.dumps([c.to_json() for c in checks]), utcnow(), draft_id, revision))
+        if cur.rowcount == 0:
+            raise LookupError(f"draft {draft_id} was changed by another writer")
         person = conn.execute("SELECT company_id FROM person WHERE person_id = ?", (stored["person_id"],)).fetchone()
         saved = get_draft_by_id(conn, draft_id)
         append_event(conn, entity="linkedin", kind="draft_confirmed", actor="devanshu", entity_id=draft_id,

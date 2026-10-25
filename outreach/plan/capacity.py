@@ -3,7 +3,7 @@
 LinkedIn: the plan's own share is `linkedin.plan_quota` a month, counted from touches the plan proposed
 (`context.source = 'plan'`); a hard total (`linkedin.hard_total`) counts every request, his own included, and wins
 when it is lower. A day's number is the remaining budget over the weekdays left, rounded half up, so it lands near 7
-and corrects itself after a missed day with no catch-up pressure. Email: the sender's limit for the day minus what is
+and corrects itself after a missed day with no catch-up pressure. A day with no weekday left in its month has no rows. Email: the sender's limit for the day minus what is
 already committed. Capacity is never negative and a zero day is a finished plan, not an error. Reads only; `today` is
 a parameter.
 """
@@ -54,11 +54,13 @@ def linkedin_capacity(conn: sqlite3.Connection, canon: dict[int, int], today: da
     budget, hard_limit = cfg.get("linkedin", "plan_quota"), cfg.get("linkedin", "hard_total")
     used, hard_used = len(plan), len(month)
     remaining = max(0, min(budget - used, hard_limit - hard_used))
-    days_left = max(1, weekdays_left(today))
-    if remaining <= 0:
+    days_left = weekdays_left(today)  # 0 on a weekend that has no weekday left in its month
+    if remaining <= 0 or days_left <= 0:
         day = 0
     else:
-        day = min(cfg.get("linkedin", "daily_max"), max(1, math.floor(remaining / days_left + 0.5)))
+        # Round half up, no floor of one: a single request left over many weekdays waits until it is owed, and the
+        # last weekday takes whatever is left (up to daily_max), so the budget still finishes.
+        day = min(cfg.get("linkedin", "daily_max"), math.floor(remaining / days_left + 0.5 + _EPS))
     return LinkedinCapacity(budget=budget, used=used, hard_limit=hard_limit, hard_used=hard_used,
                             remaining=remaining, days_left=days_left, today=day,
                             reason_used=sum(1 for o in plan if o.lane == "reason_no_role"))

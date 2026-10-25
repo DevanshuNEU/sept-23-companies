@@ -98,8 +98,22 @@ class LinkedinCapacityTest(unittest.TestCase):
         c = self.cap(D(2026, 11, 8))
         self.assertEqual(c.days_left, 16)
         self.assertGreaterEqual(c.today, 1)
-        sat = self.cap(D(2026, 10, 31))  # no weekday left in the month
-        self.assertEqual((sat.days_left, sat.today), (1, 10))
+        # Review fix H: Saturday 31 October has no weekday left in the month, so a build then gives no row (Friday
+        # took the month's last full day). It is not rounded up to one.
+        sat = self.cap(D(2026, 10, 31))
+        self.assertEqual((sat.days_left, sat.today, sat.remaining), (0, 0, 150))
+
+    def test_one_request_left_with_many_weekdays_left_rounds_down_to_none(self):
+        self.requests(149, D(2026, 11, 3))
+        c = self.cap(D(2026, 11, 10))
+        self.assertEqual((c.remaining, c.days_left, c.today), (1, 15, 0))
+        # it still finishes: half way through the remaining days the half rounds up, and the last day takes the rest
+        self.assertEqual(self.cap(D(2026, 11, 27)).today, 1)  # the last Friday: 2 weekdays left (Fri, Mon 30)
+        self.assertEqual(self.cap(D(2026, 11, 30)).today, 1)
+
+    def test_a_weekend_inside_a_month_with_weekdays_left_still_has_capacity(self):
+        sunday = self.cap(D(2026, 11, 22))
+        self.assertEqual((sunday.days_left, sunday.today), (6, 10))  # 150 over 6 weekdays, capped at daily_max
 
 
 class EmailCapacityTest(unittest.TestCase):

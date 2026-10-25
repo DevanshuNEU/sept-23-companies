@@ -185,6 +185,82 @@ class SaveTest(DraftsCase):
         self.assertEqual(self.row()["posting_id"], pid)
 
 
+class RacingConnection:
+    """Wraps a connection and runs `intervene` once, right after the first read of `linkedin_draft`: the moment
+    between a writer's check and its write, when another writer gets in."""
+
+    def __init__(self, conn, intervene):
+        self._conn = conn
+        self._intervene = intervene
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def execute(self, sql, *args):
+        cursor = self._conn.execute(sql, *args)
+        if self._intervene and sql.lstrip().upper().startswith("SELECT * FROM LINKEDIN_DRAFT"):
+            rows = cursor.fetchall()
+            intervene, self._intervene = self._intervene, None
+            intervene(self._conn)
+            return _Rows(rows)
+        return cursor
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return self._rows
+
+
+class RaceTest(DraftsCase):
+    """Review fix I: two writers cannot both pass the revision check."""
+
+    def racing_save(self, intervene, **kw):
+        kw.setdefault("banned", BANNED)
+        kw.setdefault("unconfirmed", UNCONFIRMED)
+        return save_linkedin_draft(RacingConnection(self.conn, intervene), person_id=self.person, body=BODY,
+                                   reason_line=REASON, facts=FACTS, cfg=CFG, **kw)
+
+    def bump(self, conn):
+        conn.execute("UPDATE linkedin_draft SET body = 'someone else', revision = revision + 1")
+
+    def test_a_save_that_loses_the_race_for_an_update_raises_lookup_error_and_writes_nothing(self):
+        d = self.save()
+        with self.assertRaises(LookupError):
+            self.racing_save(self.bump, saved_by="devanshu", revision=d.revision)
+        # the simulated writer shared this connection's transaction, so the refusal undid it too: what matters is
+        # that this save wrote no event and no second revision
+        self.assertEqual(len(self.events("draft_saved")), 1)
+        self.assertEqual(self.row()["revision"], 1)
+
+    def test_a_claude_save_without_a_revision_cannot_overwrite_a_write_that_got_in_first(self):
+        self.save()
+        with self.assertRaises(LookupError):
+            self.racing_save(self.bump, saved_by="claude")
+        self.assertEqual(self.row()["revision"], 1)
+
+    def test_a_first_insert_that_loses_the_race_is_a_lookup_error_not_an_integrity_error(self):
+        def other_writer(conn):
+            conn.execute("INSERT INTO linkedin_draft(person_id, body, saved_by, created_at, updated_at) "
+                         "VALUES (?, 'theirs', 'devanshu', '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z')",
+                         (self.person,))
+        with self.assertRaises(LookupError):
+            self.racing_save(other_writer, saved_by="claude")
+        self.assertEqual(len(self.events("draft_saved")), 0)
+
+    def test_confirm_that_loses_the_race_raises_lookup_error(self):
+        d = self.save()
+        racing = RacingConnection(self.conn, self.bump)
+        with self.assertRaises(LookupError):
+            confirm_reason(racing, d.draft_id, d.revision, cfg=CFG, banned=BANNED, unconfirmed=UNCONFIRMED)
+        self.assertEqual(self.row()["reason_state"], "proposed")
+
+
 class ConfirmTest(DraftsCase):
     def confirm(self, d):
         return confirm_reason(self.conn, d.draft_id, d.revision, cfg=CFG, banned=BANNED, unconfirmed=UNCONFIRMED)

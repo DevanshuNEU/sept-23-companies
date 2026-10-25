@@ -7,15 +7,22 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 import sqlite3
-from datetime import date
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from pathlib import Path
 
+from outreach.drafts.checks import load_banned
+from outreach.plan.config import default_plan_config
+from outreach.plan.drafts import save_linkedin_draft
+from outreach.plan.notecheck import Fact, load_unconfirmed
 from outreach.store.timefmt import utcnow
 from outreach.store.writes import log_touch, record_outcome
 
 __all__ = ["TODAY", "seed_scored_company", "seed_person", "seed_source", "seed_outbound", "seed_log_only",
            "seed_send_day",
-           "seed_email_touch", "seed_message", "seed_daily_entry"]
+           "seed_email_touch", "seed_message", "seed_daily_entry", "PlanSituation", "seed_plan_situation"]
 
 TODAY = date(2026, 11, 10)
 _counter = itertools.count(1)
@@ -181,3 +188,119 @@ def seed_daily_entry(conn: sqlite3.Connection, list_date: date, company_id: int,
         "person_id, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (list_date.isoformat(), company_id, list_group, rank, state, json.dumps(why or {}), now,
          None if state == "proposed" else now, person_id, channel))
+
+
+# The plan flow stage's seed (Task 15)
+
+_FIX = Path(__file__).resolve().parent / "fixtures" / "plan"
+_NOTE_REASON = "I read your post on the queue rewrite"
+_NOTE_BODY = (f"Hi Dana, {_NOTE_REASON} and built a similar job runner. "
+              "I would like to hear how your platform team works.")
+
+
+@dataclass
+class PlanSituation:
+    """What `seed_plan_situation` made, by role in the story. Company ids are the survivors of the ranked list.
+    `people` is every person the seeder made: an invariant counts only these."""
+    team: int  # rank 1: a team engineer with a draft
+    waiting: int  # rank 2: a request 5 days old, sent to a person at a merged-away duplicate
+    rotating: int  # rank 3: a request 20 days old and a second candidate
+    accepted: int  # rank 4: accepted 9 days ago
+    engaged: int  # rank 5: someone replied
+    founder: int  # rank 6: a founder with a published address
+    nobody: int  # rank 7: no people at all
+    recruiter_only: tuple[int, ...]  # the 8th and later, every other one
+    no_people: tuple[int, ...]  # the 8th and later, the rest
+    team_person: int
+    team_draft: int
+    waiting_duplicate: int  # the merged-away company the waiting request went to (0 when there is none)
+    waiting_first: int  # the person the 5 day old request went to
+    waiting_second: int  # the candidate the waiting company still has
+    rotating_first: int
+    rotating_second: int
+    accepted_person: int
+    engaged_person: int
+    founder_person: int
+    people: set[int] = field(default_factory=set)
+
+    @property
+    def blocked(self) -> tuple[int, ...]:
+        """The companies in play: none of them may get a row today."""
+        return self.waiting, self.accepted, self.engaged
+
+
+def _host(company_name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", company_name.lower()) + ".example"
+
+
+def _team_source(company_name: str) -> tuple[str, str, str]:
+    return ("team", f"https://{_host(company_name)}/team", f"an engineer on the {company_name} team")
+
+
+def seed_plan_situation(conn: sqlite3.Connection, ranked, *, today: date = TODAY) -> PlanSituation:
+    """People and touches relative to the ranked order of whatever the earlier stages produced (`ranked` is
+    `ranked_list(conn, laned_only=True)`, at least 7 long): rank 1 has a team engineer with a draft; rank 2 has a
+    request 5 days old (sent to a person at its merged-away duplicate when it has one) and another candidate;
+    rank 3 a request 20 days old and a second candidate; rank 4 a request accepted 9 days ago; rank 5 a reply;
+    rank 6 a founder with a published address; rank 7 nobody; the 8th and later alternate recruiter only and nobody.
+    Everything goes through the real writers; the draft is Claude's, with its reason line still proposed."""
+    if len(ranked) < 8:
+        raise ValueError(f"the situation needs at least 8 ranked companies, got {len(ranked)}")
+    ids = [s.company_id for s in ranked]
+    name = {r[0]: r[1] for r in conn.execute("SELECT company_id, name FROM company")}
+    made: set[int] = set()
+
+    def person(company, who, role="engineer", **kw):
+        pid = seed_person(conn, company, who, role, **kw)
+        made.add(pid)
+        return pid
+
+    def team(company, who):
+        return person(company, who, "engineer", sources=[_team_source(name[company])])
+
+    day = timedelta  # day(5): five days
+    c1, c2, c3, c4, c5, c6, c7 = ids[:7]
+
+    team_person = team(c1, "Tess Team")
+    draft = save_linkedin_draft(
+        conn, person_id=team_person, body=_NOTE_BODY, reason_line=_NOTE_REASON, saved_by="claude",
+        facts=[Fact("queue rewrite", "Tess's post", f"https://{_host(name[c1])}/blog/queue", True)],
+        cfg=default_plan_config(), banned=load_banned(_FIX / "banned_phrases.txt", scopes=("both", "dm"))[0],
+        unconfirmed=load_unconfirmed(_FIX / "me.md"))
+
+    duplicate = conn.execute("SELECT company_id FROM company WHERE merged_into = ? ORDER BY company_id",
+                             (c2,)).fetchone()
+    duplicate_id = duplicate[0] if duplicate else c2
+    waiting_first = person(duplicate_id, "Wes Waiting")
+    seed_outbound(conn, waiting_first, duplicate_id, "linkedin_request", today - day(5))
+    waiting_second = team(c2, "Wren Second")
+
+    rotating_first = person(c3, "Rob Rotated")
+    seed_outbound(conn, rotating_first, c3, "linkedin_request", today - day(20))
+    rotating_second = team(c3, "Rae Second")
+
+    accepted_person = person(c4, "Ann Accepted")
+    seed_outbound(conn, accepted_person, c4, "linkedin_request", today - day(20), accepted_on=today - day(9))
+
+    engaged_person = person(c5, "Evie Engaged")
+    seed_outbound(conn, engaged_person, c5, "linkedin_request", today - day(30), accepted_on=today - day(25),
+                  replied_on=today - day(20))
+
+    email = f"fay@{_host(name[c6])}"
+    founder_person = person(c6, "Fay Founder", "founder", email=email,
+                            sources=[("email", f"https://{_host(name[c6])}/contact", f"Write to {email}")])
+
+    recruiter_only, no_people = [], []
+    for n, company in enumerate(ids[7:149]):
+        if n % 2 == 0:
+            person(company, f"Rhea Recruiter {n}", "recruiter")
+            recruiter_only.append(company)
+        else:
+            no_people.append(company)
+    return PlanSituation(
+        team=c1, waiting=c2, rotating=c3, accepted=c4, engaged=c5, founder=c6, nobody=c7,
+        recruiter_only=tuple(recruiter_only), no_people=tuple(no_people), team_person=team_person,
+        team_draft=draft.draft_id, waiting_duplicate=duplicate_id if duplicate else 0, waiting_first=waiting_first,
+        waiting_second=waiting_second, rotating_first=rotating_first, rotating_second=rotating_second,
+        accepted_person=accepted_person, engaged_person=engaged_person, founder_person=founder_person,
+        people=made)

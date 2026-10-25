@@ -17,13 +17,17 @@ Reply schema, version 1 (`SCHEMA_VERSION`), one element of `results` per company
 Rules, in order, per candidate (the first `prepare.max_candidates` that pass are kept):
 - a name, a known `role_kind`, and not a person already on record at the company (`Target.known_people`);
 - no LinkedIn page anywhere in its sources (the whole candidate is refused, whatever else it has);
+- every source URL is scanned for LinkedIn before any cap is applied;
 - sources that are not a plain https page with a non-empty quote are dropped (an `email` source on GitHub too);
-- a `profile`, `team` or `post` page whose quote holds the last word of the name and names the company (its name or
-  domain), or that is on the company's domain or a subdomain of it; the pages that do not say so are dropped;
+- a `profile`, `team` or `post` page whose quote holds the full name (first and last word in order, a middle name or
+  initial allowed between them, accents, case and hyphens ignored, a suffix such as Jr. dropped) and names the company
+  (its name as whole words, or its domain as a whole host name), or that is on the company's domain or a subdomain of
+  it; the pages that do not say so are dropped;
 - an email is kept only when an `email` page quotes the whole address, and `add_candidate`'s rules pass (no GitHub,
   no noreply, no shared mailbox unless the page is an HN post of the company that asks for email). Otherwise the
   email and its pages are dropped, `problems` says why, and the person is still stored;
-- a `linkedin_url` without the profile shape is dropped;
+- a `linkedin_url` is kept only with the profile shape and when a kept quote holds its `in/<slug>`; a guessed link
+  would point at a stranger and would make `add_candidate` match or refuse the wrong person;
 - a note is saved by `claude` (always `proposed`) unless the stored person is a founder with an address, who is
   emailed. Note problems are checks, never refusals. `DraftLocked` (his draft, or a line he confirmed or wrote) is
   recorded in `problems` and writes nothing over the draft.
@@ -55,6 +59,8 @@ SCHEMA_VERSION = 1
 _EMPLOYER_KINDS = ("profile", "team", "post")
 _EMAIL_REFUSALS = ("bad_email", "email_source_not_allowed", "email_needs_source")
 _LEGAL = {"inc", "llc", "ltd", "corp", "co", "gmbh"}
+_NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "phd", "md", "mba"}
+_HOSTS = re.compile(r"[a-z0-9][a-z0-9.-]*")
 _SEEN_MAX = 10      # candidates looked at per company
 _SOURCES_MAX = 8    # sources read per candidate
 _FACTS_MAX = 10
@@ -96,15 +102,22 @@ def _public_page(url) -> bool:
 
 
 def _host(url: str) -> str:
-    host = (urlsplit(url).hostname or "").lower()
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
     return host[4:] if host.startswith("www.") else host
+
+
+def _on_domain(host: str, domain: str) -> bool:
+    return host == domain or host.endswith("." + domain)
 
 
 def _names_company(source: SourceInput, target: Target) -> bool:
     domain = (target.domain or "").lower()
     if domain:
-        host = _host(source.url)
-        if host == domain or host.endswith("." + domain) or domain in source.quote.lower():
+        if _on_domain(_host(source.url), domain):
+            return True
+        # the domain as a whole host name in the text: `facme.example`, `my-acme.example` and `acme.example.org`
+        # are other hosts; `www.acme.example` and a full stop that ends the sentence are fine
+        if any(_on_domain(h.rstrip(".-"), domain) for h in _HOSTS.findall(source.quote.lower())):
             return True
     words = _tokens(target.name)
     while len(words) > 1 and words[-1] in _LEGAL:
@@ -116,19 +129,42 @@ def _names_company(source: SourceInput, target: Target) -> bool:
 
 
 def _names_person(source: SourceInput, name: str) -> bool:
+    """The full name in the quote: the first word, then the last, with nothing between them but the name's own middle
+    words or single letters (a middle initial). "Bob Smith" does not name Alice Smith, nor "Adam" Ada."""
     words = _tokens(name)
-    return bool(words) and words[-1] in _tokens(source.quote)
+    while len(words) > 1 and words[-1] in _NAME_SUFFIXES:
+        words.pop()
+    quote = _tokens(source.quote)
+    if len(words) < 2:
+        return bool(words) and words[0] in quote
+    first, last, middle = words[0], words[-1], set(words[1:-1])
+    room = len(middle) + 1
+    for i, word in enumerate(quote):
+        if word != first:
+            continue
+        j = i + 1
+        while j < len(quote) and quote[j] != last and j - i <= room and (quote[j] in middle or len(quote[j]) == 1):
+            j += 1
+        if j < len(quote) and quote[j] == last:
+            return True
+    return False
+
+
+def _backs_profile(url: str, sources: list[SourceInput]) -> bool:
+    """A kept quote holds the profile's `in/<slug>` as a whole (so `in/grace-hopper-2` does not back `in/grace`)."""
+    slug = url.rsplit("/in/", 1)[1]
+    pattern = re.compile(r"(?<![a-z0-9])in/" + re.escape(slug) + r"(?![a-z0-9_%-])")
+    return any(pattern.search(s.quote.lower()) for s in sources)
 
 
 def _sources(raw, name: str, problems: list[str]) -> list[SourceInput] | None:
     """The usable sources, observed today by code; None when any of them is a LinkedIn page."""
     if not isinstance(raw, list):
         return []
-    raw = raw[:_SOURCES_MAX]
     if any(isinstance(s, dict) and isinstance(s.get("url"), str) and is_linkedin_url(s["url"]) for s in raw):
         return None
     out: dict[tuple[str, str], SourceInput] = {}
-    for s in raw:
+    for s in raw[:_SOURCES_MAX]:
         if not isinstance(s, dict):
             continue
         kind, url, quote = s.get("kind"), s.get("url"), _text(s.get("quote"), _QUOTE_MAX)
@@ -205,6 +241,9 @@ class _Company:
             linkedin = linkedin_profile_url(c.get("linkedin_url"))
             if linkedin is None:
                 self.problems.append(f"{name}: linkedin_url {c.get('linkedin_url')!s:.200} dropped: not a profile link")
+            elif not _backs_profile(linkedin, kept + email_sources):
+                self.problems.append(f"{name}: linkedin_url {linkedin:.200} dropped: no kept quote holds it")
+                linkedin = None
         add = dict(company_id=self.target.company_id, name=name, title=_text(c.get("title"), _TITLE_MAX),
                    role_kind=c["role_kind"], linkedin_url=linkedin, added_by="claude", today=self.today, cfg=self.cfg)
         result = add_candidate(self.conn, sources=kept + email_sources, email=email, **add)

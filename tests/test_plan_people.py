@@ -359,8 +359,10 @@ class AddCandidateTest(unittest.TestCase):
             self.assertEqual(result, AddResult(None, False, "email_source_not_allowed"), local)
         self.assertEqual(count(self.conn), 0)
         self.conn.execute("INSERT INTO source(source_name, version) VALUES ('hn', 'v1') ON CONFLICT DO NOTHING")
-        self.conn.execute("INSERT INTO company_post(company_id, source_name, url, posted_at, asks_email) "
-                          "VALUES (?, 'hn', 'https://hn.example/job', '2026-11-01T00:00:00Z', 1)", (self.acme,))
+        # The exception also needs the address in the stored post text (fix round 1, G3).
+        self.conn.execute("INSERT INTO company_post(company_id, source_name, url, posted_at, text, asks_email) "
+                          "VALUES (?, 'hn', 'https://hn.example/job', '2026-11-01T00:00:00Z', "
+                          "'Acme is hiring, send CVs to jobs@acme.example', 1)", (self.acme,))
         invited = self.add(email="jobs@acme.example", sources=[SourceInput(
             "email", "https://hn.example/job", quote="send CVs to jobs@acme.example", email_basis="published")])
         self.assertTrue(invited.created)

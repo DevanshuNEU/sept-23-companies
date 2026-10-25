@@ -138,6 +138,18 @@ class RejectTest(StoreCase):
         door.assert_not_called()  # refused by the reply check itself; add_candidate is the second guard
         self.assertRejected(got, "linkedin_source")
 
+    def test_a_linkedin_source_after_the_first_eight_still_refuses_the_candidate(self):
+        from outreach.plan.people import add_candidate
+        cand = candidate()
+        cand["sources"] += [{"kind": "context", "url": f"https://acme.example/p{i}", "label": "",
+                             "quote": "Ada Lovelace"} for i in range(10)]
+        cand["sources"].append({"kind": "context", "url": "https://www.linkedin.com/in/ada", "label": "",
+                                "quote": "Ada Lovelace"})
+        with mock.patch.object(prepare_store, "add_candidate", wraps=add_candidate) as door:
+            got = self.store(cand)
+        door.assert_not_called()
+        self.assertRejected(got, "linkedin_source")
+
     def test_http_source_rejected(self):
         got = self.store(candidate(url="http://acme.example/team"))
         self.assertRejected(got, "no_public_page")
@@ -198,6 +210,27 @@ class EmailTest(StoreCase):
         grace = self.people()[1]
         self.assertEqual((grace["name"], grace["email"]), ("Grace Hopper", "jobs@acme.example"))
 
+    def test_a_shared_mailbox_needs_the_address_in_the_stored_post_text_too(self):
+        self.conn.execute("INSERT INTO source(source_name, version) VALUES ('hn', 'v1') ON CONFLICT DO NOTHING")
+        self.conn.execute("INSERT INTO company_post(company_id, source_name, url, posted_at, text, asks_email) "
+                          "VALUES (?, 'hn', ?, ?, 'Acme Robotics is hiring. Email the founders.', 1)",
+                          (self.company, HN_URL, f"{TODAY.isoformat()}T12:00:00Z"))
+        got = self.store(candidate("Grace Hopper", "founder", email="jobs@acme.example",
+                                   email_sources=[(HN_URL, "Acme Robotics is hiring, email jobs@acme.example")]))
+        self.assertIsNone(self.people()[0]["email"])  # the model's quote holds it, the post we stored does not
+        self.assertTrue(any("jobs@acme.example" in x for x in got.problems))
+
+    def test_a_github_host_with_a_trailing_dot_is_still_github(self):
+        from outreach.plan.people import is_github_host
+        self.assertTrue(all(is_github_host(h) for h in ("github.com.", "GitHub.com", "api.github.com.",
+                                                         "raw.githubusercontent.com.")))
+        self.assertFalse(is_github_host("notgithub.com"))
+        got = self.store(candidate("Pat Lee", "founder", email="pat@acme.example",
+                                   email_sources=[("https://github.com./acme/x", "Author: pat@acme.example")]))
+        self.assertIsNone(self.people()[0]["email"])
+        self.assertEqual(self.count("person_source", "WHERE kind = 'email'"), 0)
+        self.assertEqual(got.added, 1)
+
     def test_published_email_stores_an_email_source_with_basis_published(self):
         cand = candidate("Pat Lee", "founder", email="Pat@Acme.example",
                          email_sources=[("https://acme.example/contact", "Founder: Pat Lee, pat@acme.example")])
@@ -213,13 +246,74 @@ class EmailTest(StoreCase):
 
 class LinkedinUrlTest(StoreCase):
     def test_bad_linkedin_url_dropped_and_good_one_normalized(self):
-        got = self.store(candidate(linkedin_url="https://www.linkedin.com/company/acme"),
-                         candidate("Grace Hopper", linkedin_url="https://linkedin.com/in/Grace-H/?trk=x"))
+        grace = candidate("Grace Hopper", linkedin_url="https://linkedin.com/in/Grace-H/?trk=x",
+                          quote="Grace Hopper, Software Engineer at Acme Robotics. linkedin.com/in/grace-h")
+        got = self.store(candidate(linkedin_url="https://www.linkedin.com/company/acme"), grace)
         ada, grace = self.people()
         self.assertIsNone(ada["linkedin_url"])
         self.assertEqual(grace["linkedin_url"], "https://www.linkedin.com/in/grace-h")
         self.assertEqual(got.added, 2)
         self.assertTrue(any("linkedin.com/company/acme" in x for x in got.problems))
+
+
+    def test_a_linkedin_url_no_kept_quote_backs_is_dropped(self):
+        # a correct name and quote, plus another person's profile link the model guessed
+        got = self.store(candidate(linkedin_url="https://www.linkedin.com/in/ada-lovelace-42"))
+        (ada,) = self.people()
+        self.assertEqual((ada["name"], ada["linkedin_url"]), ("Ada Lovelace", None))
+        self.assertTrue(any("ada-lovelace-42" in x and "no kept quote" in x for x in got.problems))
+        self.assertEqual(got.added, 1)
+
+    def test_a_linkedin_url_whose_slug_is_in_a_kept_quote_is_kept(self):
+        quote = "Ada Lovelace, Software Engineer at Acme Robotics (profile: /in/Ada-Lovelace)"
+        self.store(candidate(linkedin_url="https://www.linkedin.com/in/ada-lovelace/", quote=quote))
+        self.assertEqual(self.people()[0]["linkedin_url"], "https://www.linkedin.com/in/ada-lovelace")
+        # a slug that only starts the same way is not the same profile
+        got = self.store(candidate("Grace Hopper", linkedin_url="https://www.linkedin.com/in/grace",
+                                   quote="Grace Hopper at Acme Robotics, /in/grace-hopper-2"))
+        self.assertIsNone(self.people()[1]["linkedin_url"])
+        self.assertTrue(got.problems)
+        # a quote on a page that was dropped does not back it
+        cand = candidate("Alan Turing", linkedin_url="https://www.linkedin.com/in/aturing")
+        cand["sources"].append({"kind": "context", "url": "http://plain.example/x", "label": "",
+                                "quote": "Alan Turing linkedin.com/in/aturing"})
+        self.store(cand)
+        self.assertIsNone(self.people()[2]["linkedin_url"])
+
+
+class IdentityTest(StoreCase):
+    def test_a_quote_that_names_someone_else_with_the_same_last_name_is_rejected(self):
+        got = self.store(candidate("Alice Smith", quote="Bob Smith joined Acme Robotics in 2021."))
+        self.assertEqual(got.rejected, (Rejected("Alice Smith", "name_not_on_page"),))
+        got = self.store(candidate("Ada Lovelace", quote="Adam Lovelace, Software Engineer at Acme Robotics"))
+        self.assertEqual(got.rejected, (Rejected("Ada Lovelace", "name_not_on_page"),))
+        got = self.store(candidate("Jane Smith", quote="Smith Jane, Acme Robotics"))  # the order counts
+        self.assertEqual(got.rejected, (Rejected("Jane Smith", "name_not_on_page"),))
+        self.assertEqual(self.count("person"), 0)
+
+    def test_a_domain_inside_another_domain_does_not_name_the_company(self):
+        for quote in ("Alice Smith founded Facme.example in 2019", "Alice Smith runs acme.example.org",
+                      "Alice Smith, my-acme.example founder", "Alice Smith at acme.example-labs"):
+            with self.subTest(quote=quote):
+                got = self.store(candidate("Alice Smith", quote=quote, url="https://news.example/story"))
+                self.assertEqual(got.rejected, (Rejected("Alice Smith", "company_not_on_page"),))
+        got = self.store(candidate("Alice Smith", quote="Alice Smith builds robots at acme.example.",
+                                   url="https://news.example/story"))
+        self.assertEqual(got.added, 1)  # the domain as a whole word, a full stop after it ends the sentence
+        got = self.store(candidate("Bob Jones", quote="Bob Jones, Facme Robotics", url="https://news.example/b"),
+                         target=replace(self.target, known_people=()))
+        self.assertEqual(got.rejected, (Rejected("Bob Jones", "company_not_on_page"),))
+
+    def test_middle_initials_hyphens_accents_and_suffixes_still_name_the_person(self):
+        cases = [("Ada Lovelace", "Ada K. Lovelace, Software Engineer at Acme Robotics"),
+                 ("Mary Smith-Jones", "Mary Smith Jones, Acme Robotics"),
+                 ("Ann Lee Park", "Ann Park, Acme Robotics"),
+                 ("Jos\u00e9 N\u00fa\u00f1ez", "Jose Nunez leads infra at Acme Robotics"),
+                 ("Sam Hill Jr.", "Sam Hill, Acme Robotics")]
+        for name, quote in cases:
+            with self.subTest(name=name):
+                got = self.store(candidate(name, quote=quote), target=replace(self.target, known_people=()))
+                self.assertEqual((got.added, got.rejected), (1, ()))
 
 
 class LimitsTest(StoreCase):

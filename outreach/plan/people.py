@@ -326,6 +326,10 @@ def _host(url: str) -> str | None:
 
 
 def _github_host(host: str | None) -> bool:
+    """GitHub or its user-content host, any subdomain, any case, with or without one trailing dot (`github.com.` is
+    the same host)."""
+    host = (host or "").lower()
+    host = host[:-1] if host.endswith(".") else host
     return bool(host) and any(host == d or host.endswith("." + d) for d in ("github.com", "githubusercontent.com"))
 
 
@@ -370,11 +374,14 @@ def _source_problem(s: SourceInput) -> bool:
     return False
 
 
-def _invited(conn: sqlite3.Connection, canon: dict[int, int], survivor: int, backed: Sequence[SourceInput]) -> bool:
-    """A source page that is a post of this company asking for email: the one way a shared mailbox is allowed."""
+def _invited(conn: sqlite3.Connection, canon: dict[int, int], survivor: int, backed: Sequence[SourceInput],
+             email: str) -> bool:
+    """A source page that is a post of this company asking for email, and whose stored text (not only the caller's
+    quote) holds the address: the one way a shared mailbox is allowed."""
     urls = {s.url for s in backed}
     return any(r["url"] in urls and canon.get(r["company_id"], r["company_id"]) == survivor
-               for r in conn.execute("SELECT company_id, url FROM company_post WHERE asks_email = 1"))
+               and _holds_email(r["text"], email)
+               for r in conn.execute("SELECT company_id, url, text FROM company_post WHERE asks_email = 1"))
 
 
 def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title: str = "", role_kind: str,
@@ -385,7 +392,7 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
 
     Refusal codes: `bad_role_kind`, `bad_name`, `company_removed`, `linkedin_source`, `bad_linkedin_url`, `bad_email`,
     `email_source_not_allowed` (GitHub, a noreply address, or a shared mailbox such as info@ unless the source page
-    is an HN post that asks for email), `email_needs_source`, `bad_source` (an unknown kind, a page that is not plain https,
+    is an HN post that asks for email and its stored text holds the address), `email_needs_source`, `bad_source` (an unknown kind, a page that is not plain https,
     a basis on a non-email source or a missing one on an email source, a bad date), `person_elsewhere`. A person who
     is already at the company (same linkedin url, email or name) is returned with `created` False and only the new
     sources are added.
@@ -423,7 +430,7 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
         backed = [s for s in email_sources if s.email_basis in EMAIL_BASES and _holds_email(s.quote, email)]
         if not backed:
             return _refuse("email_needs_source")
-        if _generic_mailbox(email, cfg or default_plan_config()) and not _invited(conn, canon, survivor, backed):
+        if _generic_mailbox(email, cfg or default_plan_config()) and not _invited(conn, canon, survivor, backed, email):
             return _refuse("email_source_not_allowed")
     if any(_source_problem(s) for s in sources):
         return _refuse("bad_source")

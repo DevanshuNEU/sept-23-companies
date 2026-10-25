@@ -19,15 +19,17 @@ Rules, in order, per candidate (the first `prepare.max_candidates` that pass are
 - no LinkedIn page anywhere in its sources (the whole candidate is refused, whatever else it has);
 - every source URL is scanned for LinkedIn before any cap is applied;
 - sources that are not a plain https page with a non-empty quote are dropped (an `email` source on GitHub too);
-- a `profile`, `team` or `post` page whose quote holds the full name (first and last word in order, a middle name or
-  initial allowed between them, accents, case and hyphens ignored, a suffix such as Jr. dropped) and names the company
+- a `profile`, `team` or `post` page whose quote holds the full name (given name then surname, a middle name or
+  initial allowed between them, a hyphenated or compound part whole, accents and case folded, a leading Dr. or a
+  trailing Jr. dropped) and names the company
   (its name as whole words, or its domain as a whole host name), or that is on the company's domain or a subdomain of
   it; the pages that do not say so are dropped;
 - an email is kept only when an `email` page quotes the whole address, and `add_candidate`'s rules pass (no GitHub,
   no noreply, no shared mailbox unless the page is an HN post of the company that asks for email). Otherwise the
   email and its pages are dropped, `problems` says why, and the person is still stored;
-- a `linkedin_url` is kept only with the profile shape and when a kept quote holds its `in/<slug>`; a guessed link
-  would point at a stranger and would make `add_candidate` match or refuse the wrong person;
+- a `linkedin_url` is kept only with the profile shape and when a quote stored with the person holds the profile
+  itself (a LinkedIn host, then `/in/<slug>` as a whole path segment); a guessed link would point at a stranger and
+  would make `add_candidate` match or refuse the wrong person;
 - a note is saved by `claude` (always `proposed`) unless the stored person is a founder with an address, who is
   emailed. Note problems are checks, never refusals. `DraftLocked` (his draft, or a line he confirmed or wrote) is
   recorded in `problems` and writes nothing over the draft.
@@ -60,6 +62,8 @@ _EMPLOYER_KINDS = ("profile", "team", "post")
 _EMAIL_REFUSALS = ("bad_email", "email_source_not_allowed", "email_needs_source")
 _LEGAL = {"inc", "llc", "ltd", "corp", "co", "gmbh"}
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "phd", "md", "mba"}
+_HONORIFICS = {"dr", "prof", "mr", "mrs", "ms", "mx", "sir"}
+_PARTICLES = {"van", "von", "de", "der", "den", "del", "della", "da", "di", "du", "la", "le", "st", "bin", "al"}
 _HOSTS = re.compile(r"[a-z0-9][a-z0-9.-]*")
 _SEEN_MAX = 10      # candidates looked at per company
 _SOURCES_MAX = 8    # sources read per candidate
@@ -128,32 +132,71 @@ def _names_company(source: SourceInput, target: Target) -> bool:
     return any(quote[i:i + len(words)] == words for i in range(len(quote) - len(words) + 1))
 
 
-def _names_person(source: SourceInput, name: str) -> bool:
-    """The full name in the quote: the first word, then the last, with nothing between them but the name's own middle
-    words or single letters (a middle initial). "Bob Smith" does not name Alice Smith, nor "Adam" Ada."""
-    words = _tokens(name)
-    while len(words) > 1 and words[-1] in _NAME_SUFFIXES:
+def _name_groups(name: str) -> tuple[list[str], set[str], list[str]] | None:
+    """The given name, the middle words and the surname of `name`, each as folded tokens. A hyphenated part stays one
+    group (`Smith-Jones` is `smith`, `jones`), and particles before the surname join it (`van Beethoven`). Leading
+    honorifics (Dr, Prof, Mr, Mrs, Ms, Mx, Sir) and trailing suffixes (Jr, Sr, III, PhD) are dropped, but never down to
+    a single word. None for a single-word name."""
+    words = [t for t in (_tokens(w) for w in name.split()) if t]
+    while len(words) > 2 and len(words[-1]) == 1 and words[-1][0] in _NAME_SUFFIXES:
         words.pop()
-    quote = _tokens(source.quote)
+    while len(words) > 2 and len(words[0]) == 1 and words[0][0] in _HONORIFICS:
+        words.pop(0)
     if len(words) < 2:
-        return bool(words) and words[0] in quote
-    first, last, middle = words[0], words[-1], set(words[1:-1])
+        return None
+    last = len(words) - 1
+    while last > 1 and len(words[last - 1]) == 1 and words[last - 1][0] in _PARTICLES:
+        last -= 1
+    surname = [t for w in words[last:] for t in w]
+    middle = {t for w in words[1:last] for t in w}
+    return words[0], middle, surname
+
+
+def _group_at(quote: list[str], i: int, parts: list[str]) -> int | None:
+    """Where `parts` ends when it starts at `quote[i]`: the same parts in order, or all of them run together
+    (`smithjones`). Never one part alone."""
+    if quote[i:i + len(parts)] == parts:
+        return i + len(parts)
+    if i < len(quote) and quote[i] == "".join(parts):
+        return i + 1
+    return None
+
+
+def _names_person(source: SourceInput, name: str) -> bool:
+    """The full name in the quote: the given name, then the surname, with nothing between them but the name's own
+    middle words or single letters (a middle initial). A hyphenated or compound part must appear whole (hyphen, space
+    or no separator; case and accents folded): "Mary Jones" does not name Mary Smith-Jones, "Bob Smith" does not name
+    Alice Smith, nor "Adam" Ada."""
+    quote = _tokens(source.quote)
+    groups = _name_groups(name)
+    if groups is None:
+        words = _tokens(name)
+        return bool(words) and any(_group_at(quote, i, words) is not None for i in range(len(quote)))
+    first, middle, surname = groups
     room = len(middle) + 1
-    for i, word in enumerate(quote):
-        if word != first:
+    for i in range(len(quote)):
+        j = _group_at(quote, i, first)
+        if j is None:
             continue
-        j = i + 1
-        while j < len(quote) and quote[j] != last and j - i <= room and (quote[j] in middle or len(quote[j]) == 1):
-            j += 1
-        if j < len(quote) and quote[j] == last:
-            return True
+        skipped = 0
+        while j <= len(quote):
+            if _group_at(quote, j, surname) is not None:
+                return True
+            if j < len(quote) and skipped < room and (quote[j] in middle or len(quote[j]) == 1):
+                j += 1
+                skipped += 1
+                continue
+            break
     return False
 
 
 def _backs_profile(url: str, sources: list[SourceInput]) -> bool:
-    """A kept quote holds the profile's `in/<slug>` as a whole (so `in/grace-hopper-2` does not back `in/grace`)."""
+    """A stored quote holds the profile itself: a LinkedIn host (any subdomain, scheme optional) then `/in/<slug>`
+    with the slug a whole path segment (followed by the end, `/`, `?`, `#`, a space or closing punctuation; never a
+    letter, digit, `.`, `-`, `_` or `%`). A bare `in/<slug>` or another host (`notes.in/jane`) never counts."""
     slug = url.rsplit("/in/", 1)[1]
-    pattern = re.compile(r"(?<![a-z0-9])in/" + re.escape(slug) + r"(?![a-z0-9_%-])")
+    pattern = re.compile(r"(?<![a-z0-9.-])(?:https?://)?(?:[a-z0-9-]+\.)*linkedin\.com/in/" + re.escape(slug)
+                         + r"(?![a-z0-9._%-])")
     return any(pattern.search(s.quote.lower()) for s in sources)
 
 
@@ -241,15 +284,20 @@ class _Company:
             linkedin = linkedin_profile_url(c.get("linkedin_url"))
             if linkedin is None:
                 self.problems.append(f"{name}: linkedin_url {c.get('linkedin_url')!s:.200} dropped: not a profile link")
-            elif not _backs_profile(linkedin, kept + email_sources):
-                self.problems.append(f"{name}: linkedin_url {linkedin:.200} dropped: no kept quote holds it")
-                linkedin = None
         add = dict(company_id=self.target.company_id, name=name, title=_text(c.get("title"), _TITLE_MAX),
-                   role_kind=c["role_kind"], linkedin_url=linkedin, added_by="claude", today=self.today, cfg=self.cfg)
-        result = add_candidate(self.conn, sources=kept + email_sources, email=email, **add)
+                   role_kind=c["role_kind"], added_by="claude", today=self.today, cfg=self.cfg)
+
+        def store(stored: list[SourceInput], address: str | None):
+            # the profile link only when a quote that is actually stored with this call holds it
+            backed = linkedin if linkedin is not None and _backs_profile(linkedin, stored) else None
+            return add_candidate(self.conn, sources=stored, email=address, linkedin_url=backed, **add), backed
+
+        result, backed = store(kept + email_sources, email)
         if result.refused in _EMAIL_REFUSALS and email is not None:
             self.problems.append(f"{name}: email {email} dropped ({result.refused})")
-            result = add_candidate(self.conn, sources=kept, email=None, **add)
+            result, backed = store(kept, None)
+        if linkedin is not None and backed is None and result.refused is None:
+            self.problems.append(f"{name}: linkedin_url {linkedin:.200} dropped: no kept quote holds it")
         if result.refused is not None:
             self.rejected.append(Rejected(name, result.refused))
             return

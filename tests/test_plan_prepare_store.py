@@ -265,12 +265,12 @@ class LinkedinUrlTest(StoreCase):
         self.assertEqual(got.added, 1)
 
     def test_a_linkedin_url_whose_slug_is_in_a_kept_quote_is_kept(self):
-        quote = "Ada Lovelace, Software Engineer at Acme Robotics (profile: /in/Ada-Lovelace)"
+        quote = "Ada Lovelace, Software Engineer at Acme Robotics (profile: linkedin.com/in/Ada-Lovelace)"
         self.store(candidate(linkedin_url="https://www.linkedin.com/in/ada-lovelace/", quote=quote))
         self.assertEqual(self.people()[0]["linkedin_url"], "https://www.linkedin.com/in/ada-lovelace")
         # a slug that only starts the same way is not the same profile
         got = self.store(candidate("Grace Hopper", linkedin_url="https://www.linkedin.com/in/grace",
-                                   quote="Grace Hopper at Acme Robotics, /in/grace-hopper-2"))
+                                   quote="Grace Hopper at Acme Robotics, linkedin.com/in/grace-hopper-2"))
         self.assertIsNone(self.people()[1]["linkedin_url"])
         self.assertTrue(got.problems)
         # a quote on a page that was dropped does not back it
@@ -279,6 +279,34 @@ class LinkedinUrlTest(StoreCase):
                                 "quote": "Alan Turing linkedin.com/in/aturing"})
         self.store(cand)
         self.assertIsNone(self.people()[2]["linkedin_url"])
+
+
+    def test_only_a_linkedin_host_and_a_whole_slug_back_a_profile_link(self):
+        lead = "Ada Lovelace, engineer at Acme Robotics"
+        dropped = [f"{lead} (https://notes.in/SLUG)", f"{lead}, linkedin.com/in/SLUG.smith",
+                   f"{lead}, linkedin.com/in/SLUG.png", f"{lead}, linkedin.com/in/SLUG_2",
+                   f"{lead}, notlinkedin.com/in/SLUG", f"{lead}, profile in/SLUG"]
+        kept = [f"{lead}, https://www.linkedin.com/in/SLUG/", f"{lead} (LinkedIn.com/in/SLUG?trk=x)",
+                f"{lead}: https://uk.linkedin.com/in/SLUG#about", f"{lead}, www.linkedin.com/in/SLUG"]
+        for i, quote in enumerate(dropped + kept):
+            name, slug = f"Ada Lovelace{'x' * i}", f"jane{i}"
+            url = f"https://www.linkedin.com/in/{slug}"
+            with self.subTest(quote=quote):
+                self.store(candidate(name, quote=quote.replace("SLUG", slug).replace("Ada Lovelace", name),
+                                     linkedin_url=url), target=replace(self.target, known_people=()))
+                row = self.conn.execute("SELECT linkedin_url FROM person WHERE name = ?", (name,)).fetchone()
+                self.assertEqual(row["linkedin_url"], url if quote in kept else None)
+
+    def test_a_profile_link_backed_only_by_a_dropped_email_page_is_dropped_with_it(self):
+        # the shared mailbox is refused (no post asked for it), so its page is not stored, and neither is the link
+        got = self.store(candidate("Pat Lee", "founder", email="jobs@acme.example",
+                                   linkedin_url="https://www.linkedin.com/in/jane-stranger",
+                                   email_sources=[("https://acme.example/contact",
+                                                   "jobs@acme.example, linkedin.com/in/jane-stranger")]))
+        (pat,) = self.people()
+        self.assertEqual((pat["email"], pat["linkedin_url"]), (None, None))
+        self.assertEqual([s["kind"] for s in self.sources()], ["team"])
+        self.assertTrue(any("jane-stranger" in x for x in got.problems))
 
 
 class IdentityTest(StoreCase):
@@ -309,11 +337,28 @@ class IdentityTest(StoreCase):
                  ("Mary Smith-Jones", "Mary Smith Jones, Acme Robotics"),
                  ("Ann Lee Park", "Ann Park, Acme Robotics"),
                  ("Jos\u00e9 N\u00fa\u00f1ez", "Jose Nunez leads infra at Acme Robotics"),
-                 ("Sam Hill Jr.", "Sam Hill, Acme Robotics")]
+                 ("Sam Hill Jr.", "Sam Hill, Acme Robotics"),
+                 ("Mary Smith-Jones", "Mary SmithJones, Acme Robotics"),
+                 ("Dr. Ada Lovelace", "Ada Lovelace, Software Engineer at Acme Robotics"),
+                 ("Prof Grace Hopper", "Grace Hopper, Acme Robotics"),
+                 ("Jean-Luc Picard III", "Jean-Luc Picard, Acme Robotics")]
         for name, quote in cases:
             with self.subTest(name=name):
                 got = self.store(candidate(name, quote=quote), target=replace(self.target, known_people=()))
                 self.assertEqual((got.added, got.rejected), (1, ()))
+
+
+    def test_one_part_of_a_hyphenated_or_compound_name_is_not_the_name(self):
+        cases = [("Mary Smith-Jones", "Mary Jones, Software Engineer at Acme Robotics"),
+                 ("Mary Smith-Jones", "Mary Smith, Software Engineer at Acme Robotics"),
+                 ("Jean-Luc Picard", "Luc Picard, Acme Robotics"),
+                 ("Ludwig van Beethoven", "Ludwig Beethoven, Acme Robotics"),
+                 ("Dr. Lovelace", "Ada Lovelace, Acme Robotics")]  # an honorific is never stripped to one word
+        for name, quote in cases:
+            with self.subTest(name=name, quote=quote):
+                got = self.store(candidate(name, quote=quote), target=replace(self.target, known_people=()))
+                self.assertEqual(got.rejected, (Rejected(name, "name_not_on_page"),))
+        self.assertEqual(self.count("person"), 0)
 
 
 class LimitsTest(StoreCase):

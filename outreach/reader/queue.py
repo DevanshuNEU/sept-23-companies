@@ -38,8 +38,8 @@ from outreach.rules.rebuild import stored_decision
 from outreach.store import atomic, body_sha256, iso_utc, transaction, utcnow
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["enqueue", "enqueue_missing", "refresh_priorities", "next_batch", "release", "requeue", "batch_payload",
-           "TIER_ORDINARY", "TIER_LANE_ONE", "TIER_PROVISIONAL_HIDE", "HELD"]
+__all__ = ["enqueue", "enqueue_missing", "refresh_priorities", "next_batch", "release", "requeue", "set_aside",
+           "batch_payload", "TIER_ORDINARY", "TIER_LANE_ONE", "TIER_PROVISIONAL_HIDE", "HELD"]
 
 BATCH = 500  # rows per write transaction, as `rebuild` does
 TIER_ORDINARY, TIER_LANE_ONE, TIER_PROVISIONAL_HIDE = 1, 2, 3
@@ -297,6 +297,21 @@ def requeue(conn: sqlite3.Connection, requests: Iterable[ReadRequest], error: st
                 args.append(attempts[r.posting_id])
             back += conn.execute(sql, args).rowcount
     return back
+
+
+def set_aside(conn: sqlite3.Connection, requests: Iterable[ReadRequest], error: str) -> int:
+    """End leased rows `refused` with `error`, keeping the attempt their lease used, for a posting this caller can
+    never read (#13: one too long for a side session's result). The row stays, so `enqueue` never queues the same
+    body for the same version again and `next_batch` never hands it out again. Only a row that is still leased is
+    touched. Returns how many rows ended."""
+    ended = 0
+    with atomic(conn, "reader_set_aside"):
+        for r in requests:
+            ended += conn.execute(
+                "UPDATE read_queue SET state = 'refused', lease_until = NULL, last_error = ? WHERE posting_id = ? "
+                "AND body_sha256 = ? AND reader_version = ? AND state = 'leased'",
+                (error, r.posting_id, r.body_sha256, r.reader_version)).rowcount
+    return ended
 
 
 def batch_payload(conn: sqlite3.Connection, requests: list[ReadRequest]) -> dict:

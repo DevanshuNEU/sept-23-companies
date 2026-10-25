@@ -13,13 +13,20 @@ import re
 from outreach.reader.config import ReaderConfig, load_reader_config
 from outreach.reader.types import READING_SCHEMA_VERSION
 
-__all__ = ["SIDE_PREFIX", "VERSION_PATTERN", "reader_version", "side_version", "promoted_version"]
+__all__ = ["SIDE_PREFIX", "VERSION_PATTERN", "reader_version", "side_version", "promoted_version", "is_side_sql"]
 
 # What a reader version looks like: `rv-` and 12 lower-case hex. Only such a version can be promoted.
 VERSION_PATTERN = re.compile(r"rv-[0-9a-f]{12}\Z")
 
 # What a side session's readings are filed under, before the files' version (see `side_version`).
 SIDE_PREFIX = "side-"
+
+
+def is_side_sql(column: str = "reader_version") -> str:
+    """SQL that is true when `column` holds a side session's version. The one test of "is this row the side
+    session's" for code that reads `read_queue` or `posting_reading` across versions (the Needs-you sweep, #13's
+    guard): a side row says nothing about what the night reader has."""
+    return f"substr({column}, 1, {len(SIDE_PREFIX)}) = '{SIDE_PREFIX}'"
 
 
 def reader_version(cfg: ReaderConfig | None = None) -> str:

@@ -26,8 +26,9 @@ from tests.storetest import fresh_store
 from tests.test_mcp_boundary import forbidden
 
 ROOT = Path(__file__).resolve().parent.parent
-READ_TOOLS = {"ranked_companies", "company", "person", "followups_due"}
-WRITE_TOOLS = {"record_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people"}
+READ_TOOLS = {"ranked_companies", "company", "person", "followups_due", "prepare_targets"}
+WRITE_TOOLS = {"record_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people",
+               "save_linkedin_note", "reader_next", "reader_submit", "submit_candidates"}
 PINNED_TOOLS = READ_TOOLS | WRITE_TOOLS
 FORBIDDEN_PROPERTIES = frozenset({
     "state", "approved", "approved_at", "approve", "send", "sent", "sent_at", "skip", "unapprove", "pause", "paused",
@@ -125,6 +126,25 @@ class CallPathTest(McpCase):
         self.assertEqual(self.db.execute("SELECT state FROM message WHERE message_id = ?", (mid,)).fetchone()[0],
                          "drafted")
 
+    def test_any_failure_opening_the_guarded_connection_is_a_plain_error_with_no_path_or_sql(self):
+        path = "/Users/someone/Library/Application Support/outreach/outreach.db"
+        trigger = "CREATE TEMP TRIGGER mcp_message_state BEFORE UPDATE OF state ON main.message"
+        cases = (
+            (sqlite3.DatabaseError(f"unable to open {path}: near {trigger}: syntax error"), "internal"),
+            (sqlite3.OperationalError(f"database is locked ({path})"), "busy"),
+            (RuntimeError(f"{trigger} at {path}"), "internal"),
+            (sqlite3.IntegrityError("mcp guard: Claude never deletes a row"), "refused"),
+        )
+        for raised, code in cases:
+            with self.subTest(raised=type(raised).__name__, code=code), \
+                    mock.patch.object(server, "open_guarded", side_effect=raised), \
+                    mock.patch("sys.stderr", io.StringIO()):
+                err = self.error("echo")
+                self.assertEqual(err["code"], code)
+                for leak in (path, "CREATE", "TRIGGER", "Application Support", "outreach.db", "syntax"):
+                    self.assertNotIn(leak, err["message"] + err["fix"])
+                self.assertTrue(err["message"] and err["fix"])
+
     def test_an_oversize_result_is_an_error_not_a_truncation(self):
         self.assertEqual(self.error("huge")["code"], "result_too_large")
 
@@ -180,7 +200,10 @@ def walk_schema(schema: dict, defs: dict, where: str):
 
 class RealToolsTest(unittest.TestCase):
     def test_tool_list_is_pinned(self):
-        self.assertEqual({s.name for s in server.tool_specs()}, PINNED_TOOLS)
+        names = [s.name for s in server.tool_specs()]
+        self.assertEqual(set(names), PINNED_TOOLS)
+        self.assertEqual(len(names), 15)
+        self.assertEqual(len(set(names)), 15)
 
     def test_only_the_write_tools_declare_grants(self):
         self.assertEqual({s.name for s in server.tool_specs() if s.grants}, WRITE_TOOLS)

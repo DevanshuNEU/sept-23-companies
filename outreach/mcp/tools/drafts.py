@@ -1,4 +1,4 @@
-"""The draft tools (#13, lean v1): save_draft (the first email) and save_followup (a planned follow-up).
+"""The draft tools (#13): save_draft (the first email), save_followup (a planned follow-up) and save_linkedin_note.
 
 Both run the #9 checks of `outreach.drafts.checks.run_checks` on every save and store them on the message, inside one
 write transaction with the preconditions, so what is stored is what was checked. A content block (three links, a
@@ -9,6 +9,12 @@ removed company, an email already sent, a message he saved or approved. Nothing 
 
 The mail server answer comes from the `mx_check` cache only (this server has no network): fresh `ok` or `none`, else
 `unknown`, which warns. The banned phrases list is read on every save; an unreadable list blocks (fail closed).
+
+save_linkedin_note goes through #15's one writer of `linkedin_draft`, `outreach.plan.drafts.save_linkedin_draft`,
+always as `saved_by='claude'`, so the reason line is stored `proposed` and only Devanshu confirms or writes it. That
+writer refuses a note he confirmed, wrote or saved himself (`DraftLocked`, here `draft_locked`) and runs #15's
+`check_note`; a block still saves. The note scopes of the banned list and me.md's open questions are read on every
+save, and either one unreadable blocks the note. An identical second save writes nothing.
 """
 from __future__ import annotations
 
@@ -21,8 +27,12 @@ from pydantic import Field
 from outreach.drafts.checks import HOOK_DATE, URL, DraftInput, cached_mx, email_domain, load_banned, run_checks
 from outreach.drafts.followups import company_map, due_followups, held_survivors, no_go_sets, resolve_company
 from outreach.mcp.guard import Grant
-from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
+from outreach.mcp.tools import PREPARED_BY, Ctx, Input, ToolError, ToolSpec
+from outreach.mcp.tools.people import said_no_ids
 from outreach.mcp.tools.reads import HOOK_CHARS, MAX_ID, PROJECT_CHARS, Family, company_row, why_not_email
+from outreach.plan.config import default_plan_config
+from outreach.plan.drafts import DraftLocked, LinkedinDraft, get_draft, save_linkedin_draft
+from outreach.plan.notecheck import Fact, NoteCheck
 from outreach.store import append_event, transaction
 
 __all__ = ["TOOLS"]
@@ -274,6 +284,109 @@ def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
                   found=found)
 
 
+# ---------------------------------------------------------------------------------------------- save_linkedin_note
+
+NOTE_LOCKED = {
+    "confirmed": "Devanshu confirmed the reason line of this note, so it is his now.",
+    "written": "Devanshu wrote the reason line of this note himself, so it is his now.",
+    "his_save": "Devanshu edited this note himself, so it is his now.",
+}
+
+
+class NoteFact(Input):
+    text: str = Field(min_length=1, max_length=300, description="The fact, in the words the note uses.")
+    label: str = Field("", max_length=120, description="A short name for the page, such as Blog.")
+    url: str = Field("", max_length=300, description="The public https page it came from (not LinkedIn).")
+    in_note: bool = Field(False, description="True when the note uses this fact.")
+
+
+class SaveNoteInput(Input):
+    person_id: int = Field(ge=1, le=MAX_ID)
+    body: str = Field(min_length=1, max_length=2000, description="The whole connection note.")
+    reason_line: str = Field(min_length=1, max_length=300,
+                             description="One line, word for word in the note, saying why this person. A proposal: "
+                                         "only Devanshu confirms it or writes his own.")
+    facts: list[NoteFact] = Field(default_factory=list, max_length=8)
+    posting_id: int | None = Field(None, ge=1, le=MAX_ID, description="A posting of this person's company it names.")
+    revision: int | None = Field(None, ge=1, le=MAX_ID, description="The revision you read; a newer one refuses.")
+
+
+def note_brief(check: NoteCheck) -> dict:
+    """A check as the result shows it. #15's checks keep the what-to-do in `detail`; `fix` repeats it when the check
+    has no fix of its own, so every block says how to clear it."""
+    fix = check.fix if isinstance(check.fix, str) and check.fix else check.detail
+    return {"code": check.code, "title": check.title, "detail": check.detail, "fix": fix}
+
+
+def note_result(draft: LinkedinDraft, *, created: bool, unchanged: bool, max_chars: int) -> dict:
+    return {"draft_id": draft.draft_id, "revision": draft.revision, "created": created, "unchanged": unchanged,
+            "reason_state": draft.reason_state, "needs_his_line": True, "length": len(draft.body),
+            "max_chars": max_chars,
+            "blocks": [note_brief(c) for c in draft.checks if c.severity == "block"],
+            "warns": [note_brief(c) for c in draft.checks if c.severity == "warn"]}
+
+
+def note_refusal(conn: sqlite3.Connection, p: sqlite3.Row, main: sqlite3.Row, family: Family) -> ToolError | None:
+    """Why no note may be drafted for this person, or None: the person or company is on the no-go list, the person
+    said no, or the company is closed or removed."""
+    no_go_people, no_go_companies = no_go_sets(conn, family.companies)
+    if p["person_id"] in no_go_people:
+        return refuse("person_no_go", name=p["name"])
+    if p["person_id"] in said_no_ids(conn, [p["person_id"]]):
+        return refuse("said_no", name=p["name"])
+    if main["company_id"] in no_go_companies:
+        return refuse("company_no_go", company=main["name"])
+    if main["status"] in ("closed", "removed"):
+        return refuse(f"company_{main['status']}", company=main["name"])
+    return None
+
+
+def locked(draft: LinkedinDraft | None, name: str) -> ToolError:
+    why = ("confirmed" if draft is not None and draft.reason_state == "confirmed"
+           else "written" if draft is not None and draft.reason_state == "written" else "his_save")
+    return ToolError("draft_locked", f"{NOTE_LOCKED[why]} Claude never overwrites the note to {name}.",
+                     "Leave this note. Tell Devanshu if you think it needs something.")
+
+
+def save_linkedin_note(ctx: Ctx, args: SaveNoteInput) -> dict:
+    conn = ctx.conn
+    body, reason = text(args.body, "body"), text(args.reason_line, "reason_line")
+    facts = [Fact(text=f.text, label=f.label, url=f.url, in_note=f.in_note) for f in args.facts]
+    cfg = default_plan_config()
+    max_chars = cfg.get("note", "max_chars")
+    banned = load_banned(scopes=tuple(cfg.get("note", "banned_scopes")))[0]  # unusable: [], and every note blocks
+    with transaction(conn):
+        p = person_row(conn, args.person_id)
+        family = Family(conn)
+        main = company_row(conn, family.survivor(p["company_id"]))
+        problem = note_refusal(conn, p, main, family)
+        if problem is not None:
+            raise problem
+        if args.posting_id is not None:
+            row = conn.execute("SELECT company_id FROM posting WHERE posting_id = ?", (args.posting_id,)).fetchone()
+            if row is None or row["company_id"] not in family.members(main["company_id"]):
+                raise ToolError("bad_input", f"posting_id {args.posting_id} is not a posting of {main['name']}.",
+                                "Use a posting id from the company tool for this person's company, or leave it "
+                                "out. Nothing was written.")
+        stored = get_draft(conn, p["person_id"])
+        if (stored is not None and stored.saved_by == "claude"  # the foundation CHECK: claude's line is proposed
+                and (args.revision is None or args.revision == stored.revision)
+                and (stored.body, stored.reason_line, list(stored.facts)) == (body, reason, facts)
+                and args.posting_id in (None, stored.posting_id)):
+            return note_result(stored, created=False, unchanged=True, max_chars=max_chars)
+        try:
+            saved = save_linkedin_draft(conn, person_id=p["person_id"], body=body, reason_line=reason, facts=facts,
+                                        saved_by="claude", posting_id=args.posting_id, prepared_by_version=PREPARED_BY,
+                                        revision=args.revision, cfg=cfg, banned=banned)
+        except DraftLocked:
+            raise locked(stored, p["name"]) from None
+        except LookupError:
+            raise ToolError("stale_revision", f"The note to {p['name']} is not at revision {args.revision}, or it "
+                                              "changed while this was saved.",
+                            "Read it again with the person tool, then save with its current revision.") from None
+    return note_result(saved, created=stored is None, unchanged=False, max_chars=max_chars)
+
+
 TOOLS = (
     ToolSpec("save_draft",
              "Save the first email to a person as a draft for Devanshu to review. It runs the #9 checks and returns "
@@ -289,5 +402,14 @@ TOOLS = (
              SaveFollowupInput, save_followup,
              {"message": Grant(update=frozenset({"state", "subject", "body", "checks", "saved_by", "updated_at",
                                                  "revision"})),
+              "event": Grant(insert=True)}),
+    ToolSpec("save_linkedin_note",
+             "Save the LinkedIn connection note to a person as a draft, with its reason line and the facts it uses "
+             "(each with its public page). The reason line is a proposal that only Devanshu can confirm or rewrite. "
+             "It runs the note checks; a block still saves. A note he confirmed, wrote or edited is refused.",
+             SaveNoteInput, save_linkedin_note,
+             {"linkedin_draft": Grant(insert=True, update=frozenset({"posting_id", "body", "reason_line", "facts",
+                                                                     "checks", "prepared_by_version", "updated_at",
+                                                                     "revision"})),
               "event": Grant(insert=True)}),
 )

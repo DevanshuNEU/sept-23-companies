@@ -13,7 +13,10 @@ from outreach.mcp import server
 from outreach.mcp.guard import Grant, open_guarded
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase
+from outreach.reader.types import FIELDS
 from tests.test_drafts_checks import BODY, FIXTURE_BANNED
+
+READER_BODY = "We build tools for small teams and ship every week. " * 12
 
 INSERT = Grant(insert=True)
 PINNED = {
@@ -28,6 +31,18 @@ PINNED = {
                                                          "updated_at", "revision"}))},
     "add_people": {"person": Grant(insert=True, update=frozenset({"profile_text", "notes", "updated_at", "revision"})),
                    "person_source": INSERT, "event": INSERT},
+    "save_linkedin_note": {"event": INSERT,
+                           "linkedin_draft": Grant(insert=True, update=frozenset({
+                               "posting_id", "body", "reason_line", "facts", "checks", "prepared_by_version",
+                               "updated_at", "revision"}))},
+    "reader_next": {"read_queue": Grant(insert=True, update=frozenset({"priority", "state", "lease_until", "attempts",
+                                                                        "last_error"}))},
+    "reader_submit": {"read_queue": Grant(insert=True, update=frozenset({"state", "lease_until", "last_error"})),
+                      "posting_reading": INSERT, "event": INSERT},
+    "submit_candidates": {"person": INSERT, "person_source": INSERT, "event": INSERT,
+                          "linkedin_draft": Grant(insert=True, update=frozenset({
+                              "posting_id", "body", "reason_line", "facts", "checks", "prepared_by_version",
+                              "updated_at", "revision"}))},
 }
 
 
@@ -197,6 +212,81 @@ class GrantsCase(McpCase):
         ], {"company_id": self.acme, "people": [{"name": "Lee New", "role_kind": "engineer",
                                                  "email": "lee@acme.example",
                                                  "sources": [{"kind": "team", "url": "https://acme.example/team"}]}]})
+
+    def test_save_linkedin_note_cannot_write_beyond_its_grants(self):
+        lin = seed.person(self.db, self.acme, "Lin Kedin", channel="linkedin")
+        his = seed.person(self.db, self.acme, "Hal Hisown", channel="linkedin")
+        mine = self.db.execute(
+            "INSERT INTO linkedin_draft(person_id, body, reason_line, reason_state, saved_by, created_at, updated_at) "
+            "VALUES (?, 'Hi Hal', 'his line', 'written', 'devanshu', ?, ?)", (his, NOW, NOW)).lastrowid
+        with mock.patch.dict(os.environ, {"OUTREACH_MAIL_HOME": str(FIXTURE_BANNED.parent / "plan")}):
+            self.check_tool("save_linkedin_note", [
+                ("UPDATE linkedin_draft SET reason_state = 'confirmed', saved_by = 'devanshu' WHERE draft_id = ?",
+                 (mine,)),
+                ("UPDATE linkedin_draft SET body = 'mine now' WHERE draft_id = ?", (mine,)),
+                ("INSERT INTO linkedin_draft(person_id, body, reason_line, reason_state, saved_by, created_at, "
+                 "updated_at) VALUES (?, 'Hi', 'x', 'written', 'devanshu', ?, ?)", (lin, NOW, NOW)),
+                ("UPDATE person SET notes = 'x' WHERE person_id = ?", (lin,)),
+                ("INSERT INTO person_source(person_id, kind, url, recorded_at) VALUES (?, 'team', "
+                 "'https://acme.example/t', ?)", (lin, NOW)),
+                ("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+                 "VALUES ('flagged', ?, 'x', 'k5', 'claude', ?)", (self.acme, NOW)),
+            ], {"person_id": lin, "body": "Hi Lin, I read your post on the queue rewrite.",
+                "reason_line": "I read your post on the queue rewrite"})
+
+    def reader_posting(self) -> int:
+        pid = self.db.execute("INSERT INTO posting(company_id, source_key, title, location, first_seen_at, "
+                              "last_seen_at) VALUES (?, 'url:reader-1', 'Software Engineer', 'Austin, TX', ?, ?)",
+                              (self.acme, NOW, NOW)).lastrowid
+        self.db.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, ?)", (pid, READER_BODY))
+        seed.decision(self.db, pid)
+        return pid
+
+    def reader_outside(self, pid: int) -> list[tuple[str, tuple]]:
+        return [
+            ("UPDATE decision SET provisional = 0 WHERE posting_id = ?", (pid,)),
+            ("UPDATE posting SET pay = '$1' WHERE posting_id = ?", (pid,)),
+            ("UPDATE person SET notes = 'x' WHERE person_id = ?", (self.pat,)),
+            ("INSERT INTO linkedin_draft(person_id, body, reason_line, saved_by, created_at, updated_at) "
+             "VALUES (?, 'Hi', 'x', 'claude', ?, ?)", (self.pat, NOW, NOW)),
+            ("INSERT INTO posting_reading(posting_id, body_sha256, reader_version, read_at, fields, verified) "
+             "VALUES (?, ?, 'rv-000000000001', ?, '{}', 1)", (pid, "0" * 64, NOW)),
+            ("INSERT INTO read_queue(posting_id, body_sha256, reader_version, priority, enqueued_at) "
+             "VALUES (?, ?, 'rv-000000000001', 1, ?)", (pid, "0" * 64, NOW)),
+        ]
+
+    def test_reader_next_cannot_write_beyond_its_grants(self):
+        pid = self.reader_posting()
+        self.check_tool("reader_next", self.reader_outside(pid), {"limit": 1})
+
+    def test_reader_submit_cannot_write_beyond_its_grants(self):
+        pid = self.reader_posting()
+        (item,) = self.ok("reader_next", {"limit": 1})["postings"]
+        fields = {n: {"value": None if n.startswith("years") else "" if n in ("start_date", "location", "pay")
+                      else "unknown", "quote": ""} for n in FIELDS}
+        self.check_tool("reader_submit", self.reader_outside(pid), {"readings": [
+            {"posting_id": pid, "body_sha256": item["body_sha256"], "fields": fields}]})
+
+    def test_submit_candidates_cannot_write_beyond_its_grants(self):
+        bolt = seed.company(self.db, "Bolt Robotics")
+        seed.score(self.db, bolt, {"role": 5.0})
+        self.db.execute("UPDATE company_score SET signals = json_set(signals, '$.reasons', json('[]'))")
+        with mock.patch.dict(os.environ, {"OUTREACH_MAIL_HOME": str(FIXTURE_BANNED.parent / "plan")}):
+            self.check_tool("submit_candidates", [
+                ("UPDATE person SET email = 'x@bolt.example' WHERE person_id = ?", (self.pat,)),
+                ("UPDATE person SET notes = 'x' WHERE person_id = ?", (self.pat,)),
+                ("INSERT INTO person(company_id, name, role_kind, channel, linkedin_reason, added_by, created_at, "
+                 "updated_at) VALUES (?, 'Dev Anshu', 'engineer', 'linkedin', 'no_email', 'devanshu', ?, ?)",
+                 (bolt, NOW, NOW)),
+                ("INSERT INTO linkedin_draft(person_id, body, reason_line, reason_state, saved_by, created_at, "
+                 "updated_at) VALUES (?, 'Hi', 'x', 'written', 'devanshu', ?, ?)", (self.pat, NOW, NOW)),
+                ("UPDATE company SET status = 'working' WHERE company_id = ?", (bolt,)),
+                ("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+                 "VALUES ('flagged', ?, 'x', 'k6', 'claude', ?)", (bolt, NOW)),
+            ], {"company_id": bolt, "candidates": [{
+                "name": "Grace Hopper", "role_kind": "engineer",
+                "sources": [{"kind": "team", "url": "https://bolt.example/team",
+                             "quote": "Grace Hopper, Software Engineer at Bolt Robotics"}]}]})
 
 
 if __name__ == "__main__":

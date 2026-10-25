@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from outreach.ranking.common import canonical_ids
+from outreach.reader.version import is_side_sql
 from outreach.review import words
 from outreach.review.config import ReviewConfig, load_review_config
 from outreach.review.items import clear_item, decided_before, raise_item, unit
@@ -155,7 +156,8 @@ def sync_sponsorship(conn: sqlite3.Connection, *, now: str, company_ids: Collect
 
     In scope: a live company that is in play or in the top `sponsorship_top_n` of the ranked list, so the list never
     floods. Left out: a posting the reader has queued, a posting on a doubtful board, a company with a locked
-    sponsorship fact, and a company with another shown posting that reads `yes` or `opt_only`. Skipped, with the
+    sponsorship fact, and a company with another shown posting that reads `yes` or `opt_only`. A side session's queue
+    rows (`is_side_sql`) do not count as the reader having a posting. Skipped, with the
     reason in `skipped`, when the current ruleset is not the code's or holds no decisions: that is missing input, not
     "nothing is wrong", so nothing is raised or cleared.
 
@@ -175,8 +177,10 @@ def sync_sponsorship(conn: sqlite3.Connection, *, now: str, company_ids: Collect
     in_scope = live_company_ids(conn) & (set(play) | top)
     canon = canonical_ids(conn)
     doubtful = _doubtful_boards(conn)
+    # Only the night reader's rows: a side session (#13) queues its own and reads a few, so its rows never mean
+    # "the reader has it".
     pending = {r[0] for r in conn.execute("SELECT DISTINCT posting_id FROM read_queue "
-                                          "WHERE state IN ('queued', 'leased')")}
+                                          f"WHERE state IN ('queued', 'leased') AND NOT ({is_side_sql()})")}
     locked = {canon.get(r[0], r[0]) for r in conn.execute(
         "SELECT DISTINCT company_id FROM evidence WHERE fact = 'sponsorship' AND locked = 1")}
     marks = ", ".join("?" for _ in ("unclear", *_SPONSORS))

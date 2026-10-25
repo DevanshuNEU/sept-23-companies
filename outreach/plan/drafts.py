@@ -150,14 +150,17 @@ def save_linkedin_draft(conn: sqlite3.Connection, *, person_id: int, body: str, 
             draft_id = cur.lastrowid
         else:
             draft_id = stored["draft_id"]
+            sets = {"posting_id": posting_id if posting_id is not None else stored["posting_id"], "body": body,
+                    "reason_line": reason_line, "facts": _facts_json(facts), "checks": checks_json,
+                    "prepared_by_version": prepared_by_version or stored["prepared_by_version"], "updated_at": now}
+            if saved_by == "devanshu":
+                # A Claude save past the lock above finds the row saved by claude and proposed, and leaves it so, so
+                # its statement never names those two columns (the MCP guard grants Claude neither, #13).
+                sets.update(reason_state=state, saved_by=saved_by)
             # The revision read above is in the WHERE, so a writer that got in between makes this change nothing.
             cur = conn.execute(
-                "UPDATE linkedin_draft SET posting_id = ?, body = ?, reason_line = ?, reason_state = ?, facts = ?, "
-                "checks = ?, saved_by = ?, prepared_by_version = ?, updated_at = ?, revision = revision + 1 "
-                "WHERE draft_id = ? AND revision = ?",
-                (posting_id if posting_id is not None else stored["posting_id"], body, reason_line, state,
-                 _facts_json(facts), checks_json, saved_by, prepared_by_version or stored["prepared_by_version"],
-                 now, draft_id, stored["revision"]))
+                f"UPDATE linkedin_draft SET {', '.join(f'{c} = ?' for c in sets)}, revision = revision + 1 "
+                "WHERE draft_id = ? AND revision = ?", (*sets.values(), draft_id, stored["revision"]))
             if cur.rowcount == 0:
                 raise LookupError(f"draft {draft_id} was changed by another writer")
         saved = get_draft_by_id(conn, draft_id)

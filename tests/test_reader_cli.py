@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import live_checkout
 from outreach.reader import __main__ as cli
 from outreach.reader.config import load_reader_config
 from outreach.reader.types import FIELDS
@@ -190,11 +191,13 @@ class ApplyTests(CliCase):
 
 class GuardTests(unittest.TestCase):
     def test_cli_never_touches_the_live_store(self):
-        # The default store path, here a stand-in inside a scratch folder, outside the live checkout: the store
-        # guard stops the command before any database is opened.
+        # The default store path, here a stand-in inside a scratch folder, outside the live checkout (is_live is
+        # pinned false, so the test reads the same in a worktree and in the live checkout): the store guard stops
+        # the command before any database is opened.
         folder = Path(tempfile.mkdtemp(prefix="outreach-cli-live-"))
         env = {k: v for k, v in os.environ.items() if k != "OUTREACH_DB"}
         with mock.patch.object(store_db, "DEFAULT_PATH", str(folder / "outreach.db")), \
+                mock.patch.object(live_checkout, "is_live", return_value=False), \
                 mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch("sqlite3.connect", side_effect=AssertionError("opened a database")):
             for argv in (["next"], ["submit"], ["apply"]):

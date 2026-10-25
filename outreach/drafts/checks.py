@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 
 __all__ = ["DEFAULT_BANNED_PHRASES", "MX_TTL", "DraftInput", "load_banned", "normalise_domain", "email_domain",
-           "cached_mx", "draft_input", "run_checks", "BLOCK_CODES", "WARN_CODES"]
+           "cached_mx", "draft_input", "run_checks", "BLOCK_CODES", "WARN_CODES", "find_links", "link_host"]
 
 DEFAULT_BANNED_PHRASES = "~/Desktop/DevVault/job-search/outreach/banned_phrases.txt"
 MX_TTL = timedelta(hours=24)
@@ -88,12 +88,14 @@ class DraftInput:
 
 # Inputs
 
-def load_banned(path: Path | None = None) -> tuple[list[tuple[str, re.Pattern]], bool]:
-    """The `both` and `email` patterns of a DevVault banned_phrases.txt (SCOPE<TAB>EXTENDED-REGEX), and whether the
-    list could be used. `path` None reads OUTREACH_BANNED_PHRASES, else the DevVault default.
+def load_banned(path: Path | None = None, scopes: Sequence[str] = ("both", "email")
+                ) -> tuple[list[tuple[str, re.Pattern]], bool]:
+    """The patterns of a DevVault banned_phrases.txt (SCOPE<TAB>EXTENDED-REGEX) in the given `scopes`, by default
+    `both` and `email` (a LinkedIn note reads `both` and `dm`), and whether the list could be used. `path` None
+    reads OUTREACH_BANNED_PHRASES, else the DevVault default.
 
-    Fails closed: a missing or unreadable file, a pattern that does not compile, or no email pattern at all gives
-    `([], False)`, and `run_checks` blocks on an empty list. Never half a list."""
+    Fails closed: a missing or unreadable file, a pattern that does not compile, or no pattern at all in the
+    scopes gives `([], False)`, and `run_checks` blocks on an empty list. Never half a list."""
     if path is None:
         path = Path(os.environ.get("OUTREACH_BANNED_PHRASES") or DEFAULT_BANNED_PHRASES)
     path = Path(path).expanduser()
@@ -104,7 +106,7 @@ def load_banned(path: Path | None = None) -> tuple[list[tuple[str, re.Pattern]],
     out = []
     for line in text.splitlines():
         scope, _, pattern = line.partition("\t")
-        if scope.strip() in ("both", "email") and pattern.strip():
+        if scope.strip() in scopes and pattern.strip():
             try:
                 out.append((pattern, re.compile(pattern.replace("[[:space:]]", r"\s"), re.I)))
             except re.error:
@@ -192,6 +194,11 @@ def _host(u: str) -> str:
 
 def _is_portfolio(u: str) -> bool:
     return _host(u) == PORTFOLIO and re.sub(r"^(?:https?://)?[^/]+", "", u, flags=re.I).strip("/") == ""
+
+
+# The note checker (outreach.plan.notecheck) reads links the same way an email draft does.
+find_links = _links
+link_host = _host
 
 
 def _word_count(body: str) -> int:

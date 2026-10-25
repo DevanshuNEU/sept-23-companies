@@ -583,6 +583,29 @@ class Inputs(ChecksCase):
             "not[[:space:]]+just[[:space:]]+[a-z]+,[[:space:]]*but"])
         self.assertTrue(banned[-1][1].search("NOT just queues, but"))
 
+    def test_load_banned_scopes(self):
+        """Ported from the brief's tests/test_check_draft.py::test_load_banned_scopes: the ledger ruling puts the
+        `scopes` parameter on this module, not on the retired mail/check_draft.py."""
+        default, ok = load_banned(FIXTURE_BANNED)
+        self.assertTrue(ok)
+        self.assertEqual(default, load_banned(FIXTURE_BANNED, ("both", "email"))[0])
+        self.assertNotIn("let.s connect", [text for text, _ in default])
+        dm, ok = load_banned(FIXTURE_BANNED, scopes=("both", "dm"))
+        self.assertTrue(ok)
+        self.assertEqual([text for text, _ in dm], [
+            "leveraged", "passionate about", "I.d love to", "not[[:space:]]+just[[:space:]]+[a-z]+,[[:space:]]*but",
+            "let.s connect"])
+        comment, ok = load_banned(FIXTURE_BANNED, scopes=("comment",))
+        self.assertEqual(([text for text, _ in comment], ok), (["^great post"], True))
+
+    def test_load_banned_with_no_pattern_in_the_scopes_is_unusable(self):
+        self.assertEqual(load_banned(FIXTURE_BANNED, scopes=("nonsense",)), ([], False))
+
+    def test_text_helpers_are_public_for_the_note_checker(self):
+        self.assertEqual(checks.find_links("see www.example.com/x and https://a.example/y."),
+                         [(4, 21, "www.example.com/x"), (26, 45, "https://a.example/y")])
+        self.assertEqual(checks.link_host("https://www.Bit.ly/abc"), "bit.ly")
+
     def test_default_banned_path_is_the_api_default(self):
         from outreach.api.settings import DEFAULT_BANNED_PHRASES
         self.assertEqual(checks.DEFAULT_BANNED_PHRASES, DEFAULT_BANNED_PHRASES)

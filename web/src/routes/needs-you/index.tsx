@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { ChevronDown, CircleCheck, Lock } from 'lucide-react';
+import { ChevronDown, CircleCheck, Lock, Undo2 } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
@@ -12,6 +12,7 @@ import {
   type ResolvedReview,
   type ReviewFix,
   type ReviewItem,
+  type ReviewKind,
   type ShellSummary,
 } from '@/api';
 import { EmptyState, QueryState, StateBanner } from '@/components/state-views';
@@ -21,32 +22,38 @@ import { Card } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useHotkeys } from '@/keyboard/hotkeys';
 import { useListNav } from '@/keyboard/list-nav';
-import { formatAge, formatDay, formatDayTime, formatWeekdayTime } from '@/lib/format';
+import { ageDays, formatAge, formatDay, formatDayTime, formatLocalTime, formatWeekdayTime } from '@/lib/format';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { cn } from '@/lib/utils';
 import { NoGoDialog, type NoGoStart } from './no-go-dialog';
+import { mergeName, possessive } from './merge-compare';
 import { EDIT_FIELD, ReviewItemRow, TRIGGER, hasNoGo } from './review-item';
+import { SettledPanel } from './settled-panel';
 
 type Section = { id: string; title: string; items: ReviewItem[] };
 
+const DETAILS: readonly ReviewKind[] = ['size_unknown', 'size_guess', 'size_check', 'domain_missing'];
+const BOARDS: readonly ReviewKind[] = ['board_unreadable', 'board_empty'];
+
 /**
- * Sections by what an item holds up (design 5.4): email first, then sponsorship, then job boards. `holdsEmail`
- * comes from the API; anything else that is open lands under Other so nothing is hidden.
+ * Sections by what an item holds up (design 5.4), always in this order: email first (`holdsEmail` comes from the
+ * API), then sponsorship, company details, job boards, possible duplicates, and Other for the rest (a flag, the
+ * reader, a changed careers page, or a kind this page does not know yet), so nothing is hidden. Empty ones are dropped.
  */
 function sectionsOf(open: ReviewItem[]): Section[] {
   const email = open.filter((r) => r.holdsEmail);
   const rest = open.filter((r) => !r.holdsEmail);
+  const placed = new Set<ReviewKind>(['sponsorship_unclear', ...DETAILS, ...BOARDS, 'merge_candidate']);
   const sections: Section[] = [
     { id: 'email', title: 'Holding up email', items: email },
     { id: 'sponsorship', title: 'Sponsorship', items: rest.filter((r) => r.kind === 'sponsorship_unclear') },
-    { id: 'boards', title: 'Job boards', items: rest.filter((r) => r.kind === 'board_unreadable' || r.kind === 'board_empty') },
-    {
-      id: 'other',
-      title: 'Other',
-      items: rest.filter((r) => r.kind !== 'sponsorship_unclear' && r.kind !== 'board_unreadable' && r.kind !== 'board_empty'),
-    },
+    { id: 'details', title: 'Company details', items: rest.filter((r) => DETAILS.includes(r.kind)) },
+    { id: 'boards', title: 'Job boards', items: rest.filter((r) => BOARDS.includes(r.kind)) },
+    { id: 'merge', title: 'Possible duplicates', items: rest.filter((r) => r.kind === 'merge_candidate') },
+    { id: 'other', title: 'Other', items: rest.filter((r) => !placed.has(r.kind)) },
   ];
   return sections.filter((s) => s.items.length > 0);
 }
@@ -73,6 +80,54 @@ const FIELD_NAME: Record<Extract<ReviewFix, { kind: 'edit' }>['field'], string> 
   board_url: 'board',
 };
 
+// The API's words for a settling (outreach.review.words), for the row the page shows until its refetch lands.
+const FIELD_LABEL: Record<Extract<ReviewFix, { kind: 'edit' }>['field'], string> = {
+  domain: 'Email domain',
+  size: 'Size',
+  sponsorship: 'Sponsorship',
+  board_url: 'Job board',
+};
+const NO_GO_WORDS: Partial<Record<NoGoReason, string>> = {
+  no_sponsorship: 'does not sponsor',
+  citizenship: 'needs citizenship',
+  over_300: 'over 300 people',
+  other: 'another reason',
+};
+
+/** What comes back on Undo from Resolved, for its toast: "Undone. Railway's sponsorship question is open again." */
+const QUESTION: Record<ReviewKind, string> = {
+  domain_missing: 'email domain question',
+  size_unknown: 'size question',
+  size_guess: 'size question',
+  size_check: 'size question',
+  sponsorship_unclear: 'sponsorship question',
+  board_unreadable: 'board question',
+  board_empty: 'board question',
+  flagged: 'flag',
+  merge_candidate: 'duplicate question',
+  reader_disagrees: 'reader question',
+  careers_changed: 'careers page question',
+};
+
+const isMerge = (r: ResolvedReview) => r.kind === 'merge_candidate' && r.resolution === 'field_edited';
+
+function undoWords(r: ResolvedReview): { toast: string; tip: string } {
+  if (r.resolution === 'marked_no_go') {
+    return {
+      toast: `Undone. ${r.companyName} is off the no-go list and its question is open again.`,
+      tip: `Takes ${r.companyName} off the no-go list and puts the question back`,
+    };
+  }
+  if (isMerge(r)) {
+    // The row names the question's company, which may be the one that was folded in, so the words name no direction.
+    return {
+      toast: `Undone. The merge is taken back, and ${possessive(r.companyName)} duplicate question is open again.`,
+      tip: 'Makes two companies again and puts the question back',
+    };
+  }
+  return { toast: `Undone. ${possessive(r.companyName)} ${QUESTION[r.kind]} is open again.`, tip: 'Puts the question back in Needs you' };
+}
+
 function SectionTitle({ id, title, count, children }: { id: string; title: string; count: number; children?: ReactNode }) {
   return (
     <div className="mt-6 mb-2 flex items-center gap-2">
@@ -84,8 +139,96 @@ function SectionTitle({ id, title, count, children }: { id: string; title: strin
   );
 }
 
-function Resolved({ rows }: { rows: ResolvedReview[] }) {
+function ResolvedRow({ row, asOf, onUndo }: { row: ResolvedReview; asOf: string; onUndo: (r: ResolvedReview) => void }) {
+  const today = ageDays(row.at, asOf) === 0;
+  return (
+    <TableRow>
+      <TableCell className="font-medium">{row.companyName}</TableCell>
+      <TableCell>
+        <Badge variant="outline">{TRIGGER[row.kind].label}</Badge>
+      </TableCell>
+      <TableCell className="text-sm whitespace-normal">
+        <span>{row.note}</span>
+        {row.locked ? <span>{`${row.note.endsWith('.') ? ' ' : '. '}To change it, set it again on the company page.`}</span> : null}
+      </TableCell>
+      <TableCell className="w-px text-sm whitespace-nowrap text-muted-foreground tabular-nums">
+        {today ? formatLocalTime(row.at) : formatDay(row.at)}
+      </TableCell>
+      <TableCell className="w-px">
+        {row.canUndo ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button type="button" variant="outline" size="sm" onClick={() => onUndo(row)}>
+                <Undo2 aria-hidden />
+                Undo
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{undoWords(row).tip}</TooltipContent>
+          </Tooltip>
+        ) : row.locked ? (
+          <span className="inline-flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
+            <Lock aria-hidden className="size-3.5" />
+            Edited, locked
+          </span>
+        ) : null}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function GroupRow({ title }: { title: string }) {
+  return (
+    <TableRow className="hover:bg-transparent">
+      <TableCell colSpan={5} className="h-8 bg-subtle text-xs font-medium text-muted-foreground">
+        {title}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/**
+ * What he settled this week, collapsed, grouped Today and Earlier this week. An ok, a no-go or a merge has Undo
+ * (`canUndo`, from the API); a value he set is locked and says how to change it.
+ */
+function Resolved({ data }: { data: NeedsYouView }) {
   const [open, setOpen] = useState(false);
+  const client = usePageClient('needs-you');
+  const write = usePendingWrite();
+  const rows = data.resolvedThisWeek;
+  const today = rows.filter((r) => ageDays(r.at, data.asOf) === 0);
+  const earlier = rows.filter((r) => ageDays(r.at, data.asOf) !== 0);
+
+  // An immediate write: the row leaves Resolved and the count rises at once, and the refetch brings the item back open.
+  const undo = (r: ResolvedReview) => {
+    const words = undoWords(r).toast;
+    write({
+      id: `unresolve:${r.id}`,
+      label: words,
+      afterCommit: words,
+      patches: [
+        {
+          key: queryKeys.needsYou,
+          apply: (d: NeedsYouView) => ({
+            ...d,
+            resolvedThisWeek: d.resolvedThisWeek.filter((x) => x.id !== r.id),
+            settledToday: ageDays(r.at, d.asOf) === 0 ? Math.max(0, d.settledToday - 1) : d.settledToday,
+          }),
+        },
+        {
+          key: queryKeys.shell,
+          apply: (s: ShellSummary) => ({
+            ...s,
+            openReviewItems: s.openReviewItems + 1,
+            noGoCount: r.resolution === 'marked_no_go' ? Math.max(0, s.noGoCount - 1) : s.noGoCount,
+          }),
+        },
+      ],
+      commit: (o) => client.reopenReview(r.id, r.revision, o),
+      immediate: true,
+    });
+  };
+
+  const grouped = today.length > 0 && earlier.length > 0;
   return (
     <Collapsible open={open} onOpenChange={setOpen} asChild>
       <section aria-labelledby="ny-resolved">
@@ -101,23 +244,13 @@ function Resolved({ rows }: { rows: ResolvedReview[] }) {
           <div className="rounded-lg border">
             <Table>
               <TableBody>
-                {rows.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="font-medium">{r.companyName}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{TRIGGER[r.kind].label}</Badge>
-                    </TableCell>
-                    <TableCell className="text-sm whitespace-normal">{r.note}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{formatDay(r.at)}</TableCell>
-                    <TableCell className="w-px">
-                      {r.locked ? (
-                        <Badge variant="outline">
-                          <Lock aria-hidden />
-                          Locked
-                        </Badge>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
+                {grouped ? <GroupRow title="Today" /> : null}
+                {today.map((r) => (
+                  <ResolvedRow key={r.id} row={r} asOf={data.asOf} onUndo={undo} />
+                ))}
+                {grouped ? <GroupRow title="Earlier this week" /> : null}
+                {earlier.map((r) => (
+                  <ResolvedRow key={r.id} row={r} asOf={data.asOf} onUndo={undo} />
                 ))}
               </TableBody>
             </Table>
@@ -156,6 +289,8 @@ function NeedsYouSkeleton() {
 
 function OpenItems({ data }: { data: NeedsYouView }) {
   const client = usePageClient('needs-you');
+  const shellClient = usePageClient('shell');
+  const shell = useViewQuery(queryKeys.shell, () => shellClient.shell());
   const navigate = useNavigate();
   const write = usePendingWrite();
   const [editing, setEditing] = useState<Id | null>(null);
@@ -168,17 +303,41 @@ function OpenItems({ data }: { data: NeedsYouView }) {
   const byId = new Map(ordered.map((r) => [r.id, r]));
   const { selected, select, rowProps } = useListNav<Id>({
     ids,
+    // One next action: the first item is selected when he arrives, so the first key settles it.
+    initial: ids[0],
     onOpen: (id) => {
       const r = byId.get(id);
       if (r) navigate(`/companies/${r.company.id}`);
     },
-    announce: (id) => byId.get(id)?.company.name ?? '',
+    announce: (id) => {
+      const r = byId.get(id);
+      return r ? mergeName(r) : '';
+    },
   });
   const current = selected === null ? undefined : byId.get(selected);
 
-  /** The item leaves the list and the sidebar count drops at once; the selection moves to the next item. */
-  const patchesFor = (r: ReviewItem, extra?: (s: ShellSummary) => Partial<ShellSummary>): Patch[] => [
-    { key: queryKeys.needsYou, apply: (d: NeedsYouView) => ({ ...d, open: d.open.filter((x) => x.id !== r.id) }) },
+  /**
+   * The item leaves the list, the sidebar count drops and today's settled count rises at once, and Resolved shows
+   * the settling in the API's words until the refetch brings the stored row. That row has no Undo of its own: the
+   * toast holds it.
+   */
+  const patchesFor = (
+    r: ReviewItem,
+    settled: Pick<ResolvedReview, 'resolution' | 'note' | 'locked'>,
+    extra?: (s: ShellSummary) => Partial<ShellSummary>,
+  ): Patch[] => [
+    {
+      key: queryKeys.needsYou,
+      apply: (d: NeedsYouView) => ({
+        ...d,
+        open: d.open.filter((x) => x.id !== r.id),
+        settledToday: d.settledToday + 1,
+        resolvedThisWeek: [
+          { id: r.id, kind: r.kind, companyName: r.company.name, at: d.asOf, revision: r.revision + 1, canUndo: false, ...settled },
+          ...d.resolvedThisWeek.filter((x) => x.id !== r.id),
+        ],
+      }),
+    },
     { key: queryKeys.shell, apply: (s: ShellSummary) => ({ ...s, openReviewItems: Math.max(0, s.openReviewItems - 1), ...extra?.(s) }) },
   ];
   const moveOn = (r: ReviewItem) => {
@@ -190,12 +349,33 @@ function OpenItems({ data }: { data: NeedsYouView }) {
   const markOk = (r: ReviewItem) => {
     if (editing === r.id) setEditing(null);
     moveOn(r);
+    const merge = r.kind === 'merge_candidate';
+    const label = merge
+      ? r.merge
+        ? `Kept ${mergeName(r)} separate.`
+        : `Kept separate. ${r.company.name} ${OK_TEXT[r.kind]}.`
+      : `Marked ok. ${r.company.name} ${OK_TEXT[r.kind]}.`;
     write({
       id: `review:${r.id}`,
-      label: `Marked ok. ${r.company.name} ${OK_TEXT[r.kind]}.`,
-      afterCommit: `Marked ok and locked. ${r.company.name} ${OK_TEXT[r.kind]}.`,
-      patches: patchesFor(r),
+      label,
+      afterCommit: merge ? label : `Marked ok and locked. ${r.company.name} ${OK_TEXT[r.kind]}.`,
+      patches: patchesFor(r, { resolution: 'marked_ok', note: merge ? 'Kept separate by you' : 'Marked ok by you', locked: false }),
       commit: (o) => client.resolveReview(r.id, { kind: 'ok' }, r.revision, o),
+    });
+  };
+
+  const merge = (r: ReviewItem, keep: 'a' | 'b') => {
+    if (!r.merge) return;
+    moveOn(r);
+    const keeper = r.merge[keep];
+    const loser = r.merge[keep === 'a' ? 'b' : 'a'];
+    const label = `Merged ${loser.name} into ${keeper.name}.`;
+    write({
+      id: `review:${r.id}`,
+      label,
+      afterCommit: label,
+      patches: patchesFor(r, { resolution: 'field_edited', note: `Merged ${loser.name} into ${keeper.name} by you`, locked: false }),
+      commit: (o) => client.resolveReview(r.id, { kind: 'merge', keep }, r.revision, o),
     });
   };
 
@@ -204,13 +384,13 @@ function OpenItems({ data }: { data: NeedsYouView }) {
     moveOn(r);
     const label =
       fix.field === 'domain'
-        ? `Saved and locked. ${r.company.name}'s drafts will be checked now.`
-        : `Saved and locked. ${r.company.name}'s ${FIELD_NAME[fix.field]} is ${fix.value}.`;
+        ? `Saved and locked. ${possessive(r.company.name)} drafts will be checked now.`
+        : `Saved and locked. ${possessive(r.company.name)} ${FIELD_NAME[fix.field]} is ${fix.value}.`;
     write({
       id: `review:${r.id}`,
       label,
       afterCommit: label,
-      patches: patchesFor(r),
+      patches: patchesFor(r, { resolution: 'field_edited', note: `${FIELD_LABEL[fix.field]} set to ${fix.value} by you, from ${fix.source}`, locked: true }),
       commit: (o) => client.resolveReview(r.id, fix, r.revision, o),
     });
   };
@@ -222,7 +402,11 @@ function OpenItems({ data }: { data: NeedsYouView }) {
       id: `review:${r.id}`,
       label: `${r.company.name} is on the no-go list.`,
       afterCommit: `${r.company.name} is on the no-go list.`,
-      patches: patchesFor(r, (s) => ({ noGoCount: s.noGoCount + 1 })),
+      patches: patchesFor(
+        r,
+        { resolution: 'marked_no_go', note: `Added to the no-go list by you: ${NO_GO_WORDS[reason] ?? reason.replace(/_/g, ' ')}`, locked: false },
+        (s) => ({ noGoCount: s.noGoCount + 1 }),
+      ),
       commit: (o) => client.resolveReview(r.id, { kind: 'no_go', reason, source }, r.revision, o),
       immediate: true,
     });
@@ -244,13 +428,32 @@ function OpenItems({ data }: { data: NeedsYouView }) {
           if (current) setEditing(current.id);
         },
       },
-      { keys: 'o', label: 'Mark ok', group, enabled: current !== undefined, run: () => current && markOk(current) },
+      { keys: 'o', label: 'Mark ok, or keep a possible duplicate separate', group, enabled: current !== undefined, run: () => current && markOk(current) },
       { keys: 'n', label: 'Mark no-go, with a reason', group, enabled: current !== undefined && hasNoGo(current.kind), run: () => current && openNoGo(current) },
+      {
+        keys: 'm',
+        label: 'Merge into the suggested company',
+        group,
+        enabled: current?.merge != null,
+        run: () => {
+          if (current?.merge) merge(current, current.merge.suggestedKeep);
+        },
+      },
     ],
     { selection: selected },
   );
 
   if (ordered.length === 0) {
+    if (data.settledToday > 0) {
+      return (
+        <SettledPanel
+          settledToday={data.settledToday}
+          today={data.resolvedThisWeek.filter((r) => ageDays(r.at, data.asOf) === 0)}
+          nextReadAt={data.boardsJob?.expectedNextAt ?? null}
+          drafts={shell.data?.draftsToReview ?? 0}
+        />
+      );
+    }
     return (
       <EmptyState icon={CircleCheck} title="Nothing needs you.">
         New items appear after each board read and when you pick a company.
@@ -278,6 +481,7 @@ function OpenItems({ data }: { data: NeedsYouView }) {
                 onNoGo={(source) => openNoGo(r, source)}
                 onSave={(fix) => saveEdit(r, fix)}
                 onCancelEdit={() => setEditing(null)}
+                onMerge={(keep) => merge(r, keep)}
               />
             ))}
           </Card>
@@ -299,7 +503,22 @@ function OpenItems({ data }: { data: NeedsYouView }) {
   );
 }
 
-/** Needs you (design 5.4): every review item with its reason and a one-click fix. A fix is locked. */
+/** "2 settled today, 3 open" in grey, or "5 open" with nothing settled yet; nothing once nothing is open (the panel says it). */
+function ProgressLine({ data }: { data: NeedsYouView }) {
+  const open = data.open.length;
+  if (open === 0) return null;
+  const text = data.settledToday > 0 ? `${data.settledToday} settled today, ${open} open` : `${open} open`;
+  return (
+    <p data-testid="ny-progress" className="mt-0.5 text-sm text-muted-foreground tabular-nums">
+      {text}
+    </p>
+  );
+}
+
+/**
+ * Needs you (design 5.4): every review item with its reason and a one-click fix. A fix is locked. Under the title,
+ * the plain progress line; when nothing is open and he settled something today, the settled panel.
+ */
 export default function NeedsYouPage() {
   const client = usePageClient('needs-you');
   const query = useViewQuery(queryKeys.needsYou, () => client.needsYou(), { pollMs: pollMs.default });
@@ -309,7 +528,8 @@ export default function NeedsYouPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Needs you</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+          {query.data ? <ProgressLine data={query.data} /> : null}
+          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
             Things only you can settle. Your fix is locked, so automation never overwrites it. Items that hold up
             today's email come first.
           </p>
@@ -327,7 +547,7 @@ export default function NeedsYouPage() {
               <BoardsBanner job={data.boardsJob} asOf={data.asOf} />
             </div>
             <OpenItems data={data} />
-            {data.resolvedThisWeek.length > 0 ? <Resolved rows={data.resolvedThisWeek} /> : null}
+            {data.resolvedThisWeek.length > 0 ? <Resolved data={data} /> : null}
           </>
         )}
       </QueryState>

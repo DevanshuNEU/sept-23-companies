@@ -6,7 +6,6 @@ import { StatusBadge } from '@/components/status-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Kbd } from '@/components/ui/kbd';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { isTypingTarget, useHotkeys } from '@/keyboard/hotkeys';
@@ -15,17 +14,19 @@ import { formatDay, formatLocalTime } from '@/lib/format';
 import type { Status } from '@/lib/status';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
+import { ActionButton } from './action-button';
+import { MergeCompare, mergeName } from './merge-compare';
 
 export type EditField = Extract<ReviewFix, { kind: 'edit' }>['field'];
 
-/** The trigger badge, as the mockup words it. */
+/** The trigger badge, as the mockup words it. Amber at most: nothing on Needs you is red (Devanshu, Q3). */
 // eslint-disable-next-line react-refresh/only-export-components
 export const TRIGGER = {
-  domain_missing: { label: 'Missing email domain', tone: 'bad' },
+  domain_missing: { label: 'Missing email domain', tone: 'warn' },
   size_unknown: { label: 'Unknown size', tone: 'warn' },
   size_guess: { label: 'Size is a guess', tone: 'warn' },
   sponsorship_unclear: { label: 'Unclear sponsorship', tone: 'warn' },
-  board_unreadable: { label: 'Board unreadable', tone: 'bad' },
+  board_unreadable: { label: 'Board unreadable', tone: 'warn' },
   board_empty: { label: 'Board shows zero jobs', tone: 'warn' },
   flagged: { label: 'Flagged', tone: 'warn' },
   merge_candidate: { label: 'Maybe one company', tone: 'warn' },
@@ -58,7 +59,7 @@ export const EDIT_FIELD: Record<ReviewKind, EditField | null> = {
   board_unreadable: 'board_url',
   board_empty: 'board_url',
   flagged: null,
-  merge_candidate: null, // merged or kept separate (Mark ok); the merge confirm is #16's
+  merge_candidate: null, // merged (M, or a click into the other one) or kept separate (O): the merge confirm
   reader_disagrees: null,
   careers_changed: null,
   size_check: 'size',
@@ -75,7 +76,21 @@ const FIELD_HINT: Record<Exclude<EditField, 'sponsorship'>, string> = {
   board_url: 'https://jobs.ashbyhq.com/company',
 };
 const EDIT_BUTTON: Record<EditField, string> = { domain: 'Set domain', size: 'Set size', sponsorship: 'Set sponsorship', board_url: 'Edit board' };
-const SPONSORSHIP = ['Yes', 'No', 'Unclear'] as const;
+// The API takes these words as written (outreach.review.hand.normalize_sponsorship); No is the no-go dialog.
+const SPONSORSHIP = ['Yes', 'OPT only', 'Unclear', 'No'] as const;
+const HINT: Partial<Record<EditField, string>> = {
+  size: 'A number or a band, like 34, about 45, or 11 to 50.',
+  sponsorship: 'No opens the no-go dialog, because it is the same outcome.',
+};
+
+/** Input hygiene only (the server parses): a size needs a digit, a domain a dot. */
+function valueReady(field: EditField, value: string): boolean {
+  const v = value.trim();
+  if (v === '') return false;
+  if (field === 'size') return /\d/.test(v);
+  if (field === 'domain') return v.includes('.');
+  return true;
+}
 
 /** Past this many days an item reads "Waiting N days" in amber instead of its opening day. */
 const STALE_DAYS = 7;
@@ -140,28 +155,10 @@ function Evidence({ item }: { item: ReviewItem }) {
   return <>{parts}</>;
 }
 
-function ActionButton({ label, keyName, variant, onClick }: { label: string; keyName: string; variant: 'outline' | 'ghost'; onClick: () => void }) {
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant={variant}
-      aria-keyshortcuts={keyName.toLowerCase()}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-    >
-      {label}
-      <Kbd>{keyName}</Kbd>
-    </Button>
-  );
-}
-
 /**
  * The inline edit form: the field, a required source, and Save and lock. Mounted only while open, so it
- * starts empty. Save and lock stays `aria-disabled` until both have text. Sponsorship "No" is the no-go
- * outcome, so it goes to the no-go dialog with the source carried over.
+ * starts empty. Save and lock stays `aria-disabled` until both have text (a size with a digit, a domain with a
+ * dot). Sponsorship "No" is the no-go outcome, so it goes to the no-go dialog with the source carried over.
  */
 function EditForm({
   item,
@@ -178,7 +175,7 @@ function EditForm({
 }) {
   const [value, setValue] = useState('');
   const [source, setSource] = useState('');
-  const ready = value.trim() !== '' && source.trim() !== '';
+  const ready = valueReady(field, value) && source.trim() !== '';
   const id = `review-${item.id}`;
 
   const save = () => {
@@ -207,66 +204,74 @@ function EditForm({
     },
   ]);
 
+  const hint = HINT[field];
   return (
-    <form
-      onSubmit={submit}
-      onClick={(e) => e.stopPropagation()}
-      aria-label={`Edit ${FIELD_LABEL[field].toLowerCase()} for ${item.company.name}`}
-      className="grid grid-cols-[160px_minmax(0,1fr)_auto] items-end gap-2 rounded-md border bg-card p-3"
-    >
-      <div className="grid gap-1.5">
-        {field === 'sponsorship' ? (
-          <>
-            <span id={`${id}-field`} className="text-xs font-medium">
-              {FIELD_LABEL[field]}
-            </span>
-            <RadioGroup
-              aria-labelledby={`${id}-field`}
-              value={value}
-              onValueChange={setValue}
-              className="flex h-9 items-center gap-3"
-            >
-              {SPONSORSHIP.map((v) => (
-                <div key={v} className="flex items-center gap-1.5">
-                  <RadioGroupItem id={`${id}-sp-${v}`} value={v} autoFocus={v === 'Yes'} />
-                  <Label htmlFor={`${id}-sp-${v}`} className="font-normal">
-                    {v}
-                  </Label>
-                </div>
-              ))}
-            </RadioGroup>
-          </>
-        ) : (
-          <>
-            <Label htmlFor={`${id}-value`} className="text-xs">
-              {FIELD_LABEL[field]}
-            </Label>
-            <Input id={`${id}-value`} autoFocus placeholder={FIELD_HINT[field]} value={value} onChange={(e) => setValue(e.target.value)} />
-          </>
+    <>
+      <form
+        onSubmit={submit}
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`Edit ${FIELD_LABEL[field].toLowerCase()} for ${item.company.name}`}
+        className={cn(
+          'grid items-end gap-2 rounded-md border bg-card p-3',
+          // Four sponsorship choices need their own width; a field takes 160px, as the mockup.
+          field === 'sponsorship' ? 'grid-cols-[auto_minmax(0,1fr)_auto]' : 'grid-cols-[160px_minmax(0,1fr)_auto]',
         )}
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-source`} className="text-xs">
-          Source
-        </Label>
-        <Input
-          id={`${id}-source`}
-          aria-required
-          placeholder="Where you saw it"
-          value={source}
-          onChange={(e) => setSource(e.target.value)}
-        />
-      </div>
-      <div className="flex gap-1.5">
-        <Button type="button" variant="ghost" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit" aria-disabled={!ready} aria-keyshortcuts="Meta+Enter Control+Enter" className="aria-disabled:opacity-50">
-          <Lock aria-hidden />
-          Save and lock
-        </Button>
-      </div>
-    </form>
+      >
+        <div className="grid gap-1.5">
+          {field === 'sponsorship' ? (
+            <>
+              <span id={`${id}-field`} className="text-xs font-medium">
+                {FIELD_LABEL[field]}
+              </span>
+              <RadioGroup
+                aria-labelledby={`${id}-field`}
+                value={value}
+                onValueChange={setValue}
+                className="flex h-9 items-center gap-3"
+              >
+                {SPONSORSHIP.map((v) => (
+                  <div key={v} className="flex items-center gap-1.5 whitespace-nowrap">
+                    <RadioGroupItem id={`${id}-sp-${v.replace(/\W+/g, '-')}`} value={v} autoFocus={v === 'Yes'} />
+                    <Label htmlFor={`${id}-sp-${v.replace(/\W+/g, '-')}`} className="font-normal">
+                      {v}
+                    </Label>
+                  </div>
+                ))}
+              </RadioGroup>
+            </>
+          ) : (
+            <>
+              <Label htmlFor={`${id}-value`} className="text-xs">
+                {FIELD_LABEL[field]}
+              </Label>
+              <Input id={`${id}-value`} autoFocus placeholder={FIELD_HINT[field]} value={value} onChange={(e) => setValue(e.target.value)} />
+            </>
+          )}
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${id}-source`} className="text-xs">
+            Source
+          </Label>
+          <Input
+            id={`${id}-source`}
+            aria-required
+            placeholder="Where you saw it"
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-1.5">
+          <Button type="button" variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" aria-disabled={!ready} aria-keyshortcuts="Meta+Enter Control+Enter" className="aria-disabled:opacity-50">
+            <Lock aria-hidden />
+            Save and lock
+          </Button>
+        </div>
+      </form>
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+    </>
   );
 }
 
@@ -280,6 +285,7 @@ export function ReviewItemRow({
   onNoGo,
   onSave,
   onCancelEdit,
+  onMerge,
 }: {
   item: ReviewItem;
   row: RowProps;
@@ -289,38 +295,44 @@ export function ReviewItemRow({
   onNoGo: (source?: string) => void;
   onSave: (fix: Extract<ReviewFix, { kind: 'edit' }>) => void;
   onCancelEdit: () => void;
+  onMerge: (keep: 'a' | 'b') => void;
 }) {
   const trigger = TRIGGER[item.kind];
   const Icon = ICON[item.kind];
   const field = EDIT_FIELD[item.kind];
+  const name = mergeName(item);
+  const merge = item.kind === 'merge_candidate';
   const { 'aria-selected': selected, ...rest } = row;
   return (
     <article
       {...rest}
-      aria-label={item.company.name}
+      aria-label={name}
       aria-current={selected || undefined}
       className={cn(
         'grid grid-cols-[20px_minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b px-4 py-3.5 last:border-b-0',
         'data-[active=true]:bg-muted data-[active=true]:shadow-[inset_2px_0_0_var(--foreground)] dark:data-[active=true]:bg-muted/60',
       )}
     >
-      <Icon aria-hidden className={cn('mt-0.5 size-4', trigger.tone === 'bad' ? 'text-bad' : 'text-warn')} />
+      <Icon aria-hidden data-icon={item.kind} className="mt-0.5 size-4 text-warn" />
       <div className="flex flex-wrap items-center gap-2">
-        <b className="font-semibold">{item.company.name}</b>
+        <b className="font-semibold">{name}</b>
         <StatusBadge status={trigger} dot />
         {item.company.picked ? <Badge variant="outline">Picked today</Badge> : null}
         <Age item={item} />
       </div>
-      <div className="col-start-3 row-span-2 row-start-1 flex items-start gap-1.5">
-        {field && !editing ? <ActionButton label={EDIT_BUTTON[field]} keyName="E" variant="outline" onClick={onEdit} /> : null}
-        {!editing ? <ActionButton label="Mark ok" keyName="O" variant="ghost" onClick={onOk} /> : null}
-        {hasNoGo(item.kind) ? <ActionButton label="Mark no-go" keyName="N" variant="ghost" onClick={() => onNoGo()} /> : null}
-      </div>
+      {merge && item.merge ? null : (
+        <div className="col-start-3 row-span-2 row-start-1 flex items-start gap-1.5">
+          {field && !editing ? <ActionButton label={EDIT_BUTTON[field]} keyName="E" variant="outline" onClick={onEdit} /> : null}
+          {!editing ? <ActionButton label={merge ? 'Keep separate' : 'Mark ok'} keyName="O" variant="ghost" onClick={onOk} /> : null}
+          {hasNoGo(item.kind) ? <ActionButton label="Mark no-go" keyName="N" variant="ghost" onClick={() => onNoGo()} /> : null}
+        </div>
+      )}
       <div className="col-start-2 grid gap-2 text-[13px]">
         <p>{item.reason}</p>
         <Evidence item={item} />
         {editing && field ? <EditForm item={item} field={field} onSave={onSave} onNoGo={(s) => onNoGo(s)} onCancel={onCancelEdit} /> : null}
       </div>
+      {merge && item.merge ? <MergeCompare item={item} onMerge={onMerge} onKeepSeparate={onOk} /> : null}
     </article>
   );
 }

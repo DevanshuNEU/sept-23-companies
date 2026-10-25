@@ -578,12 +578,23 @@ describe('Today as a plan', () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
+  it('a weekend with nothing carried reads as two plain lines and no list', async () => {
+    const db = buildFixture('weekend');
+    db.plan.tomorrow = { total: 25, text: "Tomorrow's plan builds at 08:00. Room for 25 people.", preview: [] };
+    await open({ db });
+    expect(await screen.findByText('No plan on weekends.')).toBeInTheDocument();
+    expect(screen.getByText("Tomorrow's plan builds at 08:00. Room for 25 people.")).toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/below|and \d+ more/i);
+  });
+
   it('weekend scenario shows "No plan on weekends." with tomorrow\'s preview', async () => {
     await open({ scenario: 'weekend' });
     expect(await screen.findByText(/^No plan on weekends\./)).toBeInTheDocument();
-    expect(screen.getByText('Monday: 7 people')).toBeInTheDocument();
+    expect(screen.getByText('Monday: 7 people, 5 carried over.')).toBeInTheDocument();
     expect(screen.getByText(/Aiden Frost/)).toBeInTheDocument();
     expect(screen.getByText('and 4 more')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/below/i);
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 

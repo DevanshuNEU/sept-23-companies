@@ -12,7 +12,9 @@ or confirms a reason line on anyone's behalf: `confirm_note` runs only from his 
 - `save_note` and `confirm_note`: #15's `save_linkedin_draft(saved_by='devanshu')` and `confirm_reason`, so the checks
   are #15's `check_note` and a later Claude prepare never overwrites his note.
 
-Every write on a row checks the entry's revision and moves it on; every answer is the row as `GET /api/plan` shows it.
+Every write on a row moves the entry's revision on; every answer is the row as `GET /api/plan` shows it. Skip checks
+the revision first (it changes the row's state); the two step logs do not (a log only adds a touch, its key stops a
+double press, and two logs sent out of order when the tab closes must both land).
 """
 import sqlite3
 from collections.abc import Sequence
@@ -71,6 +73,11 @@ def _fresh(entry: sqlite3.Row, revision: int) -> None:
 
 def _bump(ctx: WriteCtx, entry: sqlite3.Row, revision: int, sets: dict | None = None) -> None:
     bump(ctx.conn, "daily_list_entry", "rowid", queries.plan_entry_id(entry), revision, sets or {}, at=ctx.now)
+
+
+def _bump_logged(ctx: WriteCtx, entry: sqlite3.Row) -> None:
+    """A step log moves the revision on from wherever it stands, inside this write's transaction (no check)."""
+    _bump(ctx, entry, entry["revision"])
 
 
 def _keyed(conn: sqlite3.Connection, key: str) -> sqlite3.Row | None:
@@ -142,7 +149,6 @@ def log_request(ctx: WriteCtx, entry_id: int, body: LogRequestBody, cfg: PlanCon
         raise _refuse("Nobody is on this row yet. Find someone first.")
     if body.person_id != entry["person_id"]:
         raise _bad("That person is not on this row.")
-    _fresh(entry, body.revision)
     person = conn.execute("SELECT * FROM person WHERE person_id = ?", (entry["person_id"],)).fetchone()
     survivor = _open_to_him(conn, entry, person)
     logged = conn.execute(
@@ -163,7 +169,7 @@ def log_request(ctx: WriteCtx, entry_id: int, body: LogRequestBody, cfg: PlanCon
     log_touch(conn, person_id=person["person_id"], company_id=survivor, channel="linkedin_request", sent_at=ctx.now,
               context=context, posting_id=posting["posting_id"] if posting is not None else None,
               idempotency_key=body.idempotency_key)
-    _bump(ctx, entry, body.revision)
+    _bump_logged(ctx, entry)
     return _answer(conn, entry_id, cfg)
 
 
@@ -183,7 +189,6 @@ def log_applied(ctx: WriteCtx, entry_id: int, body: LogAppliedBody, cfg: PlanCon
         raise ApiProblem("not_allowed", NO_ROLE)
     if body.posting_id != posting["posting_id"]:
         raise _bad("That role is not this row's.")
-    _fresh(entry, body.revision)
     person = conn.execute("SELECT * FROM person WHERE person_id = ?", (entry["person_id"],)).fetchone() \
         if entry["person_id"] is not None else None
     survivor = _open_to_him(conn, entry, person)
@@ -200,7 +205,7 @@ def log_applied(ctx: WriteCtx, entry_id: int, body: LogAppliedBody, cfg: PlanCon
                      (survivor, posting["posting_id"], ny_day(ctx.now), posting["url"]))
     log_touch(conn, person_id=None, company_id=survivor, channel="application", sent_at=ctx.now, context=context,
               posting_id=posting["posting_id"], idempotency_key=body.idempotency_key)
-    _bump(ctx, entry, body.revision)
+    _bump_logged(ctx, entry)
     return _answer(conn, entry_id, cfg)
 
 

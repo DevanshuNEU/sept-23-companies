@@ -435,5 +435,27 @@ class ResolveJobTest(ResolveBase):
         self.assertIsNotNone(row["finished_at"])
 
 
+class ShownReasonTest(ResolveBase):
+    """Follow-up: Needs you shows the items resolve raises as plain sentences (the stored reason is unchanged)."""
+
+    def shown(self, kind):
+        from outreach.review.queries import display_reason
+        return [display_reason(self.conn, r) for r in self.conn.execute(
+            "SELECT * FROM review_item WHERE kind = ? ORDER BY review_id", (kind,)).fetchall()]
+
+    def test_a_shared_domain_size_check_and_a_domain_pair_read_plainly(self):
+        self.company("Veltrix Pharma", "veltrix.com")
+        mark_shared_key(self.conn, "domain", "veltrix.com", "3 employers: Veltrix Corp, Veltrix Labs, Veltrix Pharma")
+        self.company("Acme Robotics", "acmerobotics.io")
+        self.company("Acme Labs", "acmerobotics.io")
+        resolve_store(self.conn)
+        self.assertEqual(self.shown("size_check"), [
+            "Veltrix Pharma shares its domain, veltrix.com, with 2 other employers in the visa filings, so it may be "
+            "part of a larger company. Nobody has recorded its size."])
+        self.assertEqual(self.shown("merge_candidate"),
+                         ["Both use the domain acmerobotics.io, so they may be one company."])
+        self.assertIn("Basis domain, confidence strong", self.items("merge_candidate")[0]["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()

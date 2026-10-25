@@ -39,14 +39,16 @@ class PlanWriteCase(PlanCase):
 
     def log_request(self, company: str, *, person_id=None, revision=1, key=None, request_id=None):
         eid = self.entry_id(company)
-        body = {"personId": person_id or self.people[company], "idempotencyKey": key or f"plan:{eid}:request",
-                "revision": revision}
+        body = {"personId": person_id or self.people[company], "idempotencyKey": key or f"plan:{eid}:request"}
+        if revision is not None:
+            body["revision"] = revision
         return self.post(f"/api/plan/{eid}/request", body, key=request_id)
 
     def log_applied(self, company: str, *, posting_id=None, revision=1, key=None, request_id=None):
         eid = self.entry_id(company)
-        body = {"postingId": posting_id or self.postings[company], "idempotencyKey": key or f"plan:{eid}:apply",
-                "revision": revision}
+        body = {"postingId": posting_id or self.postings[company], "idempotencyKey": key or f"plan:{eid}:apply"}
+        if revision is not None:
+            body["revision"] = revision
         return self.post(f"/api/plan/{eid}/apply", body, key=request_id)
 
     def skip(self, company: str, revision: int = 1):
@@ -126,10 +128,6 @@ class LogRequestTests(PlanWriteCase):
         self.assertEqual(self.touches("linkedin_request", person_id=self.people["Inngest"]), [])
         self.assertEqual(self.log_rows(self.people["Inngest"]), [])
 
-    def test_stale_entry_revision_is_a_conflict(self):
-        self.refused(self.log_request("Pylon", revision=5), "conflict", 409)
-        self.assertEqual(self.touches("linkedin_request", person_id=self.people["Pylon"]), [])
-        self.assertEqual(self.log_rows(self.people["Pylon"]), [])
 
     def test_request_for_another_persons_id_is_refused(self):
         self.refused(self.log_request("Pylon", person_id=self.people["Inngest"]), "bad_request", 400)
@@ -173,6 +171,57 @@ class LogRequestTests(PlanWriteCase):
                      lambda: self.skip("Inngest")):
             answer = self.ok(call())
             self.assertEqual(answer, self.row(answer["company"]["name"]))
+
+
+class StepLogRevisionTests(PlanWriteCase):
+    """Follow-up ruling: a step log is append-only and its touch key stops a double press, so `revision` is optional
+    on request and apply and a stale one does not conflict. Skip and the note writes keep the strict check."""
+
+    def test_a_request_logged_with_a_stale_revision_succeeds_and_writes_one_touch(self):
+        row = self.ok(self.log_request("Pylon", revision=5))
+        self.assertEqual(len(self.touches("linkedin_request", person_id=self.people["Pylon"])), 1)
+        self.assertEqual(len(self.log_rows(self.people["Pylon"])), 1)
+        self.assertEqual((row["revision"], self.entry_row("Pylon")["revision"]), (2, 2))
+
+    def test_a_request_with_no_revision_succeeds(self):
+        row = self.ok(self.log_request("Pylon", revision=None))
+        (touch,) = self.touches("linkedin_request", person_id=self.people["Pylon"])
+        self.assertEqual(row["steps"][0], {"kind": "request", "touchId": touch["touch_id"], "at": NOW})
+        self.assertEqual(self.entry_row("Pylon")["revision"], 2)
+
+    def test_an_apply_with_a_stale_revision_or_none_succeeds(self):
+        row = self.ok(self.log_applied("Pylon", revision=9))
+        self.assertEqual(len(self.touches("application", posting_id=self.postings["Pylon"])), 1)
+        self.assertEqual(row["revision"], 2)
+        turso = self.ok(self.log_applied("Turso", revision=None))
+        self.assertEqual(len(self.touches("application", posting_id=self.postings["Turso"])), 1)
+        self.assertEqual(turso["revision"], 2)
+
+    def test_two_logs_sent_out_of_order_both_land(self):
+        """The tab closed: both logs left with revision 1. The second one is not lost."""
+        self.ok(self.log_applied("Pylon", revision=1))
+        row = self.ok(self.log_request("Pylon", revision=1))
+        self.assertEqual(row["state"], "done")
+        self.assertEqual(self.entry_row("Pylon")["revision"], 3)
+
+    def test_a_double_press_with_the_same_key_and_a_stale_revision_writes_once(self):
+        first = self.ok(self.log_request("Pylon", revision=1))
+        again = self.ok(self.log_request("Pylon", revision=1))
+        self.assertEqual(again["steps"][0]["touchId"], first["steps"][0]["touchId"])
+        self.assertEqual(len(self.touches("linkedin_request", person_id=self.people["Pylon"])), 1)
+        self.assertEqual(len(self.log_rows(self.people["Pylon"])), 1)
+        self.assertEqual(self.entry_row("Pylon")["revision"], 2)
+        self.ok(self.log_applied("Pylon", revision=None))
+        self.ok(self.log_applied("Pylon", revision=None))
+        self.assertEqual(len(self.touches("application", posting_id=self.postings["Pylon"])), 1)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM application").fetchone()[0], 1)
+
+    def test_skip_with_a_stale_revision_still_conflicts(self):
+        self.refused(self.skip("Pylon", revision=5), "conflict", 409)
+        self.assertEqual(self.entry_row("Pylon")["state"], "proposed")
+        res = self.post(f"/api/plan/{self.entry_id('Pylon')}/skip", {})
+        self.refused(res, "bad_request", 400)  # skip still needs the revision
+        self.assertEqual(self.entry_row("Pylon")["revision"], 1)
 
 
 class KeyAndGuardTests(PlanWriteCase):

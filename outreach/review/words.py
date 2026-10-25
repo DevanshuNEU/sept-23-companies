@@ -5,7 +5,9 @@ them from any text that came from outside). The UI words are Devanshu's own: "ok
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+import ast
+import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -15,7 +17,7 @@ __all__ = ["clean", "day", "sponsorship_reason", "size_reason", "domain_reason",
            "fix_note", "no_go_note", "ok_note", "already_no_go_note", "person_no_go_note", "keep_separate_note",
            "settled_by_field", "NO_GO_SETTLED", "TIE_WARNING", "merge_note", "merged_away_note", "same_company_note",
            "shared_domain_note", "moved_pair_note", "MERGE_TAKEN_BACK", "UNDONE_TEXT", "hand_set_text",
-           "board_replaced_text"]
+           "board_replaced_text", "merge_reason", "reader_reason", "shared_domain_size_reason"]
 
 _NEW_YORK = ZoneInfo("America/New_York")
 _DASHES = str.maketrans({chr(0x2013): "-", chr(0x2014): "-"})
@@ -237,3 +239,241 @@ def board_replaced_text(new: str, source: str) -> str:
 
 def shared_domain_note(domain: str) -> str:
     return clean(f"{domain} is shared by several employers, so it no longer joins them")
+
+
+# ---- plain sentences for stored reasons that are not plain words (Needs you shows these; the store keeps its text) --
+
+_MAYBE = "so they may be one company."
+_UNSURE = "so the sources could not tell whether they are one company."
+# How one source record matched each company, for a strong pair basis `<a>+<b>` (`outreach.identity.BASES`).
+_MATCHED_BY = {"source_ref": "source id", "fein": "tax ID number", "domain": "domain", "name_state": "name and state",
+               "ambiguous_repeat": "name"}
+_NAME_ALIASES = ("name", "hand", "import", "crawl", "merge", "dba", "legal_name", "formd")
+_ALIAS_SAID = {  # (with the value, without it)
+    "fein": ("Both have the tax ID number {v}", "Both have the same tax ID number"),
+    "ats": ("Both claim the job board {v}", "Both claim the same job board"),
+    "linkedin": ("Both have the LinkedIn page {v}", "Both have the same LinkedIn page"),
+    **{source: ('Both go by the name "{v}"', "Both go by the same name") for source in _NAME_ALIASES},
+}
+
+
+_PIECE_MAX = 160
+_UNSAFE = str.maketrans("", "", "<>")  # `&` stays: the web shows these as escaped text
+
+
+def _piece(value) -> str:
+    """Outside text (a name, a domain, a board, an alias value, a quote) made fit to sit inside a sentence: as text,
+    without `<` and `>` (`&` stays, as in "AT&T"), every run of whitespace (newlines too) one space, at most 160
+    characters (a longer one is cut and ends in three periods), and no en or em dash. None is empty text."""
+    text = " ".join(("" if value is None else str(value)).translate(_UNSAFE).split())
+    if len(text) > _PIECE_MAX:
+        text = text[:_PIECE_MAX - 3].rstrip() + "..."
+    return clean(text)
+
+
+def _found(pattern: str, text: str) -> re.Match | None:
+    return re.search(pattern, text)
+
+
+def _domain_in(detail: str) -> str | None:
+    m = _found(r"the domain ([^\s,]+)", detail)
+    d = _piece(m[1].rstrip(".")) if m else ""
+    return d or None
+
+
+def _alias_value(detail: str) -> str | None:
+    """The alias value `identity` wrote with `!r` ("has the fein '12-3456789' (key ...)"), or None."""
+    m = _found(r" has the \S+ ('(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\") \(key ", detail)
+    if m is None:
+        return None
+    try:
+        value = ast.literal_eval(m[1])
+    except (ValueError, SyntaxError):
+        return None
+    return (_piece(value) or None) if isinstance(value, str) else None
+
+
+def merge_reason(basis: str, detail: str) -> str | None:
+    """The plain sentence for a `merge_candidate` reason, from its basis and detail (`identity.raise_merge_candidate`
+    writes "Basis <basis>, confidence <c>: <detail>"). A known basis whose detail does not read still gets a sentence
+    without the value; an unknown basis is None (the caller shows the stored text)."""
+    detail = detail or ""
+    if basis == "domain":
+        d = _domain_in(detail)
+        return f"Both use the domain {d}, {_MAYBE}" if d else f"Both use the same domain, {_MAYBE}"
+    if basis.startswith("fein_conflict+"):
+        what = basis.partition("+")[2]
+        if what == "domain":
+            d = _domain_in(detail)
+            lead = f"Both use the domain {d}" if d else "Both use the same domain"
+        elif what == "name_state":
+            m = _found(r"the same name and state \(([^)]+)\)", detail)
+            lead = f'Both names come down to "{_piece(m[1])}" in the same state' if m \
+                else "Both have the same name and state"
+        else:
+            return None
+        return f"{lead}, but their tax ID numbers differ, {_UNSURE}"
+    if basis == "name":
+        m = _found(r"the same name \(([^)]+)\), but the state is (.+) here and (.+) there$", detail)
+        if m:
+            return (f'Both names come down to "{_piece(m[1])}", but their states differ ({_piece(m[2])} and '
+                    f"{_piece(m[3])}), {_UNSURE}")
+        m = _found(r"the same name key \(([^)]+)\), from a name with letters outside ASCII", detail)
+        if m:
+            return (f'Both names come down to "{_piece(m[1])}", but one is written with letters a name match '
+                    f"cannot check, {_UNSURE}")
+        return f"Their names are alike, but nothing else matched, {_UNSURE}"
+    if basis == "ambiguous_name_state":
+        m = _found(r"the same name \(([^)]+)\) and state \(([^)]+)\) as (\d+) companies", detail)
+        if m:
+            return (f'Both names come down to "{_piece(m[1])}" in {_piece(m[2])}, and {_piece(m[3])} companies '
+                    f"match that, {_UNSURE}")
+        return f"Their name and state match other companies too, {_UNSURE}"
+    if basis == "same_board":
+        m = _found(r"both claim the (\S+) board (.+)$", detail)
+        if m:
+            return f"Both claim the same {_ats_name(_piece(m[1]))} job board, {_piece(m[2])}, {_MAYBE}"
+        return f"Both claim the same job board, {_MAYBE}"
+    if basis == "source_ref":
+        return f"One source record points at both companies, {_MAYBE}"
+    if basis == "import_near_name":
+        return f"The old lists spell the two names almost the same, {_MAYBE}"
+    if basis.startswith("alias:"):
+        said = _ALIAS_SAID.get(basis[len("alias:"):])
+        if said is None:
+            return None
+        value = _alias_value(detail)
+        return f"{said[0].format(v=value)}, {_MAYBE}" if value else f"{said[1]}, {_MAYBE}"
+    first, plus, second = basis.partition("+")
+    if plus and first in _MATCHED_BY and second in _MATCHED_BY:
+        if first == second:
+            return f"One source record matched both companies by their {_MATCHED_BY[first]}, {_MAYBE}"
+        return (f"One source record matched one company by its {_MATCHED_BY[first]} and the other by its "
+                f"{_MATCHED_BY[second]}, {_MAYBE}")
+    return None
+
+
+_RULES_SAID = {
+    "sponsorship": {
+        "silent": "The rules found nothing about sponsorship in this posting.",
+        "unclear": "The rules found sponsorship wording in this posting but could not tell yes or no.",
+        "no": "The rules read this posting as no sponsorship.",
+        "yes": "The rules read this posting as offering sponsorship.",
+        "opt_only": "The rules read this posting as sponsoring OPT only.",
+    },
+    "student_or_grad_window": {
+        "excluded": "The rules read this posting as open only to current students or a set graduation window.",
+        "ok": "The rules found no student or graduation limit in this posting.",
+    },
+    "location": {
+        "no": "The rules read this job as outside the US.",
+        "yes": "The rules read this job as in the US.",
+        "unknown": "The rules could not tell where this job is.",
+    },
+}
+_READER_HEARD = {
+    "sponsorship": {"wont_sponsor": "reads it as no sponsorship", "will_sponsor": "reads it as offering sponsorship",
+                    "opt_only": "reads it as sponsoring OPT only", "silent": "found nothing about sponsorship"},
+    "citizenship_or_clearance": {"yes": "reads it as needing US citizenship or a clearance",
+                                 "no": "reads it as needing neither"},
+    "student_or_grad_window": {"yes": "reads it as open only to current students or a set graduation window",
+                               "no": "reads it as open to graduates"},
+    "engineering": {"yes": "reads it as an engineering role", "no": "reads it as not an engineering role"},
+}
+READER_CLOSE_READER = "Mark no-go if the reader is right; mark ok to keep the rules' reading."
+READER_CLOSE_RULES = "Mark no-go if the rules are right; mark ok to go with the reader's reading."
+READER_CLOSE_EITHER = "Mark no-go if this posting rules the company out; mark ok if it does not."
+
+
+def _rules_said(field: str, rules) -> str | None:
+    if field == "citizenship_or_clearance":
+        if rules is True:
+            return "The rules read this posting as needing US citizenship or a clearance."
+        if rules is False:
+            return "The rules found no citizenship or clearance need in this posting."
+        return None
+    if field == "engineering":
+        if not isinstance(rules, str) or not rules:
+            return None
+        if rules == "engineering":
+            return "The rules read this as an engineering role."
+        if rules == "intern":
+            return "The rules read this as an engineering internship."
+        if rules in ("off_lane", "not_engineering"):
+            return "The rules read this as not an engineering role."
+        if rules == "general_application":
+            return "The rules read this as a general application, not a named role."
+        return None
+    return _RULES_SAID.get(field, {}).get(rules) if isinstance(rules, str) else None
+
+
+def _reader_heard(field: str, value) -> str | None:
+    if field == "location" and value is not None:
+        place = _piece(value)
+        return f"reads the place as {place}" if place else "found no place in it"
+    if value == "unknown" and field in _READER_HEARD:
+        return "could not tell"
+    return _READER_HEARD.get(field, {}).get(value) if isinstance(value, str) else None
+
+
+def _rules_hide(field: str, rules) -> bool:
+    return ((field == "sponsorship" and rules == "no") or (field == "citizenship_or_clearance" and rules is True)
+            or (field == "student_or_grad_window" and rules == "excluded") or (field == "location" and rules == "no"))
+
+
+def _reader_hides(field: str, rules, value) -> bool:
+    if value is None:
+        return False
+    if field == "location":  # a raised place with a value: the reader hides it exactly when the rules do not
+        return rules != "no" and bool(str(value).strip())
+    return ((field == "sponsorship" and value == "wont_sponsor")
+            or (field in ("citizenship_or_clearance", "student_or_grad_window") and value == "yes"))
+
+
+def reader_reason(parts: Sequence[tuple[str, object, object, str]]) -> str | None:
+    """The plain sentences for a `reader_disagrees` reason. Each part is (field, the rules' value, the reader's value
+    or None when the reader gave no answer, the reader's quote). One sentence for the rules, one for the reader (with
+    its line when it quoted one), then one line on what ok and no-go mean here. None when any part is a field or a
+    value these words do not know (the caller shows the stored text)."""
+    if not parts:
+        return None
+    sentences: list[str] = []
+    rules_hide: list[bool] = []
+    reader_hide: list[bool] = []
+    for field, rules, value, quote in parts:
+        said = _rules_said(field, rules)
+        if said is None:
+            return None
+        sentences.append(said)
+        quote = _piece(quote)
+        if value is None:
+            sentences.append("The night reader gave no answer on this.")
+        else:
+            heard = _reader_heard(field, value)
+            if heard is None:
+                return None
+            if quote and not (field == "location" and quote == _piece(value)):
+                sentences.append(f'The night reader found this line and {heard}: "{quote}"')
+            else:
+                sentences.append(f"The night reader {heard}.")
+        rules_hide.append(_rules_hide(field, rules))
+        reader_hide.append(_reader_hides(field, rules, value))
+    if all(reader_hide) and not any(rules_hide):
+        close = READER_CLOSE_READER
+    elif all(rules_hide) and not any(reader_hide):
+        close = READER_CLOSE_RULES
+    else:
+        close = READER_CLOSE_EITHER
+    return clean(" ".join([*sentences, close]))
+
+
+def shared_domain_size_reason(company: str, domain: str, others: int | None) -> str:
+    """The plain sentence for a `size_check` raised because the company's domain is shared (`identity.resolve_store`).
+    `others` is how many other employers the visa filings show on it, None when that count is not known."""
+    company, domain = _piece(company) or "This company", _piece(domain)
+    if isinstance(others, int) and not isinstance(others, bool) and others > 0:
+        where = f"with {others} other {'employer' if others == 1 else 'employers'} in the visa filings"
+    else:
+        where = "with other employers"
+    its = f"its domain, {domain}," if domain else "its domain"
+    return f"{company} shares {its} {where}, so it may be part of a larger company. Nobody has recorded its size."

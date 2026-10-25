@@ -11,23 +11,25 @@ REASON_MAX = 500
 
 class LogRequestBody(WireRequest):
     """He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one
-    touch per key, whatever the request id."""
+    touch per key, whatever the request id. `revision` is optional and never checked: a log only adds a touch, the key
+    stops a double press, and two logs sent out of order (the tab closed) must both land. The entry's revision still
+    moves on."""
 
     person_id: int = Field(ge=1, le=MAX_ID)
     idempotency_key: str = Field(pattern=TOUCH_KEY)
-    revision: int = Field(ge=1)
+    revision: int | None = Field(default=None, ge=1)
 
 
 class LogAppliedBody(WireRequest):
-    """He applied to the row's role. `idempotencyKey` is `plan:<entryId>:apply`."""
+    """He applied to the row's role. `idempotencyKey` is `plan:<entryId>:apply`. `revision` as `LogRequestBody`."""
 
     posting_id: int = Field(ge=1, le=MAX_ID)
     idempotency_key: str = Field(pattern=TOUCH_KEY)
-    revision: int = Field(ge=1)
+    revision: int | None = Field(default=None, ge=1)
 
 
 class SkipRowBody(WireRequest):
-    """Carry the row to tomorrow."""
+    """Carry the row to tomorrow. It changes the row's state, so a stale `revision` conflicts."""
 
     revision: int = Field(ge=1)
 

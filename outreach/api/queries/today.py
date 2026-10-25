@@ -397,6 +397,32 @@ def _refuse(text: str) -> ApiProblem:
     return ApiProblem("not_allowed", f"{text} {NOT_SAVED}")
 
 
+PLAN_DAY = "Today is a plan of people now. Use the plan to skip a row."
+
+
+def _built_by_plan(conn: sqlite3.Connection, day: str) -> bool:
+    """Whether the date's stored list is #15's people plan: a stored list whose rows name a channel, or that a `plan`
+    run built (`plan_view`'s test). A date with no list or with the lean Today's list is not."""
+    from outreach.api.queries.plan import from_plan_job  # plan imports this module
+
+    return conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is not None \
+        and from_plan_job(conn, day)
+
+
+def _plan_day(conn: sqlite3.Connection, now: str) -> bool:
+    """Whether today's (New York) list is the people plan."""
+    return _built_by_plan(conn, ny_day(now))
+
+
+def _not_on_a_plan_day(conn: sqlite3.Connection, now: str) -> None:
+    """Pick, unpick and backlog act on today's `daily_list_entry` rows. On a plan day those rows are the people
+    plan's, so these writes are refused and write nothing (the plan's own skip carries a row). Remove is not refused
+    (it is the web's Not a fit), and restore runs but leaves the plan's rows alone (it is the No-go page's Bring
+    back)."""
+    if _plan_day(conn, now):
+        raise _refuse(PLAN_DAY)
+
+
 def _family(conn: sqlite3.Connection, survivor: int) -> list[int]:
     companies = company_map(conn)
     return sorted(c for c in companies if resolve_company(companies, c)[-1] == survivor)
@@ -458,6 +484,7 @@ def _set_entry(ctx: WriteCtx, entry: sqlite3.Row, state: str, why: dict | None =
 def pick(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
     conn = ctx.conn
     row = _survivor_row(conn, company_id)
+    _not_on_a_plan_day(conn, ctx.now)
     survivor, name = row["company_id"], row["name"]
     entry = _todays_entry(conn, ctx.now, survivor, name)
     if entry["state"] == "picked":
@@ -495,6 +522,7 @@ def _leave_picked(ctx: WriteCtx, row: sqlite3.Row, entry: sqlite3.Row, what: str
 def unpick(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
     conn = ctx.conn
     row = _survivor_row(conn, company_id)
+    _not_on_a_plan_day(conn, ctx.now)
     survivor, name = row["company_id"], row["name"]
     entry = _todays_entry(conn, ctx.now, survivor, name)
     if entry["state"] != "picked":
@@ -514,6 +542,7 @@ def unpick(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
 def backlog(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
     conn = ctx.conn
     row = _survivor_row(conn, company_id)
+    _not_on_a_plan_day(conn, ctx.now)
     survivor, name = row["company_id"], row["name"]
     entry = _todays_entry(conn, ctx.now, survivor, name)
     if entry["state"] == "backlog":
@@ -556,8 +585,8 @@ def remove(ctx: WriteCtx, company_id: int, reason: str, note: str, revision: int
 def restore(ctx: WriteCtx, company_id: int, reason: str, revision: int) -> Empty:
     """Bring a removed company back to the backlog. It needs a reason. Its row on today's list becomes a backlog row
     (one is added when its newest row is from an older day), so it shows at once; on a weekend its newest row becomes
-    the backlog row and the next build carries it. A merged-away duplicate is not restored here: unmerge it in
-    Needs you."""
+    the backlog row and the next build carries it. On a day the people plan built, no list row is made or changed:
+    the company's status is all that moves. A merged-away duplicate is not restored here: unmerge it in Needs you."""
     conn = ctx.conn
     why = reason.strip()
     row = conn.execute("SELECT * FROM company WHERE company_id = ?", (company_id,)).fetchone()
@@ -572,24 +601,27 @@ def restore(ctx: WriteCtx, company_id: int, reason: str, revision: int) -> Empty
     _fresh(row, revision)
     bump(conn, "company", "company_id", company_id, revision,
          {"status": "backlog", "remove_reason": None, "status_note": "", "status_at": ctx.now}, at=ctx.now)
-    day = ny_day(ctx.now)
-    newest = conn.execute("SELECT * FROM daily_list_entry WHERE company_id = ? ORDER BY list_date DESC LIMIT 1",
-                          (company_id,)).fetchone()
-    listed_today = conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is not None
-    if newest is not None and (newest["list_date"] == day or not listed_today):
-        # Today's own row, or a weekend (no list): the newest row becomes the backlog row the next build carries.
-        conn.execute("UPDATE daily_list_entry SET state = 'backlog', decided_at = ? WHERE list_date = ? "
-                     "AND company_id = ?", (ctx.now, newest["list_date"], company_id))
-    elif listed_today:
-        # An older day's row (or none): the company joins today's list, so it shows now and not at the next build.
-        rank = conn.execute("SELECT coalesce(max(rank), 0) + 1 FROM daily_list_entry WHERE list_date = ?",
-                            (day,)).fetchone()[0]
-        conn.execute(
-            "INSERT INTO daily_list_entry(list_date, company_id, list_group, rank, state, posting_id, why, "
-            "proposed_at, decided_at) VALUES (?, ?, ?, ?, 'backlog', ?, ?, ?, ?)",
-            (day, company_id, newest["list_group"] if newest else "any_us_role", rank,
-             newest["posting_id"] if newest else None,
-             newest["why"] if newest else json.dumps({"rankReason": "Brought back from the removed list by you."}),
-             ctx.now, ctx.now))
+    if not _plan_day(conn, ctx.now):  # on a plan day the rows are the plan job's: only the company's status moves
+        day = ny_day(ctx.now)
+        newest = conn.execute("SELECT * FROM daily_list_entry WHERE company_id = ? ORDER BY list_date DESC LIMIT 1",
+                              (company_id,)).fetchone()
+        listed_today = conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is not None
+        if newest is not None and (newest["list_date"] == day or not listed_today):
+            # Today's own row, or a weekend (no list): the newest row becomes the backlog row the next build carries.
+            # Not when that row is an earlier people plan's: the plan job owns it, so only the status moves.
+            if not _built_by_plan(conn, newest["list_date"]):
+                conn.execute("UPDATE daily_list_entry SET state = 'backlog', decided_at = ? WHERE list_date = ? "
+                             "AND company_id = ?", (ctx.now, newest["list_date"], company_id))
+        elif listed_today:
+            # An older day's row (or none): the company joins today's list, so it shows now and not at the next build.
+            rank = conn.execute("SELECT coalesce(max(rank), 0) + 1 FROM daily_list_entry WHERE list_date = ?",
+                                (day,)).fetchone()[0]
+            conn.execute(
+                "INSERT INTO daily_list_entry(list_date, company_id, list_group, rank, state, posting_id, why, "
+                "proposed_at, decided_at) VALUES (?, ?, ?, ?, 'backlog', ?, ?, ?, ?)",
+                (day, company_id, newest["list_group"] if newest else "any_us_role", rank,
+                 newest["posting_id"] if newest else None,
+                 newest["why"] if newest else json.dumps({"rankReason": "Brought back from the removed list by you."}),
+                 ctx.now, ctx.now))
     _event(ctx, company_id, "restored", {"text": f"Restored to the backlog: {why}", "reason": why})
     return Empty()

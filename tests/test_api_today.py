@@ -587,3 +587,176 @@ class Barred(TodayCase):
         v = self.view()
         self.assertEqual(v["picked"], 1)
         self.assertIn("A", [e["company"]["name"] for e in v["proposed"]])
+
+
+PLAN_DAY = "Today is a plan of people now. Use the plan to skip a row. Nothing was saved."
+
+
+class PlanDayWrites(TodayCase):
+    """Follow-up ruling: on a day the people plan built, the old Today's pick, unpick and backlog own no row, so they
+    are refused and write nothing. Remove stays (it is the web's Not a fit). Restore stays too (it is the No-go page's
+    Bring back), but it never touches the plan's rows. The reads are unchanged."""
+
+    lean_today = False  # as shipped: the plan job, not a read, builds the day
+
+    def setUp(self):
+        super().setUp()
+        self.a = self.ranked("A", 5.0)
+        self.gone = self.ranked("Gone", 4.0, status="removed", remove_reason="not_a_fit")
+        self.conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES (?, ?, 7)",
+                          (TODAY, "2026-11-10T13:00:00Z"))
+
+    def plan_entry(self, cid: int, rank: int, *, person: bool = True, state: str = "proposed") -> None:
+        pid = s.person(self.conn, cid, f"P{rank}", channel="linkedin") if person else None
+        s._insert(self.conn, "daily_list_entry", {
+            "list_date": TODAY, "company_id": cid, "list_group": "level_role", "rank": rank, "state": state,
+            "proposed_at": "2026-11-10T13:00:00Z", "person_id": pid,
+            "channel": "linkedin_request" if person else None,
+            "decided_at": None if state == "proposed" else "2026-11-10T13:00:00Z"})
+
+    def plan_run(self, status: str | None = None) -> None:
+        summary = {"date": TODAY, **({"status": status} if status else {})}
+        self.conn.execute("INSERT INTO job_run(job, started_at, finished_at, status, summary) "
+                          "VALUES ('plan', ?, ?, 'ok', ?)",
+                          ("2026-11-10T13:00:00Z", "2026-11-10T13:00:05Z", json.dumps(summary)))
+
+    def snapshot(self) -> tuple:
+        entries = self.conn.execute("SELECT rowid, state, decided_at, why, revision FROM daily_list_entry "
+                                    "ORDER BY rowid").fetchall()
+        companies = self.conn.execute("SELECT company_id, status, revision FROM company ORDER BY company_id").fetchall()
+        events = self.conn.execute("SELECT count(*) FROM event").fetchone()[0]
+        return [tuple(r) for r in entries], [tuple(r) for r in companies], events
+
+    def refused_on_a_plan_day(self) -> None:
+        before = self.snapshot()
+        for call in (lambda: self.pick(self.a), lambda: self.unpick(self.a), lambda: self.backlog(self.a)):
+            res = call()
+            self.assertEqual((res.status_code, res.json()["code"], res.json()["message"]),
+                             (409, "not_allowed", PLAN_DAY), res.text)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_pick_unpick_and_backlog_are_refused_on_a_plan_with_people(self):
+        self.plan_entry(self.a, 1)
+        self.plan_entry(self.gone, 2, state="removed")
+        self.refused_on_a_plan_day()
+
+    def test_a_plan_of_find_someone_rows_built_by_the_plan_job_is_a_plan_day(self):
+        self.plan_entry(self.a, 1, person=False)
+        self.plan_run()
+        self.refused_on_a_plan_day()
+
+    def plan_list(self) -> tuple:
+        lists = self.conn.execute("SELECT * FROM daily_list ORDER BY list_date").fetchall()
+        entries = self.conn.execute("SELECT rowid, * FROM daily_list_entry ORDER BY rowid").fetchall()
+        return [tuple(r) for r in lists], [tuple(r) for r in entries]
+
+    def test_restore_on_a_plan_day_brings_the_company_back_and_leaves_the_plan_alone(self):
+        self.plan_entry(self.a, 1)
+        self.plan_entry(self.gone, 2, state="removed")
+        before = self.plan_list()
+        res = self.restore(self.gone, "A friend works there", key="restore-plan-1")
+        self.assertEqual((res.status_code, res.json()), (200, {}), res.text)
+        row = self.company(self.gone)
+        self.assertEqual((row["status"], row["remove_reason"], row["revision"]), ("backlog", None, 2))
+        self.assertEqual(self.plan_list(), before)  # no entry made, changed or un-removed
+        self.assertEqual(self.entry(self.gone)["state"], "removed")
+        [ev] = self.events("restored")
+        self.assertEqual(json.loads(ev["detail"])["reason"], "A friend works there")
+
+    def test_restore_on_a_plan_day_adds_no_row_for_a_company_off_todays_plan(self):
+        self.plan_entry(self.a, 1, person=False)
+        self.plan_run()
+        s._insert(self.conn, "daily_list", {"list_date": "2026-11-09", "built_at": "2026-11-09T13:00:00Z",
+                                            "capacity": 7})
+        s._insert(self.conn, "daily_list_entry", {
+            "list_date": "2026-11-09", "company_id": self.gone, "list_group": "level_role", "rank": 1,
+            "state": "removed", "proposed_at": "2026-11-09T13:00:00Z", "decided_at": "2026-11-09T14:00:00Z"})
+        before = self.plan_list()
+        self.assertEqual(self.restore(self.gone).status_code, 200)
+        self.assertEqual(self.plan_list(), before)
+        self.assertEqual(self.company(self.gone)["status"], "backlog")
+
+    def test_the_no_go_pages_bring_back_still_works_on_a_plan_day(self):
+        self.plan_entry(self.a, 1)
+        [shown] = self.get("/api/no-go").json()["companies"]
+        self.assertEqual((shown["kind"], shown["company"]["id"]), ("removed", self.gone))
+        res = self.restore(self.gone, "Talked to a friend there", revision=shown["company"]["revision"])
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(self.get("/api/no-go").json()["companies"], [])
+
+    def test_restore_with_no_list_today_leaves_an_earlier_plan_row_unchanged(self):
+        """A weekend, or a weekday before the plan job ran: the company's newest row is an earlier plan's."""
+        self.plan_entry(self.gone, 1, state="removed")
+        before = self.plan_list()
+        for now in (SATURDAY, "2026-11-11T09:00:00Z"):  # Saturday; Wednesday 04:00 in New York, no list yet
+            with self.subTest(now=now):
+                self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'not_a_fit' "
+                                  "WHERE company_id = ?", (self.gone,))
+                self.set_now(now)
+                res = self.restore(self.gone)
+                self.assertEqual((res.status_code, res.json()), (200, {}), res.text)
+                self.assertEqual(self.company(self.gone)["status"], "backlog")
+                self.assertEqual(self.plan_list(), before)  # the plan row is byte for byte as it was
+
+    def test_restore_with_no_list_today_still_moves_a_lean_newest_row(self):
+        self.conn.execute("DELETE FROM daily_list")  # setUp's Tuesday list: make it the lean Today's instead
+        self.conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES (?, ?, 7)",
+                          (TODAY, "2026-11-10T13:00:00Z"))
+        self.plan_entry(self.gone, 1, person=False, state="removed")  # no channel and no plan run: a lean row
+        self.set_now(SATURDAY)
+        self.assertEqual(self.restore(self.gone).status_code, 200)
+        entry = self.entry(self.gone)
+        self.assertEqual((entry["state"], entry["decided_at"]), ("backlog", SATURDAY))
+
+    def test_restore_on_a_plan_day_keeps_its_own_refusals(self):
+        self.plan_entry(self.a, 1)
+        res = self.restore(self.a)
+        self.assertEqual((res.status_code, res.json()["code"]), (409, "not_allowed"), res.text)
+        self.assertIn("is not removed", res.json()["message"])
+        res = self.restore(self.gone, "  ")
+        self.assertEqual((res.status_code, res.json()["code"]), (400, "bad_request"), res.text)
+
+    def test_a_picked_plan_row_cannot_be_unpicked_either(self):
+        self.plan_entry(self.a, 1, state="picked")
+        res = self.unpick(self.a)
+        self.assertEqual((res.status_code, res.json()["message"]), (409, PLAN_DAY), res.text)
+        self.assertEqual(self.entry(self.a)["state"], "picked")
+
+    def test_remove_stays_allowed_on_a_plan_day(self):
+        self.plan_entry(self.a, 1)
+        res = self.remove(self.a)
+        self.assertEqual((res.status_code, res.json()), (200, {}), res.text)
+        self.assertEqual((self.company(self.a)["status"], self.entry(self.a)["state"]), ("removed", "removed"))
+
+    def test_the_reads_are_unchanged_on_a_plan_day(self):
+        self.plan_entry(self.a, 1)
+        self.assertEqual(self.get("/api/today").status_code, 200)
+        self.assertEqual(self.get(f"/api/companies/{self.a}").status_code, 200)
+
+    def test_an_unknown_company_is_still_not_found(self):
+        self.plan_entry(self.a, 1)
+        for path in ("pick", "unpick", "backlog"):
+            res = self.post(f"/api/companies/999999/{path}", {"revision": 1})
+            self.assertEqual(res.status_code, 404, res.text)
+
+    def test_a_lean_list_with_an_already_built_plan_run_keeps_the_old_writes(self):
+        """A list with no channel whose only plan run found the day already built is the lean Today's."""
+        self.plan_entry(self.a, 1, person=False)
+        self.plan_run("already_built")
+        self.assertEqual(self.pick(self.a).json()["state"], "picked")
+        self.assertEqual(self.unpick(self.a).json()["state"], "proposed")
+        self.assertEqual(self.backlog(self.a).json()["state"], "backlog")
+
+
+class LeanDayWrites(TodayCase):
+    """On a day with no plan list (the lean Today's own list) every old write behaves as before."""
+
+    def test_each_old_write_still_works_on_a_lean_day(self):
+        a = self.ranked("A", 5.0)
+        self.view()
+        self.assertEqual(self.pick(a).json()["state"], "picked")
+        self.assertEqual(self.unpick(a).json()["state"], "proposed")
+        self.assertEqual(self.backlog(a).json()["state"], "backlog")
+        self.assertEqual(self.remove(a).status_code, 200)
+        self.assertEqual(self.restore(a).status_code, 200)
+        self.assertEqual((self.company(a)["status"], self.entry(a)["state"]), ("backlog", "backlog"))

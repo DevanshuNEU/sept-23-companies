@@ -1,5 +1,6 @@
 import json
 import unittest
+from dataclasses import replace
 from datetime import date, timedelta
 
 from outreach.plan.config import default_plan_config
@@ -161,6 +162,41 @@ class LoadTest(unittest.TestCase):
         got = self.load()[self.acme][0]
         self.assertEqual((got.email, got.email_basis), ("em@acme.example", "verified"))
 
+    def test_the_basis_needs_the_address_as_a_whole_token_in_the_quote(self):
+        """Review fix E, read side: a quote of joanna@acme.com does not back anna@acme.com."""
+        cases = [("anna@acme.com", "Write to joanna@acme.com today"), ("lex@acme.com", "alex@acme.com"),
+                 ("pat@acme.co", "pat@acme.com"), ("pat@acme.com", "pat@acme.com.au"),
+                 ("pat@acme.com", "pat@acme.com-old"), ("pat@acme.com", "x.pat@acme.com")]
+        for email, quote_text in cases:
+            self.conn.execute("DELETE FROM person_source")
+            self.conn.execute("DELETE FROM person")
+            company = seed_scored_company(self.conn, f"Co {email} {quote_text}", 1.0, ["level_role"])
+            pid = seed_person(self.conn, company, "Pat Doe", "founder", email=email)
+            seed_source(self.conn, pid, "email", "https://a.example/e", email_basis="published", quote=quote_text)
+            self.assertIsNone(self.load(company_ids=[company])[company][0].email_basis, (email, quote_text))
+        good = [("pat@acme.com", "Email Pat@Acme.com."), ("pat@acme.com", "(pat@acme.com)"),
+                ("pat@acme.com", "mail: pat@acme.com, thanks"), ("pat@acme.com", "pat@acme.com")]
+        for email, quote_text in good:
+            self.conn.execute("DELETE FROM person_source")
+            self.conn.execute("DELETE FROM person")
+            company = seed_scored_company(self.conn, f"Ok {quote_text}", 1.0, ["level_role"])
+            pid = seed_person(self.conn, company, "Pat Doe", "founder", email=email)
+            seed_source(self.conn, pid, "email", "https://a.example/e", email_basis="published", quote=quote_text)
+            self.assertEqual(self.load(company_ids=[company])[company][0].email_basis, "published", quote_text)
+
+    def test_the_hn_window_counts_new_york_days(self):
+        """Review fix J: 2026-08-12T03:30:00Z is 11 August in New York, 91 days before today (the window is 90)."""
+        self.conn.execute("INSERT INTO source(source_name, version) VALUES ('hn', 'v1') ON CONFLICT DO NOTHING")
+        who = {}
+        for url, at in (("https://hn.example/late", "2026-08-12T03:30:00Z"),
+                        ("https://hn.example/inside", "2026-08-12T15:00:00Z")):
+            self.conn.execute("INSERT INTO company_post(company_id, source_name, url, posted_at, asks_email) "
+                              "VALUES (?, 'hn', ?, ?, 1)", (self.acme, url, at))
+            who[url] = seed_person(self.conn, self.acme, f"Pe {url[-5:]}", "other")
+            seed_source(self.conn, who[url], "post", url)
+        got = {c.person_id: c.post_contact for c in self.load()[self.acme]}
+        self.assertEqual(got, {who["https://hn.example/late"]: False, who["https://hn.example/inside"]: True})
+
     def test_draft_id_is_loaded(self):
         pid = seed_person(self.conn, self.acme, "Dr Aft", "engineer")
         did = self.conn.execute(
@@ -182,11 +218,38 @@ class ChannelTest(unittest.TestCase):
         hn = cand(4, role="other", name="Hn Poster", email="hn@acme.example", basis="published", post_contact=True)
         self.assertEqual(pick_channel(hn, [eng, sibling], CFG), ("email", "hn_post_asks_email"))
 
-        # the only candidate has an address and nobody on LinkedIn to ask
-        lone = cand(5, role="engineer", name="Lo Ne", email="lone@acme.example", basis="verified")
+        # a company whose every candidate is a recruiter has nobody to ask on LinkedIn
+        lone = cand(5, role="recruiter", name="Lo Ne", email="lone@acme.example", basis="verified")
         self.assertEqual(pick_channel(lone, [], CFG), ("email", "no_linkedin_person"))
         recruiter = cand(6, role="recruiter", name="Rec Ruiter")
         self.assertEqual(pick_channel(lone, [recruiter], CFG), ("email", "no_linkedin_person"))
+
+    def test_an_engineer_with_an_address_is_still_a_linkedin_row_unless_the_company_has_only_recruiters(self):
+        """Review fix G: email is for a founder, an HN post that asks for email, or a company with no LinkedIn-capable
+        non-recruiter. A lone engineer is that non-recruiter himself, with or without a LinkedIn URL."""
+        lone = cand(1, role="engineer", name="Lo Ne", email="lone@acme.example", basis="verified")
+        self.assertEqual(pick_channel(lone, [], CFG), ("linkedin_request", "linkedin"))
+        with_url = replace(lone, linkedin_url="https://www.linkedin.com/in/lone")
+        self.assertEqual(pick_channel(with_url, [], CFG), ("linkedin_request", "linkedin"))
+        recruiter = cand(2, role="recruiter", name="Rec Ruiter")
+        self.assertEqual(pick_channel(lone, [recruiter], CFG), ("linkedin_request", "linkedin"))
+        manager = cand(3, role="manager", name="Ma Nager", email="ma@acme.example", basis="published")
+        self.assertEqual(pick_channel(manager, [], CFG), ("linkedin_request", "linkedin"))
+        alum = cand(4, role="alum", name="Al Um", email="al@acme.example", basis="published")
+        self.assertEqual(pick_channel(alum, [], CFG), ("linkedin_request", "linkedin"))
+
+    def test_a_generic_mailbox_never_makes_an_email_row_unless_the_post_asked(self):
+        """Review fix F, read side: a stored address like hello@ is not chosen, but an HN post that asks for email
+        and names such a mailbox is an explicit invitation."""
+        for local in ("hello", "info", "jobs", "careers", "hr", "Info+x"):
+            founder = cand(1, role="founder", name="Fay Founder", email=f"{local.lower()}@acme.example",
+                           basis="published")
+            self.assertEqual(pick_channel(founder, [], CFG), ("linkedin_request", "linkedin"), local)
+        post = cand(2, role="other", name="Hn Poster", email="jobs@acme.example", basis="published",
+                    post_contact=True)
+        self.assertEqual(pick_channel(post, [], CFG), ("email", "hn_post_asks_email"))
+        personal = cand(3, role="founder", name="Fay Founder", email="fay@acme.example", basis="published")
+        self.assertEqual(pick_channel(personal, [], CFG), ("email", "founder_published_email"))
 
     def test_an_address_without_a_usable_basis_never_makes_an_email_row(self):
         none = cand(1, role="founder", name="Fay Founder", email="fay@acme.example", basis=None)
@@ -272,6 +335,41 @@ class AddCandidateTest(unittest.TestCase):
             self.assertEqual(result, AddResult(None, False, expected), kw)
             self.assertEqual((count(self.conn), count(self.conn, "person_source"), count(self.conn, "event")),
                              before, kw)
+
+    def test_an_address_that_only_contains_the_quoted_one_is_refused(self):
+        """Review fix E, write side: the address must be on the page as a whole address."""
+        def backed(email, quote_text):
+            return dict(email=email, sources=[SourceInput("email", "https://acme.example/c", quote=quote_text,
+                                                          email_basis="published")])
+        for email, quote_text in (("anna@acme.com", "Write to joanna@acme.com"), ("lex@acme.com", "alex@acme.com"),
+                                  ("pat@acme.co", "pat@acme.com"), ("pat@acme.com", "pat@acme.com.au"),
+                                  ("pat@acme.com", "x_pat@acme.com")):
+            before = count(self.conn)
+            self.assertEqual(self.add(**backed(email, quote_text)), AddResult(None, False, "email_needs_source"),
+                             (email, quote_text))
+            self.assertEqual(count(self.conn), before)
+        self.assertTrue(self.add(**backed("pat@acme.com", "Write to Pat@Acme.com.")).created)
+
+    def test_a_generic_mailbox_is_refused_unless_the_page_is_an_asks_email_post(self):
+        """Review fix F: hello@, info@ and the rest of people.generic_mailboxes are not a person's address."""
+        for local in ("hello", "info", "jobs", "careers", "hr", "team", "support", "Info+tag", "no-reply"):
+            email = f"{local.lower()}@acme.example"
+            result = self.add(email=email, sources=[SourceInput(
+                "email", "https://acme.example/contact", quote=f"Reach us at {email}", email_basis="published")])
+            self.assertEqual(result, AddResult(None, False, "email_source_not_allowed"), local)
+        self.assertEqual(count(self.conn), 0)
+        self.conn.execute("INSERT INTO source(source_name, version) VALUES ('hn', 'v1') ON CONFLICT DO NOTHING")
+        self.conn.execute("INSERT INTO company_post(company_id, source_name, url, posted_at, asks_email) "
+                          "VALUES (?, 'hn', 'https://hn.example/job', '2026-11-01T00:00:00Z', 1)", (self.acme,))
+        invited = self.add(email="jobs@acme.example", sources=[SourceInput(
+            "email", "https://hn.example/job", quote="send CVs to jobs@acme.example", email_basis="published")])
+        self.assertTrue(invited.created)
+        quiet = seed_scored_company(self.conn, "Quiet", 1.0, [])
+        self.conn.execute("INSERT INTO company_post(company_id, source_name, url, posted_at, asks_email) "
+                          "VALUES (?, 'hn', 'https://hn.example/quiet', '2026-11-01T00:00:00Z', 0)", (quiet,))
+        self.assertEqual(self.add(company_id=quiet, email="jobs@quiet.example", sources=[SourceInput(
+            "email", "https://hn.example/quiet", quote="jobs@quiet.example", email_basis="published")]).refused,
+            "email_source_not_allowed")
 
     def test_a_published_email_is_stored_with_its_source_and_a_quote_that_holds_it(self):
         src = SourceInput("email", "https://acme.example/contact", quote="Write to Pat@Acme.example any time",

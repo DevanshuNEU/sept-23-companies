@@ -18,7 +18,8 @@ from datetime import date
 from typing import Literal
 from urllib.parse import quote, urlsplit
 
-from outreach.plan.config import PlanConfig
+from outreach.plan.config import PlanConfig, default_plan_config
+from outreach.plan.dates import ny_date
 from outreach.ranking.common import canonical_ids, size_order_key
 from outreach.store.atomic import atomic
 from outreach.store.timefmt import utcnow
@@ -97,7 +98,21 @@ def _chunks(ids: Sequence[int]):
 
 
 def _holds_email(quote_text: str, email: str | None) -> bool:
-    return bool(email) and email.lower() in (quote_text or "").lower()
+    """The address stands on the page as a whole address: no letter, digit or one of `._%+-` just before it, and
+    none just after it (a full stop that starts another label, as in `.com.au`, counts as more address). So the
+    quote `joanna@acme.com` does not back `anna@acme.com`, nor `pat@acme.com` back `pat@acme.co`."""
+    if not email:
+        return False
+    pattern = r"(?<![A-Za-z0-9._%+-])" + re.escape(email) + r"(?![A-Za-z0-9_%+-]|\.[A-Za-z0-9])"
+    return re.search(pattern, quote_text or "", re.I) is not None
+
+
+def _generic_mailbox(email: str | None, cfg: PlanConfig) -> bool:
+    """A shared mailbox (info@, hello@, jobs@ and the rest of `people.generic_mailboxes`), `+tag` removed."""
+    if not email:
+        return False
+    local = email.lower().split("@", 1)[0].split("+", 1)[0]
+    return local in {m.lower() for m in cfg.get("people", "generic_mailboxes")}
 
 
 def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], canon: dict[int, int],
@@ -114,6 +129,7 @@ def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], cano
     fresh_days = cfg.get("people", "employer_fresh_days")
     small_max = cfg.get("people", "founder_max_headcount")
     post_days = cfg.get("email", "hn_post_days")
+    tz = cfg.get("plan", "timezone")
     contacted = set(contacted)
 
     people = []
@@ -151,7 +167,7 @@ def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], cano
         for r in conn.execute(
                 f"SELECT company_id, url, posted_at FROM company_post WHERE asks_email = 1 "
                 f"AND company_id IN ({_marks(len(part))})", part):
-            posted = date.fromisoformat(r["posted_at"][:10]) if r["posted_at"] else None
+            posted = ny_date(r["posted_at"], tz) if r["posted_at"] else None
             asks_posts.setdefault(canon.get(r["company_id"], r["company_id"]), {})[r["url"]] = posted
 
     def small(company: int) -> bool:
@@ -246,9 +262,11 @@ def _shapes(name: str, email: str) -> tuple[frozenset[str], str]:
     return frozenset(shape for shape, value in options.items() if value == local), domain
 
 
-def _email_usable(c: Candidate, siblings: Sequence[Candidate]) -> bool:
+def _email_usable(c: Candidate, siblings: Sequence[Candidate], cfg: PlanConfig) -> bool:
     if not c.email:
         return False
+    if _generic_mailbox(c.email, cfg) and not c.post_contact:
+        return False  # only a post that asks for email makes a shared mailbox the way in
     if c.email_basis in ("published", "verified"):
         return True
     if c.email_basis != "pattern":
@@ -268,15 +286,18 @@ def _email_usable(c: Candidate, siblings: Sequence[Candidate]) -> bool:
 def pick_channel(c: Candidate, siblings: Sequence[Candidate], cfg: PlanConfig) -> tuple[
         Literal["linkedin_request", "email"], str]:
     """The channel and why. Email needs an address backed by a published or verified basis (a pattern address only
-    when a colleague's proven address has the same shape). An HN post that asks for email outranks the preference
-    order. `siblings` are the other candidates at the same company; a sibling who is not a recruiter can take a
-    LinkedIn request."""
-    if _email_usable(c, siblings):
+    when a colleague's proven address has the same shape) that is not a shared mailbox (info@, hello@) unless an HN
+    post asked for email there. Then email is the channel for an HN post that asks for it (outranks the preference
+    order), for a founder, and for a company with no LinkedIn-capable non-recruiter: every candidate, this one
+    included, is a recruiter. Anyone else with a name can be asked on LinkedIn (the plan builds a people search for
+    them), so a lone engineer with an address is still a LinkedIn row. `siblings` are the other candidates at the
+    same company."""
+    if _email_usable(c, siblings, cfg):
         if c.post_contact:
             return "email", "hn_post_asks_email"
         if c.role_kind == "founder":
             return "email", "founder_published_email"
-        if not any(s.role_kind != "recruiter" for s in siblings if s.person_id != c.person_id):
+        if c.role_kind == "recruiter" and all(s.role_kind == "recruiter" for s in siblings):
             return "email", "no_linkedin_person"
     return "linkedin_request", "linkedin"
 
@@ -326,13 +347,22 @@ def _source_problem(s: SourceInput) -> bool:
     return False
 
 
+def _invited(conn: sqlite3.Connection, canon: dict[int, int], survivor: int, backed: Sequence[SourceInput]) -> bool:
+    """A source page that is a post of this company asking for email: the one way a shared mailbox is allowed."""
+    urls = {s.url for s in backed}
+    return any(r["url"] in urls and canon.get(r["company_id"], r["company_id"]) == survivor
+               for r in conn.execute("SELECT company_id, url FROM company_post WHERE asks_email = 1"))
+
+
 def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title: str = "", role_kind: str,
                   sources: Sequence[SourceInput], linkedin_url: str | None = None, email: str | None = None,
-                  added_by: Literal["claude", "devanshu"] = "claude", today: date) -> AddResult:
+                  added_by: Literal["claude", "devanshu"] = "claude", today: date,
+                  cfg: PlanConfig | None = None) -> AddResult:
     """Store a person and their public source pages in one transaction, or refuse and write nothing.
 
     Refusal codes: `bad_role_kind`, `bad_name`, `company_removed`, `linkedin_source`, `bad_linkedin_url`, `bad_email`,
-    `email_source_not_allowed`, `email_needs_source`, `bad_source` (an unknown kind, a page that is not plain https,
+    `email_source_not_allowed` (GitHub, a noreply address, or a shared mailbox such as info@ unless the source page
+    is an HN post that asks for email), `email_needs_source`, `bad_source` (an unknown kind, a page that is not plain https,
     a basis on a non-email source or a missing one on an email source, a bad date), `person_elsewhere`. A person who
     is already at the company (same linkedin url, email or name) is returned with `created` False and only the new
     sources are added.
@@ -346,7 +376,8 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
     row = conn.execute("SELECT company_id FROM company WHERE company_id = ?", (company_id,)).fetchone()
     if row is None:
         raise LookupError(f"company {company_id} does not exist")
-    survivor = canonical_ids(conn).get(company_id, company_id)
+    canon = canonical_ids(conn)
+    survivor = canon.get(company_id, company_id)
     if conn.execute("SELECT status FROM company WHERE company_id = ?", (survivor,)).fetchone()[0] == "removed":
         return _refuse("company_removed")
     if any(_linkedin_url(s.url) for s in sources):
@@ -370,6 +401,8 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
         backed = [s for s in email_sources if s.email_basis in EMAIL_BASES and _holds_email(s.quote, email)]
         if not backed:
             return _refuse("email_needs_source")
+        if _generic_mailbox(email, cfg or default_plan_config()) and not _invited(conn, canon, survivor, backed):
+            return _refuse("email_source_not_allowed")
     if any(_source_problem(s) for s in sources):
         return _refuse("bad_source")
 

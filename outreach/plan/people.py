@@ -26,7 +26,7 @@ from outreach.store.timefmt import utcnow
 from outreach.store.writes import append_event, name_key
 
 __all__ = ["SourceRef", "SourceInput", "Candidate", "AddResult", "ROLE_KINDS", "SOURCE_KINDS", "load_candidates",
-           "tier", "rank_people", "pick_channel", "people_search_url", "add_candidate"]
+           "tier", "rank_people", "pick_channel", "people_search_url", "add_candidate", "small_company_ids"]
 
 ROLE_KINDS = ("engineer", "manager", "founder", "recruiter", "alum", "other")
 SOURCE_KINDS = ("profile", "team", "context", "email", "post")
@@ -115,6 +115,27 @@ def _generic_mailbox(email: str | None, cfg: PlanConfig) -> bool:
     return local in {m.lower() for m in cfg.get("people", "generic_mailboxes")}
 
 
+def small_company_ids(conn: sqlite3.Connection, company_ids: Collection[int], canon: dict[int, int],
+                      cfg: PlanConfig) -> set[int]:
+    """The surviving companies among `company_ids` (and their merged-away duplicates) whose winning `size` or
+    `headcount` evidence has `num_high` at or under `people.founder_max_headcount`. Unknown size is never small."""
+    small_max = cfg.get("people", "founder_max_headcount")
+    rows: dict[int, list[sqlite3.Row]] = {}
+    wanted = {canon.get(c, c) for c in company_ids}
+    family = sorted(c for c in {*canon, *wanted} if canon.get(c, c) in wanted)
+    for part in _chunks(family):
+        for r in conn.execute(
+                f"SELECT company_id, fact, num_high, locked, recorded_at, confidence, evidence_id FROM evidence "
+                f"WHERE fact IN ('size', 'headcount') AND company_id IN ({_marks(len(part))})", part):
+            rows.setdefault(canon.get(r["company_id"], r["company_id"]), []).append(r)
+    out = set()
+    for company, found in rows.items():
+        best = max(found, key=size_order_key)
+        if best["num_high"] is not None and best["num_high"] <= small_max:
+            out.add(company)
+    return out
+
+
 def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], canon: dict[int, int],
                     contacted: Collection[int], today: date, cfg: PlanConfig) -> dict[int, list[Candidate]]:
     """People at `company_ids` (and at their merged-away duplicates) who are not in `contacted` and have no active
@@ -127,7 +148,6 @@ def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], cano
     if not wanted:
         return out
     fresh_days = cfg.get("people", "employer_fresh_days")
-    small_max = cfg.get("people", "founder_max_headcount")
     post_days = cfg.get("email", "hn_post_days")
     tz = cfg.get("plan", "timezone")
     contacted = set(contacted)
@@ -157,25 +177,14 @@ def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], cano
         drafts.update({r[0]: r[1] for r in conn.execute(
             f"SELECT person_id, draft_id FROM linkedin_draft WHERE person_id IN ({_marks(len(part))})", part)})
 
-    size_rows: dict[int, list[sqlite3.Row]] = {}
+    small_ids = small_company_ids(conn, family, canon, cfg)
     asks_posts: dict[int, dict[str, date | None]] = {}
     for part in _chunks(family):
-        for r in conn.execute(
-                f"SELECT company_id, fact, num_high, locked, recorded_at, confidence, evidence_id FROM evidence "
-                f"WHERE fact IN ('size', 'headcount') AND company_id IN ({_marks(len(part))})", part):
-            size_rows.setdefault(canon.get(r["company_id"], r["company_id"]), []).append(r)
         for r in conn.execute(
                 f"SELECT company_id, url, posted_at FROM company_post WHERE asks_email = 1 "
                 f"AND company_id IN ({_marks(len(part))})", part):
             posted = ny_date(r["posted_at"], tz) if r["posted_at"] else None
             asks_posts.setdefault(canon.get(r["company_id"], r["company_id"]), {})[r["url"]] = posted
-
-    def small(company: int) -> bool:
-        rows = size_rows.get(company)
-        if not rows:
-            return False
-        best = max(rows, key=size_order_key)
-        return best["num_high"] is not None and best["num_high"] <= small_max
 
     by_company: dict[int, list[sqlite3.Row]] = {}
     for p in people:
@@ -183,7 +192,7 @@ def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], cano
 
     for company, rows in by_company.items():
         has_non_recruiter = any(p["role_kind"] in ("engineer", "manager", "founder", "alum") for p in rows)
-        company_small = small(company)
+        company_small = company in small_ids
         cands = []
         for p in rows:
             pid = p["person_id"]

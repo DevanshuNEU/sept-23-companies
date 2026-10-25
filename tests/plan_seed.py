@@ -15,7 +15,7 @@ from outreach.store.writes import log_touch, record_outcome
 
 __all__ = ["TODAY", "seed_scored_company", "seed_person", "seed_source", "seed_outbound", "seed_log_only",
            "seed_send_day",
-           "seed_email_touch", "seed_message"]
+           "seed_email_touch", "seed_message", "seed_daily_entry"]
 
 TODAY = date(2026, 11, 10)
 _counter = itertools.count(1)
@@ -164,3 +164,20 @@ def seed_message(conn: sqlite3.Connection, touch_id: int, seq: int, state: str, 
     if state == "skipped":
         conn.execute("UPDATE message SET state = 'skipped' WHERE message_id = ?", (message_id,))
     return message_id
+
+
+def seed_daily_entry(conn: sqlite3.Connection, list_date: date, company_id: int, *, rank: int = 1,
+                     person_id: int | None = None, channel: str | None = None, state: str = "proposed",
+                     list_group: str = "level_role", why: dict | None = None, capacity: int = 7) -> None:
+    """A `daily_list` for the date (made once) and one entry on it. A person row needs a channel; a decided state
+    (anything but proposed) gets a `decided_at`."""
+    now = utcnow()
+    conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES (?, ?, ?) "
+                 "ON CONFLICT(list_date) DO NOTHING", (list_date.isoformat(), now, capacity))
+    if person_id is not None and channel is None:
+        channel = "linkedin_request"
+    conn.execute(
+        "INSERT INTO daily_list_entry(list_date, company_id, list_group, rank, state, why, proposed_at, decided_at, "
+        "person_id, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (list_date.isoformat(), company_id, list_group, rank, state, json.dumps(why or {}), now,
+         None if state == "proposed" else now, person_id, channel))

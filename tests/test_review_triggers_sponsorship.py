@@ -147,6 +147,25 @@ class SponsorshipTest(unittest.TestCase):
         self.conn.execute("UPDATE read_queue SET state = 'done'")
         self.assertEqual(self.sync(), SyncResult(1, 0))
 
+    def test_a_side_sessions_queued_row_neither_holds_back_nor_clears_an_item(self):
+        """A side session (#13) queues its own rows under `side-` versions and reads only a few of them; the night
+        reader never takes them, so they say nothing about whether the reader has the posting."""
+        cid, pid = self.ready()
+        self.assertEqual(self.sync(), SyncResult(1, 0))
+        for state, lease in (("queued", None), ("leased", "2026-11-10T16:00:00Z")):
+            with self.subTest(state=state):
+                self.conn.execute("DELETE FROM read_queue")
+                self.conn.execute("INSERT INTO read_queue(posting_id, body_sha256, reader_version, priority, state, "
+                                  "lease_until, enqueued_at) VALUES (?, ?, 'side-rv-0123456789ab', 1, ?, ?, ?)",
+                                  (pid, "a" * 64, state, lease, utcnow()))
+                self.assertEqual(self.sync(), SyncResult(0, 0))
+                (item,) = self.items()
+                self.assertEqual(item["state"], "open")
+        other = self.picked("Bolt")
+        self.post(other)
+        self.decide()
+        self.assertEqual(self.sync(), SyncResult(1, 0))  # a new unclear item is still raised beside a side row
+
     def test_a_posting_on_a_doubtful_board_is_skipped(self):
         cid = self.picked()
         board = seed_board(self.conn, cid)

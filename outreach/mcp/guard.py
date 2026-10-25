@@ -25,6 +25,7 @@ import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from outreach.reader.version import is_side_sql
 from outreach.store import connect, db_path
 from outreach.store.db import normalise
 
@@ -93,7 +94,7 @@ _SEND_COLUMNS_SET = ("NEW.approved_at IS NOT NULL OR NEW.pending_rfc_id IS NOT N
 _SEND_COLUMNS_CHANGED = " OR ".join(f"NEW.{c} IS NOT OLD.{c}" for c in sorted(_MESSAGE_SEND_COLUMNS))
 
 # A reader version that is not a side session's (#32 `side_version`: `side-` and the files' version).
-_NOT_SIDE = "substr({0}.reader_version, 1, 5) IS NOT 'side-'"
+_NOT_SIDE = f"NOT ({is_side_sql('{0}.reader_version')})"
 
 _VALUE_TRIGGERS = (
     ("message_insert", "BEFORE INSERT ON main.message",

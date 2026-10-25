@@ -39,6 +39,7 @@ MAX_BATCH_CHARS = 50_000
 QUOTE_CHARS = 600
 TEXT_VALUE_CHARS = 300
 YEARS_MAX = 30
+SIDE_ENQUEUE_CAP = 20  # side-version rows one reader_next may queue (never more than its limit)
 SIDE_VERSION = r"^side-rv-[0-9a-f]{12}$"
 
 
@@ -80,7 +81,8 @@ def reader_next(ctx: Ctx, args: NextInput) -> dict:
     conn = ctx.conn
     cfg = load_reader_config()
     side = side_version(cfg)
-    enqueue_missing(conn, cfg=cfg, version=side, today=ctx.today)
+    # At most this call's own batch is queued under the side version: only the side session leases those rows.
+    enqueue_missing(conn, cfg=cfg, version=side, limit=min(args.limit, SIDE_ENQUEUE_CAP), today=ctx.today)
     leased = next_batch(conn, args.limit, cfg=cfg, version=side, now=ctx.now, today=ctx.today)
     payload = batch_payload(conn, leased)
     shown, left, size = [], [], 0

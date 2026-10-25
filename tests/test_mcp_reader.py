@@ -135,6 +135,14 @@ class ReaderNextTest(ReaderCase):
         self.assertEqual(len(self.ok("reader_next", {})["postings"]), 5)
         self.assertEqual(len(self.ok("reader_next", {"limit": 20})["postings"]), 2)
 
+    def test_one_call_queues_no_more_side_rows_than_its_limit(self):
+        for i in range(12):
+            self.posting(body_of(f"Posting {i} body text here."))
+        self.ok("reader_next", {"limit": 5})
+        self.assertLessEqual(self.db.execute("SELECT COUNT(*) FROM read_queue WHERE reader_version = ?",
+                                             (self.side,)).fetchone()[0], 5)
+        self.assertLessEqual(reader_tools.SIDE_ENQUEUE_CAP, 20)
+
     def test_an_empty_queue_says_queue_empty(self):
         got = self.ok("reader_next", {})
         self.assertEqual((got["postings"], got["queue_empty"], got["released"]), ([], True, 0))

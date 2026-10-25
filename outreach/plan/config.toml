@@ -1,0 +1,54 @@
+# Every number in the daily people plan (#15). Starting values: the owner's calls except where marked.
+
+[linkedin]
+plan_quota = 150              # #9: the system's own share of requests a month, counted by context.source = 'plan'
+hard_total = 200              # every request a month, his own included; wins when it is lower
+daily_max = 10
+rotate_days = 14              # #9: days of no answer before a company may get a second person
+rotate_top_n = 150            # a stale company rotates only while it is in the top this many of the laned list
+max_people_per_company = 3
+
+[lanes]
+role = ["level_role", "intern_junior"]   # the 80% share
+reason = ["reason_no_role"]              # the 20% share
+fill = ["any_us_role"]                   # only fills slots the other two cannot
+role_share = 0.8
+reason_share = 0.2
+
+[email]
+start_limit = 20              # #9: the first day's send limit
+rows_max = 15
+people_per_company = 2        # #9
+hn_post_days = 90             # same as ranking
+
+[plan]
+timezone = "America/New_York"
+scan_limit = 400
+board_read_top_n = 30
+roll_forward_days = 5
+
+[people]
+founder_max_headcount = 25
+employer_fresh_days = 30      # playbook v3.5
+generic_mailboxes = ["info", "hello", "contact", "support", "sales", "press", "admin", "team", "careers", "jobs", "hr", "recruiting", "noreply", "no-reply"]
+search_hint = "software engineer"
+
+[prepare]
+multiple = 2.0                # design 10
+retry_days = 7
+max_candidates = 2
+model = "claude-sonnet-5-5"
+call_timeout_s = 600
+max_consecutive_failures = 2
+# Until the reader plan (#32) has its own lists, these two stand.
+session_limit_patterns = ["usage limit", "rate limit"]
+auth_patterns = ["not logged in", "please run /login"]
+schema_version = 1
+
+[note]
+max_chars = 200               # #33 ruling 6: safe for free and Premium accounts; he can raise it
+max_links = 2
+banned_scopes = ["both", "dm"]
+# Regexes, case-insensitive: the playbook's connection-note prose bans.
+extra_banned = ["can you refer", "could you refer", "would you refer", "refer me", "ms from northeastern", "finishing my ms", "graduating from northeastern", "mutual connection"]
+banned_path = "~/Desktop/DevVault/job-search/outreach/banned_phrases.txt"

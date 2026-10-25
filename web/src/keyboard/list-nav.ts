@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useUrlState } from '@/lib/url-state';
 import { useAnnounce, useHotkeys, useLiveSelection, useSelectionSync } from './hotkeys';
 
@@ -42,17 +42,27 @@ export function useListNav<T extends string | number>({
   const rows = useRef(new Map<T, HTMLElement>());
 
   const pending = useLiveSelection<T>();
+  // The row this list's last `select()` moved to: the only row that may stand in while its URL write waits. State,
+  // not a ref, so the render that follows the move already knows it.
+  const [mine, setMine] = useState<T | null>(null);
 
   const fromUrl = ids.find((id) => String(id) === raw) ?? null;
-  // The row in the URL just left the list (a fix took it out) while the move to the next row waits for its URL
-  // write: the row he moved to stands in. Otherwise a render would select nothing, end that move, and drop a key
-  // pressed in that moment.
-  const movedTo = fromUrl === null && raw !== '' ? pending.latest() : null;
-  const standIn = movedTo !== null && ids.includes(movedTo) ? movedTo : null;
-  const selected = raw === '' && initial !== undefined && ids.includes(initial) ? initial : (fromUrl ?? standIn);
+  const fallback = raw === '' && initial !== undefined && ids.includes(initial) ? initial : null;
+  // A row this list just moved to, whose URL write has not rendered yet, stands in where the render would otherwise
+  // show the wrong row: the URL's row just left the list (a fix took it out), or there is no URL row and the list
+  // would fall back to `initial`. Without it that render selects nothing or the first row, ends the move and drops a
+  // key pressed in that moment. Only this list's own last move counts: an older row in the shared store never stands
+  // in. With no URL row and no `initial`, the selection still waits for the URL, as views that read `sel` expect.
+  const urlRowGone = raw !== '' && fromUrl === null;
+  const movedTo =
+    (urlRowGone || fallback !== null) && mine !== null && String(mine) !== raw && pending.latest() === mine && ids.includes(mine)
+      ? mine
+      : null;
+  const selected = fromUrl ?? movedTo ?? fallback;
   const live = useSelectionSync(selected);
 
   const select = (id: T) => {
+    setMine(id);
     live.move(id);
     setRaw(String(id));
     if (announce) say(announce(id));

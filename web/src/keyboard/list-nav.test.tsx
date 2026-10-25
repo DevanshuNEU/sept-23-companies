@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigationType } from 'react-router';
-import { HotkeysProvider } from '@/keyboard/hotkeys';
+import { HotkeysProvider, useLiveSelection } from '@/keyboard/hotkeys';
 import { useListNav } from '@/keyboard/list-nav';
 
 const people: Record<string, string> = {
@@ -247,6 +247,81 @@ describe('a selected row that leaves the list', () => {
     // Every render after the fix shows b: a render that selected nothing would end the move to b, and a key
     // pressed in that moment would be lost.
     expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((s) => s !== 'b')).toEqual([]);
+  });
+
+  /** Moves the shared selection store to `a` from outside this list, as another view's move would. */
+  function OtherMove() {
+    const live = useLiveSelection<string>();
+    return (
+      <button type="button" onClick={() => live.move('a')}>
+        Other move
+      </button>
+    );
+  }
+
+  /** A list whose rows can be dropped with no move, as a refresh does, and that starts on `initial`. */
+  function Dropping({ seen, initial }: { seen: string[]; initial?: string }) {
+    const [ids, setIds] = useState(['a', 'b', 'c']);
+    const nav = useListNav({ ids, initial });
+    seen.push(nav.selected ?? 'none');
+    return (
+      <>
+        <ul>
+          {ids.map((id) => (
+            <li key={id} {...nav.rowProps(id)}>
+              row {id}
+            </li>
+          ))}
+        </ul>
+        <button type="button" onClick={() => setIds((list) => list.filter((x) => x !== 'c'))}>
+          Drop c
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            nav.select('b');
+            setIds((list) => list.filter((x) => x !== 'a'));
+          }}
+        >
+          Settle a
+        </button>
+      </>
+    );
+  }
+
+  it('never stands in with an older row this list did not just move to', () => {
+    const seen: string[] = [];
+    render(
+      <MemoryRouter initialEntries={['/needs-you']}>
+        <HotkeysProvider>
+          <Dropping seen={seen} />
+          <OtherMove />
+        </HotkeysProvider>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('row c'));
+    expect(screen.getByText('row c')).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Other move' }));
+    seen.length = 0;
+    fireEvent.click(screen.getByRole('button', { name: 'Drop c' }));
+    expect(screen.getByText('row a')).toHaveAttribute('aria-selected', 'false');
+    expect(seen.filter((s) => s !== 'none')).toEqual([]);
+  });
+
+  it('a move this list just made wins over the initial row while its URL write waits', () => {
+    const seen: string[] = [];
+    render(
+      <MemoryRouter initialEntries={['/needs-you']}>
+        <HotkeysProvider>
+          <Dropping seen={seen} initial="c" />
+        </HotkeysProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('row c')).toHaveAttribute('aria-selected', 'true');
+    seen.length = 0;
+    fireEvent.click(screen.getByRole('button', { name: 'Settle a' }));
+    expect(screen.getByText('row b')).toHaveAttribute('aria-selected', 'true');
     expect(seen.filter((s) => s !== 'b')).toEqual([]);
   });
 });

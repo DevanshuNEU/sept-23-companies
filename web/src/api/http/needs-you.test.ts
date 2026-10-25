@@ -30,6 +30,13 @@ describe('needsYouMethods', () => {
     expect(send).toHaveBeenCalledWith('POST', '/api/companies/12/unmerge', { revision: 2 }, o);
   });
 
+  it('a reopen posts the settled row revision to the item and resolves to nothing', async () => {
+    const send = vi.fn(async () => ({ revision: 4 }));
+    const t = { get: vi.fn(), send } as unknown as Transport;
+    expect(await needsYouMethods(t).reopenReview!(7, 3, o)).toBeUndefined();
+    expect(send).toHaveBeenCalledWith('POST', '/api/review/7/reopen', { revision: 3 }, o);
+  });
+
   it('a refused resolve reaches the caller', async () => {
     const send = vi.fn(async () => { throw new Error('conflict'); });
     const t = { get: vi.fn(), send } as unknown as Transport;

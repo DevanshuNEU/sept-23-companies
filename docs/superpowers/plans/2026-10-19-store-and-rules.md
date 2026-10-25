@@ -715,7 +715,7 @@ FROM (
 | `sender` | the global pause switch, by him or by a hard block | #14, #11 pause and resume | #14, #12 Outbox and shell |
 | `send_day` | ramp level per day and how the day ended | #14 | #14 next day's level, #15 capacity, #12 Outbox |
 | `no_go` | companies and people never to email, with reason, quote, source; lifted rows stay | #11, #13 mark_no_go, #6 (no-sponsorship postings), #14 stop replies, #17 | #14 approve and send checks, #15, #12 No-go |
-| `review_item` | the needs-you list with reason, evidence key and resolution | #21 (1, 2), rules or #6 (3, size_guess), #15 (4), #14 (5), #13 flag_review, #17 | #16, #12 Needs you |
+| `review_item` | the needs-you list with reason, evidence key and resolution | #21 (1, 2), #16's sweep (3, 4, 5), #6 (size_guess, size_check, sponsorship conflicts), #31, #32, #13 flag_review, #17 (import); #15 and #14 raise none | #16, #12 Needs you |
 | `daily_list`, `daily_list_entry` | each day's capacity, and its proposals with group, rank, the role to name and a why snapshot | #15 | #12 Today, #13 todays_companies |
 | `event` | append-only history of every human and machine action | everyone through `append_event` | #12 company page, #17 count check |
 | `job_run` | every job run with status, summary, error | install, rebuild, #21, #15, #14, #17 | #11 health |

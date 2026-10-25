@@ -5,7 +5,7 @@ import type {
   ResolvedReview, ReviewFix, Revision, RoleKind, SearchIndex, SendingStatus, ShellSummary, TodayView,
   FindingsView, FunnelKey, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, WatchView, Win, WinKind, WinsView,
 } from '../types';
-import { buildFixture, computeShell, countGroups, GROUP_INDEX, STEP_LINE, type FixtureDb } from './data';
+import { buildFixture, computeShell, countGroups, GROUP_INDEX, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, winsOnDay } from './plan-data';
 
 const STOP_WORDS = new Set(['of', 'the', 'and', 'a', 'an', 'at', 'for', 'in', 'to']);
@@ -38,6 +38,12 @@ const refOf = (c: CompanyRef): CompanyRef => ({
   heldByReply: c.heldByReply,
 });
 const notAllowed = (message: string) => new ApiError('not_allowed', message);
+// The API's words for a settled item's note (outreach.review.words).
+const EDIT_LABEL: Record<Extract<ReviewFix, { kind: 'edit' }>['field'], string> = { size: 'Size', domain: 'Email domain', sponsorship: 'Sponsorship', board_url: 'Job board' };
+const NO_GO_PHRASE: Record<NoGoReason, string> = {
+  no_sponsorship: 'does not sponsor', citizenship: 'needs citizenship', over_300: 'over 300 people', defence_contractor: 'defence contractor',
+  agency: 'a staffing agency', said_no: 'they said no', stop_reply: 'they asked us to stop', not_a_fit: 'not a fit', other: 'another reason',
+};
 const rankOf = (i: OutboxItem) => Number(i.sortKey.split('.')[1]);
 
 /** The group a row belongs in, from its stored state. The browser never works this out. */
@@ -211,6 +217,7 @@ export class FixtureClient implements OutreachClient {
       s.noneReason = next ? null : 'Nothing is approved.';
     }
     this.settlePlan();
+    db.needsYou.settledToday = settledOn(db.needsYou.resolvedThisWeek, db.today.date);
     db.shell = computeShell({ ...db, jobs: db.shell.jobs });
   }
 
@@ -722,17 +729,22 @@ export class FixtureClient implements OutreachClient {
 
   resolveReview(reviewId: Id, fix: ReviewFix, revision: Revision, o: WriteOptions): Promise<void> {
     return this.write(o, () => {
-      const review = this.db.needsYou.open.find((r) => r.id === reviewId);
+      const open = this.db.needsYou.open;
+      const index = open.findIndex((r) => r.id === reviewId);
+      const review = open[index];
       if (!review) throw new ApiError('not_found', `No review item ${reviewId}`);
       if (review.revision !== revision) throw new ApiError('conflict', 'This item changed since you loaded it');
       if (fix.kind === 'edit' && (fix.source.trim() === '' || fix.value.trim() === '')) throw notAllowed('An edit needs a value and a source');
-      if (fix.kind === 'merge' && review.kind !== 'merge_candidate') throw notAllowed('Only a possible duplicate can be merged.');
+      if (fix.kind === 'edit' && fix.field === 'sponsorship' && fix.value.trim().toLowerCase() === 'no') throw notAllowed('Sponsorship No is a no-go. Use Mark no-go.');
+      if (fix.kind === 'merge' && (review.kind !== 'merge_candidate' || !review.merge)) throw notAllowed('Only a possible duplicate can be merged.');
       const v = this.view(review.company.id);
+      const settled: SettledReview = { item: structuredClone(review), index };
+      // The API's notes (outreach.review.words), so Resolved reads the same on sample data.
       let resolution: ResolvedReview['resolution'] = 'marked_ok';
-      let note = 'Marked ok by you';
+      let note = review.kind === 'merge_candidate' ? 'Kept separate by you' : 'Marked ok by you';
       if (fix.kind === 'edit') {
         resolution = 'field_edited';
-        note = `${fix.field.replace(/_/g, ' ').replace(/^./, (ch) => ch.toUpperCase())} set to ${fix.value} by you`;
+        note = `${EDIT_LABEL[fix.field]} set to ${fix.value.trim()} by you, from ${fix.source.trim()}`;
         if (fix.field === 'board_url') {
           if (v.board) v.board.url = fix.value;
         } else {
@@ -746,16 +758,58 @@ export class FixtureClient implements OutreachClient {
           }
         }
       } else if (fix.kind === 'no_go') {
+        settled.restoreStatus = { companyId: v.company.id, status: v.company.status };
         this.shut(v, fix.reason === 'no_sponsorship' ? 'no_sponsorship' : 'other', fix.source, fix.reason);
+        const added = this.db.noGo.companies[0];
+        if (added?.kind === 'no_go') settled.noGoId = added.noGoId;
         resolution = 'marked_no_go';
-        note = `Added to the no-go list by you: ${fix.reason.replace(/_/g, ' ')}`;
-      } else if (fix.kind === 'merge') {
+        note = `Added to the no-go list by you: ${NO_GO_PHRASE[fix.reason]}`;
+      } else if (fix.kind === 'merge' && review.merge) {
+        const keeper = fix.keep === 'a' ? review.merge.a : review.merge.b;
+        const loser = fix.keep === 'a' ? review.merge.b : review.merge.a;
+        const lost = this.view(loser.companyId);
+        settled.restoreStatus = { companyId: loser.companyId, status: lost.company.status };
+        this.touchCompany(loser.companyId, { status: 'removed' }, ['merged', `Merged into ${keeper.name}`], `Merged into ${keeper.name}`);
         resolution = 'field_edited';
-        note = 'Merged by you';
+        note = `Merged ${loser.name} into ${keeper.name} by you`;
       }
-      this.db.needsYou.open = this.db.needsYou.open.filter((r) => r.id !== reviewId);
-      this.db.needsYou.resolvedThisWeek.unshift({ id: reviewId, kind: review.kind, companyName: review.company.name, resolution, note, at: this.now, locked: fix.kind === 'edit', revision: revision + 1, canUndo: fix.kind !== 'edit' });
+      this.db.needsYou.open = open.filter((r) => r.id !== reviewId);
+      const locked = fix.kind === 'edit';
+      this.db.needsYou.resolvedThisWeek.unshift({ id: reviewId, kind: review.kind, companyName: review.company.name, resolution, note, at: this.now, locked, revision: revision + 1, canUndo: !locked });
+      if (!locked) this.db.settled[reviewId] = settled;
       v.reviewItems = v.reviewItems.filter((r) => r.id !== reviewId);
+    });
+  }
+
+  /** Undo from Resolved, after the undo window: an ok, a no-go or a merge goes back open, as the API's `reopen_item`. */
+  reopenReview(reviewId: Id, revision: Revision, o: WriteOptions): Promise<void> {
+    return this.write(o, () => {
+      const view = this.db.needsYou;
+      if (view.open.some((r) => r.id === reviewId)) throw notAllowed('This item is open. There is nothing to take back.');
+      const row = view.resolvedThisWeek.find((r) => r.id === reviewId);
+      if (!row) throw new ApiError('not_found', `No review item ${reviewId}`);
+      if (row.revision !== revision) throw new ApiError('conflict', 'This item changed since you loaded it. Nothing was saved.');
+      const settled = this.db.settled[reviewId];
+      if (row.locked || !row.canUndo || !settled) throw notAllowed('A value you set is locked and cannot be taken back here.');
+      if (settled.noGoId !== undefined) {
+        const noGo = this.db.noGo;
+        const lifted = noGo.companies.find((r) => r.kind === 'no_go' && r.noGoId === settled.noGoId);
+        if (lifted?.kind === 'no_go') {
+          noGo.companies = noGo.companies.filter((r) => r !== lifted);
+          this.countReason(lifted.reason, -1);
+        }
+      }
+      const restore = settled.restoreStatus;
+      if (restore && this.db.companies[restore.companyId]) {
+        const v = this.touchCompany(restore.companyId, { status: restore.status }, ['reopened', 'Undone by you, so it is open again'], '');
+        v.company.closed = null;
+      }
+      const item = { ...settled.item, revision: revision + 1 };
+      view.open.splice(Math.min(settled.index, view.open.length), 0, item);
+      view.resolvedThisWeek = view.resolvedThisWeek.filter((r) => r.id !== reviewId);
+      delete this.db.settled[reviewId];
+      const company = this.db.companies[item.company.id];
+      if (company) company.reviewItems.push(structuredClone(item));
     });
   }
 

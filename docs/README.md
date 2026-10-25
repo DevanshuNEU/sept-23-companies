@@ -34,7 +34,11 @@ Decisions live in GitHub issue #9. After the switch (#17) the live system is the
 | `outreach/ranking/` (how to run) | `uv run python -m outreach.ranking --help` lists the commands: `rank [--dry-run] [--today YYYY-MM-DD] [--diff-with VERSION]` (score every listed company in one transaction; `--dry-run` writes nothing, and `--diff-with` ranks with the current code and config and prints what moved against a stored version, so a weight change is judged before it is committed) and `diff [--old VERSION] [--new VERSION]` (what moved between two stored versions). Every command opens the store through `connect()`, so the live store opens only from the live checkout |
 | `outreach/ranking/` (modules) | `config.toml` and `config.py` (every weight and number), `wages.toml` and `pay.py` (pay text to a wage level), `common.py` (canonical ids, doubtful boards), `confidence.py` (grades and the rank confidence), `roles.py` (lanes and the best posting; stale postings last), `facts.py` (`RankFacts` loader), `hide.py` (the hide policy and the one `no_go` row ranking writes), `signals/` (the eleven signals), `score.py` (points and the stored JSON), `scores.py` (`company_score` reads and writes), `review.py` (size and sponsorship-conflict items), `version.py` (the ranker version hash), `job.py` (`compute_rank`, `run_rank`, the `weights_changed` event), `diff.py` (`what_moved`) |
 | `tests/test_ranking_*.py`, `tests/ranking_*.py`, `tests/fixtures/ranking/`, `tests/pipeline/stages_ranking.py` | The ranker's tests on seeded stores (no network), 21 fixture employers with 44 postings, and the `rank` stage of the pipeline flow test with its invariants. `tests/mutation_check.py` carries the ranker's mutation entries |
-| `superpowers/plans/2026-10-21-daily-people-plan.md` | #15: Today as a plan of people, capacity, the prepare step, LinkedIn notes and checks |
+| `superpowers/plans/2026-10-21-daily-people-plan.md` | #15: Today as a plan of people, capacity, the prepare step, LinkedIn notes and checks. Built; where the code differs from the plan text, the rulings at the top of the plan and the hand-offs below win |
+| `outreach/plan/` (how to run) | `uv run python -m outreach.plan --help` lists the commands: `build` (the day's plan, once per date; `--dry-run`, `--no-read-boards`), `show` (a stored plan, read only) and `prepare` (the morning step through `claude -p`, live checkout only). From a worktree use a scratch `OUTREACH_DB` |
+| `outreach/plan/` (modules) | `config.toml` and `config.py` (every number), `dates.py`, `outbound.py` (one read of outbound history), `capacity.py`, `contact.py` (the 14-day rule), `people.py` (candidates, channel, `add_candidate`), `notecheck.py` and `drafts.py` (the one note checker and draft writer), `select.py` (pure choice of rows), `prospects.py` (loaders, carry-forward, the `why` keys), `boards.py` and `build.py` (the plan job), `prepare_targets.py`, `prepare_store.py`, `claude_run.py`, `prepare.py` and `prompts/prepare.md` (the prepare step) |
+| `launchd/com.devanshu.outreach-plan.plist.template`, `launchd/com.devanshu.outreach-prepare.plist.template` | The plan job (Monday to Friday 08:00) and the prepare job (Monday to Friday 05:30); `{{LIVE_CHECKOUT}}` and `{{LOG_PATH}}` only; installed by `python -m outreach.deploy install`, never by the repo |
+| `tests/test_plan_*.py`, `tests/plan_seed.py`, `tests/fixtures/plan/`, `tests/pipeline/stages_plan.py` | The plan's tests on scratch stores (no network, no Claude: the prepare runner, the boards reader and the rank runner are fakes), the `plan` stage of the pipeline flow test with its invariants (capacity, one person per company, the 14-day boundary, the lane share, people before find-someone, only laned and visible companies, a second run changes nothing). `tests/mutation_check.py` carries the plan's mutation entries |
 | `superpowers/plans/2026-10-21-api.md` | #11: FastAPI, generated types, idempotent writes, outcomes, the HTTP client that replaces the fixtures |
 | `superpowers/plans/2026-10-21-web-experience.md` | #33: the people plan, outcomes, progress, wins and the finish line (mockups first) |
 | `superpowers/plans/2026-10-21-integration-review.md` | Cross-plan review of the eight plans and how each finding was resolved |
@@ -176,6 +180,43 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
 - A mass empty that lasts past the outage grace is written as empty reads: a day later its boards raise `board_empty`
   items one by one and the second empty closes their postings.
 - A board's host bucket is not stored, so the host ruling groups boards by ATS (true for every adapter here).
+
+## Daily plan hand-offs (#15)
+
+What the plan built and where each other stream meets it. The plan's task text is history where this differs; the
+rulings at the top of `superpowers/plans/2026-10-21-daily-people-plan.md` and its "Hand-off" section win.
+
+- **#13 MCP** calls `add_candidate(added_by='claude')`, `save_linkedin_draft(saved_by='claude')`,
+  `select_prepare_targets` and `record_attempt(found=0)`. Claude cannot confirm a reason line (`DraftLocked` and a
+  table CHECK), approve, send or log.
+- **#11 API** reads `daily_list` and `daily_list_entry` with the `why` keys exactly as the plan lists them, `linkedin_draft`
+  for notes, `linkedin_capacity` and `plan_capacity`. It writes through `save_linkedin_draft(saved_by='devanshu')`,
+  `confirm_reason` and `add_candidate(added_by='devanshu')`. If no plan exists for a weekday it may call
+  `build_plan(conn, today=..., read_boards=False)`, which is safe to repeat.
+- **#33 web** maps `why` to its plan rows and derives the row state from touches and entry state; the plan stores no UI
+  text except `why.find_someone.handoff`.
+- **#6 ranking, #21 crawler, #31 sources, #14 sending, #17 import.** The plan reads `ranked_list(laned_only=True)` and
+  never scores or hides. The plan job asks the crawler to read the top boards and runs `rank` when its hook exists;
+  neither can fail the plan. It never writes `company_post`, `send_day`, messages or touches. Imported LinkedIn
+  history must reach `outreach_touch` or `linkedin_log`, and imported emailed people keep their `touch` rows.
+- **Launchd.** The two templates are shipped and installed by `python -m outreach.deploy install`, never by the repo.
+
+### Prepare runbook (Devanshu runs it once)
+
+The prepare step was built without ever running `claude -p`, so the LinkedIn deny-rule form in
+`outreach/plan/claude_run.py` (`DENY_FORM`, `settings` or `disallowedTools`) is unverified. Before installing the
+prepare job:
+
+1. Run `claude --help` and confirm it still lists `--tools`, `--allowedTools`, `--disallowedTools`, `--settings` and
+   `--permission-mode` (with `dontAsk`).
+2. Make one call from the neutral folder that denies `example.com` and asks the model to fetch `https://example.com`
+   (the module docstring has the exact steps). The reply must say the fetch was denied.
+3. If it fetched, switch `DENY_FORM` to `disallowedTools` and try again. If neither form denies, say so before
+   installing the job.
+4. Only then run `uv run python -m outreach.deploy plan`, read it, and `uv run python -m outreach.deploy install`.
+
+Code refuses a LinkedIn source whatever the model returns, so a wrong form never stores a LinkedIn page; the deny rule
+only stops the model from fetching one.
 
 ## Evidence only
 

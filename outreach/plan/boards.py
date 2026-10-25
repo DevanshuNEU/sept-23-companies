@@ -17,13 +17,18 @@ Ranker = Callable[[sqlite3.Connection], object]
 
 
 class BoardsReadError(RuntimeError):
-    """The crawler's `read` command did not finish cleanly."""
+    """The crawler's `read` command did not finish cleanly. `partial` is True when the command ran to its end and
+    exited non-zero (a board was refused or failed, the others were read), False when it did not run at all."""
+
+    def __init__(self, message: str, *, partial: bool = False) -> None:
+        super().__init__(message)
+        self.partial = partial
 
 
 def crawler_boards_reader() -> BoardsReader | None:
     """A reader that runs the crawler's `read --company <ids>` command, or None when the crawler's command line is not
-    there. The command refuses outside the live checkout (`SystemExit`) and exits non-zero when a board was refused or
-    failed; both become `BoardsReadError`."""
+    there. The command refuses outside the live checkout (`SystemExit`): that is a failed read. It exits non-zero when a
+    board was refused or failed while the others were read: that is a partial read (`BoardsReadError.partial`)."""
     try:
         main = getattr(importlib.import_module("outreach.crawl.__main__"), "main", None)
     except ImportError:
@@ -38,7 +43,7 @@ def crawler_boards_reader() -> BoardsReader | None:
         except SystemExit as stop:
             raise BoardsReadError(f"the crawler refused to run: {stop.code}") from None
         if code:
-            raise BoardsReadError(f"the crawler's read command exited with {code}")
+            raise BoardsReadError(f"the crawler's read command exited with {code}", partial=True)
 
     return read
 

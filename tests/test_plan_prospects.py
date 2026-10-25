@@ -80,6 +80,28 @@ class CarryTest(unittest.TestCase):
         self.assertEqual(carried(self.conn, MON)[recent].carried_from, FRI)
         self.assertEqual(carried(self.conn, date(2026, 10, 30)), {})
 
+    def test_an_empty_plan_in_between_does_not_drop_what_was_carried_before_it(self):
+        old, kept = (seed_scored_company(self.conn, n, 80, ["level_role"]) for n in ("Old", "Kept"))
+        day1, day2, day3 = date(2026, 11, 2), date(2026, 11, 3), date(2026, 11, 4)
+        seed_daily_entry(self.conn, day1, kept, rank=1, state="backlog")
+        seed_daily_entry(self.conn, day1, old, rank=2, why={"first_proposed": "2026-10-27"})
+        self.conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES (?, ?, 0)",
+                          (day2.isoformat(), utcnow()))  # a zero-capacity plan: no entries
+        got = carried(self.conn, day3)
+        self.assertEqual(set(got), {kept})  # the row older than the roll limit is dropped
+        self.assertEqual((got[kept].carried_from, got[kept].first_proposed), (day1, day1))
+        self.assertEqual(set(carried(self.conn, day2)), {kept, old})  # the day before: still within the limit
+
+    def test_a_plan_whose_rows_are_all_done_falls_back_to_the_one_before(self):
+        a, b = (seed_scored_company(self.conn, n, 80, ["level_role"]) for n in ("A", "B"))
+        pa = seed_person(self.conn, a, "Ada")
+        seed_daily_entry(self.conn, date(2026, 11, 2), b, rank=1)
+        seed_daily_entry(self.conn, date(2026, 11, 3), a, rank=1, person_id=pa)
+        seed_outbound(self.conn, pa, a, "linkedin_request", date(2026, 11, 3))
+        got = carried(self.conn, date(2026, 11, 4))
+        self.assertEqual(set(got), {b})
+        self.assertEqual(got[b].carried_from, date(2026, 11, 2))
+
     def test_carry_limit_is_weekdays_since_first_proposed(self):
         a = seed_scored_company(self.conn, "Acme", 80, ["level_role"])
         seed_daily_entry(self.conn, FRI, a, why={"first_proposed": "2026-11-02"})

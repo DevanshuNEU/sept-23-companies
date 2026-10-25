@@ -39,7 +39,7 @@ class PlanResult:
     linkedin: LinkedinCapacity | None
     email: EmailCapacity | None
     chosen: tuple[Chosen, ...]
-    boards: Literal["read", "absent", "failed", "skipped"]
+    boards: Literal["read", "partial", "absent", "failed", "skipped"]
     run_id: int | None
 
 
@@ -49,21 +49,23 @@ def _survivor(canon: dict[int, int], company_id: int) -> int:
 
 def _read_boards(conn: sqlite3.Connection, ranked: list[StoredScore], canon: dict[int, int], cfg: PlanConfig,
                  reader: BoardsReader | None, ranker: Ranker | None, notes: dict) -> str:
-    """Ask the crawler to read the top laned companies' boards, then re-rank. Neither can fail the plan."""
-    if reader is None:
-        notes["rank"] = "skipped"
-        return "absent"
-    top = list(dict.fromkeys(_survivor(canon, s.company_id) for s in ranked[:cfg.get("plan", "board_read_top_n")]))
-    try:
-        if top:
-            reader(top)
-    except (Exception, SystemExit) as err:
-        notes["boards_error"] = describe_error(err)
-        notes["rank"] = "skipped"
-        return "failed"
+    """Ask the crawler to read the top laned companies' boards, then re-rank. The read is recorded (`read`, `partial`,
+    `failed`, `absent`) and never decides whether rank runs: rank runs whenever its hook exists, so the plan uses
+    fresh scores. Neither can fail the plan; a failed rank leaves the stored scores in use."""
+    boards = "absent"
+    if reader is not None:
+        top = list(dict.fromkeys(_survivor(canon, s.company_id)
+                                 for s in ranked[:cfg.get("plan", "board_read_top_n")]))
+        boards = "read"
+        try:
+            if top:
+                reader(top)
+        except (Exception, SystemExit) as err:
+            boards = "partial" if getattr(err, "partial", False) else "failed"
+            notes["boards_error"] = describe_error(err)
     if ranker is None:
         notes["rank"] = "absent"
-        return "read"
+        return boards
     try:
         ranker(conn)
         notes["rank"] = "ok"
@@ -72,14 +74,14 @@ def _read_boards(conn: sqlite3.Connection, ranked: list[StoredScore], canon: dic
             conn.execute("ROLLBACK")
         notes["rank"] = "failed"
         notes["rank_error"] = describe_error(err)
-    return "read"
+    return boards
 
 
 def build_plan(conn: sqlite3.Connection, *, today: date, cfg: PlanConfig | None = None,
                boards_reader: BoardsReader | None = None, ranker: Ranker | None = None, read_boards: bool = True,
                force_weekend: bool = False, dry_run: bool = False) -> PlanResult:
     """Build the plan for `today`. A weekend returns `weekend` (unless forced); a date that already has a plan returns
-    `already_built` before anything is written. `read_boards` False skips the crawler and the ranker; a dry run
+    `already_built` before anything is written. `read_boards` False skips the crawler and the ranker; otherwise rank always runs when its hook is given; a dry run
     skips them too (both write) and writes nothing at all, not even a job run. A failed build re-raises."""
     cfg = cfg or default_plan_config()
     if not is_weekday(today) and not force_weekend:

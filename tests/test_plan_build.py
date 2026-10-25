@@ -217,7 +217,7 @@ class BoardsAndRankTest(Fixture):
         result = build_plan(self.conn, today=TUE, boards_reader=reader, ranker=lambda conn: calls.append(1))
         self.assertEqual(seen, [ids[:CFG.get("plan", "board_read_top_n")]])
         self.assertEqual((result.status, result.boards), ("built", "failed"))
-        self.assertEqual(calls, [])  # nothing changed, so no re-rank
+        self.assertEqual(calls, [1])  # a failed read never decides whether rank runs
         summary = json.loads(self.conn.execute("SELECT summary FROM job_run WHERE job = 'plan'").fetchone()[0])
         self.assertEqual(summary["boards"], "failed")
         self.assertIn("exit 1", summary["boards_error"])
@@ -234,10 +234,58 @@ class BoardsAndRankTest(Fixture):
 
     def test_absent_crawler_is_skipped(self):
         self.world()
-        result = build_plan(self.conn, today=TUE, boards_reader=None, ranker=lambda conn: self.fail("rank"))
+        result = build_plan(self.conn, today=TUE, boards_reader=None)
         self.assertEqual((result.status, result.boards), ("built", "absent"))
 
-    def test_ranker_runs_only_after_a_successful_board_read(self):
+    def test_rank_runs_when_the_crawler_is_absent(self):
+        ids, _ = self.world(n=3, with_people=())
+        calls = []
+
+        def ranker(conn):
+            calls.append(1)
+            conn.execute("UPDATE company_score SET score = 500 WHERE company_id = ?", (ids[2],))
+
+        result = build_plan(self.conn, today=TUE, boards_reader=None, ranker=ranker)
+        self.assertEqual((calls, result.boards), ([1], "absent"))
+        self.assertEqual(self.entries()[0]["company_id"], ids[2])  # the plan used the fresh scores
+        summary = json.loads(self.conn.execute("SELECT summary FROM job_run WHERE job = 'plan'").fetchone()[0])
+        self.assertEqual((summary["boards"], summary["rank"]), ("absent", "ok"))
+
+    def test_rank_runs_after_a_failed_read(self):
+        self.world()
+        calls = []
+
+        def reader(company_ids):
+            raise RuntimeError("network down")
+
+        result = build_plan(self.conn, today=TUE, boards_reader=reader, ranker=lambda conn: calls.append(1))
+        self.assertEqual((calls, result.boards), ([1], "failed"))
+
+    def test_a_partial_read_is_recorded_as_partial_and_rank_still_runs(self):
+        self.world()
+        calls = []
+
+        def reader(company_ids):
+            raise BoardsReadError("one board was refused", partial=True)
+
+        result = build_plan(self.conn, today=TUE, boards_reader=reader, ranker=lambda conn: calls.append(1))
+        self.assertEqual((calls, result.boards, result.status), ([1], "partial", "built"))
+        summary = json.loads(self.conn.execute("SELECT summary FROM job_run WHERE job = 'plan'").fetchone()[0])
+        self.assertEqual(summary["boards"], "partial")
+        self.assertIn("one board was refused", summary["boards_error"])
+
+    def test_a_raising_rank_does_not_stop_the_plan(self):
+        self.world()
+
+        def ranker(conn):
+            raise RuntimeError("ranker broke")
+
+        result = build_plan(self.conn, today=TUE, boards_reader=None, ranker=ranker)
+        self.assertEqual(result.status, "built")
+        self.assertEqual(len(self.entries()), 10)  # built on the stored scores
+        self.assertFalse(self.conn.in_transaction)
+
+    def test_ranker_runs_after_a_successful_board_read(self):
         ids, _ = self.world(n=3, with_people=())
         order = []
 
@@ -286,15 +334,17 @@ class HookTest(unittest.TestCase):
 
     def test_a_non_zero_return_or_a_refusal_raises_boards_read_error(self):
         with mock.patch.dict(sys.modules, {"outreach.crawl.__main__": types.SimpleNamespace(main=lambda argv: 1)}):
-            with self.assertRaises(BoardsReadError):
+            with self.assertRaises(BoardsReadError) as caught:
                 crawler_boards_reader()([3])
+        self.assertTrue(caught.exception.partial)  # the command ran to its end, some board was not read
 
         def refuse(argv):
             raise SystemExit("reading boards only runs from the live checkout")
 
         with mock.patch.dict(sys.modules, {"outreach.crawl.__main__": types.SimpleNamespace(main=refuse)}):
-            with self.assertRaises(BoardsReadError):
+            with self.assertRaises(BoardsReadError) as caught:
                 crawler_boards_reader()([3])
+        self.assertFalse(caught.exception.partial)
 
     def test_the_rank_runner_is_run_rank_when_it_imports(self):
         from outreach.ranking.job import run_rank

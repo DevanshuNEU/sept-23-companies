@@ -25,7 +25,6 @@ EVENT_LIMIT = 500  # the newest events; a board read every few days adds up
 READS_SHOWN = 10
 DAYS_OF_EMAIL = 3
 IMPORT_SOURCE_KEY = "importSource"  # the key of an import event's detail that names the old place it came from
-EMAIL_HOLDING_KINDS = ("domain_missing", "size_unknown", "size_guess", "size_check")
 IMPORT_SOURCES = ("data_js", "local_storage", "contacts_json", "radar_db", "devboard", "contacted_txt", "devvault_notes")
 TIER_RANK = {"new_grad": 0, "early_career": 1, "swe1": 2, "swe2": 3, "open": 4, "not_stated": 5, "senior": 6}
 STATE_RANK = {"open": 0, "out_of_lane": 1, "hidden": 2, "closed": 3}
@@ -475,7 +474,11 @@ def role_to_name(role: dict | None) -> RoleToName | None:
 
 def to_event(r: sqlite3.Row) -> CompanyEvent:
     detail = json.loads(r["detail"])
-    text = detail.get("text") if isinstance(detail.get("text"), str) and detail["text"] else r["kind"].replace("_", " ").capitalize()
+    # `text` is the line an event carries for people. A review item's settling (`resolved`, `cleared`) carries its
+    # `note` instead; other entities' notes (an import's close note) are not sentences for the history.
+    keys = ("text", "note") if r["entity"] == "review_item" else ("text",)
+    text = next((detail[k] for k in keys if isinstance(detail.get(k), str) and detail[k]),
+                r["kind"].replace("_", " ").capitalize())
     source = None
     if r["actor"] == "import":
         source = detail.get(IMPORT_SOURCE_KEY) if detail.get(IMPORT_SOURCE_KEY) in IMPORT_SOURCES else None

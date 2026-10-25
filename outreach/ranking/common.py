@@ -8,7 +8,7 @@ import sqlite3
 from collections.abc import Mapping
 from datetime import date
 
-__all__ = ["BOARD_DOUBTFUL_PREFIX", "UNREAD_DOUBTFUL_FOUND_BY", "canonical_ids", "doubtful_board_ids", "age_days",
+__all__ = ["BOARD_DOUBTFUL_PREFIX", "UNREAD_DOUBTFUL_FOUND_BY", "MergeLoop", "canonical_ids", "doubtful_board_ids", "age_days",
            "clean_text", "fact_order_key", "size_order_key"]
 
 # #21 raises an open `flagged` item with this reason prefix on a board it thinks is another company's.
@@ -20,8 +20,12 @@ _DASHES = {0x2013: "-", 0x2014: "-"}
 _CONFIDENCE_RANK = {"confirmed": 0, "estimate": 1, "guess": 2}
 
 
+class MergeLoop(ValueError):
+    """`merged_into` loops back on itself: a store error. A ValueError, so callers that catch that still do."""
+
+
 def canonical_ids(conn: sqlite3.Connection) -> dict[int, int]:
-    """Every company_id to the end of its `merged_into` chain. A cycle (A into B into A) raises ValueError."""
+    """Every company_id to the end of its `merged_into` chain. A cycle (A into B into A) raises `MergeLoop`."""
     nxt = {cid: into for cid, into in conn.execute("SELECT company_id, merged_into FROM company")}
     out: dict[int, int] = {}
     for start in nxt:
@@ -34,7 +38,7 @@ def canonical_ids(conn: sqlite3.Connection) -> dict[int, int]:
                 end = out[cur]
                 break
             if cur in seen:  # a store error, as in outreach.identity.live_company: never pick a survivor silently
-                raise ValueError(f"merged_into loops back to company {cur} from {start}")
+                raise MergeLoop(f"merged_into loops back to company {cur} from {start}")
             seen.add(cur)
             path.append(cur)
             into = nxt.get(cur)

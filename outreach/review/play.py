@@ -6,6 +6,7 @@ companies a plan names at most 60. Each function is a few set-based queries, nev
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -26,10 +27,13 @@ def ny_date(now: str) -> str:
     return moment.date().isoformat()
 
 
-def live_company_ids(conn: sqlite3.Connection) -> frozenset[int]:
+def live_company_ids(conn: sqlite3.Connection, *, canon: Mapping[int, int] | None = None) -> frozenset[int]:
     """Companies still in the running: status candidate, backlog or working, not merged away, and no active no-go on
-    the company or on any company merged into it (a no-go he set on a duplicate bars the survivor too)."""
-    canon = canonical_ids(conn)
+    the company or on any company merged into it (a no-go he set on a duplicate bars the survivor too).
+
+    `canon` is the company-to-survivor mapping (`canonical_ids`, read when not given); a company it does not name is
+    its own survivor, so `{}` follows no merge."""
+    canon = canonical_ids(conn) if canon is None else canon
     barred = {canon.get(r[0], r[0]) for r in conn.execute(
         "SELECT company_id FROM no_go WHERE company_id IS NOT NULL AND lifted_at IS NULL")}
     rows = conn.execute("SELECT company_id FROM company WHERE status IN ('candidate', 'backlog', 'working') "
@@ -48,17 +52,18 @@ def recent_list_date(conn: sqlite3.Connection, today: str, planned_days: int) ->
     return row[0] if age <= planned_days else None
 
 
-def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int) -> dict[int, str]:
+def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
+            canon: Mapping[int, int] | None = None) -> dict[int, str]:
     """Live company id to `'picked'` or `'planned'` (picked wins).
 
     A plan row or person on a company merged into another counts for the company it ended up in.
 
     Picked: the company is `working`, or the latest list has it as `picked`. Planned: the latest list has it
     `proposed` or `picked` with a named person. The latest list counts only when its date is within `planned_days`
-    of `today`.
+    of `today`. `canon` as in `live_company_ids`.
     """
-    live = live_company_ids(conn)
-    canon = canonical_ids(conn)
+    canon = canonical_ids(conn) if canon is None else canon
+    live = live_company_ids(conn, canon=canon)
     out: dict[int, str] = {}
     for (cid,) in conn.execute("SELECT company_id FROM company WHERE status = 'working'"):
         if cid in live:
@@ -77,12 +82,14 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int) -> dict[
     return out
 
 
-def emailing(conn: sqlite3.Connection, *, today: str, planned_days: int) -> frozenset[int]:
+def emailing(conn: sqlite3.Connection, *, today: str, planned_days: int,
+             canon: Mapping[int, int] | None = None) -> frozenset[int]:
     """Live companies he is emailing: a person with an address there has a message in `planned`, `drafted`,
     `approved`, `sending`, `send_unknown` or `failed` on an open touch, or the latest list has an email row for a
-    person there. A person or plan row on a company merged into another counts for the company it ended up in."""
-    live = live_company_ids(conn)
-    canon = canonical_ids(conn)
+    person there. A person or plan row on a company merged into another counts for the company it ended up in.
+    `canon` as in `live_company_ids`."""
+    canon = canonical_ids(conn) if canon is None else canon
+    live = live_company_ids(conn, canon=canon)
     marks = ", ".join("?" for _ in _LIVE_MESSAGE_STATES)
     found = {r[0] for r in conn.execute(
         "SELECT DISTINCT p.company_id FROM message m JOIN touch t ON t.touch_id = m.touch_id "

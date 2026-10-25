@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 
 from outreach.identity import follow_merged
+from outreach.review import words
 from outreach.review.errors import ReviewError
 from outreach.review.hand import NOT_SAVED
 from outreach.review.items import unit
@@ -88,7 +89,7 @@ def edit_board(conn: sqlite3.Connection, item_row: sqlite3.Row, url: str, source
             append_event(conn, entity="board", kind="replaced", actor=actor, entity_id=old["board_id"],
                          company_id=survivor, at=at,
                          detail={"old": f"{old['ats']}:{old['token']}", "new": new, "closed_postings": closed,
-                                 "source": source},
+                                 "source": source, "text": words.board_replaced_text(new, source)},
                          idempotency_key=f"board-replaced:{item_row['review_id']}:{item_row['revision']}")
         if detail is not None:
             detail["closed_postings"] = closed

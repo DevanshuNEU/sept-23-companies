@@ -11,7 +11,7 @@ from outreach.crawl.base import ReadResult, Validators
 from outreach.crawl.boardstate import load_board
 from outreach.crawl.ingest import GUESSED_BOARDS, _before_first_good_read, _check_doubtful
 from outreach.crawl.stale import load_stale
-from outreach.ranking.common import (BOARD_DOUBTFUL_PREFIX, UNREAD_DOUBTFUL_FOUND_BY, age_days, canonical_ids,
+from outreach.ranking.common import (BOARD_DOUBTFUL_PREFIX, UNREAD_DOUBTFUL_FOUND_BY, MergeLoop, age_days, canonical_ids,
                                      clean_text, doubtful_board_ids)
 from outreach.ranking.config import default_ranker_config
 from outreach.ranking.facts import load_facts
@@ -528,6 +528,8 @@ class MergedTests(Store):
         rs.merge(self.conn, y, x)
         with self.assertRaisesRegex(ValueError, "merged_into loops"):
             canonical_ids(self.conn)  # like identity.live_company: a loop is a store error, never a silent pick
+        with self.assertRaises(MergeLoop):  # its own type (a ValueError), so a caller can catch only the loop
+            canonical_ids(self.conn)
 
     def test_every_surviving_company_has_inputs(self):
         other = seed_company(self.conn, "Quiet")

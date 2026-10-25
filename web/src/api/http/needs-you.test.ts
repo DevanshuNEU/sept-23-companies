@@ -2,7 +2,7 @@ import { needsYouMethods } from './needs-you';
 import type { Transport } from './transport';
 import type { NeedsYouView } from '../types';
 
-const EMPTY: NeedsYouView = { asOf: '2026-11-10T15:14:00Z', open: [], resolvedThisWeek: [], boardsJob: null };
+const EMPTY: NeedsYouView = { asOf: '2026-11-10T15:14:00Z', open: [], resolvedThisWeek: [], boardsJob: null, settledToday: 0 };
 const o = { requestId: 'req-12345678' };
 
 describe('needsYouMethods', () => {

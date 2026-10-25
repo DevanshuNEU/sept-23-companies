@@ -818,7 +818,7 @@ function buildLinkedIn(c: Ctx): LinkedInView {
 function buildNeedsYou(c: Ctx): NeedsYouView {
   const item = (kind: ReviewKind, company: string, picked: boolean, openedAt: IsoTime, ageDays: number, reason: string, o: Partial<ReviewItem> = {}): ReviewItem => ({
     id: c.next(), kind, company: { ...c.co(company), picked }, holdsEmail: false, reason, openedAt, ageDays, reopened: null, quote: null, reads: [],
-    lastOkAt: null, openPostings: null, sizeFacts: [], revision: 1, inPlay: true, ...o,
+    lastOkAt: null, openPostings: null, sizeFacts: [], revision: 1, inPlay: true, merge: null, ...o,
   });
   const read = (date: IsoDate, result: 'ok' | 'empty' | 'error', detail: string) => ({ at: et(date, '08:04'), result, detail });
   const hex = c.role('Hex', 'Software Engineer, New Grad', 'new_grad', SF, 12);
@@ -843,7 +843,7 @@ function buildNeedsYou(c: Ctx): NeedsYouView {
       }),
   ];
   const done = (kind: ReviewKind, companyName: string, resolution: ResolvedReview['resolution'], note: string, date: IsoDate): ResolvedReview =>
-    ({ id: c.next(), kind, companyName, resolution, note, at: et(date, '15:20'), locked: true });
+    ({ id: c.next(), kind, companyName, resolution, note, at: et(date, '15:20'), locked: true, revision: 2, canUndo: resolution !== 'field_edited' });
   const resolvedThisWeek: ResolvedReview[] = [
     done('size_unknown', 'Turso', 'field_edited', 'Set to about 45 by you, from LinkedIn 11 to 50', '2026-11-06'),
     done('sponsorship_unclear', 'Railway', 'marked_ok', 'Marked ok by you', '2026-11-05'),
@@ -852,7 +852,7 @@ function buildNeedsYou(c: Ctx): NeedsYouView {
     done('domain_missing', 'Weaviate', 'field_edited', 'Domain set to weaviate.example by you', '2026-11-04'),
     done('size_guess', 'Fly.io', 'marked_ok', 'Marked ok by you', '2026-11-04'),
   ];
-  return { asOf: AS_OF, open, resolvedThisWeek, boardsJob: JOBS.crawl() };
+  return { asOf: AS_OF, open, resolvedThisWeek, boardsJob: JOBS.crawl(), settledToday: 0 };
 }
 
 /* ------------------------------------------------------------------ No-go (no-go.html) */

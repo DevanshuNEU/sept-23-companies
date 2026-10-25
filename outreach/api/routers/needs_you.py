@@ -1,11 +1,14 @@
-"""Needs you: `GET /api/needs-you`, `POST /api/review/{id}/resolve` (ok, edit, no-go or merge) and
-`POST /api/companies/{id}/unmerge`."""
+"""Needs you: `GET /api/needs-you`, `POST /api/review/{id}/resolve` (ok, edit, no-go or merge),
+`POST /api/review/{id}/reopen` (take an ok, a no-go or a merge back) and `POST /api/companies/{id}/unmerge`. The writes
+are `outreach.review`'s, inside `run_write`."""
 from fastapi import APIRouter, Depends, Request, Response
 
 from outreach.api.clock import Clock, get_clock
 from outreach.api.db import read_conn
 from outreach.api.idempotency import WriteCtx, run_write
-from outreach.api.models.needs_you import NeedsYouView, ResolveReviewBody, ReviewResolved, UnmergeBody, Unmerged
+from outreach.api.models.needs_you import (
+    NeedsYouView, ReopenReviewBody, Reopened, ResolveReviewBody, ReviewResolved, UnmergeBody, Unmerged,
+)
 from outreach.api.queries import needs_you as queries
 from outreach.api.routers import row_id
 
@@ -23,6 +26,14 @@ def needs_you(request: Request, clock: Clock = Depends(get_clock)) -> NeedsYouVi
 def resolve_review(body: ResolveReviewBody, request: Request, review_id: int = row_id()) -> Response:
     def op(ctx: WriteCtx) -> ReviewResolved:
         return queries.resolve_review(ctx, review_id, body)
+
+    return run_write(request, op)
+
+
+@router.post("/review/{review_id}/reopen", response_model=Reopened)
+def reopen_review(body: ReopenReviewBody, request: Request, review_id: int = row_id()) -> Response:
+    def op(ctx: WriteCtx) -> Reopened:
+        return Reopened(revision=queries.reopen_review(ctx, review_id, body.revision))
 
     return run_write(request, op)
 

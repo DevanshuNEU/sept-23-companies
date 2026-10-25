@@ -1,5 +1,6 @@
 """Needs you: `NeedsYouView`, `ResolvedReview` and the `ReviewFix` bodies as in `web/src/api/types.ts`, plus the
-answers to a resolve and an unmerge. `ReviewItem` itself lives with the company page, which lists the same items."""
+answers to a resolve, a reopen and an unmerge. `ReviewItem` itself lives with the company page, which lists the same
+items."""
 from typing import Annotated, Literal
 
 from pydantic import Field
@@ -23,6 +24,8 @@ class ResolvedReview(Wire):
     note: str
     at: str
     locked: bool  # an edit wrote a locked value (a merge can be unmerged, so it is not locked)
+    revision: int  # the item's revision, which a reopen sends back
+    can_undo: bool  # `outreach.review.fixes.can_undo`: a reopen would take this settling back
 
 
 class NeedsYouView(Wire):
@@ -30,6 +33,7 @@ class NeedsYouView(Wire):
     open: list[ReviewItem]  # in-play companies first, then the rest ("Later"); oldest first within each
     resolved_this_week: list[ResolvedReview]  # his own resolutions this New York week, newest first
     boards_job: JobRunSummary | None  # the last read_boards run, else the last crawl
+    settled_today: int  # items he settled (ok, no-go or a field he set) on today's New York date
 
 
 class ReviewFixOk(WireRequest):
@@ -65,6 +69,14 @@ class ResolveReviewBody(WireRequest):
 class ReviewResolved(Wire):
     id: int
     revision: int
+
+
+class ReopenReviewBody(WireRequest):
+    revision: int  # the settled item's revision, as `ResolvedReview.revision` gave it
+
+
+class Reopened(Wire):
+    revision: int  # the item's new revision; it is open again
 
 
 class UnmergeBody(WireRequest):

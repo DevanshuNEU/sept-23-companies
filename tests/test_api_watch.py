@@ -286,7 +286,7 @@ class Watch(ApiCase):
         self.assertEqual(self.open_reviews(), 0)  # the queue Needs you reads
         self.assertEqual(self.items(), [])
         event = self.conn.execute(
-            "SELECT entity, entity_id, company_id, actor FROM event WHERE kind = 'review_resolved'").fetchall()
+            "SELECT entity, entity_id, company_id, actor FROM event WHERE kind = 'resolved'").fetchall()
         self.assertEqual([tuple(r) for r in event], [("review_item", rid, a, "devanshu")])
 
     def test_dismissing_a_careers_item_that_is_already_resolved_changes_nothing(self):
@@ -296,7 +296,7 @@ class Watch(ApiCase):
         self.assertEqual(res.status_code, 200, res.text)
         row = self.conn.execute("SELECT revision FROM review_item WHERE review_id = ?", (rid,)).fetchone()
         self.assertEqual(row[0], 1)
-        self.assertEqual(self.conn.execute("SELECT count(*) FROM event WHERE kind = 'review_resolved'").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM event WHERE entity = 'review_item'").fetchone()[0], 0)
 
     def test_merge_item_cannot_be_dismissed_here(self):
         b = s.company(self.conn, "Bolt")

@@ -196,6 +196,33 @@ class ReviewReopened(Wire):
     changed: str
 
 
+class MergeSide(Wire):
+    """One company of a merge question, as `outreach.review.merge.MergeSide` reads it."""
+
+    company_id: int
+    name: str
+    domain: str | None
+    size: str | None
+    stage: str | None
+    aliases: list[str]
+    boards: list[str]  # "<ats>:<token>"
+    open_postings: int
+    people: int
+    touches: int
+    status: CompanyStatus
+
+
+class MergeCompare(Wire):
+    """Both sides of a merge question (`outreach.review.merge.merge_compare`): `a` is the item's company, `b` the one
+    its key names."""
+
+    a: MergeSide
+    b: MergeSide
+    why: str
+    suggested_keep: Literal["a", "b"]
+    warning: str | None  # said on the confirm when either side is a tie company
+
+
 class ReviewItem(Wire):
     id: int
     kind: ReviewKind
@@ -213,6 +240,7 @@ class ReviewItem(Wire):
     revision: int
     # The company is in play (being worked, picked or planned): Needs you lists these first, the rest under Later.
     in_play: bool
+    merge: MergeCompare | None  # a merge question's two sides; None for every other kind
 
 
 class CompanyView(Wire):

@@ -25,6 +25,20 @@ class PlayTest(unittest.TestCase):
     def email(self, today=TODAY):
         return emailing(self.conn, today=today, planned_days=DAYS)
 
+    def test_a_given_mapping_is_used_instead_of_following_merges(self):
+        # The API passes the identity mapping ({}) when the store has a merged_into loop.
+        working = self.company(status="working")
+        seed_queued_message(self.conn, seed_email_person(self.conn, working), "drafted")
+        x, y = self.company(), self.company()
+        for a, b in ((x, y), (y, x)):
+            self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' "
+                              "WHERE company_id = ?", (b, a))
+        with self.assertRaises(ValueError):
+            self.play()
+        self.assertEqual(in_play(self.conn, today=TODAY, planned_days=DAYS, canon={}), {working: "picked"})
+        self.assertEqual(emailing(self.conn, today=TODAY, planned_days=DAYS, canon={}), {working})
+        self.assertEqual(live_company_ids(self.conn, canon={}), {working})
+
     def test_working_company_is_in_play_as_picked(self):
         working = self.company(status="working")
         self.company()

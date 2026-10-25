@@ -16,6 +16,7 @@ from unittest import mock
 from outreach.plan.drafts import get_draft_by_id, save_linkedin_draft
 from outreach.plan.prepare_store import store_company_result
 from outreach.plan.prepare_targets import Target
+from outreach.store import undo_touch
 from tests.apitest import NOW
 from tests.test_api_plan import BANNED, CFG, DAY, FIX, UNCONFIRMED, PlanCase
 
@@ -164,6 +165,118 @@ class LogRequestTests(PlanWriteCase):
                      lambda: self.skip("Inngest")):
             answer = self.ok(call())
             self.assertEqual(answer, self.row(answer["company"]["name"]))
+
+
+class KeyAndGuardTests(PlanWriteCase):
+    """Fix round 1: the touch found under a key must be this row's and live; paused and no-go refuse both writes."""
+
+    def no_go(self, *, company: str | None = None, person: str | None = None) -> None:
+        self.conn.execute("INSERT INTO no_go(company_id, person_id, reason, source, created_at) "
+                          "VALUES (?, ?, 'other', 'devanshu', ?)",
+                          (self.ids[company] if company else None, self.people[person] if person else None, NOW))
+
+    def nothing_written(self, company: str) -> None:
+        self.assertEqual(self.touches("linkedin_request", person_id=self.people[company]), [])
+        self.assertEqual(self.log_rows(self.people[company]), [])
+        self.assertEqual(self.touches("application", posting_id=self.postings[company]), [])
+        self.assertEqual(self.entry_row(company)["revision"], 1)
+
+    def test_a_request_key_replayed_against_another_rows_id_is_refused_and_writes_nothing(self):
+        self.ok(self.log_request("Pylon"))
+        key = f"plan:{self.entry_id('Pylon')}:request"
+        res = self.post(f"/api/plan/{self.entry_id('Inngest')}/request",
+                        {"personId": self.people["Pylon"], "idempotencyKey": key, "revision": 1})
+        self.refused(res, "bad_request", 400)
+        self.nothing_written("Inngest")
+
+    def test_an_apply_key_replayed_against_another_rows_id_is_refused_and_writes_nothing(self):
+        self.ok(self.log_applied("Pylon"))
+        key = f"plan:{self.entry_id('Pylon')}:apply"
+        res = self.post(f"/api/plan/{self.entry_id('Inngest')}/apply",
+                        {"postingId": self.postings["Pylon"], "idempotencyKey": key, "revision": 1})
+        self.refused(res, "bad_request", 400)
+        self.nothing_written("Inngest")
+
+    def test_a_request_key_on_an_apply_is_refused(self):
+        self.ok(self.log_request("Pylon"))
+        self.refused(self.log_applied("Pylon", key=f"plan:{self.entry_id('Pylon')}:request", revision=2),
+                     "bad_request", 400)
+
+    def test_a_request_taken_back_on_the_linkedin_page_can_be_logged_again(self):
+        lena = self.people["Pylon"]
+        first = self.ok(self.log_request("Pylon"))
+        old = first["steps"][0]["touchId"]
+        self.ok(self.post(f"/api/linkedin/{lena}/undo", {"step": "request_sent"}))
+        self.assertIsNone(self.row("Pylon")["steps"][0]["at"])
+        again = self.ok(self.log_request("Pylon", revision=2))
+        key = f"plan:{self.entry_id('Pylon')}:request"
+        live = [t for t in self.touches("linkedin_request", person_id=lena) if t["undone_at"] is None]
+        self.assertEqual(len(live), 1)
+        self.assertNotEqual(live[0]["touch_id"], old)
+        self.assertEqual(live[0]["idempotency_key"], key)
+        moved = self.conn.execute("SELECT idempotency_key, undone_at FROM outreach_touch WHERE touch_id = ?",
+                                  (old,)).fetchone()
+        self.assertEqual(moved["idempotency_key"], f"{key}#undone-{old}")
+        self.assertIsNotNone(moved["undone_at"])
+        self.assertEqual(again["steps"][0], {"kind": "request", "touchId": live[0]["touch_id"], "at": NOW})
+        self.assertEqual([r["kind"] for r in self.log_rows(lena)], ["request_sent", "undo", "request_sent"])
+        (event,) = self.conn.execute("SELECT * FROM event WHERE kind = 'key_released'").fetchall()
+        self.assertEqual((event["entity"], event["entity_id"]), ("outreach_touch", old))
+        self.assertEqual(self.row("Pylon"), again)
+
+    def test_an_application_taken_back_can_be_logged_again_with_one_application_row(self):
+        first = self.ok(self.log_applied("Pylon"))
+        old = first["steps"][1]["touchId"]
+        undo_touch(self.conn, old, at=NOW, revision=1)
+        again = self.ok(self.log_applied("Pylon", revision=2))
+        self.assertNotEqual(again["steps"][1]["touchId"], old)
+        self.assertEqual(again["steps"][1]["at"], NOW)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM application").fetchone()[0], 1)
+
+    def test_body_keys_are_plain(self):
+        self.refused(self.log_request("Pylon", key="plan:1:request#undone-3"), "bad_request", 400)
+        self.nothing_written("Pylon")
+
+    def test_a_paused_company_refuses_both_writes(self):
+        self.conn.execute("UPDATE company SET status = 'working', paused_at = ? WHERE company_id = ?",
+                          (NOW, self.ids["Pylon"]))
+        for res in (self.log_request("Pylon"), self.log_applied("Pylon")):
+            body = self.refused(res, "not_allowed", 409)
+            self.assertIn("Pylon is paused", body["message"])
+        self.nothing_written("Pylon")
+
+    def test_a_paused_survivor_refuses_a_row_of_its_merged_duplicate(self):
+        survivor = self.s_company("Pylon Labs")
+        self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' "
+                          "WHERE company_id = ?", (survivor, self.ids["Pylon"]))
+        self.conn.execute("UPDATE company SET status = 'working', paused_at = ? WHERE company_id = ?", (NOW, survivor))
+        self.refused(self.log_request("Pylon"), "not_allowed", 409)
+        self.refused(self.log_applied("Pylon"), "not_allowed", 409)
+        self.nothing_written("Pylon")
+
+    def test_a_no_go_company_refuses_both_writes(self):
+        self.no_go(company="Pylon")
+        for res in (self.log_request("Pylon"), self.log_applied("Pylon")):
+            body = self.refused(res, "not_allowed", 409)
+            self.assertIn("no-go list", body["message"])
+        self.nothing_written("Pylon")
+
+    def test_a_no_go_person_refuses_both_writes(self):
+        self.no_go(person="Pylon")
+        for res in (self.log_request("Pylon"), self.log_applied("Pylon")):
+            body = self.refused(res, "not_allowed", 409)
+            self.assertIn("no-go list", body["message"])
+        self.nothing_written("Pylon")
+
+    def test_a_lifted_no_go_allows_the_writes_again(self):
+        self.no_go(person="Pylon")
+        self.conn.execute("UPDATE no_go SET lifted_at = ?, lift_reason = 'slip'", (NOW,))
+        self.ok(self.log_request("Pylon"))
+        self.ok(self.log_applied("Pylon", revision=2))
+
+    def s_company(self, name: str) -> int:
+        from tests import apiseed
+        return apiseed.company(self.conn, name)
 
 
 class LogAppliedTests(PlanWriteCase):

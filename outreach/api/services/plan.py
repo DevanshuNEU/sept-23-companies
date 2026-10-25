@@ -102,13 +102,39 @@ def _posting(conn: sqlite3.Connection, posting_id: int | None) -> sqlite3.Row | 
     return conn.execute("SELECT * FROM posting WHERE posting_id = ?", (posting_id,)).fetchone()
 
 
+def _release_key(ctx: WriteCtx, touch: sqlite3.Row) -> None:
+    """An undone touch gives its key back: it keeps a derived key (`<key>#undone-<touch_id>`), so a new touch can take
+    the row's key. Body keys cannot hold `#` (`LogRequestBody`), so the derived key is never anyone else's."""
+    moved = f"{touch['idempotency_key']}#undone-{touch['touch_id']}"
+    ctx.conn.execute("UPDATE outreach_touch SET idempotency_key = ? WHERE touch_id = ?", (moved, touch["touch_id"]))
+    append_event(ctx.conn, entity="outreach_touch", entity_id=touch["touch_id"], company_id=touch["company_id"],
+                 kind="key_released", actor="devanshu", at=ctx.now,
+                 detail={"from": touch["idempotency_key"], "to": moved}, idempotency_key=ctx.event_key(1))
+
+
+def _open_to_him(conn: sqlite3.Connection, entry: sqlite3.Row, person: sqlite3.Row | None) -> int:
+    """The row's company (its survivor, through merges), after refusing a paused company and an active no-go on the
+    company or the person (a no-go on a merged-away duplicate counts for the survivor). Returns the survivor."""
+    survivor = survivor_of(merge_parents(conn), entry["company_id"])
+    company = conn.execute("SELECT name, paused_at FROM company WHERE company_id = ?", (survivor,)).fetchone()
+    if company["paused_at"] is not None:
+        raise _refuse(f"{company['name']} is paused. Resume it on its page first.")
+    no_go_people, no_go_companies = no_go_sets(conn, company_map(conn))
+    if survivor in no_go_companies:
+        raise _refuse(f"{company['name']} is on the no-go list, so nothing is logged for it. Lift it first.")
+    if person is not None and person["person_id"] in no_go_people:
+        raise _refuse(f"{person['name']} is on the no-go list, so nothing goes to them. Lift it first.")
+    return survivor
+
+
 def log_request(ctx: WriteCtx, entry_id: int, body: LogRequestBody, cfg: PlanConfig) -> PlanRow:
     conn = ctx.conn
     entry = _entry(conn, entry_id)
     found = _keyed(conn, body.idempotency_key)
-    if found is not None:  # already logged under this key: the same touch, nothing written
-        if found["channel"] != "linkedin_request" or found["person_id"] != body.person_id:
-            raise _bad("That key was already used for another touch.")
+    if found is not None and (found["channel"] != "linkedin_request" or found["person_id"] is None
+                              or found["person_id"] != entry["person_id"] or body.person_id != entry["person_id"]):
+        raise _bad("That key belongs to another touch, not this row's request.")
+    if found is not None and found["undone_at"] is None:  # already logged under this key: nothing written
         return _answer(conn, entry_id, cfg)
     if entry["channel"] == "email":
         raise _refuse("This row is an email. Review it in the Outbox.")
@@ -118,11 +144,7 @@ def log_request(ctx: WriteCtx, entry_id: int, body: LogRequestBody, cfg: PlanCon
         raise _bad("That person is not on this row.")
     _fresh(entry, body.revision)
     person = conn.execute("SELECT * FROM person WHERE person_id = ?", (entry["person_id"],)).fetchone()
-    parents = merge_parents(conn)
-    survivor = survivor_of(parents, person["company_id"])
-    no_go_people, no_go_companies = no_go_sets(conn, company_map(conn))
-    if person["person_id"] in no_go_people or survivor in no_go_companies:
-        raise _refuse(f"{person['name']} is on the no-go list, so nothing goes to them. Lift it first.")
+    survivor = _open_to_him(conn, entry, person)
     logged = conn.execute(
         "SELECT sent_at FROM outreach_touch WHERE person_id = ? AND channel = 'linkedin_request' "
         "AND undone_at IS NULL AND sent_at >= ? ORDER BY sent_at LIMIT 1",
@@ -130,7 +152,11 @@ def log_request(ctx: WriteCtx, entry_id: int, body: LogRequestBody, cfg: PlanCon
     if logged is not None:
         raise _refuse(f"Already logged: request sent to {person['name']} on {ny_day(logged['sent_at'])}.")
     posting = _posting(conn, entry["posting_id"])
+    if posting is not None and posting["closed_at"] is not None:
+        posting = None  # the row shows no role once its posting closed, so the touch names none either
     context = _context(conn, entry, survivor, person["role_kind"], posting, ctx.now)
+    if found is not None:  # taken back on the LinkedIn page: the old touch stays, undone, under a derived key
+        _release_key(ctx, found)
     # The log row first, the touch second, in one transaction: if either fails, neither stays.
     conn.execute("INSERT INTO linkedin_log(person_id, kind, at, recorded_at) VALUES (?, 'request_sent', ?, ?)",
                  (person["person_id"], ctx.now, ctx.now))
@@ -145,9 +171,10 @@ def log_applied(ctx: WriteCtx, entry_id: int, body: LogAppliedBody, cfg: PlanCon
     conn = ctx.conn
     entry = _entry(conn, entry_id)
     found = _keyed(conn, body.idempotency_key)
-    if found is not None:
-        if found["channel"] != "application" or found["posting_id"] != body.posting_id:
-            raise _bad("That key was already used for another touch.")
+    if found is not None and (found["channel"] != "application" or found["posting_id"] is None
+                              or found["posting_id"] != entry["posting_id"] or body.posting_id != entry["posting_id"]):
+        raise _bad("That key belongs to another touch, not this row's application.")
+    if found is not None and found["undone_at"] is None:
         return _answer(conn, entry_id, cfg)
     if entry["channel"] == "email":
         raise _refuse("This row is an email. Review it in the Outbox.")
@@ -157,14 +184,20 @@ def log_applied(ctx: WriteCtx, entry_id: int, body: LogAppliedBody, cfg: PlanCon
     if body.posting_id != posting["posting_id"]:
         raise _bad("That role is not this row's.")
     _fresh(entry, body.revision)
+    person = conn.execute("SELECT * FROM person WHERE person_id = ?", (entry["person_id"],)).fetchone() \
+        if entry["person_id"] is not None else None
+    survivor = _open_to_him(conn, entry, person)
     logged = conn.execute("SELECT sent_at FROM outreach_touch WHERE channel = 'application' AND posting_id = ? "
                           "AND undone_at IS NULL ORDER BY sent_at LIMIT 1", (posting["posting_id"],)).fetchone()
     if logged is not None:
         raise _refuse(f"Already logged: applied on {ny_day(logged['sent_at'])}.")
-    survivor = survivor_of(merge_parents(conn), posting["company_id"])
     context = _context(conn, entry, survivor, None, posting, ctx.now)
-    conn.execute("INSERT INTO application(company_id, posting_id, applied_on, url) VALUES (?, ?, ?, ?)",
-                 (survivor, posting["posting_id"], ny_day(ctx.now), posting["url"]))
+    if found is not None:
+        _release_key(ctx, found)
+    # One application row per posting: a touch taken back and logged again keeps the row it already has.
+    if conn.execute("SELECT 1 FROM application WHERE posting_id = ? LIMIT 1", (posting["posting_id"],)).fetchone() is None:
+        conn.execute("INSERT INTO application(company_id, posting_id, applied_on, url) VALUES (?, ?, ?, ?)",
+                     (survivor, posting["posting_id"], ny_day(ctx.now), posting["url"]))
     log_touch(conn, person_id=None, company_id=survivor, channel="application", sent_at=ctx.now, context=context,
               posting_id=posting["posting_id"], idempotency_key=body.idempotency_key)
     _bump(ctx, entry, body.revision)

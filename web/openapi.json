@@ -2381,8 +2381,7 @@
         "description": "He applied to the row's role. `idempotencyKey` is `plan:<entryId>:apply`.",
         "properties": {
           "idempotencyKey": {
-            "maxLength": 200,
-            "minLength": 1,
+            "pattern": "^[A-Za-z0-9:._-]{1,200}$",
             "title": "Idempotencykey",
             "type": "string"
           },
@@ -2411,8 +2410,7 @@
         "description": "He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one\ntouch per key, whatever the request id.",
         "properties": {
           "idempotencyKey": {
-            "maxLength": 200,
-            "minLength": 1,
+            "pattern": "^[A-Za-z0-9:._-]{1,200}$",
             "title": "Idempotencykey",
             "type": "string"
           },

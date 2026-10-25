@@ -42,7 +42,9 @@
     undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
     keyboard: '<path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10M8 12h.01"/><rect x="2" y="4" width="20" height="16" rx="2"/>',
     help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/>',
-    plus: '<path d="M5 12h14M12 5v14"/>'
+    plus: '<path d="M5 12h14M12 5v14"/>',
+    flag: '<path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/>',
+    differs: '<path d="M5 9h14M5 15h14M19 5 5 19"/>'
   };
   var sprite = '<svg xmlns="http://www.w3.org/2000/svg" style="display:none">' +
     Object.keys(P).map(function (k) { return '<symbol id="' + k + '" viewBox="0 0 24 24">' + P[k] + '</symbol>'; }).join("") + "</svg>";
@@ -93,6 +95,12 @@
   });
 
   /* ---------- tabs ---------- */
+  /* [data-when="panelA panelB"] shows only while one of those tab panels is shown (a sidebar count per mockup state). */
+  function syncWhen() {
+    document.querySelectorAll("[data-when]").forEach(function (el) {
+      el.hidden = !el.getAttribute("data-when").split(" ").some(function (id) { var p = document.getElementById(id); return p && !p.hidden; });
+    });
+  }
   document.querySelectorAll('[role="tablist"]').forEach(function (list) {
     list.addEventListener("click", function (e) {
       var tab = e.target.closest('[role="tab"]'); if (!tab) return;
@@ -100,8 +108,13 @@
         var on = t === tab; t.setAttribute("aria-selected", on);
         var p = document.getElementById(t.getAttribute("aria-controls")); if (p) p.hidden = !on;
       });
+      syncWhen();
     });
   });
+  /* review helper: ?tab=<panel id> opens that tab on load */
+  var tabq = /[?&]tab=([\w-]+)/.exec(location.search);
+  if (tabq) { var tq = document.querySelector('[role="tab"][aria-controls="' + tabq[1] + '"]'); if (tq) tq.click(); }
+  syncWhen();
 
   /* ---------- list movement: j/k, arrows, enter, x ---------- */
   var rows = function () { return Array.prototype.slice.call(document.querySelectorAll("[data-row]")).filter(function (r) { return r.offsetParent !== null; }); };

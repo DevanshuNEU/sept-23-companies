@@ -5,26 +5,28 @@ import { EmptyState, StateBanner } from '@/components/state-views';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDayTime } from '@/lib/format';
+import { jobKindLabel } from '@/lib/status';
 
 /** How many people tomorrow's preview names before "and N more". */
 const PREVIEW = 3;
 
 /**
- * The shared stale banner when the daily list job failed or is late, with the job's own error (the same words as
- * the phase-1 Today, now at Proposals).
+ * The shared stale banner when the plan's job failed or is late, with the job's own error and name (the plan job on
+ * the API, as the phase-1 Today names the daily list, now at Proposals).
  */
 export function PlanJobBanner({ job }: { job: JobRunSummary | null }) {
   if (!job) return null;
+  const name = jobKindLabel[job.job];
   if (job.status === 'failed') {
     return (
-      <StateBanner tone="warn" title={`Daily list failed ${formatDayTime(job.startedAt)}`}>
+      <StateBanner tone="warn" title={`${name} failed ${formatDayTime(job.startedAt)}`}>
         {job.error || 'The job stopped without an error message.'}
       </StateBanner>
     );
   }
   if (job.late) {
     return (
-      <StateBanner tone="warn" title="Daily list is late">
+      <StateBanner tone="warn" title={`${name} is late`}>
         {job.expectedNextAt ? `It was expected ${formatDayTime(job.expectedNextAt)}.` : 'It has not run on time.'}
       </StateBanner>
     );

@@ -191,22 +191,13 @@ describe('usePlanActions', () => {
     expect((await client.plan()).rows[2]?.state).toBe('done');
   });
 
-  it('a flush as the tab closes sends both steps at once with the revision on screen, and both land in any order', async () => {
+  it('a flush as the tab closes sends both steps at once, each with the revision the one before it leaves, and both land', async () => {
     const { client, rowOf, act: run } = await open();
     const request = vi.spyOn(client, 'logRequest');
-    const original = client.logApplied.bind(client);
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    // The apply log is held back, so the request log reaches the server first and the apply log arrives second.
-    const apply = vi.spyOn(client, 'logApplied').mockImplementation(async (...args) => {
-      await gate;
-      return original(...args);
-    });
+    const apply = vi.spyOn(client, 'logApplied');
     const row = rowOf(3);
-    run((a) => a.logApplied(row));
     run((a) => a.logRequest(row));
+    run((a) => a.logApplied(row));
     await settle();
     act(() => {
       window.dispatchEvent(new Event('pagehide'));
@@ -215,12 +206,10 @@ describe('usePlanActions', () => {
     expect(apply).toHaveBeenCalledTimes(1);
     expect(request.mock.calls[0]?.[3]).toMatchObject({ keepalive: true });
     expect(apply.mock.calls[0]?.[3]).toMatchObject({ keepalive: true });
-    // Step logs are append-only: neither carries a guessed revision, just the one the row had.
+    // The API checks the row revision on every log and moves it on by one, and the page cannot wait for the first
+    // answer: the second log goes with the revision the first one leaves.
     expect(request.mock.calls[0]?.[2]).toBe(row.revision);
-    expect(apply.mock.calls[0]?.[2]).toBe(row.revision);
-    await settle(50);
-    expect((await client.plan()).rows[2]?.steps.map((s) => s.at !== null)).toEqual([true, false]);
-    release();
+    expect(apply.mock.calls[0]?.[2]).toBe(row.revision + 1);
     await settle(50);
     expect((await client.plan()).rows[2]?.state).toBe('done');
   });

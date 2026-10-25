@@ -757,11 +757,13 @@ describe('plan writes: logging', () => {
     expect((await rowAt(c, 3)).steps[0]?.at).not.toBeNull();
   });
 
-  it('logging a step that is already logged changes nothing', async () => {
+  it('logging a step that is already logged under another key is refused and changes nothing, as the API does', async () => {
     const c = client();
     const row = await rowAt(c, 1);
-    const out = await c.logRequest(row.entryId, { personId: personOf(row), idempotencyKey: 'another-key' }, row.revision, opt());
-    expect(out).toEqual(row);
+    const err = await rejection(c.logRequest(row.entryId, { personId: personOf(row), idempotencyKey: 'another-key' }, row.revision, opt()));
+    expect(err.code).toBe('not_allowed');
+    expect(err.message).toMatch(/^Already logged/);
+    expect(await rowAt(c, 1)).toEqual(row);
     expect((await c.progress()).today.requests).toBe(2);
   });
 
@@ -773,17 +775,20 @@ describe('plan writes: logging', () => {
     expect(err.code).toBe('not_allowed');
   });
 
-  it('logging a step is append-only: a stale revision still logs it, once', async () => {
+  it('a step log checks the row revision, as the API does: a stale one conflicts and logs nothing', async () => {
     const c = client();
     const row = await rowAt(c, 3);
-    await logReq(c, row);
-    expect((await c.progress()).today.requests).toBe(3);
-    // The second step, sent with the revision the row had before the first step bumped it (an out-of-order arrival).
-    const out = await c.logApplied(row.entryId, { postingId: postingOf(row), idempotencyKey: applyKey(row) }, row.revision, opt());
+    const first = await logReq(c, row);
+    expect(first.revision).toBe(row.revision + 1);
+    // The second step, sent with the revision the row had before the first step moved it on.
+    const stale = await rejection(c.logApplied(row.entryId, { postingId: postingOf(row), idempotencyKey: applyKey(row) }, row.revision, opt()));
+    expect(stale.code).toBe('conflict');
+    expect((await c.progress()).today.applications).toBe(2);
+    // With the revision the first log answered, it lands.
+    const out = await c.logApplied(row.entryId, { postingId: postingOf(row), idempotencyKey: applyKey(row) }, first.revision, opt());
     expect(out.state).toBe('done');
-    expect((await c.progress()).today.applications).toBe(3);
     expect((await c.plan()).done).toBe(3);
-    // A wildly old revision on a new key for an open step also lands; the same key again still changes nothing.
+    // The same key again is a replay: the API finds the touch before it looks at the revision, so any revision does.
     const again = await c.logApplied(row.entryId, { postingId: postingOf(row), idempotencyKey: applyKey(row) }, 0, opt());
     expect(again.steps[1]?.touchId).toBe(out.steps[1]?.touchId);
     expect((await c.progress()).today.applications).toBe(3);

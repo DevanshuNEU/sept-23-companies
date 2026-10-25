@@ -506,10 +506,12 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
   const { rows } = built;
   const done = rows.filter((r) => r.state === 'done').length;
 
+  // The plan's job is #15's plan job, and the not-ready lines are the API's own words (outreach/api/queries/plan.py).
+  const listJob: JobRunSummary | null = c.listJob ? { ...c.listJob, job: 'plan' } : null;
   const notReady: PlanView['notReady'] =
-    scenario === 'weekend' ? { reason: 'weekend', text: "No plan on weekends. Monday's plan has 7 people." }
-    : scenario === 'job_failed' ? { reason: 'job_failed', text: "Today's list is not ready. It is built at 08:00 on weekdays." }
-    : scenario === 'empty' ? { reason: 'not_built', text: "Today's list has not been built yet." }
+    scenario === 'weekend' ? { reason: 'weekend', text: 'No plan on weekends. The next one is below.' }
+    : scenario === 'job_failed' ? { reason: 'job_failed', text: `Today's plan did not build. The plan job said: ${listJob?.error || 'no error text'}` }
+    : scenario === 'empty' ? { reason: 'not_built', text: "Today's plan is not built yet. It builds at 8:00 on weekdays." }
     : null;
   const tomorrow: PlanView['tomorrow'] = scenario === 'empty'
     ? { total: 0, text: 'Nothing is planned yet.', preview: [] }
@@ -520,7 +522,7 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
   const monthFrom = `${asOfDate.slice(0, 7)}-01`;
 
   const plan: PlanView = {
-    asOf: c.asOf, date: c.date, builtAt: noList ? null : c.et(c.date, '08:01'), listJob: c.listJob, notReady, rows, done, total: rows.length,
+    asOf: c.asOf, date: c.date, builtAt: noList ? null : c.et(c.date, '08:01'), listJob, notReady, rows, done, total: rows.length,
     linkedinMonth: { used: n.linkedin[0], limit: 150, hardUsed: n.linkedin[1], hardLimit: 200 },
     tomorrow, week: { requests: week[0], accepts: week[1], replies: week[2] },
   };

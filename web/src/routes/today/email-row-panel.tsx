@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import { Inbox } from 'lucide-react';
-import { pollMs, queryKeys, useClient, type IsoTime, type PlanRow } from '@/api';
+import { pollMs, queryKeys, usePageClient, type IsoTime, type PlanRow } from '@/api';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { messageStatus } from '@/lib/status';
@@ -22,7 +22,7 @@ export function EmailRowPanel({
   actions: Pick<PanelActions, 'onCarry' | 'onNotFit'>;
   headingId?: string;
 }) {
-  const client = useClient();
+  const client = usePageClient('plan');
   const outbox = useViewQuery(queryKeys.outbox, () => client.outbox(), { pollMs: pollMs.outbox });
   const item = row.emailTouchId === null ? undefined : outbox.data?.items.find((i) => i.touchId === row.emailTouchId);
   const person = row.person?.person ?? item?.person ?? null;

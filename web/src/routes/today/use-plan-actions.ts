@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   ApiError,
   queryKeys,
-  useClient,
+  usePageClient,
   type Id,
   type OutcomeKind,
   type OutcomePromptView,
@@ -39,23 +39,24 @@ const sentence = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `
 /* ------------------------------------------------------------------ revisions */
 
 /**
- * Skip, notes and outcomes are state-changing writes, so each carries the revision the last write on the same
- * thing returned. The cached plan only catches up after its refetch, so each commit records the revision it
- * gets back (`noteRevision`) and the next write takes the newest of that, the cache and the row on screen.
+ * Every write on a row, a note or a touch carries the revision the last write on the same thing returned: the API
+ * checks it on each one (step logs too) and moves it on by exactly one. The cached plan only catches up after its
+ * refetch, so each commit records the revision it gets back (`noteRevision`) and the next write takes the newest of
+ * that, the cache and the row on screen.
  *
  * Writes for one thing never overlap: each waits for the one before it, so it can use that one's result. A
- * keepalive flush (the tab is closing) cannot wait or read, so it sends at once with the newest revision known.
- * Step logs are append-only and the API accepts them at any revision, so a flush that sends two of them lands
- * both in whatever order they arrive. A skip or note save flushed beside another write on the same row can be
- * rejected as stale, and says so.
+ * keepalive flush (the tab is closing) cannot wait or read, so it sends at once with the newest revision known plus
+ * one for each write of the lane already sent and not yet answered: the revision each one before it will leave. Sent
+ * in queue order, they land in that order; one that arrives ahead of the write before it is refused as stale, and
+ * the page is gone by then.
  */
-type Lane = { tail: Promise<unknown> };
+type Lane = { tail: Promise<unknown>; started: number };
 const lanes = new WeakMap<QueryClient, Map<string, Lane>>();
 
 function laneOf(queryClient: QueryClient, key: string): Lane {
   const map = lanes.get(queryClient) ?? new Map<string, Lane>();
   lanes.set(queryClient, map);
-  const lane = map.get(key) ?? { tail: Promise.resolve() };
+  const lane = map.get(key) ?? { tail: Promise.resolve(), started: 0 };
   map.set(key, lane);
   return lane;
 }
@@ -69,11 +70,16 @@ function sendVersioned<T extends { revision: Revision }>(
   call: (revision: Revision) => Promise<T>,
 ): Promise<T> {
   const lane = laneOf(queryClient, key);
-  const newest = () => newestRevision(queryClient, key, cached(), seen) ?? seen;
+  const newest = () => (newestRevision(queryClient, key, cached(), seen) ?? seen) + lane.started;
   const run = async (revision: Revision): Promise<T> => {
-    const result = await call(revision);
-    noteRevision(queryClient, key, result.revision);
-    return result;
+    lane.started += 1;
+    try {
+      const result = await call(revision);
+      noteRevision(queryClient, key, result.revision);
+      return result;
+    } finally {
+      lane.started -= 1;
+    }
   };
   const result = o.keepalive ? run(newest()) : lane.tail.then(() => run(newest()));
   lane.tail = result.then(
@@ -141,7 +147,7 @@ function outcomeLabel(t: PromptTouch, kind: OutcomeKind, replyKind: Reply | unde
  * appears.
  */
 export function usePlanActions() {
-  const client = useClient();
+  const client = usePageClient('plan');
   const write = usePendingWrite();
   const { isPending } = usePendingControls();
   const queryClient = useQueryClient();
@@ -348,7 +354,8 @@ export function usePlanActions() {
   const notAFit = (row: PlanRow, reason: RemoveReason, note: string): boolean => {
     const id = removeId(row);
     if (isPending(id)) return false;
-    if (row.state !== 'todo') return refuse(`${row.company.name} is not on today's list to do.`);
+    const blocked = notAFitRefusal(row);
+    if (blocked) return refuse(blocked);
     const label = `Removed ${row.company.name}. Find it on the No-go list.`;
     write({
       id,
@@ -372,6 +379,19 @@ export function usePlanActions() {
     return true;
   };
 
+  /**
+   * Why Not a fit must not start on this row, or null: a row that is not to do, or one with a step logged (on screen,
+   * pending included). The API removes no company with a LinkedIn request or an application out; that one is closed
+   * on its page.
+   */
+  const notAFitRefusal = (row: PlanRow): string | null => {
+    if (row.state !== 'todo') return `${row.company.name} is not on today's list to do.`;
+    if (row.steps.some((s) => s.at !== null)) {
+      return `Not removed. ${row.company.name} already has a request or an application logged. To stop, close it on its page.`;
+    }
+    return null;
+  };
+
   /** True while the newest save of this note waits in its window or for its commit: its checks are unknown. */
   const noteSaving = (noteId: Id): boolean => {
     const id = lastSave.get(queryClient)?.get(noteId);
@@ -380,5 +400,5 @@ export function usePlanActions() {
   /** True while Confirm line for this note waits in its window or for its commit. */
   const confirming = (noteId: Id): boolean => isPending(`confirm:${noteId}`);
 
-  return { logRequest, logApplied, skip, notAFit, saveNote, confirmReason, answer, seeWins, noteSaving, confirming };
+  return { logRequest, logApplied, skip, notAFit, notAFitRefusal, saveNote, confirmReason, answer, seeWins, noteSaving, confirming };
 }

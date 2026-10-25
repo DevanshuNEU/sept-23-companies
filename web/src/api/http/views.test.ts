@@ -20,6 +20,12 @@ describe('DEFAULT_LIVE_VIEWS', () => {
     expect(on.length === 0 || on.length === together.length).toBe(true);
   });
 
+  it('the plan goes live only with Today', () => {
+    // Not a fit on a plan row is `removeCompany`, a Today write: with Today on sample data, a live plan would send its
+    // real company to the sample side and the row would never leave the plan.
+    expect(!DEFAULT_LIVE_VIEWS.includes('plan') || DEFAULT_LIVE_VIEWS.includes('today')).toBe(true);
+  });
+
   it('the no-go list goes live only with Today', () => {
     // Bringing a removed company back is `restoreCompany`, a Today write: with Today on sample data, a click on the
     // live No-go page would restore a fixture company.

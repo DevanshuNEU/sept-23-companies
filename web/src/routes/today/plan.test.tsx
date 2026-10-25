@@ -511,6 +511,21 @@ describe('Today as a plan', () => {
     expect(options().map((o) => o.textContent).join(' ')).not.toMatch(/Mintlify/);
   });
 
+  it('Not a fit after a step is logged is refused up front, as the API keeps a company with a request out', async () => {
+    const { client } = await openPlan();
+    const remove = vi.spyOn(client, 'removeCompany');
+    press('r');
+    expect(await screen.findByText('Logged: request sent to Lena Ortiz.')).toBeInTheDocument();
+    press('n');
+    expect(await screen.findByText('Not removed. Pylon already has a request or an application logged. To stop, close it on its page.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Not a fit' }));
+    await act(async () => {});
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await leavePage();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it('n acts only on a row to do, like its button', async () => {
     await openPlan();
     fireEvent.click(option(1));
@@ -572,11 +587,18 @@ describe('Today as a plan', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
-  it('job_failed shows the stale banner with the job error', async () => {
+  it('job_failed shows the plan job banner with its error, and the API words for the day', async () => {
     await open({ scenario: 'job_failed' });
     expect(await screen.findByText('Could not read the company store: database is locked')).toBeInTheDocument();
-    expect(screen.getByText(/^Daily list failed/)).toBeInTheDocument();
-    expect(screen.getByText("Today's list is not ready. It is built at 08:00 on weekdays.")).toBeInTheDocument();
+    // The plan's job is the plan job (#15), as GET /api/plan reports it, not the old daily list.
+    expect(screen.getByText(/^Plan failed/)).toBeInTheDocument();
+    expect(screen.getByText("Today's plan did not build. The plan job said: Could not read the company store: database is locked")).toBeInTheDocument();
+  });
+
+  it('a day the plan job has not built yet says so in the API words, with nobody to work on', async () => {
+    await open({ scenario: 'empty' });
+    expect(await screen.findByText("Today's plan is not built yet. It builds at 8:00 on weekdays.")).toBeInTheDocument();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
   it('an empty built plan says who to add and how', async () => {

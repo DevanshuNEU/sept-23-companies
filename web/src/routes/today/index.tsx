@@ -5,7 +5,7 @@ import { HelpCircle, Terminal } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
-  useClient,
+  usePageClient,
   type Id,
   type PlanRow,
   type PlanView,
@@ -156,6 +156,12 @@ function PlanWork({ plan }: { plan: PlanView }) {
   const carry = (row: PlanRow) => {
     if (actions.skip(row)) moveOn(row);
   };
+  /** Not a fit opens its dialog only when the API could remove the company; else it says why, once. */
+  const askNotAFit = (row: PlanRow) => {
+    const blocked = actions.notAFitRefusal(row);
+    if (blocked) return void toast(blocked);
+    setRemoving(row);
+  };
   /** An open edit that differs from the saved note: Copy would copy the saved text, so it waits for Save. */
   const unsavedEdit = (row: PlanRow): boolean => {
     const draft = row.note ? edits.get(row.note.noteId) : undefined;
@@ -218,7 +224,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
   const panelActions = (row: PlanRow): PanelActions => ({
     onLog: (kind) => log(row, kind),
     onCarry: () => carry(row),
-    onNotFit: () => setRemoving(row),
+    onNotFit: () => askNotAFit(row),
     onCopy: () => copyNote(row),
     onEdit: () => edit(row),
     onConfirm: () => confirm(row),
@@ -249,7 +255,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
     { keys: 'p', label: 'Log applied', group, enabled: has, run: on((r) => log(r, 'apply')) },
     { keys: 'x', label: 'Carry to tomorrow', group, enabled: has, run: on(carry) },
     // Only a row to do has a Not a fit button, so only a row to do answers n.
-    { keys: 'n', label: 'Not a fit', group, enabled: current?.state === 'todo', run: on((r) => setRemoving(r)) },
+    { keys: 'n', label: 'Not a fit', group, enabled: current?.state === 'todo', run: on(askNotAFit) },
     { keys: 'mod+s', label: 'Save the note', group, enabled: editing, run: on(save) },
   ];
   // These act on the selected person, so a key right after j, k or a click waits for that move to render.
@@ -356,7 +362,7 @@ function PlanContent({ plan }: { plan: PlanView }) {
  * and backlog live at /proposals.
  */
 export default function TodayPage() {
-  const client = useClient();
+  const client = usePageClient('plan');
   const plan = useViewQuery(queryKeys.plan, () => client.plan(), { pollMs: pollMs.default });
   return (
     <div className="h-full min-h-0">

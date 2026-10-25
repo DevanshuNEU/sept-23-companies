@@ -56,9 +56,10 @@ export interface OutreachClient {
   watchList(): Promise<WatchView>;
   score(companyId: Id): Promise<ScoreView>; // 'not_found' for an unknown company
 
-  // Idempotency keys are `plan:<entryId>:request` and `plan:<entryId>:apply`: the same key twice returns the first result and writes nothing.
-  // Logging a step is append-only: a new key for a step that is still open lands whatever `revision` is sent (steps can arrive out of
-  // order), so `revision` is a hint here. Skip, notes and every other state-changing write reject a stale revision with 'conflict'.
+  // Idempotency keys are `plan:<entryId>:request` and `plan:<entryId>:apply`, sent in the body: the same key again (any request id, any
+  // revision) answers with the row and writes nothing. A new key checks the row's `revision` like every other row write: a stale one is
+  // 'conflict' (#11's API checks it on step logs too). A step already logged under another key, a removed company's row, a paused or
+  // no-go company are 'not_allowed'; a person or role that is not the row's is the API's bad_request, which reads as 'not_allowed'.
   logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>;
   logApplied(entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>; // 'not_allowed' with no role
   logOutcome(touchId: Id, kind: OutcomeKind, revision: Revision, o: WriteOptions, replyKind?: Exclude<ReplyKind, 'unsorted' | 'auto_reply'>): Promise<{ revision: Revision }>;

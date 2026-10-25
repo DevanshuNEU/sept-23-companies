@@ -1,7 +1,8 @@
 """The lean Today (until #15's daily plan): `GET /api/today` and the writes on its rows.
 
 `POST /api/companies/{id}/pick`, `/unpick`, `/backlog`, `/remove` and `/restore`, each in `run_write` against the
-company's revision. See `outreach.api.queries.today` for how the list is made.
+company's revision. See `outreach.api.queries.today` for how the list is made. On a day the people plan built,
+pick, unpick, backlog and restore are `not_allowed` (the rows are the plan's); remove stays.
 """
 from fastapi import APIRouter, Depends, Request, Response
 

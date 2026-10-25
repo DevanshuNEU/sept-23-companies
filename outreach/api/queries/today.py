@@ -397,6 +397,22 @@ def _refuse(text: str) -> ApiProblem:
     return ApiProblem("not_allowed", f"{text} {NOT_SAVED}")
 
 
+PLAN_DAY = "Today is a plan of people now. Use the plan to skip a row."
+
+
+def _not_on_a_plan_day(conn: sqlite3.Connection, now: str) -> None:
+    """Pick, unpick, backlog and restore act on today's `daily_list_entry` rows. On a day #15's plan job built, those
+    rows are the people plan's, so these writes are refused and write nothing (the plan's own skip carries a row).
+    The test is `plan_view`'s: a stored list whose rows name a channel, or that a `plan` run built. A day with no list
+    or with the lean Today's list keeps the old behaviour. Remove is not refused: it is the web's Not a fit."""
+    from outreach.api.queries.plan import from_plan_job  # plan imports this module
+
+    day = ny_day(now)
+    if conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is not None \
+            and from_plan_job(conn, day):
+        raise ApiProblem("not_allowed", PLAN_DAY)
+
+
 def _family(conn: sqlite3.Connection, survivor: int) -> list[int]:
     companies = company_map(conn)
     return sorted(c for c in companies if resolve_company(companies, c)[-1] == survivor)
@@ -458,6 +474,7 @@ def _set_entry(ctx: WriteCtx, entry: sqlite3.Row, state: str, why: dict | None =
 def pick(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
     conn = ctx.conn
     row = _survivor_row(conn, company_id)
+    _not_on_a_plan_day(conn, ctx.now)
     survivor, name = row["company_id"], row["name"]
     entry = _todays_entry(conn, ctx.now, survivor, name)
     if entry["state"] == "picked":
@@ -495,6 +512,7 @@ def _leave_picked(ctx: WriteCtx, row: sqlite3.Row, entry: sqlite3.Row, what: str
 def unpick(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
     conn = ctx.conn
     row = _survivor_row(conn, company_id)
+    _not_on_a_plan_day(conn, ctx.now)
     survivor, name = row["company_id"], row["name"]
     entry = _todays_entry(conn, ctx.now, survivor, name)
     if entry["state"] != "picked":
@@ -514,6 +532,7 @@ def unpick(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
 def backlog(ctx: WriteCtx, company_id: int, revision: int) -> DailyEntry:
     conn = ctx.conn
     row = _survivor_row(conn, company_id)
+    _not_on_a_plan_day(conn, ctx.now)
     survivor, name = row["company_id"], row["name"]
     entry = _todays_entry(conn, ctx.now, survivor, name)
     if entry["state"] == "backlog":
@@ -563,6 +582,7 @@ def restore(ctx: WriteCtx, company_id: int, reason: str, revision: int) -> Empty
     row = conn.execute("SELECT * FROM company WHERE company_id = ?", (company_id,)).fetchone()
     if row is None:
         raise ApiProblem("not_found", f"There is no company {company_id}.")
+    _not_on_a_plan_day(conn, ctx.now)
     if row["merged_into"] is not None:
         raise _refuse(f"{row['name']} was merged into another company. Unmerge it in Needs you instead.")
     if row["status"] != "removed":

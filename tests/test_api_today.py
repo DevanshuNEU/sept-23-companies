@@ -587,3 +587,105 @@ class Barred(TodayCase):
         v = self.view()
         self.assertEqual(v["picked"], 1)
         self.assertIn("A", [e["company"]["name"] for e in v["proposed"]])
+
+
+PLAN_DAY = "Today is a plan of people now. Use the plan to skip a row."
+
+
+class PlanDayWrites(TodayCase):
+    """Follow-up ruling: on a day the people plan built, the old Today's pick, unpick, backlog and restore own no row,
+    so they are refused and write nothing. Remove stays (it is the web's Not a fit), and the reads are unchanged."""
+
+    lean_today = False  # as shipped: the plan job, not a read, builds the day
+
+    def setUp(self):
+        super().setUp()
+        self.a = self.ranked("A", 5.0)
+        self.gone = self.ranked("Gone", 4.0, status="removed", remove_reason="not_a_fit")
+        self.conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES (?, ?, 7)",
+                          (TODAY, "2026-11-10T13:00:00Z"))
+
+    def plan_entry(self, cid: int, rank: int, *, person: bool = True, state: str = "proposed") -> None:
+        pid = s.person(self.conn, cid, f"P{rank}", channel="linkedin") if person else None
+        s._insert(self.conn, "daily_list_entry", {
+            "list_date": TODAY, "company_id": cid, "list_group": "level_role", "rank": rank, "state": state,
+            "proposed_at": "2026-11-10T13:00:00Z", "person_id": pid,
+            "channel": "linkedin_request" if person else None,
+            "decided_at": None if state == "proposed" else "2026-11-10T13:00:00Z"})
+
+    def plan_run(self, status: str | None = None) -> None:
+        summary = {"date": TODAY, **({"status": status} if status else {})}
+        self.conn.execute("INSERT INTO job_run(job, started_at, finished_at, status, summary) "
+                          "VALUES ('plan', ?, ?, 'ok', ?)",
+                          ("2026-11-10T13:00:00Z", "2026-11-10T13:00:05Z", json.dumps(summary)))
+
+    def snapshot(self) -> tuple:
+        entries = self.conn.execute("SELECT rowid, state, decided_at, why, revision FROM daily_list_entry "
+                                    "ORDER BY rowid").fetchall()
+        companies = self.conn.execute("SELECT company_id, status, revision FROM company ORDER BY company_id").fetchall()
+        events = self.conn.execute("SELECT count(*) FROM event").fetchone()[0]
+        return [tuple(r) for r in entries], [tuple(r) for r in companies], events
+
+    def refused_on_a_plan_day(self) -> None:
+        before = self.snapshot()
+        for call in (lambda: self.pick(self.a), lambda: self.unpick(self.a), lambda: self.backlog(self.a),
+                     lambda: self.restore(self.gone)):
+            res = call()
+            self.assertEqual((res.status_code, res.json()["code"], res.json()["message"]),
+                             (409, "not_allowed", PLAN_DAY), res.text)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_pick_unpick_backlog_and_restore_are_refused_on_a_plan_with_people(self):
+        self.plan_entry(self.a, 1)
+        self.plan_entry(self.gone, 2, state="removed")
+        self.refused_on_a_plan_day()
+
+    def test_a_plan_of_find_someone_rows_built_by_the_plan_job_is_a_plan_day(self):
+        self.plan_entry(self.a, 1, person=False)
+        self.plan_run()
+        self.refused_on_a_plan_day()
+
+    def test_a_picked_plan_row_cannot_be_unpicked_either(self):
+        self.plan_entry(self.a, 1, state="picked")
+        res = self.unpick(self.a)
+        self.assertEqual((res.status_code, res.json()["message"]), (409, PLAN_DAY), res.text)
+        self.assertEqual(self.entry(self.a)["state"], "picked")
+
+    def test_remove_stays_allowed_on_a_plan_day(self):
+        self.plan_entry(self.a, 1)
+        res = self.remove(self.a)
+        self.assertEqual((res.status_code, res.json()), (200, {}), res.text)
+        self.assertEqual((self.company(self.a)["status"], self.entry(self.a)["state"]), ("removed", "removed"))
+
+    def test_the_reads_are_unchanged_on_a_plan_day(self):
+        self.plan_entry(self.a, 1)
+        self.assertEqual(self.get("/api/today").status_code, 200)
+        self.assertEqual(self.get(f"/api/companies/{self.a}").status_code, 200)
+
+    def test_an_unknown_company_is_still_not_found(self):
+        self.plan_entry(self.a, 1)
+        for path in ("pick", "unpick", "backlog"):
+            res = self.post(f"/api/companies/999999/{path}", {"revision": 1})
+            self.assertEqual(res.status_code, 404, res.text)
+
+    def test_a_lean_list_with_an_already_built_plan_run_keeps_the_old_writes(self):
+        """A list with no channel whose only plan run found the day already built is the lean Today's."""
+        self.plan_entry(self.a, 1, person=False)
+        self.plan_run("already_built")
+        self.assertEqual(self.pick(self.a).json()["state"], "picked")
+        self.assertEqual(self.unpick(self.a).json()["state"], "proposed")
+        self.assertEqual(self.backlog(self.a).json()["state"], "backlog")
+
+
+class LeanDayWrites(TodayCase):
+    """On a day with no plan list (the lean Today's own list) every old write behaves as before."""
+
+    def test_each_old_write_still_works_on_a_lean_day(self):
+        a = self.ranked("A", 5.0)
+        self.view()
+        self.assertEqual(self.pick(a).json()["state"], "picked")
+        self.assertEqual(self.unpick(a).json()["state"], "proposed")
+        self.assertEqual(self.backlog(a).json()["state"], "backlog")
+        self.assertEqual(self.remove(a).status_code, 200)
+        self.assertEqual(self.restore(a).status_code, 200)
+        self.assertEqual((self.company(a)["status"], self.entry(a)["state"]), ("backlog", "backlog"))

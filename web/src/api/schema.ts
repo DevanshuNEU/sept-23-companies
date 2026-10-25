@@ -1785,7 +1785,7 @@ export interface components {
         };
         /**
          * LogAppliedBody
-         * @description He applied to the row's role. `idempotencyKey` is `plan:<entryId>:apply`.
+         * @description He applied to the row's role. `idempotencyKey` is `plan:<entryId>:apply`. `revision` as `LogRequestBody`.
          */
         LogAppliedBody: {
             /** Idempotencykey */
@@ -1793,12 +1793,14 @@ export interface components {
             /** Postingid */
             postingId: number;
             /** Revision */
-            revision: number;
+            revision?: number | null;
         };
         /**
          * LogRequestBody
          * @description He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one
-         *     touch per key, whatever the request id.
+         *     touch per key, whatever the request id. `revision` is optional and never checked: a log only adds a touch, the key
+         *     stops a double press, and two logs sent out of order (the tab closed) must both land. The entry's revision still
+         *     moves on.
          */
         LogRequestBody: {
             /** Idempotencykey */
@@ -1806,7 +1808,7 @@ export interface components {
             /** Personid */
             personId: number;
             /** Revision */
-            revision: number;
+            revision?: number | null;
         };
         /**
          * LogStepBody
@@ -3128,7 +3130,7 @@ export interface components {
         };
         /**
          * SkipRowBody
-         * @description Carry the row to tomorrow.
+         * @description Carry the row to tomorrow. It changes the row's state, so a stale `revision` conflicts.
          */
         SkipRowBody: {
             /** Revision */

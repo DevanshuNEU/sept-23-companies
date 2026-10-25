@@ -2378,7 +2378,7 @@
       },
       "LogAppliedBody": {
         "additionalProperties": false,
-        "description": "He applied to the row's role. `idempotencyKey` is `plan:<entryId>:apply`.",
+        "description": "He applied to the row's role. `idempotencyKey` is `plan:<entryId>:apply`. `revision` as `LogRequestBody`.",
         "properties": {
           "idempotencyKey": {
             "pattern": "^[A-Za-z0-9:._-]{1,200}$",
@@ -2392,22 +2392,28 @@
             "type": "integer"
           },
           "revision": {
-            "minimum": 1.0,
-            "title": "Revision",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
           }
         },
         "required": [
           "postingId",
-          "idempotencyKey",
-          "revision"
+          "idempotencyKey"
         ],
         "title": "LogAppliedBody",
         "type": "object"
       },
       "LogRequestBody": {
         "additionalProperties": false,
-        "description": "He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one\ntouch per key, whatever the request id.",
+        "description": "He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one\ntouch per key, whatever the request id. `revision` is optional and never checked: a log only adds a touch, the key\nstops a double press, and two logs sent out of order (the tab closed) must both land. The entry's revision still\nmoves on.",
         "properties": {
           "idempotencyKey": {
             "pattern": "^[A-Za-z0-9:._-]{1,200}$",
@@ -2421,15 +2427,21 @@
             "type": "integer"
           },
           "revision": {
-            "minimum": 1.0,
-            "title": "Revision",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
           }
         },
         "required": [
           "personId",
-          "idempotencyKey",
-          "revision"
+          "idempotencyKey"
         ],
         "title": "LogRequestBody",
         "type": "object"
@@ -6392,7 +6404,7 @@
       },
       "SkipRowBody": {
         "additionalProperties": false,
-        "description": "Carry the row to tomorrow.",
+        "description": "Carry the row to tomorrow. It changes the row's state, so a stale `revision` conflicts.",
         "properties": {
           "revision": {
             "minimum": 1.0,

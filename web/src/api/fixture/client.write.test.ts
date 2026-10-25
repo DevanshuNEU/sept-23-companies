@@ -1121,7 +1121,7 @@ describe('plan writes: skip, notes, wins, watch', () => {
     expect(plan.rows[3]?.state).toBe('skipped');
     expect(plan.rows.map((r) => r.entryId)).toEqual(before.rows.map((r) => r.entryId));
     expect(plan.tomorrow.total).toBe(before.tomorrow.total + 1);
-    expect(plan.tomorrow.text).toBe('Tomorrow: 8 people');
+    expect(plan.tomorrow.text).toBe('Tomorrow: 8 people, 5 carried over.');
     expect(plan.tomorrow.preview[0]).toMatchObject({ companyName: 'Inngest', personName: 'Jonah Park' });
     expect(plan.tomorrow.preview.length).toBeLessThanOrEqual(5);
     expect(plan.done).toBe(2);

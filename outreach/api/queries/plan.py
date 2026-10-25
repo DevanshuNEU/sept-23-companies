@@ -49,7 +49,7 @@ from outreach.ranking.common import canonical_ids
 EMAIL_DONE = ("approved", "sending", "send_unknown", "sent")  # the first email left drafted
 SEARCH_PREFIX = "https://www.linkedin.com/search/results/people/"
 SEARCH_HINT = "engineer"
-WEEKEND_TEXT = "No plan on weekends. The next one is below."
+WEEKEND_TEXT = "No plan on weekends."
 NOT_BUILT_TEXT = "Today's plan is not built yet. It builds at 8:00 on weekdays."
 LEAN_TEXT = "Today's list came from the old Today page, so there is no people plan today. It builds again tomorrow."
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -343,9 +343,16 @@ def _tomorrow(conn: sqlite3.Connection, day: str, canon: dict[int, int], cfg: Pl
     carried = load_carried(conn, when, cfg, load_outbound(conn, canon, tz=cfg.get("plan", "timezone")))
     preview = _preview(conn, carried, canon)
     label = "Tomorrow" if when == date.fromisoformat(day) + timedelta(days=1) else WEEKDAYS[when.weekday()]
-    text = f"{label}: {total} {'person' if total == 1 else 'people'}"
-    text += f", {len(preview)} carried over." if preview else "."
-    return Tomorrow(total=total, text=text, preview=preview)
+    return Tomorrow(total=total, text=tomorrow_text(label, total, len(preview)), preview=preview)
+
+
+def tomorrow_text(label: str, total: int, carried: int) -> str:
+    """The one line about the next plan. The total is room, not a list: the plan builds at 08:00, and the carried rows
+    (when there are any) are the list the screen shows under this line."""
+    people = f"{total} {'person' if total == 1 else 'people'}"
+    if carried:
+        return f"{label}: {people}, {carried} carried over."
+    return f"{label}'s plan builds at 08:00. Room for {people}."
 
 
 def _preview(conn: sqlite3.Connection, carried: dict, canon: dict[int, int]) -> list[TomorrowRow]:

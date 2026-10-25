@@ -498,6 +498,12 @@ function buildScores(c: PlanCtx, scenario: Scenario): Record<Id, ScoreView> {
 
 /* ------------------------------------------------------------------ the whole fixture */
 
+/** The API's one line about the next plan (outreach/api/queries/plan.py): room, plus the carried list when it has rows. */
+export function tomorrowText(label: string, total: number, carried: number): string {
+  const people = `${total} ${total === 1 ? 'person' : 'people'}`;
+  return carried > 0 ? `${label}: ${people}, ${carried} carried over.` : `${label}'s plan builds at 08:00. Room for ${people}.`;
+}
+
 export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
   const n = numbersFor(scenario);
   const noList = scenario === 'weekend' || scenario === 'job_failed' || scenario === 'empty';
@@ -509,13 +515,13 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
   // The plan's job is #15's plan job, and the not-ready lines are the API's own words (outreach/api/queries/plan.py).
   const listJob: JobRunSummary | null = c.listJob ? { ...c.listJob, job: 'plan' } : null;
   const notReady: PlanView['notReady'] =
-    scenario === 'weekend' ? { reason: 'weekend', text: 'No plan on weekends. The next one is below.' }
+    scenario === 'weekend' ? { reason: 'weekend', text: 'No plan on weekends.' }
     : scenario === 'job_failed' ? { reason: 'job_failed', text: `Today's plan did not build. The plan job said: ${listJob?.error || 'no error text'}` }
     : scenario === 'empty' ? { reason: 'not_built', text: "Today's plan is not built yet. It builds at 8:00 on weekdays." }
     : null;
   const tomorrow: PlanView['tomorrow'] = scenario === 'empty'
     ? { total: 0, text: 'Nothing is planned yet.', preview: [] }
-    : { total: 7, text: scenario === 'weekend' ? 'Monday: 7 people' : 'Tomorrow: 7 people', preview: TOMORROW_PREVIEW.map((p) => ({ ...p })) };
+    : { total: 7, text: tomorrowText(scenario === 'weekend' ? 'Monday' : 'Tomorrow', 7, TOMORROW_PREVIEW.length), preview: TOMORROW_PREVIEW.map((p) => ({ ...p })) };
   const [week, month] = [n.week, n.month];
   const [asOfDate, to] = [c.date, c.date];
   const weekFrom = c.addDays(asOfDate, -6);

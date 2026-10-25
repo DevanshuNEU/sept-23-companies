@@ -14,6 +14,7 @@ from outreach.plan.capacity import linkedin_capacity, plan_capacity
 from outreach.plan.config import default_plan_config
 from outreach.plan.drafts import confirm_reason, save_linkedin_draft
 from outreach.plan.notecheck import load_unconfirmed
+from outreach.api.queries.plan import tomorrow_text as plan_text
 from outreach.plan.prospects import HANDOFF
 from outreach.ranking.common import canonical_ids
 from outreach.store import log_touch
@@ -331,6 +332,7 @@ class PlanReadTests(PlanCase):
         self.set_now("2026-11-14T15:00:00Z")  # Saturday
         view = self.plan()
         self.assertEqual(view["notReady"]["reason"], "weekend")
+        self.assertEqual(view["notReady"]["text"], "No plan on weekends.")
         self.assertEqual((view["rows"], view["done"], view["total"], view["builtAt"]), ([], 0, 0, None))
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 16), CFG)
         self.assertEqual(view["tomorrow"]["total"], total)
@@ -350,7 +352,9 @@ class PlanReadTests(PlanCase):
         self.assertEqual((view["rows"], view["builtAt"], view["date"]), ([], None, "2026-11-11"))
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 12), CFG)
         self.assertEqual(view["tomorrow"]["total"], total)
-        self.assertTrue(view["tomorrow"]["text"].startswith(f"Tomorrow: {total} people"))
+        carried = len(view["tomorrow"]["preview"])
+        self.assertEqual(view["tomorrow"]["text"], f"Tomorrow: {total} people, {carried} carried over."
+                         if carried else f"Tomorrow's plan builds at 08:00. Room for {total} people.")
 
     def test_failed_plan_job_is_job_failed_with_its_error(self):
         self.set_now("2026-11-11T15:00:00Z")
@@ -373,6 +377,7 @@ class PlanReadTests(PlanCase):
     def test_tomorrow_on_friday_names_monday_and_counts_carried(self):
         today = self.plan()["tomorrow"]
         self.assertTrue(today["text"].startswith("Tomorrow: "), today["text"])
+        self.assertTrue(today["text"].endswith(" carried over."), today["text"])
         friday = "2026-11-13"
         self.conn.execute("UPDATE daily_list_entry SET state = 'removed', decided_at = ? WHERE list_date = ?",
                           (EARLIER, DAY))  # Tuesday's rows would carry too: this test is about Friday's
@@ -393,7 +398,19 @@ class PlanReadTests(PlanCase):
         tomorrow = self.plan()["tomorrow"]
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 11), CFG)
         self.assertEqual((tomorrow["text"], tomorrow["preview"]),
-                         (f"Tomorrow: {total} {'person' if total == 1 else 'people'}.", []))
+                         (f"Tomorrow's plan builds at 08:00. Room for {total} {'person' if total == 1 else 'people'}.",
+                          []))
+        self.assertNotIn("below", tomorrow["text"])
+
+    def test_tomorrow_text_says_person_for_one_and_names_the_weekday_for_monday(self):
+        self.conn.execute("UPDATE daily_list_entry SET state = 'removed', decided_at = ?", (EARLIER,))
+        self.set_now("2026-11-13T16:00:00Z")  # Friday: the next plan is Monday's
+        tomorrow = self.plan()["tomorrow"]
+        self.assertEqual(tomorrow["preview"], [])
+        self.assertEqual(tomorrow["text"], f"Monday's plan builds at 08:00. Room for {tomorrow['total']} "
+                                           f"{'person' if tomorrow['total'] == 1 else 'people'}.")
+        self.assertEqual(plan_text("Tomorrow", 1, 0), "Tomorrow's plan builds at 08:00. Room for 1 person.")
+        self.assertEqual(plan_text("Monday", 1, 2), "Monday: 1 person, 2 carried over.")
 
     def test_linkedin_month_comes_from_linkedin_capacity_with_both_limits(self):
         self.request("Pylon", source="own")  # his own request: the hard total only
@@ -544,10 +561,12 @@ class EmptyPlanTests(ApiCase):
         self.assertEqual(view["linkedinMonth"], {"used": 0, "limit": 150, "hardUsed": 0, "hardLimit": 200})
         self.assertEqual(view["tomorrow"]["preview"], [])
         self.assertNotIn("carried", view["tomorrow"]["text"])
-        self.assertTrue(view["tomorrow"]["text"].startswith("Tomorrow: "))
+        self.assertTrue(view["tomorrow"]["text"].startswith("Tomorrow's plan builds at 08:00. Room for "))
 
     def test_a_weekend_on_an_empty_store_is_a_weekend(self):
         self.set_now("2026-11-15T15:00:00Z")  # Sunday: tomorrow is Monday, the next calendar day
         view = self.get("/api/plan").json()
         self.assertEqual(view["notReady"]["reason"], "weekend")
-        self.assertTrue(view["tomorrow"]["text"].startswith("Tomorrow: "))
+        self.assertEqual(view["notReady"]["text"], "No plan on weekends.")
+        self.assertTrue(view["tomorrow"]["text"].startswith("Tomorrow's plan builds at 08:00. Room for "))
+        self.assertNotIn("below", view["notReady"]["text"] + view["tomorrow"]["text"])

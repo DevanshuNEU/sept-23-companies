@@ -482,7 +482,8 @@ class NotifyTest(Base):
                                 "notify:gmail_policy:2026-11-02"])
 
     def test_mac_notifier_does_nothing_outside_the_live_checkout(self):
-        with mock.patch("outreach.sending.notify.subprocess.run") as run:
+        with mock.patch("outreach.sending.notify.live_checkout.is_live", return_value=False), \
+                mock.patch("outreach.sending.notify.subprocess.run") as run:
             notify.mac_notifier("Paused", "Gmail said stop")
         run.assert_not_called()
 

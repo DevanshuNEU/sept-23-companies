@@ -6,7 +6,7 @@ import type {
   FindingsView, FunnelKey, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, WatchView, Win, WinKind, WinsView,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
-import { rescanNote, winsOnDay } from './plan-data';
+import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
 
 const STOP_WORDS = new Set(['of', 'the', 'and', 'a', 'an', 'at', 'for', 'in', 'to']);
 
@@ -925,8 +925,8 @@ export class FixtureClient implements OutreachClient {
       row.revision += 1;
       const t = this.db.plan.tomorrow;
       t.total += 1;
-      t.text = t.text.replace(/\d+/, String(t.total));
       t.preview = [{ companyName: row.company.name, personName: row.person?.person.name ?? null, roleTitle: row.role?.title ?? null }, ...t.preview].slice(0, 5);
+      t.text = tomorrowText(/^\w+/.exec(t.text)?.[0] ?? 'Tomorrow', t.total, t.preview.length);
       return row;
     });
   }

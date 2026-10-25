@@ -92,7 +92,7 @@ describe('FinishPanel', () => {
     expect(plan.tomorrow.total).toBe(7);
     showPanel(plan);
     const tomorrow = within(section('Tomorrow'));
-    expect(tomorrow.getByText('Tomorrow: 7 people')).toBeInTheDocument();
+    expect(tomorrow.getByText('Tomorrow: 7 people, 5 carried over.')).toBeInTheDocument();
     const lines = tomorrow.getAllByRole('listitem').map((li) => li.textContent);
     expect(lines).toEqual(['1Aiden Frost at Hex, Software Engineer, New Grad', '2Rhea Kapoor at Warp, Software Engineer I', '3Find someone at Clerk, Product Engineer']);
     expect(tomorrow.getByText('and 4 more')).toBeInTheDocument();
@@ -100,7 +100,7 @@ describe('FinishPanel', () => {
 
   it('names no "and more" line when the preview shows everyone', () => {
     const plan = planOf();
-    plan.tomorrow = { ...plan.tomorrow, total: 2, text: 'Tomorrow: 2 people', preview: plan.tomorrow.preview.slice(0, 2) };
+    plan.tomorrow = { ...plan.tomorrow, total: 2, text: 'Tomorrow: 2 people, 2 carried over.', preview: plan.tomorrow.preview.slice(0, 2) };
     showPanel(plan);
     expect(within(section('Tomorrow')).getAllByRole('listitem')).toHaveLength(2);
     expect(screen.queryByText(/and \d+ more/)).not.toBeInTheDocument();
@@ -292,7 +292,7 @@ describe('Today with no row to do', () => {
     await openToday({ db });
     expect(await screen.findByRole('heading', { level: 2, name: 'Done for today' })).toBeInTheDocument();
     expect(screen.getByText('6 people, 6 done')).toBeInTheDocument();
-    expect(screen.queryByText(/carried over/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/carried to tomorrow/)).not.toBeInTheDocument();
   });
 
   it('the weekend plan (no rows) shows the not-ready state, not the finish panel', async () => {

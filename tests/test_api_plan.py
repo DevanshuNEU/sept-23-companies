@@ -423,6 +423,46 @@ class PlanReadTests(PlanCase):
         self.assertEqual((three["company"]["id"], three["company"]["name"]), (survivor, "Pylon Labs"))
 
 
+class LeanTodayTests(ApiCase):
+    """The lean Today must never take the day from the plan job (fix round 1)."""
+
+    def seed(self) -> int:
+        from tests.plan_seed import seed_person, seed_scored_company
+        cid = seed_scored_company(self.conn, "Pylon", 90, ["level_role"], version="rk-1")
+        seed_person(self.conn, cid, "Lena Ortiz", "engineer")
+        return cid
+
+    def test_a_today_read_before_the_plan_job_leaves_the_day_to_the_plan(self):
+        from outreach.plan.build import build_plan
+        self.seed()
+        self.assertEqual(self.get("/api/today").status_code, 200)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM daily_list").fetchone()[0], 0)
+        result = build_plan(self.conn, today=date(2026, 11, 10), read_boards=False)
+        self.assertEqual(result.status, "built")
+        view = self.get("/api/plan").json()
+        self.assertIsNone(view["notReady"])
+        self.assertEqual([r["person"]["person"]["name"] for r in view["rows"]], ["Lena Ortiz"])
+
+    def test_a_lean_built_list_reads_as_not_built(self):
+        self.seed()
+        self.lean_today = True
+        self.build()
+        self.assertIsNone(self.get("/api/today").json()["notReady"])  # the lean list exists
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM daily_list_entry WHERE channel IS NULL").fetchone()[0], 1)
+        view = self.get("/api/plan").json()
+        self.assertEqual(view["notReady"]["reason"], "not_built")
+        self.assertEqual((view["rows"], view["done"], view["total"]), ([], 0, 0))
+
+    def test_a_plan_built_list_with_only_find_someone_rows_is_still_the_plan(self):
+        from outreach.plan.build import build_plan
+        from tests.plan_seed import seed_scored_company
+        seed_scored_company(self.conn, "Cerebrium", 90, ["level_role"], version="rk-1")
+        self.assertEqual(build_plan(self.conn, today=date(2026, 11, 10), read_boards=False).status, "built")
+        view = self.get("/api/plan").json()
+        self.assertIsNone(view["notReady"])
+        self.assertEqual([r["person"] for r in view["rows"]], [None])
+
+
 class EmptyPlanTests(ApiCase):
     def test_empty_store_is_a_not_built_view(self):
         res = self.get("/api/plan")

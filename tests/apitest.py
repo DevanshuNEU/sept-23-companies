@@ -4,6 +4,7 @@ Every test gets its own migrated scratch store and a `TestClient` that talks to 
 binds a port, opens the live store or calls the mail API. The client looks like Devanshu's own page (loopback host,
 matching Origin), so a test that wants a foreign page overrides those headers on the call.
 """
+import dataclasses
 import json
 import shutil
 import sys
@@ -26,6 +27,10 @@ NOW = "2026-11-10T15:14:00Z"
 
 
 class ApiCase(unittest.TestCase):
+    # The lean Today builds a list on its first weekday read only with `[today] lean_build` on (off as shipped: the
+    # plan job builds the day). Tests of the lean Today set this to True, so they still test what they did.
+    lean_today = False
+
     def setUp(self):
         self.conn = fresh_store()
         self.addCleanup(self.conn.close)
@@ -52,6 +57,8 @@ class ApiCase(unittest.TestCase):
         """(Re)build the app and the client for this test's store."""
         self.app = create_app(self.settings, clock=lambda: self.now, mx_resolvers=self.mx_resolvers,
                               old_sender_loaded=lambda: self.old_sender)
+        if self.lean_today:
+            self.app.state.config = dataclasses.replace(self.app.state.config, lean_build=True)
         # raise_server_exceptions=False: a bug is the clean 500 envelope a browser would see, and the test asserts it.
         self.client = TestClient(
             self.app, base_url=BASE_URL, headers={"Origin": ORIGIN}, raise_server_exceptions=False

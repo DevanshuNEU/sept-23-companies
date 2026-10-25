@@ -51,6 +51,7 @@ SEARCH_PREFIX = "https://www.linkedin.com/search/results/people/"
 SEARCH_HINT = "engineer"
 WEEKEND_TEXT = "No plan on weekends. The next one is below."
 NOT_BUILT_TEXT = "Today's plan is not built yet. It builds at 8:00 on weekdays."
+LEAN_TEXT = "Today's list came from the old Today page, so there is no people plan today. It builds again tomorrow."
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 ENTRY_SQL = "SELECT rowid, * FROM daily_list_entry"
@@ -325,18 +326,35 @@ def _week(conn: sqlite3.Connection, now: str) -> PlanWeek:
     return PlanWeek(requests=counts["requests"], accepts=counts["accepts"], replies=counts["replies"])
 
 
+def from_plan_job(conn: sqlite3.Connection, day: str) -> bool:
+    """Whether the date's list is #15's people plan. The lean Today also stores lists (with `[today] lean_build` on,
+    or from before the switch): its rows never name a channel, and no `plan` job built that date. Such a list is not
+    the plan and is never repaired or rebuilt (its rowids may already key touches)."""
+    if conn.execute("SELECT 1 FROM daily_list_entry WHERE list_date = ? AND channel IS NOT NULL LIMIT 1",
+                    (day,)).fetchone() is not None:
+        return True
+    return conn.execute(
+        "SELECT 1 FROM job_run WHERE job = 'plan' AND status = 'ok' AND json_valid(summary) "
+        "AND json_extract(summary, '$.date') = ? AND ifnull(json_extract(summary, '$.status'), '') <> 'already_built' "
+        "LIMIT 1", (day,)).fetchone() is not None
+
+
 def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
     day = ny_day(now)
     canon = canonical_ids(conn)
     built = conn.execute("SELECT * FROM daily_list WHERE list_date = ?", (day,)).fetchone()
     last = conn.execute("SELECT * FROM job_run WHERE job = 'plan' ORDER BY started_at DESC, run_id DESC LIMIT 1"
                         ).fetchone()
+    lean = built is not None and not from_plan_job(conn, day)
+    if lean:
+        built = None
     rows = build_rows(conn, entries_of(conn, day), cfg) if built is not None else []
     month = linkedin_capacity(conn, canon, date.fromisoformat(day), cfg)
     return PlanView(
         as_of=now, date=day, built_at=built["built_at"] if built is not None else None,
         list_job=jobs.run_summary(last, now) if last is not None else None,
-        not_ready=None if built is not None else _not_ready(day, last),
+        not_ready=None if built is not None else NotReady(reason="not_built", text=LEAN_TEXT) if lean
+        else _not_ready(day, last),
         rows=rows, done=sum(1 for r in rows if r.state == "done"), total=len(rows),
         linkedin_month=LinkedinMonth(used=month.used, limit=month.budget, hard_used=month.hard_used,
                                      hard_limit=month.hard_limit),

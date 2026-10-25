@@ -4,7 +4,8 @@ and restore.
 THIS IS LEAN. It stands in until #15's daily plan exists, and #15's plan replaces the building, the capacity and the
 `stillEmailing` rows here (the shapes stay). Left out on purpose: find-someone rows, notes, and the prepare step.
 
-How the list is made. The first read of a weekday (New York) builds that day's list in one short write
+How the list is made (only with `[today] lean_build` on; off as shipped, so the plan job builds the day and this
+page shows `not_built` until it has). The first read of a weekday (New York) builds that day's list in one short write
 transaction, so the same people stay in the same places all day and a pick sticks:
 
 - who: `outreach.ranking.scores.ranked_list(laned_only=True)` of the newest ranker version, as
@@ -143,7 +144,12 @@ def build_list(conn: sqlite3.Connection, now: str, day: str, capacity: int, cfg:
 
 def ensure_list(settings, now: str, cfg: ApiConfig, *, old_sender_loaded: bool) -> None:
     """Build today's list on the first read of a weekday: one short write transaction of its own (a read of the
-    page, not a write of his, so it takes no idempotency key). The row's primary key makes a race build it once."""
+    page, not a write of his, so it takes no idempotency key). The row's primary key makes a race build it once.
+
+    Only with `[today] lean_build` on. It is off as shipped: the plan job (#15) builds the day, and a list built here
+    first would make that job stop with `already_built` and leave no people plan for the date."""
+    if not cfg.lean_build:
+        return
     day = ny_day(now)
     if not _weekday(day):
         return

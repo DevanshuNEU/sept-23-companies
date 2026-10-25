@@ -227,6 +227,22 @@ class CarriedTest(unittest.TestCase):
         q = prospect(9, score=99.0, candidates=[ada, ben], carried=self.carry(9, 51, date(2026, 11, 6)))
         self.assertEqual(choose_rows([q], Caps(0, 3, 0, 0), CFG), [])
 
+    def test_a_carried_email_person_the_company_can_no_longer_email_is_dropped_and_the_company_competes(self):
+        ada = cand(50, company=9, role="founder", email="ada@nine.example", basis="published")
+        ben = cand(51, company=9, fit="team")
+        full = dict(status="stale", people=2, email_people=2, position=3)  # email.people_per_company reached
+        p = prospect(9, score=99.0, candidates=[ada, ben], carried=self.carry(9, 50, date(2026, 11, 6)), **full)
+        rows = choose_rows([p], Caps(5, 3, 4, 1), CFG)
+        self.assertEqual([(r.company_id, r.person_id, r.channel, r.carried_from, r.first_proposed) for r in rows],
+                         [(9, 51, "linkedin_request", None, None)])  # a new row for Ben, not a carried one
+        alone = prospect(9, score=99.0, candidates=[ada], carried=self.carry(9, 50, date(2026, 11, 6)), **full)
+        rows = choose_rows([alone], Caps(5, 3, 4, 1), CFG)
+        self.assertEqual([(r.person_id, r.channel_reason, r.carried_from) for r in rows],
+                         [(None, "find_someone", None)])
+        # merely no email slot today: Ada keeps waiting, nobody else in her place
+        waiting = prospect(9, score=99.0, candidates=[ada, ben], carried=self.carry(9, 50, date(2026, 11, 6)))
+        self.assertEqual(choose_rows([waiting], Caps(5, 0, 4, 1), CFG), [])
+
     def test_oldest_first_proposed_is_admitted_first(self):
         old = prospect(1, score=1.0, carried=self.carry(1, None, date(2026, 11, 2)))
         newer = prospect(2, score=99.0, carried=self.carry(2, None, date(2026, 11, 6)))

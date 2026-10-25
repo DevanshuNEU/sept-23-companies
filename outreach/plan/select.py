@@ -132,6 +132,7 @@ def choose_rows(prospects: Sequence[Prospect], caps: Caps, cfg: PlanConfig) -> l
     by_id = {p.company_id: p for p in prospects}
     used: set[int] = set()
     rows: list[Chosen] = []
+    dropped: set[int] = set()  # carried rows that can never be placed: the company competes as a new row
 
     def take(p: Prospect, opt: tuple[str, int | None, str]) -> None:
         nonlocal linkedin, email
@@ -144,8 +145,8 @@ def choose_rows(prospects: Sequence[Prospect], caps: Caps, cfg: PlanConfig) -> l
         rows.append(Chosen(
             company_id=p.company_id, channel=opt[0], person_id=opt[1], group=group_of(p.lanes, cfg),
             list_group=p.lanes[0], channel_reason=opt[2],
-            carried_from=p.carried.carried_from if p.carried else None,
-            first_proposed=p.carried.first_proposed if p.carried else None,
+            carried_from=p.carried.carried_from if p.carried and p.company_id not in dropped else None,
+            first_proposed=p.carried.first_proposed if p.carried and p.company_id not in dropped else None,
             rotation_from=p.contact.last_person_id if status == "stale" else None))
 
     # 1. Carried rows, oldest first. They count against their pool's quota (a LinkedIn row only).
@@ -157,10 +158,15 @@ def choose_rows(prospects: Sequence[Prospect], caps: Caps, cfg: PlanConfig) -> l
         opts = options(p, cfg)
         person = p.carried.person_id
         if person is not None and any(c.person_id == person for c in p.candidates):
-            # Their row, or none today: never another person in their place. Without room, the company waits and the
-            # row stays carried (the next build reads it again from the plan that proposed it).
+            # Their row, or none today: never another person in their place. Without room today, the company waits and
+            # the row stays carried (the next build reads it again from the plan that proposed it). With no option
+            # at all (their email row was dropped: `email.people_per_company` is reached), the carried row can never
+            # be placed: it is dropped, quietly, and the company competes in the passes below as a new row.
             mine = next((o for o in opts if o[1] == person), None)
-            if mine is None or (email if mine[0] == "email" else linkedin) <= 0:
+            if mine is None:
+                dropped.add(p.company_id)
+                continue
+            if (email if mine[0] == "email" else linkedin) <= 0:
                 used.add(p.company_id)
                 continue
             opt = mine

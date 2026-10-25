@@ -180,6 +180,18 @@ class SubmitCandidatesTest(FindingCase):
                          his)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM person").fetchone()[0], 1)
 
+    def test_the_targets_are_ranked_before_the_write_lock_is_taken(self):
+        from outreach.mcp.tools import finding
+        seen = []
+
+        def watching(conn, *args, **kwargs):
+            seen.append(conn.in_transaction)
+            return select_prepare_targets(conn, *args, **kwargs)
+
+        with mock.patch.object(finding, "select_prepare_targets", watching):
+            self.submit(candidate())
+        self.assertEqual(seen, [False])  # ranking 400 companies never holds the lock the sender waits on
+
     def test_more_than_two_candidates_is_bad_input(self):
         before = fingerprint(self.db)
         three = [candidate("Ada Lovelace"), candidate("Grace Hopper"), candidate("Alan Turing")]

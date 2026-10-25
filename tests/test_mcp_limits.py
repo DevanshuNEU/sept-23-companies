@@ -8,6 +8,7 @@ store is refused before SQLite is reached; a stray print never reaches the proto
 import io
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import unittest
@@ -18,10 +19,10 @@ from unittest import mock
 import live_checkout
 from outreach.mcp import __main__ as cli
 from outreach.mcp import server
-from outreach.mcp.guard import NEVER_TABLES
+from outreach.mcp.guard import NEVER_TABLES, install_authorizer, install_triggers, open_guarded
 from outreach.mcp.tools import Input, ToolSpec
 from outreach.reader.types import FIELDS
-from outreach.store import DEFAULT_PATH
+from outreach.store import DEFAULT_PATH, connect
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase
 from tests.pipeline import stages_mcp
@@ -174,6 +175,13 @@ class SweepTest(SweepCase):
                 for mid, row in before.items():
                     if mid != named:
                         self.assertEqual(after[mid], row, f"{name} changed message {mid}")
+                touched = [mid for mid in after if mid not in before] + ([named] if named else [])
+                for mid in touched:  # what the call wrote is a draft or a planned row, never approved
+                    row = self.db.execute("SELECT state, approved_at, saved_by FROM message WHERE message_id = ?",
+                                          (mid,)).fetchone()
+                    self.assertIn(row["state"], ("drafted", "planned"), f"{name} left message {mid} {row['state']}")
+                    self.assertIsNone(row["approved_at"], f"{name} approved message {mid}")
+                    self.assertIn(row["saved_by"], ("claude", "sender"), f"{name} saved message {mid} as another")
 
     def test_no_message_leaves_drafted_through_any_tool_with_any_input(self):
         before = table_hashes(self.db)
@@ -191,6 +199,75 @@ class SweepTest(SweepCase):
         for mid, state in states.items():
             self.assertEqual(self.db.execute("SELECT state FROM message WHERE message_id = ?", (mid,)).fetchone()[0],
                              state)
+
+
+class RawStoreTest(SweepCase):
+    """Per write tool: a schema-valid call, then raw statements that would approve, skip, send or insert an approved
+    email, run on a connection opened the way `run_tool` opens it for that tool (`open_guarded` with its grants), and
+    on the authorizer and the triggers alone. The triggers refuse every one; the authorizer refuses every one the
+    tool's grants do not cover; together nothing moves."""
+
+    def statements(self) -> list[tuple[str, tuple, str, frozenset[str]]]:
+        """(sql, params, table, the columns it updates or {'<insert>'})."""
+        tia = seed.person(self.db, self.acme, "Tia Touchless", email="tia@acme.example")
+        touch = seed.touch(self.db, tia)
+        return [
+            ("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?", (NOW, self.drafted),
+             "message", frozenset({"state", "approved_at"})),
+            ("UPDATE message SET state = 'skipped' WHERE message_id = ?", (self.drafted,), "message",
+             frozenset({"state"})),
+            ("UPDATE message SET state = 'drafted' WHERE message_id = ?", (self.states["approved"],), "message",
+             frozenset({"state"})),
+            ("UPDATE message SET sent_at = ? WHERE message_id = ?", (NOW, self.drafted), "message",
+             frozenset({"sent_at"})),
+            ("INSERT INTO message(touch_id, seq, state, subject, body, approved_at, created_at, updated_at) "
+             "VALUES (?, 0, 'approved', 'Hi', 'Hello', ?, ?, ?)", (touch, NOW, NOW, NOW), "message",
+             frozenset({"<insert>"})),
+        ]
+
+    def test_no_write_tools_connection_can_approve_skip_or_send_on_the_raw_store(self):
+        calls = self.valid()
+        statements = self.statements()
+        writers = [name for name in FIFTEEN if spec(name).grants]
+        self.assertEqual(len(writers), 10)
+        for name in writers:
+            args, _named = calls[name] if name != "reader_submit" else self.valid()["reader_submit"]
+            self.ok(name, args)
+            grants = spec(name).grants
+            layers = {"triggers": lambda: self._triggers_only(), "authorizer": lambda: self._authorizer_only(grants),
+                      "guard": lambda: self._open(grants)}
+            for sql, params, table, columns in statements:
+                grant = grants.get(table)
+                covered = grant is not None and (grant.insert if columns == {"<insert>"} else columns <= grant.update)
+                for layer, connect_layer in layers.items():
+                    if layer == "authorizer" and covered:
+                        continue  # the tool may write those columns; the triggers hold the values
+                    with self.subTest(tool=name, layer=layer, sql=sql[:50]):
+                        conn = connect_layer()
+                        before = messages(self.db)
+                        with self.assertRaises(sqlite3.DatabaseError) as caught:
+                            conn.execute(sql, params)
+                        want = "mcp guard" if layer == "triggers" else ("not authorized", "mcp guard")
+                        self.assertTrue(any(w in str(caught.exception) for w in
+                                            ((want,) if isinstance(want, str) else want)), str(caught.exception))
+                        self.assertEqual(messages(self.db), before)
+
+    def _open(self, grants):
+        conn = open_guarded(grants, path=self.path)
+        self.addCleanup(conn.close)
+        return conn
+
+    def _triggers_only(self):
+        conn = connect(self.path)
+        self.addCleanup(conn.close)
+        install_triggers(conn)
+        return conn
+
+    def _authorizer_only(self, grants):
+        conn = connect(self.path)
+        self.addCleanup(conn.close)
+        install_authorizer(conn, grants)
+        return conn
 
 
 class OfflineTest(unittest.TestCase):

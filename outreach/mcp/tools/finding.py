@@ -35,7 +35,6 @@ from outreach.plan.people import ROLE_KINDS, SOURCE_KINDS
 from outreach.plan.prepare_store import store_company_result
 from outreach.plan.prepare_targets import Target, select_prepare_targets
 from outreach.ranking.common import canonical_ids
-from outreach.store import transaction
 
 __all__ = ["TOOLS"]
 
@@ -111,23 +110,23 @@ def submit_candidates(ctx: Ctx, args: SubmitCandidatesInput) -> dict:
                         "Send the people you found, or none_reason saying why there is nobody. Nothing was written.")
     cfg = default_plan_config()
     banned = load_banned(scopes=tuple(cfg.get("note", "banned_scopes")))[0]  # unusable: [], and every note blocks
-    with transaction(conn):
-        canon = canonical_ids(conn)
-        if args.company_id not in canon:
-            raise ToolError("not_found", f"No company {args.company_id}.", "Use a company id from prepare_targets.")
-        survivor = canon[args.company_id]
-        targets = select_prepare_targets(conn, canon, ctx.today, cfg, count=cfg.get("plan", "scan_limit"))
-        target = next((t for t in targets if t.company_id == survivor), None)
-        if target is None:
-            name = conn.execute("SELECT name FROM company WHERE company_id = ?", (survivor,)).fetchone()["name"]
-            raise ToolError("not_a_target", f"{name} is not on today's list of companies to find someone at.",
-                            "Use a company prepare_targets lists. A company is not on it when it has someone left to "
-                            "contact, is not in play today, or a search found nobody there in the last few days.")
-        reply = {"company_id": target.company_id,
-                 "candidates": [c.model_dump() for c in args.candidates],
-                 "none_reason": (args.none_reason or "").strip()}
-        stored = store_company_result(conn, target, reply, run_id=SIDE_RUN_ID, version=PREPARED_BY, today=ctx.today,
-                                      cfg=cfg, banned=banned, unconfirmed=None)  # None: me.md, read by the writer
+    # The selection reads the ranked list and every prospect: it runs before any lock, and store_company_result
+    # takes the write lock for its own short transaction.
+    canon = canonical_ids(conn)
+    if args.company_id not in canon:
+        raise ToolError("not_found", f"No company {args.company_id}.", "Use a company id from prepare_targets.")
+    survivor = canon[args.company_id]
+    targets = select_prepare_targets(conn, canon, ctx.today, cfg, count=cfg.get("plan", "scan_limit"))
+    target = next((t for t in targets if t.company_id == survivor), None)
+    if target is None:
+        name = conn.execute("SELECT name FROM company WHERE company_id = ?", (survivor,)).fetchone()["name"]
+        raise ToolError("not_a_target", f"{name} is not on today's list of companies to find someone at.",
+                        "Use a company prepare_targets lists. A company is not on it when it has someone left to "
+                        "contact, is not in play today, or a search found nobody there in the last few days.")
+    reply = {"company_id": target.company_id, "candidates": [c.model_dump() for c in args.candidates],
+             "none_reason": (args.none_reason or "").strip()}
+    stored = store_company_result(conn, target, reply, run_id=SIDE_RUN_ID, version=PREPARED_BY, today=ctx.today,
+                                  cfg=cfg, banned=banned, unconfirmed=None)  # None: me.md, read by the writer
     out = asdict(stored)
     return {**out, "rejected": [dict(r) for r in out["rejected"]], "problems": list(out["problems"]),
             "merged_note": None if survivor == args.company_id else

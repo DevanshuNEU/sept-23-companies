@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Today's plan (#15): Monday to Friday at 08:00, build the day's list of people. The job asks the crawler to read the
+  top companies' boards, re-ranks, then chooses the day's rows by LinkedIn and send capacity and writes them in one
+  transaction. It never sends, approves or logs anything. One summary line per run in the log.
+
+  StartCalendarInterval (not StartInterval), so a run missed while the Mac sleeps fires on wake. A rerun is safe: the
+  build is once per date, and a second run for the same date changes nothing. The build command starts
+  /usr/bin/caffeinate -i -w <its pid> when it reads boards, so the Mac stays awake until the build ends.
+
+  It follows the deploy tool's one convention (#17, outreach/deploy/jobs.py): WorkingDirectory is the live checkout,
+  the program is the checkout's venv python run as a module, and both streams go to the log. Placeholders, filled by
+  the deploy tool: {{LIVE_CHECKOUT}} is the live checkout, {{LOG_PATH}} the log file. Nothing else is filled; the
+  store is the default.
+
+  Not installed by the repo, and never loaded from a worktree. Installing it is Devanshu's step, through the deploy
+  tool (python -m outreach.deploy plan, then install). By hand, after filling it in:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.devanshu.outreach-plan.plist
+  To remove it:
+    launchctl bootout gui/$(id -u)/com.devanshu.outreach-plan
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-plan</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.plan</string>
+    <string>build</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Weekday</key>
+      <integer>1</integer>
+      <key>Hour</key>
+      <integer>8</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>2</integer>
+      <key>Hour</key>
+      <integer>8</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>3</integer>
+      <key>Hour</key>
+      <integer>8</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>4</integer>
+      <key>Hour</key>
+      <integer>8</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>5</integer>
+      <key>Hour</key>
+      <integer>8</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

@@ -26,7 +26,8 @@ from outreach.store.timefmt import utcnow
 from outreach.store.writes import append_event, name_key
 
 __all__ = ["SourceRef", "SourceInput", "Candidate", "AddResult", "ROLE_KINDS", "SOURCE_KINDS", "load_candidates",
-           "tier", "rank_people", "pick_channel", "people_search_url", "add_candidate"]
+           "tier", "rank_people", "pick_channel", "people_search_url", "add_candidate", "small_company_ids",
+           "holds_email", "is_linkedin_url", "is_github_host", "linkedin_profile_url"]
 
 ROLE_KINDS = ("engineer", "manager", "founder", "recruiter", "alum", "other")
 SOURCE_KINDS = ("profile", "team", "context", "email", "post")
@@ -115,6 +116,27 @@ def _generic_mailbox(email: str | None, cfg: PlanConfig) -> bool:
     return local in {m.lower() for m in cfg.get("people", "generic_mailboxes")}
 
 
+def small_company_ids(conn: sqlite3.Connection, company_ids: Collection[int], canon: dict[int, int],
+                      cfg: PlanConfig) -> set[int]:
+    """The surviving companies among `company_ids` (and their merged-away duplicates) whose winning `size` or
+    `headcount` evidence has `num_high` at or under `people.founder_max_headcount`. Unknown size is never small."""
+    small_max = cfg.get("people", "founder_max_headcount")
+    rows: dict[int, list[sqlite3.Row]] = {}
+    wanted = {canon.get(c, c) for c in company_ids}
+    family = sorted(c for c in {*canon, *wanted} if canon.get(c, c) in wanted)
+    for part in _chunks(family):
+        for r in conn.execute(
+                f"SELECT company_id, fact, num_high, locked, recorded_at, confidence, evidence_id FROM evidence "
+                f"WHERE fact IN ('size', 'headcount') AND company_id IN ({_marks(len(part))})", part):
+            rows.setdefault(canon.get(r["company_id"], r["company_id"]), []).append(r)
+    out = set()
+    for company, found in rows.items():
+        best = max(found, key=size_order_key)
+        if best["num_high"] is not None and best["num_high"] <= small_max:
+            out.add(company)
+    return out
+
+
 def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], canon: dict[int, int],
                     contacted: Collection[int], today: date, cfg: PlanConfig) -> dict[int, list[Candidate]]:
     """People at `company_ids` (and at their merged-away duplicates) who are not in `contacted` and have no active
@@ -127,7 +149,6 @@ def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], cano
     if not wanted:
         return out
     fresh_days = cfg.get("people", "employer_fresh_days")
-    small_max = cfg.get("people", "founder_max_headcount")
     post_days = cfg.get("email", "hn_post_days")
     tz = cfg.get("plan", "timezone")
     contacted = set(contacted)
@@ -157,25 +178,14 @@ def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], cano
         drafts.update({r[0]: r[1] for r in conn.execute(
             f"SELECT person_id, draft_id FROM linkedin_draft WHERE person_id IN ({_marks(len(part))})", part)})
 
-    size_rows: dict[int, list[sqlite3.Row]] = {}
+    small_ids = small_company_ids(conn, family, canon, cfg)
     asks_posts: dict[int, dict[str, date | None]] = {}
     for part in _chunks(family):
-        for r in conn.execute(
-                f"SELECT company_id, fact, num_high, locked, recorded_at, confidence, evidence_id FROM evidence "
-                f"WHERE fact IN ('size', 'headcount') AND company_id IN ({_marks(len(part))})", part):
-            size_rows.setdefault(canon.get(r["company_id"], r["company_id"]), []).append(r)
         for r in conn.execute(
                 f"SELECT company_id, url, posted_at FROM company_post WHERE asks_email = 1 "
                 f"AND company_id IN ({_marks(len(part))})", part):
             posted = ny_date(r["posted_at"], tz) if r["posted_at"] else None
             asks_posts.setdefault(canon.get(r["company_id"], r["company_id"]), {})[r["url"]] = posted
-
-    def small(company: int) -> bool:
-        rows = size_rows.get(company)
-        if not rows:
-            return False
-        best = max(rows, key=size_order_key)
-        return best["num_high"] is not None and best["num_high"] <= small_max
 
     by_company: dict[int, list[sqlite3.Row]] = {}
     for p in people:
@@ -183,7 +193,7 @@ def load_candidates(conn: sqlite3.Connection, company_ids: Collection[int], cano
 
     for company, rows in by_company.items():
         has_non_recruiter = any(p["role_kind"] in ("engineer", "manager", "founder", "alum") for p in rows)
-        company_small = small(company)
+        company_small = company in small_ids
         cands = []
         for p in rows:
             pid = p["person_id"]
@@ -316,12 +326,29 @@ def _host(url: str) -> str | None:
 
 
 def _github_host(host: str | None) -> bool:
+    """GitHub or its user-content host, any subdomain, any case, with or without one trailing dot (`github.com.` is
+    the same host)."""
+    host = (host or "").lower()
+    host = host[:-1] if host.endswith(".") else host
     return bool(host) and any(host == d or host.endswith("." + d) for d in ("github.com", "githubusercontent.com"))
 
 
 def _linkedin_url(url: str) -> bool:
     low = (url or "").lower()
     return "linkedin.com" in low or "lnkd.in" in low
+
+
+def linkedin_profile_url(url: str | None) -> str | None:
+    """The normalized profile link (`https://www.linkedin.com/in/<slug>`, slug lower case) of a URL with the profile
+    shape, else None."""
+    m = _LINKEDIN_IN.match(url.strip()) if isinstance(url, str) else None
+    return f"https://www.linkedin.com/in/{m.group(1).lower()}" if m else None
+
+
+# The rules above, by public name, for the prepare step (Task 13), which checks a reply before `add_candidate` does.
+holds_email = _holds_email
+is_linkedin_url = _linkedin_url
+is_github_host = _github_host
 
 
 def _refuse(code: str) -> AddResult:
@@ -347,11 +374,14 @@ def _source_problem(s: SourceInput) -> bool:
     return False
 
 
-def _invited(conn: sqlite3.Connection, canon: dict[int, int], survivor: int, backed: Sequence[SourceInput]) -> bool:
-    """A source page that is a post of this company asking for email: the one way a shared mailbox is allowed."""
+def _invited(conn: sqlite3.Connection, canon: dict[int, int], survivor: int, backed: Sequence[SourceInput],
+             email: str) -> bool:
+    """A source page that is a post of this company asking for email, and whose stored text (not only the caller's
+    quote) holds the address: the one way a shared mailbox is allowed."""
     urls = {s.url for s in backed}
     return any(r["url"] in urls and canon.get(r["company_id"], r["company_id"]) == survivor
-               for r in conn.execute("SELECT company_id, url FROM company_post WHERE asks_email = 1"))
+               and _holds_email(r["text"], email)
+               for r in conn.execute("SELECT company_id, url, text FROM company_post WHERE asks_email = 1"))
 
 
 def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title: str = "", role_kind: str,
@@ -362,7 +392,7 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
 
     Refusal codes: `bad_role_kind`, `bad_name`, `company_removed`, `linkedin_source`, `bad_linkedin_url`, `bad_email`,
     `email_source_not_allowed` (GitHub, a noreply address, or a shared mailbox such as info@ unless the source page
-    is an HN post that asks for email), `email_needs_source`, `bad_source` (an unknown kind, a page that is not plain https,
+    is an HN post that asks for email and its stored text holds the address), `email_needs_source`, `bad_source` (an unknown kind, a page that is not plain https,
     a basis on a non-email source or a missing one on an email source, a bad date), `person_elsewhere`. A person who
     is already at the company (same linkedin url, email or name) is returned with `created` False and only the new
     sources are added.
@@ -384,10 +414,9 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
         return _refuse("linkedin_source")
     norm_linkedin = None
     if linkedin_url is not None:
-        m = _LINKEDIN_IN.match(linkedin_url.strip())
-        if not m:
+        norm_linkedin = linkedin_profile_url(linkedin_url)
+        if norm_linkedin is None:
             return _refuse("bad_linkedin_url")
-        norm_linkedin = f"https://www.linkedin.com/in/{m.group(1).lower()}"
     if email is not None:
         email = email.strip().lower()
         if not _EMAIL_SHAPE.match(email):
@@ -401,7 +430,7 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
         backed = [s for s in email_sources if s.email_basis in EMAIL_BASES and _holds_email(s.quote, email)]
         if not backed:
             return _refuse("email_needs_source")
-        if _generic_mailbox(email, cfg or default_plan_config()) and not _invited(conn, canon, survivor, backed):
+        if _generic_mailbox(email, cfg or default_plan_config()) and not _invited(conn, canon, survivor, backed, email):
             return _refuse("email_source_not_allowed")
     if any(_source_problem(s) for s in sources):
         return _refuse("bad_source")

@@ -45,6 +45,7 @@ SOURCES = ROOT / "outreach" / "sources"
 SENDING = ROOT / "outreach" / "sending"
 IMPORTER = ROOT / "outreach" / "importer"
 REVIEW = ROOT / "outreach" / "review"
+PLAN = ROOT / "outreach" / "plan"
 REFRESH = ROOT / "refresh"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
@@ -680,6 +681,74 @@ MUTATIONS = [
     (REVIEW / "merge.py", "unmerge does not put back the pause he set",
      'was.get("previous_paused_at") if status == "working" else None,', "None,",
      "test_unmerge_restores_status_close_reason_and_pause_exactly"),
+
+    # ---- plan/ (#15 Today's plan) -----------------------------------------------------------------------------------
+    (PLAN / "contact.py", "the 14-day boundary uses <=, so a request on day fourteen still waits",
+     "(today - o.anchor_on).days < rotate_days]", "(today - o.anchor_on).days <= rotate_days]",
+     "test_boundary_is_day_fourteen"),
+    (PLAN / "contact.py", "an accepted request waits from the sent date, not the accept date",
+     "(today - o.anchor_on).days < rotate_days]", "(today - o.sent_on).days < rotate_days]",
+     "test_accepted_request_waits_from_the_accept_date"),
+    (PLAN / "outbound.py", "an accept no longer moves the anchor of a touch off its sent date",
+     "anchor_on=max(anchor, accepted_on or sent_on),", "anchor_on=anchor,",
+     "test_accepted_moves_the_anchor_and_replied_and_progress_flags_follow"),
+    (PLAN / "outbound.py", "a log entry with a live touch twin counts a second time (the dedupe is removed)",
+     "        if (person_id, channel, day) in twins:\n            continue\n", "",
+     "test_each_touch_counts_once"),
+    (PLAN / "capacity.py", "the month and its requests are counted in UTC, not New York",
+     '    tz = cfg.get("plan", "timezone")\n    first, last = month_range(today)',
+     '    tz = "UTC"\n    first, last = month_range(today)',
+     "test_month_boundary_is_new_york"),
+    (PLAN / "capacity.py", "a spent or overspent budget gives a negative day (the floor and the guard are gone)",
+     "    remaining = max(0, min(budget - used, hard_limit - hard_used))\n"
+     "    days_left = weekdays_left(today)  # 0 on a weekend that has no weekday left in its month\n"
+     "    if remaining <= 0 or days_left <= 0:\n",
+     "    remaining = min(budget - used, hard_limit - hard_used)\n"
+     "    days_left = weekdays_left(today)  # 0 on a weekend that has no weekday left in its month\n"
+     "    if days_left <= 0:\n",
+     "test_budget_spent_or_overspent_is_zero_not_negative"),
+    (PLAN / "select.py", "the role and reason shares are ignored: one pool, strongest score first",
+     '    fill(pools["role"], quota["role"])\n    fill(pools["reason"], quota["reason"])\n', "",
+     "test_lane_share_80_20"),
+    (PLAN / "select.py", "a stale company rotates whatever its place in the ranked list",
+     '    if p.position > cfg.get("linkedin", "rotate_top_n"):\n        return False, "stale_below_rotation_cutoff"\n',
+     "", "test_stale_rotates_only_near_the_top"),
+    (PLAN / "select.py", "a company is not marked used, so one company can take two rows",
+     "        used.add(p.company_id)\n        status = p.contact.status\n", "        status = p.contact.status\n",
+     "test_capacity_is_never_exceeded"),
+    (PLAN / "people.py", "a recruiter is offered even when an engineer, manager, founder or alum is on record",
+     '            if p["role_kind"] == "recruiter" and has_non_recruiter:\n                continue\n', "",
+     "test_recruiter_only_when_nobody_else_is_on_record"),
+    (PLAN / "people.py", "an email is accepted whatever the page quotes (the whole-address check always passes)",
+     '    return re.search(pattern, quote_text or "", re.I) is not None', "    return True",
+     "test_email_must_be_in_the_quote"),
+    (PLAN / "notecheck.py", "the length check fires one character early (>= the limit)",
+     "    if len(body) > max_chars:", "    if len(body) >= max_chars:", "test_length_boundary"),
+    (PLAN / "notecheck.py", "the playbook's connection-note bans (extra_banned) are not applied",
+     '    rules += [(p, re.compile(p, re.I)) for p in cfg.get("note", "extra_banned")]\n', "",
+     "test_extra_banned_referral_demand"),
+    (PLAN / "drafts.py", "a Claude save may overwrite a confirmed or written line, and a draft he saved",
+     '        if stored is not None and saved_by == "claude" and (\n'
+     '                stored["reason_state"] in READY_STATES or stored["saved_by"] == "devanshu"):\n',
+     "        if False:\n",
+     "test_claude_cannot_overwrite_a_confirmed_or_written_line"),
+    (PLAN / "drafts.py", "a Claude save may overwrite a draft Devanshu saved when its line is still proposed",
+     ' or stored["saved_by"] == "devanshu"):\n', "):\n",
+     "test_claude_cannot_overwrite_a_draft_he_saved"),
+    (PLAN / "prepare_store.py", "a candidate with a LinkedIn source page is no longer refused by the reply check",
+     '    if any(isinstance(s, dict) and isinstance(s.get("url"), str) and is_linkedin_url(s["url"]) for s in raw):\n'
+     "        return None\n", "",
+     "test_a_linkedin_source_is_refused_before_the_store_door_is_reached"),
+    (PLAN / "build.py", "a second build for the same date starts a job run before it finds the plan is there",
+     "    if existing is not None:\n        return PlanResult(\"already_built\"", "    if False:\n        return PlanResult(\"already_built\"",
+     "test_second_run_changes_nothing"),
+    (PLAN / "build.py", "the writes are not one transaction, so a failure midway leaves rows behind",
+     "    with transaction(conn):\n        made = conn.execute(",
+     "    with __import__(\"contextlib\").nullcontext():\n        made = conn.execute(",
+     "test_failure_midway_writes_nothing_and_a_rerun_builds"),
+    (PLAN / "prospects.py", "a carried row never ages out (the roll limit on first_proposed is removed)",
+     "        if business_days_between(first, today) > limit:\n            continue\n", "",
+     "test_carry_limit_is_weekdays_since_first_proposed"),
 ]
 
 

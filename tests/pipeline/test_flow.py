@@ -9,13 +9,18 @@ import importlib.util
 import json
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 from outreach.crawl.stale import Stale, load_stale
 from outreach.net import FetchError
+from outreach.plan.build import build_plan
+from outreach.plan.config import default_plan_config
+from outreach.plan.people import people_search_url
+from outreach.plan.prospects import WHY_KEYS
+from outreach.ranking.common import canonical_ids
 from outreach.ranking.confidence import LEVELS
 from outreach.ranking.config import default_ranker_config
 from outreach.ranking.job import run_rank
@@ -34,6 +39,7 @@ from outreach.rules.rebuild import stored_decision
 from tests.pipeline import stages_crawl, stages_ranking, stages_reader, stages_rules, stages_sending
 import tests.pipeline.harness as harness_module
 from tests.pipeline.harness import STAGE_NAMES, PipelineHarness
+from tests.plan_seed import TODAY, seed_outbound, seed_person, seed_scored_company
 from tests.ranking_seed import EMPLOYERS, POSTINGS, seed_ranking_fixture
 from tests.storetest import fresh_store, seed_company, seed_posting
 
@@ -253,6 +259,56 @@ def ranking_puts_the_sponsoring_new_grad_employer_first_and_keeps_every_rule(h):
         assert row.signals["best_posting_id"] not in stale, f"{key}: a stale posting is the best posting"
         say = row.signals["rank_reason"]
         assert say["level"] in LEVELS and say["basis"].strip(), f"{key}: the rank reason lacks a level or a basis"
+
+
+@invariant("plan")
+def plan_is_sized_one_person_per_company_and_quiet_about_companies_in_play(h):
+    """Counts only the `daily_list` of the stage's date and the people the stage seeded. Rows never pass the two
+    capacities or 60; no company or person twice and every person belongs to the row's company (through merges); a
+    request 5 days old (sent to a merged-away duplicate), an accepted one and a reply each keep their company off the
+    list; the company with a 20 day old request returns with its second candidate and names the first; people rows come
+    before find-someone rows and each find-someone row has a search link; every row is a laned, visible company; every
+    `why` has exactly the agreed keys."""
+    run, s = h.plan.result, h.plan.situation
+    assert run.status == "built", f"the plan stage built {run.status}"
+    rows = h.conn.execute("SELECT * FROM daily_list_entry WHERE list_date = ? ORDER BY rank",
+                          (TODAY.isoformat(),)).fetchall()
+    capacity = h.conn.execute("SELECT capacity FROM daily_list WHERE list_date = ?", (TODAY.isoformat(),)).fetchone()[0]
+    assert capacity == run.linkedin.today + run.email.slots and capacity <= 60, f"capacity {capacity}"
+    linkedin = [r for r in rows if r["channel"] == "linkedin_request"]
+    email = [r for r in rows if r["channel"] == "email"]
+    assert len(linkedin) <= run.linkedin.today, f"{len(linkedin)} LinkedIn rows for {run.linkedin.today}"
+    assert len(email) <= run.email.slots, f"{len(email)} email rows for {run.email.slots} slots"
+    assert len(rows) <= capacity, f"{len(rows)} rows for capacity {capacity}"
+    assert [r["rank"] for r in rows] == list(range(1, len(rows) + 1)), "ranks are 1..n"
+    companies = [r["company_id"] for r in rows]
+    assert len(set(companies)) == len(companies), "a company has two rows"
+    people = [r["person_id"] for r in rows if r["person_id"] is not None]
+    assert len(set(people)) == len(people), "a person has two rows"
+    canon = canonical_ids(h.conn)
+    for r in rows:
+        if r["person_id"] is not None:
+            owner = h.conn.execute("SELECT company_id FROM person WHERE person_id = ?", (r["person_id"],)).fetchone()[0]
+            assert canon.get(owner, owner) == r["company_id"], f"person {r['person_id']} is not at {r['company_id']}"
+    for company in s.blocked:
+        assert company not in companies, f"company {company} is in play and has a row"
+    by_company = {r["company_id"]: r for r in rows}
+    rotated = by_company.get(s.rotating)
+    assert rotated is not None and rotated["person_id"] == s.rotating_second, "the stale company has no second person"
+    assert json.loads(rotated["why"])["rotation"] == {"previous_person_id": s.rotating_first}, "rotation names no one"
+    assert by_company[s.team]["person_id"] == s.team_person, "rank 1 has its team engineer"
+    assert json.loads(by_company[s.team]["why"])["draft_id"] == s.team_draft, "rank 1 shows its draft"
+    assert by_company[s.founder]["channel"] == "email" and by_company[s.founder]["person_id"] == s.founder_person
+    named = [r["person_id"] is not None for r in rows]
+    assert named == sorted(named, reverse=True), "a find-someone row comes before a row with a person"
+    laned = {canon.get(x.company_id, x.company_id) for x in ranked_list(h.conn, laned_only=True)}
+    hidden = {canon.get(x.company_id, x.company_id) for x in hidden_list(h.conn)}
+    for r in rows:
+        assert r["company_id"] in laned and r["company_id"] not in hidden, f"{r['company_id']} has no lane or is hidden"
+        why = json.loads(r["why"])
+        assert tuple(sorted(why)) == tuple(sorted(WHY_KEYS)), f"why keys {sorted(why)}"
+        if r["person_id"] is None:
+            assert why["find_someone"]["search_url"], f"company {r['company_id']} has no search link"
 
 
 @invariant("send")
@@ -892,6 +948,173 @@ class RankFlowTests(HarnessCase):
         self.assertEqual(h.ranking.report.version, latest_version(h.conn))
         self.assertEqual(stages_ranking.TODAY, date(2026, 10, 21))
         self.assertEqual(h.ranking.report.stale_postings, 3, "O, P and Q each have one stale posting")
+
+
+class PlanFlowTests(HarnessCase):
+    """The plan stage, through every stage before it (`h.plan.situation` is what the stage seeded, `h.plan.result`
+    the build). Each test runs the stages up to and including `plan` and reads `TODAY`'s list."""
+
+    def flow(self):
+        h = self.harness()
+        self.assertIn("plan", [n for n, _ in h.stages])
+        for name, run in h.stages:
+            run()
+            if name in INVARIANTS:
+                INVARIANTS[name](h)
+            if name == "plan":  # later streams' stages are not this class's business
+                break
+        return h
+
+    def entries(self, h):
+        return _rows(h, "SELECT * FROM daily_list_entry WHERE list_date = ? ORDER BY rank", TODAY.isoformat())
+
+    def test_plan_stage_registers_one_stage_named_plan_between_rank_and_send(self):
+        h = self.harness()
+        names = [n for n, _ in h.stages]
+        self.assertLess(names.index("rank"), names.index("plan"))
+        self.assertLess(names.index("plan"), names.index("send"))
+        self.assertEqual(names.count("plan"), 1)
+
+    def test_flow_plan_respects_capacity(self):
+        h = self.flow()
+        run = h.plan.result
+        rows = self.entries(h)
+        self.assertEqual((run.linkedin.today, run.email.slots), (10, 15))
+        self.assertEqual(len([r for r in rows if r["channel"] == "linkedin_request"]), run.linkedin.today)
+        self.assertEqual(len([r for r in rows if r["channel"] == "email"]), 1, "only the founder has an address")
+        self.assertLessEqual(len(rows), _rows(h, "SELECT capacity FROM daily_list")[0][0])
+        self.assertLessEqual(run.linkedin.today + run.email.slots, 60)
+
+    def test_flow_plan_has_one_person_per_company(self):
+        h = self.flow()
+        s = h.plan.situation
+        rows = self.entries(h)
+        by_company = {r["company_id"]: r for r in rows}
+        self.assertEqual(len(by_company), len(rows))
+        self.assertNotIn(s.waiting, by_company, "a request 5 days old waits")
+        self.assertNotIn(s.accepted, by_company, "an accepted request waits from the accept date")
+        self.assertNotIn(s.engaged, by_company, "a reply engages the company for good")
+        self.assertNotEqual(s.waiting_duplicate, s.waiting, "the request went to a merged-away duplicate")
+        self.assertEqual(_rows(h, "SELECT merged_into FROM company WHERE company_id = ?", s.waiting_duplicate)[0][0],
+                         s.waiting)
+        rotated = by_company[s.rotating]
+        self.assertEqual(rotated["person_id"], s.rotating_second)
+        self.assertNotEqual(rotated["person_id"], s.rotating_first)
+        self.assertEqual(json.loads(rotated["why"])["rotation"], {"previous_person_id": s.rotating_first})
+        self.assertIsNone(by_company[s.nobody]["person_id"], "rank 7 has nobody: a find-someone row")
+
+    def test_flow_plan_lane_share(self):
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        team = ("team", "https://flow.example/team", "an engineer on the team")
+        for i in range(40):
+            lane = "intern_junior" if i % 5 == 4 else "level_role"
+            seed_person(conn, seed_scored_company(conn, f"Role{i:02}", 100 - i, [lane]), f"Eng {i}", sources=[team])
+        for i in range(15):
+            seed_person(conn, seed_scored_company(conn, f"Reason{i:02}", 40 - i, ["reason_no_role"]), f"Rea {i}",
+                        sources=[team])
+        days = [date(2026, 11, 2) + timedelta(days=n) for n in range(5)]
+        reason_rows = total = 0
+        for n, day in enumerate(days):
+            run = build_plan(conn, today=day, read_boards=False)
+            self.assertEqual((run.status, run.linkedin.today), ("built", 7), day)
+            rows = conn.execute("SELECT * FROM daily_list_entry WHERE list_date = ? ORDER BY rank",
+                                (day.isoformat(),)).fetchall()
+            self.assertEqual(len(rows), 7)
+            reason = sum(1 for r in rows if r["list_group"] == "reason_no_role")
+            if n == 0:
+                self.assertEqual((7 - reason, reason), (6, 1), "capacity 7 gives 6 role rows and 1 reason row")
+            for r in rows:  # he sends every row the same day
+                self.assertIsNotNone(r["person_id"])
+                seed_outbound(conn, r["person_id"], r["company_id"], "linkedin_request", day, lane=r["list_group"])
+            reason_rows, total = reason_rows + reason, total + len(rows)
+            self.assertLessEqual(abs(reason_rows - 0.2 * total), 1, f"after day {n + 1}: {reason_rows} of {total}")
+        self.assertEqual(total, 35)
+
+    def test_flow_plan_14_day_rule_boundary(self):
+        h = self.flow()
+        s = h.plan.situation
+        sent = TODAY - timedelta(days=5)
+        written = _rows(h, "SELECT count(*) FROM daily_list_entry")[0][0]
+
+        def company_rows(day):
+            run = build_plan(h.conn, today=day, read_boards=False, dry_run=True)  # writes nothing
+            return {c.company_id: c for c in run.chosen}
+
+        before = company_rows(sent + timedelta(days=13))
+        self.assertNotIn(s.waiting, before, "13 days old: still waiting")
+        after = company_rows(sent + timedelta(days=14))
+        self.assertIn(s.waiting, after, "14 days old with no answer: the company returns")
+        row = after[s.waiting]
+        self.assertEqual(row.person_id, s.waiting_second)
+        self.assertNotEqual(row.person_id, s.waiting_first)
+        self.assertEqual(row.rotation_from, s.waiting_first)
+        self.assertEqual(_rows(h, "SELECT count(*) FROM daily_list_entry")[0][0], written, "a dry run writes no rows")
+
+    def test_flow_plan_shows_people_before_find_someone_and_every_find_someone_has_a_search_url(self):
+        h = self.flow()
+        rows = self.entries(h)
+        named = [r["person_id"] is not None for r in rows]
+        self.assertEqual(named, sorted(named, reverse=True))
+        self.assertTrue(named[0], "the first row has a person")
+        self.assertIn(False, named, "the situation leaves companies with nobody")
+        names = dict(_rows(h, "SELECT company_id, name FROM company"))
+        hint = default_plan_config().get("people", "search_hint")
+        for r in rows:
+            why = json.loads(r["why"])
+            if r["person_id"] is None:
+                self.assertEqual(why["find_someone"]["search_url"], people_search_url(names[r["company_id"]], hint))
+                self.assertEqual(r["channel"], "linkedin_request")
+            else:
+                self.assertIsNone(why["find_someone"])
+
+    def test_flow_plan_only_proposes_companies_with_a_lane_and_not_hidden_ones(self):
+        h = self.harness()
+        h.run(through="rank")
+        s = h.plan.seed()
+        version = latest_version(h.conn)
+        team = ("team", "https://extra.example/team", "an engineer on the team")
+        extras = {
+            "no lane": seed_scored_company(h.conn, "No Lane Co", 900.0, [], version=version),
+            "removed": seed_scored_company(h.conn, "Removed Co", 899.0, ["level_role"], status="removed",
+                                           version=version),
+            "closed": seed_scored_company(h.conn, "Closed Co", 898.0, ["level_role"], status="closed",
+                                          version=version),
+            "hidden": seed_scored_company(h.conn, "Hidden Co", 897.0, ["level_role"], version=version),
+            "no go": seed_scored_company(h.conn, "No Go Co", 896.0, ["level_role"], version=version),
+        }
+        for company in extras.values():
+            seed_person(h.conn, company, "Extra Eng", sources=[team])
+        h.conn.execute("UPDATE company_score SET signals = json_set(signals, '$.hide', json('{\"reason\": \"test\"}')) "
+                       "WHERE company_id = ?", (extras["hidden"],))
+        h.conn.execute("INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'not_a_fit', 'devanshu', "
+                       "strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))", (extras["no go"],))
+        h.plan.run()
+        INVARIANTS["plan"](h)
+        placed = {r["company_id"] for r in self.entries(h)}
+        for label, company in extras.items():
+            self.assertNotIn(company, placed, label)
+        self.assertEqual(len(placed), 11, "the extras took no place from the companies that may be reached")
+        self.assertIn(s.team, placed)
+
+    def test_flow_plan_is_idempotent_and_the_foundation_flow_test_still_passes(self):
+        h = self.harness()
+        for name, run in h.stages:  # the whole flow, as the foundation test runs it
+            run()
+            if name in INVARIANTS:
+                INVARIANTS[name](h)
+        marks = ("daily_list", "daily_list_entry", "job_run", "event", "person", "person_source", "linkedin_draft",
+                 "outreach_touch")
+
+        def snapshot():
+            return {t: [tuple(r) for r in h.conn.execute(f"SELECT * FROM {t} ORDER BY 1, 2")] for t in marks}
+
+        before = snapshot()
+        again = dict(h.stages)["plan"]()
+        self.assertEqual(again.status, "already_built")
+        self.assertEqual(snapshot(), before, "a second plan run changes nothing")
+        self.assertEqual(build_plan(h.conn, today=TODAY, read_boards=False).status, "already_built")
+        self.assertEqual(snapshot(), before)
 
 
 class ReaderFlowTests(HarnessCase):

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Search, Users } from 'lucide-react';
 import {
@@ -26,6 +26,7 @@ import { replyKindStatus } from '@/lib/status';
 import { useUrlState } from '@/lib/url-state';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { openExternal } from '@/lib/safe-href';
+import { clampPage, pageGroups, pageOfPerson, peopleRange } from './linkedin-pages';
 import { NEXT, nextStep, ORDER, STEP_WORD } from './linkedin-steps';
 import { LinkedInTable, type ShownGroup } from './linkedin-table';
 
@@ -165,11 +166,32 @@ export default function LinkedInPage() {
   const query = useViewQuery(queryKeys.linkedin, () => client.linkedin(), { pollMs: pollMs.default });
   const view = query.data;
 
-  const [tabRaw, setTab] = useUrlState('tab', 'to_reach');
+  const [tabRaw] = useUrlState('tab', 'to_reach');
   const tab: Tab = isTab(tabRaw) ? tabRaw : 'to_reach';
-  const [filter, setFilter] = useUrlState('q', '');
+  const [filter] = useUrlState('q', '');
   const [sel] = useUrlState('sel', '');
+  const [pageRaw, setPage] = useUrlState('page', '1');
   const [replyFor, setReplyFor] = useState<Id | null>(null);
+
+  // A new tab or filter starts at page 1 with nothing selected. One write for all of it: two `useUrlState` writes in
+  // one tick would each start from the same URL, and the second would drop the first.
+  const [, setParams] = useSearchParams();
+  const restart = (key: 'tab' | 'q', value: string, initial: string) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === initial) next.delete(key);
+        else next.set(key, value);
+        next.delete('page');
+        next.delete('sel');
+        return next;
+      },
+      { replace: true },
+    );
+  const setTab = (v: string) => {
+    if (v !== tab) restart('tab', v, 'to_reach');
+  };
+  const setFilter = (v: string) => restart('q', v, '');
 
   const all = (view?.groups ?? []).flatMap((group) => group.people.map((person) => ({ group, person })));
   const find = (id: Id | null) => (id === null ? undefined : all.find((x) => x.person.person.id === id));
@@ -185,10 +207,15 @@ export default function LinkedInPage() {
       ),
     }))
     .filter((g) => g.people.length > 0);
+  // j and k walk every page in order, so the last row of a page leads to the first row of the next.
   const ids = shown.flatMap((g) => g.people.map((p) => p.person.id));
+  const pages = pageGroups(shown);
+  const urlPage = clampPage(pageRaw, pages.length);
+  const firstOf = (n: number) => pages[n - 1]?.[0]?.people[0]?.person.id;
 
-  const { selected, rowProps } = useListNav<Id>({
+  const { selected, select, rowProps } = useListNav<Id>({
     ids,
+    start: firstOf(urlPage),
     onOpen: (id) => {
       const hit = find(id);
       if (hit) navigate(`/companies/${hit.group.company.id}`);
@@ -196,6 +223,34 @@ export default function LinkedInPage() {
     announce: (id) => find(id)?.person.person.name ?? '',
   });
   const current = find(selected);
+
+  // The page in sight is the one holding the selected row, so j and k carry the page with them, a `sel` in the URL
+  // opens its page, and a log that keeps its row (useKeptInTab) keeps the page. With no row selected it is the URL's
+  // page, held to the pages there are: when the last page empties, the one before it shows.
+  const page = pageOfPerson(pages, selected) ?? urlPage;
+  const loaded = view !== undefined;
+  useEffect(() => {
+    if (loaded && String(page) !== pageRaw) setPage(String(page));
+  }, [loaded, page, pageRaw, setPage]);
+
+  // Turning the page selects its first row, so the step keys always act on a row in sight.
+  const turnTo = (n: number) => {
+    const id = firstOf(n);
+    if (id !== undefined) select(id);
+  };
+
+  // A new page starts at its top, unless k came back to the last row of the page before.
+  const topRef = useRef<HTMLDivElement>(null);
+  const lastPage = useRef(page);
+  useEffect(() => {
+    if (lastPage.current === page) return;
+    lastPage.current = page;
+    const row = selected !== null && selected !== firstOf(page) ? topRef.current?.querySelector('tbody tr[aria-selected="true"]') : null;
+    if (row) row.scrollIntoView({ block: 'nearest' });
+    else topRef.current?.scrollIntoView({ block: 'start' });
+    // Only a new page scrolls; `selected` and `firstOf` are read as they are at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   /**
    * Only the person's next step can be logged. An earlier or the same step is already there; a later one would
@@ -269,12 +324,16 @@ export default function LinkedInPage() {
   ];
   // These act on the selected person, so a key right after j, k or a click waits for that move to render.
   useHotkeys(onRow, { selection: selected });
-  useHotkeys(TABS.map((t, i): Binding => ({ keys: String(i + 1), label: `${t.label} tab`, group, run: () => setTab(t.value) })));
+  useHotkeys([
+    ...TABS.map((t, i): Binding => ({ keys: String(i + 1), label: `${t.label} tab`, group, run: () => setTab(t.value) })),
+    { keys: '[', label: 'Previous page', group, enabled: page > 1, run: () => turnTo(page - 1) },
+    { keys: ']', label: 'Next page', group, enabled: page < pages.length, run: () => turnTo(page + 1) },
+  ]);
 
   const replyPerson = find(replyFor)?.person ?? null;
 
   return (
-    <div className="max-w-[1360px] px-6 pt-5 pb-12">
+    <div ref={topRef} className="max-w-[1360px] px-6 pt-5 pb-12">
       <div className="mb-4 flex items-end gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">LinkedIn list</h1>
@@ -330,7 +389,22 @@ export default function LinkedInPage() {
               </div>
             }
           >
-            {(v) => <LinkedInTable groups={shown} asOf={v.asOf} rowProps={rowProps} onLog={onLog} onCopy={copyRole} />}
+            {(v) => (
+              <LinkedInTable
+                groups={pages[page - 1] ?? []}
+                asOf={v.asOf}
+                rowProps={rowProps}
+                onLog={onLog}
+                onCopy={copyRole}
+                pageInfo={{
+                  page,
+                  count: pages.length,
+                  ...peopleRange(pages, page),
+                  onPrevious: () => turnTo(page - 1),
+                  onNext: () => turnTo(page + 1),
+                }}
+              />
+            )}
           </QueryState>
         </TabsContent>
       </Tabs>

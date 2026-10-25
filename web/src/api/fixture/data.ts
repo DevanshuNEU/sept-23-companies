@@ -28,9 +28,11 @@ import { buildPlanFixture } from './plan-data';
 export type Scenario =
   | 'default' | 'hard_block' | 'signed_out' | 'empty' | 'weekend' | 'job_failed' | 'error' | 'many_sent'
   | 'quiet_week' | 'first_week' | 'plan_done' | 'win' | 'fresh' // the plan scenarios (#33); `fresh` has no outcomes ever
-  | 'review'; // Needs you with every kind, a merge question and today's settlings (#16)
+  | 'review' // Needs you with every kind, a merge question and today's settlings (#16)
+  | 'many_linkedin'; // the LinkedIn list long enough to page: 52 to reach across 26 companies
 export const SCENARIOS: readonly Scenario[] = [
   'default', 'hard_block', 'signed_out', 'empty', 'weekend', 'job_failed', 'error', 'many_sent', 'quiet_week', 'first_week', 'plan_done', 'win', 'fresh', 'review',
+  'many_linkedin',
 ];
 
 export interface FixtureDb {
@@ -795,8 +797,42 @@ function lperson(c: Ctx, company: string, name: string, title: string, kind: Rol
   };
 }
 
-function buildLinkedIn(c: Ctx): LinkedInView {
-  const group = (company: string, role: RoleToName, emailed: number, people: LinkedInPerson[], heldBy: LinkedInGroup['heldBy'] = null): LinkedInGroup =>
+/** The extra companies of the `many_linkedin` scenario and how many people each has to reach (40 in all). */
+const MANY_LINKEDIN: [company: string, toReach: number][] = [
+  ['Pylon', 3], ['Cerebrium', 2], ['Trigger.dev', 2], ['Baseten', 1], ['Inngest', 3], ['Turso', 2], ['Hex', 2], ['Warp', 1], ['Zed Industries', 2],
+  ['Fly.io', 3], ['Railway', 2], ['Weaviate', 2], ['Clerk', 1], ['Tailscale', 2], ['Sourcegraph', 2], ['Temporal', 3], ['Render', 2], ['PlanetScale', 1],
+  ['Modal', 2], ['Neon', 2],
+];
+const MANY_FIRST = ['Ada', 'Bruno', 'Celia', 'Dev', 'Elif', 'Farid', 'Gemma', 'Hugo', 'Ines', 'Jonah', 'Kira', 'Leo', 'Marta', 'Nikhil', 'Oona', 'Pavel', 'Quinn', 'Rosa', 'Sami', 'Tess', 'Uma', 'Victor'];
+const MANY_LAST = ['Abara', 'Lindqvist', 'Moreau', 'Okafor', 'Petrov', 'Quist', 'Ramos', 'Sato', 'Tanaka', 'Varga', 'Weller', 'Yilmaz'];
+
+/** The `many_linkedin` groups: names, kinds and reasons rotate so every look shows up; every fifth company has no role yet. */
+function manyLinkedIn(c: Ctx, group: (company: string, role: RoleToName | null, emailed: number, people: LinkedInPerson[]) => LinkedInGroup): LinkedInGroup[] {
+  const kinds: RoleKind[] = ['engineer', 'manager', 'founder', 'engineer', 'recruiter', 'alum'];
+  const titles: Record<RoleKind, string> = {
+    engineer: 'Software Engineer', manager: 'Engineering Manager', founder: 'Co-founder and CTO', recruiter: 'Technical Recruiter',
+    alum: 'Software Engineer, Northeastern alum', other: 'Product Designer',
+  };
+  let n = 0;
+  return MANY_LINKEDIN.map(([company, toReach], i) => {
+    const people: LinkedInPerson[] = [];
+    const add = (tab: LinkedInPerson['tab'], steps: StepList = []) => {
+      const kind = kinds[n % kinds.length] ?? 'engineer';
+      const name = `${MANY_FIRST[n % MANY_FIRST.length]} ${MANY_LAST[(n * 7) % MANY_LAST.length]}`;
+      const reason: LinkedInReason = kind === 'alum' ? 'alum_first' : n % 4 === 1 ? 'no_email' : 'past_budget';
+      n += 1;
+      people.push(lperson(c, company, name, titles[kind], kind, tab, reason, steps));
+    };
+    for (let k = 0; k < toReach; k += 1) add('to_reach');
+    if (i % 5 === 2) add('waiting', [['request_sent', 3 + (i % 4)]]);
+    if (i === 6) add('replied', [['request_sent', 9], ['accepted', 7], ['message_sent', 5], ['replied', 1]]);
+    const role = i % 5 === 4 ? null : c.role(company, 'Software Engineer, New Grad', 'new_grad', c.spec(company).hq, 3 + i);
+    return group(company, role, 2 + (i % 7), people);
+  });
+}
+
+function buildLinkedIn(c: Ctx, scenario: Scenario): LinkedInView {
+  const group = (company: string, role: RoleToName | null, emailed: number, people: LinkedInPerson[], heldBy: LinkedInGroup['heldBy'] = null): LinkedInGroup =>
     ({ company: c.co(company), role, emailed, onLinkedIn: people.length, heldBy, people });
   const L = (company: string) => (name: string, title: string, kind: RoleKind, tab: LinkedInPerson['tab'], reason: LinkedInReason, steps?: StepList) =>
     lperson(c, company, name, title, kind, tab, reason, steps);
@@ -838,9 +874,12 @@ function buildLinkedIn(c: Ctx): LinkedInView {
       car('Rune Sorensen', 'Software Engineer', 'engineer', 'waiting', 'past_budget', [['request_sent', 2]]),
     ]),
   ];
+  const many = scenario === 'many_linkedin';
+  if (many) groups.push(...manyLinkedIn(c, group));
   const count = (tab: LinkedInPerson['tab']) => groups.reduce((n, g) => n + g.people.filter((p) => p.tab === tab).length, 0);
   // The mockup's All tab reads 31 while the three tabs add to 23, so `all` is stored as shown.
-  return { asOf: AS_OF, groups, counts: { toReach: count('to_reach'), waiting: count('waiting'), replied: count('replied'), all: 31 }, requestsThisWeek: 14 };
+  const all = many ? groups.reduce((n, g) => n + g.people.length, 0) : 31;
+  return { asOf: AS_OF, groups, counts: { toReach: count('to_reach'), waiting: count('waiting'), replied: count('replied'), all }, requestsThisWeek: 14 };
 }
 
 /* ------------------------------------------------------------------ Needs you (needs-you.html) */
@@ -1264,7 +1303,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
   const c = makeCtx();
   const today = buildToday(c);
   const { view: outbox, details, compares } = buildOutbox(c, scenario === 'many_sent' ? 500 : 64);
-  const linkedin = buildLinkedIn(c);
+  const linkedin = buildLinkedIn(c, scenario);
   const { view: needsYou, settled } = buildNeedsYou(c, scenario);
   const noGo = buildNoGo(c);
   const done = buildDone(c);

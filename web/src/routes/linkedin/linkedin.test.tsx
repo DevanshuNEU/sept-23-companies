@@ -1,5 +1,8 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router';
+import { queryKeys, type LinkedInView } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
 import { renderWithApp } from '@/test/render';
@@ -281,6 +284,13 @@ describe('LinkedIn list', () => {
     expect(screen.getByText('Percival Moon')).toBeInTheDocument();
   });
 
+  it('shows everyone on one page when ten companies or fewer are in the tab', async () => {
+    await setup();
+    expect(screen.getByText('Showing 1 to 12 of 12 people')).toBeInTheDocument();
+    expect(screen.queryByText(/^Page \d+ of \d+$/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Next/ })).toBeNull();
+  });
+
   it('says so when a tab is empty', async () => {
     const db = buildFixture();
     db.linkedin.groups.forEach((g) => g.people.forEach((p) => { if (p.tab === 'to_reach') p.tab = 'waiting'; }));
@@ -288,5 +298,170 @@ describe('LinkedIn list', () => {
     renderWithApp(<LinkedInPage />, { route: '/linkedin', client: new FixtureClient(db) });
     expect(await screen.findByText('Nobody to reach.')).toBeInTheDocument();
     expect(screen.getByText('People past the email budget land here when Claude adds them.')).toBeInTheDocument();
+  });
+});
+
+describe('LinkedIn list pages', () => {
+  // many_linkedin: 52 to reach across 26 companies. Page 1 is the six mockup companies plus Pylon, Cerebrium,
+  // Trigger.dev and Baseten (20 people); page 2 runs Inngest to Tailscale (20); page 3 Sourcegraph to Neon (12).
+  const where = () => screen.getByTestId('where').textContent ?? '';
+  const pageParam = () => new URLSearchParams(where().split('?')[1] ?? '').get('page');
+  const pageLine = () => screen.getByText(/^Page \d+ of \d+$/).textContent;
+  const companyLink = (name: string) => within(table()).queryByRole('link', { name });
+
+  function Where() {
+    const location = useLocation();
+    return <p data-testid="where">{location.pathname + location.search}</p>;
+  }
+
+  async function setupMany(route = '/linkedin', queryClient?: QueryClient) {
+    const client = new FixtureClient(buildFixture('many_linkedin'));
+    const data = await client.linkedin();
+    renderWithApp(
+      <>
+        <LinkedInPage />
+        <Where />
+      </>,
+      { route, client, queryClient },
+    );
+    await screen.findByText(/^Showing \d+ to \d+ of \d+ people$/);
+    const peopleAt = (company: string) => {
+      const g = data.groups.find((x) => x.company.name === company);
+      if (!g) throw new Error(`no group ${company}`);
+      return g.people.filter((p) => p.tab === 'to_reach').map((p) => ({ id: p.person.id, name: p.person.name }));
+    };
+    const first = (company: string) => {
+      const p = peopleAt(company)[0];
+      if (!p) throw new Error(`nobody at ${company}`);
+      return p;
+    };
+    return { client, data, peopleAt, first };
+  }
+
+  it('pages by company, ten companies a page, and says who is showing out of 52', async () => {
+    await setupMany();
+    expect(tab(/^To reach/)).toHaveTextContent('52');
+    expect(pageLine()).toBe('Page 1 of 3');
+    expect(screen.getByText('Showing 1 to 20 of 52 people')).toBeInTheDocument();
+    const headers = within(table()).getAllByRole('link').filter((a) => a.getAttribute('href')?.startsWith('/companies/'));
+    expect(headers.map((a) => a.textContent)).toEqual([
+      'Mintlify', 'Browserbase', 'Resend', 'Supabase', 'Graphite', 'Cartesia', 'Pylon', 'Cerebrium', 'Trigger.dev', 'Baseten',
+    ]);
+    expect(screen.getByRole('button', { name: /^Previous/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Next/ }));
+    await waitFor(() => expect(pageLine()).toBe('Page 2 of 3'));
+    expect(screen.getByText('Showing 21 to 40 of 52 people')).toBeInTheDocument();
+    expect(companyLink('Inngest')).not.toBeNull();
+    expect(companyLink('Mintlify')).toBeNull();
+    // A company is never split: all three of Inngest's people are on this page.
+    expect(within(table()).getAllByRole('row').filter((r) => r.closest('tbody'))).toHaveLength(10 + 20);
+    expect(tab(/^To reach/)).toHaveTextContent('52');
+  });
+
+  it('keeps the page in the URL, so a reload lands on it', async () => {
+    await setupMany('/linkedin?page=3');
+    expect(pageLine()).toBe('Page 3 of 3');
+    expect(screen.getByText('Showing 41 to 52 of 52 people')).toBeInTheDocument();
+    expect(companyLink('Neon')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /^Next/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Previous/ }));
+    await waitFor(() => expect(pageParam()).toBe('2'));
+    expect(pageLine()).toBe('Page 2 of 3');
+  });
+
+  it('changing the tab or the filter goes back to page 1', async () => {
+    await setupMany('/linkedin?page=2');
+    expect(pageLine()).toBe('Page 2 of 3');
+    press('4');
+    await waitFor(() => expect(tab(/^All/)).toHaveAttribute('aria-selected', 'true'));
+    expect(pageLine()).toBe('Page 1 of 3');
+    expect(pageParam()).toBeNull();
+    expect(tab(/^All/)).toHaveTextContent('68');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Next/ }));
+    await waitFor(() => expect(pageParam()).toBe('2'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Filter' }), { target: { value: 'software' } });
+    await waitFor(() => expect(pageLine()).toBe('Page 1 of 3'));
+    expect(pageParam()).toBeNull();
+    expect(where()).toContain('q=software');
+  });
+
+  it('j on the last row of a page goes to the first row of the next page, and k comes back', async () => {
+    const { first } = await setupMany();
+    const baseten = first('Baseten');
+    const inngest = first('Inngest');
+    fireEvent.click(row(baseten.name));
+    await waitFor(() => expect(row(baseten.name)).toHaveAttribute('aria-selected', 'true'));
+
+    press('j');
+    await waitFor(() => expect(pageLine()).toBe('Page 2 of 3'));
+    expect(row(inngest.name)).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(pageParam()).toBe('2'));
+
+    press('k');
+    await waitFor(() => expect(pageLine()).toBe('Page 1 of 3'));
+    expect(row(baseten.name)).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(pageParam()).toBeNull());
+  });
+
+  it('] and [ turn the page and select its first row, so the step keys act on a row in sight', async () => {
+    const { first } = await setupMany();
+    press(']');
+    await waitFor(() => expect(pageLine()).toBe('Page 2 of 3'));
+    await waitFor(() => expect(row(first('Inngest').name)).toHaveAttribute('aria-selected', 'true'));
+    press(']');
+    await waitFor(() => expect(pageLine()).toBe('Page 3 of 3'));
+    press(']');
+    expect(pageLine()).toBe('Page 3 of 3');
+    press('[');
+    await waitFor(() => expect(pageLine()).toBe('Page 2 of 3'));
+  });
+
+  it('a person selected in the URL opens on the page that holds them', async () => {
+    const client = new FixtureClient(buildFixture('many_linkedin'));
+    const temporal = (await client.linkedin()).groups.find((g) => g.company.name === 'Temporal')?.people[1];
+    if (!temporal) throw new Error('no Temporal person');
+    renderWithApp(
+      <>
+        <LinkedInPage />
+        <Where />
+      </>,
+      { route: `/linkedin?sel=${temporal.person.id}`, client },
+    );
+    await waitFor(() => expect(pageLine()).toBe('Page 3 of 3'));
+    expect(row(temporal.person.name)).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(pageParam()).toBe('3'));
+  });
+
+  it('a log keeps the page and the row being worked in sight', async () => {
+    const { first } = await setupMany('/linkedin?page=2');
+    const inngest = first('Inngest');
+    fireEvent.click(row(inngest.name));
+    press('r');
+    expect(await screen.findByText(`Logged: request sent to ${inngest.name}.`)).toBeInTheDocument();
+    expect(tab(/^To reach/)).toHaveTextContent('51');
+    expect(pageLine()).toBe('Page 2 of 3');
+    expect(row(inngest.name)).toHaveTextContent('Requested today');
+    expect(row(inngest.name)).toHaveAttribute('aria-selected', 'true');
+    expect(pageParam()).toBe('2');
+  });
+
+  it('when the last page empties it goes to the page before', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { peopleAt } = await setupMany('/linkedin?page=3', queryClient);
+    expect(pageLine()).toBe('Page 3 of 3');
+    const onPage3 = new Set(['Sourcegraph', 'Temporal', 'Render', 'PlanetScale', 'Modal', 'Neon'].flatMap((c) => peopleAt(c).map((p) => p.id)));
+    // A refetch where everyone on page 3 has moved on (logged from another tab).
+    queryClient.setQueryData<LinkedInView>(queryKeys.linkedin, (v) =>
+      v && {
+        ...v,
+        groups: v.groups.map((g) => ({ ...g, people: g.people.map((p) => (onPage3.has(p.person.id) ? { ...p, tab: 'waiting' as const } : p)) })),
+      },
+    );
+    await waitFor(() => expect(pageLine()).toBe('Page 2 of 2'));
+    expect(screen.getByText('Showing 21 to 40 of 40 people')).toBeInTheDocument();
+    await waitFor(() => expect(pageParam()).toBe('2'));
   });
 });

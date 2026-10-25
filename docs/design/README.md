@@ -146,6 +146,7 @@ own keys in section 16.6.
 | L | Open their LinkedIn profile |
 | R, A, M, Y | Log request sent, accepted, message sent, reply |
 | 1 to 4 | To reach, Waiting, Replied, All |
+| [ / ] | Previous page, next page (J and K also cross into the next or previous page) |
 
 ### Needs you
 
@@ -260,6 +261,10 @@ what happened, so the company page tells the whole story.
 
 **Layout.** One table grouped by company. Tabs: To reach, Waiting, Replied, All. A filter field on the right.
 "Requests this week" shown as a plain count (LinkedIn has no rule in #9, so no limit is drawn).
+Ten companies a page, never splitting a company; the page is in the URL (`?page=2`) and a new tab or filter
+starts at page 1. A footer under the table says "Showing 11 to 20 of 52 people" with Previous, "Page 2 of 5" and
+Next. The header and footer stick while the page scrolls. Every column fits from about 1100 px with the sidebar
+open; in a narrower table Why LinkedIn moves under the person's name.
 
 **Elements.**
 

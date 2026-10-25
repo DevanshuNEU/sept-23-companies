@@ -139,6 +139,23 @@ def parse_plan_why(text: str | None) -> PlanWhy:
 
 # ---------------------------------------------------------------------------------------------- notes
 
+def stored_note_checks(raw) -> list[Check]:
+    """The checks #15 stored with a note. Anything that does not read as a list of checks (not JSON, not a list, one
+    element that is not a check) is one `block` check saying so, never an empty list: a note that had a block check
+    must never show as clean."""
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else None
+    except ValueError:
+        data = None
+    if isinstance(data, list):
+        try:
+            return [Check.model_validate(c) for c in data]
+        except (ValueError, TypeError):
+            pass
+    return [Check(code="checks_unreadable", severity="block", title="The stored checks could not be read",
+                  detail="Save the note again to check it before you send it.", fix=None, spans=[])]
+
+
 def note_draft(row: sqlite3.Row, cfg: PlanConfig) -> NoteDraft:
     """A `linkedin_draft` row as the page shows it. The checks are the stored ones (#15's `check_note`)."""
     try:
@@ -152,14 +169,11 @@ def note_draft(row: sqlite3.Row, cfg: PlanConfig) -> NoteDraft:
         shown.append(NoteFact(text=f["text"], source=SourceLink(label=str(f.get("label") or ""),
                                                                 url=str(f.get("url") or "")),
                               in_note=bool(f.get("in_note"))))
-    try:
-        checks = [Check.model_validate(c) for c in json.loads(row["checks"] or "[]")]
-    except ValueError:
-        checks = []
     return NoteDraft(
         note_id=row["draft_id"], text=row["body"], chars=len(row["body"]), max_chars=cfg.get("note", "max_chars"),
         reason_line=row["reason_line"], reason_state=row["reason_state"],
-        needs_your_line=row["reason_state"] == "proposed", facts=shown, checks=checks, saved_by=row["saved_by"],
+        needs_your_line=row["reason_state"] == "proposed", facts=shown, checks=stored_note_checks(row["checks"]),
+        saved_by=row["saved_by"],
         saved_at=row["updated_at"], revision=row["revision"])
 
 
@@ -194,6 +208,40 @@ def _first(rows, key: str) -> dict:
     return found
 
 
+def _company_asked(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanConfig) -> dict[int, PlanStep]:
+    """The request step of each find-someone row (no person), by entry id: #15's company rule (`load_carried`), so the
+    plan, the carry and the counts agree. The row is asked once anyone at its company (through merges) has a
+    LinkedIn request or an email on or after the list date in #15's outbound read (`load_outbound`: touches, legacy
+    email threads, the LinkedIn log). The step names the first such live touch; a contact with no touch behind it
+    (an imported log entry, a first email still in the Outbox) gives no touch id and the New York start of its day."""
+    if not entries:
+        return {}
+    canon = canonical_ids(conn)
+    survivors = {canon.get(e["company_id"], e["company_id"]) for e in entries}
+    days: dict[int, list[date]] = {}
+    for o in load_outbound(conn, canon, tz=cfg.get("plan", "timezone"), company_ids=survivors):
+        if o.channel in ("linkedin_request", "email"):
+            days.setdefault(o.company_id, []).append(o.sent_on)
+    family = survivors | {c for c, s in canon.items() if s in survivors}
+    touches: dict[int, list[sqlite3.Row]] = {}
+    for r in by_ids(conn, "SELECT company_id, touch_id, sent_at FROM outreach_touch WHERE undone_at IS NULL AND "
+                          "channel IN ('linkedin_request', 'email') AND company_id IN ({ids}) "
+                          "ORDER BY sent_at, touch_id", family):
+        touches.setdefault(canon.get(r["company_id"], r["company_id"]), []).append(r)
+    out = {}
+    for e in entries:
+        survivor = canon.get(e["company_id"], e["company_id"])
+        listed = date.fromisoformat(e["list_date"])
+        first = min((d for d in days.get(survivor, ()) if d >= listed), default=None)
+        if first is None:
+            continue
+        start = day_bounds_utc(e["list_date"])[0]
+        sent = next((r for r in touches.get(survivor, ()) if r["sent_at"] >= start), None)
+        out[plan_entry_id(e)] = PlanStep(kind="request", touch_id=sent["touch_id"] if sent else None,
+                                         at=sent["sent_at"] if sent else day_bounds_utc(first.isoformat())[0])
+    return out
+
+
 def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanConfig) -> list[PlanRow]:
     """A `PlanRow` for each entry, in the entries' order, positions 1 up. One query per table, however many rows."""
     if not entries:
@@ -218,9 +266,11 @@ def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanCo
                     email_people):
         threads[t["person_id"]] = t  # the newest thread is the Outbox item
     states = ",".join(f"'{s}'" for s in EMAIL_DONE)
-    gone = {r["touch_id"] for r in by_ids(
-        conn, f"SELECT DISTINCT touch_id FROM message WHERE seq = 0 AND state IN ({states}) "
-              "AND touch_id IN ({ids})", {t["touch_id"] for t in threads.values()})}
+    gone = {r["touch_id"]: r["at"] for r in by_ids(
+        conn, f"SELECT touch_id, min(coalesce(approved_at, sent_at)) AS at FROM message WHERE seq = 0 "
+              f"AND state IN ({states}) AND touch_id IN ({{ids}}) GROUP BY touch_id",
+        {t["touch_id"] for t in threads.values()})}
+    asked = _company_asked(conn, [e for e in entries if e["person_id"] is None and e["channel"] != "email"], cfg)
     rows = []
     for position, (e, d) in enumerate(zip(entries, daily), 1):
         parsed = parse_plan_why(e["why"])
@@ -232,13 +282,16 @@ def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanCo
         if channel == "email":
             thread = threads.get(e["person_id"])
             email_touch = thread["touch_id"] if thread is not None else None
-            done = email_touch in gone
+            left = gone.get(email_touch)
+            done = left is not None and left >= day_bounds_utc(e["list_date"])[0]
         else:
             start = day_bounds_utc(e["list_date"])[0]
-            sent = next((t for t in requests.get(e["person_id"], []) if t["sent_at"] >= start), None) \
-                if person is not None else None
-            steps.append(PlanStep(kind="request", touch_id=sent["touch_id"] if sent else None,
-                                  at=sent["sent_at"] if sent else None))
+            if person is not None:
+                sent = next((t for t in requests.get(e["person_id"], []) if t["sent_at"] >= start), None)
+                steps.append(PlanStep(kind="request", touch_id=sent["touch_id"] if sent else None,
+                                      at=sent["sent_at"] if sent else None))
+            else:
+                steps.append(asked.get(plan_entry_id(e)) or PlanStep(kind="request", touch_id=None, at=None))
             app = applied.get(e["posting_id"]) if e["posting_id"] is not None else None
             if role is not None or app is not None:
                 steps.append(PlanStep(kind="apply", touch_id=app["touch_id"] if app else None,
@@ -306,14 +359,16 @@ def _preview(conn: sqlite3.Connection, carried: dict, canon: dict[int, int]) -> 
     names = {r["company_id"]: r["name"] for r in by_ids(conn, "SELECT company_id, name FROM company WHERE company_id "
                                                               "IN ({ids})", set(carried))}
     people = people_by_ids(conn, {c.person_id for c in carried.values() if c.person_id is not None})
+    titles = {r["posting_id"]: r["title"] for r in by_ids(
+        conn, "SELECT posting_id, title FROM posting WHERE posting_id IN ({ids})",
+        {e["posting_id"] for e in entries.values() if e["posting_id"] is not None})}
     found = []
     for company, c in carried.items():
         e = entries.get((c.carried_from.isoformat(), company))
         rank = e["rank"] if e is not None else 10**6
         title = parse_plan_why(e["why"]).role_title if e is not None else None
         if title is None and e is not None and e["posting_id"] is not None:
-            got = conn.execute("SELECT title FROM posting WHERE posting_id = ?", (e["posting_id"],)).fetchone()
-            title = got["title"] if got else None
+            title = titles.get(e["posting_id"])
         person = people.get(c.person_id) if c.person_id is not None else None
         found.append(((-c.carried_from.toordinal(), rank, company), TomorrowRow(
             company_name=names.get(company, "Unknown company"), person_name=person["name"] if person else None,
@@ -339,6 +394,15 @@ def from_plan_job(conn: sqlite3.Connection, day: str) -> bool:
         "LIMIT 1", (day,)).fetchone() is not None
 
 
+def plan_rows(conn: sqlite3.Connection, day: str, cfg: PlanConfig) -> list[PlanRow] | None:
+    """The rows of the day's people plan, or None when there is none (no list, or a list the lean Today stored). The
+    plan view, the shell and progress count from these, so they always agree."""
+    if conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is None \
+            or not from_plan_job(conn, day):
+        return None
+    return build_rows(conn, entries_of(conn, day), cfg)
+
+
 def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
     day = ny_day(now)
     canon = canonical_ids(conn)
@@ -348,7 +412,7 @@ def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
     lean = built is not None and not from_plan_job(conn, day)
     if lean:
         built = None
-    rows = build_rows(conn, entries_of(conn, day), cfg) if built is not None else []
+    rows = plan_rows(conn, day, cfg) or []
     month = linkedin_capacity(conn, canon, date.fromisoformat(day), cfg)
     return PlanView(
         as_of=now, date=day, built_at=built["built_at"] if built is not None else None,

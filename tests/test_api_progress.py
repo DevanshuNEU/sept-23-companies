@@ -227,6 +227,13 @@ class TodayAndPlan(ProgressCase):
         self.conn.execute(
             "INSERT INTO daily_list(list_date, built_at, capacity) VALUES (?, ?, 7) ON CONFLICT DO NOTHING",
             (list_date, "2026-11-10T11:00:00Z"))
+        # The plan job's own run for the date, as #15's build writes it: a list with only find-someone rows is still
+        # the people plan (a list with no channel anywhere and no plan run is the lean Today's, and counts nothing).
+        self.conn.execute(
+            "INSERT INTO job_run(job, started_at, finished_at, status, summary) SELECT 'plan', ?, ?, 'ok', "
+            "json_object('date', ?) WHERE NOT EXISTS (SELECT 1 FROM job_run WHERE job = 'plan' "
+            "AND json_extract(summary, '$.date') = ?)",
+            ("2026-11-10T11:00:00Z", "2026-11-10T11:00:05Z", list_date, list_date))
         company = s.company(self.conn, f"Co{rank}", "working")
         s._insert(self.conn, "daily_list_entry", {
             "list_date": list_date, "company_id": company, "list_group": "level_role", "rank": rank, "state": state,
@@ -285,11 +292,19 @@ class TodayAndPlan(ProgressCase):
         self.conn.execute("UPDATE message SET sent_at = ? WHERE message_id = ?", ("2026-11-10T14:00:00Z", m))
         self.assertEqual(self.progress()["today"]["done"], 1)
 
-    def test_a_skipped_row_is_not_planned(self):
+    def test_a_skipped_row_still_counts_in_the_plan_total(self):
         self.entry(1, self.lena, "linkedin_request")
-        self.entry(2, None, None, state="backlog")  # a skip sets backlog: carried to tomorrow, not today's work
+        self.entry(2, None, None, state="backlog")  # a skip sets backlog: still today's row, as PlanView.total counts
         self.entry(3, None, None, state="picked")
-        self.assertEqual(self.progress()["today"]["planned"], 2)
+        self.assertEqual(self.progress()["today"]["planned"], 3)
+
+    def test_a_list_the_lean_today_stored_is_no_plan(self):
+        self.conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES ('2026-11-10', ?, 7)",
+                          ("2026-11-10T11:00:00Z",))
+        s._insert(self.conn, "daily_list_entry", {
+            "list_date": "2026-11-10", "company_id": s.company(self.conn, "Lean", "candidate"),
+            "list_group": "level_role", "rank": 1, "state": "proposed", "proposed_at": "2026-11-10T11:00:00Z"})
+        self.assertEqual((self.progress()["today"]["planned"], self.progress()["today"]["done"]), (0, 0))
 
     def test_a_find_someone_row_is_done_by_a_request_at_a_merged_duplicate_of_its_company(self):
         company = self.entry(1, None, None)

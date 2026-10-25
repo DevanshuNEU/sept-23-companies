@@ -415,6 +415,75 @@ class PlanReadTests(PlanCase):
         self.assertEqual(before, after)
         self.assertEqual(after["Pylon"], self.entry_id("Pylon"))
 
+    def test_the_shell_progress_and_the_plan_agree_on_a_built_plan(self):
+        view = self.plan()
+        self.assertEqual((view["done"], view["total"]), (2, 7))
+        self.assertEqual(self.ok(self.get("/api/shell"))["plan"], {"done": 2, "total": 7})
+        today = self.ok(self.get("/api/progress"))["today"]
+        self.assertEqual((today["done"], today["planned"]), (2, 7))
+        self.conn.execute("UPDATE daily_list_entry SET state = 'backlog', decided_at = ? WHERE company_id = ?",
+                          (EARLIER, self.ids["Inngest"]))  # a skipped row still counts in the total
+        self.assertEqual(self.ok(self.get("/api/shell"))["plan"], {"done": 2, "total": 7})
+
+    def test_a_find_someone_row_is_done_once_anyone_at_the_company_was_asked(self):
+        ana = s.person(self.conn, self.ids["Cerebrium"], "Ana Silva", channel="linkedin")
+        self.people["Cerebrium"] = ana
+        self.request("Cerebrium", at="2026-11-09T15:00:00Z")  # before the list date: not this row's
+        self.assertEqual(self.row("Cerebrium")["state"], "todo")
+        touch = self.request("Cerebrium")
+        five = self.row("Cerebrium")
+        self.assertIsNone(five["person"])
+        self.assertEqual(five["steps"][0], {"kind": "request", "touchId": touch, "at": EARLIER})
+        self.assertEqual(five["steps"][1]["at"], None)  # the row has a role: the apply step is still to do
+        self.apply("Cerebrium")
+        self.assertEqual(self.row("Cerebrium")["state"], "done")
+
+    def test_a_find_someone_row_counts_an_email_and_a_merged_duplicate(self):
+        dup = s.company(self.conn, "Cerebrium Inc", "removed", merged_into=self.ids["Cerebrium"])
+        kim = s.person(self.conn, dup, "Kim Ito", channel="email")
+        touch = log_touch(self.conn, person_id=kim, company_id=dup, channel="email", sent_at=EARLIER,
+                          context=self.context(), idempotency_key="seed:kim:email")
+        self.conn.execute("UPDATE daily_list_entry SET posting_id = NULL WHERE company_id = ?",
+                          (self.ids["Cerebrium"],))
+        five = self.row("Cerebrium")
+        self.assertEqual((five["steps"], five["state"]), ([{"kind": "request", "touchId": touch, "at": EARLIER}],
+                                                          "done"))
+
+    def test_a_find_someone_row_counts_a_request_logged_only_in_the_linkedin_log(self):
+        ana = s.person(self.conn, self.ids["Cerebrium"], "Ana Silva", channel="linkedin")
+        s.linkedin(self.conn, ana, "request_sent", EARLIER)  # imported history: no touch behind it
+        self.conn.execute("UPDATE daily_list_entry SET posting_id = NULL WHERE company_id = ?",
+                          (self.ids["Cerebrium"],))
+        five = self.row("Cerebrium")
+        self.assertEqual(five["steps"], [{"kind": "request", "touchId": None, "at": "2026-11-10T05:00:00Z"}])
+        self.assertEqual(five["state"], "done")
+
+    def test_an_email_approved_before_the_list_date_does_not_finish_the_row(self):
+        self.conn.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?",
+                          ("2026-11-10T04:59:59Z", self.email_message))  # still the 9th in New York
+        self.assertEqual(self.row("Mintlify")["state"], "todo")
+        self.conn.execute("UPDATE message SET approved_at = ? WHERE message_id = ?",
+                          ("2026-11-10T05:00:00Z", self.email_message))
+        self.assertEqual(self.row("Mintlify")["state"], "done")
+
+    def test_a_stored_check_that_does_not_parse_becomes_one_block_check(self):
+        self.conn.execute("UPDATE linkedin_draft SET checks = ? WHERE draft_id = ?",
+                          (json.dumps([{"code": "note_too_long", "severity": "block"}, {"nope": 1}]),
+                           self.lena_note.draft_id))
+        checks = self.row("Pylon")["note"]["checks"]
+        self.assertEqual([(c["code"], c["severity"]) for c in checks], [("checks_unreadable", "block")])
+
+    def test_stored_checks_that_are_not_a_list_become_one_block_check(self):
+        from outreach.api.queries.plan import note_draft
+        stored = dict(self.conn.execute("SELECT * FROM linkedin_draft WHERE draft_id = ?",
+                                        (self.lena_note.draft_id,)).fetchone())
+        for raw in ("null", '"text"', "{}", "not json", None, "[1]"):
+            with self.subTest(checks=raw):
+                note = note_draft({**stored, "checks": raw}, CFG)
+                self.assertEqual([(c.code, c.severity) for c in note.checks], [("checks_unreadable", "block")])
+                self.assertIn("could not be read", note.checks[0].title)
+        self.assertEqual(note_draft({**stored, "checks": "[]"}, CFG).checks, [])
+
     def test_a_merged_away_company_answers_as_its_survivor(self):
         survivor = s.company(self.conn, "Pylon Labs")
         self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' "

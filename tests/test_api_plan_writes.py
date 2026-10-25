@@ -160,6 +160,14 @@ class LogRequestTests(PlanWriteCase):
         self.assertEqual((context["source"], context["lane"], context["roleKind"], context["roleAgeDays"],
                           context["roleNamed"]), ("plan", "intern_junior", None, 9, True))
 
+    def test_a_request_on_a_row_whose_posting_closed_names_no_posting(self):
+        self.conn.execute("UPDATE posting SET closed_at = ?, close_reason = 'hand' WHERE posting_id = ?",
+                          ("2026-11-10T14:00:00Z", self.postings["Pylon"]))
+        self.ok(self.log_request("Pylon"))
+        (touch,) = self.touches("linkedin_request", person_id=self.people["Pylon"])
+        context = json.loads(touch["context"])
+        self.assertEqual((touch["posting_id"], context["roleNamed"], context["roleAgeDays"]), (None, False, None))
+
     def test_response_row_matches_the_next_plan_read(self):
         for call in (lambda: self.log_request("Pylon"), lambda: self.log_applied("Pylon", revision=2),
                      lambda: self.skip("Inngest")):

@@ -170,5 +170,77 @@ class QueuedAndThreadStateTest(unittest.TestCase):
         self.assertEqual(self.status().status, "engaged")
 
 
+class QueuedNoGoAndReasonTest(unittest.TestCase):
+    """Fix round 2: a draft that can never be sent keeps nobody out; the reason names the latest activity."""
+
+    def setUp(self):
+        self.conn = fresh_store()
+        self.company = seed_scored_company(self.conn, "Acme", 5.0, ["level_role"])
+        self.person = seed_person(self.conn, self.company, "Ada")
+
+    def status(self):
+        return load_contact_states(self.conn, [self.company], canonical_ids(self.conn), TODAY, CFG)[self.company]
+
+    def no_go(self, person):
+        return self.conn.execute(
+            "INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'said_no', 'devanshu', "
+            "'2026-11-01T00:00:00Z')", (person,)).lastrowid
+
+    def lift(self, no_go_id):
+        self.conn.execute("UPDATE no_go SET lifted_at = '2026-11-05T00:00:00Z', lift_reason = 'changed mind' "
+                          "WHERE no_go_id = ?", (no_go_id,))
+
+    def test_a_queued_first_email_to_a_person_with_a_no_go_does_not_block(self):
+        seed_message(self.conn, seed_email_touch(self.conn, self.person, None), 0, "drafted")
+        self.assertEqual(self.status().status, "waiting")
+        no_go = self.no_go(self.person)
+        got = self.status()
+        self.assertEqual((got.status, got.people_contacted), ("free", 0))
+        self.lift(no_go)
+        self.assertEqual(self.status().status, "waiting")
+
+    def test_a_queued_followup_to_a_person_with_a_no_go_does_not_keep_the_thread_alive(self):
+        touch = seed_email_touch(self.conn, self.person, ago(20), company_id=self.company, outreach=True)
+        seed_message(self.conn, touch, 0, "sent", sent_on=ago(20))
+        seed_message(self.conn, touch, 1, "drafted", due_on=ago(2))
+        self.assertEqual(self.status().status, "waiting")
+        no_go = self.no_go(self.person)
+        self.assertEqual(self.status().status, "stale")  # the sent first email still counts, and it is old
+        self.lift(no_go)
+        self.assertEqual(self.status().status, "waiting")
+
+    def test_a_no_go_on_someone_else_changes_nothing(self):
+        other = seed_person(self.conn, self.company, "Bo")
+        self.no_go(other)
+        seed_message(self.conn, seed_email_touch(self.conn, self.person, None), 0, "approved")
+        self.assertEqual(self.status().status, "waiting")
+
+    def test_a_skipped_message_does_not_block(self):
+        seed_message(self.conn, seed_email_touch(self.conn, self.person, None), 0, "skipped")
+        self.assertEqual(self.status().status, "free")
+
+    def test_the_no_go_follows_the_merge_chain(self):
+        dup = seed_scored_company(self.conn, "Acme Inc", 1.0, [])
+        other = seed_person(self.conn, dup, "Dee")
+        seed_message(self.conn, seed_email_touch(self.conn, other, None), 0, "drafted")
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'duplicate', merged_into = ? "
+                          "WHERE company_id = ?", (self.company, dup))
+        self.assertEqual(self.status().status, "waiting")
+        self.no_go(other)
+        self.assertEqual(self.status().status, "free")
+
+    def test_the_reason_names_the_latest_activity_not_an_old_draft(self):
+        old_draft = Outbound(person_id=1, company_id=1, channel="email", sent_on=ago(300), anchor_on=ago(300),
+                             accepted=False, replied=False, progressed=False, lane=None, context_source="own",
+                             source="queued_email", queued=True)
+        self.assertEqual(state([old_draft, row(1, person=2)]).reason, "Request sent 1 day ago, no answer yet")
+        self.assertEqual(state([row(1, person=2), old_draft]).reason, "Request sent 1 day ago, no answer yet")
+        self.assertEqual(state([old_draft]).reason, "Email queued, no answer yet")
+        today_draft = Outbound(person_id=1, company_id=1, channel="email", sent_on=ago(1), anchor_on=ago(1),
+                               accepted=False, replied=False, progressed=False, lane=None, context_source="own",
+                               source="queued_email", queued=True)
+        self.assertEqual(state([today_draft, row(1, person=2)]).reason, "Email queued, no answer yet")
+
+
 if __name__ == "__main__":
     unittest.main()

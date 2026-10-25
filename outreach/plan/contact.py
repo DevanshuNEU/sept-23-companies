@@ -63,7 +63,7 @@ def _state(company_id: int, rows: list[Outbound], today: date, rotate_days: int)
         status, reason = "engaged", ("A referral or interview is in progress" if any(o.progressed for o in rows)
                                      else "Someone replied")
     elif waiting:
-        status, reason = "waiting", _waiting_reason(max(waiting, key=lambda o: (o.queued, o.anchor_on, o.sent_on)), today)
+        status, reason = "waiting", _waiting_reason(max(waiting, key=lambda o: (o.anchor_on, o.sent_on, o.queued)), today)
     else:
         status, reason = "stale", f"No answer for {(today - newest.anchor_on).days} days"
     return ContactState(company_id, status, len(people), len(email_people), newest.person_id, newest.anchor_on,

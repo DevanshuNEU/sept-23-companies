@@ -7,7 +7,7 @@ touches with no person: they are never outreach to a person and never appear her
 
 Two kinds of email state count beyond sent mail: a thread's anchor is its latest sent message (a follow-up keeps a
 thread alive), and a thread with a follow-up still queued, or a first email still in the Outbox, is `queued`, which
-the contact rule reads as waiting however old it is.
+the contact rule reads as waiting however old it is (unless its person has an active no_go: that mail cannot go).
 """
 from __future__ import annotations
 
@@ -88,6 +88,10 @@ def _threads(conn: sqlite3.Connection, tz: str) -> _Threads:
     live = {r[0] for r in conn.execute(
         "SELECT email_touch_id FROM outreach_touch WHERE email_touch_id IS NOT NULL AND undone_at IS NULL")}
     out = _Threads({}, set(), [], live)
+    # An email to a person with an active no_go can never go out (his own no-go leaves the draft sitting): it does
+    # not keep the company waiting. Sent mail still counts.
+    stopped = {r[0] for r in conn.execute(
+        "SELECT person_id FROM no_go WHERE person_id IS NOT NULL AND lifted_at IS NULL")}
     for r in conn.execute(
             "SELECT m.touch_id, m.seq, m.state, m.sent_at, m.created_at, t.state AS touch_state, "
             "t.first_sent_at, t.person_id, p.company_id FROM message m JOIN touch t ON t.touch_id = m.touch_id "
@@ -96,7 +100,7 @@ def _threads(conn: sqlite3.Connection, tz: str) -> _Threads:
         if r["state"] == "sent" and r["sent_at"]:
             day = ny_date(r["sent_at"], tz)
             out.last_sent[touch_id] = max(day, out.last_sent.get(touch_id, day))
-        if r["touch_state"] != "open":
+        if r["touch_state"] != "open" or r["person_id"] in stopped:
             continue
         if r["seq"] >= 1 and r["state"] in _QUEUED_FOLLOWUP:
             out.followup_queued.add(touch_id)

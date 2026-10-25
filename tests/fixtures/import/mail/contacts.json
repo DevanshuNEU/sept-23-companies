@@ -1,0 +1,395 @@
+{
+ "contacts": [
+  {
+   "id": "c01",
+   "company": "Kestrel Robotics",
+   "companyId": "kestrel",
+   "name": "Ada Fenwick",
+   "email": "ada.fenwick@example.com",
+   "title": "Engineer",
+   "linkedinUrl": "https://linkedin.example.com/in/ada-fenwick",
+   "profileText": "Fixture profile text for Ada Fenwick.",
+   "kind": "engineer",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c01"
+   },
+   "draft": {
+    "subject": "Question about Kestrel Robotics",
+    "body": "Hi Ada, this is a made-up fixture message about Kestrel Robotics."
+   },
+   "status": "replied",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": null,
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    },
+    {
+     "at": "2026-10-06T09:14:00-04:00",
+     "what": "sent"
+    },
+    {
+     "at": "2026-10-08T15:02:00-04:00",
+     "what": "replied"
+    }
+   ],
+   "sentAt": "2026-10-06T09:14:00-04:00",
+   "messageId": "gm-c01",
+   "threadId": "th-c01",
+   "rfcMessageId": "<c01.fixture@example.com>",
+   "replyAt": "2026-10-08T15:02:00-04:00"
+  },
+  {
+   "id": "c02",
+   "company": "Lumen Freight",
+   "companyId": "lumen",
+   "name": "Bram Okafor",
+   "email": "bram.okafor@example.com",
+   "title": "Engineering Manager",
+   "linkedinUrl": "https://linkedin.example.com/in/bram-okafor",
+   "profileText": "Fixture profile text for Bram Okafor.",
+   "kind": "manager",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c02"
+   },
+   "draft": {
+    "subject": "Question about Lumen Freight",
+    "body": "Hi Bram, this is a made-up fixture message about Lumen Freight."
+   },
+   "status": "sent",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": null,
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    },
+    {
+     "at": "2026-10-06T09:14:00-04:00",
+     "what": "sent"
+    }
+   ],
+   "sentAt": "2026-10-06T09:14:00-04:00",
+   "messageId": "gm-c02",
+   "threadId": "th-c02",
+   "rfcMessageId": "<c02.fixture@example.com>"
+  },
+  {
+   "id": "c03",
+   "company": "Marlow Dynamics",
+   "companyId": null,
+   "name": "Cleo Hartmann",
+   "email": "cleo.hartmann@example.com",
+   "title": "Recruiter",
+   "linkedinUrl": "https://linkedin.example.com/in/cleo-hartmann",
+   "profileText": "Fixture profile text for Cleo Hartmann.",
+   "kind": "manager",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c03"
+   },
+   "draft": {
+    "subject": "Question about Marlow Dynamics",
+    "body": "Hi Cleo, this is a made-up fixture message about Marlow Dynamics."
+   },
+   "status": "followup_sent",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": {
+    "subject": "Re: Question about Marlow Dynamics",
+    "body": "Following up, a fixture note for Cleo Hartmann."
+   },
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    },
+    {
+     "at": "2026-10-07T09:14:00-04:00",
+     "what": "sent"
+    }
+   ],
+   "sentAt": "2026-10-07T09:14:00-04:00",
+   "messageId": "gm-c03",
+   "threadId": "th-c03",
+   "rfcMessageId": "<c03.fixture@example.com>",
+   "followupSentAt": "2026-10-14T09:30:00-04:00"
+  },
+  {
+   "id": "c04",
+   "company": "Pinewood Logistics",
+   "companyId": null,
+   "name": "Dara Venn",
+   "email": "dara.venn@example.com",
+   "title": "Engineer",
+   "linkedinUrl": "https://linkedin.example.com/in/dara-venn",
+   "profileText": "Fixture profile text for Dara Venn.",
+   "kind": "engineer",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c04"
+   },
+   "draft": {
+    "subject": "Question about Pinewood Logistics",
+    "body": "Hi Dara, this is a made-up fixture message about Pinewood Logistics."
+   },
+   "status": "bounced",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": null,
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    },
+    {
+     "at": "2026-10-08T09:14:00-04:00",
+     "what": "sent"
+    }
+   ],
+   "sentAt": "2026-10-08T09:14:00-04:00",
+   "messageId": "gm-c04",
+   "threadId": "th-c04",
+   "rfcMessageId": "<c04.fixture@example.com>"
+  },
+  {
+   "id": "c05",
+   "company": "Cobalt Harbor",
+   "companyId": null,
+   "name": "Emil Strand",
+   "email": "emil.strand@example.com",
+   "title": "Founder",
+   "linkedinUrl": "https://linkedin.example.com/in/emil-strand",
+   "profileText": "Fixture profile text for Emil Strand.",
+   "kind": "manager",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c05"
+   },
+   "draft": {
+    "subject": "Question about Cobalt Harbor",
+    "body": "Hi Emil, this is a made-up fixture message about Cobalt Harbor."
+   },
+   "status": "followup_ready",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": {
+    "subject": "Re: Question about Cobalt Harbor",
+    "body": "Following up, a fixture note for Emil Strand."
+   },
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    },
+    {
+     "at": "2026-10-09T09:14:00-04:00",
+     "what": "sent"
+    }
+   ],
+   "sentAt": "2026-10-09T09:14:00-04:00",
+   "messageId": "gm-c05",
+   "threadId": "th-c05",
+   "rfcMessageId": "<c05.fixture@example.com>"
+  },
+  {
+   "id": "c06",
+   "company": "Ember Analytics",
+   "companyId": null,
+   "name": "Fern Castillo",
+   "email": "fern.castillo@example.com",
+   "title": "Engineer",
+   "linkedinUrl": "https://linkedin.example.com/in/fern-castillo",
+   "profileText": "Fixture profile text for Fern Castillo.",
+   "kind": "engineer",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c06"
+   },
+   "draft": {
+    "subject": "Question about Ember Analytics",
+    "body": "Hi Fern, this is a made-up fixture message about Ember Analytics."
+   },
+   "status": "closed",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": {
+    "subject": "Re: Question about Ember Analytics",
+    "body": "Following up, a fixture note for Fern Castillo."
+   },
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    },
+    {
+     "at": "2026-10-09T09:14:00-04:00",
+     "what": "sent"
+    }
+   ],
+   "sentAt": "2026-10-09T09:14:00-04:00",
+   "messageId": "gm-c06",
+   "threadId": "th-c06",
+   "rfcMessageId": "<c06.fixture@example.com>",
+   "followupSentAt": "2026-10-14T09:30:00-04:00"
+  },
+  {
+   "id": "c07",
+   "company": "Fathom Systems",
+   "companyId": null,
+   "name": "Gus Albrecht",
+   "email": "gus.albrecht@example.com",
+   "title": "Engineer",
+   "linkedinUrl": "https://linkedin.example.com/in/gus-albrecht",
+   "profileText": "Fixture profile text for Gus Albrecht.",
+   "kind": "engineer",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c07"
+   },
+   "draft": {
+    "subject": "Question about Fathom Systems",
+    "body": "Hi Gus, this is a made-up fixture message about Fathom Systems."
+   },
+   "status": "approved",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": null,
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    }
+   ],
+   "approvedAt": "2026-10-20T08:00:00-04:00"
+  },
+  {
+   "id": "c08",
+   "company": "Juniper Optics",
+   "companyId": null,
+   "name": "Hana Lindqvist",
+   "email": "hana.lindqvist@example.com",
+   "title": "Recruiter",
+   "linkedinUrl": "https://linkedin.example.com/in/hana-lindqvist",
+   "profileText": "Fixture profile text for Hana Lindqvist.",
+   "kind": "manager",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c08"
+   },
+   "draft": {
+    "subject": "Question about Juniper Optics",
+    "body": "Hi Hana, this is a made-up fixture message about Juniper Optics."
+   },
+   "status": "drafted",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": null,
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    }
+   ]
+  },
+  {
+   "id": "c09",
+   "company": "Granite Peak Software",
+   "companyId": null,
+   "name": "Ivo Marchetti",
+   "email": "ivo.marchetti@example.com",
+   "title": "Engineer",
+   "linkedinUrl": "https://linkedin.example.com/in/ivo-marchetti",
+   "profileText": "Fixture profile text for Ivo Marchetti.",
+   "kind": "engineer",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c09"
+   },
+   "draft": {
+    "subject": "Question about Granite Peak Software",
+    "body": "Hi Ivo, this is a made-up fixture message about Granite Peak Software."
+   },
+   "status": "skipped",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": null,
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    },
+    {
+     "at": "2026-10-06T08:00:00-04:00",
+     "what": "skipped"
+    }
+   ]
+  },
+  {
+   "id": "c10",
+   "company": "Tidewater AI",
+   "companyId": "tidewater",
+   "name": "Jun Valdez",
+   "email": "jun.valdez@example.com",
+   "title": "Engineer",
+   "linkedinUrl": "https://linkedin.example.com/in/jun-valdez",
+   "profileText": "Fixture profile text for Jun Valdez.",
+   "kind": "engineer",
+   "tz": "America/New_York",
+   "hooks": [
+    "Northeastern MS"
+   ],
+   "role": {
+    "title": "Software Engineer",
+    "url": "https://jobs.example.com/c10"
+   },
+   "draft": {
+    "subject": "Question about Tidewater AI",
+    "body": "Hi Jun, this is a made-up fixture message about Tidewater AI."
+   },
+   "status": "failed",
+   "createdAt": "2026-10-05T10:00:00-04:00",
+   "followup": null,
+   "history": [
+    {
+     "at": "2026-10-05T10:00:00-04:00",
+     "what": "drafted"
+    }
+   ],
+   "error": "not in Sent 10 min after the attempt, so it did not go out; safe to approve again"
+  }
+ ],
+ "firstSendDate": "2026-10-06"
+}

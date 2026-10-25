@@ -1,0 +1,18 @@
+{
+  "offset": 2,
+  "limit": 100,
+  "totalFound": 3,
+  "content": [
+    {
+      "id": "743999000111444",
+      "uuid": "6c1c1b0e-3f0a-4a7e-9f0e-2b8f6a1d0003",
+      "name": "Data Engineer",
+      "refNumber": "REF-1003",
+      "company": {"identifier": "AcmeRobotics", "name": "Acme Robotics"},
+      "releasedDate": "2026-08-29T16:45:00.000Z",
+      "location": {"city": "Austin", "region": "TX", "country": "us", "remote": false},
+      "department": {"label": "Engineering"},
+      "ref": "https://api.smartrecruiters.com/v1/companies/acme/postings/743999000111444"
+    }
+  ]
+}

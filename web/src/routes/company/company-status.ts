@@ -21,7 +21,7 @@ export function companyActions(c: Company) {
   const open = c.status === 'working';
   return {
     pause: open && c.pausedAt === null,
-    resume: open && (c.pausedAt !== null || c.heldByTouchId !== null),
+    resume: open && (c.pausedAt !== null || c.held || c.heldByTouchId !== null),
     close: c.status === 'working' || c.status === 'backlog' || c.status === 'candidate',
     reopen: isClosed(c),
   };
@@ -40,8 +40,8 @@ export function headerStatuses(c: Company): Status[] {
     return [{ label: reason ? `Closed: ${CLOSE_WORD[reason]}` : 'Closed', tone: 'idle' }];
   }
   const out: Status[] = [];
-  if (c.heldByTouchId !== null) out.push(companyStatus({ ...c, pausedAt: null }));
-  if (c.pausedAt !== null) out.push(companyStatus({ ...c, heldByTouchId: null }));
+  if (c.held || c.heldByTouchId !== null) out.push(companyStatus({ ...c, pausedAt: null }));
+  if (c.pausedAt !== null) out.push(companyStatus({ ...c, heldByTouchId: null, held: false, heldByReply: null }));
   if (out.length === 0) out.push(companyStatus(c));
   if (c.day !== null && c.status === 'working') out.push({ label: `Day ${c.day} of 3`, tone: 'idle' });
   return out;

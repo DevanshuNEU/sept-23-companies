@@ -429,7 +429,7 @@ describe('usePlanActions: notes and outcomes', () => {
     run((a) => a.answer(t, 'accepted'));
     await settle();
     expect(text('prompt')).toBe('1');
-    expect(screen.getByText(`Logged: ${t.person.name} accepted.`)).toBeInTheDocument();
+    expect(screen.getByText(`Logged: ${t.person?.name} accepted.`)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     await settle(10000);
     expect(spy).not.toHaveBeenCalled();
@@ -449,7 +449,8 @@ describe('usePlanActions: notes and outcomes', () => {
     run((a) => a.answer(t, 'replied', 'said_no'));
     await settle();
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenCalledWith(t.touchId, 'replied', t.revision, { requestId: expect.any(String) }, 'said_no');
+    // An immediate write goes out with keepalive, so it finishes even if the tab closes now (pending store, #11).
+    expect(spy).toHaveBeenCalledWith(t.touchId, 'replied', t.revision, { requestId: expect.any(String), keepalive: true }, 'said_no');
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
   });
 
@@ -489,7 +490,7 @@ describe('usePlanActions: notes and outcomes', () => {
     run((a) => a.seeWins(ids));
     await settle();
     expect(text('unseen')).toBe(String(before - ids.length));
-    expect(spy).toHaveBeenCalledWith(ids, { requestId: expect.any(String) });
+    expect(spy).toHaveBeenCalledWith(ids, { requestId: expect.any(String), keepalive: true });
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
     expect(screen.queryByText('Marked as seen.')).not.toBeInTheDocument();
     await settle(50);

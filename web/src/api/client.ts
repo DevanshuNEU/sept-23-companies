@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -6,6 +6,7 @@ export class ApiError extends Error { constructor(public code: ApiErrorCode, mes
 
 export interface OutreachClient {
   readonly source: 'sample' | 'live';
+  health(): Promise<HealthView>;
   shell(): Promise<ShellSummary>;
   searchIndex(): Promise<SearchIndex>;
   searchPostings(q: string): Promise<PostingHit[]>;
@@ -27,7 +28,8 @@ export interface OutreachClient {
   setRoleKind(personId: Id, kind: RoleKind, revision: Revision, o: WriteOptions): Promise<PersonRef>;
   compareDrafts(messageId: Id, otherMessageId: Id): Promise<DraftCompare>;
   pauseCompany(companyId: Id, revision: Revision, o: WriteOptions): Promise<void>;
-  resumeCompany(companyId: Id, revision: Revision, o: WriteOptions): Promise<{ released: number }>;
+  resumeCompany(companyId: Id, revision: Revision, o: WriteOptions): Promise<{ released: number }>; // clears his pause only
+  releaseHold(companyId: Id, revision: Revision, o: WriteOptions): Promise<{ released: number }>;   // a reply's hold, across the merged family
   closeCompany(companyId: Id, reason: CloseReason, note: string, revision: Revision, o: WriteOptions): Promise<void>;
   reopenCompany(companyId: Id, revision: Revision, o: WriteOptions): Promise<void>;
   pauseSending(o: WriteOptions): Promise<SendingStatus>;

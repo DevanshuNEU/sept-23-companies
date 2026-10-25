@@ -111,6 +111,7 @@ def transaction(conn: sqlite3.Connection):
     try:
         yield conn
     except BaseException:
-        conn.execute("ROLLBACK")
+        if conn.in_transaction:  # SQLite may have rolled back already; the original error is the one to raise
+            conn.execute("ROLLBACK")
         raise
     conn.execute("COMMIT")

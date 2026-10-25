@@ -48,6 +48,17 @@ class CandidateTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     Candidate(name="Acme", domain=domain, keys={})
 
+    def test_candidate_state_is_optional_and_a_us_state_dc_or_territory(self):
+        self.assertIsNone(Candidate(name="Acme", domain=None, keys={}).state)
+        for state in ("NY", "CA", "DC", "PR", "GU"):
+            self.assertEqual(Candidate(name="Acme", domain=None, keys={}, state=state).state, state)
+
+    def test_candidate_rejects_a_state_that_is_not_one(self):
+        for state in ("ZZ", "ny", "New York", "", "N", "A6", "E9", " NY", "NY "):
+            with self.subTest(state=state):
+                with self.assertRaises(ValueError):
+                    Candidate(name="Acme", domain=None, keys={}, state=state)
+
     def test_evidence_draft_is_the_rules_one(self):
         self.assertIs(ReExported, EvidenceDraft)
 

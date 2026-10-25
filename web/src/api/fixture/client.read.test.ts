@@ -45,6 +45,8 @@ describe('FixtureClient reads: default scenario', () => {
       doneCount: 4,
       sending: { state: 'running', sentToday: 20, limitToday: 30 },
       repliesThisMonth: 9,
+      plan: { done: 2, total: 7 }, // the people plan's own counts (#33), not the picks
+      winsUnseen: 0,
     });
   });
 
@@ -442,11 +444,12 @@ describe('FixtureClient behavior', () => {
 
   it('createClient reads ?scenario= and falls back to default', async () => {
     // A promise: the fixture client and its data load as their own chunk, not in the main bundle.
-    expect(createClient('')).toBeInstanceOf(Promise);
-    const hard = await createClient('?scenario=hard_block');
+    // `live=none`: by default the shell is a live view, and this test reads the sample one.
+    expect(createClient('?live=none')).toBeInstanceOf(Promise);
+    const hard = await createClient('?scenario=hard_block&live=none');
     expect(hard.source).toBe('sample');
     expect((await hard.shell()).sending.state).toBe('paused_hard_block');
-    expect((await (await createClient('?scenario=nope')).shell()).sending.state).toBe('running');
-    expect((await (await createClient('')).shell()).sending.state).toBe('running');
+    expect((await (await createClient('?scenario=nope&live=none')).shell()).sending.state).toBe('running');
+    expect((await (await createClient('?live=none')).shell()).sending.state).toBe('running');
   });
 });

@@ -4,7 +4,7 @@ import { ChevronDown, CircleCheck, Lock } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
-  useClient,
+  usePageClient,
   type Id,
   type JobRunSummary,
   type NeedsYouView,
@@ -27,7 +27,7 @@ import { formatAge, formatDay, formatDayTime, formatWeekdayTime } from '@/lib/fo
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { cn } from '@/lib/utils';
 import { NoGoDialog, type NoGoStart } from './no-go-dialog';
-import { EDIT_FIELD, ReviewItemRow, TRIGGER } from './review-item';
+import { EDIT_FIELD, ReviewItemRow, TRIGGER, hasNoGo } from './review-item';
 
 type Section = { id: string; title: string; items: ReviewItem[] };
 
@@ -60,10 +60,10 @@ const OK_TEXT: Record<ReviewItem['kind'], string> = {
   board_unreadable: 'keeps its postings open',
   board_empty: 'keeps its postings closed',
   flagged: 'stays as it is',
-  merge_candidate: 'stays as two companies',
-  careers_changed: 'keeps its postings as they are',
-  size_check: 'keeps its size',
-  reader_disagrees: 'keeps the posting as it is',
+  merge_candidate: 'stays a separate company',
+  reader_disagrees: 'keeps what the rules decided',
+  careers_changed: 'stays as it is',
+  size_check: 'keeps the size on file',
 };
 
 const FIELD_NAME: Record<Extract<ReviewFix, { kind: 'edit' }>['field'], string> = {
@@ -155,7 +155,7 @@ function NeedsYouSkeleton() {
 }
 
 function OpenItems({ data }: { data: NeedsYouView }) {
-  const client = useClient();
+  const client = usePageClient('needs-you');
   const navigate = useNavigate();
   const write = usePendingWrite();
   const [editing, setEditing] = useState<Id | null>(null);
@@ -245,7 +245,7 @@ function OpenItems({ data }: { data: NeedsYouView }) {
         },
       },
       { keys: 'o', label: 'Mark ok', group, enabled: current !== undefined, run: () => current && markOk(current) },
-      { keys: 'n', label: 'Mark no-go, with a reason', group, enabled: current !== undefined, run: () => current && openNoGo(current) },
+      { keys: 'n', label: 'Mark no-go, with a reason', group, enabled: current !== undefined && hasNoGo(current.kind), run: () => current && openNoGo(current) },
     ],
     { selection: selected },
   );
@@ -301,7 +301,7 @@ function OpenItems({ data }: { data: NeedsYouView }) {
 
 /** Needs you (design 5.4): every review item with its reason and a one-click fix. A fix is locked. */
 export default function NeedsYouPage() {
-  const client = useClient();
+  const client = usePageClient('needs-you');
   const query = useViewQuery(queryKeys.needsYou, () => client.needsYou(), { pollMs: pollMs.default });
   const job = query.data?.boardsJob ?? null;
   return (

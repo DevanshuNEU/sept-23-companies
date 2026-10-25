@@ -469,45 +469,34 @@ describe('Today as a plan', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Jonah Park' })).toBeInTheDocument();
   });
 
-  it('a removed row reads Not a fit, and r, p and x on it do nothing', async () => {
+  it('a removed company leaves the plan at once, as the API leaves it off, and nothing is logged for it', async () => {
     const { client } = await openPlan();
     const request = vi.spyOn(client, 'logRequest');
     const applied = vi.spyOn(client, 'logApplied');
     const skip = vi.spyOn(client, 'skipRow');
+    const pylon = (await client.plan()).rows[2]?.entryId;
     press('n');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Pylon for good?' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
-    // At once, before the commit lands: the row is out of the day, in place, with its own word.
-    expect(option(3)).toHaveAccessibleName('3. Lena Ortiz at Pylon, Not a fit');
-    expect(screen.getByText('7 people, 2 done')).toBeInTheDocument();
+    // At once, before the commit lands: the row is off the rail and out of the day's total.
+    expect(options()).toHaveLength(6);
+    expect(options().map((o) => o.textContent).join(' ')).not.toMatch(/Pylon/);
+    expect(screen.getByText('6 people, 2 done')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { level: 2, name: 'Jonah Park' })).toBeInTheDocument();
-
-    fireEvent.click(option(3));
-    await screen.findByRole('heading', { level: 2, name: 'Lena Ortiz' });
-    expect(within(panel()).queryByRole('button', { name: 'Log request sent' })).not.toBeInTheDocument();
-    expect(within(panel()).getByText(/is on the No-go list/)).toBeInTheDocument();
-    press('r');
-    expect(await screen.findByText('Not logged. Pylon is on the No-go list.')).toBeInTheDocument();
-    toast.dismiss();
-    press('p');
-    await waitFor(() => expect(screen.getAllByText('Not logged. Pylon is on the No-go list.').length).toBeGreaterThan(0));
-    press('x');
-    expect(await screen.findByText('Not carried. Pylon is on the No-go list.')).toBeInTheDocument();
-    // Once the commit and the refetch land, the API says the same.
-    await waitFor(async () => expect((await client.plan()).rows[2]).toMatchObject({ state: 'skipped', skipReason: 'not_a_fit' }));
+    // Once the commit and the refetch land, the API says the same, with the positions counted again.
+    await waitFor(async () => expect((await client.plan()).rows.map((r) => r.company.name)).not.toContain('Pylon'));
+    await waitFor(() => expect(option(3)).toHaveAccessibleName(/^3\. Jonah Park at Inngest/));
     press('r');
     await leavePage();
-    expect(request).not.toHaveBeenCalled();
+    // r logged Jonah's request, never Pylon's; nothing was carried.
+    expect(request.mock.calls.every(([entryId]) => entryId !== pylon)).toBe(true);
     expect(applied).not.toHaveBeenCalled();
     expect(skip).not.toHaveBeenCalled();
   });
 
   it('the finish line is reached when the last row to do is removed', async () => {
     const db = buildFixture();
-    for (const r of db.plan.rows.slice(2, 6)) {
-      r.state = 'skipped';
-      r.skipReason = 'carried';
-    }
+    for (const r of db.plan.rows.slice(2, 6)) r.state = 'skipped';
     await open({ db });
     expect(await screen.findByRole('heading', { level: 2, name: 'Mintlify, by email' })).toBeInTheDocument();
     const finish = () => document.querySelector('[data-finish]');
@@ -517,7 +506,9 @@ describe('Today as a plan', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(finish()).toHaveAttribute('data-done', 'true'));
     expect(finish()).toHaveAttribute('aria-current', 'step');
-    expect(option(7)).toHaveAccessibleName('7. Mintlify by email, Not a fit');
+    // Mintlify is off the plan, as the API leaves a removed company off it.
+    expect(options()).toHaveLength(6);
+    expect(options().map((o) => o.textContent).join(' ')).not.toMatch(/Mintlify/);
   });
 
   it('n acts only on a row to do, like its button', async () => {

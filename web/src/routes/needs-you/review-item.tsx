@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { Archive, CircleHelp, Clock, Flag, Lock, Mail, RefreshCw, User, type LucideIcon } from 'lucide-react';
+import { Archive, CircleHelp, Clock, Copy, Flag, Lock, Mail, RefreshCw, User, type LucideIcon } from 'lucide-react';
 import type { IsoTime, ReviewFix, ReviewItem, ReviewKind } from '@/api';
 import { RunStrip } from '@/components/run-strip';
 import { StatusBadge } from '@/components/status-badge';
@@ -28,10 +28,10 @@ export const TRIGGER = {
   board_unreadable: { label: 'Board unreadable', tone: 'bad' },
   board_empty: { label: 'Board shows zero jobs', tone: 'warn' },
   flagged: { label: 'Flagged', tone: 'warn' },
-  merge_candidate: { label: 'Merge?', tone: 'warn' },
+  merge_candidate: { label: 'Maybe one company', tone: 'warn' },
+  reader_disagrees: { label: 'Reader disagrees', tone: 'warn' },
   careers_changed: { label: 'Careers page changed', tone: 'warn' },
-  size_check: { label: 'Check size', tone: 'warn' },
-  reader_disagrees: { label: 'Check posting', tone: 'warn' },
+  size_check: { label: 'May be a subsidiary', tone: 'warn' },
 } satisfies Record<ReviewKind, Status>;
 
 const ICON: Record<ReviewKind, LucideIcon> = {
@@ -42,10 +42,10 @@ const ICON: Record<ReviewKind, LucideIcon> = {
   board_unreadable: RefreshCw,
   board_empty: Archive,
   flagged: Flag,
-  merge_candidate: CircleHelp,
+  merge_candidate: Copy,
+  reader_disagrees: CircleHelp,
   careers_changed: RefreshCw,
   size_check: User,
-  reader_disagrees: Flag,
 };
 
 /** The field Edit sets for each trigger. A flag has none: mark it ok or no-go. */
@@ -58,11 +58,15 @@ export const EDIT_FIELD: Record<ReviewKind, EditField | null> = {
   board_unreadable: 'board_url',
   board_empty: 'board_url',
   flagged: null,
-  merge_candidate: null,
-  careers_changed: 'board_url',
-  size_check: 'size',
+  merge_candidate: null, // merged or kept separate (Mark ok); the merge confirm is #16's
   reader_disagrees: null,
+  careers_changed: null,
+  size_check: 'size',
 };
+
+/** Whether Mark no-go applies: a possible duplicate is merged or kept separate, never put on the no-go list. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const hasNoGo = (kind: ReviewKind): boolean => kind !== 'merge_candidate';
 
 const FIELD_LABEL: Record<EditField, string> = { domain: 'Email domain', size: 'Size', sponsorship: 'Sponsorship', board_url: 'Board URL' };
 const FIELD_HINT: Record<Exclude<EditField, 'sponsorship'>, string> = {
@@ -310,7 +314,7 @@ export function ReviewItemRow({
       <div className="col-start-3 row-span-2 row-start-1 flex items-start gap-1.5">
         {field && !editing ? <ActionButton label={EDIT_BUTTON[field]} keyName="E" variant="outline" onClick={onEdit} /> : null}
         {!editing ? <ActionButton label="Mark ok" keyName="O" variant="ghost" onClick={onOk} /> : null}
-        <ActionButton label="Mark no-go" keyName="N" variant="ghost" onClick={() => onNoGo()} />
+        {hasNoGo(item.kind) ? <ActionButton label="Mark no-go" keyName="N" variant="ghost" onClick={() => onNoGo()} /> : null}
       </div>
       <div className="col-start-2 grid gap-2 text-[13px]">
         <p>{item.reason}</p>

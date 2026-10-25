@@ -1,0 +1,754 @@
+[
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "everify",
+    "observed_on": "2026-09-20",
+    "value": "enrolled"
+   },
+   {
+    "confidence": "estimate",
+    "fact": "size",
+    "num_high": 60,
+    "num_low": 20,
+    "value": "20 to 60 people"
+   },
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "San Francisco, CA",
+  "key": "A",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 1,
+    "level1": 0,
+    "median_jr_wage": 155605,
+    "newemp_jr": 1,
+    "software": 1
+   },
+   {
+    "fy": 2026,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 155605,
+    "newemp_jr": 0,
+    "software": 0
+   }
+  ],
+  "name": "Genmo, Inc.",
+  "people": [
+   {
+    "email": "casey.fixture@example.com",
+    "name": "Casey Fixture",
+    "role_kind": "engineer"
+   }
+  ],
+  "role": "small employer, FY25 junior filings, E-Verify, a live new-grad posting that says it sponsors",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "Seattle, WA",
+  "key": "B",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 11,
+    "level1": 6,
+    "median_jr_wage": 153000,
+    "newemp_jr": 11,
+    "software": 11
+   },
+   {
+    "fy": 2026,
+    "jr": 4,
+    "level1": 0,
+    "median_jr_wage": 153000,
+    "newemp_jr": 0,
+    "software": 4
+   }
+  ],
+  "name": "Allen Institute for Artificial Intelligence",
+  "role": "clean small employer, a level II posting, no other signal",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "estimate",
+    "fact": "staffing_risk",
+    "value": "high"
+   }
+  ],
+  "hq": "Seattle, WA",
+  "key": "C",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 11,
+    "level1": 6,
+    "median_jr_wage": 153000,
+    "newemp_jr": 11,
+    "software": 11
+   },
+   {
+    "fy": 2026,
+    "jr": 4,
+    "level1": 0,
+    "median_jr_wage": 153000,
+    "newemp_jr": 0,
+    "software": 4
+   }
+  ],
+  "name": "Montclair Hospital Medical Center",
+  "role": "staffing risk high, the twin of B",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "guess",
+    "fact": "stage",
+    "value": "series_d"
+   },
+   {
+    "confidence": "guess",
+    "fact": "size",
+    "num_high": 5000,
+    "num_low": 5000,
+    "value": "about 5,000 people"
+   },
+   {
+    "confidence": "estimate",
+    "fact": "everify",
+    "observed_on": "2026-09-20",
+    "value": "not_enrolled"
+   }
+  ],
+  "hq": "Hoboken, NJ",
+  "key": "D",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 81600,
+    "newemp_jr": 0,
+    "software": 0
+   },
+   {
+    "fy": 2026,
+    "jr": 1,
+    "level1": 0,
+    "median_jr_wage": 81600,
+    "newemp_jr": 0,
+    "software": 1
+   }
+  ],
+  "name": "Stevens Institute of Technology",
+  "role": "large later-stage company (series D, a guessed 5,000 people) with a new-grad posting",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "Oakland, CA",
+  "key": "E",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 2,
+    "level1": 0,
+    "median_jr_wage": 97500,
+    "newemp_jr": 2,
+    "software": 2
+   },
+   {
+    "fy": 2026,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 97500,
+    "newemp_jr": 0,
+    "software": 0
+   }
+  ],
+  "name": "Recidiviz Inc.",
+  "role": "its only posting says we do not sponsor visas, a final decision",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "Atlanta, GA",
+  "key": "F",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 2,
+    "level1": 0,
+    "median_jr_wage": 131843,
+    "newemp_jr": 0,
+    "software": 2
+   },
+   {
+    "fy": 2026,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 131843,
+    "newemp_jr": 0,
+    "software": 0
+   }
+  ],
+  "name": "Roadie",
+  "role": "the same with the decision still provisional",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "New York, NY",
+  "key": "G",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 1,
+    "level1": 1,
+    "median_jr_wage": 95493,
+    "newemp_jr": 1,
+    "software": 1
+   },
+   {
+    "fy": 2026,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 95493,
+    "newemp_jr": 0,
+    "software": 0
+   }
+  ],
+  "name": "Eulerity, Inc.",
+  "no_go": {
+   "lifted": true,
+   "reason": "no_sponsorship"
+  },
+  "role": "a lifted no-go and a refusing posting",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "Draper, UT",
+  "key": "H",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 4,
+    "level1": 1,
+    "median_jr_wage": 125000,
+    "newemp_jr": 0,
+    "software": 4
+   },
+   {
+    "fy": 2026,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 125000,
+    "newemp_jr": 0,
+    "software": 0
+   }
+  ],
+  "name": "Rescale, Inc.",
+  "role": "a clearance-required posting",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "cap_exempt",
+    "value": "confirmed"
+   }
+  ],
+  "hq": "San Francisco, CA",
+  "key": "I",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 2,
+    "level1": 0,
+    "median_jr_wage": 155300,
+    "newemp_jr": 1,
+    "software": 2
+   },
+   {
+    "fy": 2026,
+    "jr": 1,
+    "level1": 0,
+    "median_jr_wage": 155300,
+    "newemp_jr": 0,
+    "software": 1
+   }
+  ],
+  "name": "Planet Labs PBC",
+  "role": "a cap-exempt university lab",
+  "status": "candidate"
+ },
+ {
+  "hq": "Novato, CA",
+  "key": "J",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 4,
+    "level1": 2,
+    "median_jr_wage": 99767,
+    "newemp_jr": 4,
+    "software": 4
+   },
+   {
+    "fy": 2026,
+    "jr": 2,
+    "level1": 0,
+    "median_jr_wage": 99767,
+    "newemp_jr": 0,
+    "software": 2
+   }
+  ],
+  "name": "2K Games, Inc.",
+  "role": "LCA history only, no board",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "doubtful": "the organisation name differs",
+    "found_by": "stapply_name",
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "Santa Clara, CA",
+  "key": "K",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 2,
+    "level1": 0,
+    "median_jr_wage": 247500,
+    "newemp_jr": 2,
+    "software": 2
+   },
+   {
+    "fy": 2026,
+    "jr": 2,
+    "level1": 0,
+    "median_jr_wage": 247500,
+    "newemp_jr": 0,
+    "software": 2
+   }
+  ],
+  "name": "Boson AI USA Inc.",
+  "role": "its only posting is on a board with an open board match doubtful item",
+  "status": "candidate"
+ },
+ {
+  "hq": "Seattle, WA",
+  "key": "L",
+  "merged_into": "B",
+  "name": "Allen Institute for Artificial Intelligence LLC",
+  "role": "a merged duplicate of B",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "Florham Park, NJ",
+  "key": "M",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 3,
+    "level1": 2,
+    "median_jr_wage": 122200,
+    "newemp_jr": 0,
+    "software": 3
+   },
+   {
+    "fy": 2026,
+    "jr": 1,
+    "level1": 0,
+    "median_jr_wage": 122200,
+    "newemp_jr": 0,
+    "software": 1
+   }
+  ],
+  "name": "Datacor, Inc.",
+  "role": "posted Boston pay of $130,000 - $150,000",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "Redwood City, CA",
+  "key": "N",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 136620,
+    "newemp_jr": 0,
+    "software": 0
+   },
+   {
+    "fy": 2026,
+    "jr": 1,
+    "level1": 0,
+    "median_jr_wage": 136620,
+    "newemp_jr": 0,
+    "software": 1
+   }
+  ],
+  "name": "Openart.ai",
+  "role": "a final refusal and a second open posting that says it sponsors",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "everify",
+    "observed_on": "2026-09-20",
+    "value": "enrolled"
+   },
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "Boston, MA",
+  "key": "O",
+  "lca": [],
+  "name": "PathAI, Inc.",
+  "role": "clean twin of P, its only posting is a 2016 new-grad role its board still lists",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "everify",
+    "observed_on": "2026-09-20",
+    "value": "enrolled"
+   },
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "Fremont, CA",
+  "key": "P",
+  "lca": [],
+  "name": "Neuralink Corp.",
+  "role": "the profile of O with one live new-grad posting 3 days old and one 2016 posting",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "empty_streak": 1,
+    "read": "empty",
+    "read_at": "2026-10-21T08:00:00Z"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "San Francisco, CA",
+  "key": "Q",
+  "lca": [],
+  "name": "BaseTen",
+  "role": "a new-grad posting last seen on 2026-10-18, its board then had a first empty read",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "error_streak": 1,
+    "read": "error",
+    "read_at": "2026-10-21T08:00:00Z"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "San Francisco, CA",
+  "key": "R",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 1,
+    "level1": 0,
+    "median_jr_wage": 156000,
+    "newemp_jr": 1,
+    "software": 1
+   },
+   {
+    "fy": 2026,
+    "jr": 2,
+    "level1": 0,
+    "median_jr_wage": 156000,
+    "newemp_jr": 0,
+    "software": 2
+   }
+  ],
+  "name": "Ascend",
+  "role": "a live new-grad posting on a board whose last read errored",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "New York, NY",
+  "key": "S",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 1,
+    "level1": 1,
+    "median_jr_wage": 100000,
+    "newemp_jr": 1,
+    "software": 1
+   },
+   {
+    "fy": 2026,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 100000,
+    "newemp_jr": 0,
+    "software": 0
+   }
+  ],
+  "name": "Verse Medical",
+  "role": "its only posting is a 2016 refusal with a final decision",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "confirmed",
+    "fact": "everify",
+    "observed_on": "2026-09-20",
+    "value": "enrolled"
+   },
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "San Francisco, CA",
+  "key": "T",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 2,
+    "level1": 2,
+    "median_jr_wage": 127500,
+    "newemp_jr": 2,
+    "software": 2
+   },
+   {
+    "fy": 2026,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 127500,
+    "newemp_jr": 0,
+    "software": 0
+   }
+  ],
+  "name": "Uncountable Inc.",
+  "role": "twin of U, E-Verify confirmed",
+  "status": "candidate"
+ },
+ {
+  "boards": [
+   {
+    "read": "ok"
+   }
+  ],
+  "facts": [
+   {
+    "confidence": "guess",
+    "fact": "everify",
+    "observed_on": "2026-09-20",
+    "value": "enrolled"
+   },
+   {
+    "confidence": "confirmed",
+    "fact": "staffing_risk",
+    "value": "low"
+   }
+  ],
+  "hq": "San Francisco, CA",
+  "key": "U",
+  "lca": [
+   {
+    "fy": 2025,
+    "jr": 2,
+    "level1": 2,
+    "median_jr_wage": 127500,
+    "newemp_jr": 2,
+    "software": 2
+   },
+   {
+    "fy": 2026,
+    "jr": 0,
+    "level1": 0,
+    "median_jr_wage": 127500,
+    "newemp_jr": 0,
+    "software": 0
+   }
+  ],
+  "name": "Rocket Partners LLC",
+  "role": "twin of T, E-Verify only a guess",
+  "status": "candidate"
+ }
+]

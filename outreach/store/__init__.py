@@ -1,4 +1,5 @@
 """The store's public API. Everything else imports from here."""
+from outreach.store.atomic import atomic, describe_error
 from outreach.store.db import (
     DEFAULT_PATH,
     StoreError,
@@ -25,7 +26,7 @@ from outreach.store.writes import (
 
 __all__ = [
     "DEFAULT_PATH", "StoreError", "connect", "db_path", "is_live_path", "transaction",
-    "utcnow", "iso_utc", "iso_date",
+    "utcnow", "iso_utc", "iso_date", "atomic", "describe_error",
     "name_key", "append_event", "start_job", "finish_job",
     "body_sha256", "add_alias", "mark_shared_key", "is_shared_key", "log_touch", "record_outcome", "set_reply_kind",
     "undo_touch",

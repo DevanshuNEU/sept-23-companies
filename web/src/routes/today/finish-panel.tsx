@@ -50,28 +50,20 @@ const ledgerWord = (label: string, count: number) => {
 };
 
 /**
- * How the day ended, in the API's counts: every row is done, carried or removed as not a fit. A not-a-fit row is
- * handled, so it never counts as carried.
+ * How the day ended, in the API's counts: every row is done or carried to tomorrow. A company removed as not a fit
+ * is off the plan (the API leaves it out of the rows and the total), so it is not counted here.
  */
-function summary(plan: PlanView, carried: PlanRow[], removed: PlanRow[]) {
+function summary(plan: PlanView, carried: PlanRow[]) {
   const { done, total } = plan;
-  if (carried.length === 0 && removed.length === 0) {
+  if (carried.length === 0) {
     const sub = total === 1 ? "The one person on today's plan is done." : `All ${total} people on today's plan are done.`;
     return { sub: `${sub} Nothing else is asked of you today.`, say: `All ${total} done for today.` };
   }
   const first = carried[0];
-  const gone = removed[0];
-  const parts = [
-    ...(first ? [carried.length === 1 ? `${nameOf(first)} carries to tomorrow` : `${carried.length} carry to tomorrow`] : []),
-    ...(gone ? [removed.length === 1 ? `${gone.company.name} was not a fit and is off your list` : `${removed.length} were not a fit and are off your list`] : []),
-  ];
-  const counts = [
-    `${done} of ${total} done`,
-    ...(carried.length > 0 ? [`${carried.length} carried to tomorrow`] : []),
-    ...(removed.length > 0 ? [`${removed.length} not a fit`] : []),
-  ];
+  const carries = carried.length === 1 && first ? `${nameOf(first)} carries to tomorrow` : `${carried.length} carry to tomorrow`;
+  const counts = [`${done} of ${total} done`, `${carried.length} carried to tomorrow`];
   return {
-    sub: `${done} of ${total} done. ${parts.join('. ')}, so nothing else is asked of you today.`,
+    sub: `${done} of ${total} done. ${carries}, so nothing else is asked of you today.`,
     say: `Done for today. ${counts.join(', ')}.`,
   };
 }
@@ -97,10 +89,9 @@ export function FinishPanel({ plan }: { plan: PlanView }) {
   const say = useAnnounce();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const done = plan.rows.filter((r) => r.state === 'done');
-  const carried = plan.rows.filter((r) => r.state === 'skipped' && r.skipReason === 'carried');
-  const removed = plan.rows.filter((r) => r.state === 'skipped' && r.skipReason === 'not_a_fit');
+  const carried = plan.rows.filter((r) => r.state === 'skipped');
   const did = didToday(plan.rows);
-  const { sub, say: spoken } = summary(plan, carried, removed);
+  const { sub, say: spoken } = summary(plan, carried);
 
   // Focus comes to the heading only when it would otherwise be lost: on the page, or inside the work region he
   // was in. A poll that finishes the plan never takes it from a field or a dialog he is using elsewhere.

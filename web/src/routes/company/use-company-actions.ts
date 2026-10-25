@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { queryKeys, useClient, type CloseReason, type CompanyView, type Revision, type ShellSummary, type WriteOptions } from '@/api';
+import { queryKeys, usePageClient, type CloseReason, type CompanyView, type Revision, type ShellSummary, type WriteOptions } from '@/api';
 import { usePendingWrite, type Patch } from '@/pending/pending';
 import { newestRevision, noteRevision, withRevision } from '@/pending/revisions';
 import { CLOSE_WORD } from './company-status';
@@ -28,7 +28,7 @@ const TAIL: Record<CloseReason, string> = {
  * newest revision known: on screen when it was asked for, in the cache, or from a read.
  */
 export function useCompanyActions(view: CompanyView | undefined) {
-  const client = useClient();
+  const client = usePageClient('company');
   const queryClient = useQueryClient();
   const write = usePendingWrite();
 
@@ -78,8 +78,9 @@ export function useCompanyActions(view: CompanyView | undefined) {
       label: `Resumed ${name}.`,
       afterCommit: `Resumed ${name}.`,
       immediate: true,
-      patches: [patchCompany((c) => ({ ...c, pausedAt: null, heldByTouchId: null })), ...refetch(queryKeys.shell, queryKeys.outbox, queryKeys.today)],
-      commit: (o) => withCompanyRevision(o, c, (r) => client.resumeCompany(id, r, o)),
+      patches: [patchCompany((c) => ({ ...c, pausedAt: null, heldByTouchId: null, held: false, heldByReply: null })), ...refetch(queryKeys.shell, queryKeys.outbox, queryKeys.today)],
+      // His pause first; a company held by a reply and not paused releases the hold (Resume shows again for it).
+      commit: (o) => withCompanyRevision(o, c, (r) => (c.pausedAt === null ? client.releaseHold(id, r, o) : client.resumeCompany(id, r, o))),
     });
   }, [view, write, client, patchCompany, withCompanyRevision]);
 

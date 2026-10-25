@@ -7,8 +7,10 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from outreach.rules.rebuild import EvidenceDraft
+from outreach.sources.keys import US_STATES
+from outreach.store.atomic import describe_error
 
-__all__ = ["Candidate", "EvidenceDraft", "Source", "KEY_NAMES"]
+__all__ = ["Candidate", "EvidenceDraft", "Source", "KEY_NAMES", "describe_error"]
 
 # `ats` is "<ats>:<token>"; the rest are the identifiers a source may know for a company.
 KEY_NAMES = frozenset({"fein", "dba", "legal_name", "ats", "linkedin", "formd_cik"})
@@ -23,12 +25,18 @@ class Candidate:
     `keys` holds only identifiers named in KEY_NAMES. Raises ValueError on an unknown key, an empty name, or a domain
     with an at sign, a slash, a colon (so no scheme or port), whitespace, upper case, no dot, or a leading or trailing
     dot (a domain is a bare lower-case host such as `acme.com`, or None).
+
+    `state` is for matching only: the US state, DC or territory (upper case, as in `US_STATES`) the source knows
+    the company is in, or None. Identity reads it before the candidate's `hq` drafts and never writes it as
+    evidence, so a source whose address says little about headquarters (Form D) can still give identity a state
+    without changing the company's own. Anything else raises ValueError.
     """
     name: str
     domain: str | None
     keys: dict[str, str]
     evidence: tuple[EvidenceDraft, ...] = field(default=())
     source_ref: str = ""
+    state: str | None = None
 
     def __post_init__(self):
         if not isinstance(self.name, str) or not self.name.strip():
@@ -40,6 +48,9 @@ class Candidate:
         if d is not None and (_NOT_A_HOST.search(d) or d != d.lower() or "." not in d or d.startswith(".")
                               or d.endswith(".")):
             raise ValueError(f"bad candidate domain {d!r}: a bare lower-case host with a dot, such as acme.com")
+        if self.state is not None and self.state not in US_STATES:
+            raise ValueError(f"bad candidate state {self.state!r}: a US state, DC or territory in upper case, "
+                             "such as NY")
 
 
 class Source(Protocol):

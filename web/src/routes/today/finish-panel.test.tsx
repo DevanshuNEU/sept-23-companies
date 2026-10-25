@@ -41,8 +41,14 @@ function carry(plan: PlanView, position: number) {
   const row = plan.rows[position - 1];
   if (!row) throw new Error(`No row ${position}`);
   row.state = 'skipped';
-  row.skipReason = 'carried';
   row.steps = row.steps.map((s) => ({ ...s, at: null, touchId: null }));
+  plan.done = plan.rows.filter((r) => r.state === 'done').length;
+}
+
+/** Removes a row's company as not a fit, the way the API reports it: the row is off the plan and out of the total. */
+function takeOff(plan: PlanView, position: number) {
+  plan.rows.splice(position - 1, 1);
+  plan.total = plan.rows.length;
   plan.done = plan.rows.filter((r) => r.state === 'done').length;
 }
 
@@ -136,17 +142,13 @@ describe('FinishPanel', () => {
     expect(screen.getByText('5 of 7 done. 2 carry to tomorrow, so nothing else is asked of you today.')).toBeInTheDocument();
   });
 
-  it('a not-a-fit row is handled: it is neither carried nor listed as done', () => {
+  it('a company removed as not a fit is off the plan: it is neither carried nor listed as done', () => {
     const plan = planOf();
-    const row = plan.rows[5] as PlanRow;
-    row.state = 'skipped';
-    row.skipReason = 'not_a_fit';
-    row.steps = row.steps.map((s) => ({ ...s, at: null, touchId: null }));
-    plan.done = 6;
+    takeOff(plan, 6);
     showPanel(plan);
     expect(screen.queryByRole('region', { name: 'Carried to tomorrow' })).not.toBeInTheDocument();
     expect(screen.queryByText(/carries? to tomorrow/)).not.toBeInTheDocument();
-    expect(screen.getByText('6 of 7 done. Turso was not a fit and is off your list, so nothing else is asked of you today.')).toBeInTheDocument();
+    expect(screen.getByText("All 6 people on today's plan are done. Nothing else is asked of you today.")).toBeInTheDocument();
     expect(within(section('What you did')).queryByText('Ines Duarte')).not.toBeInTheDocument();
   });
 
@@ -190,7 +192,6 @@ describe('FinishPanel', () => {
     for (const r of plan.rows) {
       if (r.channel === 'linkedin_request' && r.position !== 1) {
         r.state = 'skipped';
-        r.skipReason = 'carried';
         r.steps = r.steps.map((s) => ({ ...s, at: null, touchId: null }));
       }
     }
@@ -285,16 +286,12 @@ describe('Today with no row to do', () => {
     expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   });
 
-  it('a not-a-fit row leaves the head carried-over count at zero', async () => {
+  it('a company removed as not a fit leaves the head carried-over count at zero', async () => {
     const db = buildFixture('plan_done');
-    const row = db.plan.rows[5] as PlanRow;
-    row.state = 'skipped';
-    row.skipReason = 'not_a_fit';
-    row.steps = row.steps.map((s) => ({ ...s, at: null, touchId: null }));
-    db.plan.done = 6;
+    takeOff(db.plan, 6);
     await openToday({ db });
     expect(await screen.findByRole('heading', { level: 2, name: 'Done for today' })).toBeInTheDocument();
-    expect(screen.getByText('7 people, 6 done')).toBeInTheDocument();
+    expect(screen.getByText('6 people, 6 done')).toBeInTheDocument();
     expect(screen.queryByText(/carried over/)).not.toBeInTheDocument();
   });
 

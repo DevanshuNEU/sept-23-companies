@@ -1,0 +1,10 @@
+# Outreach log (fixture, made-up people)
+# Format: YYYY-MM-DD - Company - Person (note)
+# A note in brackets is free text, not a name.
+
+2026-10-06 - Kestrel Robotics - Ada Fenwick (engineer, email)
+2026-10-06 - Lumen Freight - Bram Okafor
+2026-10-07 - Marlow Dynamics - Cleo Hartmann (recruiter) + Ned Pruitt (EM)
+2026-10-08 - Pinewood Logistics - Dara Venn - bounced, tried LinkedIn instead
+2026-10-09 - Cobalt Harbor - Emil
+Found Fathom Systems on a list and meant to log it later

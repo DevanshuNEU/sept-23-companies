@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { CircleCheck } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
-import { pollMs, queryKeys, useClient, type DoneCompany, type DoneView } from '@/api';
+import { pollMs, queryKeys, usePageClient, type DoneCompany, type DoneView } from '@/api';
 import { EmptyState, QueryState } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,7 +13,7 @@ import { useViewQuery } from '@/pending/pending';
 import { RepliesChart } from './replies-chart';
 
 export default function DonePage() {
-  const client = useClient();
+  const client = usePageClient('done');
   const query = useViewQuery(queryKeys.done, () => client.done(), { pollMs: pollMs.default });
   return (
     <div className="max-w-[1360px] px-6 pt-5 pb-12">

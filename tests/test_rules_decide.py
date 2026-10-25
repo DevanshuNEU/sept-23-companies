@@ -62,6 +62,17 @@ class DecideTests(unittest.TestCase):
     def test_non_us_fails_passes(self):
         self.assertFalse(passes(d("Software Engineer, New Grad", "", "Paris, France")))
 
+    def test_a_non_us_country_in_the_title_fails_passes_when_the_location_is_silent(self):
+        r = d("Software Engineer II (Venezuela)", "", "Remote")
+        self.assertEqual(r.us, "no")
+        self.assertFalse(passes(r))
+        self.assertEqual(d("Software Engineer II (Venezuela)", "", "").us, "no")
+        # a US place in the location, or a US mark in the title, keeps it in
+        self.assertEqual(d("Software Engineer II (Venezuela)", "", "Austin, TX").us, "yes")
+        self.assertNotEqual(d("Software Engineer (US)", "", "Remote").us, "no")
+        self.assertTrue(passes(d("Software Engineer, Remote (USA or Canada)", "", "Remote")))
+        self.assertNotEqual(d("Engineer, Georgia Tech", "", "Remote").us, "no")
+
     def test_off_lane_fails_passes(self):
         self.assertFalse(passes(d("Solutions Engineer", "")))
 
@@ -184,7 +195,12 @@ class DecideTests(unittest.TestCase):
                             r"|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b")
         funcs = {"compile", "search", "match", "fullmatch", "findall", "finditer", "sub"}
         # allowed exceptions: none today. A path (relative to the repo root) maps to the reason it may differ.
-        allowed = {}
+        allowed = {
+            # Pay is read only for a worksite in a listed metro, never for a remote role. This is a guard on the wage
+            # lookup (the ruling of 2026-10-22), not a classification of the posting: the posting's own location
+            # still goes through outreach/rules.
+            "outreach/ranking/pay.py": "wage lookup refuses a remote or anywhere location",
+        }
         found = []
         for path in sorted((ROOT / "outreach").rglob("*.py")):
             rel = path.relative_to(ROOT).as_posix()

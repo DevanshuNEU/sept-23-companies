@@ -75,7 +75,7 @@ export function EmailRowPanel({
         <span className="flex-1" />
         {todo ? <QuietActions actions={actions} /> : null}
       </div>
-      {row.state === 'skipped' ? <SkippedLine row={row} /> : null}
+      {row.state === 'skipped' ? <SkippedLine /> : null}
     </div>
   );
 }

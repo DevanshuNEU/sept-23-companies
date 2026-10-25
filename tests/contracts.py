@@ -10,10 +10,11 @@ import unittest
 
 from outreach.crawl.base import Adapter, ReadResult, Validators
 from outreach.ranking.types import CompanyFacts, Signal, SignalValue
+from outreach.review.kinds import KINDS
 from outreach.sources.base import Candidate, Source
 from tests.fakes import FakeClient
 
-__all__ = ["check_source", "check_adapter", "check_signal"]
+__all__ = ["check_source", "check_adapter", "check_signal", "check_review_items"]
 
 _DASHES = (chr(0x2014), chr(0x2013))
 
@@ -98,3 +99,26 @@ def check_signal(tc: unittest.TestCase, signal: Signal, facts: CompanyFacts) -> 
     for dash in _DASHES:
         tc.assertNotIn(dash, got.reason, f"the reason {got.reason!r} has an em or en dash")
     return got
+
+
+def check_review_items(tc: unittest.TestCase, conn) -> None:
+    """Every `review_item` row in the store is one a producer may raise (#16). Each has a spec in `KINDS`; its
+    `raised_by` is one the spec names; its reason is plain text (not empty, no en or em dash); its `evidence_key` is
+    not empty; a `merge_candidate` names the lower company id as its company and the higher as its key; a board
+    item's board belongs to the item's company. Every producer's flow test calls it."""
+    for row in conn.execute("SELECT * FROM review_item ORDER BY review_id"):
+        tag = f"review item {row['review_id']} ({row['kind']}, raised by {row['raised_by']})"
+        tc.assertIn(row["kind"], KINDS, f"{tag}: the kind has no spec in outreach.review.kinds")
+        spec = KINDS[row["kind"]]
+        tc.assertIn(row["raised_by"], spec.raised_by, f"{tag}: {spec.kind} is raised by {spec.raised_by}")
+        tc.assertTrue(row["reason"].strip(), f"{tag}: the reason is empty")
+        tc.assertFalse(any(d in row["reason"] for d in _DASHES), f"{tag}: the reason holds an en or em dash")
+        tc.assertTrue(row["evidence_key"].strip(), f"{tag}: the evidence key is empty")
+        if row["kind"] == "merge_candidate":
+            tc.assertTrue(row["evidence_key"].isdigit(), f"{tag}: the key {row['evidence_key']!r} is not a company id")
+            tc.assertLess(row["company_id"], int(row["evidence_key"]),
+                          f"{tag}: a merge question names the lower company id first")
+        if row["kind"].startswith("board_"):
+            owner = conn.execute("SELECT company_id FROM board WHERE board_id = ?", (row["board_id"],)).fetchone()
+            tc.assertIsNotNone(owner, f"{tag}: it names no board")
+            tc.assertEqual(owner[0], row["company_id"], f"{tag}: the board belongs to another company")

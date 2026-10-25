@@ -5,7 +5,7 @@ import { formatCarriedDay } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 /** How a node is drawn. `current` is the selected row while it is still to do. */
-type Node = 'todo' | 'current' | 'logged' | 'done' | 'carried' | 'removed';
+type Node = 'todo' | 'current' | 'logged' | 'done' | 'carried';
 
 const WORD: Record<Node, string> = {
   todo: 'To do',
@@ -13,12 +13,12 @@ const WORD: Record<Node, string> = {
   logged: 'Logged',
   done: 'Done',
   carried: 'Carried over',
-  removed: 'Not a fit',
 };
 
 function nodeOf(row: PlanRow, selected: boolean): Node {
   if (row.state === 'done') return 'done';
-  if (row.state === 'skipped') return row.skipReason === 'not_a_fit' ? 'removed' : 'carried';
+  // A skipped row is carried to tomorrow; a company removed as not a fit is off the plan altogether (the API).
+  if (row.state === 'skipped') return 'carried';
   if (row.steps.some((s) => s.at !== null)) return 'logged';
   return selected ? 'current' : 'todo';
 }
@@ -44,7 +44,7 @@ function NodeMark({ node, selected }: { node: Node; selected: boolean }) {
         selected && 'border-2 border-foreground',
         node === 'done' && 'border-foreground bg-foreground',
         node === 'logged' && 'border-info-dot bg-info-bg text-info',
-        (node === 'carried' || node === 'removed') && 'bg-[linear-gradient(90deg,var(--muted-foreground)_50%,var(--background)_50%)]',
+        node === 'carried' && 'bg-[linear-gradient(90deg,var(--muted-foreground)_50%,var(--background)_50%)]',
       )}
     >
       {node === 'done' ? <Check className="size-3" strokeWidth={3} /> : null}

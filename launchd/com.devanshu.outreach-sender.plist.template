@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The new sender (#14): one tick every 120 seconds. A tick proves the Gmail sign-in, settles any send in doubt against
+  Sent, reads new replies and bounces, then sends at most one approved email inside the ramp, the per-company limits
+  and the recipient's hours. About 70 to 100 emails a day fit at one every 4 to 9 minutes. A tick that starts while
+  another still runs finds the lock held and exits 0.
+
+  StartInterval misses ticks while the Mac sleeps, and that is safe: the next tick settles whatever was left in
+  doubt and does not ramp twice.
+
+  The sender refuses to send while the old mailer's job (com.devanshu.outreach-mail-sender) is loaded, so a missed
+  step in the switch fails safe. Its store and Gmail folder are the defaults.
+
+  Placeholders, filled by the deploy tool (#17), which also installs this: {{LIVE_CHECKOUT}} is the live checkout,
+  {{LOG_PATH}} the log file. Nothing else is filled.
+
+  Not installed by the repo, and never loaded from a worktree. #17's switch step installs it after the old sender is
+  stopped and its sent mail imported. To install by hand after filling it in:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.devanshu.outreach-sender.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-sender</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.sending</string>
+    <string>run</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>120</integer>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

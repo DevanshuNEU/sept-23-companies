@@ -1,0 +1,6 @@
+# test fixture in the DevVault format: SCOPE<TAB>EXTENDED-REGEX
+
+both	synergy
+dm	passionate about
+email	hope this finds you well
+comment	^great post

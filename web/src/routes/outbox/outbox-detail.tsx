@@ -8,7 +8,7 @@ import {
   newRequestId,
   pollMs,
   queryKeys,
-  useClient,
+  usePageClient,
   type Check,
   type CheckFix,
   type Id,
@@ -165,8 +165,8 @@ function ContextRow({ detail }: { detail: OutboxDetail }) {
       <Cell k="Role to name" v={role ? role.title : 'No open role on file'} s={role ? `Posted ${formatAge(role.firstSeenAt, asOf)}, ${role.location}` : undefined} />
       <Cell k="Hook" v={hook.text} s={hookWhen} />
       {schedule ? (
-        schedule.reason === 'recruiter_day_2' ? (
-          <Cell k="If approved now" v={schedule.text} s={`Day 2 for ${item.company.name}, after engineers`} />
+        schedule.reason === 'recruiter_waits' ? (
+          <Cell k="If approved now" v={schedule.text} s={`Waits for the others at ${item.company.name}`} />
         ) : (
           <Cell
             k={`${item.company.name} today`}
@@ -222,7 +222,7 @@ function DetailBody({
   detail: OutboxDetail;
   items: OutboxItem[];
 }) {
-  const client = useClient();
+  const client = usePageClient('outbox');
   // Unsaved text per email, so J, K, another view and back never throw it away.
   const edits = useEdits();
   const queryClient = useQueryClient();
@@ -463,7 +463,7 @@ function DetailBody({
       apply: (x) => ({
         ...x,
         reply: x.reply ? { ...x.reply, kind: next } : x.reply,
-        item: release ? { ...x.item, company: { ...x.item.company, heldByTouchId: null } } : x.item,
+        item: release ? { ...x.item, company: { ...x.item.company, heldByTouchId: null, held: false, heldByReply: null } } : x.item,
       }),
     };
     const word: Record<ReplyChoice, string> = {
@@ -698,7 +698,7 @@ function DetailBody({
 
 /** Spec 5.3, the detail pane: the selected email, its checks and its actions. */
 export function OutboxDetailPane({ touchId, items }: { touchId: Id; items: OutboxItem[] }) {
-  const client = useClient();
+  const client = usePageClient('outbox');
   const query = useViewQuery(queryKeys.outboxDetail(touchId), () => client.outboxDetail(touchId), { pollMs: pollMs.outbox });
   return (
     <QueryState query={query} skeleton={<DetailSkeleton />} empty={null}>

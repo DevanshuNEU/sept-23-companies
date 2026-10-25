@@ -8,17 +8,35 @@ export PATH="$HOME/.nvm/versions/node/v20.19.5/bin:$PATH"
 uv venv --python /opt/homebrew/bin/python3 && uv sync
 cd web && pnpm install --frozen-lockfile
 """
-# Each workspace has its own ports (CONDUCTOR_PORT..+9), so workspaces can run side by side.
+# Each workspace has its own ports (CONDUCTOR_PORT..+9), so workspaces can run side by side. Conductor's own
+# guide says a local workspace gets "ten ports, CONDUCTOR_PORT through CONDUCTOR_PORT+9", so the web app takes
+# CONDUCTOR_PORT and the API takes +1. Read from that guide; not tested by starting two workspaces.
 run_mode = "concurrent"
 
 [scripts.run.web]
 available_in = [ "local" ]
 command = """
 export PATH="$HOME/.nvm/versions/node/v20.19.5/bin:$PATH"
+export OUTREACH_API_PORT=$((CONDUCTOR_PORT + 1))
 cd web && pnpm dev --host 127.0.0.1 --port "$CONDUCTOR_PORT" --strictPort
 """
 default = true
 icon = "play"
+
+# The local API on CONDUCTOR_PORT + 1, on a scratch store under this workspace's .context/ (git-ignored). Run it next
+# to the web script: Vite proxies /api to it, and OUTREACH_DEV_ORIGINS lets the API accept that page's Origin.
+# OUTREACH_DB is always set here, so `outreach.install` and the API never open the live store.
+[scripts.run.api]
+available_in = [ "local" ]
+command = """
+set -e
+export PATH="$HOME/.nvm/versions/node/v20.19.5/bin:$PATH"
+mkdir -p .context/api-scratch
+export OUTREACH_DB="$PWD/.context/api-scratch/outreach.db"
+uv run python -m outreach.install
+OUTREACH_API_PORT=$((CONDUCTOR_PORT + 1)) OUTREACH_DEV_ORIGINS=http://127.0.0.1:$CONDUCTOR_PORT uv run python -m outreach.api
+"""
+icon = "server"
 
 [scripts.run.tests]
 command = """

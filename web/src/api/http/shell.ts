@@ -1,0 +1,8 @@
+import type { LiveMethods } from './client';
+import { getJson } from './api';
+import type { Transport } from './transport';
+
+/** The sidebar's counts, the sender line, today's plan and the wins not yet seen (`GET /api/shell`). Read only. */
+export const shellMethods = (t: Transport): LiveMethods => ({
+  shell: () => getJson(t, '/api/shell'),
+});

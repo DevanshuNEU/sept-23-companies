@@ -1,0 +1,51 @@
+{
+  "name": "Acme Robotics",
+  "description": "We build warehouse robots.",
+  "jobs": [
+    {
+      "title": "Software Engineer, New Grad",
+      "shortcode": "A1B2C3D4E5",
+      "code": "ENG-1",
+      "employment_type": "Full-time",
+      "telecommuting": false,
+      "department": "Engineering",
+      "url": "https://apply.workable.com/j/A1B2C3D4E5",
+      "shortlink": "https://apply.workable.com/j/A1B2C3D4E5",
+      "application_url": "https://apply.workable.com/j/A1B2C3D4E5/apply",
+      "published_on": "2026-09-30",
+      "created_at": "2026-09-28",
+      "country": "US",
+      "city": "Boston",
+      "state": "Massachusetts",
+      "description": "<p>Build services &amp; ship them.</p><ul><li>Write code</li><li>Review code</li></ul><p>We sponsor visas for the right person.</p>"
+    },
+    {
+      "title": "Account Executive",
+      "shortcode": "F6G7H8I9J0",
+      "code": "SAL-1",
+      "employment_type": "Full-time",
+      "telecommuting": true,
+      "department": "Sales",
+      "url": "https://apply.workable.com/j/F6G7H8I9J0",
+      "shortlink": "https://apply.workable.com/j/F6G7H8I9J0",
+      "created_at": "2026-10-03",
+      "country": "United Kingdom",
+      "city": "",
+      "state": ""
+    },
+    {
+      "title": "Data Engineer",
+      "shortcode": "K1L2M3N4O5",
+      "code": "ENG-2",
+      "employment_type": "Full-time",
+      "telecommuting": false,
+      "department": "Engineering",
+      "url": "https://apply.workable.com/j/K1L2M3N4O5",
+      "published_on": "2026-08-29",
+      "country": "CA",
+      "city": "Toronto",
+      "state": "Ontario",
+      "description": "<p>Move data around.</p>"
+    }
+  ]
+}

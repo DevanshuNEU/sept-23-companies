@@ -759,6 +759,7 @@ describe('reply', () => {
     if (!priya) throw new Error('No Priya in the fixture');
     priya.item.company.status = 'closed';
     priya.item.company.heldByTouchId = null;
+    priya.item.company.held = false;
     const client = new FixtureClient(db);
     renderWithApp(<OutboxPage />, { route: `/outbox/${T.priya}`, client });
     await screen.findByRole('heading', { level: 2, name: 'Priya Natarajan' });
@@ -835,9 +836,9 @@ describe('reply', () => {
     expect(close.mock.calls[0]?.slice(0, 3)).toEqual([companyId('Browserbase'), 'interview', '']);
   });
 
-  it('Resume lists what will send again, then resumes at once', async () => {
+  it('Resume lists what will send again, then releases the hold at once (the company is not paused)', async () => {
     const { client } = await open(T.priya, 'Priya Natarajan');
-    const resume = vi.spyOn(client, 'resumeCompany');
+    const resume = vi.spyOn(client, 'releaseHold');
     fireEvent.click(screen.getByRole('button', { name: 'Resume Browserbase' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('Lena Szabo (approved)');

@@ -1,6 +1,6 @@
 import { ApiError, type OutreachClient, type WriteOptions } from '../client';
 import type {
-  Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
+  Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, SearchIndex, SendingStatus, ShellSummary, TodayView,
   FindingsView, FunnelKey, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, WatchView, Win, WinKind, WinsView,
@@ -33,7 +33,10 @@ function eachObject(node: unknown, visit: (o: Obj) => void): void {
 }
 const isCompanyRef = (o: Obj, id: Id) => o.id === id && 'heldByTouchId' in o && 'pausedAt' in o;
 const isPersonRef = (o: Obj, id: Id) => o.id === id && 'roleKind' in o && 'linkedinUrl' in o;
-const refOf = (c: CompanyRef): CompanyRef => ({ id: c.id, name: c.name, status: c.status, pausedAt: c.pausedAt, heldByTouchId: c.heldByTouchId });
+const refOf = (c: CompanyRef): CompanyRef => ({
+  id: c.id, name: c.name, status: c.status, pausedAt: c.pausedAt, heldByTouchId: c.heldByTouchId, held: c.held,
+  heldByReply: c.heldByReply,
+});
 const notAllowed = (message: string) => new ApiError('not_allowed', message);
 const rankOf = (i: OutboxItem) => Number(i.sortKey.split('.')[1]);
 
@@ -88,6 +91,8 @@ export class FixtureClient implements OutreachClient {
   private readonly results = new Map<string, unknown>();
   /** Today rows taken off the list by removeCompany, so restoreCompany can bring back the same row. */
   private readonly removedEntries = new Map<Id, DailyEntry>();
+  /** Plan rows of a removed company. The API leaves a removed entry off the plan, and restoreCompany brings it back carried. */
+  private readonly removedPlanRows = new Map<Id, PlanRow[]>();
   /** Idempotency keys (`plan:<entryId>:request`) and the touch each one made, so a repeated key writes nothing. Only successes are kept. */
   private readonly keys = new Map<string, Id>();
   /** Prompt touches that got an outcome and left the prompt. A reply on a quiet touch still finds its person here. */
@@ -124,6 +129,18 @@ export class FixtureClient implements OutreachClient {
     return structuredClone(result);
   }
 
+  /** A fixed sample: the shell's jobs and sender, with the queue and board counts of a quiet night. */
+  health(): Promise<HealthView> {
+    return this.read(() => ({
+      asOf: this.db.shell.asOf,
+      store: { version: 2, rulesetVersion: 'r-3f9a0c71b2de' },
+      jobs: this.db.shell.jobs,
+      readQueue: { queued: 14, leased: 2, leaseExpired: 0, done: 812, refused: 3, oldestQueuedAgeHours: 6.5, lastNight: null },
+      boards: { active: 47, dueNow: 5, erroring: 2 },
+      watchedPages: { total: 9, changedLast7Days: 1 },
+      sender: this.db.shell.sending,
+    }));
+  }
   shell(): Promise<ShellSummary> { return this.read(() => this.db.shell); }
   searchIndex(): Promise<SearchIndex> { return this.read(() => this.db.searchIndex); }
   searchPostings(q: string): Promise<PostingHit[]> { return this.read(() => this.db.postings.filter((p) => postingMatches(p.title, q)).slice(0, 20)); }
@@ -200,6 +217,8 @@ export class FixtureClient implements OutreachClient {
   /** Everything the plan, progress and wins views derive, worked out here from the rows and wins and nowhere else. */
   private settlePlan(): void {
     const { plan, progress, wins } = this.db;
+    // As the API: positions count 1 up over the rows on the plan, so a removed company's place is taken.
+    plan.rows.forEach((row, i) => { row.position = i + 1; });
     for (const row of plan.rows) if (row.state === 'todo' && row.steps.length > 0 && row.steps.every((st) => st.at !== null)) row.state = 'done';
     plan.done = plan.rows.filter((r) => r.state === 'done').length;
     plan.total = plan.rows.length;
@@ -328,14 +347,17 @@ export class FixtureClient implements OutreachClient {
     return this.write(o, () => {
       const v = this.fresh(companyId, revision);
       if (v.company.status === 'removed' || v.company.status === 'closed') throw notAllowed(`${v.company.name} is already ${v.company.status}`);
+      // As the API: a company with a LinkedIn request or an application logged is closed on its page, not removed.
+      if (this.db.plan.rows.some((row) => row.company.id === companyId && row.steps.some((st) => st.at !== null))) {
+        throw notAllowed(`${v.company.name} already has a LinkedIn request or an application logged. Close it on its page instead`);
+      }
       const taken = this.takeEntry(companyId);
       if (taken) this.removedEntries.set(companyId, taken);
-      // Its row on today's plan leaves the day as not a fit, in place: handled, never done.
-      for (const row of this.db.plan.rows) {
-        if (row.company.id !== companyId || row.state !== 'todo') continue;
-        row.state = 'skipped';
-        row.skipReason = 'not_a_fit';
-        row.revision += 1;
+      // As the API: its row is off today's plan (a removed entry is not on the plan), so the day's total drops.
+      const off = this.db.plan.rows.filter((row) => row.company.id === companyId);
+      if (off.length > 0) {
+        this.removedPlanRows.set(companyId, off);
+        this.db.plan.rows = this.db.plan.rows.filter((row) => row.company.id !== companyId);
       }
       this.touchCompany(companyId, { status: 'removed' }, ['removed', note ? `Removed by you: ${note}` : 'Removed by you'], 'Removed by you');
       this.db.noGo.companies.unshift({ kind: 'removed', company: { ...refOf(v.company), revision: v.company.revision }, removeReason: reason, note, removedAt: this.now });
@@ -350,12 +372,14 @@ export class FixtureClient implements OutreachClient {
       const v = this.fresh(companyId, revision);
       this.db.noGo.companies = this.db.noGo.companies.filter((r) => r !== row);
       this.countReason('removed', -1);
-      for (const planRow of this.db.plan.rows) {
-        if (planRow.company.id !== companyId || planRow.skipReason !== 'not_a_fit') continue;
-        planRow.state = 'todo';
-        planRow.skipReason = null;
+      // As the API: today's entry becomes a backlog row, which the plan shows as carried to tomorrow.
+      const back = this.removedPlanRows.get(companyId) ?? [];
+      this.removedPlanRows.delete(companyId);
+      for (const planRow of back) {
+        if (planRow.state === 'todo') planRow.state = 'skipped';
         planRow.revision += 1;
       }
+      this.db.plan.rows = [...this.db.plan.rows, ...back].sort((a, b) => a.entryId - b.entryId); // entry ids follow the plan's order
       this.touchCompany(companyId, { status: 'backlog' }, ['restored', `Restored to the backlog: ${reason}`], 'Backlog');
       const kept = this.removedEntries.get(companyId);
       this.removedEntries.delete(companyId);
@@ -543,13 +567,30 @@ export class FixtureClient implements OutreachClient {
       if (holder) { released += holder.held.length; holder.held = []; }
       this.db.linkedin.groups.forEach((g) => { if (g.company.id === companyId) g.heldBy = null; });
       const wasPaused = this.itemsOf(companyId).filter((i) => i.group === 'paused');
-      this.touchCompany(companyId, { pausedAt: null, heldByTouchId: null }, ['resumed', 'Resumed by you']);
+      this.touchCompany(companyId, { pausedAt: null, heldByTouchId: null, held: false, heldByReply: null },
+        ['resumed', 'Resumed by you']);
       for (const item of wasPaused) if (deriveGroup(item) !== 'paused') { this.place(item); released += 1; }
       const still = this.db.today.stillEmailing.find((s) => s.company.id === companyId);
       if (still && (still.state === 'held' || still.state === 'paused')) {
         still.state = 'emailing';
         if (still.nextStep.kind === 'paused') still.nextStep = { kind: 'nothing', text: 'Nothing. Follow-ups are scheduled' };
       }
+      return { released };
+    });
+  }
+
+  releaseHold(companyId: Id, revision: Revision, o: WriteOptions): Promise<{ released: number }> {
+    return this.write(o, () => {
+      const v = this.fresh(companyId, revision);
+      const heldBy = v.company.heldByTouchId;
+      if (heldBy === null && !v.company.held) throw notAllowed(`${v.company.name} is not held by a reply`);
+      let released = 0;
+      const holder = heldBy === null ? undefined : this.db.details[heldBy];
+      if (holder) { released += holder.held.length; holder.held = []; }
+      this.db.linkedin.groups.forEach((g) => { if (g.company.id === companyId) g.heldBy = null; });
+      this.touchCompany(companyId, { heldByTouchId: null, held: false, heldByReply: null }, ['hold_released', 'Hold released by you']);
+      const still = this.db.today.stillEmailing.find((s) => s.company.id === companyId);
+      if (still && still.state === 'held') still.state = 'emailing';
       return { released };
     });
   }
@@ -685,6 +726,7 @@ export class FixtureClient implements OutreachClient {
       if (!review) throw new ApiError('not_found', `No review item ${reviewId}`);
       if (review.revision !== revision) throw new ApiError('conflict', 'This item changed since you loaded it');
       if (fix.kind === 'edit' && (fix.source.trim() === '' || fix.value.trim() === '')) throw notAllowed('An edit needs a value and a source');
+      if (fix.kind === 'merge' && review.kind !== 'merge_candidate') throw notAllowed('Only a possible duplicate can be merged.');
       const v = this.view(review.company.id);
       let resolution: ResolvedReview['resolution'] = 'marked_ok';
       let note = 'Marked ok by you';
@@ -707,9 +749,12 @@ export class FixtureClient implements OutreachClient {
         this.shut(v, fix.reason === 'no_sponsorship' ? 'no_sponsorship' : 'other', fix.source, fix.reason);
         resolution = 'marked_no_go';
         note = `Added to the no-go list by you: ${fix.reason.replace(/_/g, ' ')}`;
+      } else if (fix.kind === 'merge') {
+        resolution = 'field_edited';
+        note = 'Merged by you';
       }
       this.db.needsYou.open = this.db.needsYou.open.filter((r) => r.id !== reviewId);
-      this.db.needsYou.resolvedThisWeek.unshift({ id: reviewId, kind: review.kind, companyName: review.company.name, resolution, note, at: this.now, locked: fix.kind === 'edit' });
+      this.db.needsYou.resolvedThisWeek.unshift({ id: reviewId, kind: review.kind, companyName: review.company.name, resolution, note, at: this.now, locked: fix.kind === 'edit', revision: revision + 1, canUndo: fix.kind !== 'edit' });
       v.reviewItems = v.reviewItems.filter((r) => r.id !== reviewId);
     });
   }
@@ -741,8 +786,12 @@ export class FixtureClient implements OutreachClient {
 
   private planRow(entryId: Id): PlanRow {
     const row = this.db.plan.rows.find((r) => r.entryId === entryId);
-    if (!row) throw new ApiError('not_found', `No plan row ${entryId}`);
-    return row;
+    if (row) return row;
+    // As the API: a removed company's entry still exists, and every write on it is refused.
+    for (const rows of this.removedPlanRows.values()) {
+      if (rows.some((r) => r.entryId === entryId)) throw notAllowed('That company was taken off the plan');
+    }
+    throw new ApiError('not_found', `No plan row ${entryId}`);
   }
 
   private freshRow(entryId: Id, revision: Revision): PlanRow {
@@ -779,7 +828,6 @@ export class FixtureClient implements OutreachClient {
   private logStep(entryId: Id, kind: StepKind, key: string, check: (row: PlanRow) => void): PlanRow {
     const row = this.planRow(entryId);
     if (this.keys.has(key)) return row;
-    if (row.skipReason === 'not_a_fit') throw notAllowed(`${row.company.name} is on the No-go list`);
     if (row.state === 'skipped') throw notAllowed(`${row.company.name} is carried to tomorrow`);
     const step = row.steps.find((st) => st.kind === kind);
     if (!step) throw notAllowed(kind === 'request' ? 'This row has no request to log' : 'This row has no role to apply to');
@@ -823,7 +871,6 @@ export class FixtureClient implements OutreachClient {
       if (row.state === 'done') throw notAllowed(`${row.company.name} is already done`);
       if (row.state === 'skipped') return row;
       row.state = 'skipped';
-      row.skipReason = 'carried';
       row.revision += 1;
       const t = this.db.plan.tomorrow;
       t.total += 1;

@@ -1,0 +1,104 @@
+{
+  "author": "whoishiring",
+  "children": [
+    {
+      "author": "user61000101",
+      "children": [
+        {
+          "author": "user61000901",
+          "children": [],
+          "created_at": "2026-10-01T16:00:00.000Z",
+          "created_at_i": 0,
+          "id": 61000901,
+          "parent_id": 61000101,
+          "story_id": 61000101,
+          "text": "Is this role open to new grads?",
+          "type": "comment"
+        }
+      ],
+      "created_at": "2026-10-01T15:04:11.000Z",
+      "created_at_i": 0,
+      "id": 61000101,
+      "parent_id": 61000001,
+      "story_id": 61000001,
+      "text": "Orchard (YC S21) | Backend Engineer | NYC | REMOTE | <a href=\"https:&#x2F;&#x2F;orchard.io&#x2F;jobs\" rel=\"nofollow\">https:&#x2F;&#x2F;orchard.io&#x2F;jobs</a><p>We run a small team building scheduling software for clinics. Python, Postgres, a little Go. Interns welcome in the summer.<p>Email me at hiring@orchard.io with a few lines about what you have shipped.",
+      "type": "comment"
+    },
+    {
+      "author": "user61000102",
+      "children": [],
+      "created_at": "2026-10-01T15:20:45.000Z",
+      "created_at_i": 0,
+      "id": 61000102,
+      "parent_id": 61000001,
+      "story_id": 61000001,
+      "text": "Tidepool Apps | Full-stack | Remote (US) | <a href=\"https:&#x2F;&#x2F;tidepoolapps.com\" rel=\"nofollow\">https:&#x2F;&#x2F;tidepoolapps.com</a><p>Two engineers and a designer making offline-first field apps. TypeScript and Rust. Apply at <a href=\"https:&#x2F;&#x2F;jobs.lever.co&#x2F;tidepoolapps\" rel=\"nofollow\">https:&#x2F;&#x2F;jobs.lever.co&#x2F;tidepoolapps</a><p>Please email me a short note about something you have built.",
+      "type": "comment"
+    },
+    {
+      "author": "user61000103",
+      "children": [],
+      "created_at": "2026-10-01T16:41:02.000Z",
+      "created_at_i": 0,
+      "id": 61000103,
+      "parent_id": 61000001,
+      "story_id": 61000001,
+      "text": "Quasar Games | Unity dev | London, UK | <a href=\"https:&#x2F;&#x2F;quasar.games\" rel=\"nofollow\">https:&#x2F;&#x2F;quasar.games</a><p>Co-op puzzle games, hybrid in our London studio. UK right to work needed.",
+      "type": "comment"
+    },
+    {
+      "author": "user61000104",
+      "children": [],
+      "created_at": "2026-10-01T17:02:30.000Z",
+      "created_at_i": 0,
+      "id": 61000104,
+      "parent_id": 61000001,
+      "story_id": 61000001,
+      "text": "Mesh Systems | SWE | San Francisco | <a href=\"https:&#x2F;&#x2F;meshsystems.dev\" rel=\"nofollow\">https:&#x2F;&#x2F;meshsystems.dev</a><p>Mesh networking for warehouses. C++ and Go.",
+      "type": "comment"
+    },
+    {
+      "author": "user61000105",
+      "children": [],
+      "created_at": "2026-10-01T17:30:00.000Z",
+      "created_at_i": 0,
+      "id": 61000105,
+      "parent_id": 61000001,
+      "story_id": 61000001,
+      "text": "Veltrix Bio | Data Engineer | Newark, NJ | <a href=\"https:&#x2F;&#x2F;veltrix.com&#x2F;careers\" rel=\"nofollow\">https:&#x2F;&#x2F;veltrix.com&#x2F;careers</a><p>Lab data pipelines. Python and SQL.",
+      "type": "comment"
+    },
+    {
+      "author": "user61000106",
+      "children": [],
+      "created_at": "2026-10-01T18:11:09.000Z",
+      "created_at_i": 0,
+      "id": 61000106,
+      "parent_id": 61000001,
+      "story_id": 61000001,
+      "text": "PrairieLearn (Remote US) \u2014 Full-Stack Software Engineer<p>Open source education tooling, code at <a href=\"https:&#x2F;&#x2F;github.com&#x2F;prairielearn\" rel=\"nofollow\">https:&#x2F;&#x2F;github.com&#x2F;prairielearn</a>. Remote across the US.",
+      "type": "comment"
+    },
+    {
+      "author": "user61000107",
+      "children": [],
+      "created_at": "2026-10-01T19:45:55.000Z",
+      "created_at_i": 0,
+      "id": 61000107,
+      "parent_id": 61000001,
+      "story_id": 61000001,
+      "text": "Thanks for the thread, great month everyone",
+      "type": "comment"
+    }
+  ],
+  "created_at": "2026-10-01T15:00:00.000Z",
+  "created_at_i": 0,
+  "id": 61000001,
+  "parent_id": null,
+  "points": 300,
+  "story_id": 61000001,
+  "text": null,
+  "title": "Ask HN: Who is hiring? (October 2026)",
+  "type": "story",
+  "url": null
+}

@@ -82,6 +82,57 @@ MORE_CASES = [
     ("Software Engineer, Layer 2", "engineering", None),
 ]
 
+# #4 follow-up 2026-10-22: postdoctoral roles need a PhD, so they are off lane (he is a May 2026 MS new grad).
+# The controls keep the results they had before the change.
+POSTDOC_CASES = [
+    ("Postdoctoral Associate-Systems Engineering", "off_lane", None),
+    ("Postdoctoral Researcher - Civil, Environmental, and Ocean Engineering", "off_lane", None),
+    ("Postdoc Software Engineer", "off_lane", None),
+    ("Post-Doctoral Fellow, Machine Learning Engineering", "off_lane", None),
+    ("Post Doc Developer", "off_lane", None),
+    ("Software Engineer, New Grad", "engineering", "new_grad"),
+    ("Graduate Software Engineer", "engineering", "new_grad"),
+    ("Engineering Fellow", "engineering", "early_career"),
+]
+
+# #4 follow-up 2026-10-23: support, field, metrology and academic titles are off lane. Contract roles stay in
+# (he wants contract-to-hire), so the contract controls keep their results.
+OFF_LANE_CASES = [
+    ("Mandarin-speaking: Customer Success Engineer (Contract)", "off_lane", None),
+    ("Customer Success Engineer", "off_lane", None),
+    ("Robotics Field Engineer", "off_lane", None),
+    ("Field Engineers, Hardware Rollout", "off_lane", None),
+    ("Field Application Engineer", "off_lane", None),
+    ("Field Applications Engineer", "off_lane", None),
+    ("CMM Programmer", "off_lane", None),
+    ("Metrology Engineer", "off_lane", None),
+    ("Assistant Professor of Professional Practice, Clinical Practicum & Internship Coordinator, "
+     "Counselor Education", "off_lane", None),
+    ("Adjunct Faculty - Engineering", "off_lane", None),
+    ("Lecturer, Software Engineering", "off_lane", None),
+    ("Faculty Software Engineer", "off_lane", None),
+    ("Customer Success Engineers", "off_lane", None),
+    ("Customer Success Manager, Engineering", "off_lane", None),
+    ("Customer Success Specialist, Developer Tools", "off_lane", None),
+    ("Customer Success Architect, Software Engineering", "off_lane", None),
+    # narrowed 2026-10-23 (second commit): these software roles stay in
+    ("Forward Deployed Engineer | AI Implementation & Customer Success", "engineering", "open"),
+    ("AI Field Engineer - Enterprise", "engineering", None),
+    ("MLOps Field Engineer", "engineering", None),
+    ("Cloud Field Engineer", "engineering", None),
+    ("Field Engineer", "engineering", None),  # a plain Field Engineer passes, accepted
+    # already off lane before this change (field service and field technician stay as they were)
+    ("Field Service Engineer", "off_lane", None),
+    ("Field Technician", "not_engineering", None),
+    # unchanged controls
+    ("Software Engineer (Contract)", "engineering", None),
+    ("Software Engineer, Contract to Hire", "engineering", None),
+    ("Software Engineer, Field Systems", "engineering", None),
+    ("Software Engineering Intern", "intern", None),
+    ("RA-II/Sr. Research Associate Protein Engineering", "engineering", "senior"),
+    ("Research Associate, Software Engineering", "engineering", "early_career"),
+]
+
 
 class ClassifyTitleTests(unittest.TestCase):
     @classmethod
@@ -101,6 +152,20 @@ class ClassifyTitleTests(unittest.TestCase):
 
     def test_more_cases(self):
         self._check(MORE_CASES)
+
+    def test_postdoc_cases(self):
+        self._check(POSTDOC_CASES)
+
+    def test_postdoc_titles_are_off_lane_with_no_tier(self):
+        for title, lane, _ in POSTDOC_CASES:
+            if lane == "off_lane":
+                with self.subTest(title=title):
+                    got = classify_title(title, self.cfg)
+                    self.assertEqual(got.lane, "off_lane")
+                    self.assertIsNone(got.tier)
+
+    def test_off_lane_cases(self):
+        self._check(OFF_LANE_CASES)
 
     def test_basis_is_never_empty(self):
         for title, _, _ in CASES + MORE_CASES:

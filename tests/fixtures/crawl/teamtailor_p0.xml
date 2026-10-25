@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:tt="https://teamtailor.com/locations">
+  <channel>
+    <title>Acme Jobs</title>
+    <link>https://acme.teamtailor.com</link>
+    <description>Jobs at Acme</description>
+    <item>
+      <guid isPermaLink="true">https://acme.teamtailor.com/jobs/1001-software-engineer</guid>
+      <pubDate>Mon, 14 Sep 2026 09:12:00 +0200</pubDate>
+      <link>https://acme.teamtailor.com/jobs/1001-software-engineer</link>
+      <title>Software Engineer</title>
+      <description>&lt;p&gt;Build things.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Ship &amp;amp; learn&lt;/li&gt;&lt;li&gt;We sponsor visas&lt;/li&gt;&lt;/ul&gt;</description>
+      <tt:department>Engineering</tt:department>
+      <tt:locations>
+        <tt:location>
+          <tt:name>Stockholm HQ</tt:name>
+          <tt:city>Stockholm</tt:city>
+          <tt:country>Sweden</tt:country>
+        </tt:location>
+      </tt:locations>
+    </item>
+    <item>
+      <guid isPermaLink="true">https://acme.teamtailor.com/jobs/1002-data-analyst</guid>
+      <pubDate>Sat, 03 Oct 2026 14:00:00 +0000</pubDate>
+      <link>https://acme.teamtailor.com/jobs/1002-data-analyst</link>
+      <title>Data Analyst</title>
+      <description><![CDATA[<p>Analyse data.</p><p>Remote friendly.</p>]]></description>
+      <tt:department>Data</tt:department>
+      <tt:locations>
+        <tt:location>
+          <tt:city>Berlin</tt:city>
+          <tt:country>Germany</tt:country>
+        </tt:location>
+        <tt:location>
+          <tt:name>Remote</tt:name>
+        </tt:location>
+      </tt:locations>
+    </item>
+  </channel>
+</rss>

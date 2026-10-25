@@ -1,0 +1,13 @@
+{
+  "id": "743999000111222",
+  "name": "Software Engineer, New Grad",
+  "company": {"identifier": "AcmeRobotics", "name": "Acme Robotics"},
+  "jobAd": {
+    "sections": {
+      "companyDescription": {"title": "Company Description", "text": "<p>We build warehouse robots.</p>"},
+      "jobDescription": {"title": "Job Description", "text": "<p>Build services &amp; ship them.</p><ul><li>Write code</li><li>Review code</li></ul>"},
+      "qualifications": {"title": "Qualifications", "text": "<ul><li>A CS degree</li><li>Curiosity</li></ul>"},
+      "additionalInformation": {"title": "Additional Information", "text": "<p>We sponsor visas for the right person.</p>"}
+    }
+  }
+}

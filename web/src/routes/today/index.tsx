@@ -58,7 +58,7 @@ function PlanHead({ plan }: { plan: PlanView }) {
   const { used, limit, hardUsed, hardLimit } = plan.linkedinMonth;
   // Once nothing is left to do, the head says what carried over, as the finish line does (design 16.2).
   const finished = plan.rows.length > 0 && plan.rows.every((r) => r.state !== 'todo');
-  const carried = finished ? plan.rows.filter((r) => r.state === 'skipped' && r.skipReason === 'carried').length : 0;
+  const carried = finished ? plan.rows.filter((r) => r.state === 'skipped').length : 0;
   return (
     <div className="flex flex-none items-end gap-4 border-b px-6 pt-5 pb-4">
       <div>

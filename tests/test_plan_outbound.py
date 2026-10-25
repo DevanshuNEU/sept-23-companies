@@ -1,0 +1,295 @@
+import unittest
+from datetime import date
+
+from outreach.plan.outbound import load_outbound
+from outreach.ranking.common import canonical_ids
+from outreach.store.timefmt import utcnow
+from outreach.store.writes import log_touch, record_outcome, undo_touch
+from tests.plan_seed import (TODAY, seed_email_touch, seed_log_only, seed_message, seed_outbound, seed_person,
+                             seed_scored_company)
+from tests.storetest import fresh_store
+
+TZ = "America/New_York"
+D = date
+
+
+def _context(source="plan", lane=None):
+    return {"source": source, "lane": lane, "roleKind": None, "roleAgeDays": None, "rankerVersion": None,
+            "signals": {}, "roleNamed": False}
+
+
+class OutboundCase(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh_store()
+        self.company = seed_scored_company(self.conn, "Acme", 5.0, ["level_role"])
+        self.person = seed_person(self.conn, self.company, "Ada")
+
+    def load(self, **kw):
+        return load_outbound(self.conn, canonical_ids(self.conn), tz=TZ, **kw)
+
+
+class OutboundTest(OutboundCase):
+
+    def test_touch_row_becomes_one_outbound_with_ny_day(self):
+        log_touch(self.conn, person_id=self.person, company_id=self.company, channel="linkedin_request",
+                  sent_at="2026-11-01T03:30:00Z", context=_context(lane="level_role"), idempotency_key="k1")
+        (o,) = self.load()
+        self.assertEqual(o.sent_on, D(2026, 10, 31))
+        self.assertEqual(o.anchor_on, D(2026, 10, 31))
+        self.assertEqual((o.person_id, o.company_id, o.channel), (self.person, self.company, "linkedin_request"))
+        self.assertEqual((o.lane, o.context_source, o.source), ("level_role", "plan", "touch"))
+        self.assertFalse(o.accepted or o.replied or o.progressed)
+
+    def test_applications_are_not_outbound(self):
+        log_touch(self.conn, person_id=None, company_id=self.company, channel="application",
+                  sent_at="2026-11-02T15:00:00Z", context=_context("own"), idempotency_key="app")
+        self.assertEqual(self.load(), [])
+
+    def test_undone_touch_is_not_outbound(self):
+        touch = seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 11, 2))
+        self.assertEqual(len(self.load()), 1)
+        undo_touch(self.conn, touch, at="2026-11-03T15:00:00Z", revision=1)
+        self.assertEqual(self.load(), [])
+
+    def test_context_source_comes_from_the_touch_context_and_defaults_to_own(self):
+        other = seed_person(self.conn, self.company, "Bo")
+        third = seed_person(self.conn, self.company, "Cy")
+        fourth = seed_person(self.conn, self.company, "Di")
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 11, 2),
+                      context_source="plan")
+        seed_outbound(self.conn, other, self.company, "linkedin_request", D(2026, 11, 3), context_source="own")
+        # A legacy email touch (no outreach_touch) and a log-only request (nothing in the plan touched them).
+        self.conn.execute(
+            "INSERT INTO touch(person_id, origin, first_sent_at, created_at, updated_at) "
+            "VALUES (?, 'import', '2026-11-04T15:00:00Z', ?, ?)", (third, utcnow(), utcnow()))
+        seed_log_only(self.conn, fourth, "request_sent", D(2026, 11, 5))
+        got = {o.person_id: o for o in self.load()}
+        self.assertEqual({p: o.context_source for p, o in got.items()},
+                         {self.person: "plan", other: "own", third: "own", fourth: "own"})
+        self.assertEqual({p: o.source for p, o in got.items()},
+                         {self.person: "touch", other: "touch", third: "email_touch", fourth: "linkedin_log"})
+
+    def test_accepted_moves_the_anchor_and_replied_and_progress_flags_follow(self):
+        plain = seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 11, 2),
+                              accepted_on=D(2026, 11, 6))
+        other = seed_person(self.conn, self.company, "Bo")
+        replied = seed_outbound(self.conn, other, self.company, "linkedin_request", D(2026, 11, 2),
+                                accepted_on=D(2026, 11, 3), replied_on=D(2026, 11, 4))
+        third = seed_person(self.conn, self.company, "Cy")
+        referred = seed_outbound(self.conn, third, self.company, "email", D(2026, 11, 2))
+        record_outcome(self.conn, referred, kind="referred", at="2026-11-05T15:00:00Z", revision=1)
+        a, b, c = self.load()
+        self.assertEqual((a.sent_on, a.anchor_on, a.accepted, a.replied, a.progressed),
+                         (D(2026, 11, 2), D(2026, 11, 6), True, False, False))
+        self.assertEqual((b.anchor_on, b.accepted, b.replied, b.progressed), (D(2026, 11, 3), True, True, False))
+        self.assertEqual((c.anchor_on, c.accepted, c.replied, c.progressed), (D(2026, 11, 2), False, False, True))
+        self.assertIsNotNone(plain)
+        self.assertIsNotNone(replied)
+
+    def test_legacy_email_touch_counts_once(self):
+        email_touch = self.conn.execute(
+            "INSERT INTO touch(person_id, origin, first_sent_at, created_at, updated_at) "
+            "VALUES (?, 'import', '2026-11-04T15:00:00Z', ?, ?)", (self.person, utcnow(), utcnow())).lastrowid
+        (o,) = self.load()
+        self.assertEqual((o.source, o.channel, o.sent_on, o.person_id), ("email_touch", "email", D(2026, 11, 4),
+                                                                         self.person))
+        log_touch(self.conn, person_id=self.person, company_id=self.company, channel="email",
+                  sent_at="2026-11-04T15:00:00Z", context=_context("own"), email_touch_id=email_touch,
+                  idempotency_key="email-1")
+        (o,) = self.load()
+        self.assertEqual(o.source, "touch")
+
+    def test_legacy_email_touch_reply(self):
+        self.conn.execute(
+            "INSERT INTO touch(person_id, origin, state, first_sent_at, replied_at, reply_kind, created_at, "
+            "updated_at) VALUES (?, 'import', 'replied', '2026-11-04T15:00:00Z', '2026-11-05T15:00:00Z', "
+            "'interested', ?, ?)", (self.person, utcnow(), utcnow()))
+        (o,) = self.load()
+        self.assertTrue(o.replied)
+
+    def test_log_only_request_counts_unless_a_touch_matches(self):
+        seed_log_only(self.conn, self.person, "request_sent", D(2026, 11, 2))
+        self.assertEqual([o.source for o in self.load()], ["linkedin_log"])
+        # The same person, channel and New York day as a touch: the touch is the record, the log is its twin.
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 11, 2))
+        self.assertEqual([o.source for o in self.load()], ["touch"])
+        # A request on another day still counts on its own.
+        seed_log_only(self.conn, self.person, "request_sent", D(2026, 11, 3))
+        self.assertEqual([o.source for o in self.load()], ["touch", "linkedin_log"])
+
+    def test_log_only_message_is_a_linkedin_message(self):
+        seed_log_only(self.conn, self.person, "message_sent", D(2026, 11, 2))
+        (o,) = self.load()
+        self.assertEqual(o.channel, "linkedin_message")
+
+    def test_undone_log_entry_does_not_count(self):
+        entry = seed_log_only(self.conn, self.person, "request_sent", D(2026, 11, 2))
+        seed_log_only(self.conn, self.person, "undo", D(2026, 11, 3), undoes=entry)
+        self.assertEqual(self.load(), [])
+
+    def test_log_only_accept_sets_accepted(self):
+        seed_log_only(self.conn, self.person, "request_sent", D(2026, 11, 2))
+        seed_log_only(self.conn, self.person, "accepted", D(2026, 11, 6))
+        (o,) = self.load()
+        self.assertEqual((o.accepted, o.anchor_on, o.replied), (True, D(2026, 11, 6), False))
+        seed_log_only(self.conn, self.person, "replied", D(2026, 11, 7))
+        (o,) = self.load()
+        self.assertTrue(o.replied)
+
+    def test_log_accept_before_the_request_does_not_count(self):
+        seed_log_only(self.conn, self.person, "accepted", D(2026, 11, 1))
+        seed_log_only(self.conn, self.person, "request_sent", D(2026, 11, 2))
+        (o,) = self.load()
+        self.assertFalse(o.accepted)
+
+    def test_company_follows_a_merge(self):
+        dup = seed_scored_company(self.conn, "Acme Inc", 1.0, [])
+        person = seed_person(self.conn, dup, "Dee")
+        seed_outbound(self.conn, person, dup, "linkedin_request", D(2026, 11, 2))
+        seed_log_only(self.conn, self.person, "request_sent", D(2026, 11, 3))
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'duplicate', merged_into = ? "
+                          "WHERE company_id = ?", (self.company, dup))
+        self.assertEqual({o.company_id for o in self.load()}, {self.company})
+
+    def test_since_and_company_filters(self):
+        other_company = seed_scored_company(self.conn, "Beta", 3.0, ["level_role"])
+        other = seed_person(self.conn, other_company, "Bo")
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 11, 2))
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 11, 9))
+        seed_outbound(self.conn, other, other_company, "linkedin_request", D(2026, 11, 9))
+        self.assertEqual(len(self.load()), 3)
+        self.assertEqual(len(self.load(since=D(2026, 11, 9))), 2)
+        self.assertEqual({o.company_id for o in self.load(company_ids=[other_company])}, {other_company})
+        self.assertEqual(len(self.load(since=D(2026, 11, 9), company_ids={self.company})), 1)
+        self.assertEqual(self.load(company_ids=[]), [])
+        self.assertEqual(TODAY, D(2026, 11, 10))
+
+
+class FoldedLogOutcomesTest(OutboundCase):
+    """Review fix A: a log accept or reply belongs to every live touch of the person, not only to a log request."""
+
+    def test_log_accept_and_reply_fold_into_a_live_touch(self):
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 10, 21))
+        (o,) = self.load()
+        self.assertEqual((o.accepted, o.replied, o.anchor_on), (False, False, D(2026, 10, 21)))
+        seed_log_only(self.conn, self.person, "accepted", D(2026, 11, 9))
+        (o,) = self.load()
+        self.assertEqual((o.accepted, o.replied, o.anchor_on), (True, False, D(2026, 11, 9)))
+        seed_log_only(self.conn, self.person, "replied", D(2026, 11, 9))
+        (o,) = self.load()
+        self.assertEqual((o.accepted, o.replied, o.source), (True, True, "touch"))
+
+    def test_a_log_entry_before_the_touch_does_not_fold_in(self):
+        seed_log_only(self.conn, self.person, "accepted", D(2026, 10, 1))
+        seed_log_only(self.conn, self.person, "replied", D(2026, 10, 1))
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 10, 21))
+        (o,) = self.load()
+        self.assertEqual((o.accepted, o.replied), (False, False))
+
+    def test_an_undone_log_accept_does_not_fold_in(self):
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 10, 21))
+        entry = seed_log_only(self.conn, self.person, "accepted", D(2026, 11, 9))
+        seed_log_only(self.conn, self.person, "undo", D(2026, 11, 9), undoes=entry)
+        (o,) = self.load()
+        self.assertFalse(o.accepted)
+
+    def test_a_touch_that_already_has_its_accept_keeps_it(self):
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 10, 21),
+                      accepted_on=D(2026, 10, 25))
+        seed_log_only(self.conn, self.person, "accepted", D(2026, 11, 9))
+        (o,) = self.load()
+        self.assertEqual(o.anchor_on, D(2026, 10, 25))
+
+    def test_an_undone_touch_does_not_hide_the_log_only_request(self):
+        touch = seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 11, 2))
+        seed_log_only(self.conn, self.person, "request_sent", D(2026, 11, 2))
+        undo_touch(self.conn, touch, at="2026-11-03T15:00:00Z", revision=1)
+        (o,) = self.load()
+        self.assertEqual((o.source, o.person_id, o.sent_on), ("linkedin_log", self.person, D(2026, 11, 2)))
+
+
+class EmailThreadTest(OutboundCase):
+    """Review fixes B, C and D: legacy email touches, follow-ups and first emails still in the Outbox."""
+
+    def test_an_undone_outreach_touch_does_not_hide_a_replied_legacy_email(self):
+        touch = seed_email_touch(self.conn, self.person, D(2026, 11, 4), state="replied")
+        outreach = log_touch(self.conn, person_id=self.person, company_id=self.company, channel="email",
+                             sent_at="2026-11-04T15:00:00Z", context=_context("own"), email_touch_id=touch,
+                             idempotency_key="email-undone")
+        undo_touch(self.conn, outreach, at="2026-11-04T16:00:00Z", revision=1)
+        (o,) = self.load()
+        self.assertEqual((o.source, o.replied), ("email_touch", True))
+
+    def test_the_anchor_is_the_latest_sent_message_of_the_thread(self):
+        touch = seed_email_touch(self.conn, self.person, D(2026, 10, 21), company_id=self.company, outreach=True)
+        seed_message(self.conn, touch, 0, "sent", sent_on=D(2026, 10, 21))
+        seed_message(self.conn, touch, 1, "sent", sent_on=D(2026, 11, 7), due_on=D(2026, 11, 2))
+        (o,) = self.load()
+        self.assertEqual((o.source, o.sent_on, o.anchor_on, o.queued), ("touch", D(2026, 10, 21), D(2026, 11, 7), False))
+
+    def test_a_legacy_thread_anchors_on_its_latest_sent_message_too(self):
+        touch = seed_email_touch(self.conn, self.person, D(2026, 10, 21))
+        seed_message(self.conn, touch, 1, "sent", sent_on=D(2026, 11, 7), due_on=D(2026, 11, 2))
+        (o,) = self.load()
+        self.assertEqual((o.source, o.anchor_on), ("email_touch", D(2026, 11, 7)))
+
+    def test_a_queued_followup_marks_the_thread(self):
+        for i, state in enumerate(("planned", "drafted", "approved", "send_unknown", "sending")):
+            person = seed_person(self.conn, self.company, f"F{i}")
+            touch = seed_email_touch(self.conn, person, D(2026, 10, 25), company_id=self.company, outreach=bool(i % 2))
+            seed_message(self.conn, touch, 0, "sent", sent_on=D(2026, 10, 25))
+            seed_message(self.conn, touch, 1, state)
+        rows = [o for o in self.load() if o.person_id != self.person]
+        self.assertEqual(len(rows), 5)
+        self.assertTrue(all(o.queued for o in rows), [o for o in rows if not o.queued])
+        self.assertTrue(all(o.channel == "email" for o in rows))
+
+    def test_a_skipped_or_failed_followup_or_a_closed_thread_queues_nothing(self):
+        done = seed_email_touch(self.conn, self.person, D(2026, 10, 25))
+        seed_message(self.conn, done, 1, "skipped")
+        other = seed_person(self.conn, self.company, "Bo")
+        closed = seed_email_touch(self.conn, other, D(2026, 10, 25), state="closed")
+        seed_message(self.conn, closed, 1, "drafted")
+        self.assertEqual([o.queued for o in self.load()], [False, False])
+
+    def test_a_queued_first_email_is_a_row_for_its_company(self):
+        states = ("planned", "drafted", "approved", "send_unknown", "failed", "sending")
+        for i, state in enumerate(states):
+            person = seed_person(self.conn, self.company, f"Q{i}")
+            touch = seed_email_touch(self.conn, person, None)
+            seed_message(self.conn, touch, 0, state)
+        rows = self.load()
+        self.assertEqual(len(rows), 6)
+        self.assertTrue(all(o.queued and o.channel == "email" and o.source == "queued_email" for o in rows))
+        self.assertTrue(all(o.company_id == self.company for o in rows))
+
+    def test_a_queued_first_email_follows_a_merge(self):
+        dup = seed_scored_company(self.conn, "Acme Inc", 1.0, [])
+        person = seed_person(self.conn, dup, "Dee")
+        seed_message(self.conn, seed_email_touch(self.conn, person, None), 0, "drafted")
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'duplicate', merged_into = ? "
+                          "WHERE company_id = ?", (self.company, dup))
+        (o,) = self.load()
+        self.assertEqual(o.company_id, self.company)
+
+    def test_a_first_email_that_went_out_is_not_also_a_queued_row(self):
+        sent = seed_email_touch(self.conn, self.person, D(2026, 11, 2), company_id=self.company, outreach=True)
+        seed_message(self.conn, sent, 0, "sent", sent_on=D(2026, 11, 2))
+        other = seed_person(self.conn, self.company, "Bo")
+        claimed = seed_email_touch(self.conn, other, None)
+        log_touch(self.conn, person_id=other, company_id=self.company, channel="email",
+                  sent_at="2026-11-03T15:00:00Z", context=_context("own"), email_touch_id=claimed,
+                  idempotency_key="claimed")
+        seed_message(self.conn, claimed, 0, "sending")
+        self.assertEqual(sorted(o.source for o in self.load()), ["touch", "touch"])
+
+    def test_a_closed_or_skipped_first_email_blocks_nothing(self):
+        touch = seed_email_touch(self.conn, self.person, None, state="closed")
+        seed_message(self.conn, touch, 0, "skipped")
+        other = seed_person(self.conn, self.company, "Bo")
+        seed_message(self.conn, seed_email_touch(self.conn, other, None), 0, "skipped")
+        self.assertEqual(self.load(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -129,12 +129,12 @@ describe('DayRail', () => {
     expect(screen.getByRole('option', { name: '7. Mintlify by email, Done' })).toHaveTextContent('By email, reviewed');
   });
 
-  it('a row removed as not a fit reads Not a fit, not Carried over', () => {
+  it('a skipped row reads Carried over: the API skips a row only to carry it (a removed company is off the plan)', () => {
     const p = plan();
-    const rows = p.rows.map((r) => (r.position === 4 ? { ...r, state: 'skipped' as const, skipReason: 'not_a_fit' as const } : r));
+    const rows = p.rows.map((r) => (r.position === 4 ? { ...r, state: 'skipped' as const } : r));
     render(rail({ ...p, rows }));
     const box = screen.getByRole('listbox', { name: "Today's people" });
-    expect(within(box).getAllByRole('option')[3]).toHaveAccessibleName('4. Jonah Park at Inngest, Not a fit');
+    expect(within(box).getAllByRole('option')[3]).toHaveAccessibleName('4. Jonah Park at Inngest, Carried over');
   });
 
   it('clicking a row calls its onClick', () => {

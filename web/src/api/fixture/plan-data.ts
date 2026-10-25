@@ -221,7 +221,7 @@ function buildRows(c: PlanCtx, mode: Mode): Built {
         searchUrl: searchUrl(spec.company), handoff: HANDOFF(spec.company, role?.title ?? 'an engineering role'),
       },
       emailTouchId: spec.channel === 'email' ? c.touch.marcus : null,
-      steps, state: isDone ? 'done' : 'todo', skipReason: null,
+      steps, state: isDone ? 'done' : 'todo',
       carriedFrom: spec.carriedFrom && !isDone ? spec.carriedFrom : null, revision: 1,
     };
   });
@@ -411,7 +411,11 @@ function signalsOf(raw: Sig[]): { signals: ScoreSignal[]; score: number } {
   return {
     signals: raw.map((s, i) => ({
       name: s.name, label: s.label, value: s.value, weight: s.weight, points: points[i] ?? 0, share: total === 0 ? 0 : r4((points[i] ?? 0) / total),
-      neutral: s.value === 0, reason: s.reason, source: s.source,
+      neutral: s.value === 0, reason: s.reason,
+      // How sure the ranker is of the value: a value read from a linked page is high, a neutral one (nothing known) low.
+      confidence: s.source ? 'high' : s.value === 0 ? 'low' : 'medium',
+      basis: s.source ? `Read from ${s.source.label}.` : s.value === 0 ? 'Nothing is known yet, so it counts for nothing.' : 'Worked out from what the crawler stored.',
+      source: s.source,
     })),
     score: r4(points.reduce((a, b) => a + b, 0)),
   };
@@ -453,6 +457,20 @@ function genericSignals(name: string, hq: string): Sig[] {
   ];
 }
 
+/** The ranker's one line for the place: the signal that adds the most, or why a hidden company has no place. */
+function rankReasonOf(signals: ScoreSignal[], hidden: boolean): string {
+  if (hidden) return 'Hidden from the list, so it keeps its score and has no place.';
+  const top = [...signals].sort((a, b) => b.points - a.points)[0];
+  return top && top.points > 0 ? `${top.label} adds the most.` : 'No signal adds much.';
+}
+
+/** How sure the whole score is: by how many signals were read from a linked page. */
+function confidenceOf(signals: ScoreSignal[]): ScoreView['confidence'] {
+  const read = signals.filter((s) => s.source !== null).length;
+  const level = read * 2 >= signals.length ? 'high' : read > 0 ? 'medium' : 'low';
+  return { level, basis: `${read} of ${signals.length} signals were read from a linked page.` };
+}
+
 function buildScores(c: PlanCtx, scenario: Scenario): Record<Id, ScoreView> {
   if (scenario === 'empty') return {};
   const built = c.companies.map((co) => {
@@ -471,7 +489,7 @@ function buildScores(c: PlanCtx, scenario: Scenario): Record<Id, ScoreView> {
       lanes: b.co.name === 'Pylon'
         ? [{ lane: 'level_role', strongest: true }, { lane: 'any_us_role', strongest: false }]
         : [{ lane: 'level_role', strongest: strongest === 'level_role' }, { lane: 'any_us_role', strongest: strongest === 'any_us_role' }],
-      signals: b.signals, scoredAt: c.et(c.date, '08:00'),
+      signals: b.signals, rankReason: rankReasonOf(b.signals, at < 0), confidence: confidenceOf(b.signals), scoredAt: c.et(c.date, '08:00'),
       previous: b.co.name === 'Pylon' ? { rankerVersion: '2026.10.28', score: 3.7 } : null,
     };
   }

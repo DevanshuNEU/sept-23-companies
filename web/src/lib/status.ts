@@ -66,10 +66,10 @@ export const reviewKindStatus = {
   size_guess: { label: 'Guess', tone: 'warn' },
   domain_missing: { label: 'No domain', tone: 'warn' },
   flagged: { label: 'Flagged', tone: 'warn' },
-  merge_candidate: { label: 'Merge?', tone: 'warn' },
-  careers_changed: { label: 'Careers page changed', tone: 'warn' },
+  merge_candidate: { label: 'Duplicate?', tone: 'warn' },
+  reader_disagrees: { label: 'Reader disagrees', tone: 'warn' },
+  careers_changed: { label: 'Page changed', tone: 'info' },
   size_check: { label: 'Check size', tone: 'warn' },
-  reader_disagrees: { label: 'Check posting', tone: 'warn' },
 } satisfies Record<ReviewKind, Status>;
 
 export const noGoReasonStatus = {
@@ -104,6 +104,15 @@ export const jobKindLabel = {
   daily_list: 'Daily list',
   sender: 'Sender',
   import: 'Import',
+  discover: 'Discover',
+  resolve: 'Resolve',
+  find_boards: 'Find boards',
+  read_boards: 'Read boards',
+  watch_pages: 'Watch pages',
+  read_postings: 'Read postings',
+  rank: 'Rank',
+  plan: 'Plan',
+  prepare: 'Prepare',
 } satisfies Record<JobKind, string>;
 
 /** The last run of a job. `late` is derived by the API (`expectedNextAt` passed with no new run). */
@@ -123,9 +132,12 @@ const byCompanyStatus = {
   removed: { label: 'Removed', tone: 'idle' },
 } satisfies Record<CompanyRef['status'], Status>;
 
-/** A held company shows Held: reply over anything else; a paused one shows Paused; else the stored status. */
+/**
+ * A held company shows Held: reply over anything else (a reply on any channel holds it, with or without an email
+ * touch); a paused one shows Paused; else the stored status.
+ */
 export function companyStatus(c: CompanyRef): Status {
-  if (c.heldByTouchId !== null) return { label: 'Held: reply', tone: 'ok', icon: 'reply' };
+  if (c.held || c.heldByTouchId !== null) return { label: 'Held: reply', tone: 'ok', icon: 'reply' };
   if (c.pausedAt !== null) return { label: 'Paused', tone: 'idle', icon: 'pause' };
   return byCompanyStatus[c.status];
 }

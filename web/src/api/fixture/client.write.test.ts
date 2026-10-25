@@ -863,7 +863,7 @@ describe('plan writes: outcomes', () => {
     expect(wins.unseen).toBe(before.unseen + 1);
     expect(wins.counts.accepted).toBe(before.counts.accepted + 1);
     const win = wins.wins.find((w) => w.touchId === t.touchId);
-    expect(win).toMatchObject({ kind: 'accepted', unseen: true, at: wins.asOf, line: `${t.person.name} at ${t.company.name} accepted your request.` });
+    expect(win).toMatchObject({ kind: 'accepted', unseen: true, at: wins.asOf, line: `${t.person?.name} at ${t.company.name} accepted your request.` });
     expect((await c.outcomePrompt()).touches).toHaveLength(1);
     expect((await c.shell()).winsUnseen).toBe(1);
     expect((await c.progress()).today.accepted).toBe(1);
@@ -912,7 +912,7 @@ describe('plan writes: outcomes', () => {
     expect(wins.wins.some((w) => w.touchId === t.touchId)).toBe(false);
     expect((await c.progress()).week.stages[2]?.count).toBe(3);
     expect((await c.plan()).week.replies).toBe(3);
-    expect((await c.noGo()).people.some((r) => r.target.kind === 'person' && r.target.person.id === t.person.id)).toBe(true);
+    expect((await c.noGo()).people.some((r) => r.target.kind === 'person' && r.target.person.id === t.person?.id)).toBe(true);
   });
 
   it('asked to stop is a reply with no win', async () => {
@@ -1008,40 +1008,35 @@ describe('plan writes: skip, notes, wins, watch', () => {
     expect((await c.shell()).plan.done).toBe(2);
   });
 
-  it('rows start with no skip reason, and skipRow says the row was carried', async () => {
-    const c = client();
-    expect((await c.plan()).rows.every((r) => r.skipReason === null)).toBe(true);
-    const row = await rowAt(c, 4);
-    expect((await c.skipRow(row.entryId, row.revision, opt())).skipReason).toBe('carried');
-    expect((await rowAt(c, 4)).skipReason).toBe('carried');
-  });
-
-  it('removeCompany takes its plan row out of the day as not a fit, and restoreCompany puts it back', async () => {
+  it('removeCompany takes its plan row off the day, as the API does, and restoreCompany brings it back carried', async () => {
     const c = client();
     const before = await c.plan();
     const pylon = await rowAt(c, 3);
     await c.removeCompany(pylon.company.id, 'not_a_fit', '', pylon.company.revision, opt());
     const plan = await c.plan();
-    expect(plan.rows[2]).toMatchObject({ state: 'skipped', skipReason: 'not_a_fit' });
-    expect(plan.rows.map((r) => r.entryId)).toEqual(before.rows.map((r) => r.entryId));
+    expect(plan.rows.map((r) => r.entryId)).toEqual(before.rows.map((r) => r.entryId).filter((id) => id !== pylon.entryId));
+    expect(plan.total).toBe(before.total - 1);
     expect(plan.done).toBe(2);
-    expect((await c.shell()).plan.done).toBe(2);
-    // A step on it is refused: the company is on the No-go list.
+    expect((await c.shell()).plan).toEqual({ done: 2, total: before.total - 1 });
+    // A step on it is refused, with the API's words: the entry still exists, off the plan.
     const refused = await rejection(c.logRequest(pylon.entryId, { personId: pylon.person?.person.id ?? 0, idempotencyKey: 'plan:x:request' }, pylon.revision, opt()));
     expect(refused.code).toBe('not_allowed');
-    expect(refused.message).toBe('Pylon is on the No-go list');
+    expect(refused.message).toBe('That company was taken off the plan');
 
     const removed = (await c.noGo()).companies.flatMap((r) => (r.kind === 'removed' && r.company.id === pylon.company.id ? [r] : []))[0];
     if (!removed) throw new Error('not removed');
     await c.restoreCompany(pylon.company.id, 'Changed my mind', removed.company.revision, opt());
-    expect((await rowAt(c, 3))).toMatchObject({ state: 'todo', skipReason: null });
+    // The API makes today's entry a backlog row, which the plan shows as carried to tomorrow.
+    expect(await rowAt(c, 3)).toMatchObject({ entryId: pylon.entryId, state: 'skipped' });
+    expect((await c.plan()).total).toBe(before.total);
   });
 
-  it('a done row stays done when its company is removed', async () => {
+  it('a company with a step logged is not removed, as the API refuses one with a request or application out', async () => {
     const c = client();
     const dana = await rowAt(c, 1);
-    await c.removeCompany(dana.company.id, 'other', '', dana.company.revision, opt());
-    expect(await rowAt(c, 1)).toMatchObject({ state: 'done', skipReason: null });
+    const refused = await rejection(c.removeCompany(dana.company.id, 'other', '', dana.company.revision, opt()));
+    expect(refused.code).toBe('not_allowed');
+    expect(await rowAt(c, 1)).toMatchObject({ entryId: dana.entryId, state: 'done' });
   });
 
   it('skipRow on a done row is not_allowed, and a stale revision conflicts', async () => {

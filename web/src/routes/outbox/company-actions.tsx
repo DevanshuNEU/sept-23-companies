@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   queryKeys,
-  useClient,
+  usePageClient,
   type CloseReason,
   type CompanyRef,
   type CompanyView,
@@ -62,7 +62,7 @@ export function useCompanyActions({
   /** Lines for the resume dialog: what will send again. */
   willResume: string[];
 }): { held: boolean; pause: () => void; askResume: () => void; askClose: () => void; dialogs: ReactNode } {
-  const client = useClient();
+  const client = usePageClient('outbox');
   const queryClient = useQueryClient();
   const write = usePendingWrite();
   const [resuming, setResuming] = useState(false);
@@ -113,8 +113,9 @@ export function useCompanyActions({
       label: `Resumed ${company.name}.`,
       afterCommit: `Resumed ${company.name}.`,
       immediate: true,
-      patches: companyPatches(() => ({ pausedAt: null, heldByTouchId: null })),
-      commit: (o) => thenWarm(withRevision(o, known, read, (r) => client.resumeCompany(company.id, r, o))),
+      patches: companyPatches(() => ({ pausedAt: null, heldByTouchId: null, held: false, heldByReply: null })),
+      // His pause first; a company held by a reply and not paused releases the hold.
+      commit: (o) => thenWarm(withRevision(o, known, read, (r) => (company.pausedAt === null ? client.releaseHold(company.id, r, o) : client.resumeCompany(company.id, r, o)))),
     });
 
   const close = (reason: CloseReason, note: string) => {
@@ -159,7 +160,7 @@ export function useCompanyActions({
             </ul>
           ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel>{company.heldByTouchId !== null ? 'Keep on hold' : 'Keep paused'}</AlertDialogCancel>
+            <AlertDialogCancel>{company.held || company.heldByTouchId !== null ? 'Keep on hold' : 'Keep paused'}</AlertDialogCancel>
             <AlertDialogAction onClick={resume}>{`Resume ${company.name}`}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -168,7 +169,7 @@ export function useCompanyActions({
   );
 
   return {
-    held: company.pausedAt !== null || company.heldByTouchId !== null,
+    held: company.pausedAt !== null || company.held || company.heldByTouchId !== null,
     pause,
     askResume: () => setResuming(true),
     askClose: () => {

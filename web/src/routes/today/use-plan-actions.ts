@@ -114,7 +114,8 @@ const stepLabel = (row: PlanRow, kind: StepKind): string =>
     : `Logged: applied for ${row.role?.title ?? 'the role'} at ${row.company.name}.`;
 
 function outcomeLabel(t: PromptTouch, kind: OutcomeKind, replyKind: Reply | undefined): string {
-  const name = t.person.name;
+  // An application has no person, so its outcome names the company.
+  const name = t.person?.name ?? t.company.name;
   switch (kind) {
     case 'accepted':
       return `Logged: ${name} accepted.`;
@@ -146,12 +147,12 @@ export function usePlanActions() {
   const queryClient = useQueryClient();
 
   /**
-   * Why a press on this row must do nothing, or null. The company was removed as not a fit (on screen, in the newest
-   * poll, or by a remove still on its way), or the newest plan no longer has the row.
+   * Why a press on this row must do nothing, or null. The company was removed as not a fit (by a remove still on its
+   * way; once it lands the API leaves the row off the plan), or the newest plan no longer has the row.
    */
   const goneOrNoGo = (row: PlanRow, latest: PlanRow | undefined, what: 'Not logged' | 'Not carried'): string | null => {
     const company = row.company.name;
-    if (row.skipReason === 'not_a_fit' || latest?.skipReason === 'not_a_fit' || isPending(removeId(row))) return `${what}. ${company} is on the No-go list.`;
+    if (isPending(removeId(row))) return `${what}. ${company} is on the No-go list.`;
     if (cachedPlan(queryClient) && !latest) return `${what}. ${company}'s row is no longer on today's plan.`;
     return null;
   };
@@ -234,7 +235,7 @@ export function usePlanActions() {
       id,
       label,
       afterCommit: `${label} ${ADD(company)}`,
-      patches: [planRowPatch(entryId, (r) => (r.state === 'todo' ? { ...r, state: 'skipped', skipReason: 'carried' } : r)), shellPatch()],
+      patches: [planRowPatch(entryId, (r) => (r.state === 'todo' ? { ...r, state: 'skipped' } : r)), shellPatch()],
       commit: (o) =>
         sendVersioned(queryClient, `plan:${entryId}`, row.revision, () => cachedRow(queryClient, entryId)?.revision, o, (revision) =>
           client.skipRow(entryId, revision, o),
@@ -342,7 +343,7 @@ export function usePlanActions() {
 
   /**
    * Not a fit: the company goes on the No-go list at once, with no Undo (a dialog action, phase 1 lead decision 2).
-   * Its row leaves the day in place, as not a fit, and the API says the same once the commit lands. True when queued.
+   * Its row leaves today's plan and the day's total, as the API leaves a removed entry off the plan. True when queued.
    */
   const notAFit = (row: PlanRow, reason: RemoveReason, note: string): boolean => {
     const id = removeId(row);
@@ -355,8 +356,16 @@ export function usePlanActions() {
       afterCommit: label,
       immediate: true,
       patches: [
-        planRowPatch(row.entryId, (r) => (r.state === 'todo' ? { ...r, state: 'skipped', skipReason: 'not_a_fit' } : r)),
-        shellPatch((s) => ({ ...s, noGoCount: s.noGoCount + 1 })),
+        {
+          key: queryKeys.plan,
+          apply: (p: PlanView) => {
+            const kept = p.rows.filter((r) => r.entryId !== row.entryId);
+            if (kept.length === p.rows.length) return p;
+            const rows = kept.map((r, i) => (r.position === i + 1 ? r : { ...r, position: i + 1 }));
+            return { ...p, rows, total: rows.length, done: rows.filter((r) => r.state === 'done').length };
+          },
+        },
+        shellPatch((s) => ({ ...s, noGoCount: s.noGoCount + 1, plan: { ...s.plan, total: Math.max(0, s.plan.total - 1) } })),
       ],
       commit: (o) => client.removeCompany(row.company.id, reason, note, row.company.revision, o),
     });

@@ -34,6 +34,8 @@ class _Patterns:
         self.state_code = re.compile(r",\s{0,3}" + code + "|" + code + r"\W*\Z")
         self.us_cities = phrases(loc["us_cities"])
         self.shared = phrases(loc["shared_city_names"])
+        self.countries = phrases(loc["non_us_countries"])
+        self.fillers = phrases(loc["title_fillers"])
 
 
 def _read_part(part: str, p: _Patterns) -> str:
@@ -60,12 +62,32 @@ def _read_country(country: str, p: _Patterns) -> str | None:
     return None
 
 
-def us_status(location: str, country: str | None, cfg: Config) -> str:
+def _title_names_non_us_country(title: str, p: _Patterns) -> bool:
+    """True when the title names a non-US country and no US place. A country counts only as a whole segment of the
+    title ("(Venezuela)", "- Remote Canada"), so a name that merely contains one ("Jordan Lake", "India Hicks") is no
+    country. A US mark, state, state code or US city in any segment ("(USA or Canada)", "Georgia Tech", "Peru, IN")
+    means the title names a US place, and the title is never refused."""
+    segments = [seg for chunk in re.split(r"[()\[\],:;|/\u2013\u2014]|\s-\s", title) for seg in _SPLIT.split(chunk)]
+    found = False
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        if _read_part(seg, p) == "yes":
+            return False
+        bare = p.fillers.sub(" ", p.state_names.sub(" ", seg)).strip(" \t.-")
+        if bare and p.countries.fullmatch(bare):
+            found = True
+    return found
+
+
+def us_status(location: str, country: str | None, cfg: Config, title: str | None = None) -> str:
     """yes, no or unknown. A structured country that names the US wins. A US place in the location text beats a
     known non-US country (Devanshu's ruling, 2026-10-21: a multi-location posting carries one country, often the
     primary office, so "Remote - US or Canada" with country Canada reads yes); with no US place in the text a known
     non-US country reads no. Any other country is no evidence, so the location text decides (a country the lists do
-    not know is never a "no" on its own)."""
+    not know is never a "no" on its own). When all of those say nothing, a title that names a non-US country and no US
+    place reads no ("Software Engineer II (Venezuela)"); a title never overrides what the location or country said."""
     p = _Patterns(cfg)
     read = None
     if country is not None and country.strip():
@@ -77,4 +99,6 @@ def us_status(location: str, country: str | None, cfg: Config) -> str:
         return "yes"
     if read == "no" or "no" in parts:
         return "no"
+    if title and _title_names_non_us_country(title, p):
+        return "no"  # the location and country said nothing, and the title names a non-US country (2026-10-23)
     return "unknown"

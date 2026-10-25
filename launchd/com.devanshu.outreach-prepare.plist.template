@@ -12,7 +12,9 @@
   starts /usr/bin/caffeinate -i -w <its pid> itself, so the Mac stays awake until the run ends. The claude CLI is
   found on PATH or at ~/.local/bin/claude, so the job sets no PATH.
 
-  Before installing: check the LinkedIn deny rule form once on the seat (the runbook in
+  The step is off until prepare.deny_rule_checked = true in outreach/plan/config.toml: until then each run prints one
+  line and exits 0, touching nothing, so installing this job early is safe. Devanshu flips it after the one-time
+  check that the LinkedIn deny rule takes effect on his seat (the runbook in docs/README.md and
   outreach/plan/claude_run.py).
 
   It follows the deploy tool's one convention (#17, outreach/deploy/jobs.py): WorkingDirectory is the live checkout,

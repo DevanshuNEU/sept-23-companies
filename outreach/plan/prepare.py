@@ -6,6 +6,11 @@ and one JSON user message: the company (`prepare_targets.Target`), his facts fro
 (`- ASK:` item) removed, and the note limit. The model never touches the store: `prepare_store` checks the reply and
 stores what passes, one transaction per company.
 
+The step is off until `prepare.deny_rule_checked` is true in config: until then `run_prepare` returns
+`deny_rule_unchecked` and touches nothing (no call, no job run, no event). Devanshu turns it on after the one-time
+check that the LinkedIn deny rule takes effect on his seat (the runbook in `claude_run` and docs/README.md), so a
+`deploy install` that loads the 05:30 job early cannot make a call.
+
 An outage changes nothing but the number of ready rows (Review Focus 4). Each call ends one of four ways
 (`classify_run`):
 - ok: the reply is parsed and stored, and the company's attempt is recorded;
@@ -43,7 +48,7 @@ PROMPT_PATH = Path(__file__).with_name("prompts") / "prepare.md"
 _REPO_MAIL = Path(__file__).resolve().parents[2] / "mail"
 _MAX_DETAIL = 300
 
-Status = Literal["done", "no_capacity", "no_targets", "session_limit", "auth", "failed"]
+Status = Literal["done", "no_capacity", "no_targets", "session_limit", "auth", "failed", "deny_rule_unchecked"]
 _JOB_STATUS = {"no_capacity": "ok", "no_targets": "ok", "session_limit": "partial", "auth": "failed",
                "failed": "failed"}
 
@@ -58,6 +63,9 @@ class PrepareSummary:
     failures: int  # failed calls and unreadable replies
 
     def line(self) -> str:
+        if self.status == "deny_rule_unchecked":
+            return ("prepare: off until the LinkedIn deny rule is checked on this seat; after the runbook in "
+                    "docs/README.md, set prepare.deny_rule_checked = true in outreach/plan/config.toml")
         return (f"prepare: {self.status}, {self.companies} companies, {self.added} added, {self.drafts} drafts, "
                 f"{self.rejected} rejected, {self.failures} failures")
 
@@ -187,7 +195,10 @@ class _Run:
 def run_prepare(conn: sqlite3.Connection, runner: Runner, *, today: date, cfg: PlanConfig, me_text: str, banned,
                 unconfirmed, count: int | None = None) -> PrepareSummary:
     """One prepare run: a `prepare` job run, up to `count` targets (default `target_count` of today's LinkedIn
-    capacity), one call each. See the module text for how each call ends."""
+    capacity), one call each. See the module text for how each call ends. Off (nothing touched) until
+    `prepare.deny_rule_checked` is true."""
+    if cfg.get("prepare", "deny_rule_checked") is not True:
+        return PrepareSummary("deny_rule_unchecked", 0, 0, 0, 0, 0)
     run_id = start_job(conn, "prepare")
     work = _Run(conn, runner, cfg, today, me_text, banned, unconfirmed, run_id)
     try:

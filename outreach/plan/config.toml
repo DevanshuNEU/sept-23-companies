@@ -44,6 +44,10 @@ max_consecutive_failures = 2
 session_limit_patterns = ["usage limit", "rate limit"]
 auth_patterns = ["not logged in", "please run /login"]
 schema_version = 1
+# The prepare step does nothing (one line, exit 0) until this is true. Devanshu flips it after the one-time check that
+# the LinkedIn deny rule takes effect on his seat (the runbook in docs/README.md and outreach/plan/claude_run.py), so
+# a `deploy install` that loads the 05:30 job before the check cannot make a call.
+deny_rule_checked = false
 
 [note]
 max_chars = 200               # #33 ruling 6: safe for free and Premium accounts; he can raise it

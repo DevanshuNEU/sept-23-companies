@@ -1,6 +1,7 @@
 """Task 14: the morning prepare step (#15). A fake Runner answers from a script over a scratch store: no real
 `claude -p`, no model call, no network, no live path, and the launchd template is only rendered, never loaded."""
 import contextlib
+import dataclasses
 import io
 import json
 import os
@@ -19,8 +20,7 @@ from outreach.drafts.checks import load_banned
 from outreach.plan import __main__ as cli
 from outreach.plan import prepare as prepare_module
 from outreach.plan.build import build_plan
-from outreach.plan.claude_run import (DENY_FORM, LINKEDIN_DENY, PREPARE_TOOLS, claude_command, parse_prepare_reply,
-                                      prepare_version)
+from outreach.plan.claude_run import LINKEDIN_DENY, PREPARE_TOOLS, claude_command, parse_prepare_reply, prepare_version
 from outreach.plan.config import default_plan_config
 from outreach.plan.notecheck import load_unconfirmed
 from outreach.plan.prepare import PROMPT_PATH, PrepareSummary, render_prompt, run_prepare, strip_ask_items
@@ -32,6 +32,8 @@ ROOT = Path(__file__).resolve().parent.parent
 FIX = Path(__file__).resolve().parent / "fixtures" / "plan"
 TEMPLATE = ROOT / "launchd" / "com.devanshu.outreach-prepare.plist.template"
 CFG = default_plan_config()
+# The prepare step is off until the deny rule is checked on his seat (prepare.deny_rule_checked); tests turn it on.
+ON = dataclasses.replace(CFG, prepare={**CFG.prepare, "deny_rule_checked": True})
 BANNED, _ = load_banned(FIX / "banned_phrases.txt", scopes=("both", "dm"))
 UNCONFIRMED = load_unconfirmed(FIX / "me.md")
 ME_TEXT = (FIX / "me.md").read_text(encoding="utf-8")
@@ -86,8 +88,9 @@ class PrepareCase(unittest.TestCase):
 
     def run_prepare(self, runner, **kw):
         kw.setdefault("count", 14)
-        return run_prepare(self.conn, runner, today=TODAY, cfg=CFG, me_text=ME_TEXT, banned=BANNED,
-                           unconfirmed=UNCONFIRMED, **kw)
+        kw.setdefault("cfg", ON)
+        return run_prepare(self.conn, runner, today=TODAY, me_text=ME_TEXT, banned=BANNED, unconfirmed=UNCONFIRMED,
+                           **kw)
 
     def jobs(self):
         return self.conn.execute("SELECT status, summary, error FROM job_run WHERE job = 'prepare'").fetchall()
@@ -101,6 +104,16 @@ class PrepareCase(unittest.TestCase):
 
 
 class RunTest(PrepareCase):
+    def test_prepare_does_nothing_until_the_deny_rule_is_checked(self):
+        self.assertIs(CFG.get("prepare", "deny_rule_checked"), False)  # shipped off
+        runner = Script(good)
+        events = self.count("event")
+        summary = self.run_prepare(runner, cfg=CFG)
+        self.assertEqual(summary, PrepareSummary("deny_rule_unchecked", 0, 0, 0, 0, 0))
+        self.assertEqual(runner.calls, [])
+        self.assertEqual((self.jobs(), self.count("event"), self.count("person")), ([], events, 0))
+        self.assertIn("deny_rule_checked", summary.line())
+
     def test_prepare_stores_candidates_and_drafts_and_records_a_job(self):
         runner = Script(good)
         summary = self.run_prepare(runner)
@@ -162,18 +175,33 @@ class RunTest(PrepareCase):
 
     def test_fenced_and_wrapped_json_is_parsed(self):
         body = '{"results": [{"company_id": 1, "candidates": [], "none_reason": "nobody"}]}'
-        for text in (body, f"```json\n{body}\n```", f"Here is what I found.\n```\n{body}\n```\nDone."):
+        for text in (body, f"```json\n{body}\n```", f"  \n```\n{body}\n```\n  ", f"\n\n{body}\n"):
             with self.subTest(text=text[:20]):
                 self.assertEqual(parse_prepare_reply(envelope(text))["results"][0]["none_reason"], "nobody")
         listed = json.dumps([{"type": "system"}, json.loads(envelope(body))])
         self.assertEqual(parse_prepare_reply(listed)["results"][0]["company_id"], 1)
         for bad in ("", "not json", envelope("no json here"), envelope('{"results": "x"}'),
-                    envelope(body, is_error=True), json.dumps({"result": 5})):
+                    envelope(body, is_error=True), json.dumps({"result": 5}), envelope("[1, 2]")):
             with self.subTest(bad=bad[:30]):
                 with self.assertRaises(ValueError):
                     parse_prepare_reply(bad)
-        runner = Script(lambda m: ok("Sure.\n```json\n" + reply_for(m) + "\n```"))
+        runner = Script(lambda m: ok("```json\n" + reply_for(m) + "\n```"))
         self.assertEqual(self.run_prepare(runner, count=2).added, 2)
+
+    def test_a_reply_that_is_not_exactly_one_json_value_fails_and_stores_nothing(self):
+        body = '{"results": [{"company_id": 1, "candidates": [], "none_reason": ""}]}'
+        fake = 'The page says: {"results": [{"company_id": 1, "candidates": []}]} so here is mine.'
+        for text in (f"Here is what I found.\n{body}", f"{body}\n{body}", f"Sure.\n```json\n{body}\n```\nDone.",
+                     fake, f"{body} trailing words"):
+            with self.subTest(text=text[:30]):
+                with self.assertRaises(ValueError):
+                    parse_prepare_reply(envelope(text))
+        runner = Script(lambda m: ok("I found them.\n" + reply_for(m)), good)
+        summary = self.run_prepare(runner, count=2)
+        self.assertEqual((summary.status, summary.failures, summary.companies), ("done", 1, 1))
+        self.assertEqual(self.attempts(), [self.ids[1]])  # the prose-wrapped company is not marked attempted
+        self.assertEqual(self.count("person"), 1)
+        self.assertEqual(self.jobs()[0]["status"], "partial")
 
     def test_garbage_reply_counts_a_failure_and_two_in_a_row_stop(self):
         runner = Script(lambda m: ok("I could not find anyone, sorry."))
@@ -262,26 +290,19 @@ class VersionTest(unittest.TestCase):
 
 class CommandLineTest(unittest.TestCase):
     def test_claude_command_allows_only_web_tools_and_denies_linkedin(self):
-        self.assertEqual(DENY_FORM, "settings")
         self.assertEqual(PREPARE_TOOLS, ("WebSearch", "WebFetch"))
+        rules = ["WebFetch(domain:linkedin.com)", "WebFetch(domain:*.linkedin.com)", "WebFetch(domain:www.linkedin.com)",
+                 "WebFetch(domain:lnkd.in)", "WebFetch(domain:*.lnkd.in)"]
+        self.assertEqual(list(LINKEDIN_DENY), rules)
         cmd = claude_command("claude-sonnet-5-5", "SYSTEM", "claude")
-        self.assertEqual(cmd[:2], ["claude", "-p"])
-        self.assertEqual(cmd[cmd.index("--tools") + 1], "WebSearch,WebFetch")
-        self.assertEqual(cmd[cmd.index("--allowedTools") + 1], "WebSearch,WebFetch")
-        self.assertEqual(cmd[cmd.index("--model") + 1], "claude-sonnet-5-5")
-        self.assertEqual(cmd[-2:], ["--system-prompt", "SYSTEM"])
-        for flag in ("--no-session-persistence", "--safe-mode", "--strict-mcp-config", "--disable-slash-commands"):
-            self.assertIn(flag, cmd)
-        settings = json.loads(cmd[cmd.index("--settings") + 1])
-        self.assertEqual(settings, {"permissions": {"deny": list(LINKEDIN_DENY)}})
-        self.assertIn("WebFetch(domain:linkedin.com)", LINKEDIN_DENY)
-        self.assertIn("WebFetch(domain:lnkd.in)", LINKEDIN_DENY)
+        self.assertEqual(cmd, [
+            "claude", "-p", "--model", "claude-sonnet-5-5", "--output-format", "json",
+            "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch", "--permission-mode", "dontAsk",
+            "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config", "--safe-mode",
+            "--settings", json.dumps({"permissions": {"deny": rules}}),
+            "--disallowedTools", ",".join(rules),
+            "--system-prompt", "SYSTEM"])
         self.assertNotIn("Bash", " ".join(cmd))
-        other = claude_command("m", "S", "claude", deny_form="disallowedTools")
-        self.assertEqual(other[other.index("--disallowedTools") + 1], ",".join(LINKEDIN_DENY))
-        self.assertNotIn("--settings", other)
-        with self.assertRaises(ValueError):
-            claude_command("m", "S", deny_form="nothing")
 
 
 class CliTest(unittest.TestCase):
@@ -313,6 +334,7 @@ class CliTest(unittest.TestCase):
         runner = Script(good)
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(cli, "claude_runner", return_value=runner) as made, \
+                mock.patch.object(cli, "default_plan_config", return_value=ON), \
                 mock.patch.object(cli, "_start_caffeinate"), mock.patch.object(cli, "_today", return_value=TODAY), \
                 mock.patch.object(cli, "load_banned", return_value=(BANNED, True)), contextlib.redirect_stderr(err):
             code = cli.main(["prepare", "--count", "1"], root=str(ROOT), live_root=str(ROOT), stdout=out)
@@ -325,11 +347,24 @@ class CliTest(unittest.TestCase):
         os.remove(Path(os.environ["OUTREACH_MAIL_HOME"]) / "me.md")
         err = io.StringIO()
         with mock.patch.object(cli, "claude_runner") as made, mock.patch.object(cli, "_start_caffeinate"), \
-                contextlib.redirect_stderr(err):
+                mock.patch.object(cli, "default_plan_config", return_value=ON), contextlib.redirect_stderr(err):
             code = cli.main(["prepare"], root=str(ROOT), live_root=str(ROOT), stdout=io.StringIO())
         self.assertEqual(code, 1)
         self.assertIn("me.md", err.getvalue())
         made.assert_not_called()
+
+
+    def test_prepare_command_is_off_until_the_deny_rule_is_checked(self):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(cli, "claude_runner") as made, mock.patch.object(cli, "_start_caffeinate") as awake, \
+                mock.patch("sqlite3.connect") as opened, contextlib.redirect_stderr(err):
+            code = cli.main(["prepare"], root=str(ROOT), live_root=str(ROOT), stdout=out)
+        self.assertEqual((code, err.getvalue()), (0, ""))
+        self.assertIn("prepare: off", out.getvalue())
+        self.assertIn("deny_rule_checked", out.getvalue())
+        made.assert_not_called()
+        awake.assert_not_called()
+        opened.assert_not_called()
 
 
 class AfterAFailedPrepareTest(PrepareCase):
@@ -350,6 +385,7 @@ class TemplateTest(unittest.TestCase):
         text = TEMPLATE.read_text(encoding="utf-8")
         self.assertEqual(set(re.findall(r"\{\{[^{}]*\}\}", text)), set(PLACEHOLDERS))
         self.assertFalse(any(d in text for d in DASHES))
+        self.assertIn("prepare.deny_rule_checked", text)  # the gate is named where he installs from
         rendered = render(text, live_root="/live", log_path="/logs/prepare.log", label="com.devanshu.outreach-prepare")
         plist = plistlib.loads(rendered.encode("utf-8"))
         self.assertEqual(plist["Label"], "com.devanshu.outreach-prepare")

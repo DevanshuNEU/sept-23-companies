@@ -203,17 +203,22 @@ rulings at the top of `superpowers/plans/2026-10-21-daily-people-plan.md` and it
 
 ### Prepare runbook (Devanshu runs it once)
 
-The prepare step was built without ever running `claude -p`, so the LinkedIn deny-rule form in
-`outreach/plan/claude_run.py` (`DENY_FORM`, `settings` or `disallowedTools`) is unverified. Before installing the
-prepare job:
+The prepare step was built without ever running `claude -p`, so nobody has seen the LinkedIn deny rule in
+`outreach/plan/claude_run.py` take effect on his seat. It is passed both ways at once (`--settings` and
+`--disallowedTools`) and names `linkedin.com`, `*.linkedin.com`, `www.linkedin.com`, `lnkd.in` and `*.lnkd.in`. The
+step ships **off**: until `prepare.deny_rule_checked = true` in `outreach/plan/config.toml`, `python -m outreach.plan
+prepare` prints one line and exits 0, touching nothing. So `deploy install` may load the 05:30 job with the plan job;
+it does nothing until the check below is done.
 
 1. Run `claude --help` and confirm it still lists `--tools`, `--allowedTools`, `--disallowedTools`, `--settings` and
    `--permission-mode` (with `dontAsk`).
-2. Make one call from the neutral folder that denies `example.com` and asks the model to fetch `https://example.com`
-   (the module docstring has the exact steps). The reply must say the fetch was denied.
-3. If it fetched, switch `DENY_FORM` to `disallowedTools` and try again. If neither form denies, say so before
-   installing the job.
-4. Only then run `uv run python -m outreach.deploy plan`, read it, and `uv run python -m outreach.deploy install`.
+2. Make two calls from the neutral folder with the command `claude_command` builds, every `linkedin.com` in the deny
+   rules replaced by `example.com`: one asks the model to fetch `https://example.com`, one `https://uk.example.com`
+   (the module docstring has the exact steps). Both must say the fetch was denied.
+3. If the subdomain call fetched, the `*.` pattern is not honoured: add the LinkedIn hosts by name to `LINKEDIN_DENY`
+   and repeat. If the plain call fetched, leave the step off and say so.
+4. Only when both are denied, set `prepare.deny_rule_checked = true` in `outreach/plan/config.toml` (a commit, then
+   the usual deploy).
 
 Code refuses a LinkedIn source whatever the model returns, so a wrong form never stores a LinkedIn page; the deny rule
 only stops the model from fetching one.

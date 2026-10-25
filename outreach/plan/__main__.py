@@ -10,7 +10,8 @@
 - `prepare [--count N]`: the morning prepare step (Task 14): find people for the top companies with nobody to ask and
   draft their notes, one `claude -p` call per company, and print one summary line. It refuses to run outside the live
   checkout before it reads anything (it calls a model through his seat). It starts caffeinate like `build`. `--count`
-  overrides the number of companies (default: twice today's LinkedIn capacity). Exit 1 when the run stopped on a login
+  overrides the number of companies (default: twice today's LinkedIn capacity). Until `prepare.deny_rule_checked` is
+  true in config it prints one line saying so and exits 0, touching nothing. Exit 1 when the run stopped on a login
   problem or failed calls, or me.md cannot be read; a session limit is a clean stop (exit 0).
 
 The store is the one at OUTREACH_DB; the default (live) store opens only from the live checkout, so from a worktree
@@ -36,7 +37,7 @@ from outreach.plan.claude_run import claude_runner
 from outreach.plan.config import default_plan_config
 from outreach.plan.dates import today_ny
 from outreach.plan.notecheck import load_unconfirmed
-from outreach.plan.prepare import default_me_path, run_prepare
+from outreach.plan.prepare import PrepareSummary, default_me_path, run_prepare
 from outreach.store import StoreError, connect, describe_error
 from outreach.store.timefmt import utcnow
 
@@ -158,8 +159,11 @@ _PREPARE_OK = ("done", "no_capacity", "no_targets", "session_limit")
 def _prepare(args: argparse.Namespace, root: str | None, live_root: str | None, stdout) -> int:
     live_checkout.require_live("the daily prepare step", root or live_checkout.REPO_ROOT,
                                live_root or live_checkout.LIVE_ROOT)
-    _start_caffeinate()
     cfg = default_plan_config()
+    if cfg.get("prepare", "deny_rule_checked") is not True:  # off until the deny-rule check: say so, touch nothing
+        print(PrepareSummary("deny_rule_unchecked", 0, 0, 0, 0, 0).line(), file=stdout)
+        return 0
+    _start_caffeinate()
     me_path = default_me_path()
     try:
         me_text = me_path.read_text(encoding="utf-8")

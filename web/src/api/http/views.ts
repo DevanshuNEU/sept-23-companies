@@ -55,6 +55,7 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   logLinkedIn: 'linkedin',
   needsYou: 'needs-you',
   resolveReview: 'needs-you',
+  reopenReview: 'needs-you',
   noGo: 'no-go',
   liftNoGo: 'no-go',
   company: 'company',

@@ -200,6 +200,32 @@ describe('FixtureClient reads: default scenario', () => {
     expect(n.boardsJob?.job).toBe('crawl');
   });
 
+  it('the default scenario still has five open items and settledToday 0', async () => {
+    const n = await client().needsYou();
+    expect(n.open).toHaveLength(5);
+    expect(n.settledToday).toBe(0);
+    expect(n.open.every((i) => i.merge === null)).toBe(true);
+    // ok and no-go rows can be taken back; a value he set cannot.
+    for (const r of n.resolvedThisWeek) expect(r.canUndo).toBe(r.resolution !== 'field_edited');
+  });
+
+  it('the review scenario lists all eleven kinds', async () => {
+    const n = await client('review').needsYou();
+    const kinds = new Set(n.open.map((i) => i.kind));
+    expect([...kinds].sort()).toEqual([
+      'board_empty', 'board_unreadable', 'careers_changed', 'domain_missing', 'flagged', 'merge_candidate', 'reader_disagrees',
+      'size_check', 'size_guess', 'size_unknown', 'sponsorship_unclear',
+    ]);
+    const merge = n.open.find((i) => i.kind === 'merge_candidate');
+    expect(merge?.merge).toMatchObject({ a: { name: 'Mesh Systems' }, b: { name: 'Mesh' }, suggestedKeep: 'a' });
+    expect(n.open.find((i) => i.kind === 'flagged')?.reason).toMatch(/^The board match is doubtful/);
+    // Settled today: one locked edit and one ok; earlier this week an ok, a no-go and a merge with Undo.
+    expect(n.settledToday).toBe(2);
+    expect(n.resolvedThisWeek.filter((r) => r.canUndo).map((r) => r.resolution)).toEqual(expect.arrayContaining(['marked_ok', 'marked_no_go', 'field_edited']));
+    expect(n.resolvedThisWeek.find((r) => r.locked)?.canUndo).toBe(false);
+    expect((await client('review').shell()).openReviewItems).toBe(11);
+  });
+
   it('noGo has 24 companies and 7 people', async () => {
     const n = await client().noGo();
     expect(n.companies).toHaveLength(24);

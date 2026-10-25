@@ -40,6 +40,9 @@ export interface OutreachClient {
 
   needsYou(): Promise<NeedsYouView>;
   resolveReview(reviewId: Id, fix: ReviewFix, revision: Revision, o: WriteOptions): Promise<void>; // edit needs a source
+  // Undo from Resolved, after the 8 second window: an ok, a no-go or a merge goes back open (a merge is unmerged). The revision is the
+  // settled row's (`ResolvedReview.revision`). 'not_allowed' for a value he set (locked) or an item already open; 'conflict' when stale.
+  reopenReview(reviewId: Id, revision: Revision, o: WriteOptions): Promise<void>;
 
   noGo(): Promise<NoGoView>;
   liftNoGo(noGoId: Id, reason: string, o: WriteOptions): Promise<void>;

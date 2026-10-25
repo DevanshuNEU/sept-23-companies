@@ -17,7 +17,7 @@
 import type {
   Actor, Check, CheckFix, CheckSeverity, CloseReason, CompanyEvent, CompanyPerson, CompanyRef, CompanyStatus, CompanyView, Confidence,
   DailyEntry, DoneView, DraftCompare, Fact, FactKind, Id, ImportSource, IsoDate, IsoTime, JobRunSummary, LevelTier, LinkedInGroup,
-  LinkedInPerson, LinkedInReason, LinkedInStep, LinkedInView, MessageState, NeedsYouView, NoGoReason, NoGoRow, NoGoSource, NoGoView,
+  LinkedInPerson, LinkedInReason, LinkedInStep, LinkedInView, MergeSide, MessageState, NeedsYouView, NoGoReason, NoGoRow, NoGoSource, NoGoView,
   OutboxCounts, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, PostingRow, RemovedRow, ResolvedReview,
   ReviewItem, ReviewKind, RoleKind, RoleToName, Schedule, SearchCompany, SearchIndex, SearchPerson, SenderState, SendingStatus,
   ShellSummary, SourceKind, SponsorshipShown, StillEmailing, ThreadMessage, TodayView, TouchState,
@@ -27,9 +27,10 @@ import { buildPlanFixture } from './plan-data';
 
 export type Scenario =
   | 'default' | 'hard_block' | 'signed_out' | 'empty' | 'weekend' | 'job_failed' | 'error' | 'many_sent'
-  | 'quiet_week' | 'first_week' | 'plan_done' | 'win' | 'fresh'; // the last five are the plan scenarios (#33); `fresh` has no outcomes ever
+  | 'quiet_week' | 'first_week' | 'plan_done' | 'win' | 'fresh' // the plan scenarios (#33); `fresh` has no outcomes ever
+  | 'review'; // Needs you with every kind, a merge question and today's settlings (#16)
 export const SCENARIOS: readonly Scenario[] = [
-  'default', 'hard_block', 'signed_out', 'empty', 'weekend', 'job_failed', 'error', 'many_sent', 'quiet_week', 'first_week', 'plan_done', 'win', 'fresh',
+  'default', 'hard_block', 'signed_out', 'empty', 'weekend', 'job_failed', 'error', 'many_sent', 'quiet_week', 'first_week', 'plan_done', 'win', 'fresh', 'review',
 ];
 
 export interface FixtureDb {
@@ -53,7 +54,15 @@ export interface FixtureDb {
   findings: FindingsView;
   watch: WatchView;
   scores: Record<Id, ScoreView>; // by company id; fixture-internal, the wire has no Record
+  settled: Record<Id, SettledReview>; // by review id; fixture-internal: what Undo from Resolved puts back
 }
+
+/**
+ * A settled review item as it was while open, so `reopenReview` can put it back. `index` is its place in the open
+ * list; `restoreStatus` is a company the settling changed (a no-go closed it, a merge removed the loser) and the
+ * status it had; `noGoId` is the no-go row the settling added.
+ */
+export interface SettledReview { item: ReviewItem; index: number; restoreStatus?: { companyId: Id; status: CompanyStatus }; noGoId?: Id }
 
 /* ------------------------------------------------------------------ time */
 
@@ -167,6 +176,13 @@ const SPECS: Record<string, Spec> = {
 BACKLOG_NAMES.forEach((name, i) => { SPECS[name] = { hq: [SF, RM, NY][i % 3] ?? SF, status: 'backlog' }; });
 [...NO_SPONSOR_NAMES, ...CITIZEN_NAMES, ...OVER_300_NAMES].forEach((name, i) => { SPECS[name] = { hq: [NY, 'Boston', 'Austin'][i % 3] ?? NY, status: 'closed' }; });
 REMOVED_NAMES.forEach((name) => { SPECS[name] = { hq: NY, status: 'removed' }; });
+// The Needs you mockup's other companies (#16), last so no earlier id moves. Sorrel AI was merged into Sorrel this week.
+Object.assign(SPECS, {
+  'Mesh Systems': working(SF, { domain: 'meshsystems.example' }), Mesh: { hq: SF, status: 'backlog', domain: 'mesh.example' },
+  Fernhill: cand(RM), Copperline: cand(NY, { domain: 'copperline.example' }), 'Larkspur AI': cand(SF), Quillmate: cand(RM), Brightwell: cand(NY),
+  Wrenfield: cand(RM), Ambergate: cand(SF), 'Tallgrass Data': { hq: NY, status: 'closed' }, Sorrel: cand(SF), 'Sorrel AI': { hq: SF, status: 'removed' },
+  'Pellucid Labs': cand(RM), 'Corvid Works': cand(NY),
+} satisfies Record<string, Spec>);
 
 const COMPANY_ORDER = Object.keys(SPECS);
 export function companyId(name: string): Id {
@@ -829,7 +845,14 @@ function buildLinkedIn(c: Ctx): LinkedInView {
 
 /* ------------------------------------------------------------------ Needs you (needs-you.html) */
 
-function buildNeedsYou(c: Ctx): NeedsYouView {
+const NY_DATE = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+
+/** How many items he settled on a New York date, as the API's `settled_today` counts them (his ok, no-go or edit). */
+export function settledOn(rows: ResolvedReview[], date: IsoDate): number {
+  return rows.filter((r) => NY_DATE.format(new Date(r.at)) === date).length;
+}
+
+function buildNeedsYou(c: Ctx, scenario: Scenario): { view: NeedsYouView; settled: Record<Id, SettledReview> } {
   const item = (kind: ReviewKind, company: string, picked: boolean, openedAt: IsoTime, ageDays: number, reason: string, o: Partial<ReviewItem> = {}): ReviewItem => ({
     id: c.next(), kind, company: { ...c.co(company), picked }, holdsEmail: false, reason, openedAt, ageDays, reopened: null, quote: null, reads: [],
     lastOkAt: null, openPostings: null, sizeFacts: [], revision: 1, inPlay: true, merge: null, ...o,
@@ -856,17 +879,85 @@ function buildNeedsYou(c: Ctx): NeedsYouView {
         lastOkAt: et('2026-11-02', '08:04'), openPostings: 0,
       }),
   ];
-  const done = (kind: ReviewKind, companyName: string, resolution: ResolvedReview['resolution'], note: string, date: IsoDate): ResolvedReview =>
-    ({ id: c.next(), kind, companyName, resolution, note, at: et(date, '15:20'), locked: true, revision: 2, canUndo: resolution !== 'field_edited' });
+  const settled: Record<Id, SettledReview> = {};
+  /** A row he settled; with `was`, the item it was while open, so Undo from Resolved can put it back. */
+  const done = (kind: ReviewKind, companyName: string, resolution: ResolvedReview['resolution'], note: string, at: IsoTime, was?: Omit<SettledReview, 'index'>): ResolvedReview => {
+    const locked = resolution === 'field_edited' && kind !== 'merge_candidate';
+    const row: ResolvedReview = { id: was?.item.id ?? c.next(), kind, companyName, resolution, note, at, locked, revision: 2, canUndo: !locked };
+    if (was) settled[row.id] = { ...was, index: Number.MAX_SAFE_INTEGER, item: { ...was.item, revision: 1 } };
+    return row;
+  };
   const resolvedThisWeek: ResolvedReview[] = [
-    done('size_unknown', 'Turso', 'field_edited', 'Set to about 45 by you, from LinkedIn 11 to 50', '2026-11-06'),
-    done('sponsorship_unclear', 'Railway', 'marked_ok', 'Marked ok by you', '2026-11-05'),
-    done('sponsorship_unclear', 'Clerk', 'field_edited', 'Sponsorship set to Not stated by you', '2026-11-05'),
-    done('board_empty', 'Warp', 'marked_ok', 'Marked ok by you', '2026-11-04'),
-    done('domain_missing', 'Weaviate', 'field_edited', 'Domain set to weaviate.example by you', '2026-11-04'),
-    done('size_guess', 'Fly.io', 'marked_ok', 'Marked ok by you', '2026-11-04'),
+    done('size_unknown', 'Turso', 'field_edited', 'Set to about 45 by you, from LinkedIn 11 to 50', et('2026-11-06', '15:20')),
+    done('sponsorship_unclear', 'Railway', 'marked_ok', 'Marked ok by you', et('2026-11-05', '15:20'), {
+      item: item('sponsorship_unclear', 'Railway', false, et('2026-11-02', '08:00'), 8, 'The posting says sponsorship may be considered for strong candidates.'),
+    }),
+    done('sponsorship_unclear', 'Clerk', 'field_edited', 'Sponsorship set to Not stated by you', et('2026-11-05', '15:20')),
+    done('board_empty', 'Warp', 'marked_ok', 'Marked ok by you', et('2026-11-04', '15:20'), {
+      item: item('board_empty', 'Warp', false, et('2026-11-02', '08:04'), 8, 'The Greenhouse board returned no jobs twice in a row, so its postings were closed.'),
+    }),
+    done('domain_missing', 'Weaviate', 'field_edited', 'Domain set to weaviate.example by you', et('2026-11-04', '15:20')),
+    done('size_guess', 'Fly.io', 'marked_ok', 'Marked ok by you', et('2026-11-04', '15:20'), {
+      item: item('size_guess', 'Fly.io', false, et('2026-11-01', '08:00'), 9, 'Claude guessed about 80 people from the team page. A guess never hides a company.'),
+    }),
   ];
-  return { asOf: AS_OF, open, resolvedThisWeek, boardsJob: JOBS.crawl(), settledToday: 0 };
+  if (scenario !== 'review') return { view: { asOf: AS_OF, open, resolvedThisWeek, boardsJob: JOBS.crawl(), settledToday: settledOn(resolvedThisWeek, TODAY) }, settled };
+
+  // The review scenario: the mockup's other kinds, one of each, and what he settled today and earlier this week.
+  const larkspur = c.role('Larkspur AI', 'Backend Engineer', 'early_career', SF, 7);
+  const meshSide = (name: string, o: Partial<MergeSide>): MergeSide => ({
+    companyId: companyId(name), name, domain: domainOf(name), size: null, stage: null, aliases: [], boards: [], openPostings: 0, people: 0, touches: 0,
+    status: c.spec(name).status, ...o,
+  });
+  const meshWhy = 'Both names come down to "mesh", and both list the same office at 500 Harrison Street, San Francisco. Their domains differ, so the sources could not tell whether they are one company.';
+  const fernhill = c.fact('size', '60', 'guess', 'other', 'Team page, 58 names', { low: 50, high: 70, quote: '58 names on the team page', observedOn: '2026-11-06' });
+  open.push(
+    item('size_guess', 'Fernhill', false, et('2026-11-09', '08:00'), 1, 'Claude guessed about 60 people from the team page. A guess never hides a company, and one number with a source settles it.', { sizeFacts: [fernhill] }),
+    item('size_check', 'Copperline', false, et('2026-11-08', '08:00'), 2,
+      'Copperline shares its domain, copperline.example, with 2 other employers in the visa filings, so it may be part of a larger company. Nobody has recorded its size.'),
+    item('merge_candidate', 'Mesh Systems', false, et(TODAY, '08:00'), 0, meshWhy, {
+      merge: {
+        a: meshSide('Mesh Systems', { size: '11 to 50', stage: 'Series A', boards: ['ashby:meshsystems'], openPostings: 3, people: 4, touches: 6 }),
+        b: meshSide('Mesh', { size: '11 to 50', stage: 'Series A', boards: ['greenhouse:mesh'], openPostings: 1 }),
+        why: meshWhy, suggestedKeep: 'a', warning: null,
+      },
+    }),
+    item('reader_disagrees', 'Larkspur AI', false, et(TODAY, '02:41'), 0,
+      "The rules found nothing about sponsorship in this posting. The night reader found the line below and reads it as no sponsorship. Mark no-go if the reader is right; mark ok to keep the rules' reading.", {
+        quote: { text: 'We are unable to sponsor work visas for this position.', postingId: larkspur.postingId, postingTitle: larkspur.title, url: larkspur.url, firstSeenAt: larkspur.firstSeenAt },
+      }),
+    item('flagged', 'Quillmate', false, et('2026-11-09', '08:04'), 1,
+      'The board match is doubtful: the Greenhouse board named quillmate lists its jobs under Quillmate Health, and this company is Quillmate. Mark ok if the board is theirs.'),
+    item('careers_changed', 'Brightwell', false, et('2026-11-09', '08:04'), 1,
+      'Brightwell has no job board we can read, and its careers page changed on Nov 9. Look for a new role there, then mark ok.'),
+  );
+  const earlier = resolvedThisWeek.splice(0);
+  resolvedThisWeek.push(
+    done('domain_missing', 'Wrenfield', 'field_edited', 'Email domain set to wrenfield.example by you, from the company website footer', et(TODAY, '09:12')),
+    done('sponsorship_unclear', 'Ambergate', 'marked_ok', 'Marked ok by you', et(TODAY, '09:20'), {
+      item: item('sponsorship_unclear', 'Ambergate', false, et('2026-11-09', '08:00'), 1, 'The posting says visa sponsorship may be considered for this role.'),
+    }),
+    done('sponsorship_unclear', 'Tallgrass Data', 'marked_no_go', 'Added to the no-go list by you: does not sponsor', et('2026-11-09', '11:30'), {
+      item: item('sponsorship_unclear', 'Tallgrass Data', false, et('2026-11-06', '08:00'), 3, 'The posting says sponsorship is decided case by case.'),
+      restoreStatus: { companyId: companyId('Tallgrass Data'), status: 'candidate' },
+    }),
+    done('merge_candidate', 'Sorrel', 'field_edited', 'Merged Sorrel AI into Sorrel by you', et('2026-11-06', '10:05'), {
+      item: item('merge_candidate', 'Sorrel', false, et('2026-11-05', '08:00'), 5, 'Both names come down to "sorrel", and both use sorrel.example.', {
+        merge: {
+          a: meshSide('Sorrel', { domain: 'sorrel.example', openPostings: 2, people: 2, touches: 1 }),
+          b: meshSide('Sorrel AI', { domain: 'sorrel.example', status: 'backlog' }),
+          why: 'Both names come down to "sorrel", and both use sorrel.example.', suggestedKeep: 'a', warning: null,
+        },
+      }),
+      restoreStatus: { companyId: companyId('Sorrel AI'), status: 'backlog' },
+    }),
+    done('size_unknown', 'Pellucid Labs', 'field_edited', 'Size set to about 45 by you, from LinkedIn 11 to 50', et('2026-11-06', '09:40')),
+    done('board_empty', 'Corvid Works', 'marked_ok', 'Marked ok by you', et('2026-11-05', '14:02'), {
+      item: item('board_empty', 'Corvid Works', false, et('2026-11-03', '08:04'), 7, 'The Lever board returned no jobs twice in a row, so its postings were closed.'),
+    }),
+  );
+  for (const r of earlier) delete settled[r.id];
+  return { view: { asOf: AS_OF, open, resolvedThisWeek, boardsJob: JOBS.crawl(), settledToday: settledOn(resolvedThisWeek, TODAY) }, settled };
 }
 
 /* ------------------------------------------------------------------ No-go (no-go.html) */
@@ -1174,7 +1265,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
   const today = buildToday(c);
   const { view: outbox, details, compares } = buildOutbox(c, scenario === 'many_sent' ? 500 : 64);
   const linkedin = buildLinkedIn(c);
-  const needsYou = buildNeedsYou(c);
+  const { view: needsYou, settled } = buildNeedsYou(c, scenario);
   const noGo = buildNoGo(c);
   const done = buildDone(c);
   const views: Views = { today, outbox, details, linkedin, needsYou, noGo, done };
@@ -1197,6 +1288,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
   });
   const db: FixtureDb = {
     scenario, shell: computeShell({ ...views, ...planFixture, jobs: jobList() }), searchIndex, postings, today, outbox, details, compares, linkedin, needsYou, noGo, companies, done, ...planFixture,
+    settled,
   };
 
   const s = db.outbox.sending;
@@ -1225,7 +1317,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
     s.sentToday = 0; s.nextSend = null; s.noneReason = 'Nothing is approved.';
     db.details = {}; db.compares = []; db.companies = {};
     db.linkedin.groups = []; db.linkedin.counts = { toReach: 0, waiting: 0, replied: 0, all: 0 }; db.linkedin.requestsThisWeek = 0;
-    db.needsYou.open = []; db.needsYou.resolvedThisWeek = [];
+    db.needsYou.open = []; db.needsYou.resolvedThisWeek = []; db.settled = {};
     db.noGo.companies = []; db.noGo.people = []; db.noGo.countsByReason = [];
     db.done.companies = [];
     db.done.metrics = { repliesThisMonth: 0, repliesPerWeek: db.done.metrics.repliesPerWeek.map((w) => ({ ...w, count: 0 })), replyRate: { replies: 0, firstEmails: 0 }, referrals: 0, interviews: 0 };

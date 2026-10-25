@@ -22,7 +22,7 @@ export type LiveMethods = Partial<Omit<OutreachClient, 'source'>> & {
   searchCompanies?: (q: string) => Promise<CompanyHit[]>;
   // Not on `OutreachClient`: the page undoes before a write commits, so only the API knows a committed undo.
   undoLinkedIn?: (personId: Id, step: LinkedInStep, o: WriteOptions) => Promise<LinkedInPerson>;
-  // Not on `OutreachClient` until #16 adds the merge confirm and its undo: take a merged company back out.
+  // Not on `OutreachClient`: Needs you takes a merge back with `reopenReview`, which unmerges; this is the company-level call.
   unmergeCompany?: (companyId: Id, revision: Revision, o: WriteOptions) => Promise<{ revision: Revision }>;
 };
 export type HttpClient = LiveMethods & { readonly source: 'live' };

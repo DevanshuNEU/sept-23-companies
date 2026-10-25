@@ -561,6 +561,121 @@ describe('LinkedIn, Needs you', () => {
   });
 });
 
+describe('Needs you: merge, Undo from Resolved and the settled count (#16)', () => {
+  const openItem = async (c: FixtureClient, name: string) => {
+    const found = (await c.needsYou()).open.find((r) => r.company.name === name);
+    if (!found) throw new Error(`No open item for ${name}`);
+    return found;
+  };
+  const resolvedRow = async (c: FixtureClient, name: string) => {
+    const found = (await c.needsYou()).resolvedThisWeek.find((r) => r.companyName === name);
+    if (!found) throw new Error(`No resolved row for ${name}`);
+    return found;
+  };
+
+  it('reopenReview puts an ok item back open and the shell count rises', async () => {
+    const c = client();
+    const hex = await openItem(c, 'Hex');
+    await c.resolveReview(hex.id, { kind: 'ok' }, hex.revision, opt());
+    expect((await c.shell()).openReviewItems).toBe(4);
+    const row = await resolvedRow(c, 'Hex');
+    expect(row).toMatchObject({ resolution: 'marked_ok', canUndo: true, locked: false });
+
+    await c.reopenReview(row.id, row.revision, opt());
+    const back = await openItem(c, 'Hex');
+    expect(back.revision).toBe(row.revision + 1);
+    expect(back.quote?.text).toBe(hex.quote?.text);
+    expect((await c.needsYou()).resolvedThisWeek.some((r) => r.id === row.id)).toBe(false);
+    expect((await c.shell()).openReviewItems).toBe(5);
+    // Resolving it again works from the new revision.
+    await c.resolveReview(back.id, { kind: 'ok' }, back.revision, opt());
+    expect((await c.shell()).openReviewItems).toBe(4);
+  });
+
+  it('reopenReview on a no-go takes the company off the no-go list again', async () => {
+    const c = client();
+    const zed = await openItem(c, 'Zed Industries');
+    await c.resolveReview(zed.id, { kind: 'no_go', reason: 'other', source: 'Board is gone' }, zed.revision, opt());
+    const row = await resolvedRow(c, 'Zed Industries');
+    expect(row.canUndo).toBe(true);
+    await c.reopenReview(row.id, row.revision, opt());
+    const noGo = await c.noGo();
+    expect(noGo.companies.some((r) => r.kind === 'no_go' && r.target.kind === 'company' && r.target.company.name === 'Zed Industries')).toBe(false);
+    expect((await c.company(zed.company.id)).company.status).toBe('candidate');
+    expect(await openItem(c, 'Zed Industries')).toMatchObject({ kind: 'board_unreadable' });
+  });
+
+  it('reopenReview on a locked edit throws not_allowed with the lock message', async () => {
+    const c = client();
+    const turso = await resolvedRow(c, 'Turso');
+    expect(turso).toMatchObject({ resolution: 'field_edited', locked: true, canUndo: false });
+    const err = await rejection(c.reopenReview(turso.id, turso.revision, opt()));
+    expect(err.code).toBe('not_allowed');
+    expect(err.message).toBe('A value you set is locked and cannot be taken back here.');
+    expect((await c.shell()).openReviewItems).toBe(5);
+  });
+
+  it('reopenReview with a stale revision throws conflict', async () => {
+    const c = client();
+    const railway = await resolvedRow(c, 'Railway');
+    const err = await rejection(c.reopenReview(railway.id, railway.revision - 1, opt()));
+    expect(err.code).toBe('conflict');
+    expect(err.message).toBe('This item changed since you loaded it. Nothing was saved.');
+    expect((await c.needsYou()).open.some((r) => r.company.name === 'Railway')).toBe(false);
+    // The right revision brings a row the fixture started with back open.
+    await c.reopenReview(railway.id, railway.revision, opt());
+    expect(await openItem(c, 'Railway')).toMatchObject({ kind: 'sponsorship_unclear' });
+    expect((await rejection(c.reopenReview(railway.id, railway.revision + 1, opt()))).code).toBe('not_allowed');
+    expect((await rejection(c.reopenReview(1, 1, opt()))).code).toBe('not_found');
+  });
+
+  it('resolveReview merge removes the loser and the item', async () => {
+    const c = client('review');
+    const item = await openItem(c, 'Mesh Systems');
+    if (!item.merge) throw new Error('no merge compare');
+    const loser = item.merge.b.companyId;
+    expect((await c.company(loser)).company.status).toBe('backlog');
+    expect((await rejection(c.resolveReview((await openItem(c, 'Hex')).id, { kind: 'merge', keep: 'a' }, 1, opt()))).code).toBe('not_allowed');
+
+    await c.resolveReview(item.id, { kind: 'merge', keep: item.merge.suggestedKeep }, item.revision, opt());
+    expect((await c.needsYou()).open.some((r) => r.id === item.id)).toBe(false);
+    expect((await c.company(loser)).company.status).toBe('removed');
+    expect((await c.shell()).openReviewItems).toBe(10);
+    const row = await resolvedRow(c, 'Mesh Systems');
+    expect(row).toMatchObject({ kind: 'merge_candidate', note: 'Merged Mesh into Mesh Systems by you', locked: false, canUndo: true });
+
+    // Undo from Resolved unmerges: the loser comes back as it was, and the question is open again.
+    await c.reopenReview(row.id, row.revision, opt());
+    expect((await c.company(loser)).company.status).toBe('backlog');
+    expect((await openItem(c, 'Mesh Systems')).merge?.b.name).toBe('Mesh');
+    expect((await c.shell()).openReviewItems).toBe(11);
+  });
+
+  it('keep separate on a merge question is the ok fix and says so', async () => {
+    const c = client('review');
+    const item = await openItem(c, 'Mesh Systems');
+    await c.resolveReview(item.id, { kind: 'ok' }, item.revision, opt());
+    expect(await resolvedRow(c, 'Mesh Systems')).toMatchObject({ resolution: 'marked_ok', note: 'Kept separate by you', canUndo: true });
+  });
+
+  it('settledToday rises by one after a resolve', async () => {
+    const c = client();
+    expect((await c.needsYou()).settledToday).toBe(0);
+    const hex = await openItem(c, 'Hex');
+    await c.resolveReview(hex.id, { kind: 'ok' }, hex.revision, opt());
+    expect((await c.needsYou()).settledToday).toBe(1);
+    const trigger = await openItem(c, 'Trigger.dev');
+    await c.resolveReview(trigger.id, { kind: 'edit', field: 'size', value: 'about 30', source: 'Team page' }, trigger.revision, opt());
+    const after = await c.needsYou();
+    expect(after.settledToday).toBe(2);
+    expect(after.resolvedThisWeek[0]).toMatchObject({ note: 'Size set to about 30 by you, from Team page', locked: true, canUndo: false });
+    // Undo takes it back off the count.
+    const row = await resolvedRow(c, 'Hex');
+    await c.reopenReview(row.id, row.revision, opt());
+    expect((await c.needsYou()).settledToday).toBe(1);
+  });
+});
+
 describe('write plumbing', () => {
   it('every write rejects with network in the error scenario', async () => {
     const c = client('error');

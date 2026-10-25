@@ -12,6 +12,9 @@ the wrong shape, is a `ValueError`, so a typo never reads as "no override". Keys
     [touch_for]               "<record id>" = "<record id>"   this row annotates that touch
     [skip_record]             "<record id>" = "why"    a held record he settles by skipping it (only the holds
                                                        the planner allows; an unclear send never)
+    [allow_empty]             sources = ["contacts_json"]   these sources are empty on purpose: the count check
+                                                       lets them have zero records (a required source name
+                                                       only; a read error still fails)
 """
 import glob
 import os
@@ -20,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import live_checkout
-from outreach.importer.records import SOURCES, SourceError
+from outreach.importer.records import REQUIRED_SOURCES, SOURCES, SourceError
 
 DEFAULT_SOURCES = Path(__file__).resolve().parent / "sources.toml"
 
@@ -40,6 +43,7 @@ class Overrides:
     done_remove: frozenset[str]
     touch_for: dict[str, str]
     skip_record: dict[str, str] = field(default_factory=dict)
+    allow_empty: frozenset[str] = frozenset()
 
 
 def _expand(text: str, env) -> str:
@@ -72,7 +76,8 @@ def load_manifest(path: Path | None = None, *, env=os.environ) -> Manifest:
 
 
 _PAIR_TABLES = ("same_company", "person_name", "touch_for", "skip_record")
-_LIST_TABLES = {"not_same_company": "pairs", "done_add": "keys", "done_remove": "keys"}
+_LIST_TABLES = {"not_same_company": "pairs", "done_add": "keys", "done_remove": "keys",
+                "allow_empty": "sources"}
 
 
 def load_overrides(path: Path | None) -> Overrides:
@@ -106,6 +111,12 @@ def load_overrides(path: Path | None) -> Overrides:
     for name in ("done_add", "done_remove"):
         if not all(isinstance(x, str) for x in lists[name]):
             raise ValueError(f"overrides {path}: [{name}] keys must be text")
+    if not isinstance(lists["allow_empty"], list) or not all(isinstance(x, str) for x in lists["allow_empty"]):
+        raise ValueError(f"overrides {path}: [allow_empty] sources must be a list of source names")
+    bad = sorted(set(lists["allow_empty"]) - set(REQUIRED_SOURCES))
+    if bad:
+        raise ValueError(f"overrides {path}: [allow_empty] names {bad}, which are not required sources "
+                         f"({', '.join(REQUIRED_SOURCES)})")
     return Overrides(
         same_company=mappings["same_company"],
         not_same_company=frozenset(frozenset(p) for p in pairs),
@@ -114,4 +125,5 @@ def load_overrides(path: Path | None) -> Overrides:
         done_remove=frozenset(lists["done_remove"]),
         touch_for=mappings["touch_for"],
         skip_record=mappings["skip_record"],
+        allow_empty=frozenset(lists["allow_empty"]),
     )

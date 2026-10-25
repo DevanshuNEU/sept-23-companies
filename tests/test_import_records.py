@@ -11,6 +11,7 @@ from live_checkout import LIVE_ROOT
 from outreach.importer import IMPORTER_VERSION
 from outreach.importer.manifest import Manifest, Overrides, load_manifest, load_overrides
 from outreach.importer.records import (
+    REQUIRED_SOURCES,
     SOURCES,
     SourceError,
     SourceRecord,
@@ -192,6 +193,8 @@ keys = ["kestrelrobotics"]
 "curated_touches:row:3" = "contacted_txt:line:7"
 [skip_record]
 "contacted_txt:line:12" = "a stray note"
+[allow_empty]
+sources = ["contacts_json"]
 """)
         got = load_overrides(path)
         self.assertEqual(got.same_company, {"tidewater": "tidewaterai"})
@@ -202,6 +205,10 @@ keys = ["kestrelrobotics"]
         self.assertEqual(got.touch_for, {"curated_touches:row:3": "contacted_txt:line:7"})
         self.assertEqual(got.skip_record, {"contacted_txt:line:12": "a stray note"})
         self.assertEqual(load_overrides(None).skip_record, {})
+        self.assertEqual(got.allow_empty, frozenset({"contacts_json"}))
+        self.assertEqual(load_overrides(None).allow_empty, frozenset())
+        self.assertEqual(load_overrides(write(self.tmp / "none.toml", "[done_add]\nkeys = []\n")).allow_empty,
+                         frozenset())
 
     def test_overrides_refuse_an_unknown_table(self):
         path = write(self.tmp / "o.toml", '[same_compny]\na = "b"\n')
@@ -219,6 +226,32 @@ keys = ["kestrelrobotics"]
         path = write(self.tmp / "p.toml", "[same_company]\na = 3\n")
         with self.assertRaises(ValueError):
             load_overrides(path)
+
+    def test_allow_empty_refuses_a_name_that_is_not_a_required_source(self):
+        # a typo, a wrong case and a made-up name are each an error, never "no override"
+        for name in ("contacts_jsno", "Contacts_json", "not_a_source", ""):
+            with self.subTest(name=name):
+                path = write(self.tmp / "o.toml", f'[allow_empty]\nsources = ["{name}"]\n')
+                with self.assertRaises(ValueError) as cm:
+                    load_overrides(path)
+                self.assertIn("allow_empty", str(cm.exception))
+        path = write(self.tmp / "mixed.toml", '[allow_empty]\nsources = ["contacts_json", "nope"]\n')
+        with self.assertRaises(ValueError):
+            load_overrides(path)
+
+    def test_allow_empty_refuses_a_bad_shape(self):
+        for text in ('[allow_empty]\nsources = "contacts_json"\n',    # not a list
+                     '[allow_empty]\nsources = [3]\n',                # not text
+                     '[allow_empty]\nsource = ["contacts_json"]\n',   # wrong key
+                     'allow_empty = ["contacts_json"]\n'):             # not a table
+            with self.subTest(text=text):
+                with self.assertRaises(ValueError):
+                    load_overrides(write(self.tmp / "o.toml", text))
+
+    def test_allow_empty_accepts_every_required_source(self):
+        names = ", ".join(f'"{s}"' for s in REQUIRED_SOURCES)
+        got = load_overrides(write(self.tmp / "o.toml", f"[allow_empty]\nsources = [{names}]\n"))
+        self.assertEqual(got.allow_empty, frozenset(REQUIRED_SOURCES))
 
 
 class FixtureSetTest(unittest.TestCase):

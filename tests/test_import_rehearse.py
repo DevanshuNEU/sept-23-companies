@@ -12,7 +12,7 @@ from outreach.importer.__main__ import main
 from outreach.importer.records import SOURCES, source_digest
 from outreach.importer.rehearse import rehearse
 from outreach.store import db
-from tests.importtest import fixture_manifest
+from tests.importtest import fixture_manifest, make_contacts_empty
 
 NOW = "2026-10-20T12:00:00Z"
 
@@ -69,6 +69,31 @@ class RehearseTest(unittest.TestCase):
         self.assertTrue(failures)
         self.assertIn("Rehearsal failed:", out)
         self.assertIn("unclear_send", out)
+
+    def empty_contacts(self, declare):
+        import dataclasses
+        make_contacts_empty(self.manifest)
+        overrides = self.tmp / "overrides.toml"
+        overrides.write_text('[allow_empty]\nsources = ["contacts_json"]\n' if declare else "", encoding="utf-8")
+        return dataclasses.replace(self.manifest, overrides=overrides)
+
+    def test_rehearsal_with_an_empty_contacts_file_passes_when_he_declares_it(self):
+        manifest = self.empty_contacts(declare=True)
+        into = self.tmp / "r"
+        (report, failures), out = self.quiet(rehearse, manifest, into, now=NOW)
+        self.assertEqual(failures, [], out)
+        self.assertEqual(report.empty_on_purpose, ("contacts_json",))
+        self.assertIn("contacts_json: empty on purpose (his ruling)", out)
+        self.assertIn("Second run changed nothing", out)
+        self.assertTrue(out.rstrip().endswith("Rehearsal passed"), out[-300:])
+        self.assertIn("empty on purpose", (into / "report.txt").read_text(encoding="utf-8"))
+
+    def test_rehearsal_with_an_empty_contacts_file_still_fails_without_the_declaration(self):
+        manifest = self.empty_contacts(declare=False)
+        (_, failures), out = self.quiet(rehearse, manifest, self.tmp / "r", now=NOW)
+        self.assertTrue(any("contacts_json: no records at all" in f for f in failures), failures)
+        self.assertIn("Rehearsal failed:", out)
+        self.assertNotIn("empty on purpose", out)
 
     def test_a_second_rehearsal_on_the_same_day_gets_its_own_folder(self):
         into = self.tmp / "2026-10-20"

@@ -7,6 +7,11 @@
   nothing, not even a job run. A weekend builds nothing unless `--force-weekend`.
 - `show [--date YYYY-MM-DD]`: print the stored plan, read only: `<rank> <company> <person or find someone> <channel>
   <lane>`, and the people search link under each find-someone row.
+- `prepare [--count N]`: the morning prepare step (Task 14): find people for the top companies with nobody to ask and
+  draft their notes, one `claude -p` call per company, and print one summary line. It refuses to run outside the live
+  checkout before it reads anything (it calls a model through his seat). It starts caffeinate like `build`. `--count`
+  overrides the number of companies (default: twice today's LinkedIn capacity). Exit 1 when the run stopped on a login
+  problem or failed calls, or me.md cannot be read; a session limit is a clean stop (exit 0).
 
 The store is the one at OUTREACH_DB; the default (live) store opens only from the live checkout, so from a worktree
 this runs on a scratch OUTREACH_DB or not at all. Exit code: 0 when the command finished, 1 when it failed (the
@@ -24,10 +29,14 @@ from collections.abc import Sequence
 from datetime import date
 
 import live_checkout
+from outreach.drafts.checks import load_banned
 from outreach.plan.boards import BoardsReadError, crawler_boards_reader, rank_runner
 from outreach.plan.build import PlanResult, build_plan
+from outreach.plan.claude_run import claude_runner
 from outreach.plan.config import default_plan_config
 from outreach.plan.dates import today_ny
+from outreach.plan.notecheck import load_unconfirmed
+from outreach.plan.prepare import default_me_path, run_prepare
 from outreach.store import StoreError, connect, describe_error
 from outreach.store.timefmt import utcnow
 
@@ -46,7 +55,17 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--force-weekend", action="store_true", help="build on a Saturday or Sunday too")
     show = sub.add_parser("show", help="print a stored plan")
     show.add_argument("--date", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD")
+    prepare = sub.add_parser("prepare", help="find people and draft notes through claude -p (live checkout only)")
+    prepare.add_argument("--count", type=_count, default=None, metavar="N",
+                         help="companies to prepare (default: twice today's LinkedIn capacity)")
     return p
+
+
+def _count(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be 0 or more")
+    return value
 
 
 def _today() -> date:
@@ -133,6 +152,33 @@ def _show(args: argparse.Namespace, stdout) -> int:
     return 0
 
 
+_PREPARE_OK = ("done", "no_capacity", "no_targets", "session_limit")
+
+
+def _prepare(args: argparse.Namespace, root: str | None, live_root: str | None, stdout) -> int:
+    live_checkout.require_live("the daily prepare step", root or live_checkout.REPO_ROOT,
+                               live_root or live_checkout.LIVE_ROOT)
+    _start_caffeinate()
+    cfg = default_plan_config()
+    me_path = default_me_path()
+    try:
+        me_text = me_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as err:
+        raise OSError(f"cannot read me.md at {me_path}: {err}") from None
+    # An unusable banned list comes back empty and every note is then blocked (fails closed), never passed.
+    banned = load_banned(cfg.get("note", "banned_path"), scopes=tuple(cfg.get("note", "banned_scopes")))[0]
+    unconfirmed = load_unconfirmed(me_path)
+    runner = claude_runner(cfg)
+    conn = connect()
+    try:
+        summary = run_prepare(conn, runner, today=_today(), cfg=cfg, me_text=me_text, banned=banned,
+                              unconfirmed=unconfirmed, count=args.count)
+    finally:
+        conn.close()
+    print(summary.line(), file=stdout)
+    return 0 if summary.status in _PREPARE_OK else 1
+
+
 def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_root: str | None = None,
          stdout=None) -> int:
     """Run one command and return the exit code. `root` and `live_root` default to this checkout and the live one."""
@@ -141,6 +187,8 @@ def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_roo
     try:
         if args.command == "build":
             return _build(args, root, live_root, stdout)
+        if args.command == "prepare":
+            return _prepare(args, root, live_root, stdout)
         return _show(args, stdout)
     except _EXPECTED as err:
         print(f"{args.command}: {describe_error(err)}", file=sys.stderr)

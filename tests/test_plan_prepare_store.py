@@ -131,6 +131,13 @@ class RejectTest(StoreCase):
                                 "quote": "Ada Lovelace"})
         self.assertRejected(self.store(cand), "linkedin_source")
 
+    def test_a_linkedin_source_is_refused_before_the_store_door_is_reached(self):
+        from outreach.plan.people import add_candidate
+        with mock.patch.object(prepare_store, "add_candidate", wraps=add_candidate) as door:
+            got = self.store(candidate(url="https://www.linkedin.com/in/ada"))
+        door.assert_not_called()  # refused by the reply check itself; add_candidate is the second guard
+        self.assertRejected(got, "linkedin_source")
+
     def test_http_source_rejected(self):
         got = self.store(candidate(url="http://acme.example/team"))
         self.assertRejected(got, "no_public_page")

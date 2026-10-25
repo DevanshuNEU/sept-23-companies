@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The morning prepare step (#15): Monday to Friday at 05:30, after the 02:30 reader night job and before the 08:00
+  plan. For the top companies that have nobody to ask (about twice the day's LinkedIn capacity), one claude -p call
+  each through Devanshu's Claude Code seat finds people on public pages and drafts their LinkedIn notes. Code checks
+  every reply before anything is stored; a LinkedIn source is always refused, and every note waits for his reason
+  line. It never sends, approves or logs anything. One summary line per run in the log. A session limit, an expired
+  login or failed calls stop the run cleanly: the plan still builds at 08:00, with find-someone rows for the rest.
+
+  StartCalendarInterval (not StartInterval), so a run missed while the Mac sleeps fires on wake. The prepare command
+  starts /usr/bin/caffeinate -i -w <its pid> itself, so the Mac stays awake until the run ends. The claude CLI is
+  found on PATH or at ~/.local/bin/claude, so the job sets no PATH.
+
+  Before installing: check the LinkedIn deny rule form once on the seat (the runbook in
+  outreach/plan/claude_run.py).
+
+  It follows the deploy tool's one convention (#17, outreach/deploy/jobs.py): WorkingDirectory is the live checkout,
+  the program is the checkout's venv python run as a module, and both streams go to the log. Placeholders, filled by
+  the deploy tool: {{LIVE_CHECKOUT}} is the live checkout, {{LOG_PATH}} the log file. Nothing else is filled; the
+  store is the default.
+
+  Not installed by the repo, and never loaded from a worktree. Installing it is Devanshu's step, through the deploy
+  tool (python -m outreach.deploy plan, then install). By hand, after filling it in:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.devanshu.outreach-prepare.plist
+  To remove it:
+    launchctl bootout gui/$(id -u)/com.devanshu.outreach-prepare
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-prepare</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.plan</string>
+    <string>prepare</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Weekday</key>
+      <integer>1</integer>
+      <key>Hour</key>
+      <integer>5</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>2</integer>
+      <key>Hour</key>
+      <integer>5</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>3</integer>
+      <key>Hour</key>
+      <integer>5</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>4</integer>
+      <key>Hour</key>
+      <integer>5</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>5</integer>
+      <key>Hour</key>
+      <integer>5</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

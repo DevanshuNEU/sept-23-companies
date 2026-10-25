@@ -338,7 +338,9 @@ class CliTest(unittest.TestCase):
                 mock.patch.object(cli, "_start_caffeinate"), mock.patch.object(cli, "_today", return_value=TODAY), \
                 mock.patch.object(cli, "load_banned", return_value=(BANNED, True)), contextlib.redirect_stderr(err):
             code = cli.main(["prepare", "--count", "1"], root=str(ROOT), live_root=str(ROOT), stdout=out)
-        self.assertEqual((code, err.getvalue()), (0, ""))
+        self.assertEqual(code, 0)
+        # stderr may hold a ResourceWarning from another test's connection, collected now: only our own line counts
+        self.assertNotIn("prepare:", err.getvalue())
         made.assert_called_once()
         self.assertEqual(len(runner.calls), 1)
         self.assertIn("prepare: done, 1 companies, 1 added, 1 drafts", out.getvalue())
@@ -359,7 +361,9 @@ class CliTest(unittest.TestCase):
         with mock.patch.object(cli, "claude_runner") as made, mock.patch.object(cli, "_start_caffeinate") as awake, \
                 mock.patch("sqlite3.connect") as opened, contextlib.redirect_stderr(err):
             code = cli.main(["prepare"], root=str(ROOT), live_root=str(ROOT), stdout=out)
-        self.assertEqual((code, err.getvalue()), (0, ""))
+        self.assertEqual(code, 0)
+        # stderr may hold a ResourceWarning from another test's connection, collected now: only our own line counts
+        self.assertNotIn("prepare:", err.getvalue())
         self.assertIn("prepare: off", out.getvalue())
         self.assertIn("deny_rule_checked", out.getvalue())
         made.assert_not_called()

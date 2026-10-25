@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigationType } from 'react-router';
 import { HotkeysProvider } from '@/keyboard/hotkeys';
@@ -196,5 +197,56 @@ describe('useListNav', () => {
     expect(region).toHaveTextContent('Kenji Watanabe, Trigger.dev, blocked');
     press('j');
     expect(region).toHaveTextContent('Omar Haddad, Mintlify, ready');
+  });
+});
+
+describe('a selected row that leaves the list', () => {
+  /** A list where Settle takes the selected row out at once and moves to the next one, as a Needs you fix does. */
+  function Settling({ seen }: { seen: string[] }) {
+    const [ids, setIds] = useState(['a', 'b', 'c']);
+    const nav = useListNav({ ids });
+    seen.push(nav.selected ?? 'none');
+    return (
+      <>
+        <ul>
+          {ids.map((id) => (
+            <li key={id} {...nav.rowProps(id)}>
+              row {id}
+            </li>
+          ))}
+        </ul>
+        <button
+          type="button"
+          onClick={() => {
+            const at = ids.indexOf(nav.selected ?? '');
+            const next = ids[at + 1] ?? ids[at - 1];
+            if (next !== undefined) nav.select(next);
+            setIds((list) => list.filter((x) => x !== nav.selected));
+          }}
+        >
+          Settle
+        </button>
+      </>
+    );
+  }
+
+  it('hands the selection to the row he moved to, with no render that selects nothing', () => {
+    const seen: string[] = [];
+    render(
+      <MemoryRouter initialEntries={['/needs-you']}>
+        <HotkeysProvider>
+          <Settling seen={seen} />
+        </HotkeysProvider>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('row a'));
+    seen.length = 0;
+    fireEvent.click(screen.getByRole('button', { name: 'Settle' }));
+    expect(screen.queryByText('row a')).not.toBeInTheDocument();
+    expect(screen.getByText('row b')).toHaveAttribute('aria-selected', 'true');
+    // Every render after the fix shows b: a render that selected nothing would end the move to b, and a key
+    // pressed in that moment would be lost.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((s) => s !== 'b')).toEqual([]);
   });
 });

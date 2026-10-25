@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { useUrlState } from '@/lib/url-state';
-import { useAnnounce, useHotkeys, useSelectionSync } from './hotkeys';
+import { useAnnounce, useHotkeys, useLiveSelection, useSelectionSync } from './hotkeys';
 
 export type ListNavOptions<T extends string | number> = {
   ids: T[];
@@ -41,8 +41,15 @@ export function useListNav<T extends string | number>({
   const say = useAnnounce();
   const rows = useRef(new Map<T, HTMLElement>());
 
+  const pending = useLiveSelection<T>();
+
   const fromUrl = ids.find((id) => String(id) === raw) ?? null;
-  const selected = raw === '' && initial !== undefined && ids.includes(initial) ? initial : fromUrl;
+  // The row in the URL just left the list (a fix took it out) while the move to the next row waits for its URL
+  // write: the row he moved to stands in. Otherwise a render would select nothing, end that move, and drop a key
+  // pressed in that moment.
+  const movedTo = fromUrl === null && raw !== '' ? pending.latest() : null;
+  const standIn = movedTo !== null && ids.includes(movedTo) ? movedTo : null;
+  const selected = raw === '' && initial !== undefined && ids.includes(initial) ? initial : (fromUrl ?? standIn);
   const live = useSelectionSync(selected);
 
   const select = (id: T) => {

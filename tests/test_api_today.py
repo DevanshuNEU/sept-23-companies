@@ -684,6 +684,30 @@ class PlanDayWrites(TodayCase):
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(self.get("/api/no-go").json()["companies"], [])
 
+    def test_restore_with_no_list_today_leaves_an_earlier_plan_row_unchanged(self):
+        """A weekend, or a weekday before the plan job ran: the company's newest row is an earlier plan's."""
+        self.plan_entry(self.gone, 1, state="removed")
+        before = self.plan_list()
+        for now in (SATURDAY, "2026-11-11T09:00:00Z"):  # Saturday; Wednesday 04:00 in New York, no list yet
+            with self.subTest(now=now):
+                self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'not_a_fit' "
+                                  "WHERE company_id = ?", (self.gone,))
+                self.set_now(now)
+                res = self.restore(self.gone)
+                self.assertEqual((res.status_code, res.json()), (200, {}), res.text)
+                self.assertEqual(self.company(self.gone)["status"], "backlog")
+                self.assertEqual(self.plan_list(), before)  # the plan row is byte for byte as it was
+
+    def test_restore_with_no_list_today_still_moves_a_lean_newest_row(self):
+        self.conn.execute("DELETE FROM daily_list")  # setUp's Tuesday list: make it the lean Today's instead
+        self.conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES (?, ?, 7)",
+                          (TODAY, "2026-11-10T13:00:00Z"))
+        self.plan_entry(self.gone, 1, person=False, state="removed")  # no channel and no plan run: a lean row
+        self.set_now(SATURDAY)
+        self.assertEqual(self.restore(self.gone).status_code, 200)
+        entry = self.entry(self.gone)
+        self.assertEqual((entry["state"], entry["decided_at"]), ("backlog", SATURDAY))
+
     def test_restore_on_a_plan_day_keeps_its_own_refusals(self):
         self.plan_entry(self.a, 1)
         res = self.restore(self.a)

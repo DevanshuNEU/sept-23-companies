@@ -400,14 +400,18 @@ def _refuse(text: str) -> ApiProblem:
 PLAN_DAY = "Today is a plan of people now. Use the plan to skip a row."
 
 
-def _plan_day(conn: sqlite3.Connection, now: str) -> bool:
-    """Whether today's list is #15's people plan: a stored list whose rows name a channel, or that a `plan` run
-    built (`plan_view`'s test). A day with no list or with the lean Today's list is not."""
+def _built_by_plan(conn: sqlite3.Connection, day: str) -> bool:
+    """Whether the date's stored list is #15's people plan: a stored list whose rows name a channel, or that a `plan`
+    run built (`plan_view`'s test). A date with no list or with the lean Today's list is not."""
     from outreach.api.queries.plan import from_plan_job  # plan imports this module
 
-    day = ny_day(now)
     return conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is not None \
         and from_plan_job(conn, day)
+
+
+def _plan_day(conn: sqlite3.Connection, now: str) -> bool:
+    """Whether today's (New York) list is the people plan."""
+    return _built_by_plan(conn, ny_day(now))
 
 
 def _not_on_a_plan_day(conn: sqlite3.Connection, now: str) -> None:
@@ -604,8 +608,10 @@ def restore(ctx: WriteCtx, company_id: int, reason: str, revision: int) -> Empty
         listed_today = conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is not None
         if newest is not None and (newest["list_date"] == day or not listed_today):
             # Today's own row, or a weekend (no list): the newest row becomes the backlog row the next build carries.
-            conn.execute("UPDATE daily_list_entry SET state = 'backlog', decided_at = ? WHERE list_date = ? "
-                         "AND company_id = ?", (ctx.now, newest["list_date"], company_id))
+            # Not when that row is an earlier people plan's: the plan job owns it, so only the status moves.
+            if not _built_by_plan(conn, newest["list_date"]):
+                conn.execute("UPDATE daily_list_entry SET state = 'backlog', decided_at = ? WHERE list_date = ? "
+                             "AND company_id = ?", (ctx.now, newest["list_date"], company_id))
         elif listed_today:
             # An older day's row (or none): the company joins today's list, so it shows now and not at the next build.
             rank = conn.execute("SELECT coalesce(max(rank), 0) + 1 FROM daily_list_entry WHERE list_date = ?",

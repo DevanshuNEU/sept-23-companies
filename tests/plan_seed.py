@@ -13,7 +13,8 @@ from datetime import date
 from outreach.store.timefmt import utcnow
 from outreach.store.writes import log_touch, record_outcome
 
-__all__ = ["TODAY", "seed_scored_company", "seed_person", "seed_outbound", "seed_log_only", "seed_send_day"]
+__all__ = ["TODAY", "seed_scored_company", "seed_person", "seed_source", "seed_outbound", "seed_log_only",
+           "seed_send_day"]
 
 TODAY = date(2026, 11, 10)
 _counter = itertools.count(1)
@@ -72,6 +73,16 @@ def seed_person(conn: sqlite3.Connection, company_id: int, name: str, role_kind:
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (person_id, kind, url, quote, "published" if kind == "email" else None, TODAY.isoformat(), now))
     return person_id
+
+
+def seed_source(conn: sqlite3.Connection, person_id: int, kind: str, url: str, *, observed_on: date | None = TODAY,
+                quote: str = "", email_basis: str | None = None, label: str = "") -> int:
+    """One `person_source` row with a chosen observation date (an `email` source needs a basis)."""
+    return conn.execute(
+        "INSERT INTO person_source(person_id, kind, url, label, quote, email_basis, observed_on, recorded_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (person_id, kind, url, label, quote, email_basis, observed_on.isoformat() if observed_on else None,
+         utcnow())).lastrowid
 
 
 def seed_outbound(conn: sqlite3.Connection, person_id: int, company_id: int, channel: str, sent_on: date, *,

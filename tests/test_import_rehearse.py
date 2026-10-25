@@ -95,6 +95,32 @@ class RehearseTest(unittest.TestCase):
         self.assertIn("Rehearsal failed:", out)
         self.assertNotIn("empty on purpose", out)
 
+    def unlisted_merge(self, ruling):
+        """A radar posting merged into one radar.db does not list, with his [skip_record] for it or without."""
+        import dataclasses
+        import sqlite3
+        conn = sqlite3.connect(self.manifest.paths["radar_db"])
+        conn.execute("UPDATE posting SET merged_into = 999 WHERE posting_id = 2")
+        conn.commit()
+        conn.close()
+        overrides = self.tmp / "overrides.toml"
+        overrides.write_text('[skip_record]\n"radar_db:posting:2" = "a duplicate he does not track"\n'
+                             if ruling else "", encoding="utf-8")
+        return dataclasses.replace(self.manifest, overrides=overrides)
+
+    def test_rehearsal_refuses_a_posting_merged_into_an_unlisted_one(self):
+        (_, failures), out = self.quiet(rehearse, self.unlisted_merge(ruling=False), self.tmp / "r", now=NOW)
+        self.assertTrue(any("radar_db: 1 held (unparsed_record)" in f for f in failures), failures)
+        self.assertIn("was merged in radar.db into a posting it does not list", out)
+
+    def test_rehearsal_passes_when_his_skip_record_settles_that_hold(self):
+        (report, failures), out = self.quiet(rehearse, self.unlisted_merge(ruling=True), self.tmp / "r", now=NOW)
+        self.assertEqual(failures, [], out)
+        self.assertEqual(report.sources["radar_db"].skipped["by_override"], 1)
+        self.assertNotIn("skip_record_unused", out)
+        self.assertIn("Second run changed nothing", out)
+        self.assertTrue(out.rstrip().endswith("Rehearsal passed"), out[-300:])
+
     def test_a_second_rehearsal_on_the_same_day_gets_its_own_folder(self):
         into = self.tmp / "2026-10-20"
         self.quiet(rehearse, self.manifest, into, now=NOW)

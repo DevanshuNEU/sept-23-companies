@@ -8,6 +8,7 @@ from outreach.importer.manifest import Overrides
 from outreach.importer.model import EmailIn
 from outreach.importer.plan import ImportPlan, build_plan, read_all
 from outreach.importer.records import SOURCES, SourceError, SourceRecord
+from outreach.importer.report import check_report, count_report
 from outreach.importer.vocab import noon_ny
 from outreach.sending.config import load_config
 from tests.importtest import fixture_manifest
@@ -329,6 +330,38 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(settled.held(), ())
         out = self.outcome(settled, "contacted_txt:line:60")
         self.assertEqual((out.outcome, out.reason), ("skipped", "by_override"))
+
+    def unlisted_merge(self):
+        """Radar posting 2 says it was merged into posting 999, which radar.db does not list."""
+        return self.changed("radar_db:posting:2", lambda r: {**r, "merged_into": 999})
+
+    def test_a_radar_posting_merged_into_an_unlisted_one_is_held(self):
+        plan = self.plan(self.unlisted_merge())
+        self.assertEqual(plan.held(), ("radar_db:posting:2",))
+        self.assertEqual(self.outcome(plan, "radar_db:posting:2").reason, "unparsed_record")
+        self.assertEqual(self.issues(plan, "skip_record_unused"), [])
+
+    def test_skip_record_settles_a_hold_raised_late(self):
+        # the merged-radar-posting hold is raised after the other holds; it is settleable like they are
+        ov = overrides(skip_record={"radar_db:posting:2": "a duplicate of a posting he does not track"})
+        plan = self.plan(self.unlisted_merge(), ov=ov)
+        self.assertEqual(plan.held(), ())
+        out = self.outcome(plan, "radar_db:posting:2")
+        self.assertEqual((out.outcome, out.reason), ("skipped", "by_override"))
+        self.assertEqual(self.issues(plan, "skip_record_unused"), [])
+        [issue] = [i for i in plan.issues if i.record == "radar_db:posting:2"]
+        self.assertFalse(issue.holds)
+        self.assertIn("Skipped by [skip_record]: a duplicate of a posting he does not track", issue.detail)
+        report = count_report(plan, self.unlisted_merge())
+        self.assertEqual(check_report(report), [])
+        self.assertEqual(report.sources["radar_db"].skipped["by_override"], 1)
+
+    def test_skip_record_for_a_record_that_is_not_held_is_still_reported_unused(self):
+        ov = overrides(skip_record={"radar_db:posting:2": "not held here", "radar_db:posting:999": "no such record"})
+        plan = self.plan(ov=ov)  # the plain fixture: posting 2 is imported, 999 does not exist
+        self.assertEqual({i.record for i in self.issues(plan, "skip_record_unused")},
+                         {"radar_db:posting:2", "radar_db:posting:999"})
+        self.assertEqual(self.outcome(plan, "radar_db:posting:2").outcome, "imported")
 
     def test_skip_record_cannot_settle_an_unclear_send(self):
         records = self.changed("contacts_json:contact:c05", lambda r: {**r, "status": "sending"})

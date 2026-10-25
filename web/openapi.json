@@ -1570,6 +1570,24 @@
         "title": "Fact",
         "type": "object"
       },
+      "FindSomeone": {
+        "properties": {
+          "handoff": {
+            "title": "Handoff",
+            "type": "string"
+          },
+          "searchUrl": {
+            "title": "Searchurl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "searchUrl",
+          "handoff"
+        ],
+        "title": "FindSomeone",
+        "type": "object"
+      },
       "Finding": {
         "properties": {
           "caution": {
@@ -2315,6 +2333,34 @@
         "title": "LinkedInView",
         "type": "object"
       },
+      "LinkedinMonth": {
+        "properties": {
+          "hardLimit": {
+            "title": "Hardlimit",
+            "type": "integer"
+          },
+          "hardUsed": {
+            "title": "Hardused",
+            "type": "integer"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "used": {
+            "title": "Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "used",
+          "limit",
+          "hardUsed",
+          "hardLimit"
+        ],
+        "title": "LinkedinMonth",
+        "type": "object"
+      },
       "LogStepBody": {
         "additionalProperties": false,
         "description": "A step he took on LinkedIn by hand. `replyKind` goes with `replied` and nothing else; an out-of-office is\nnot a reply, so `auto_reply` is not a kind here.",
@@ -2956,6 +3002,113 @@
           "text"
         ],
         "title": "NotReady",
+        "type": "object"
+      },
+      "NoteDraft": {
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/NoteFact"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "maxChars": {
+            "title": "Maxchars",
+            "type": "integer"
+          },
+          "needsYourLine": {
+            "title": "Needsyourline",
+            "type": "boolean"
+          },
+          "noteId": {
+            "title": "Noteid",
+            "type": "integer"
+          },
+          "reasonLine": {
+            "title": "Reasonline",
+            "type": "string"
+          },
+          "reasonState": {
+            "enum": [
+              "proposed",
+              "confirmed",
+              "written"
+            ],
+            "title": "Reasonstate",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "savedAt": {
+            "title": "Savedat",
+            "type": "string"
+          },
+          "savedBy": {
+            "enum": [
+              "claude",
+              "devanshu",
+              "sender",
+              "import"
+            ],
+            "title": "Savedby",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "noteId",
+          "text",
+          "chars",
+          "maxChars",
+          "reasonLine",
+          "reasonState",
+          "needsYourLine",
+          "facts",
+          "checks",
+          "savedBy",
+          "savedAt",
+          "revision"
+        ],
+        "title": "NoteDraft",
+        "type": "object"
+      },
+      "NoteFact": {
+        "properties": {
+          "inNote": {
+            "title": "Innote",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceLink"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "source",
+          "inNote"
+        ],
+        "title": "NoteFact",
         "type": "object"
       },
       "OtherRole": {
@@ -3634,6 +3787,121 @@
         "title": "Ping",
         "type": "object"
       },
+      "PlanCompany": {
+        "properties": {
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "held": {
+            "title": "Held",
+            "type": "boolean"
+          },
+          "heldByReply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "heldByTouchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heldbytouchid"
+          },
+          "hq": {
+            "title": "Hq",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pausedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pausedat"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "backlog",
+              "working",
+              "closed",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "pausedAt",
+          "heldByTouchId",
+          "held",
+          "heldByReply",
+          "domain",
+          "hq",
+          "revision"
+        ],
+        "title": "PlanCompany",
+        "type": "object"
+      },
+      "PlanPerson": {
+        "properties": {
+          "foundOn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "person": {
+            "$ref": "#/components/schemas/PersonRef"
+          }
+        },
+        "required": [
+          "person",
+          "foundOn"
+        ],
+        "title": "PlanPerson",
+        "type": "object"
+      },
       "PlanProgress": {
         "properties": {
           "done": {
@@ -3650,6 +3918,310 @@
           "total"
         ],
         "title": "PlanProgress",
+        "type": "object"
+      },
+      "PlanRow": {
+        "properties": {
+          "applyUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applyurl"
+          },
+          "carriedFrom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carriedfrom"
+          },
+          "channel": {
+            "enum": [
+              "linkedin_request",
+              "email"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "company": {
+            "$ref": "#/components/schemas/PlanCompany"
+          },
+          "emailTouchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emailtouchid"
+          },
+          "entryId": {
+            "title": "Entryid",
+            "type": "integer"
+          },
+          "findSomeone": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FindSomeone"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lane": {
+            "enum": [
+              "level_role",
+              "intern_junior",
+              "any_us_role",
+              "reason_no_role"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoteDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanPerson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reasonSources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceLink"
+            },
+            "title": "Reasonsources",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleToName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "todo",
+              "done",
+              "skipped"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entryId",
+          "position",
+          "channel",
+          "lane",
+          "company",
+          "person",
+          "role",
+          "applyUrl",
+          "reason",
+          "reasonSources",
+          "note",
+          "findSomeone",
+          "emailTouchId",
+          "steps",
+          "state",
+          "carriedFrom",
+          "revision"
+        ],
+        "title": "PlanRow",
+        "type": "object"
+      },
+      "PlanStep": {
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "kind": {
+            "enum": [
+              "request",
+              "apply"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "touchId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Touchid"
+          }
+        },
+        "required": [
+          "kind",
+          "touchId",
+          "at"
+        ],
+        "title": "PlanStep",
+        "type": "object"
+      },
+      "PlanView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "builtAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Builtat"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "linkedinMonth": {
+            "$ref": "#/components/schemas/LinkedinMonth"
+          },
+          "listJob": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notReady": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotReady"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/PlanRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "tomorrow": {
+            "$ref": "#/components/schemas/Tomorrow"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "week": {
+            "$ref": "#/components/schemas/PlanWeek"
+          }
+        },
+        "required": [
+          "asOf",
+          "date",
+          "builtAt",
+          "listJob",
+          "notReady",
+          "rows",
+          "done",
+          "total",
+          "linkedinMonth",
+          "tomorrow",
+          "week"
+        ],
+        "title": "PlanView",
+        "type": "object"
+      },
+      "PlanWeek": {
+        "properties": {
+          "accepts": {
+            "title": "Accepts",
+            "type": "integer"
+          },
+          "replies": {
+            "title": "Replies",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests",
+          "accepts",
+          "replies"
+        ],
+        "title": "PlanWeek",
         "type": "object"
       },
       "PostingFlag": {
@@ -5960,6 +6532,69 @@
           "listJob"
         ],
         "title": "TodayView",
+        "type": "object"
+      },
+      "Tomorrow": {
+        "properties": {
+          "preview": {
+            "items": {
+              "$ref": "#/components/schemas/TomorrowRow"
+            },
+            "title": "Preview",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "text",
+          "preview"
+        ],
+        "title": "Tomorrow",
+        "type": "object"
+      },
+      "TomorrowRow": {
+        "properties": {
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "personName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personname"
+          },
+          "roleTitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roletitle"
+          }
+        },
+        "required": [
+          "companyName",
+          "personName",
+          "roleTitle"
+        ],
+        "title": "TomorrowRow",
         "type": "object"
       },
       "TouchHistory": {
@@ -9747,6 +10382,77 @@
           }
         },
         "summary": "Ping"
+      }
+    },
+    "/api/plan": {
+      "get": {
+        "operationId": "plan",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Plan",
+        "tags": [
+          "plan"
+        ]
       }
     },
     "/api/progress": {

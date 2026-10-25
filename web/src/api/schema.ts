@@ -565,6 +565,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Plan */
+        get: operations["plan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/progress": {
         parameters: {
             query?: never;
@@ -1414,6 +1431,13 @@ export interface components {
             /** Value */
             value: string;
         };
+        /** FindSomeone */
+        FindSomeone: {
+            /** Handoff */
+            handoff: string;
+            /** Searchurl */
+            searchUrl: string;
+        };
         /** Finding */
         Finding: {
             /** Caution */
@@ -1658,6 +1682,17 @@ export interface components {
             /** Requeststhisweek */
             requestsThisWeek: number;
         };
+        /** LinkedinMonth */
+        LinkedinMonth: {
+            /** Hardlimit */
+            hardLimit: number;
+            /** Hardused */
+            hardUsed: number;
+            /** Limit */
+            limit: number;
+            /** Used */
+            used: number;
+        };
         /**
          * LogStepBody
          * @description A step he took on LinkedIn by hand. `replyKind` goes with `replied` and nothing else; an out-of-office is
@@ -1874,6 +1909,47 @@ export interface components {
              * @enum {string}
              */
             reason: "weekend" | "not_built" | "job_failed";
+            /** Text */
+            text: string;
+        };
+        /** NoteDraft */
+        NoteDraft: {
+            /** Chars */
+            chars: number;
+            /** Checks */
+            checks: components["schemas"]["Check"][];
+            /** Facts */
+            facts: components["schemas"]["NoteFact"][];
+            /** Maxchars */
+            maxChars: number;
+            /** Needsyourline */
+            needsYourLine: boolean;
+            /** Noteid */
+            noteId: number;
+            /** Reasonline */
+            reasonLine: string;
+            /**
+             * Reasonstate
+             * @enum {string}
+             */
+            reasonState: "proposed" | "confirmed" | "written";
+            /** Revision */
+            revision: number;
+            /** Savedat */
+            savedAt: string;
+            /**
+             * Savedby
+             * @enum {string}
+             */
+            savedBy: "claude" | "devanshu" | "sender" | "import";
+            /** Text */
+            text: string;
+        };
+        /** NoteFact */
+        NoteFact: {
+            /** Innote */
+            inNote: boolean;
+            source: components["schemas"]["SourceLink"];
             /** Text */
             text: string;
         };
@@ -2112,12 +2188,124 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** PlanCompany */
+        PlanCompany: {
+            /** Domain */
+            domain: string | null;
+            /** Held */
+            held: boolean;
+            heldByReply: components["schemas"]["HoldingReply"] | null;
+            /** Heldbytouchid */
+            heldByTouchId: number | null;
+            /** Hq */
+            hq: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Pausedat */
+            pausedAt: string | null;
+            /** Revision */
+            revision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "backlog" | "working" | "closed" | "removed";
+        };
+        /** PlanPerson */
+        PlanPerson: {
+            foundOn: components["schemas"]["SourceLink"] | null;
+            person: components["schemas"]["PersonRef"];
+        };
         /** PlanProgress */
         PlanProgress: {
             /** Done */
             done: number;
             /** Total */
             total: number;
+        };
+        /** PlanRow */
+        PlanRow: {
+            /** Applyurl */
+            applyUrl: string | null;
+            /** Carriedfrom */
+            carriedFrom: string | null;
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "linkedin_request" | "email";
+            company: components["schemas"]["PlanCompany"];
+            /** Emailtouchid */
+            emailTouchId: number | null;
+            /** Entryid */
+            entryId: number;
+            findSomeone: components["schemas"]["FindSomeone"] | null;
+            /**
+             * Lane
+             * @enum {string}
+             */
+            lane: "level_role" | "intern_junior" | "any_us_role" | "reason_no_role";
+            note: components["schemas"]["NoteDraft"] | null;
+            person: components["schemas"]["PlanPerson"] | null;
+            /** Position */
+            position: number;
+            /** Reason */
+            reason: string;
+            /** Reasonsources */
+            reasonSources: components["schemas"]["SourceLink"][];
+            /** Revision */
+            revision: number;
+            role: components["schemas"]["RoleToName"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "todo" | "done" | "skipped";
+            /** Steps */
+            steps: components["schemas"]["PlanStep"][];
+        };
+        /** PlanStep */
+        PlanStep: {
+            /** At */
+            at: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "request" | "apply";
+            /** Touchid */
+            touchId: number | null;
+        };
+        /** PlanView */
+        PlanView: {
+            /** Asof */
+            asOf: string;
+            /** Builtat */
+            builtAt: string | null;
+            /** Date */
+            date: string;
+            /** Done */
+            done: number;
+            linkedinMonth: components["schemas"]["LinkedinMonth"];
+            listJob: components["schemas"]["JobRunSummary"] | null;
+            notReady: components["schemas"]["NotReady"] | null;
+            /** Rows */
+            rows: components["schemas"]["PlanRow"][];
+            tomorrow: components["schemas"]["Tomorrow"];
+            /** Total */
+            total: number;
+            week: components["schemas"]["PlanWeek"];
+        };
+        /** PlanWeek */
+        PlanWeek: {
+            /** Accepts */
+            accepts: number;
+            /** Replies */
+            replies: number;
+            /** Requests */
+            requests: number;
         };
         /**
          * PostingFlag
@@ -2892,6 +3080,24 @@ export interface components {
             proposed: components["schemas"]["DailyEntry"][];
             /** Stillemailing */
             stillEmailing: components["schemas"]["StillEmailing"][];
+        };
+        /** Tomorrow */
+        Tomorrow: {
+            /** Preview */
+            preview: components["schemas"]["TomorrowRow"][];
+            /** Text */
+            text: string;
+            /** Total */
+            total: number;
+        };
+        /** TomorrowRow */
+        TomorrowRow: {
+            /** Companyname */
+            companyName: string;
+            /** Personname */
+            personName: string | null;
+            /** Roletitle */
+            roleTitle: string | null;
         };
         /** TouchHistory */
         TouchHistory: {
@@ -5631,6 +5837,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ping"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    plan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanView"];
                 };
             };
             /** @description bad_request: the request was not valid */

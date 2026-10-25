@@ -410,14 +410,16 @@ week", collapsed.
 **Elements.** Each item: icon, company, trigger badge, context badge (Picked today, Claude suggests), age ("Opened
 Mon Nov 9", or an amber "Waiting 11 days" once older than 7 days), one plain sentence on what is wrong and what it
 affects, the evidence with its source link (a quoted posting or profile line; a run strip of the last reads, green
-ok, red error, amber empty, with the run in words beside it), and the actions on the right. Edit opens an inline
+ok, a filled amber square for an error, a hollow amber square for an empty read, with the run in words beside it),
+and the actions on the right. Edit opens an inline
 form in the row: the field (domain, size, sponsorship Yes, OPT only, Unclear or No, board URL), a Source field
 (required), Cancel, and Save and lock. While the form is open, Mark ok is hidden; Mark no-go stays. Sponsorship No
 opens the no-go dialog, since it is the same outcome. A size takes a number or a band ("34", "about 45", "11 to 50").
 
-Trigger badges are amber, the "look at it, nothing is stopped" color of section 8. The one exception is a missing
-email domain under "Holding up email", which is red because no draft for that company can be approved until it is
-fixed. A waiting item never turns red, however long it waits.
+Trigger badges are amber, the "look at it, nothing is stopped" color of section 8, and so is everything else on the
+page: nothing here is red (Devanshu, 2026-10-25). A missing email domain under "Holding up email" is amber too; its
+sentence says no draft for that company can be approved until it is fixed, and the section puts it first. A waiting
+item never turns red, however long it waits.
 
 - **Merge row** (a `merge_candidate`). The head names both companies ("Mesh Systems and Mesh"), the reason sentence
   says what matched and what did not. Below, the two companies side by side: a column each, headed by the name and

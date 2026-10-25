@@ -539,8 +539,9 @@ details.passed ul { display: grid; gap: 4px; padding: 0 12px 12px 38px; font-siz
 .ny-edit { display: grid; grid-template-columns: 160px 1fr auto; gap: 8px; align-items: end; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .runs { display: inline-flex; gap: 3px; vertical-align: middle; }
 .runs i { width: 10px; height: 10px; border-radius: 2px; background: var(--ok-dot); }
-.runs i.err { background: var(--bad-dot); }
-.runs i.nil { background: var(--warn-dot); }
+/* Amber at most on Needs you: an error is a filled amber square, an empty read a hollow one. */
+.runs i.err { background: var(--warn-dot); }
+.runs i.nil { background: transparent; box-shadow: inset 0 0 0 1px var(--warn-dot); }
 .ny-progress { margin-top: 2px; font-size: 14px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .page-head .ny-progress + .lede { margin-top: 6px; }
 .ny-item .wide { grid-column: 2 / -1; display: grid; gap: 8px; }

@@ -114,6 +114,21 @@ Rollback is `git revert`, never a reset. Rolling back the whole switch is `pytho
 plus the steps under R-back in `docs/superpowers/plans/2026-10-22-import-and-switch-over.md`. The new store is never
 deleted.
 
+## Branching and merging
+
+- Every PR targets `master`. Never open a PR whose base is another feature branch (no stacked PRs): a PR merged into a
+  feature branch after its parent merged into master never reaches master (this happened with #67, re-opened as #68).
+- One branch per issue, created from the current `origin/master`. If work B needs work A and A is not merged yet, B
+  stays local (no push, no PR) until A is in master, then `git fetch && git rebase --onto origin/master <A's last
+  commit> <B's branch>` and push B.
+- Before asking Devanshu to merge: `gh pr view <n> --json baseRefName,mergeStateStatus` shows base `master` and `CLEAN`
+  (CI green). After he merges: confirm `gh pr view <n> --json state,baseRefName` says `MERGED` into `master` and the
+  commit is in `git log origin/master`.
+- With more than one PR open, say the merge order. Prefer one open PR per chain of dependent work.
+- Repos squash-merge, so a merged branch still looks unmerged in GitHub's network graph. Delete a branch only after its
+  PR is merged into master, and only on his say-so for remote branches.
+- Push local-only work early so nothing lives on one disk.
+
 ## Building
 
 - Python is Homebrew's: `/opt/homebrew/bin/python3` (3.14), the same one launchd uses.

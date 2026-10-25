@@ -193,6 +193,81 @@ class ReadRadarTest(unittest.TestCase):
         finally:
             rw.close()
 
+    def many_postings(self, count=200):
+        """Add `count` postings on board 1: every third one closed, every fifth merged, some with no version."""
+        statements = []
+        for i in range(count):
+            posting_id = 100 + i
+            last_seen = "2026-10-01T08:00:00Z" if i % 3 == 0 else "2026-10-24T08:00:00Z"
+            merged = "1" if i % 5 == 0 else "NULL"
+            statements.append(
+                "INSERT INTO posting(posting_id, board_id, source_key, fingerprint, apply_url, title, merged_into, "
+                f"first_seen_at, last_seen_at, first_run_id) VALUES ({posting_id}, 1, 'bulk-{i}', 'fp-{i}', "
+                f"'https://example.test/{i}', 'Bulk {i}', {merged}, '2026-09-01T08:00:00Z', '{last_seen}', 1)")
+            if i % 7 != 0:
+                statements.append(
+                    "INSERT INTO posting_version(posting_id, run_id, observed_at, content_hash, payload, body_text) "
+                    f"VALUES ({posting_id}, 1, '2026-10-0{1 + i % 3}T08:00:00Z', 'bulk-h-{i}', '{{}}', 'body {i}')")
+        self.edit(*statements)
+
+    def traced(self):
+        """Read the radar through a connection that records every statement it runs; returns (records, statements)."""
+        import outreach.importer.read_radar as module
+        statements: list[str] = []
+        real_open = module.open_radar
+
+        def tracing_open(path):
+            conn = real_open(path)
+            conn.set_trace_callback(statements.append)
+            return conn
+
+        module.open_radar = tracing_open
+        try:
+            records = list(read_radar(self.path))
+        finally:
+            module.open_radar = real_open
+        return records, statements
+
+    def test_the_posting_live_view_is_read_once_not_once_per_posting(self):
+        self.many_postings(200)
+        records, statements = self.traced()
+        self.assertEqual(len([r for r in records if r.source_key.startswith("posting:")]), 206)
+        view_reads = [s for s in statements if "posting_live" in s and "sqlite_master" not in s]
+        self.assertLessEqual(len(view_reads), 1)
+        # one lookup of the newest version per posting, plus a small constant for everything else
+        self.assertLessEqual(len(statements), 206 + 30)
+
+    def test_posting_records_equal_a_per_row_read_of_the_view(self):
+        self.many_postings(200)
+        self.edit("UPDATE posting SET last_seen_at = '2026-10-01T08:00:00Z' WHERE posting_id = 2",
+                  "UPDATE posting SET merged_into = 1 WHERE posting_id = 3")
+        records = [r for r in read_radar(self.path) if r.source_key.startswith("posting:")]
+        conn = open_radar(self.path)
+        conn.row_factory = sqlite3.Row
+        try:
+            expected = []
+            for (posting_id,) in conn.execute("SELECT posting_id FROM posting ORDER BY posting_id").fetchall():
+                row = conn.execute(
+                    "SELECT p.*, l.closed AS closed FROM posting p LEFT JOIN posting_live l "
+                    "ON l.posting_id = p.posting_id WHERE p.posting_id = ?", (posting_id,)).fetchone()
+                latest = conn.execute(
+                    "SELECT version_id, content_hash, observed_at, body_text FROM posting_version "
+                    "WHERE posting_id = ? ORDER BY observed_at DESC, version_id DESC LIMIT 1", (posting_id,)).fetchone()
+                raw = {k: row[k] for k in row.keys()}
+                raw["latest"] = None if latest is None else {
+                    "version_id": latest["version_id"], "content_hash": latest["content_hash"],
+                    "observed_at": latest["observed_at"]}
+                expected.append((f"posting:{posting_id}", raw, None if latest is None else latest["body_text"]))
+        finally:
+            conn.close()
+        self.assertEqual([(r.source_key, r.raw, radar_body(r)) for r in records], expected)
+        closed = [raw["closed"] for _, raw, _ in expected]
+        self.assertEqual({0, 1, None}, set(closed))  # the fixture covers open, closed and merged postings
+        by_key = {key: raw for key, raw, _ in expected}
+        self.assertEqual(by_key["posting:2"]["closed"], 1)
+        self.assertIsNone(by_key["posting:3"]["closed"])
+        self.assertEqual([list(raw) for _, raw, _ in expected][0][-2:], ["closed", "latest"])
+
     def test_a_missing_file_a_non_database_and_a_missing_table_are_source_errors(self):
         with self.assertRaises(SourceError) as cm:
             list(read_radar(self.tmp / "nowhere.db"))

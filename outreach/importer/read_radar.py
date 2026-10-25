@@ -5,7 +5,7 @@ transaction, which is closed when the generator finishes or is closed. radar.db 
 blocks Job Radar's writers (a reader only keeps the WAL from being checkpointed past its snapshot). Nothing is
 copied, and nothing is written: the connection cannot write, and the main file's digest is unchanged by a run (a test
 holds the reader open part-way and writes to the file from another connection to prove the writer is not blocked).
-Postings are read one by one, so the version bodies (most of the 700 MB) are never all in memory.
+Postings are streamed one by one from a cursor, so the version bodies (most of the 700 MB) are never all in memory.
 """
 import sqlite3
 from dataclasses import dataclass
@@ -77,15 +77,16 @@ def read_radar(path: Path) -> Iterator[SourceRecord]:
             tables = _check_schema(conn, Path(path))
             for row in conn.execute("SELECT * FROM board ORDER BY board_id").fetchall():
                 yield SourceRecord("radar_db", f"board:{row['board_id']}", _row(row))
-            ids = [r[0] for r in conn.execute("SELECT posting_id FROM posting ORDER BY posting_id")]
-            for posting_id in ids:
-                row = conn.execute(
-                    "SELECT p.*, l.closed AS closed FROM posting p LEFT JOIN posting_live l "
-                    "ON l.posting_id = p.posting_id WHERE p.posting_id = ?", (posting_id,)).fetchone()
+            # posting_live is a view SQLite rebuilds on every query that touches it, so it is read once, here: one
+            # small int per posting. A posting the view leaves out (a merged one) has no entry, so its closed is None.
+            closed_by_id = {pid: closed for pid, closed in conn.execute("SELECT posting_id, closed FROM posting_live")}
+            for row in conn.execute("SELECT * FROM posting ORDER BY posting_id"):
+                posting_id = row["posting_id"]
                 latest = conn.execute(
                     "SELECT version_id, content_hash, observed_at, body_text FROM posting_version "
                     "WHERE posting_id = ? ORDER BY observed_at DESC, version_id DESC LIMIT 1", (posting_id,)).fetchone()
                 raw = _row(row)
+                raw["closed"] = closed_by_id.get(posting_id)
                 raw["latest"] = None if latest is None else {
                     "version_id": latest["version_id"], "content_hash": latest["content_hash"],
                     "observed_at": latest["observed_at"]}

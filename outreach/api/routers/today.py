@@ -2,7 +2,8 @@
 
 `POST /api/companies/{id}/pick`, `/unpick`, `/backlog`, `/remove` and `/restore`, each in `run_write` against the
 company's revision. See `outreach.api.queries.today` for how the list is made. On a day the people plan built,
-pick, unpick, backlog and restore are `not_allowed` (the rows are the plan's); remove stays.
+pick, unpick and backlog are `not_allowed` (the rows are the plan's); remove stays, and restore stays without
+touching the plan's rows.
 """
 from fastapi import APIRouter, Depends, Request, Response
 

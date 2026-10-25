@@ -589,12 +589,13 @@ class Barred(TodayCase):
         self.assertIn("A", [e["company"]["name"] for e in v["proposed"]])
 
 
-PLAN_DAY = "Today is a plan of people now. Use the plan to skip a row."
+PLAN_DAY = "Today is a plan of people now. Use the plan to skip a row. Nothing was saved."
 
 
 class PlanDayWrites(TodayCase):
-    """Follow-up ruling: on a day the people plan built, the old Today's pick, unpick, backlog and restore own no row,
-    so they are refused and write nothing. Remove stays (it is the web's Not a fit), and the reads are unchanged."""
+    """Follow-up ruling: on a day the people plan built, the old Today's pick, unpick and backlog own no row, so they
+    are refused and write nothing. Remove stays (it is the web's Not a fit). Restore stays too (it is the No-go page's
+    Bring back), but it never touches the plan's rows. The reads are unchanged."""
 
     lean_today = False  # as shipped: the plan job, not a read, builds the day
 
@@ -628,14 +629,13 @@ class PlanDayWrites(TodayCase):
 
     def refused_on_a_plan_day(self) -> None:
         before = self.snapshot()
-        for call in (lambda: self.pick(self.a), lambda: self.unpick(self.a), lambda: self.backlog(self.a),
-                     lambda: self.restore(self.gone)):
+        for call in (lambda: self.pick(self.a), lambda: self.unpick(self.a), lambda: self.backlog(self.a)):
             res = call()
             self.assertEqual((res.status_code, res.json()["code"], res.json()["message"]),
                              (409, "not_allowed", PLAN_DAY), res.text)
         self.assertEqual(self.snapshot(), before)
 
-    def test_pick_unpick_backlog_and_restore_are_refused_on_a_plan_with_people(self):
+    def test_pick_unpick_and_backlog_are_refused_on_a_plan_with_people(self):
         self.plan_entry(self.a, 1)
         self.plan_entry(self.gone, 2, state="removed")
         self.refused_on_a_plan_day()
@@ -644,6 +644,53 @@ class PlanDayWrites(TodayCase):
         self.plan_entry(self.a, 1, person=False)
         self.plan_run()
         self.refused_on_a_plan_day()
+
+    def plan_list(self) -> tuple:
+        lists = self.conn.execute("SELECT * FROM daily_list ORDER BY list_date").fetchall()
+        entries = self.conn.execute("SELECT rowid, * FROM daily_list_entry ORDER BY rowid").fetchall()
+        return [tuple(r) for r in lists], [tuple(r) for r in entries]
+
+    def test_restore_on_a_plan_day_brings_the_company_back_and_leaves_the_plan_alone(self):
+        self.plan_entry(self.a, 1)
+        self.plan_entry(self.gone, 2, state="removed")
+        before = self.plan_list()
+        res = self.restore(self.gone, "A friend works there", key="restore-plan-1")
+        self.assertEqual((res.status_code, res.json()), (200, {}), res.text)
+        row = self.company(self.gone)
+        self.assertEqual((row["status"], row["remove_reason"], row["revision"]), ("backlog", None, 2))
+        self.assertEqual(self.plan_list(), before)  # no entry made, changed or un-removed
+        self.assertEqual(self.entry(self.gone)["state"], "removed")
+        [ev] = self.events("restored")
+        self.assertEqual(json.loads(ev["detail"])["reason"], "A friend works there")
+
+    def test_restore_on_a_plan_day_adds_no_row_for_a_company_off_todays_plan(self):
+        self.plan_entry(self.a, 1, person=False)
+        self.plan_run()
+        s._insert(self.conn, "daily_list", {"list_date": "2026-11-09", "built_at": "2026-11-09T13:00:00Z",
+                                            "capacity": 7})
+        s._insert(self.conn, "daily_list_entry", {
+            "list_date": "2026-11-09", "company_id": self.gone, "list_group": "level_role", "rank": 1,
+            "state": "removed", "proposed_at": "2026-11-09T13:00:00Z", "decided_at": "2026-11-09T14:00:00Z"})
+        before = self.plan_list()
+        self.assertEqual(self.restore(self.gone).status_code, 200)
+        self.assertEqual(self.plan_list(), before)
+        self.assertEqual(self.company(self.gone)["status"], "backlog")
+
+    def test_the_no_go_pages_bring_back_still_works_on_a_plan_day(self):
+        self.plan_entry(self.a, 1)
+        [shown] = self.get("/api/no-go").json()["companies"]
+        self.assertEqual((shown["kind"], shown["company"]["id"]), ("removed", self.gone))
+        res = self.restore(self.gone, "Talked to a friend there", revision=shown["company"]["revision"])
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(self.get("/api/no-go").json()["companies"], [])
+
+    def test_restore_on_a_plan_day_keeps_its_own_refusals(self):
+        self.plan_entry(self.a, 1)
+        res = self.restore(self.a)
+        self.assertEqual((res.status_code, res.json()["code"]), (409, "not_allowed"), res.text)
+        self.assertIn("is not removed", res.json()["message"])
+        res = self.restore(self.gone, "  ")
+        self.assertEqual((res.status_code, res.json()["code"]), (400, "bad_request"), res.text)
 
     def test_a_picked_plan_row_cannot_be_unpicked_either(self):
         self.plan_entry(self.a, 1, state="picked")

@@ -162,6 +162,16 @@ def note_draft(row: sqlite3.Row, cfg: PlanConfig) -> NoteDraft:
         saved_at=row["updated_at"], revision=row["revision"])
 
 
+def stored_facts(row: sqlite3.Row) -> list[dict]:
+    """A draft's stored facts as #15 wrote them (`text`, `label`, `url`, `in_note`), for a save that keeps them."""
+    try:
+        facts = json.loads(row["facts"])
+    except ValueError:
+        return []
+    return [f for f in facts if isinstance(f, dict) and isinstance(f.get("text"), str)] \
+        if isinstance(facts, list) else []
+
+
 def note_by_id(conn: sqlite3.Connection, note_id: int, cfg: PlanConfig) -> NoteDraft | None:
     row = conn.execute("SELECT * FROM linkedin_draft WHERE draft_id = ?", (note_id,)).fetchone()
     return note_draft(row, cfg) if row is not None else None

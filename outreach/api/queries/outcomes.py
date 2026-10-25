@@ -396,6 +396,12 @@ def _score_parts(score: sqlite3.Row | None) -> tuple[str, str | None, dict[str, 
     return lane, score["ranker_version"], values
 
 
+def newest_score_parts(conn: sqlite3.Connection, company_id: int) -> tuple[str, str | None, dict[str, float]]:
+    """`(lane, ranker_version, signal values)` of the company's newest score, as `own_context` reads them (lane
+    `own` when it has none). The plan's writes use the version and the values; their lane is the row's."""
+    return _score_parts(_newest_score(conn, company_id))
+
+
 def own_context(conn: sqlite3.Connection, company_id: int, role_kind: str | None, role_first_seen_at: str | None,
                 now: str) -> dict:
     """The context of a touch he logged himself (`source 'own'`): the lane, ranker version and signals come from the

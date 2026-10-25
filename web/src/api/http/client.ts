@@ -1,5 +1,5 @@
 import type { OutreachClient, WriteOptions } from '../client';
-import type { CompanyHit, FindingsView, Id, LinkedInPerson, LinkedInStep, OutcomeKind, OutcomePromptView, PlanView, ProgressView, ReplyKind, Revision, ScoreView, WatchView, WinsView } from '../types';
+import type { CompanyHit, FindingsView, Id, LinkedInPerson, LinkedInStep, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressView, ReplyKind, Revision, ScoreView, WatchView, WinsView } from '../types';
 import { companyMethods, searchMethods } from './company';
 import { companyWriteMethods } from './company-writes';
 import { doneMethods } from './done';
@@ -23,6 +23,11 @@ export type LiveMethods = Partial<Omit<OutreachClient, 'source'>> & {
   score?: (companyId: Id) => Promise<ScoreView>; // not on `OutreachClient` until #33 adds it; 'not_found' for no score
   // Not on `OutreachClient` until #33 adds them.
   plan?: () => Promise<PlanView>;
+  logRequest?: (entryId: Id, input: { personId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions) => Promise<PlanRow>;
+  logApplied?: (entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions) => Promise<PlanRow>; // 'not_allowed' with no role
+  skipRow?: (entryId: Id, revision: Revision, o: WriteOptions) => Promise<PlanRow>; // carried to tomorrow; 'not_allowed' on a done row
+  saveNote?: (noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions) => Promise<NoteDraft>;
+  confirmReason?: (noteId: Id, revision: Revision, o: WriteOptions) => Promise<NoteDraft>; // 'bad_request' with an empty line
   watchList?: () => Promise<WatchView>;
   dismissWatch?: (itemId: Id, o: WriteOptions) => Promise<void>;
   outcomePrompt?: () => Promise<OutcomePromptView>;

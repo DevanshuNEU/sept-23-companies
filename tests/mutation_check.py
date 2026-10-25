@@ -46,6 +46,7 @@ SENDING = ROOT / "outreach" / "sending"
 IMPORTER = ROOT / "outreach" / "importer"
 REVIEW = ROOT / "outreach" / "review"
 PLAN = ROOT / "outreach" / "plan"
+MCP = ROOT / "outreach" / "mcp"
 REFRESH = ROOT / "refresh"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
@@ -749,6 +750,51 @@ MUTATIONS = [
     (PLAN / "prospects.py", "a carried row never ages out (the roll limit on first_proposed is removed)",
      "        if business_days_between(first, today) > limit:\n            continue\n", "",
      "test_carry_limit_is_weekdays_since_first_proposed"),
+    (PLAN / "drafts.py", "a Claude save of its own note names reason_state and saved_by, which the MCP guard never grants",
+     '            if saved_by == "devanshu":\n', "            if True:\n",
+     "test_a_claude_update_never_names_reason_state_or_saved_by"),
+
+    # ---- mcp (#13): the guard's layers, the strict inputs, and the tools' own refusals -------------------------
+    (MCP / "guard.py", "the message state trigger is gone: a claude draft may be skipped on Claude's connection",
+     "\"NEW.state IS NOT OLD.state AND NOT (OLD.state = 'planned' AND NEW.state = 'drafted')\",", "\"0\",",
+     "test_unapprove_skip_and_revive_are_refused_by_the_trigger_alone"),
+    (MCP / "guard.py", "the update trigger no longer pins a note's reason line to proposed",
+     "\"OLD.saved_by IS NOT 'claude' OR NEW.saved_by IS NOT 'claude' OR NEW.reason_state IS NOT 'proposed'\",",
+     "\"OLD.saved_by IS NOT 'claude' OR NEW.saved_by IS NOT 'claude'\",",
+     "test_a_confirmed_line_cannot_be_written_by_a_hostile_statement_on_the_guard_or_without_it"),
+    (MCP / "guard.py", "a size Claude found may be stored as an estimate (the trigger no longer pins it to a guess)",
+     "NEW.fact IN ('size', 'headcount', 'domain', 'hq') AND", "NEW.fact IN ('headcount', 'domain', 'hq') AND",
+     "test_evidence_that_is_locked_hand_confirmed_or_a_stronger_size_or_domain_is_refused"),
+    (MCP / "guard.py", "the authorizer allows a DELETE",
+     "_ALWAYS = frozenset({sqlite3.SQLITE_SELECT,", "_ALWAYS = frozenset({sqlite3.SQLITE_DELETE, sqlite3.SQLITE_SELECT,",
+     "test_a_delete_is_refused_by_the_authorizer_alone_even_with_every_grant"),
+    (MCP / "guard.py", "a reading from Claude may be filed under the night's version (the side-only trigger is gone)",
+     '("posting_reading_insert", "BEFORE INSERT ON main.posting_reading", _NOT_SIDE.format("NEW"),',
+     '("posting_reading_insert", "BEFORE INSERT ON main.posting_reading", "0",',
+     "test_the_trigger_alone_keeps_claude_to_the_side_versions_rows"),
+    (MCP / "tools" / "__init__.py", "an unknown input property is ignored instead of refusing the whole call",
+     'model_config = ConfigDict(extra="forbid", strict=True, frozen=True)',
+     'model_config = ConfigDict(extra="ignore", strict=True, frozen=True)',
+     "test_bad_input_is_a_plain_error_and_the_handler_never_runs"),
+    (MCP / "tools" / "reads.py", "save_draft goes on to overwrite a first email Devanshu saved",
+     '    if first is not None and first["saved_by"] == "devanshu":\n        return "edited_by_devanshu"\n', "",
+     "test_a_draft_he_saved_or_approved_is_refused_in_his_words"),
+    (MCP / "tools" / "research.py", "mark_no_go writes a no_go row instead of only raising the Needs-you item",
+     "    raised = raise_flag(ctx, company_id=survivor, reason=reason, person_id=args.person_id,",
+     "    conn.execute(\"INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'said_no', 'claude', ?)\", "
+     "(args.person_id, ctx.now))\n"
+     "    raised = raise_flag(ctx, company_id=survivor, reason=reason, person_id=args.person_id,",
+     "test_writes_one_needs_you_item_and_no_no_go_row"),
+    (MCP / "tools" / "research.py", "a domain Claude found may be recorded as an estimate",
+     'GUESS_ONLY = ("size", "headcount", "domain", "hq")', 'GUESS_ONLY = ("size", "headcount", "hq")',
+     "test_a_size_headcount_domain_or_hq_above_guess_is_refused_with_the_reason"),
+    (MCP / "server.py", "a stray print during a call reaches stdout, the protocol stream",
+     "with redirect_stdout(sys.stderr):", "with redirect_stdout(sys.stdout):",
+     "test_a_stray_print_goes_to_stderr_never_stdout"),
+    (MCP / "tools" / "drafts.py", "an identical save of a note he made comes back unchanged instead of draft_locked",
+     '        if (stored is not None and stored.saved_by == "claude"  # the foundation CHECK',
+     '        if (stored is not None  # the foundation CHECK',
+     "test_a_locked_draft_is_refused_and_stays_byte_identical"),
 ]
 
 

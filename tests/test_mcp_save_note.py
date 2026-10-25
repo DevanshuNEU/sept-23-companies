@@ -167,7 +167,7 @@ class SaveNoteTest(NoteCase):
     def test_blocks_come_back_with_codes_and_fixes(self):
         long_body = BODY + " " + "More words here." * 12
         got = self.ok("save_linkedin_note", self.args(
-            body=long_body.replace("similar", "similar —"),
+            body=long_body.replace("similar", "similar " + chr(0x2014)),
             facts=[FACT, {"text": "talk", "label": "Talk", "url": "https://www.linkedin.com/posts/x", "in_note": False}]))
         codes = [b["code"] for b in got["blocks"]]
         self.assertEqual(codes, ["note_too_long", "dash", "fact_no_link"])

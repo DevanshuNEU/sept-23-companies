@@ -36,7 +36,7 @@ from outreach.reader.queue import TIER_PROVISIONAL_HIDE, next_batch, release
 from outreach.reader.version import reader_version
 from outreach.rules import passes
 from outreach.rules.rebuild import stored_decision
-from tests.pipeline import stages_crawl, stages_ranking, stages_reader, stages_rules, stages_sending
+from tests.pipeline import stages_crawl, stages_mcp, stages_ranking, stages_reader, stages_rules, stages_sending
 import tests.pipeline.harness as harness_module
 from tests.pipeline.harness import STAGE_NAMES, PipelineHarness
 from tests.plan_seed import TODAY, seed_outbound, seed_person, seed_scored_company
@@ -309,6 +309,33 @@ def plan_is_sized_one_person_per_company_and_quiet_about_companies_in_play(h):
         assert tuple(sorted(why)) == tuple(sorted(WHY_KEYS)), f"why keys {sorted(why)}"
         if r["person_id"] is None:
             assert why["find_someone"]["search_url"], f"company {r['company_id']} has no search link"
+
+
+@invariant("draft")
+def draft_leaves_only_claudes_drafts_and_never_touches_what_claude_may_not_write(h):
+    """Counts only the Draftwell Labs fixture and the events the stage appended. Every message the stage made is a
+    drafted first email saved by claude with its checks stored and no approval; no touch of its people went out; the
+    note's reason line is still proposed; every event it appended is claude's; and no table an MCP tool may never
+    write changed (`guard.NEVER_TABLES`: the sender, companies, no-go rows, outreach touches, the daily list...)."""
+    s = h.mcp
+    messages = h.conn.execute("SELECT m.* FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+                              "JOIN person p ON p.person_id = t.person_id WHERE p.company_id = ? ORDER BY m.message_id",
+                              (s.company,)).fetchall()
+    assert [m["message_id"] for m in messages] == [s.message], f"the stage made {[m['message_id'] for m in messages]}"
+    for m in messages:
+        assert (m["state"], m["seq"], m["saved_by"], m["approved_at"]) == ("drafted", 0, "claude", None), \
+            f"message {m['message_id']} is {m['state']} seq {m['seq']} by {m['saved_by']}"
+        checks = json.loads(m["checks"])
+        assert isinstance(checks, list) and checks, f"message {m['message_id']} has no stored checks"
+    sent = h.conn.execute("SELECT count(*) FROM touch t JOIN person p ON p.person_id = t.person_id "
+                          "WHERE p.company_id = ? AND t.first_sent_at IS NOT NULL", (s.company,)).fetchone()[0]
+    assert sent == 0, f"{sent} touches of the stage's people went out"
+    notes = h.conn.execute("SELECT d.draft_id, d.reason_state, d.saved_by FROM linkedin_draft d JOIN person p "
+                           "ON p.person_id = d.person_id WHERE p.company_id = ?", (s.company,)).fetchall()
+    assert [tuple(n) for n in notes] == [(s.note, "proposed", "claude")], f"notes: {[tuple(n) for n in notes]}"
+    actors = [r[0] for r in h.conn.execute("SELECT actor FROM event WHERE event_id > ?", (s.last_event_before,))]
+    assert actors and set(actors) == {"claude"}, f"the stage appended events by {sorted(set(actors))}"
+    assert stages_mcp.never_fingerprint(h.conn) == s.before_never, "a table no MCP tool may write changed"
 
 
 @invariant("send")

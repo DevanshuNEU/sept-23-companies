@@ -92,6 +92,30 @@ class SaveTest(DraftsCase):
         self.assertIn("queue", self.row()["body"])
         self.assertEqual(len(self.events("draft_saved")), 2)
 
+    def test_a_claude_update_never_names_reason_state_or_saved_by(self):
+        """The MCP guard (#13) grants Claude's connection no update of those two columns, so Claude's save of its own
+        proposal must not name them; his save still writes them."""
+        import sqlite3
+        a = self.save()
+        named = []
+
+        def watch(action, _table, column, _db, _src):
+            if action == sqlite3.SQLITE_UPDATE and _table == "linkedin_draft":
+                named.append(column)
+            return sqlite3.SQLITE_OK
+
+        self.conn.set_authorizer(watch)
+        self.addCleanup(self.conn.set_authorizer, None)
+        b = self.save(body=BODY.replace("job runner", "queue"), revision=a.revision)
+        self.assertEqual((b.reason_state, b.saved_by, b.revision), ("proposed", "claude", 2))
+        self.assertTrue(named)
+        self.assertFalse({"reason_state", "saved_by"} & set(named), named)
+        named.clear()
+        his = self.save(saved_by="devanshu", reason="My own line in the note", revision=2,
+                        body="Hi Dana, My own line in the note.")
+        self.assertEqual((his.reason_state, his.saved_by), ("written", "devanshu"))
+        self.assertLessEqual({"reason_state", "saved_by"}, set(named))
+
     def test_his_edit_of_the_line_is_written_and_his_edit_elsewhere_keeps_state(self):
         self.save()
         body_only = self.save(saved_by="devanshu", body=BODY.replace("platform", "infra"))

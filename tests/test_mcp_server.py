@@ -27,7 +27,8 @@ from tests.test_mcp_boundary import forbidden
 
 ROOT = Path(__file__).resolve().parent.parent
 READ_TOOLS = {"ranked_companies", "company", "person", "followups_due"}
-WRITE_TOOLS = {"record_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people"}
+WRITE_TOOLS = {"record_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people",
+               "save_linkedin_note"}
 PINNED_TOOLS = READ_TOOLS | WRITE_TOOLS
 FORBIDDEN_PROPERTIES = frozenset({
     "state", "approved", "approved_at", "approve", "send", "sent", "sent_at", "skip", "unapprove", "pause", "paused",

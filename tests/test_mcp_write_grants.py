@@ -28,6 +28,10 @@ PINNED = {
                                                          "updated_at", "revision"}))},
     "add_people": {"person": Grant(insert=True, update=frozenset({"profile_text", "notes", "updated_at", "revision"})),
                    "person_source": INSERT, "event": INSERT},
+    "save_linkedin_note": {"event": INSERT,
+                           "linkedin_draft": Grant(insert=True, update=frozenset({
+                               "posting_id", "body", "reason_line", "facts", "checks", "prepared_by_version",
+                               "updated_at", "revision"}))},
 }
 
 
@@ -197,6 +201,27 @@ class GrantsCase(McpCase):
         ], {"company_id": self.acme, "people": [{"name": "Lee New", "role_kind": "engineer",
                                                  "email": "lee@acme.example",
                                                  "sources": [{"kind": "team", "url": "https://acme.example/team"}]}]})
+
+    def test_save_linkedin_note_cannot_write_beyond_its_grants(self):
+        lin = seed.person(self.db, self.acme, "Lin Kedin", channel="linkedin")
+        his = seed.person(self.db, self.acme, "Hal Hisown", channel="linkedin")
+        mine = self.db.execute(
+            "INSERT INTO linkedin_draft(person_id, body, reason_line, reason_state, saved_by, created_at, updated_at) "
+            "VALUES (?, 'Hi Hal', 'his line', 'written', 'devanshu', ?, ?)", (his, NOW, NOW)).lastrowid
+        with mock.patch.dict(os.environ, {"OUTREACH_MAIL_HOME": str(FIXTURE_BANNED.parent / "plan")}):
+            self.check_tool("save_linkedin_note", [
+                ("UPDATE linkedin_draft SET reason_state = 'confirmed', saved_by = 'devanshu' WHERE draft_id = ?",
+                 (mine,)),
+                ("UPDATE linkedin_draft SET body = 'mine now' WHERE draft_id = ?", (mine,)),
+                ("INSERT INTO linkedin_draft(person_id, body, reason_line, reason_state, saved_by, created_at, "
+                 "updated_at) VALUES (?, 'Hi', 'x', 'written', 'devanshu', ?, ?)", (lin, NOW, NOW)),
+                ("UPDATE person SET notes = 'x' WHERE person_id = ?", (lin,)),
+                ("INSERT INTO person_source(person_id, kind, url, recorded_at) VALUES (?, 'team', "
+                 "'https://acme.example/t', ?)", (lin, NOW)),
+                ("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
+                 "VALUES ('flagged', ?, 'x', 'k5', 'claude', ?)", (self.acme, NOW)),
+            ], {"person_id": lin, "body": "Hi Lin, I read your post on the queue rewrite.",
+                "reason_line": "I read your post on the queue rewrite"})
 
 
 if __name__ == "__main__":

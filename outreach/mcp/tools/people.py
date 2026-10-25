@@ -37,7 +37,7 @@ from outreach.sources.keys import EMAIL, linkedin_key
 from outreach.sources.keys import person_name_key as name_key
 from outreach.store import append_event, transaction
 
-__all__ = ["TOOLS", "linkedin_key"]
+__all__ = ["TOOLS", "linkedin_key", "said_no_ids"]
 
 class SourceIn(Input):
     kind: Literal["profile", "team", "context", "email", "post"]
@@ -111,7 +111,7 @@ def _namesakes(conn: sqlite3.Connection, want: dict, family_ids: list[int]) -> l
             if name_key(r["name"]) == name_key(want["name"])]
 
 
-def _said_no(conn: sqlite3.Connection, person_ids: list[int]) -> set[int]:
+def said_no_ids(conn: sqlite3.Connection, person_ids: list[int]) -> set[int]:
     """The people whose reply said no or asked to stop, on an email thread or a logged outreach touch."""
     if not person_ids:
         return set()
@@ -124,7 +124,7 @@ def _said_no(conn: sqlite3.Connection, person_ids: list[int]) -> set[int]:
 
 def _stop_reason(conn: sqlite3.Connection, people: list[sqlite3.Row], no_go_people: set[int]) -> dict | None:
     """The refusal for the first of `people` who must not be emailed (a person no-go, or said no), else None."""
-    said_no = _said_no(conn, [p["person_id"] for p in people])
+    said_no = said_no_ids(conn, [p["person_id"] for p in people])
     for p in people:
         if p["person_id"] in no_go_people:
             return {"person_id": p["person_id"], "created": False, "refused": "person_no_go", "flags": [],

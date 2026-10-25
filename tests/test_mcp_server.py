@@ -126,6 +126,25 @@ class CallPathTest(McpCase):
         self.assertEqual(self.db.execute("SELECT state FROM message WHERE message_id = ?", (mid,)).fetchone()[0],
                          "drafted")
 
+    def test_any_failure_opening_the_guarded_connection_is_a_plain_error_with_no_path_or_sql(self):
+        path = "/Users/someone/Library/Application Support/outreach/outreach.db"
+        trigger = "CREATE TEMP TRIGGER mcp_message_state BEFORE UPDATE OF state ON main.message"
+        cases = (
+            (sqlite3.DatabaseError(f"unable to open {path}: near {trigger}: syntax error"), "internal"),
+            (sqlite3.OperationalError(f"database is locked ({path})"), "busy"),
+            (RuntimeError(f"{trigger} at {path}"), "internal"),
+            (sqlite3.IntegrityError("mcp guard: Claude never deletes a row"), "refused"),
+        )
+        for raised, code in cases:
+            with self.subTest(raised=type(raised).__name__, code=code), \
+                    mock.patch.object(server, "open_guarded", side_effect=raised), \
+                    mock.patch("sys.stderr", io.StringIO()):
+                err = self.error("echo")
+                self.assertEqual(err["code"], code)
+                for leak in (path, "CREATE", "TRIGGER", "Application Support", "outreach.db", "syntax"):
+                    self.assertNotIn(leak, err["message"] + err["fix"])
+                self.assertTrue(err["message"] and err["fix"])
+
     def test_an_oversize_result_is_an_error_not_a_truncation(self):
         self.assertEqual(self.error("huge")["code"], "result_too_large")
 

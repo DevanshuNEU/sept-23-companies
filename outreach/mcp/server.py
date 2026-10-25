@@ -103,26 +103,16 @@ def run_tool(spec: ToolSpec, arguments: dict, *, path: str | None, clock: Callab
     except SystemExit as err:  # the foundation's live-store refusal outside the live checkout
         return _error("store_unavailable", str(err), "Run the server from the live checkout, or point OUTREACH_DB "
                                                      "at a scratch store.")
+    except Exception as err:  # noqa: BLE001 - any other failure to open is plain too, and never shows its text
+        return _failure(err, plain=True)
     try:
         now = clock()
         with redirect_stdout(sys.stderr):  # a stray print must never reach the protocol stream
             payload = spec.handler(Ctx(conn=conn, now=now, today=_today(now)), args)
     except ToolError as err:
         return True, err.payload()
-    except sqlite3.DatabaseError as err:
-        text = str(err)
-        if "mcp guard:" in text:
-            return _error("refused", text.split("mcp guard:", 1)[1].strip(),
-                          "This is a hard limit. Tell Devanshu what you were trying to do.")
-        if "not authorized" in text:
-            return _error("refused", "The store refused this on Claude's connection: it is a write no tool here "
-                                     "may make.", "Tell Devanshu what you were trying to do; do not work around it.")
-        if isinstance(err, sqlite3.OperationalError) and ("locked" in text or "busy" in text):
-            return _error("busy", "The store is busy (the sender or a refresh is writing).",
-                          "Try the same call again in a few seconds.")
-        return _internal(err)
     except Exception as err:  # noqa: BLE001 - every other failure is reported, never swallowed
-        return _internal(err)
+        return _failure(err)
     finally:
         conn.close()
     text = _dumps(payload)
@@ -132,10 +122,29 @@ def run_tool(spec: ToolSpec, arguments: dict, *, path: str | None, clock: Callab
     return False, payload
 
 
-def _internal(err: BaseException) -> tuple[bool, dict]:
+def _failure(err: Exception, *, plain: bool = False) -> tuple[bool, dict]:
+    """The plain error for a failure: the guard's own words on `refused`, a lock on `busy`, anything else
+    `internal`. With `plain` (a failure opening the connection, whose text may hold the store path or the guard's
+    SQL) an internal error says only that it happened; the details go to stderr."""
+    text = str(err) if isinstance(err, sqlite3.DatabaseError) else ""
+    if "mcp guard:" in text:
+        return _error("refused", text.split("mcp guard:", 1)[1].strip(),
+                      "This is a hard limit. Tell Devanshu what you were trying to do.")
+    if "not authorized" in text:
+        return _error("refused", "The store refused this on Claude's connection: it is a write no tool here may "
+                                 "make.", "Tell Devanshu what you were trying to do; do not work around it.")
+    if isinstance(err, sqlite3.OperationalError) and ("locked" in text or "busy" in text):
+        return _error("busy", "The store is busy (the sender or a refresh is writing).",
+                      "Try the same call again in a few seconds.")
+    return _internal(err, plain=plain)
+
+
+def _internal(err: BaseException, *, plain: bool = False) -> tuple[bool, dict]:
     traceback.print_exception(err, file=sys.stderr)
-    return _error("internal", f"{type(err).__name__}: {err}"[:300], "This is a bug in the outreach MCP server. "
-                                                                    "Tell Devanshu; the details are on its stderr.")
+    message = ("The outreach MCP server could not open its guarded connection to the store." if plain
+               else f"{type(err).__name__}: {err}"[:300])
+    return _error("internal", message, "This is a bug in the outreach MCP server. Tell Devanshu; the details are on "
+                                       "its stderr.")
 
 
 def _dumps(payload: dict) -> str:

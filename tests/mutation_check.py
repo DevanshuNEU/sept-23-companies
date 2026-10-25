@@ -791,6 +791,10 @@ MUTATIONS = [
     (MCP / "server.py", "a stray print during a call reaches stdout, the protocol stream",
      "with redirect_stdout(sys.stderr):", "with redirect_stdout(sys.stdout):",
      "test_a_stray_print_goes_to_stderr_never_stdout"),
+    (MCP / "server.py", "a failure opening the guarded connection reaches the client raw, path and SQL included",
+     "    except Exception as err:  # noqa: BLE001 - any other failure to open is plain too, and never shows its text\n"
+     "        return _failure(err, plain=True)\n", "",
+     "test_any_failure_opening_the_guarded_connection_is_a_plain_error_with_no_path_or_sql"),
     (REVIEW / "triggers.py", "a side session's queued row counts as the reader having the posting (unclear items clear)",
      "f\"WHERE state IN ('queued', 'leased') AND NOT ({is_side_sql()})\")}",
      "f\"WHERE state IN ('queued', 'leased')\")}",

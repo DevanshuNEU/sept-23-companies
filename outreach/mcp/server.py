@@ -37,7 +37,7 @@ MAX_PROBLEMS = 8
 
 # Tool modules, each exporting TOOLS. A module that fails to import raises: no tool is skipped quietly.
 GROUPS: tuple[str, ...] = ("outreach.mcp.tools.reads", "outreach.mcp.tools.research", "outreach.mcp.tools.drafts",
-                           "outreach.mcp.tools.people")
+                           "outreach.mcp.tools.people", "outreach.mcp.tools.reader")
 
 INSTRUCTIONS = """\
 Outreach store for Devanshu's job search: ranked companies, the people at them, their drafts and due follow-ups.

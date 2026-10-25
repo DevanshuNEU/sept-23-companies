@@ -13,7 +13,10 @@ from outreach.mcp import server
 from outreach.mcp.guard import Grant, open_guarded
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase
+from outreach.reader.types import FIELDS
 from tests.test_drafts_checks import BODY, FIXTURE_BANNED
+
+READER_BODY = "We build tools for small teams and ship every week. " * 12
 
 INSERT = Grant(insert=True)
 PINNED = {
@@ -32,6 +35,10 @@ PINNED = {
                            "linkedin_draft": Grant(insert=True, update=frozenset({
                                "posting_id", "body", "reason_line", "facts", "checks", "prepared_by_version",
                                "updated_at", "revision"}))},
+    "reader_next": {"read_queue": Grant(insert=True, update=frozenset({"priority", "state", "lease_until", "attempts",
+                                                                        "last_error"}))},
+    "reader_submit": {"read_queue": Grant(insert=True, update=frozenset({"state", "lease_until", "last_error"})),
+                      "posting_reading": INSERT, "event": INSERT},
 }
 
 
@@ -222,6 +229,39 @@ class GrantsCase(McpCase):
                  "VALUES ('flagged', ?, 'x', 'k5', 'claude', ?)", (self.acme, NOW)),
             ], {"person_id": lin, "body": "Hi Lin, I read your post on the queue rewrite.",
                 "reason_line": "I read your post on the queue rewrite"})
+
+    def reader_posting(self) -> int:
+        pid = self.db.execute("INSERT INTO posting(company_id, source_key, title, location, first_seen_at, "
+                              "last_seen_at) VALUES (?, 'url:reader-1', 'Software Engineer', 'Austin, TX', ?, ?)",
+                              (self.acme, NOW, NOW)).lastrowid
+        self.db.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, ?)", (pid, READER_BODY))
+        seed.decision(self.db, pid)
+        return pid
+
+    def reader_outside(self, pid: int) -> list[tuple[str, tuple]]:
+        return [
+            ("UPDATE decision SET provisional = 0 WHERE posting_id = ?", (pid,)),
+            ("UPDATE posting SET pay = '$1' WHERE posting_id = ?", (pid,)),
+            ("UPDATE person SET notes = 'x' WHERE person_id = ?", (self.pat,)),
+            ("INSERT INTO linkedin_draft(person_id, body, reason_line, saved_by, created_at, updated_at) "
+             "VALUES (?, 'Hi', 'x', 'claude', ?, ?)", (self.pat, NOW, NOW)),
+            ("INSERT INTO posting_reading(posting_id, body_sha256, reader_version, read_at, fields, verified) "
+             "VALUES (?, ?, 'rv-000000000001', ?, '{}', 1)", (pid, "0" * 64, NOW)),
+            ("INSERT INTO read_queue(posting_id, body_sha256, reader_version, priority, enqueued_at) "
+             "VALUES (?, ?, 'rv-000000000001', 1, ?)", (pid, "0" * 64, NOW)),
+        ]
+
+    def test_reader_next_cannot_write_beyond_its_grants(self):
+        pid = self.reader_posting()
+        self.check_tool("reader_next", self.reader_outside(pid), {"limit": 1})
+
+    def test_reader_submit_cannot_write_beyond_its_grants(self):
+        pid = self.reader_posting()
+        (item,) = self.ok("reader_next", {"limit": 1})["postings"]
+        fields = {n: {"value": None if n.startswith("years") else "" if n in ("start_date", "location", "pay")
+                      else "unknown", "quote": ""} for n in FIELDS}
+        self.check_tool("reader_submit", self.reader_outside(pid), {"readings": [
+            {"posting_id": pid, "body_sha256": item["body_sha256"], "fields": fields}]})
 
 
 if __name__ == "__main__":

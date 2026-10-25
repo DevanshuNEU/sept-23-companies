@@ -7,8 +7,10 @@ live store outside the live checkout are refused exactly as everywhere else), th
    grants: approving, skipping, unapproving or reviving a message; a message born in any state but a drafted first
    email by claude; editing a message he saved or one already approved; any touch but a fresh open one; any
    evidence that is locked, by hand, confirmed, or a size, headcount, domain or hq that is not a guess; a LinkedIn
-   note not saved by claude as proposed; an event or review item by another actor; any write at all to the tables
-   in `NEVER_TABLES` (the sender, companies, no-go rows and the rest); and every DELETE.
+   note not saved by claude as proposed; an event or review item by another actor; a reading or a queue row of any
+   reader version but a side session's (`side-`, #32's `side_version`, which can never be promoted, so a reading
+   from Claude never decides a posting), and on the night's queue rows any change but their order; any write at all
+   to the tables in `NEVER_TABLES` (the sender, companies, no-go rows, decisions and the rest); and every DELETE.
 2. An authorizer. It allows reads, transactions and savepoints, and a write only where the tool's grants name it:
    an INSERT on a table whose grant has `insert`, an UPDATE of a granted column. It refuses every DELETE, ATTACH,
    DETACH, PRAGMA, CREATE, DROP (the guard's own triggers included), ALTER, REINDEX, ANALYZE and any action it does
@@ -38,7 +40,7 @@ NEVER_TABLES = frozenset({
     "daily_list", "daily_list_entry", "company", "company_alias", "company_name_key", "no_go", "board", "board_read",
     "watched_page", "job_run", "ruleset", "decision", "schema_migration", "import_record", "mx_check", "win_seen",
     "watch_dismissal", "source", "company_source", "shared_key", "work_tier", "company_post", "company_score",
-    "posting", "posting_body", "read_queue", "posting_reading",
+    "posting", "posting_body",
 })
 
 # Columns no grant may name. `touch` maps to None: no column of a touch is ever updated through MCP.
@@ -49,6 +51,8 @@ NEVER_COLUMNS: dict[str, frozenset[str] | None] = {
     "touch": None,
     "person": frozenset({"person_id", "company_id", "added_by", "created_at"}),
     "linkedin_draft": frozenset({"draft_id", "person_id", "reason_state", "saved_by", "created_at"}),
+    "read_queue": frozenset({"posting_id", "body_sha256", "reader_version", "enqueued_at"}),
+    "posting_reading": None,
 }
 
 
@@ -79,13 +83,17 @@ def check_grants(grants: Mapping[str, Grant]) -> None:
 # ---------------------------------------------------------------------------------------------- layer 1: triggers
 
 def _refuse(why: str) -> str:
-    return f"SELECT RAISE(ABORT, 'mcp guard: {why}');"
+    text = why.replace("'", "''")  # a message is a SQL string literal
+    return f"SELECT RAISE(ABORT, 'mcp guard: {text}');"
 
 
 _SEND_COLUMNS_SET = ("NEW.approved_at IS NOT NULL OR NEW.pending_rfc_id IS NOT NULL OR NEW.claimed_at IS NOT NULL "
                      "OR NEW.rfc_message_id IS NOT NULL OR NEW.gmail_message_id IS NOT NULL OR NEW.sent_at IS NOT NULL "
                      "OR NEW.reconciled_at IS NOT NULL OR NEW.error IS NOT ''")
 _SEND_COLUMNS_CHANGED = " OR ".join(f"NEW.{c} IS NOT OLD.{c}" for c in sorted(_MESSAGE_SEND_COLUMNS))
+
+# A reader version that is not a side session's (#32 `side_version`: `side-` and the files' version).
+_NOT_SIDE = "substr({0}.reader_version, 1, 5) IS NOT 'side-'"
 
 _VALUE_TRIGGERS = (
     ("message_insert", "BEFORE INSERT ON main.message",
@@ -116,12 +124,24 @@ _VALUE_TRIGGERS = (
     ("linkedin_draft_update", "BEFORE UPDATE ON main.linkedin_draft",
      "OLD.saved_by IS NOT 'claude' OR NEW.saved_by IS NOT 'claude' OR NEW.reason_state IS NOT 'proposed'",
      "Claude never confirms a reason line or edits a note Devanshu saved"),
+    ("read_queue_insert", "BEFORE INSERT ON main.read_queue",
+     f"{_NOT_SIDE.format('NEW')} OR NEW.state IS NOT 'queued' OR NEW.attempts IS NOT 0 OR NEW.lease_until IS NOT NULL",
+     "Claude queues only a side session's readings, and a new row is queued with no lease"),
+    ("read_queue_update", "BEFORE UPDATE ON main.read_queue",
+     "NEW.posting_id IS NOT OLD.posting_id OR NEW.body_sha256 IS NOT OLD.body_sha256 "
+     "OR NEW.reader_version IS NOT OLD.reader_version OR NEW.enqueued_at IS NOT OLD.enqueued_at "
+     f"OR ({_NOT_SIDE.format('OLD')} AND (NEW.state IS NOT OLD.state OR NEW.lease_until IS NOT OLD.lease_until "
+     "OR NEW.attempts IS NOT OLD.attempts OR NEW.last_error IS NOT OLD.last_error))",
+     "Claude leases and files only a side session's queue rows; of the night's rows only the order may change"),
+    ("posting_reading_insert", "BEFORE INSERT ON main.posting_reading", _NOT_SIDE.format("NEW"),
+     "a reading from Claude is filed under a side version, so it never decides a posting"),
+    ("posting_reading_update", "BEFORE UPDATE ON main.posting_reading", None, "Claude never changes a stored reading"),
     ("evidence_insert", "BEFORE INSERT ON main.evidence",
      "NEW.locked IS NOT 0 OR NEW.source_kind IS 'hand' OR NEW.confidence IS 'confirmed' "
      "OR (NEW.fact IN ('size', 'headcount', 'domain', 'hq') AND NEW.confidence IS NOT 'guess')",
      "evidence from Claude is never locked, by hand or confirmed; a size, headcount, domain or hq is a guess"),
     ("review_item_insert", "BEFORE INSERT ON main.review_item",
-     "NEW.raised_by IS NOT 'claude'",  # reader joins when #32 adds the reader tools
+     "NEW.raised_by IS NOT 'claude'",  # the reader tools raise none: they never combine a reading (reader.py)
      "a review item from Claude is raised by claude"),
     ("review_item_update", "BEFORE UPDATE ON main.review_item", "NEW.resolution IS NOT 'cleared'",
      "Claude only clears a review item; Devanshu resolves them"),

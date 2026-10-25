@@ -938,16 +938,30 @@ class NeedsYou(ApiCase):
         bare = {("resolved", "Resolved"), ("reopened", "Reopened"), ("hand_set", "Hand set"), ("replaced", "Replaced")}
         self.assertFalse(texts & bare, texts)
 
-    def test_a_merge_loop_does_not_break_the_view(self):
+    def test_a_merge_loop_does_not_break_the_view_or_clear_in_play_and_holds_email(self):
         a = s.company(self.conn, "Loop A", "removed", remove_reason="merged")
         b = s.company(self.conn, "Loop B", "removed", remove_reason="merged", merged_into=a)
         self.conn.execute("UPDATE company SET merged_into = ? WHERE company_id = ?", (b, a))  # store corruption
         cid = s.company(self.conn, "Acme", "working")
+        s.message(self.conn, s.touch(self.conn, s.person(self.conn, cid, "Pat Mail")), 0)  # drafted, open touch
         item = s.review(self.conn, cid, "size_unknown")
-        listed = self.open_items()
-        self.assertIn(item, listed)
-        self.assertFalse(listed[item]["inPlay"])  # unknown this time, never a 500 that blocks every fix
+        with self.assertLogs("outreach.api", "WARNING") as logged:
+            listed = self.open_items()
+        self.assertEqual(len(logged.records), 1)
+        self.assertIn("merged_into loop", logged.output[0])
+        # Merges are not followed for this request, but nothing reads as all clear.
+        self.assertEqual((listed[item]["inPlay"], listed[item]["holdsEmail"]), (True, True))
         self.ok(self.resolve(item, {"kind": "ok"}))
+
+    def test_a_bad_list_date_is_an_error_not_an_all_clear(self):
+        # The schema's CHECK keeps this out; the guard is that nothing reads a bad input as "nobody in play".
+        self.conn.execute("PRAGMA ignore_check_constraints = ON")
+        self.conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES ('soon', ?, 10)", (NOW,))
+        self.conn.execute("PRAGMA ignore_check_constraints = OFF")
+        cid = s.company(self.conn, "Acme", "working")
+        s.review(self.conn, cid, "size_unknown")
+        res = self.get("/api/needs-you")
+        self.assertEqual((res.status_code, res.json()["code"]), (500, "server_error"))  # as before #16 Task 13
 
     def test_a_board_conflict_from_add_board_retires_nothing(self):
         from unittest import mock

@@ -27,6 +27,7 @@ from outreach.api.queries.company import (
 )
 from outreach.api.queries.outcomes import by_ids
 from outreach.outcomes.windows import day_bounds_utc, ny_day, week_bounds
+from outreach.ranking.common import MergeLoop, canonical_ids
 from outreach.review import queries as review_queries
 from outreach.review.config import load_review_config
 from outreach.review.errors import ReviewError
@@ -120,13 +121,16 @@ def review_items(conn: sqlite3.Connection, rows: list[sqlite3.Row], parents: dic
         "SELECT company_id FROM daily_list_entry WHERE list_date = ? AND state = 'picked'", (today,))}
     planned_days = load_review_config().planned_days
     try:
-        playing = in_play(conn, today=today, planned_days=planned_days)
-        mailing = emailing(conn, today=today, planned_days=planned_days)
-    except ValueError:
-        # A `merged_into` loop (store corruption) stops `canonical_ids`. The list still shows every item and every
-        # fix still works; only the in-play order and the holds-email flag are unknown for this request.
-        log.warning("Needs you: a merged_into loop in the store; in-play and emailing are skipped for this request.")
-        playing, mailing = {}, frozenset()
+        canon = canonical_ids(conn)
+    except MergeLoop:
+        # A `merged_into` loop is store corruption. Follow no merge for this request (each company is its own
+        # survivor) rather than fail the list or read it as "nobody in play": a working company, or one with a
+        # queued email, still counts. Any other error (a bad list date) surfaces as before.
+        log.warning("Needs you: a merged_into loop in the store; merges are not followed for in-play and emailing "
+                    "on this request.")
+        canon = {}
+    playing = in_play(conn, today=today, planned_days=planned_days, canon=canon)
+    mailing = emailing(conn, today=today, planned_days=planned_days, canon=canon)
     holds = company_holds(conn)  # a hold left on a merged-away duplicate holds the survivor; so does any reply
 
     moment = datetime.strptime(now, ISO_FMT)

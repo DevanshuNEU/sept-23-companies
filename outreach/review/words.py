@@ -257,13 +257,28 @@ _ALIAS_SAID = {  # (with the value, without it)
 }
 
 
+_PIECE_MAX = 160
+_UNSAFE = str.maketrans("", "", "<>&")
+
+
+def _piece(value) -> str:
+    """Outside text (a name, a domain, a board, an alias value, a quote) made fit to sit inside a sentence: as text,
+    without `<`, `>` and `&`, every run of whitespace (newlines too) one space, at most 160 characters (a longer one
+    is cut and ends in three periods), and no en or em dash. None is empty text."""
+    text = " ".join(("" if value is None else str(value)).translate(_UNSAFE).split())
+    if len(text) > _PIECE_MAX:
+        text = text[:_PIECE_MAX - 3].rstrip() + "..."
+    return clean(text)
+
+
 def _found(pattern: str, text: str) -> re.Match | None:
     return re.search(pattern, text)
 
 
 def _domain_in(detail: str) -> str | None:
     m = _found(r"the domain ([^\s,]+)", detail)
-    return m[1].rstrip(".") if m and m[1].rstrip(".") else None
+    d = _piece(m[1].rstrip(".")) if m else ""
+    return d or None
 
 
 def _alias_value(detail: str) -> str | None:
@@ -275,7 +290,7 @@ def _alias_value(detail: str) -> str | None:
         value = ast.literal_eval(m[1])
     except (ValueError, SyntaxError):
         return None
-    return value if isinstance(value, str) and value.strip() else None
+    return (_piece(value) or None) if isinstance(value, str) else None
 
 
 def merge_reason(basis: str, detail: str) -> str | None:
@@ -285,7 +300,7 @@ def merge_reason(basis: str, detail: str) -> str | None:
     detail = detail or ""
     if basis == "domain":
         d = _domain_in(detail)
-        return clean(f"Both use the domain {d}, {_MAYBE}" if d else f"Both use the same domain, {_MAYBE}")
+        return f"Both use the domain {d}, {_MAYBE}" if d else f"Both use the same domain, {_MAYBE}"
     if basis.startswith("fein_conflict+"):
         what = basis.partition("+")[2]
         if what == "domain":
@@ -293,28 +308,31 @@ def merge_reason(basis: str, detail: str) -> str | None:
             lead = f"Both use the domain {d}" if d else "Both use the same domain"
         elif what == "name_state":
             m = _found(r"the same name and state \(([^)]+)\)", detail)
-            lead = f'Both names come down to "{m[1]}" in the same state' if m else "Both have the same name and state"
+            lead = f'Both names come down to "{_piece(m[1])}" in the same state' if m \
+                else "Both have the same name and state"
         else:
             return None
-        return clean(f"{lead}, but their tax ID numbers differ, {_UNSURE}")
+        return f"{lead}, but their tax ID numbers differ, {_UNSURE}"
     if basis == "name":
         m = _found(r"the same name \(([^)]+)\), but the state is (.+) here and (.+) there$", detail)
         if m:
-            return clean(f'Both names come down to "{m[1]}", but their states differ ({m[2]} and {m[3]}), {_UNSURE}')
+            return (f'Both names come down to "{_piece(m[1])}", but their states differ ({_piece(m[2])} and '
+                    f"{_piece(m[3])}), {_UNSURE}")
         m = _found(r"the same name key \(([^)]+)\), from a name with letters outside ASCII", detail)
         if m:
-            return clean(f'Both names come down to "{m[1]}", but one is written with letters a name match cannot '
-                         f"check, {_UNSURE}")
+            return (f'Both names come down to "{_piece(m[1])}", but one is written with letters a name match '
+                    f"cannot check, {_UNSURE}")
         return f"Their names are alike, but nothing else matched, {_UNSURE}"
     if basis == "ambiguous_name_state":
         m = _found(r"the same name \(([^)]+)\) and state \(([^)]+)\) as (\d+) companies", detail)
         if m:
-            return clean(f'Both names come down to "{m[1]}" in {m[2]}, and {m[3]} companies match that, {_UNSURE}')
+            return (f'Both names come down to "{_piece(m[1])}" in {_piece(m[2])}, and {_piece(m[3])} companies '
+                    f"match that, {_UNSURE}")
         return f"Their name and state match other companies too, {_UNSURE}"
     if basis == "same_board":
         m = _found(r"both claim the (\S+) board (.+)$", detail)
         if m:
-            return clean(f"Both claim the same {_ats_name(m[1])} job board, {m[2].strip()}, {_MAYBE}")
+            return f"Both claim the same {_ats_name(_piece(m[1]))} job board, {_piece(m[2])}, {_MAYBE}"
         return f"Both claim the same job board, {_MAYBE}"
     if basis == "source_ref":
         return f"One source record points at both companies, {_MAYBE}"
@@ -325,7 +343,7 @@ def merge_reason(basis: str, detail: str) -> str | None:
         if said is None:
             return None
         value = _alias_value(detail)
-        return clean(f"{said[0].format(v=value)}, {_MAYBE}" if value else f"{said[1]}, {_MAYBE}")
+        return f"{said[0].format(v=value)}, {_MAYBE}" if value else f"{said[1]}, {_MAYBE}"
     first, plus, second = basis.partition("+")
     if plus and first in _MATCHED_BY and second in _MATCHED_BY:
         if first == second:
@@ -381,13 +399,18 @@ def _rules_said(field: str, rules) -> str | None:
             return "The rules read this as an engineering role."
         if rules == "intern":
             return "The rules read this as an engineering internship."
-        return "The rules read this as not an engineering role."
+        if rules in ("off_lane", "not_engineering"):
+            return "The rules read this as not an engineering role."
+        if rules == "general_application":
+            return "The rules read this as a general application, not a named role."
+        return None
     return _RULES_SAID.get(field, {}).get(rules) if isinstance(rules, str) else None
 
 
 def _reader_heard(field: str, value) -> str | None:
-    if field == "location" and isinstance(value, str):
-        return clean(f"reads the place as {value.strip()}") if value.strip() else "found no place in it"
+    if field == "location" and value is not None:
+        place = _piece(value)
+        return f"reads the place as {place}" if place else "found no place in it"
     if value == "unknown" and field in _READER_HEARD:
         return "could not tell"
     return _READER_HEARD.get(field, {}).get(value) if isinstance(value, str) else None
@@ -422,14 +445,14 @@ def reader_reason(parts: Sequence[tuple[str, object, object, str]]) -> str | Non
         if said is None:
             return None
         sentences.append(said)
-        quote = " ".join(str(quote or "").split())
+        quote = _piece(quote)
         if value is None:
             sentences.append("The night reader gave no answer on this.")
         else:
             heard = _reader_heard(field, value)
             if heard is None:
                 return None
-            if quote and not (field == "location" and quote == str(value).strip()):
+            if quote and not (field == "location" and quote == _piece(value)):
                 sentences.append(f'The night reader found this line and {heard}: "{quote}"')
             else:
                 sentences.append(f"The night reader {heard}.")
@@ -447,9 +470,10 @@ def reader_reason(parts: Sequence[tuple[str, object, object, str]]) -> str | Non
 def shared_domain_size_reason(company: str, domain: str, others: int | None) -> str:
     """The plain sentence for a `size_check` raised because the company's domain is shared (`identity.resolve_store`).
     `others` is how many other employers the visa filings show on it, None when that count is not known."""
-    if others is None:
-        where = "with other employers"
-    else:
+    company, domain = _piece(company) or "This company", _piece(domain)
+    if isinstance(others, int) and not isinstance(others, bool) and others > 0:
         where = f"with {others} other {'employer' if others == 1 else 'employers'} in the visa filings"
-    return clean(f"{company} shares its domain, {domain}, {where}, so it may be part of a larger company. "
-                 "Nobody has recorded its size.")
+    else:
+        where = "with other employers"
+    its = f"its domain, {domain}," if domain else "its domain"
+    return f"{company} shares {its} {where}, so it may be part of a larger company. Nobody has recorded its size."

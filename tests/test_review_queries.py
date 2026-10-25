@@ -311,5 +311,65 @@ class PlainReasonsTest(unittest.TestCase):
         self.assertIsNone(words.reader_reason([]))
 
 
+    # ------------------------------------------------------------------------------------------- fix round 1
+
+    def assert_one_short_line(self, text: str) -> None:
+        self.assertTrue(text.strip())
+        self.assertNotIn("\n", text)
+        self.assertNotIn("\r", text)
+        for c in "<>&":
+            self.assertNotIn(c, text)
+        self.assertLess(len(text), 700)
+        self.assertEqual(text, words.clean(text))
+
+    def test_outside_text_is_one_short_plain_line(self):
+        hostile = "Acme\nCorp <img src=x onerror=alert(1)> & Co"
+        long = "x " * 2500  # 5,000 characters
+        outs = [
+            words.shared_domain_size_reason(hostile, hostile, 2),
+            words.shared_domain_size_reason(None, None, None),
+            words.shared_domain_size_reason(12345, long, 3),
+            words.merge_reason("domain", f"both hold the domain {'d' * 5000}.example"),
+            words.merge_reason("same_board", f"both claim the ashby board {hostile}"),
+            words.merge_reason("name", f"r: the same name ({long}), but the state is {long} here and CA there"),
+            words.merge_reason("ambiguous_name_state", "r: the same name (<b>) and state (C&A) as 3 companies"),
+            words.merge_reason("alias:dba", f"r has the dba {hostile!r} (key x), which already belongs to #2"),
+            words.merge_reason("alias:fein", f"r has the fein {long!r} (key x), which already belongs to #2"),
+            words.reader_reason([("sponsorship", "silent", "wont_sponsor", "We cannot sponsor. " * 260)]),
+            words.reader_reason([("location", "yes", hostile, hostile)]),
+            words.reader_reason([("location", "yes", 77, None)]),
+        ]
+        for text in outs:
+            with self.subTest(text=str(text)[:80]):
+                self.assertIsNotNone(text)
+                self.assert_one_short_line(text)
+        self.assertIn("Acme Corp img src=x onerror=alert(1) Co shares its domain", outs[0])
+        self.assertIn("...", outs[2])
+        self.assertIn("...", outs[9])
+
+    def test_a_long_or_hostile_stored_reason_reads_as_one_short_line(self):
+        self.conn.execute("UPDATE company SET name = ? WHERE company_id = ?",
+                          ("Mesh\nSystems <script>x</script>", self.a))
+        size = self.shared("Mesh", "2 other employers")
+        reader = self.reader(verdict("sponsorship", "silent", "wont_sponsor", "We cannot sponsor. " * 260))
+        for rid in (size, reader):
+            self.assert_one_short_line(self.shown(rid))
+
+    def test_a_null_or_empty_stored_reason_never_crashes(self):
+        for kind in ("merge_candidate", "size_check", "reader_disagrees", "board_empty", "size_unknown"):
+            for reason in (None, ""):
+                with self.subTest(kind=kind, reason=reason):
+                    row = {"kind": kind, "reason": reason, "board_id": None, "company_id": self.a}
+                    self.assertEqual(display_reason(self.conn, row), "")
+
+    def test_an_engineering_lane_these_words_do_not_know_shows_the_stored_text(self):
+        rid = self.reader(verdict("engineering", "banana", "yes", "Software Engineer"))
+        self.assertIn('rules say "banana"', self.stored(rid))
+        self.assertEqual(self.shown(rid), self.stored(rid))
+        self.assertEqual(self.shown(self.reader(verdict("engineering", "off_lane", "yes", "Software Engineer"))),
+                         "The rules read this as not an engineering role. The night reader found this line and "
+                         'reads it as an engineering role: "Software Engineer" Mark no-go if this posting rules the '
+                         "company out; mark ok if it does not.")
+
 if __name__ == "__main__":
     unittest.main()

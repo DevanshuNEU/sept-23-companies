@@ -39,13 +39,13 @@ _READER_PART = re.compile(rf'(?P<field>[a-z_]+): rules say (?P<rules>{_JSON}), r
                           r"(?=; [a-z_]+: rules say |\Z)", re.S)
 
 
-def _merge_text(conn: sqlite3.Connection, row: sqlite3.Row) -> str | None:
-    m = _MERGE.match(row["reason"])
+def _merge_text(conn: sqlite3.Connection, row: sqlite3.Row, reason: str) -> str | None:
+    m = _MERGE.match(reason)
     return words.merge_reason(m["basis"], m["detail"]) if m else None
 
 
-def _size_text(conn: sqlite3.Connection, row: sqlite3.Row) -> str | None:
-    m = _SHARED.match(row["reason"])
+def _size_text(conn: sqlite3.Connection, row: sqlite3.Row, reason: str) -> str | None:
+    m = _SHARED.match(reason)
     if m is None:
         return None  # the ranker's size checks are plain words already
     now = conn.execute("SELECT name FROM company WHERE company_id = ?", (row["company_id"],)).fetchone()
@@ -76,8 +76,8 @@ def _reader_parts(reason: str) -> list[tuple[str, object, object, str]] | None:
         pos += 2
 
 
-def _reader_text(conn: sqlite3.Connection, row: sqlite3.Row) -> str | None:
-    parts = _reader_parts(row["reason"])
+def _reader_text(conn: sqlite3.Connection, row: sqlite3.Row, reason: str) -> str | None:
+    parts = _reader_parts(reason)
     return words.reader_reason(parts) if parts else None
 
 
@@ -90,15 +90,16 @@ def display_reason(conn: sqlite3.Connection, row: sqlite3.Row | int) -> str:
     closed the postings. Closed postings are those closed `board_empty_twice` since the streak began. A merge
     question, a reader disagreement and a shared-domain size check show plain sentences built from their stored text
     (`words.merge_reason`, `reader_reason`, `shared_domain_size_reason`); a stored text these cannot read shows as it
-    is. Every other kind, and a board never read, shows the stored reason."""
+    is. Every other kind, and a board never read, shows the stored reason. A missing reason shows as empty text."""
     row = _row(conn, row)
+    reason = row["reason"] or ""
     if row["kind"] in _PLAIN:
-        return _PLAIN[row["kind"]](conn, row) or row["reason"]
+        return _PLAIN[row["kind"]](conn, row, reason) or reason
     if row["kind"] not in _BOARD_KINDS or row["board_id"] is None:
-        return row["reason"]
+        return reason
     board = conn.execute("SELECT * FROM board WHERE board_id = ?", (row["board_id"],)).fetchone()
     if board is None or board["last_read"] is None:
-        return row["reason"]
+        return reason
     since = board["streak_since"] or row["created_at"]
     last_ok = conn.execute("SELECT max(at) FROM board_read WHERE board_id = ? AND result IN ('ok', 'unchanged')",
                            (row["board_id"],)).fetchone()[0]

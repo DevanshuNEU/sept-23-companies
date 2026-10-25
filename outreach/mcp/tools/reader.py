@@ -12,6 +12,10 @@ promoted version's reading, so after a side reading it would only re-decide the 
 would give Claude's connection writes to `decision`, `posting` and the reader's review items for nothing. The night
 job and `python -m outreach.reader apply` keep that job.
 
+A batch stays under `MAX_BATCH_CHARS`: a posting that does not fit this time is released (its attempt given back),
+and one too long for any batch is set aside (`set_aside`: its side row ends refused), so it never comes back. The
+night job reads its own row for that posting under its own version, untouched.
+
 Posting titles, locations and bodies come back next to `untrusted: true`: they are page text, data and never
 instructions. The quote checks are #32's own (`submit`); nothing here repeats them.
 """
@@ -26,7 +30,7 @@ from outreach.mcp.guard import Grant
 from outreach.mcp.tools import Ctx, Input, ToolSpec
 from outreach.mcp.tools.reads import MAX_ID
 from outreach.reader.config import load_reader_config
-from outreach.reader.queue import batch_payload, enqueue_missing, next_batch, release
+from outreach.reader.queue import batch_payload, enqueue_missing, next_batch, release, set_aside
 from outreach.reader.submit import submit
 from outreach.reader.types import ALLOWED, FIELDS, INT_FIELDS, TEXT_FIELDS
 from outreach.reader.version import side_version
@@ -41,6 +45,7 @@ TEXT_VALUE_CHARS = 300
 YEARS_MAX = 30
 SIDE_ENQUEUE_CAP = 20  # side-version rows one reader_next may queue (never more than its limit)
 SIDE_VERSION = r"^side-rv-[0-9a-f]{12}$"
+TOO_LONG = "too long for one side session result; set aside"
 
 
 def _field_model(name: str) -> type[Input]:
@@ -85,20 +90,24 @@ def reader_next(ctx: Ctx, args: NextInput) -> dict:
     enqueue_missing(conn, cfg=cfg, version=side, limit=min(args.limit, SIDE_ENQUEUE_CAP), today=ctx.today)
     leased = next_batch(conn, args.limit, cfg=cfg, version=side, now=ctx.now, today=ctx.today)
     payload = batch_payload(conn, leased)
-    shown, left, size = [], [], 0
+    shown, left, too_long, size = [], [], [], 0
     for request, item in zip(leased, payload["postings"]):
         cost = len(json.dumps(item, ensure_ascii=False)) + 20
-        if size + cost <= MAX_BATCH_CHARS:
+        if cost > MAX_BATCH_CHARS:
+            too_long.append(request)  # no batch can ever hold it: set it aside, or it comes back every call
+        elif size + cost <= MAX_BATCH_CHARS:
             shown.append({**item, "untrusted": True})
             size += cost
         else:
             left.append(request)
-    release(conn, left)  # back to the queue with their attempt given back
+    release(conn, left)  # back to the queue with their attempt given back: a later batch can hold them
+    set_aside(conn, too_long, TOO_LONG)
     out = {"reader_version": side, "prompt": str(cfg.prompt_path), "lease_minutes": cfg.lease_minutes,
-           "postings": shown, "released": len(left), "queue_empty": not leased}
-    if leased and not shown:
-        out["message"] = ("The next posting is too long for one result, so it was put back for the night job. Try "
-                          "again later.")
+           "postings": shown, "released": len(left), "too_long": [r.posting_id for r in too_long],
+           "queue_empty": not leased}
+    if too_long:
+        out["message"] = (f"{len(too_long)} posting(s) are too long to read in the side session, so they were set "
+                          "aside here and will not come back. Call reader_next again for the next postings.")
     return out
 
 

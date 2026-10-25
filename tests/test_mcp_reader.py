@@ -116,12 +116,32 @@ class ReaderNextTest(ReaderCase):
         self.assertNotEqual(again["postings"][0]["posting_id"], shown)
         self.assertEqual(self.queue(again["postings"][0]["posting_id"])[0]["attempts"], 1)
 
-    def test_a_posting_too_long_for_any_result_is_released_and_said(self):
-        self.posting(body_of("One very long posting.", 3000))
+    def test_a_posting_too_long_for_any_result_is_set_aside_once_and_the_next_is_reachable(self):
+        short = self.posting(body_of("A short posting.", 700))
+        long = self.posting(body_of("One very long posting.", 3000))  # the newer one is leased first
         with mock.patch.object(reader_tools, "MAX_BATCH_CHARS", 1000):
-            got = self.ok("reader_next", {})
-        self.assertEqual((got["postings"], got["released"], got["queue_empty"]), ([], 1, False))
-        self.assertTrue(got["message"])
+            got = self.ok("reader_next", {"limit": 1})
+            self.assertEqual((got["postings"], got["released"], got["queue_empty"]), ([], 0, False))
+            self.assertEqual(got["too_long"], [long])
+            self.assertIn("side session", got["message"])
+            self.assertNotIn("night job will", got["message"])
+            (row,) = self.queue(long)
+            self.assertEqual((row["state"], row["reader_version"], row["lease_until"]), ("refused", self.side, None))
+            self.assertIn("too long", row["last_error"])
+            again = self.ok("reader_next", {"limit": 1})
+        self.assertEqual([p["posting_id"] for p in again["postings"]], [short])
+        self.assertEqual(again["too_long"], [])
+        self.assertEqual(len(self.queue(long)), 1)  # set aside, never queued a second time
+        self.assertEqual(self.ok("reader_next", {"limit": 5})["postings"], [])
+
+    def test_a_posting_that_fits_alone_is_released_with_its_attempt_given_back(self):
+        ids = [self.posting(body_of(f"Posting number {i} says this.", 2000)) for i in range(2)]
+        with mock.patch.object(reader_tools, "MAX_BATCH_CHARS", 2600):
+            got = self.ok("reader_next", {"limit": 2})
+        self.assertEqual((len(got["postings"]), got["released"], got["too_long"]), (1, 1, []))
+        left = next(pid for pid in ids if pid != got["postings"][0]["posting_id"])
+        (row,) = self.queue(left)
+        self.assertEqual((row["state"], row["attempts"]), ("queued", 0))
 
     def test_limit_bounds_and_default(self):
         for i in range(7):

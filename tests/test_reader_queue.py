@@ -489,6 +489,21 @@ class LeaseTests(QueueCase):
         self.assertEqual([r.posting_id for r in self.batch(2)], [a])
         self.assertEqual(self.row(a)["attempts"], 1)
 
+    def test_set_aside_ends_a_leased_row_refused_keeps_its_attempt_and_it_is_never_leased_or_queued_again(self):
+        a, b = self.posting(), self.posting()
+        self.enqueue(a)
+        self.enqueue(b)
+        got = self.batch(2)
+        self.assertEqual(queue.set_aside(self.conn, [r for r in got if r.posting_id == a], "too long"), 1)
+        row = self.row(a)
+        self.assertEqual((row["state"], row["lease_until"], row["attempts"], row["last_error"]),
+                         ("refused", None, 1, "too long"))
+        self.assertEqual(queue.set_aside(self.conn, [r for r in got if r.posting_id == a], "again"), 0)
+        self.assertEqual(self.row(a)["last_error"], "too long")
+        self.assertFalse(self.enqueue(a))
+        self.conn.execute("UPDATE read_queue SET state = 'queued', lease_until = NULL WHERE posting_id = ?", (b,))
+        self.assertEqual([r.posting_id for r in self.batch(5, now="2026-10-23T09:00:00Z")], [b])
+
     def test_release_never_goes_below_zero_and_never_revives_a_finished_row(self):
         a, b = self.posting(), self.posting()
         self.enqueue(a)

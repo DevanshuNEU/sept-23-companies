@@ -42,6 +42,16 @@ def fixture_manifest(tmp: Path) -> Manifest:
     )
 
 
+def make_contacts_empty(manifest: Manifest) -> None:
+    """The old mailer that never sent: `contacts.json` parses and holds no contacts, and `send.log` has only lines
+    that name no send (a sign-in note and a dry run). Both files are the copies under the manifest."""
+    manifest.paths["contacts_json"].write_text('{"contacts": []}\n', encoding="utf-8")
+    log = manifest.paths["send_log"]
+    keep = [line for line in log.read_text(encoding="utf-8").splitlines()
+            if "nothing sent" in line or "(dry run)" in line]
+    log.write_text("\n".join(keep) + "\n", encoding="utf-8")
+
+
 def all_marks(conn: sqlite3.Connection) -> dict[str, tuple[int, int]]:
     """`(row count, highest rowid)` for every table in the store, so a test can show a run wrote nothing.
 

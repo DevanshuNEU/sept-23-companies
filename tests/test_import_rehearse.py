@@ -12,7 +12,7 @@ from outreach.importer.__main__ import main
 from outreach.importer.records import SOURCES, source_digest
 from outreach.importer.rehearse import rehearse
 from outreach.store import db
-from tests.importtest import fixture_manifest
+from tests.importtest import fixture_manifest, make_contacts_empty
 
 NOW = "2026-10-20T12:00:00Z"
 
@@ -69,6 +69,57 @@ class RehearseTest(unittest.TestCase):
         self.assertTrue(failures)
         self.assertIn("Rehearsal failed:", out)
         self.assertIn("unclear_send", out)
+
+    def empty_contacts(self, declare):
+        import dataclasses
+        make_contacts_empty(self.manifest)
+        overrides = self.tmp / "overrides.toml"
+        overrides.write_text('[allow_empty]\nsources = ["contacts_json"]\n' if declare else "", encoding="utf-8")
+        return dataclasses.replace(self.manifest, overrides=overrides)
+
+    def test_rehearsal_with_an_empty_contacts_file_passes_when_he_declares_it(self):
+        manifest = self.empty_contacts(declare=True)
+        into = self.tmp / "r"
+        (report, failures), out = self.quiet(rehearse, manifest, into, now=NOW)
+        self.assertEqual(failures, [], out)
+        self.assertEqual(report.empty_on_purpose, ("contacts_json",))
+        self.assertIn("contacts_json: empty on purpose (his ruling)", out)
+        self.assertIn("Second run changed nothing", out)
+        self.assertTrue(out.rstrip().endswith("Rehearsal passed"), out[-300:])
+        self.assertIn("empty on purpose", (into / "report.txt").read_text(encoding="utf-8"))
+
+    def test_rehearsal_with_an_empty_contacts_file_still_fails_without_the_declaration(self):
+        manifest = self.empty_contacts(declare=False)
+        (_, failures), out = self.quiet(rehearse, manifest, self.tmp / "r", now=NOW)
+        self.assertTrue(any("contacts_json: no records at all" in f for f in failures), failures)
+        self.assertIn("Rehearsal failed:", out)
+        self.assertNotIn("empty on purpose", out)
+
+    def unlisted_merge(self, ruling):
+        """A radar posting merged into one radar.db does not list, with his [skip_record] for it or without."""
+        import dataclasses
+        import sqlite3
+        conn = sqlite3.connect(self.manifest.paths["radar_db"])
+        conn.execute("UPDATE posting SET merged_into = 999 WHERE posting_id = 2")
+        conn.commit()
+        conn.close()
+        overrides = self.tmp / "overrides.toml"
+        overrides.write_text('[skip_record]\n"radar_db:posting:2" = "a duplicate he does not track"\n'
+                             if ruling else "", encoding="utf-8")
+        return dataclasses.replace(self.manifest, overrides=overrides)
+
+    def test_rehearsal_refuses_a_posting_merged_into_an_unlisted_one(self):
+        (_, failures), out = self.quiet(rehearse, self.unlisted_merge(ruling=False), self.tmp / "r", now=NOW)
+        self.assertTrue(any("radar_db: 1 held (unparsed_record)" in f for f in failures), failures)
+        self.assertIn("was merged in radar.db into a posting it does not list", out)
+
+    def test_rehearsal_passes_when_his_skip_record_settles_that_hold(self):
+        (report, failures), out = self.quiet(rehearse, self.unlisted_merge(ruling=True), self.tmp / "r", now=NOW)
+        self.assertEqual(failures, [], out)
+        self.assertEqual(report.sources["radar_db"].skipped["by_override"], 1)
+        self.assertNotIn("skip_record_unused", out)
+        self.assertIn("Second run changed nothing", out)
+        self.assertTrue(out.rstrip().endswith("Rehearsal passed"), out[-300:])
 
     def test_a_second_rehearsal_on_the_same_day_gets_its_own_folder(self):
         into = self.tmp / "2026-10-20"

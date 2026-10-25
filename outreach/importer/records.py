@@ -13,6 +13,8 @@ SOURCES = (
     "data_js", "local_storage", "contacts_json", "send_log", "radar_db", "devboard", "contacted_txt",
     "devvault_notes", "interview_prep", "curated_touches",
 )
+# Every source must give at least one record, unless his [allow_empty] names it: error is not empty.
+REQUIRED_SOURCES = SOURCES
 
 
 class SourceError(Exception):

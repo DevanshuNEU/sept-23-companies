@@ -16,6 +16,7 @@ import os
 import shutil
 import sqlite3
 import tomllib
+from collections.abc import Collection
 from pathlib import Path
 
 import live_checkout
@@ -140,15 +141,15 @@ def store_report(conn: sqlite3.Connection, run_id: int, report: CountReport) -> 
 
 
 def import_twice(conn: sqlite3.Connection, plan: ImportPlan, records: list[SourceRecord], *,
-                 now: str) -> tuple[CountReport, list[str], list[str]]:
+                 now: str, allow_empty: Collection[str] = frozenset()) -> tuple[CountReport, list[str], list[str]]:
     """The check, the run and the same plan again. Returns the report, the lines to print and the failures (none
-    is a pass). A failed check writes nothing."""
-    report = count_report(plan, records)
-    failures = check_report(report)
+    is a pass). A failed check writes nothing. `allow_empty` is his declared-empty sources."""
+    report = count_report(plan, records, allow_empty=allow_empty)
+    failures = check_report(report, allow_empty=allow_empty)
     if failures:
         return report, [render_report(report), "Refused: the check failed, nothing was written."], failures
     result = apply_plan(conn, plan, now=now)
-    report = count_report(plan, records, written=result.written)
+    report = count_report(plan, records, written=result.written, allow_empty=allow_empty)
     store_report(conn, result.run_id, report)
     lines = [render_report(report)]
     if result.status != "ok":
@@ -156,7 +157,7 @@ def import_twice(conn: sqlite3.Connection, plan: ImportPlan, records: list[Sourc
         return report, lines, [f"the run ended {result.status}: {result.error}"]
     before = marks(conn)
     again = apply_plan(conn, plan, now=now)
-    store_report(conn, again.run_id, count_report(plan, records, written=again.written))
+    store_report(conn, again.run_id, count_report(plan, records, written=again.written, allow_empty=allow_empty))
     after = marks(conn)
     changed = sorted(t for t in after if t != "job_run" and after[t] != before.get(t))
     if again.status != "ok" or changed:
@@ -180,10 +181,11 @@ def rehearse(manifest: Manifest, into: Path, *, now: str, real: bool = False) ->
     store = into / "outreach.db"
     install(str(store))
     records = read_all(copied)
-    plan = build_plan(records, load_overrides(copied.overrides), now=now, send_cfg=load_config())
+    overrides = load_overrides(copied.overrides)
+    plan = build_plan(records, overrides, now=now, send_cfg=load_config())
     conn = connect(str(store))
     try:
-        report, lines, failures = import_twice(conn, plan, records, now=now)
+        report, lines, failures = import_twice(conn, plan, records, now=now, allow_empty=overrides.allow_empty)
     finally:
         conn.close()
     lines.append(PASSED if not failures else "\n".join([FAILED] + [f"  {f}" for f in failures]))

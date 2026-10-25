@@ -14,7 +14,7 @@ from outreach.importer.__main__ import main
 from outreach.importer.records import source_digest
 from outreach.install import install
 from outreach.store import db
-from tests.importtest import all_marks, fixture_manifest
+from tests.importtest import all_marks, fixture_manifest, make_contacts_empty
 
 NOW = "2026-10-20T12:00:00Z"
 
@@ -105,6 +105,65 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("Unexplained losses: 0", out)
         self.assertIn("contacts_json imported", out)
+
+    # -- [allow_empty]: a source he declares empty on purpose --
+
+    def empty_contacts(self, declare=True):
+        make_contacts_empty(self.manifest)
+        overrides = self.tmp / "overrides.toml"
+        overrides.write_text('[allow_empty]\nsources = ["contacts_json"]\n' if declare else "", encoding="utf-8")
+        return "--overrides", str(overrides)
+
+    def test_dry_run_passes_for_a_declared_empty_source_and_says_so(self):
+        flag = self.empty_contacts()
+        before = all_marks(self.store())
+        code, out = self.cli("dry-run", *flag)
+        self.assertEqual(code, 0, out)
+        self.assertIn("contacts_json: empty on purpose (his ruling)", out)
+        self.assertIn("Unexplained losses: 0", out)
+        self.assertEqual(all_marks(self.store()), before)
+
+    def test_dry_run_still_fails_for_an_empty_source_he_did_not_declare(self):
+        flag = self.empty_contacts(declare=False)
+        for args in (("dry-run",), ("dry-run", *flag)):
+            code, out = self.cli(*args)
+            self.assertEqual(code, 1, out)
+            self.assertIn("contacts_json: no records at all", out)
+            self.assertNotIn("empty on purpose", out)
+
+    def test_a_declared_source_that_cannot_be_read_still_fails(self):
+        flag = self.empty_contacts()
+        self.manifest.paths["contacts_json"].unlink()
+        for command in ("dry-run", "run"):
+            code, out = self.cli(command, *flag)
+            self.assertEqual(code, 1, out)
+            self.assertIn("contacts_json", out)
+            self.assertNotIn("empty on purpose", out)
+        self.manifest.paths["contacts_json"].write_text("{not json", encoding="utf-8")
+        code, out = self.cli("dry-run", *flag)
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("empty on purpose", out)
+
+    def test_run_and_report_for_a_declared_empty_source(self):
+        flag = self.empty_contacts()
+        code, out = self.cli("run", *flag)
+        self.assertEqual(code, 0, out)
+        self.assertIn("contacts_json: empty on purpose (his ruling)", out)
+        self.assertIn("Second run changed nothing", out)
+        stored = json.loads(self.store().execute(
+            "SELECT summary FROM job_run WHERE job = 'import' ORDER BY run_id LIMIT 1").fetchone()[0])
+        self.assertEqual(stored["report"]["empty_on_purpose"], ["contacts_json"])
+        code, out = self.cli("report")  # no overrides given: the stored ruling is what it shows
+        self.assertEqual(code, 0, out)
+        self.assertIn("contacts_json: empty on purpose (his ruling)", out)
+        self.assertIn("Unexplained losses: 0", out)
+
+    def test_run_refuses_an_empty_source_he_did_not_declare_and_writes_nothing(self):
+        self.empty_contacts(declare=False)
+        code, out = self.cli("run")
+        self.assertEqual(code, 1)
+        self.assertIn("Refused", out)
+        self.assertEqual(self.store().execute("SELECT count(*) FROM import_record").fetchone()[0], 0)
 
     def test_reconcile_counts_match_on_the_fixture(self):
         code, out = self.cli("reconcile")

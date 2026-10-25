@@ -346,6 +346,7 @@ class _Planner:
                        f"{self.companies.name(a)!r} and {self.companies.name(b)!r} may be one company; they stay two. "
                        f"Rule [same_company] or [not_same_company].")
         companies = self.freeze_companies(done)
+        self.place_radar_merges()
         self.settle_overrides()
         records = self.finish_outcomes(companies, people, touches)
         return ImportPlan(companies=companies, people=people, touches=touches, applications=dict(self.apps),
@@ -1128,8 +1129,19 @@ class _Planner:
                                  notes=tuple(c.notes), records=self.companies.records(key))
         return out
 
+    def place_radar_merges(self):
+        """A radar posting merged into another is a merge when the other is listed, a hold when it is not. This
+        runs before `settle_overrides`, so his [skip_record] sees every hold there is."""
+        for rid, target in self.radar_merged.items():
+            skey = self.radar_postings.get(target)
+            if skey in self.postings:
+                self.outcomes[rid] = RecordOutcome("merged", "same_posting", "posting", skey)
+            else:
+                self.hold(rid, "unparsed_record", f"{rid} was merged in radar.db into a posting it does not list.")
+
     def settle_overrides(self):
-        """His [skip_record]: a settleable hold becomes a skip; any other hold stays and says why."""
+        """His [skip_record]: a settleable hold becomes a skip; any other hold stays and says why. Every hold must
+        exist by now: a hold raised after this runs can never be settled."""
         for rid, why in sorted(self.ov.skip_record.items()):
             code = self.held_code.get(rid)
             if code is None:
@@ -1154,12 +1166,6 @@ class _Planner:
             "application": lambda k: self.apps[k].records,
             "posting": lambda k: self.postings[k].records,
         }
-        for rid, target in self.radar_merged.items():
-            skey = self.radar_postings.get(target)
-            if skey in self.postings:
-                self.outcomes[rid] = RecordOutcome("merged", "same_posting", "posting", skey)
-            else:
-                self.hold(rid, "unparsed_record", f"{rid} was merged in radar.db into a posting it does not list.")
         out = {}
         for rid, record in self.input.items():
             outcome = self.outcomes.get(rid)

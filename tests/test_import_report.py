@@ -73,6 +73,76 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("curated_touches", failures[0])
 
+    def empty_contacts(self, **kw):
+        """The report of the fixture set with no contacts at all: contacts_json read nothing."""
+        records = [r for r in self.records if r.source != "contacts_json"]
+        plan = dataclasses.replace(self.plan, records={k: v for k, v in self.plan.records.items()
+                                                       if not k.startswith("contacts_json:")})
+        return count_report(plan, records, **kw)
+
+    def test_a_declared_empty_source_may_have_zero_records(self):
+        undeclared = check_report(self.empty_contacts())
+        self.assertEqual(len(undeclared), 1)
+        self.assertEqual(undeclared[0], "contacts_json: no records at all; a required source never counts as empty")
+        declared = frozenset({"contacts_json"})
+        self.assertEqual(check_report(self.empty_contacts(allow_empty=declared), allow_empty=declared), [])
+        self.assertEqual(check_report(self.empty_contacts(), allow_empty=declared), [])
+
+    def test_declaring_one_source_does_not_excuse_another(self):
+        declared = frozenset({"send_log"})
+        failures = check_report(self.empty_contacts(allow_empty=declared), allow_empty=declared)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("contacts_json: no records at all", failures[0])
+
+    def test_a_declared_source_that_has_records_is_unchanged(self):
+        declared = frozenset(SOURCES)
+        report = count_report(self.plan, self.records, allow_empty=declared)
+        self.assertEqual(check_report(report, allow_empty=declared), [])
+        self.assertEqual(report.empty_on_purpose, ())
+        self.assertEqual(report, self.report)
+        self.assertNotIn("empty on purpose", render_report(report))
+
+    def test_a_source_missing_from_the_report_still_fails_whatever_is_declared(self):
+        # no entry at all is a source that was never read, not a source read empty
+        report = dataclasses.replace(self.report, sources={s: c for s, c in self.report.sources.items()
+                                                           if s != "contacts_json"})
+        failures = check_report(report, allow_empty=frozenset(SOURCES))
+        self.assertEqual(len(failures), 1)
+        self.assertIn("contacts_json: no records at all", failures[0])
+
+    def test_the_count_identity_still_applies_to_a_declared_empty_source(self):
+        declared = frozenset({"contacts_json"})
+        report = self.empty_contacts(allow_empty=declared)
+        counts = report.sources["contacts_json"]
+        broken = dataclasses.replace(report, sources={**report.sources, "contacts_json": dataclasses.replace(
+            counts, imported=2)})
+        failures = check_report(broken, allow_empty=declared)
+        self.assertEqual(failures, ["contacts_json: read 0 but accounted for 2"])
+        held = dataclasses.replace(report, sources={**report.sources, "contacts_json": dataclasses.replace(
+            counts, held={"unclear_send": 1})})
+        self.assertTrue(any("accounted for 1" in f for f in check_report(held, allow_empty=declared)))
+
+    def test_render_says_a_declared_source_was_empty_on_purpose(self):
+        declared = frozenset({"contacts_json"})
+        report = self.empty_contacts(allow_empty=declared)
+        self.assertEqual(report.empty_on_purpose, ("contacts_json",))
+        text = render_report(report)
+        self.assertIn("contacts_json: empty on purpose (his ruling)", text)
+        self.assertIn("Unexplained losses: 0", text)
+        undeclared = render_report(self.empty_contacts())
+        self.assertNotIn("empty on purpose", undeclared)
+        self.assertIn("no records at all", undeclared)
+
+    def test_the_empty_ruling_survives_the_stored_report(self):
+        report = self.empty_contacts(allow_empty=frozenset({"contacts_json"}))
+        stored = json.loads(json.dumps(report_to_json(report)))
+        again = report_from_json(stored)
+        self.assertEqual(again, report)
+        self.assertIn("contacts_json: empty on purpose (his ruling)", render_report(again))
+        self.assertEqual(check_report(again), [])  # the stored ruling is what the stored report was checked with
+        self.assertEqual(report_from_json({k: v for k, v in stored.items() if k != "empty_on_purpose"})
+                         .empty_on_purpose, ())
+
     def test_radar_tables_list_every_table_with_its_rows(self):
         tables = self.report.radar_tables
         self.assertEqual(tables["board"], (3, "rows"))

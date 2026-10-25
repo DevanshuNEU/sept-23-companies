@@ -4,16 +4,21 @@
 empty list is a pass); `render_report` is the text the dry run and the run print. A radar table record stands for
 all its rows, so it counts as that many skipped rows of `radar_db`, and `radar_tables` names every table of the
 radar file with its rows (#5's retire guard reads it from the stored summary).
+
+A required source with zero records fails the check, so a failed read can never look like "nothing there". His
+`[allow_empty]` ruling names the sources that really are empty (the reader raises `SourceError` for a missing or
+unreadable file, so a source that reads and holds nothing is empty). `count_report` records which declared sources
+were empty in `empty_on_purpose`, `render_report` says so in one line, and the stored report keeps the ruling.
 """
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from outreach.importer.plan import ImportPlan
 from outreach.importer.read_radar import RADAR_ROW_TABLES
-from outreach.importer.records import SOURCES, SourceRecord
+from outreach.importer.records import REQUIRED_SOURCES, SOURCES, SourceRecord
 
 __all__ = ["EXPLAINED_SKIPS", "MERGE_REASONS", "REQUIRED_SOURCES", "SourceCount", "CountReport", "count_report",
            "check_report", "render_report", "report_to_json", "report_from_json", "unplaced_issues"]
@@ -26,7 +31,6 @@ EXPLAINED_SKIPS = frozenset({
 })
 MERGE_REASONS = frozenset({"same_company", "same_person", "same_touch", "same_application", "same_posting",
                            "annotation"})
-REQUIRED_SOURCES = SOURCES  # every source must give at least one record: error is not empty
 FIRST_ISSUES = 50
 
 
@@ -50,6 +54,8 @@ class CountReport:
     first_issues: tuple[str, ...]
     # issues that name no company: no review item can hold them, so the report is where he reads them
     unplaced_issues: tuple[str, ...] = ()
+    # declared in his [allow_empty] and read with zero records: the one case where a required source may be empty
+    empty_on_purpose: tuple[str, ...] = ()
 
 
 def unplaced_issues(plan: ImportPlan) -> tuple[str, ...]:
@@ -59,9 +65,11 @@ def unplaced_issues(plan: ImportPlan) -> tuple[str, ...]:
 
 
 def count_report(plan: ImportPlan, records: Sequence[SourceRecord], *,
-                 written: dict[str, int] | None = None) -> CountReport:
+                 written: dict[str, int] | None = None,
+                 allow_empty: Collection[str] = frozenset()) -> CountReport:
     """Counts per source from the plan's outcomes. `would_write` is the plan's rows per kind, or, after a run,
-    the rows the writer added per table (`written`)."""
+    the rows the writer added per table (`written`). `allow_empty` is his declared-empty sources; the ones that
+    read nothing are kept in `empty_on_purpose`."""
     counts = {s: {"read": 0, "imported": 0, "merged": Counter(), "skipped": Counter(), "held": Counter()}
               for s in SOURCES}
     tables: dict[str, tuple[int, str]] = {}
@@ -98,15 +106,21 @@ def count_report(plan: ImportPlan, records: Sequence[SourceRecord], *,
     return CountReport(sources=sources, radar_tables=dict(sorted(tables.items())), would_write=would,
                        issues=dict(sorted(Counter(i.code for i in plan.issues).items())), done_set=plan.done_set,
                        followups_not_planned=plan.followups_not_planned, first_issues=lines,
-                       unplaced_issues=unplaced_issues(plan))
+                       unplaced_issues=unplaced_issues(plan),
+                       empty_on_purpose=tuple(s for s in SOURCES if s in allow_empty and sources[s].read == 0))
 
 
-def check_report(report: CountReport) -> list[str]:
-    """One plain line per failure; an empty list means the run may go ahead."""
+def check_report(report: CountReport, *, allow_empty: Collection[str] = frozenset()) -> list[str]:
+    """One plain line per failure; an empty list means the run may go ahead.
+
+    `allow_empty` (his `[allow_empty]`, plus the ruling a stored report carries) lets those sources have zero
+    records. It relaxes nothing else: a source missing from the report still fails, and the count identity is
+    still checked for a declared source."""
     failures = []
+    declared = set(allow_empty) | set(report.empty_on_purpose)
     for source in REQUIRED_SOURCES:
         c = report.sources.get(source)
-        if c is None or c.read == 0:
+        if c is None or (c.read == 0 and source not in declared):
             failures.append(f"{source}: no records at all; a required source never counts as empty")
     for source, c in report.sources.items():
         total = c.imported + sum(c.merged.values()) + sum(c.skipped.values()) + sum(c.held.values())
@@ -137,6 +151,7 @@ def render_report(report: CountReport) -> str:
                 f"  merged: {_by_reason(c.merged)}",
                 f"  skipped: {_by_reason(c.skipped)}",
                 f"  held: {_by_reason(c.held)}"]
+    out += [f"{source}: empty on purpose (his ruling)" for source in report.empty_on_purpose]
     out.append("Radar tables")
     out += [f"  {name}: {rows} {reason}" for name, (rows, reason) in report.radar_tables.items()]
     out.append("Rows: " + _by_reason(report.would_write))
@@ -165,6 +180,7 @@ def report_to_json(report: CountReport) -> dict:
         "would_write": report.would_write, "issues": report.issues, "done_set": list(report.done_set),
         "followups_not_planned": report.followups_not_planned, "first_issues": list(report.first_issues),
         "unplaced_issues": list(report.unplaced_issues),
+        "empty_on_purpose": list(report.empty_on_purpose),
     }
 
 
@@ -175,4 +191,5 @@ def report_from_json(obj: dict) -> CountReport:
         radar_tables={k: (int(v[0]), str(v[1])) for k, v in obj["radar_tables"].items()},
         would_write=dict(obj["would_write"]), issues=dict(obj["issues"]), done_set=tuple(obj["done_set"]),
         followups_not_planned=int(obj["followups_not_planned"]), first_issues=tuple(obj["first_issues"]),
-        unplaced_issues=tuple(obj.get("unplaced_issues", ())))
+        unplaced_issues=tuple(obj.get("unplaced_issues", ())),
+        empty_on_purpose=tuple(obj.get("empty_on_purpose", ())))

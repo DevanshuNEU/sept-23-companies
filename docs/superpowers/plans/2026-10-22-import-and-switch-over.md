@@ -873,7 +873,8 @@ checkout `~/Desktop/Sept 23 Companies`. If a check fails, stop and roll back (R-
    Check: the last lines say `Unexplained losses: 0`, `Second run changed nothing`, `Rehearsal passed`; the done set
    lists Crusoe, Retell and Distyl; read the issue list and fix what needs a decision in
    `~/Desktop/outreach-scratch/import/overrides.toml` (`same_company`, `not_same_company`, `person_name`,
-   `touch_for`, `done_add`, `done_remove`), then repeat step 4.
+   `touch_for`, `done_add`, `done_remove`, `skip_record`, and `allow_empty` for a source that is empty on purpose, such as
+   `[allow_empty]` with `sources = ["contacts_json"]`), then repeat step 4.
 5. Optional staging for #12 and #21: point `OUTREACH_DB` at the rehearsal's `outreach.db` and open the new app
    against it (#11's `python -m outreach.api` with that `OUTREACH_DB` on `CONDUCTOR_PORT + 1` of a workspace, as #11's
    Q13 says; never 3001, 3002, 3011, 3013, 5173 or 3100).

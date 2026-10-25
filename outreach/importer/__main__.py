@@ -64,7 +64,7 @@ def _plan(args, manifest):
     records = read_all(manifest)
     overrides = load_overrides(args.overrides or manifest.overrides)
     plan = build_plan(records, overrides, now=args.now, send_cfg=load_config())
-    return records, plan
+    return records, plan, overrides
 
 
 # -- commands ------------------------------------------------------------------------------------------------------
@@ -98,15 +98,15 @@ def dry_run(args, manifest) -> int:
     try:
         before = conn.total_changes
         stored = conn.execute("SELECT count(*) FROM import_record").fetchone()[0]
-        records, plan = _plan(args, manifest)
-        report = count_report(plan, records)
+        records, plan, overrides = _plan(args, manifest)
+        report = count_report(plan, records, allow_empty=overrides.allow_empty)
         print(render_report(report))
         print(f"Import records already in the store: {stored}")
         if conn.total_changes != before:
             raise RuntimeError("the dry run wrote to the store")
     finally:
         conn.close()
-    return 0 if not check_report(report) else 1
+    return 0 if not check_report(report, allow_empty=overrides.allow_empty) else 1
 
 
 def run(args, manifest) -> int:
@@ -114,8 +114,8 @@ def run(args, manifest) -> int:
         live_checkout.require_live("the import run on real data")
     conn = connect()
     try:
-        records, plan = _plan(args, manifest)
-        _, lines, failures = import_twice(conn, plan, records, now=args.now)
+        records, plan, overrides = _plan(args, manifest)
+        _, lines, failures = import_twice(conn, plan, records, now=args.now, allow_empty=overrides.allow_empty)
     finally:
         conn.close()
     print("\n".join(lines))

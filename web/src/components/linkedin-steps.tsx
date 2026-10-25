@@ -10,8 +10,21 @@ const WORD: Record<LinkedInStep, string> = {
   replied: 'Replied',
 };
 
-/** Four dots joined by lines, lit up to the latest step, with that step's word and day beside them. */
-export function LinkedInSteps({ steps, asOf }: { steps: { step: LinkedInStep; at: IsoTime }[]; asOf: IsoTime }) {
+/**
+ * Four dots joined by lines, lit up to the latest step, with that step's word and day beside them. `className` and
+ * `labelClassName` let a narrow table put the words under the dots.
+ */
+export function LinkedInSteps({
+  steps,
+  asOf,
+  className,
+  labelClassName,
+}: {
+  steps: { step: LinkedInStep; at: IsoTime }[];
+  asOf: IsoTime;
+  className?: string;
+  labelClassName?: string;
+}) {
   let reached = -1;
   let latest: { step: LinkedInStep; at: IsoTime } | null = null;
   for (const s of steps) {
@@ -23,7 +36,7 @@ export function LinkedInSteps({ steps, asOf }: { steps: { step: LinkedInStep; at
   }
   const label = latest ? `${WORD[latest.step]} ${ageDays(latest.at, asOf) === 0 ? 'today' : formatDay(latest.at)}` : 'Not started';
   return (
-    <span className="inline-flex items-center align-middle">
+    <span className={cn('inline-flex items-center align-middle', className)}>
       <span role="img" aria-label={label} className="inline-flex items-center">
         {ORDER.map((step, i) => (
           <span key={step} className="inline-flex items-center">
@@ -39,7 +52,7 @@ export function LinkedInSteps({ steps, asOf }: { steps: { step: LinkedInStep; at
           </span>
         ))}
       </span>
-      <span className="ml-2 text-xs whitespace-nowrap text-muted-foreground">{label}</span>
+      <span className={cn('ml-2 text-xs whitespace-nowrap text-muted-foreground', labelClassName)}>{label}</span>
     </span>
   );
 }

@@ -27,14 +27,16 @@ function List<T extends string | number>({
   onOpen,
   announce,
   initial,
+  start,
 }: {
   ids: T[];
   param?: string;
   onOpen?: (id: T) => void;
   announce?: (id: T) => string;
   initial?: T;
+  start?: T;
 }) {
-  const nav = useListNav({ ids, param, onOpen, announce, initial });
+  const nav = useListNav({ ids, param, onOpen, announce, initial, start });
   return (
     <>
       <p data-testid="selected">{nav.selected === null ? 'none' : String(nav.selected)}</p>
@@ -50,7 +52,7 @@ function List<T extends string | number>({
 }
 
 function renderList<T extends string | number>(
-  props: { ids: T[]; param?: string; onOpen?: (id: T) => void; announce?: (id: T) => string; initial?: T },
+  props: { ids: T[]; param?: string; onOpen?: (id: T) => void; announce?: (id: T) => string; initial?: T; start?: T },
   route = '/outbox',
 ) {
   return render(
@@ -68,6 +70,15 @@ const location = () => screen.getByTestId('location').textContent;
 const selected = () => screen.getByTestId('selected').textContent;
 
 describe('useListNav', () => {
+  it('with nothing selected, j and k land on `start` (the first row of the page in sight)', () => {
+    renderList({ ids: ['t1', 't2', 't3'], start: 't2' });
+    expect(selected()).toBe('none');
+    press('k');
+    expect(selected()).toBe('t2');
+    press('j');
+    expect(selected()).toBe('t3');
+  });
+
   it('j and k move without wrapping', () => {
     renderList({ ids: ['t1', 't2', 't3'] });
     expect(selected()).toBe('none');

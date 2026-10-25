@@ -11,6 +11,8 @@ export type ListNavOptions<T extends string | number> = {
   announce?: (id: T) => string;
   /** The selection while the URL has none (the first row to work on). The URL is written only when he moves. */
   initial?: T;
+  /** Where j and k land while nothing is selected (the first row of a paged list's page in sight). Default: the first row. */
+  start?: T;
 };
 
 export type RowProps = {
@@ -35,6 +37,7 @@ export function useListNav<T extends string | number>({
   onOpen,
   announce,
   initial,
+  start,
 }: ListNavOptions<T>): { selected: T | null; select: (id: T) => void; rowProps: (id: T) => RowProps } {
   // No param means nothing selected; useUrlState writes with replace.
   const [raw, setRaw] = useUrlState(param, '');
@@ -72,7 +75,7 @@ export function useListNav<T extends string | number>({
     if (ids.length === 0) return;
     const from = live.latest();
     const at = from === null ? -1 : ids.indexOf(from);
-    const index = at === -1 ? 0 : Math.min(Math.max(at + step, 0), ids.length - 1);
+    const index = at === -1 ? Math.max(start === undefined ? 0 : ids.indexOf(start), 0) : Math.min(Math.max(at + step, 0), ids.length - 1);
     const id = ids[index] as T;
     if (id === from) return;
     select(id);

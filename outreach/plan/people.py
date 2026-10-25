@@ -26,7 +26,8 @@ from outreach.store.timefmt import utcnow
 from outreach.store.writes import append_event, name_key
 
 __all__ = ["SourceRef", "SourceInput", "Candidate", "AddResult", "ROLE_KINDS", "SOURCE_KINDS", "load_candidates",
-           "tier", "rank_people", "pick_channel", "people_search_url", "add_candidate", "small_company_ids"]
+           "tier", "rank_people", "pick_channel", "people_search_url", "add_candidate", "small_company_ids",
+           "holds_email", "is_linkedin_url", "is_github_host", "linkedin_profile_url"]
 
 ROLE_KINDS = ("engineer", "manager", "founder", "recruiter", "alum", "other")
 SOURCE_KINDS = ("profile", "team", "context", "email", "post")
@@ -333,6 +334,19 @@ def _linkedin_url(url: str) -> bool:
     return "linkedin.com" in low or "lnkd.in" in low
 
 
+def linkedin_profile_url(url: str | None) -> str | None:
+    """The normalized profile link (`https://www.linkedin.com/in/<slug>`, slug lower case) of a URL with the profile
+    shape, else None."""
+    m = _LINKEDIN_IN.match(url.strip()) if isinstance(url, str) else None
+    return f"https://www.linkedin.com/in/{m.group(1).lower()}" if m else None
+
+
+# The rules above, by public name, for the prepare step (Task 13), which checks a reply before `add_candidate` does.
+holds_email = _holds_email
+is_linkedin_url = _linkedin_url
+is_github_host = _github_host
+
+
 def _refuse(code: str) -> AddResult:
     return AddResult(None, False, code)
 
@@ -393,10 +407,9 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
         return _refuse("linkedin_source")
     norm_linkedin = None
     if linkedin_url is not None:
-        m = _LINKEDIN_IN.match(linkedin_url.strip())
-        if not m:
+        norm_linkedin = linkedin_profile_url(linkedin_url)
+        if norm_linkedin is None:
             return _refuse("bad_linkedin_url")
-        norm_linkedin = f"https://www.linkedin.com/in/{m.group(1).lower()}"
     if email is not None:
         email = email.strip().lower()
         if not _EMAIL_SHAPE.match(email):

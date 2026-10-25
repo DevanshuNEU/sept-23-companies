@@ -212,6 +212,21 @@ class CarriedTest(unittest.TestCase):
         gone = prospect(9, candidates=[team], carried=self.carry(9, 41, date(2026, 11, 6)))
         self.assertEqual(options(gone, CFG)[0][1], 40)
 
+    def test_a_carried_person_without_room_keeps_the_company_waiting_never_someone_else(self):
+        ada = cand(50, company=9, role="founder", email="ada@nine.example", basis="published")
+        ben = cand(51, company=9, fit="team")
+        p = prospect(9, score=99.0, candidates=[ada, ben], carried=self.carry(9, 50, date(2026, 11, 6)))
+        others = many(3, ["level_role"], start_score=50, base=500)
+        rows = choose_rows([p] + others, Caps(5, 0, 4, 1), CFG)  # Ada is an email row and no email slot is left
+        self.assertNotIn(9, chosen_ids(rows))  # not Ben in her place, and no find-someone row either
+        self.assertEqual(sorted(chosen_ids(rows)), [500, 501, 502])
+        rows = choose_rows([p] + others, Caps(5, 1, 4, 1), CFG)
+        mine = [r for r in rows if r.company_id == 9]
+        self.assertEqual([(r.person_id, r.channel) for r in mine], [(50, "email")])
+        # the other way round: Ben carried on LinkedIn with no LinkedIn room; Ada is not emailed instead
+        q = prospect(9, score=99.0, candidates=[ada, ben], carried=self.carry(9, 51, date(2026, 11, 6)))
+        self.assertEqual(choose_rows([q], Caps(0, 3, 0, 0), CFG), [])
+
     def test_oldest_first_proposed_is_admitted_first(self):
         old = prospect(1, score=1.0, carried=self.carry(1, None, date(2026, 11, 2)))
         newer = prospect(2, score=99.0, carried=self.carry(2, None, date(2026, 11, 6)))

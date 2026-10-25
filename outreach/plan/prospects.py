@@ -56,13 +56,15 @@ def _iso(text) -> date | None:
 
 def load_carried(conn: sqlite3.Connection, today: date, cfg: PlanConfig,
                  outbound: Sequence[Outbound]) -> dict[int, CarriedRow]:
-    """The rows of the latest plan before `today` that has at least one carryable row, by surviving company id. A row
-    is carryable when it is still `proposed`, `picked` or `backlog`, not done, and not past the roll limit. A person
-    row is done when `outbound` has a row for that person on or after the plan's date; a find-someone row when anyone
-    at the company was asked by LinkedIn request or email since then. A row is dropped once more than
-    `plan.roll_forward_days` weekdays passed since it was first proposed. A plan with nothing carryable (an empty
-    zero-capacity day, or one whose rows are all done) is skipped, so it does not cut off what was carried before it;
-    plans too old for any row to survive are not read. `carried_from` is the date of the plan the row is read from."""
+    """The unfinished rows of the plans before `today`, by surviving company id. The plans are walked newest first,
+    and a company is decided by the newest plan that has a row for it: a carryable row there is carried, any other row
+    (removed, done, past the limit) means it is not carried, and an older plan is never read for it again. A row is
+    carryable when it is still `proposed`, `picked` or `backlog`, not done, and not past the roll limit. So a row
+    that a day had no room for (it was never written into that day's plan) is still carried from the plan that last
+    proposed it, until the limit. A person row is done when `outbound` has a row for that person on or after the
+    plan's date; a find-someone row when anyone at the company was asked by LinkedIn request or email since then. A
+    row is dropped once more than `plan.roll_forward_days` weekdays passed since it was first proposed; plans too old
+    for any row to survive are not read. `carried_from` is the date of the plan the row is read from."""
     limit = cfg.get("plan", "roll_forward_days")
     canon = canonical_ids(conn)
     by_person: dict[int, list[date]] = {}
@@ -72,27 +74,30 @@ def load_carried(conn: sqlite3.Connection, today: date, cfg: PlanConfig,
             by_person.setdefault(o.person_id, []).append(o.sent_on)
         if o.channel in ("linkedin_request", "email"):
             by_company.setdefault(o.company_id, []).append(o.sent_on)
+    out: dict[int, CarriedRow] = {}
+    decided: set[int] = set()
     for (plan_day,) in conn.execute("SELECT list_date FROM daily_list WHERE list_date < ? ORDER BY list_date DESC",
                                     (today.isoformat(),)).fetchall():
         list_date = date.fromisoformat(plan_day)
         if business_days_between(list_date, today) > limit:
             break  # a row's first_proposed is never after its plan's date, so none here can survive
-        out = _carryable(conn, plan_day, list_date, today, limit, canon, by_person, by_company)
-        if out:
-            return out
-    return {}
+        _carryable(conn, plan_day, list_date, today, limit, canon, by_person, by_company, decided, out)
+    return out
 
 
 def _carryable(conn: sqlite3.Connection, plan_day: str, list_date: date, today: date, limit: int,
-               canon: dict[int, int], by_person: dict[int, list[date]],
-               by_company: dict[int, list[date]]) -> dict[int, CarriedRow]:
-    out: dict[int, CarriedRow] = {}
-    marks = _marks(len(CARRIED_STATES))
-    for r in conn.execute(
-            f"SELECT company_id, person_id, why FROM daily_list_entry WHERE list_date = ? AND state IN ({marks}) "
-            f"ORDER BY rank", (plan_day, *CARRIED_STATES)):
+               canon: dict[int, int], by_person: dict[int, list[date]], by_company: dict[int, list[date]],
+               decided: set[int], out: dict[int, CarriedRow]) -> None:
+    """Add the carryable rows of one plan to `out`, skipping companies a newer plan already decided; every company
+    this plan has a row for is decided from here on."""
+    here: set[int] = set()
+    for r in conn.execute("SELECT company_id, person_id, why, state FROM daily_list_entry WHERE list_date = ? "
+                          "ORDER BY rank", (plan_day,)):
         company = canon.get(r["company_id"], r["company_id"])
-        if company in out:
+        if company in decided or company in out:
+            continue
+        here.add(company)
+        if r["state"] not in CARRIED_STATES:
             continue
         seen = by_person.get(r["person_id"], ()) if r["person_id"] is not None else by_company.get(company, ())
         if any(d >= list_date for d in seen):
@@ -105,7 +110,7 @@ def _carryable(conn: sqlite3.Connection, plan_day: str, list_date: date, today: 
         if business_days_between(first, today) > limit:
             continue
         out[company] = CarriedRow(company, r["person_id"], list_date, first)
-    return out
+    decided |= here
 
 
 # Prospects

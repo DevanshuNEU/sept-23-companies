@@ -110,6 +110,32 @@ class CarryTest(unittest.TestCase):
         self.assertEqual(kept[a].carried_from, FRI)
         self.assertEqual(carried(self.conn, TUE), {})  # the sixth weekday
 
+    def test_rows_left_out_for_lack_of_capacity_are_carried_again(self):
+        """Monday proposes ten; Tuesday has room for four of them. On Wednesday the other six are still carried
+        (from Monday), with the four Tuesday took, until the roll limit."""
+        wed = date(2026, 11, 11)
+        ids = [seed_scored_company(self.conn, f"Co{i}", 90 - i, ["level_role"]) for i in range(10)]
+        ada = seed_person(self.conn, ids[9], "Ada Founder", "founder", email="ada@co9.example")
+        for rank, company in enumerate(ids, 1):
+            seed_daily_entry(self.conn, MON, company, rank=rank, state="backlog",  # Tuesday's build backlogs them
+                             person_id=ada if company == ids[9] else None,
+                             channel="email" if company == ids[9] else None)
+        for rank, company in enumerate(ids[:4], 1):
+            seed_daily_entry(self.conn, TUE, company, rank=rank, why={"first_proposed": MON.isoformat()})
+        got = carried(self.conn, wed)
+        self.assertEqual(set(got), set(ids))
+        self.assertTrue(all(got[c].first_proposed == MON for c in ids))
+        self.assertEqual({c for c in ids if got[c].carried_from == TUE}, set(ids[:4]))
+        self.assertEqual(got[ids[9]].person_id, ada)  # the founder-email row with no email slot on Tuesday waits too
+        # a company a newer plan decided (removed it) is not carried from the older plan
+        self.conn.execute("UPDATE daily_list_entry SET state = 'removed', decided_at = ? WHERE list_date = ? "
+                          "AND company_id = ?", (utcnow(), TUE.isoformat(), ids[0]))
+        self.assertNotIn(ids[0], carried(self.conn, wed))
+        # done still drops it, and so does the roll limit counted from first_proposed
+        seed_outbound(self.conn, ada, ids[9], "email", TUE)
+        self.assertNotIn(ids[9], carried(self.conn, wed))
+        self.assertEqual(carried(self.conn, date(2026, 11, 17)), {})  # Monday plus six weekdays
+
     def test_a_row_with_no_first_proposed_uses_its_plan_date(self):
         a = seed_scored_company(self.conn, "Acme", 80, ["level_role"])
         seed_daily_entry(self.conn, date(2026, 11, 2), a, why={"first_proposed": "not a date"})

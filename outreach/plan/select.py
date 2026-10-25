@@ -154,9 +154,20 @@ def choose_rows(prospects: Sequence[Prospect], caps: Caps, cfg: PlanConfig) -> l
     for p in carried:
         if p.company_id in used:
             continue
-        opt = _first_with_room(options(p, cfg), linkedin, email)
-        if opt is None:
-            continue
+        opts = options(p, cfg)
+        person = p.carried.person_id
+        if person is not None and any(c.person_id == person for c in p.candidates):
+            # Their row, or none today: never another person in their place. Without room, the company waits and the
+            # row stays carried (the next build reads it again from the plan that proposed it).
+            mine = next((o for o in opts if o[1] == person), None)
+            if mine is None or (email if mine[0] == "email" else linkedin) <= 0:
+                used.add(p.company_id)
+                continue
+            opt = mine
+        else:
+            opt = _first_with_room(opts, linkedin, email)
+            if opt is None:
+                continue
         take(p, opt)
         group = group_of(p.lanes, cfg)
         if opt[0] != "email" and group in quota:

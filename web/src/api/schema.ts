@@ -1243,6 +1243,41 @@ export interface components {
              */
             tone: "ok" | "info" | "warn" | "bad" | "idle";
         };
+        /**
+         * CompanyQueue
+         * @description A company row's lines (company first, #9 2026-10-26). Every line is the API's; the page shows them as given.
+         */
+        CompanyQueue: {
+            /** Careersurl */
+            careersUrl: string | null;
+            /** Emailhint */
+            emailHint: string | null;
+            /** Hiring */
+            hiring: number;
+            /** Hiringline */
+            hiringLine: string;
+            /** Lasttouch */
+            lastTouch: string | null;
+            /** Peopleline */
+            peopleLine: string;
+            /** Peopleonrecord */
+            peopleOnRecord: number;
+            /** Peoplesearchurl */
+            peopleSearchUrl: string;
+            /** Reasons */
+            reasons: string[];
+            /** Roleline */
+            roleLine: string | null;
+            /** Searchsaved */
+            searchSaved: boolean;
+            /** Sizeline */
+            sizeLine: string | null;
+            /** Sponsorshipline */
+            sponsorshipLine: string;
+            standing: components["schemas"]["QueueStanding"];
+            /** Terminalline */
+            terminalLine: string;
+        };
         /** CompanyRef */
         CompanyRef: {
             /** Held */
@@ -1700,6 +1735,24 @@ export interface components {
              */
             channel: "linkedin_request" | "linkedin_message" | "email" | "application" | "hn_reply" | "other";
             person: components["schemas"]["PersonRef"] | null;
+        };
+        /**
+         * InFlightCompany
+         * @description A company with a wave out in the last `linkedin.rotate_days`, or a reply: the track half of the queue.
+         */
+        InFlightCompany: {
+            company: components["schemas"]["CompanyRef"];
+            /** Freeon */
+            freeOn: string | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "in_flight" | "replied";
+            /** Text */
+            text: string;
         };
         /** JobCount */
         JobCount: {
@@ -2392,6 +2445,7 @@ export interface components {
             person: components["schemas"]["PlanPerson"] | null;
             /** Position */
             position: number;
+            queue: components["schemas"]["CompanyQueue"] | null;
             /** Reason */
             reason: string;
             /** Reasonsources */
@@ -2429,6 +2483,11 @@ export interface components {
             date: string;
             /** Done */
             done: number;
+            /**
+             * Inflight
+             * @default []
+             */
+            inFlight: components["schemas"]["InFlightCompany"][];
             linkedinWeek: components["schemas"]["LinkedinWeek"];
             listJob: components["schemas"]["JobRunSummary"] | null;
             notReady: components["schemas"]["NotReady"] | null;
@@ -2572,6 +2631,28 @@ export interface components {
         Pulse: {
             /** Revision */
             revision: number;
+        };
+        /**
+         * QueueStanding
+         * @description Where a company stands (`outreach.plan.contact`): new, a wave in flight, asked before with no answer, or a
+         *     reply that holds it. `text` is the line the row shows.
+         */
+        QueueStanding: {
+            /** Asked */
+            asked: number;
+            /** Freeon */
+            freeOn: string | null;
+            /** Reason */
+            reason: string;
+            /** Room */
+            room: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "new" | "in_flight" | "asked_before" | "replied";
+            /** Text */
+            text: string;
         };
         /** ReadQueueStatus */
         ReadQueueStatus: {

@@ -630,6 +630,127 @@
         "title": "CompanyPerson",
         "type": "object"
       },
+      "CompanyQueue": {
+        "description": "A company row's lines (company first, #9 2026-10-26). Every line is the API's; the page shows them as given.",
+        "properties": {
+          "careersUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Careersurl"
+          },
+          "emailHint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emailhint"
+          },
+          "hiring": {
+            "title": "Hiring",
+            "type": "integer"
+          },
+          "hiringLine": {
+            "title": "Hiringline",
+            "type": "string"
+          },
+          "lastTouch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lasttouch"
+          },
+          "peopleLine": {
+            "title": "Peopleline",
+            "type": "string"
+          },
+          "peopleOnRecord": {
+            "title": "Peopleonrecord",
+            "type": "integer"
+          },
+          "peopleSearchUrl": {
+            "title": "Peoplesearchurl",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "roleLine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roleline"
+          },
+          "searchSaved": {
+            "title": "Searchsaved",
+            "type": "boolean"
+          },
+          "sizeLine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sizeline"
+          },
+          "sponsorshipLine": {
+            "title": "Sponsorshipline",
+            "type": "string"
+          },
+          "standing": {
+            "$ref": "#/components/schemas/QueueStanding"
+          },
+          "terminalLine": {
+            "title": "Terminalline",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sizeLine",
+          "roleLine",
+          "hiring",
+          "hiringLine",
+          "sponsorshipLine",
+          "reasons",
+          "standing",
+          "lastTouch",
+          "emailHint",
+          "peopleOnRecord",
+          "peopleLine",
+          "peopleSearchUrl",
+          "searchSaved",
+          "careersUrl",
+          "terminalLine"
+        ],
+        "title": "CompanyQueue",
+        "type": "object"
+      },
       "CompanyRef": {
         "properties": {
           "held": {
@@ -2056,6 +2177,50 @@
           "at"
         ],
         "title": "HoldingReply",
+        "type": "object"
+      },
+      "InFlightCompany": {
+        "description": "A company with a wave out in the last `linkedin.rotate_days`, or a reply: the track half of the queue.",
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "freeOn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freeon"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "in_flight",
+              "replied"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "company",
+          "status",
+          "text",
+          "reason",
+          "freeOn"
+        ],
+        "title": "InFlightCompany",
         "type": "object"
       },
       "JobCount": {
@@ -4125,6 +4290,16 @@
             "title": "Position",
             "type": "integer"
           },
+          "queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompanyQueue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reason": {
             "title": "Reason",
             "type": "string"
@@ -4184,7 +4359,8 @@
           "steps",
           "state",
           "carriedFrom",
-          "revision"
+          "revision",
+          "queue"
         ],
         "title": "PlanRow",
         "type": "object"
@@ -4255,6 +4431,14 @@
             "title": "Done",
             "type": "integer"
           },
+          "inFlight": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InFlightCompany"
+            },
+            "title": "Inflight",
+            "type": "array"
+          },
           "linkedinWeek": {
             "$ref": "#/components/schemas/LinkedinWeek"
           },
@@ -4307,7 +4491,8 @@
           "total",
           "linkedinWeek",
           "tomorrow",
-          "week"
+          "week",
+          "inFlight"
         ],
         "title": "PlanView",
         "type": "object"
@@ -4703,6 +4888,58 @@
           "revision"
         ],
         "title": "Pulse",
+        "type": "object"
+      },
+      "QueueStanding": {
+        "description": "Where a company stands (`outreach.plan.contact`): new, a wave in flight, asked before with no answer, or a\nreply that holds it. `text` is the line the row shows.",
+        "properties": {
+          "asked": {
+            "title": "Asked",
+            "type": "integer"
+          },
+          "freeOn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freeon"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "room": {
+            "title": "Room",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "new",
+              "in_flight",
+              "asked_before",
+              "replied"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "text",
+          "reason",
+          "asked",
+          "room",
+          "freeOn"
+        ],
+        "title": "QueueStanding",
         "type": "object"
       },
       "ReadQueueStatus": {

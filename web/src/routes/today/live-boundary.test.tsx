@@ -28,6 +28,7 @@ const EMPTY_DAY = {
   linkedinWeek: { used: 12, limit: 150, hardUsed: 14, hardLimit: 200 },
   tomorrow: { total: 7, text: 'Tomorrow: 7 people.', preview: [] },
   week: { requests: 0, accepts: 0, replies: 0 },
+  inFlight: [],
 } satisfies Omit<PlanView, 'listJob' | 'notReady'>;
 
 const FAILED_JOB: JobRunSummary = {

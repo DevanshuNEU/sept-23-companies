@@ -301,6 +301,19 @@ export interface NoteDraft {
   facts: NoteFact[]; checks: Check[]; savedBy: SavedBy; savedAt: IsoTime; revision: Revision;
 }
 export interface PlanStep { kind: StepKind; touchId: Id | null; at: IsoTime | null }  // at null: not done yet
+// Today as a company queue (#9 company-first ruling, P2): every line is the API's; the page shows them as given.
+export interface QueueStanding {
+  status: 'new' | 'in_flight' | 'asked_before' | 'replied'; text: string; reason: string; // text: "4 asked 6 days ago, free again Nov 18"
+  asked: number; room: number; freeOn: IsoDate | null;                               // the wave: people asked, room left (of 4), the day it is free again
+}
+export interface CompanyQueue {
+  sizeLine: string | null; roleLine: string | null; hiring: number; hiringLine: string; sponsorshipLine: string;
+  reasons: string[]; standing: QueueStanding; lastTouch: string | null; emailHint: string | null;
+  peopleOnRecord: number; peopleLine: string;
+  peopleSearchUrl: string; searchSaved: boolean; careersUrl: string | null;          // opened in his browser, never fetched
+  terminalLine: string;                                                              // "Knock: Tessera Labs (company 1304), role: Forward Deployed Engineer"
+}
+export interface InFlightCompany { company: CompanyRef; status: 'in_flight' | 'replied'; text: string; reason: string; freeOn: IsoDate | null }
 export interface PlanRow {
   entryId: Id; position: number; channel: 'linkedin_request' | 'email'; lane: ListGroup;
   company: CompanyRef & { domain: string | null; hq: string; revision: Revision };
@@ -313,6 +326,7 @@ export interface PlanRow {
   steps: PlanStep[];                                                                 // linkedin_request: request, then apply when there is a role
   state: 'todo' | 'done' | 'skipped';                                                // derived
   carriedFrom: IsoDate | null; revision: Revision;
+  queue: CompanyQueue | null;                                                        // set only on a company row (no person, not an email row)
 }
 /** One person the next weekday's plan would propose (a dry run, rebuilt at 08:00): findSomeone when nobody is named yet. */
 export interface TomorrowRow {
@@ -326,6 +340,7 @@ export interface PlanView {
   linkedinWeek: { used: number; limit: number; hardUsed: number; hardLimit: number };    // the last 7 days: plan quota, and every request against the hard total
   tomorrow: { total: number; text: string; preview: TomorrowRow[] };                     // total is room; preview is a dry run of the next plan
   week: { requests: number; accepts: number; replies: number };
+  inFlight: InFlightCompany[];                                                       // waves out in the last 14 days and replies, replies first
 }
 
 // Done (spec 13.8)

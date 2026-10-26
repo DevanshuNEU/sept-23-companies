@@ -70,6 +70,9 @@ export const _parity: [
   Same<T.NoteFact, S['NoteFact']>,
   Same<T.NoteDraft, S['NoteDraft']>,
   Same<T.PlanStep, S['PlanStep']>,
+  Same<T.QueueStanding, S['QueueStanding']>,
+  Same<T.CompanyQueue, S['CompanyQueue']>,
+  Same<T.InFlightCompany, S['InFlightCompany']>,
   Same<T.PlanRow, S['PlanRow']>,
   Same<T.PlanView, S['PlanView']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

@@ -9,6 +9,7 @@ const EMPTY: PlanView = {
   linkedinWeek: { used: 0, limit: 150, hardUsed: 0, hardLimit: 200 },
   tomorrow: { total: 7, text: 'Tomorrow: 7 people.', preview: [] },
   week: { requests: 0, accepts: 0, replies: 0 },
+  inFlight: [],
 };
 
 describe('planMethods', () => {

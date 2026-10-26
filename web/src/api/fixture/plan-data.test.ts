@@ -32,6 +32,41 @@ describe("plan fixture: tomorrow's draft", () => {
   });
 });
 
+describe('plan fixture: the company queue', () => {
+  it('has 8 company rows with the API lines, the first 2 done, and nobody named', async () => {
+    const plan = await client('queue').plan();
+    expect(plan.rows.map((r) => r.company.name)).toEqual(['Resend', 'Baseten', 'Pylon', 'Inngest', 'Cerebrium', 'Turso', 'Trigger.dev', 'Hex']);
+    expect([plan.done, plan.total]).toEqual([2, 8]);
+    for (const r of plan.rows) {
+      expect(r.person).toBeNull();
+      expect(r.note).toBeNull();
+      expect(r.queue).not.toBeNull();
+      expect(r.findSomeone?.searchUrl).toBe(r.queue?.peopleSearchUrl);
+      expect(r.queue?.terminalLine).toBe(`Knock: ${r.company.name} (company ${r.company.id})${r.role ? `, role: ${r.role.title}` : ''}`);
+      expect(r.queue?.peopleSearchUrl.startsWith('https://www.linkedin.com/search/results/people/?')).toBe(true);
+    }
+    expect(plan.rows.map((r) => r.state)).toEqual(['done', 'done', 'todo', 'todo', 'todo', 'todo', 'todo', 'todo']);
+    expect(row(plan, 1).queue?.standing.text).toBe('3 asked today, room for 1 more, free again Nov 24');
+    expect(row(plan, 3).queue?.searchSaved).toBe(true);
+    expect(row(plan, 6).carriedFrom).toBe('2026-11-09');
+    expect(plan.tomorrow.text).toBe("Tomorrow's plan builds at 08:00. Room for 8 companies. A draft of who it would propose is below.");
+  });
+
+  it('lists the replies first in flight, then by the day each is free again', async () => {
+    const { inFlight } = await client('queue').plan();
+    expect(inFlight.map((f) => [f.company.name, f.status, f.freeOn])).toEqual([
+      ['Browserbase', 'replied', null], ['Warp', 'in_flight', '2026-11-18'], ['Zed Industries', 'in_flight', '2026-11-19'],
+      ['Baseten', 'in_flight', '2026-11-24'], ['Resend', 'in_flight', '2026-11-24'],
+    ]);
+    expect((await client('fresh').plan()).inFlight).toEqual([]);
+  });
+
+  it('the people plan keeps its one company row with lines, and its person rows have none', async () => {
+    const plan = await client().plan();
+    expect(plan.rows.filter((r) => r.queue !== null).map((r) => r.company.name)).toEqual(['Cerebrium']);
+  });
+});
+
 describe('plan fixture: default', () => {
   it('default plan has 7 rows in the listed order, done 2, total 7', async () => {
     const plan = await client().plan();

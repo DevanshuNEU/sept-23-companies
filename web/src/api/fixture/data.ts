@@ -29,10 +29,11 @@ export type Scenario =
   | 'default' | 'hard_block' | 'signed_out' | 'empty' | 'weekend' | 'job_failed' | 'error' | 'many_sent'
   | 'quiet_week' | 'first_week' | 'plan_done' | 'win' | 'fresh' // the plan scenarios (#33); `fresh` has no outcomes ever
   | 'review' // Needs you with every kind, a merge question and today's settlings (#16)
-  | 'many_linkedin'; // the LinkedIn list long enough to page: 52 to reach across 26 companies
+  | 'many_linkedin' // the LinkedIn list long enough to page: 52 to reach across 26 companies
+  | 'queue'; // Today as the company queue the shipped config builds (company first, #9): 8 companies, 2 done
 export const SCENARIOS: readonly Scenario[] = [
   'default', 'hard_block', 'signed_out', 'empty', 'weekend', 'job_failed', 'error', 'many_sent', 'quiet_week', 'first_week', 'plan_done', 'win', 'fresh', 'review',
-  'many_linkedin',
+  'many_linkedin', 'queue',
 ];
 
 export interface FixtureDb {

@@ -214,7 +214,11 @@ class PlanReadTests(PlanCase):
         five = rows[4]
         self.assertIsNone(five["person"])
         self.assertIsNone(five["note"])
-        self.assertEqual(five["findSomeone"], {"searchUrl": SEARCH, "handoff": HANDOFF})
+        # The link is read now (his saved search, a stored LinkedIn id, else the name), not the one stored at 08:00.
+        self.assertEqual(five["findSomeone"], {"searchUrl": five["queue"]["peopleSearchUrl"], "handoff": HANDOFF})
+        self.assertEqual(five["queue"]["peopleSearchUrl"], "https://www.linkedin.com/search/results/people/"
+                                                           "?keywords=Cerebrium&geoUrn=%5B%22103644278%22%5D"
+                                                           "&origin=FACETED_SEARCH")
         self.assertEqual(five["state"], "todo")
         self.assertTrue(all(r["findSomeone"] is None for i, r in enumerate(rows) if i != 4))
 
@@ -364,7 +368,7 @@ class PlanReadTests(PlanCase):
         preview = view["tomorrow"]["preview"]
         self.assertEqual(preview, self.expected_draft())
         self.assertNotIn("Resend", [p["companyName"] for p in preview])  # asked on Tuesday: the company waits
-        self.assertEqual(view["tomorrow"]["text"], f"Monday's plan builds at 08:00. Room for {total} people. "
+        self.assertEqual(view["tomorrow"]["text"], f"Monday's plan builds at 08:00. Room for {total} companies. "
                                                    "A draft of who it would propose is below.")
 
     def test_weekday_with_no_list_is_not_built(self):
@@ -375,7 +379,7 @@ class PlanReadTests(PlanCase):
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 12), CFG)
         self.assertEqual(view["tomorrow"]["total"], total)
         self.assertEqual(view["tomorrow"]["preview"], self.expected_draft())
-        self.assertEqual(view["tomorrow"]["text"], f"Tomorrow's plan builds at 08:00. Room for {total} people. "
+        self.assertEqual(view["tomorrow"]["text"], f"Tomorrow's plan builds at 08:00. Room for {total} companies. "
                                                    "A draft of who it would propose is below.")
 
     def test_failed_plan_job_is_job_failed_with_its_error(self):
@@ -411,7 +415,7 @@ class PlanReadTests(PlanCase):
             view = self.plan()
         self.assertEqual(spy.call_args.kwargs["today"], date(2026, 11, 16))
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 16), CFG)
-        self.assertEqual(view["tomorrow"]["text"], f"Monday's plan builds at 08:00. Room for {total} people. "
+        self.assertEqual(view["tomorrow"]["text"], f"Monday's plan builds at 08:00. Room for {total} companies. "
                                                    "A draft of who it would propose is below.")
         preview = view["tomorrow"]["preview"]
         self.assertEqual(preview, self.expected_draft())
@@ -423,7 +427,7 @@ class PlanReadTests(PlanCase):
         tomorrow = self.plan()["tomorrow"]
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 11), CFG)
         self.assertEqual((tomorrow["text"], tomorrow["preview"]),
-                         (f"Tomorrow's plan builds at 08:00. Room for {total} {'person' if total == 1 else 'people'}.",
+                         (f"Tomorrow's plan builds at 08:00. Room for {total} {'company' if total == 1 else 'companies'}.",
                           []))
         self.assertNotIn("below", tomorrow["text"])
 
@@ -433,8 +437,11 @@ class PlanReadTests(PlanCase):
         tomorrow = self.plan()["tomorrow"]
         self.assertEqual(tomorrow["preview"], [])
         self.assertEqual(tomorrow["text"], f"Monday's plan builds at 08:00. Room for {tomorrow['total']} "
-                                           f"{'person' if tomorrow['total'] == 1 else 'people'}.")
+                                           f"{'company' if tomorrow['total'] == 1 else 'companies'}.")
         self.assertEqual(plan_text("Tomorrow", 1, 0), "Tomorrow's plan builds at 08:00. Room for 1 person.")
+        # company first (#9): the queue counts companies
+        self.assertEqual(plan_text("Tomorrow", 1, 0, companies=True), "Tomorrow's plan builds at 08:00. Room for 1 company.")
+        self.assertEqual(plan_text("Monday", 8, 0, companies=True), "Monday's plan builds at 08:00. Room for 8 companies.")
         self.assertEqual(plan_text("Monday", 7, 2), "Monday's plan builds at 08:00. Room for 7 people. "
                                                     "A draft of who it would propose is below.")
 
@@ -609,7 +616,7 @@ class TomorrowDraftTests(PlanCase):
                         first = self.plan()["tomorrow"]
                         second = self.plan()["tomorrow"]
                 self.assertEqual(first, {"total": total, "preview": [],
-                                         "text": f"Monday's plan builds at 08:00. Room for {total} people."})
+                                         "text": f"Monday's plan builds at 08:00. Room for {total} companies."})
                 self.assertEqual(second, first)
                 self.assertEqual(sum(str(error) in r.getMessage() for r in logs.records), 1)
 

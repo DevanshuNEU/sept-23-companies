@@ -7,7 +7,7 @@ from typing import Literal
 
 from outreach.api.models.base import Wire
 from outreach.api.models.checks import Check
-from outreach.api.models.company import PersonRef, RoleToName
+from outreach.api.models.company import CompanyRef, PersonRef, RoleToName
 from outreach.api.models.health import JobRunSummary
 from outreach.api.models.outbox import SavedBy
 from outreach.api.models.today import DailyCompany, ListGroup, NotReady
@@ -17,6 +17,7 @@ StepKind = Literal["request", "apply"]
 ReasonState = Literal["proposed", "confirmed", "written"]
 RowState = Literal["todo", "done", "skipped"]
 PlanChannel = Literal["linkedin_request", "email"]
+StandingStatus = Literal["new", "in_flight", "asked_before", "replied"]
 
 
 class NoteFact(Wire):
@@ -60,6 +61,48 @@ class FindSomeone(Wire):
     handoff: str
 
 
+class QueueStanding(Wire):
+    """Where a company stands (`outreach.plan.contact`): new, a wave in flight, asked before with no answer, or a
+    reply that holds it. `text` is the line the row shows."""
+
+    status: StandingStatus
+    text: str  # "New", "4 asked 6 days ago, free again Nov 18", "2 asked before. No answer for 20 days"
+    reason: str  # ContactState.reason
+    asked: int  # people in the current wave
+    room: int  # people he may still ask in this wave (queue.requests_per_company less asked)
+    free_on: str | None  # the day the company is free again, while a wave is in flight
+
+
+class CompanyQueue(Wire):
+    """A company row's lines (company first, #9 2026-10-26). Every line is the API's; the page shows them as given."""
+
+    size_line: str | None  # "40 to 60 people (estimate), seed (guess)"; None when neither is known
+    role_line: str | None  # "Forward Deployed Engineer, posted 6 days ago"; None with no role
+    hiring: int  # open engineering postings posted (else first seen) in the last 30 days
+    hiring_line: str
+    sponsorship_line: str  # "Sponsorship not stated, E-Verify enrolled"
+    reasons: list[str]  # why it ranks: up to 3 of the stored why signals, else the row's reason
+    standing: QueueStanding
+    last_touch: str | None  # "Request to Priya Rao (Engineer) on Oct 20"
+    email_hint: str | None  # set when the email rule (`pick_channel`) allows email to someone on record
+    people_on_record: int
+    people_line: str  # "2 people on record, none asked"
+    people_search_url: str  # his saved search, else the LinkedIn id filter, else the name; never fetched
+    search_saved: bool  # the link is the search he saved
+    careers_url: str | None  # the posting, else the board's page, else the watched page, else https://<domain>
+    terminal_line: str  # "Knock: Tessera Labs (company 1304), role: Forward Deployed Engineer"
+
+
+class InFlightCompany(Wire):
+    """A company with a wave out in the last `linkedin.rotate_days`, or a reply: the track half of the queue."""
+
+    company: CompanyRef
+    status: Literal["in_flight", "replied"]
+    text: str
+    reason: str
+    free_on: str | None
+
+
 class PlanRow(Wire):
     entry_id: int  # the rowid of daily_list_entry (`plan_entry_id`)
     position: int
@@ -78,6 +121,7 @@ class PlanRow(Wire):
     state: RowState
     carried_from: str | None
     revision: int  # the entry's own revision: every write on the row checks it
+    queue: CompanyQueue | None = None  # set only on a company row (no person, not an email row)
 
 
 class LinkedinWeek(Wire):
@@ -119,3 +163,4 @@ class PlanView(Wire):
     linkedin_week: LinkedinWeek
     tomorrow: Tomorrow
     week: PlanWeek
+    in_flight: list[InFlightCompany] = []  # waves out in the last 14 days and replies, replies first

@@ -50,10 +50,10 @@ class GuardCase(unittest.TestCase):
         self.db.execute("UPDATE message SET saved_by = 'devanshu' WHERE message_id = ?", (self.his,))
 
     # Each layer alone, on a plain connection from the foundation.
-    def triggers_only(self) -> sqlite3.Connection:
+    def triggers_only(self, grants=None) -> sqlite3.Connection:
         conn = connect(self.path)
         self.addCleanup(conn.close)
-        guard.install_triggers(conn)
+        guard.install_triggers(conn, grants or {})
         return conn
 
     def authorizer_only(self, grants=None) -> sqlite3.Connection:
@@ -317,6 +317,8 @@ class FullGuardTest(GuardCase):
 
 BRIDGE_GRANTS = {"linkedin_log": Grant(insert=True), "outreach_touch": Grant(insert=True),
                  "event": Grant(insert=True)}
+UNDONE_AT = "2026-11-09T15:00:00Z"
+OLD_AT = "2026-11-01T15:00:00Z"
 CONTEXT = ('{"lane":"own","rankerVersion":null,"roleAgeDays":null,"roleKind":"engineer","roleNamed":false,'
            '"signals":{},"source":"own"}')
 LOG = ("INSERT INTO linkedin_log(person_id, kind, reply_kind, undoes, at, note, recorded_at) "
@@ -324,7 +326,9 @@ LOG = ("INSERT INTO linkedin_log(person_id, kind, reply_kind, undoes, at, note, 
 TOUCH = ("INSERT INTO outreach_touch(person_id, company_id, channel, email_touch_id, sent_at, accepted_at, replied_at, "
          "reply_kind, referred_at, interview_at, offer_at, quiet_at, undone_at, context, idempotency_key, created_at) "
          "VALUES (:person, :company, :channel, :email_touch, :sent, :accepted, :replied, :reply_kind, :referred, "
-         ":interview, :offer, :quiet, :undone, :context, :key, :sent)")
+         ":interview, :offer, :quiet, :undone, :context, :key, :created)")
+TOUCH_REVISION = ("INSERT INTO outreach_touch(person_id, company_id, channel, sent_at, context, idempotency_key, "
+                  "created_at, revision) VALUES (?, ?, 'linkedin_request', ?, ?, ?, ?, ?)")
 
 
 class BridgeGuardTest(GuardCase):
@@ -338,12 +342,21 @@ class BridgeGuardTest(GuardCase):
         self.db.execute(LOG, (self.lin, "request_sent", None, None, "2026-11-08T15:00:00Z", "", "2026-11-08T15:00:00Z"))
         self.old_log = self.db.execute("SELECT max(entry_id) FROM linkedin_log").fetchone()[0]
         self.old_touch = self.db.execute(TOUCH, self.touch_row(person=self.lin, sent="2026-11-08T15:00:00Z",
+                                                               created="2026-11-08T15:00:00Z",
                                                                key="linkedin:seed")).lastrowid
+        # A request he logged on 2026-11-09 and took back on the LinkedIn page: its log row and the undo stay.
+        self.db.execute(LOG, (self.lin, "request_sent", None, None, UNDONE_AT, "", UNDONE_AT))
+        undone = self.db.execute("SELECT max(entry_id) FROM linkedin_log").fetchone()[0]
+        self.db.execute(LOG, (self.lin, "undo", None, undone, UNDONE_AT, "", UNDONE_AT))
+        # An imported request from 2026-11-01 with no touch: its log row is live, but it is 9 days old.
+        self.db.execute(LOG, (self.lin, "request_sent", None, None, OLD_AT, "", OLD_AT))
+        self.elsewhere = seed.company(self.db, "Elsewhere")
 
     def touch_row(self, **over) -> dict:
         row = {"person": self.lin, "company": self.company, "channel": "linkedin_request", "email_touch": None,
                "sent": T, "accepted": None, "replied": None, "reply_kind": None, "referred": None, "interview": None,
-               "offer": None, "quiet": None, "undone": None, "context": CONTEXT, "key": f"bridge:{self.lin}:x"}
+               "offer": None, "quiet": None, "undone": None, "context": CONTEXT, "key": f"bridge:{self.lin}:x",
+               "created": T}
         row.update(over)
         return row
 
@@ -359,7 +372,7 @@ class BridgeGuardTest(GuardCase):
             (LOG, (self.lin, "note", None, None, T, "x", T)),
             (LOG, (self.lin, "undo", None, self.old_log, T, "", T)),
             self.request_log(note="x" * 301),
-            self.request_log(at="2026-11-05T14:00:00Z"),   # more than 4 days before it is recorded
+            self.request_log(at="2026-11-05T14:00:00Z"),   # more than 5 days before it is recorded
             self.request_log(at="2026-11-10T16:00:00Z"),   # after it is recorded
         ]
 
@@ -371,7 +384,52 @@ class BridgeGuardTest(GuardCase):
             {"accepted": T}, {"replied": T, "reply_kind": "interested"}, {"referred": T}, {"interview": T},
             {"offer": T}, {"quiet": T}, {"undone": T}, {"key": "linkedin:not-the-bridge"}, {"key": None},
             {"sent": "2026-11-10T14:00:00Z"},  # no request_sent log row at this time: a touch never comes alone
-        )]
+            {"sent": UNDONE_AT, "created": "2026-11-10T15:00:00Z"},  # its log row was taken back
+            {"sent": OLD_AT},  # a live log row, but the touch is recorded 9 days after it was sent
+            {"sent": "2026-11-08T15:00:00Z", "key": "bridge:dup"},  # that log row already has its live touch
+            {"company": self.elsewhere},  # not the person's company
+        )] + [(TOUCH_REVISION, (self.lin, self.company, T, CONTEXT, "bridge:rev", T, 2))]
+
+    def test_a_valid_backdate_across_the_clock_change_passes_the_trigger(self):
+        conn = self.triggers_only(BRIDGE_GRANTS)
+        sent, recorded = "2026-10-31T04:30:00Z", "2026-11-04T04:59:00Z"  # 3 New York days, 4.02 julian days
+        conn.execute(*self.request_log(at=sent, recorded=recorded))
+        conn.execute(TOUCH, self.touch_row(sent=sent, created=recorded))
+
+    def test_the_touch_goes_to_the_end_of_the_persons_merge_chain(self):
+        old = seed.company(self.db, "Acme Old")
+        moved = seed.person(self.db, old, "Mo Moved", channel="linkedin")
+        self.db.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
+                        "WHERE company_id = ?", (self.company, old))
+        conn = self.triggers_only(BRIDGE_GRANTS)
+        conn.execute(LOG, (moved, "request_sent", None, None, T, "", T))
+        self.assert_trigger_refuses(conn, TOUCH, self.touch_row(person=moved, company=old, key="bridge:old"))
+        self.assert_trigger_refuses(conn, TOUCH, self.touch_row(person=moved, company=self.elsewhere,
+                                                                 key="bridge:else"))
+        conn.execute(TOUCH, self.touch_row(person=moved, company=self.company, key="bridge:survivor"))
+
+    def test_the_two_tables_stay_never_written_for_a_tool_with_no_insert_grant(self):
+        bare = self.triggers_only()
+        self.assert_trigger_refuses(bare, *self.request_log())
+        self.assert_trigger_refuses(bare, TOUCH, self.touch_row())
+        only_log = self.triggers_only({"linkedin_log": Grant(insert=True)})
+        only_log.execute(*self.request_log())
+        self.assert_trigger_refuses(only_log, TOUCH, self.touch_row())
+
+    def test_insert_or_replace_of_a_log_row_is_refused_without_the_recursive_triggers_pragma(self):
+        conn = connect(self.path)
+        self.addCleanup(conn.close)
+        conn.execute("PRAGMA recursive_triggers = OFF")
+        guard.install_triggers(conn, BRIDGE_GRANTS)
+        self.assert_trigger_refuses(conn, "INSERT OR REPLACE INTO linkedin_log(entry_id, person_id, kind, at, note, "
+                                          "recorded_at) VALUES (?, ?, 'request_sent', ?, 'x', ?)",
+                                    (self.old_log, self.lin, T, T))
+        self.assertEqual(self.db.execute("SELECT note FROM linkedin_log WHERE entry_id = ?",
+                                         (self.old_log,)).fetchone()[0], "")
+        guarded = self.guarded(BRIDGE_GRANTS)
+        with self.assertRaises(sqlite3.DatabaseError):
+            guarded.execute("INSERT OR REPLACE INTO linkedin_log(entry_id, person_id, kind, at, note, recorded_at) "
+                            "VALUES (?, ?, 'request_sent', ?, 'x', ?)", (self.old_log, self.lin, T, T))
 
     def changes(self) -> list[tuple[str, tuple]]:
         return [
@@ -400,27 +458,27 @@ class BridgeGuardTest(GuardCase):
                 guard.check_grants({table: Grant(insert=True, update=frozenset({column}))})
 
     def test_a_request_and_its_touch_pass_the_trigger_alone(self):
-        touch = self.write_request(self.triggers_only())
+        touch = self.write_request(self.triggers_only(BRIDGE_GRANTS))
         row = self.db.execute("SELECT channel FROM outreach_touch WHERE touch_id = ?", (touch,)).fetchone()
         self.assertEqual(row[0], "linkedin_request")
 
     def test_an_accept_reply_message_undo_long_or_misdated_log_is_refused_by_the_trigger_alone(self):
-        conn = self.triggers_only()
+        conn = self.triggers_only(BRIDGE_GRANTS)
         for sql, params in self.hostile_logs():
             with self.subTest(params=params[1:]):
                 self.assert_trigger_refuses(conn, sql, params)
-        self.assertEqual(self.db.execute("SELECT count(*) FROM linkedin_log").fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM linkedin_log").fetchone()[0], 4)
 
     def test_any_touch_but_a_paired_bridge_request_is_refused_by_the_trigger_alone(self):
-        conn = self.triggers_only()
+        conn = self.triggers_only(BRIDGE_GRANTS)
         conn.execute(*self.request_log())  # the log row a real request has: each touch below still fails alone
         for sql, params in self.hostile_touches():
-            with self.subTest(params={k: v for k, v in params.items() if k != "context"}):
+            with self.subTest(params=str(params)[:160]):
                 self.assert_trigger_refuses(conn, sql, params)
         self.assertEqual(self.db.execute("SELECT count(*) FROM outreach_touch").fetchone()[0], 1)
 
     def test_an_update_or_delete_of_a_touch_or_log_is_refused_by_the_trigger_alone(self):
-        conn = self.triggers_only()
+        conn = self.triggers_only(BRIDGE_GRANTS)
         for sql, params in self.changes():
             with self.subTest(sql=sql):
                 self.assert_trigger_refuses(conn, sql, params)

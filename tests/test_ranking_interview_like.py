@@ -63,6 +63,16 @@ class InterviewLikeTest(unittest.TestCase):
                 self.assertGreaterEqual(p.raw_points, 0.0)
                 self.assertGreaterEqual(p.points, 0.0)
 
+    def test_the_lift_never_lowers_the_confidence_label_of_the_facts_below_it(self):
+        high, low = Confidence("high", "confirmed"), Confidence("low", "a guess")
+        facts = neutral_facts(company_id=1, features=FULL, everify="enrolled", reachable_person=True,
+                              grades={"everify": high, "reachable_person": low})
+        without = [s for s in build_signals(CFG, make_profile(13)) if s.name != "interview_like"]
+        plain = score_company(facts, None, without, CFG)
+        lifted = score_company(facts, None, build_signals(CFG, make_profile(13)), CFG)
+        self.assertGreater(lifted.values["interview_like"].points, 0.0)
+        self.assertEqual(plain.confidence, lifted.confidence)
+
     def test_a_lift_counts_by_its_confidence(self):
         self.assertEqual(6.0, CFG.weights["interview_like"])
         low = score_company(facts_like(FULL), None, [self.signal(make_profile(13))], CFG).values["interview_like"]

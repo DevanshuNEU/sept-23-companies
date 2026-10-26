@@ -7,12 +7,13 @@ from pathlib import Path
 from outreach.crawl.config import load_crawl_config
 from outreach.rules.version import ruleset_version
 
-__all__ = ["RANKING_DIR", "CRAWL_DIR", "INSIGHTS_DIR", "RANKING_FILES", "NOT_RANKING", "INSIGHTS_FILES",
+__all__ = ["RANKING_DIR", "CRAWL_DIR", "INSIGHTS_DIR", "OUTCOMES_DIR", "RANKING_FILES", "NOT_RANKING", "INSIGHTS_FILES",
            "NOT_INSIGHTS", "ranker_version"]
 
 RANKING_DIR = Path(__file__).resolve().parent
 CRAWL_DIR = RANKING_DIR.parent / "crawl"
 INSIGHTS_DIR = RANKING_DIR.parent / "insights"
+OUTCOMES_DIR = RANKING_DIR.parent / "outcomes"
 
 # The files whose bytes decide a score, plus every signals/*.py. Files that do not exist yet hash as empty.
 # job.py is in because compute_rank lives there: how a run builds facts and scores them changes scores.
@@ -28,9 +29,10 @@ NOT_INSIGHTS = ("__init__.py", "__main__.py", "config.toml", "config.py", "findi
 
 
 def ranker_version(ranking_dir: Path = RANKING_DIR, crawl_dir: Path = CRAWL_DIR,
-                   insights_dir: Path = INSIGHTS_DIR) -> str:
+                   insights_dir: Path = INSIGHTS_DIR, outcomes_dir: Path = OUTCOMES_DIR) -> str:
     """`rk-` plus 12 hex over the ranking files (path, NUL, bytes, NUL), the insights files (`insights/<name>`, NUL,
-    bytes, NUL), the crawler's stale.py bytes, the text `stale_after_months=<n>` and
+    bytes, NUL), the crawler's stale.py bytes, the New York day rules (`outcomes/windows.py`, which picks the posting
+    open on an application's day), the text `stale_after_months=<n>` and
     `ruleset=<outreach.rules ruleset_version()>` (the rules decide what is visible, so a new ruleset is a new score)."""
     ranking_dir, crawl_dir, insights_dir = Path(ranking_dir), Path(crawl_dir), Path(insights_dir)
     signals = ranking_dir / "signals"
@@ -48,6 +50,8 @@ def ranker_version(ranking_dir: Path = RANKING_DIR, crawl_dir: Path = CRAWL_DIR,
         digest.update(f"insights/{name}".encode() + b"\0" + body + b"\0")
     stale = crawl_dir / "stale.py"
     digest.update(stale.read_bytes() if stale.is_file() else b"")
+    windows = Path(outcomes_dir) / "windows.py"
+    digest.update(windows.read_bytes() if windows.is_file() else b"")
     digest.update(f"stale_after_months={load_crawl_config().stale_after_months}".encode())
     digest.update(f"ruleset={ruleset_version()}".encode())
     return "rk-" + digest.hexdigest()[:12]

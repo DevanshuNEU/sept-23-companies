@@ -10,7 +10,7 @@ from outreach.crawl.config import load_crawl_config
 from outreach.crawl import stale as stale_module
 from outreach.ranking import version as ranking_version
 from outreach.ranking.config import CONFIG_PATH, RankerConfig, default_ranker_config, load_ranker_config
-from outreach.ranking.version import (INSIGHTS_DIR, INSIGHTS_FILES, NOT_INSIGHTS, NOT_RANKING, RANKING_DIR,
+from outreach.ranking.version import (INSIGHTS_DIR, OUTCOMES_DIR, INSIGHTS_FILES, NOT_INSIGHTS, NOT_RANKING, RANKING_DIR,
                                       RANKING_FILES, ranker_version)
 
 BOTTOM = ("staffing_risk", "large_later_stage")
@@ -177,6 +177,7 @@ class VersionTests(unittest.TestCase):
         for name in sorted(INSIGHTS_FILES):
             digest.update(f"insights/{name}".encode() + b"\0" + (INSIGHTS_DIR / name).read_bytes() + b"\0")
         digest.update((crawl / "stale.py").read_bytes())
+        digest.update((OUTCOMES_DIR / "windows.py").read_bytes())
         digest.update(f"stale_after_months={load_crawl_config().stale_after_months}".encode())
         digest.update(f"ruleset={ranking_version.ruleset_version()}".encode())
         self.assertEqual(ranker_version(ranking, crawl), "rk-" + digest.hexdigest()[:12])
@@ -206,9 +207,20 @@ class VersionTests(unittest.TestCase):
                 (insights / name).write_text("# changed\n", encoding="utf-8")
                 self.assertEqual(ranker_version(ranking, crawl, insights), base)
 
+    def test_version_moves_with_the_new_york_day_rules(self):
+        ranking, crawl = _temp_ranking_dir(self)
+        insights = _temp_insights_dir(self)
+        outcomes = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, outcomes, ignore_errors=True)
+        (outcomes / "windows.py").write_bytes((OUTCOMES_DIR / "windows.py").read_bytes())
+        base = ranker_version(ranking, crawl, insights, outcomes)
+        _flip(outcomes / "windows.py")
+        self.assertNotEqual(ranker_version(ranking, crawl, insights, outcomes), base)
+
     def test_every_insights_file_is_hashed_or_not(self):
         self.assertFalse(set(INSIGHTS_FILES) & set(NOT_INSIGHTS), "a file cannot be in both groups")
-        on_disk = {p.name for p in INSIGHTS_DIR.iterdir() if p.is_file() and p.suffix in (".py", ".toml")}
+        on_disk = {p.relative_to(INSIGHTS_DIR).as_posix() for p in INSIGHTS_DIR.rglob("*")
+                   if p.is_file() and "__pycache__" not in p.parts}
         listed = set(INSIGHTS_FILES) | set(NOT_INSIGHTS)
         self.assertEqual(sorted(on_disk - listed), [], "a new insights file must choose: INSIGHTS_FILES or NOT_INSIGHTS")
         self.assertTrue(set(INSIGHTS_FILES) <= on_disk)

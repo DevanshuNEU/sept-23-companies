@@ -80,7 +80,9 @@ def score_company(facts: RankFacts, hide: Hide | None, signals: list[Signal], cf
 
     ranked = sorted(((n, p) for n, p in values.items() if p.raw_points != 0), key=lambda x: (-abs(x[1].points), x[0]))
     reasons = tuple(p.reason for _n, p in ranked)
-    confidence = rank_confidence({n: (p.raw_points, p.confidence) for n, p in values.items()}, cfg)
+    # The interview tilt only ever adds points; it must not also be able to lower the label on the facts below it.
+    confidence = rank_confidence({n: (p.raw_points, p.confidence) for n, p in values.items()
+                                  if n != "interview_like"}, cfg)
 
     flags = list(facts.weak_flags)
     doubtful = facts.ignored_postings - facts.inactive_postings

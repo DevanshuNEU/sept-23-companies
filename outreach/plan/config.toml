@@ -44,10 +44,12 @@ max_consecutive_failures = 2
 session_limit_patterns = ["usage limit", "rate limit"]
 auth_patterns = ["not logged in", "please run /login"]
 schema_version = 1
-# The prepare step does nothing (one line, exit 0) until this is true. Devanshu flips it after the one-time check that
-# the LinkedIn deny rule takes effect on his seat (the runbook in docs/README.md and outreach/plan/claude_run.py), so
-# a `deploy install` that loads the 05:30 job before the check cannot make a call.
-deny_rule_checked = false
+# The prepare step does nothing (one line, exit 0) until this is true: it is the one-time check that the LinkedIn deny
+# rule takes effect on his seat (the runbook in docs/README.md and outreach/plan/claude_run.py). Checked 2026-10-25 with
+# the exact command `claude_command` builds and example.com in place of linkedin.com: `https://example.com` and
+# `https://uk.example.com` both came back DENIED with 0 web fetches (so the `*.` pattern is honoured). Set back to
+# false to switch the step off.
+deny_rule_checked = true
 
 [note]
 max_chars = 200               # #33 ruling 6: safe for free and Premium accounts; he can raise it

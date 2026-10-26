@@ -208,9 +208,10 @@ rulings at the top of `superpowers/plans/2026-10-21-daily-people-plan.md` and it
 The prepare step was built without ever running `claude -p`, so nobody has seen the LinkedIn deny rule in
 `outreach/plan/claude_run.py` take effect on his seat. It is passed both ways at once (`--settings` and
 `--disallowedTools`) and names `linkedin.com`, `*.linkedin.com`, `www.linkedin.com`, `lnkd.in` and `*.lnkd.in`. The
-step ships **off**: until `prepare.deny_rule_checked = true` in `outreach/plan/config.toml`, `python -m outreach.plan
-prepare` prints one line and exits 0, touching nothing. So `deploy install` may load the 05:30 job with the plan job;
-it does nothing until the check below is done.
+step shipped **off** and was switched on on 2026-10-25, after the check below passed (both calls DENIED, 0 web fetches,
+with the exact command `claude_command` builds): while `prepare.deny_rule_checked` is false in
+`outreach/plan/config.toml`, `python -m outreach.plan prepare` prints one line and exits 0, touching nothing. Set it back
+to false to switch the step off.
 
 1. Run `claude --help` and confirm it still lists `--tools`, `--allowedTools`, `--disallowedTools`, `--settings` and
    `--permission-mode` (with `dontAsk`).

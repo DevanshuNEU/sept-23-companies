@@ -21,6 +21,8 @@ export type PanelActions = {
   onCarry: () => void;
   onNotFit: () => void;
   onCopy: () => void;
+  /** Open the profile, then copy the note (Enter on a person). */
+  onCopyOpen: () => void;
   onEdit: () => void;
   onConfirm: () => void;
   onEditChange: (edit: NoteEdit) => void;
@@ -290,6 +292,13 @@ export function PersonPanel({
                 Open profile
                 <KeyHint k="L" />
               </a>
+            </Button>
+          ) : null}
+          {profile && row.note ? (
+            <Button type="button" variant="outline" size="sm" className={MAIN} aria-keyshortcuts="enter" onClick={actions.onCopyOpen}>
+              <ExternalLink aria-hidden />
+              Copy and open
+              <KeyHint k="↵" />
             </Button>
           ) : null}
           <LogButton row={row} kind="request" filled={!confirmFirst && step === 'request'} onLog={actions.onLog} />

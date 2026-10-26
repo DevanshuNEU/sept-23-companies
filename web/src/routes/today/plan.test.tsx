@@ -282,6 +282,93 @@ describe('Today as a plan', () => {
     expect(writeText).toHaveBeenCalledTimes(1);
   });
 
+  describe('Enter on a person: open the profile, then copy the note', () => {
+    it('opens the profile inside the key press, then copies, and logs nothing', async () => {
+      const writeText = stubClipboard();
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      const { client } = await openPlan();
+      const lena = (await client.plan()).rows[2];
+      const request = vi.spyOn(client, 'logRequest');
+      press('Enter');
+      // Synchronous: the window opens in the same call as the key press, so a popup blocker allows it.
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(open).toHaveBeenCalledWith(lena?.person?.person.linkedinUrl, '_blank', 'noopener,noreferrer');
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith(lena?.note?.text);
+      expect(open.mock.invocationCallOrder[0]).toBeLessThan(writeText.mock.invocationCallOrder[0] ?? 0);
+      expect(await screen.findByText('Opened the profile. Copied the note.')).toBeInTheDocument();
+      // R stays his own explicit log.
+      expect(request).not.toHaveBeenCalled();
+      expect(panelHeading()).toHaveTextContent('Lena Ortiz');
+    });
+
+    it('obeys the checks that block c: nothing opens and nothing is copied', async () => {
+      const writeText = stubClipboard();
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      const db = buildFixture();
+      const lena = db.plan.rows[2]?.note;
+      if (!lena) throw new Error('fixture: Lena has a note');
+      lena.checks = [{ code: 'dash', severity: 'block', title: 'Em or en dash', detail: 'Use a comma.', fix: null, spans: [] }];
+      await openPlan({ db });
+      press('Enter');
+      expect(await screen.findByText('Not copied. 1 check blocks this note. Fix it, then copy.')).toBeInTheDocument();
+      expect(open).not.toHaveBeenCalled();
+      expect(writeText).not.toHaveBeenCalled();
+    });
+
+    it('waits for an unsaved edit like c does', async () => {
+      const writeText = stubClipboard();
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      const user = userEvent.setup();
+      await openPlan();
+      press('e');
+      const text = await within(panel()).findByRole('textbox', { name: 'Note to Lena Ortiz' });
+      await user.type(text, ' more');
+      act(() => (document.activeElement as HTMLElement | null)?.blur());
+      press('Enter');
+      expect(await screen.findByText(/^Not copied\. Save your edit first/)).toBeInTheDocument();
+      expect(open).not.toHaveBeenCalled();
+      expect(writeText).not.toHaveBeenCalled();
+    });
+
+    it('a profile that is not a web address is never opened', async () => {
+      const writeText = stubClipboard();
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      const db = buildFixture();
+      const person = db.plan.rows[2]?.person?.person;
+      if (!person) throw new Error('fixture: Lena has a profile');
+      person.linkedinUrl = 'javascript:alert(1)';
+      await openPlan({ db });
+      press('Enter');
+      expect(open).not.toHaveBeenCalled();
+      expect(writeText).not.toHaveBeenCalled();
+    });
+
+    it('the Copy and open chip does the same on a click, with Enter in its hint', async () => {
+      const writeText = stubClipboard();
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      await openPlan();
+      const chip = within(panel()).getByRole('button', { name: /^Copy and open/ });
+      expect(chip).toHaveAttribute('aria-keyshortcuts', 'enter');
+      fireEvent.click(chip);
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(await screen.findByText('Opened the profile. Copied the note.')).toBeInTheDocument();
+    });
+
+    it('c and l keep doing one thing each', async () => {
+      const writeText = stubClipboard();
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      await openPlan();
+      press('l');
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(writeText).not.toHaveBeenCalled();
+      press('c');
+      expect(await screen.findByText('Copied the note.')).toBeInTheDocument();
+      expect(open).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('c and the Copy button follow the same rule: no copy while a check blocks or the checks are unknown', async () => {
     const writeText = stubClipboard();
     const db = buildFixture();

@@ -1035,9 +1035,11 @@ from the touch's history on the company page.
 
 ### 16.2 Finish
 
-When no row is left to do, the work panel becomes the finish panel and focus moves to its heading, "Done for today"
+When no row is left to do, the work panel becomes the finish panel and focus moves to its heading, "Today's list is done."
 (announced once: "All 7 done for today."). The finish node on the rail fills. The panel, on paper: the heading with a
-filled flag and one calm line ("All 7 people on today's plan are done. Nothing else is asked of you today."); What you
+filled flag and one calm line ("All 7 people on today's plan are done."); "Still waiting for you" (neutral, links to
+the Outbox for replies and drafts to review and to Needs you, from the same counts as the sidebar; with all three at
+zero, one line says nothing is waiting there; it never claims nothing is asked of him while the sidebar shows work); What you
 did (counts, then one line per row with its time); Carried to tomorrow (only when a row was carried); Tomorrow's draft
 (rebuilt at 08:00: the API's line, then up to 10 people the next plan's dry run would propose, people first, each with
 company, role and a small channel word, LinkedIn, Email or Find someone, then "and 3 more" counted from the draft; the
@@ -1101,7 +1103,7 @@ Single keys work only outside text fields, as in section 3.
 | View | Key | Action |
 |---|---|---|
 | Today | J / K, ↓ / ↑ | Next, previous person on the rail |
-| Today | Enter | Open the company |
+| Today | Enter | On a person to do with a profile link: open the profile, then copy the note (the "Copy and open" button). A blocked or unsaved note is not copied and the profile stays shut. Any other row: open the company |
 | Today | L | Open profile |
 | Today | O | Open role |
 | Today | A | Open the apply page |

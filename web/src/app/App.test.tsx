@@ -60,7 +60,7 @@ describe('createQueryClient', () => {
   if (typeof retry !== 'function') throw new Error('retry is a function');
 
   it('retries a network error at most twice', () => {
-    const err = new ApiError('network', 'Cannot reach the outreach server');
+    const err = new ApiError('network', 'Cannot reach the Knock server');
     expect(retry(0, err)).toBe(true);
     expect(retry(1, err)).toBe(true);
     expect(retry(2, err)).toBe(false);

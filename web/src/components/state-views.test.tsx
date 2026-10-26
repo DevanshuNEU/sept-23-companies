@@ -51,7 +51,7 @@ describe('QueryState', () => {
     expect(screen.getByText('Graphite')).toBeInTheDocument();
     const banner = screen.getByRole('alert');
     expect(banner).toHaveTextContent('Showing what loaded at 10:14');
-    expect(banner).toHaveTextContent('Cannot reach the outreach server');
+    expect(banner).toHaveTextContent('Cannot reach the Knock server');
   });
 
   it('keeps the empty state under the banner when the old data was empty', () => {
@@ -63,7 +63,7 @@ describe('QueryState', () => {
   it('with an error and no data shows the banner and a Retry that refetches', async () => {
     const refetch = vi.fn();
     renderState(query({ isError: true, isPending: false, refetch }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Cannot reach the outreach server');
+    expect(screen.getByRole('alert')).toHaveTextContent('Cannot reach the Knock server');
     expect(screen.queryByText('loading rows')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(refetch).toHaveBeenCalledTimes(1);

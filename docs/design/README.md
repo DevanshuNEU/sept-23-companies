@@ -551,7 +551,7 @@ closed date, note. Imported companies show an Imported tag and blank fields wher
 |---|---|---|
 | Loading | skeleton rows and blocks at final size | none |
 | Empty | icon, one bold line, one line saying what to do next | "No drafts to review. Paste people ... " |
-| Error (API unreachable) | red alert above the content, last loaded data kept and marked | "Cannot reach the outreach server. Nothing was changed. Showing what loaded at 10:14." |
+| Error (API unreachable) | red alert above the content, last loaded data kept and marked | "Cannot reach the Knock server. Nothing was changed. Showing what loaded at 10:14." |
 | Stale | amber banner when a `job_run` is late or failed | "Boards last read 6 days ago. Thursday's read did not run (the Mac was asleep)." |
 | Partial | one section shows a warning row with Retry; the rest works | "Evidence did not load for this company." |
 | Conflict | amber alert above the editor | "This draft changed in another tab. Your edit is kept below." |

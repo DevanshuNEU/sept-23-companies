@@ -90,6 +90,7 @@ function sendVersioned<T extends { revision: Revision }>(
 }
 
 let saves = 0;
+let pastes = 0;
 /** The newest save per note, per client, so the view can tell a note whose save has not landed yet. */
 const lastSave = new WeakMap<QueryClient, Map<Id, string>>();
 
@@ -201,7 +202,7 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
       const postingId = row.role.postingId;
       if (latest && latest.role?.postingId !== postingId) {
         const now = latest.role ? ` to ${latest.role.title}` : '';
-        return refuse(`Not logged. The role on ${company}'s row changed${now}. Check the row, then press P again.`);
+        return refuse(`Not logged. The role on ${company}'s row changed${now}. Check the row, then press A again.`);
       }
       call = (revision, o) => client.logApplied(entryId, { postingId, idempotencyKey: key }, revision, o);
     }
@@ -235,6 +236,82 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
 
   const logRequest = (row: PlanRow, asked?: string) => logStep(row, 'request', asked);
   const logApplied = (row: PlanRow) => logStep(row, 'apply');
+
+  /**
+   * Company first (#9, P2): the people he asked at a company row, pasted as `Name | Title | note` lines, for when his
+   * terminal cannot log them. The API reads the lines; the row's request step shows as logged at once and Undo takes
+   * the paste back inside the window. Each paste has its own key, so a retry writes once. A note check the API
+   * reports (his note already went out, so it is logged as sent) is said once the log lands. True when queued.
+   */
+  const logPeople = (row: PlanRow, text: string): boolean => {
+    const { entryId } = row;
+    const company = row.company.name;
+    if (row.channel === 'email' || row.person) return refuse(`Not logged. ${company}'s row is not a company row.`);
+    const lines = text.split('\n').filter((l) => l.trim());
+    if (lines.length === 0) return refuse('Not logged. Paste one line per person: Name | Title | note.');
+    if (lines.length > 10) return refuse(`Not logged. Paste at most 10 people at a time; this has ${lines.length}.`);
+    const gone = goneOrNoGo(row, cachedRow(queryClient, entryId), 'Not logged');
+    if (gone) return refuse(gone);
+    if (row.state === 'skipped') return refuse(`${company} is carried to tomorrow.`);
+    const key = `plan:${entryId}:people:${++pastes}-${Date.now().toString(36)}`;
+    const id = `people:${entryId}:${pastes}`;
+    const label = `Logged: ${lines.length === 1 ? '1 person' : `${lines.length} people`} at ${company}.`;
+    const delta = finishes(row, 'request') ? 1 : 0;
+    write({
+      id,
+      label,
+      afterCommit: `${label} ${ADD(company)}`,
+      patches: [
+        { key: queryKeys.plan, apply: (p: PlanView) => withStepLogged(p, entryId, 'request', p.asOf) },
+        shellPatch((s) => ({ ...s, plan: { ...s.plan, done: s.plan.done + delta } })),
+      ],
+      commit: (o) =>
+        sendVersioned(queryClient, `plan:${entryId}`, row.revision, () => cachedRow(queryClient, entryId)?.revision, o, (revision) =>
+          client.logPeople(entryId, { lines: text, idempotencyKey: key }, revision, o).then(
+            (res) => {
+              const warned = res.people.filter((p) => p.warnings.length > 0);
+              if (warned.length > 0) {
+                toast.warning(`Logged as sent. A note check fired for ${warned.map((p) => p.name).join(', ')}: ${warned[0]?.warnings[0] ?? ''}`);
+              }
+              return res.row;
+            },
+            (err: unknown) => {
+              if (err instanceof ApiError && err.code === 'not_allowed') {
+                throw new ApiError('not_allowed', `Not logged. ${sentence(err.message)} Nothing was written for ${company}.`);
+              }
+              throw err;
+            },
+          ),
+        ),
+    });
+    return true;
+  };
+
+  /** His LinkedIn people search for a company row: S opens it from now on. True when the save was queued. */
+  const saveSearch = (row: PlanRow, url: string): boolean => {
+    const clean = url.trim();
+    const company = row.company.name;
+    if (!/^https:\/\/(www\.)?linkedin\.com\/search\/results\/people\/?/.test(clean)) {
+      return refuse('Not saved. Paste the address of a LinkedIn people search; it starts with https://www.linkedin.com/search/results/people/.');
+    }
+    if (row.queue?.searchSaved && row.queue.peopleSearchUrl === clean) return refuse(`That search is already saved for ${company}.`);
+    const label = `Saved the search for ${company}. S opens it.`;
+    write({
+      id: `search:${row.entryId}`,
+      label,
+      afterCommit: label,
+      immediate: true,
+      patches: [
+        planRowPatch(row.entryId, (r) => ({
+          ...r,
+          queue: r.queue ? { ...r.queue, peopleSearchUrl: clean, searchSaved: true } : r.queue,
+          findSomeone: r.findSomeone ? { ...r.findSomeone, searchUrl: clean } : r.findSomeone,
+        })),
+      ],
+      commit: (o) => client.saveSearch(row.entryId, clean, o),
+    });
+    return true;
+  };
 
   /** True when the carry was queued. */
   const skip = (row: PlanRow): boolean => {
@@ -416,5 +493,7 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
   /** True while Confirm line for this note waits in its window or for its commit. */
   const confirming = (noteId: Id): boolean => isPending(`confirm:${noteId}`);
 
-  return { logRequest, logApplied, skip, notAFit, notAFitRefusal, saveNote, confirmReason, answer, seeWins, noteSaving, confirming };
+  return {
+    logRequest, logApplied, logPeople, saveSearch, skip, notAFit, notAFitRefusal, saveNote, confirmReason, answer, seeWins, noteSaving, confirming,
+  };
 }

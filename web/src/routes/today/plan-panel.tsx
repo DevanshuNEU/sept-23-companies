@@ -18,8 +18,12 @@ import { nextStep } from './plan-steps';
 /** What the panel's buttons do. The view binds the same handlers to the keys, so a key and its button never differ. */
 export type PanelActions = {
   onLog: (kind: StepKind) => void;
-  /** A company row: log the request he sent to the person he names. */
-  onLogAsked: (name: string) => void;
+  /** A company row: the people he asked, pasted as `Name | Title | note` lines. True when the log was queued. */
+  onLogPeople: (lines: string) => boolean;
+  /** A company row: save his LinkedIn people search. True when the save was queued. */
+  onSaveSearch: (url: string) => boolean;
+  /** A company row: copy the one line for his terminal. */
+  onCopyLine: () => void;
   onCarry: () => void;
   onNotFit: () => void;
   onCopy: () => void;
@@ -112,7 +116,7 @@ export function CarriedOver({ row, asOf }: { row: PlanRow; asOf: IsoTime }) {
   return <span className="text-muted-foreground">{`Carried over from ${formatCarriedDay(row.carriedFrom, asOf)}`}</span>;
 }
 
-/** The role to name, with Open role (O) and Apply page (A). Nothing when the row has no role. */
+/** The role to name, with Open role (O) and the apply page. Nothing when the row has no role. */
 export function PanelRole({ row }: { row: PlanRow }) {
   const role = row.role;
   if (!role) return null;
@@ -139,10 +143,9 @@ export function PanelRole({ row }: { row: PlanRow }) {
       ) : null}
       {applyHref ? (
         <Button asChild variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs has-[>svg]:px-2">
-          <a href={applyHref} target="_blank" rel="noopener noreferrer" aria-keyshortcuts="a">
+          <a href={applyHref} target="_blank" rel="noopener noreferrer">
             <ExternalLink aria-hidden />
             Apply page
-            <KeyHint k="A" />
           </a>
         </Button>
       ) : null}
@@ -193,7 +196,7 @@ const stepAt = (row: PlanRow, kind: StepKind) => row.steps.find((s) => s.kind ==
  */
 export function LogButton({ row, kind, filled, onLog }: { row: PlanRow; kind: StepKind; filled: boolean; onLog: (kind: StepKind) => void }) {
   const at = stepAt(row, kind);
-  const key = kind === 'request' ? 'R' : 'P';
+  const key = kind === 'request' ? 'R' : 'A';
   const label = at ? (kind === 'request' ? `Request logged ${formatClockTime(at)}` : `Applied ${formatClockTime(at)}`) : kind === 'request' ? 'Log request sent' : 'Log applied';
   return (
     <Button

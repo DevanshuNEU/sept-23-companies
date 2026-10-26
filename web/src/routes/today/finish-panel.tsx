@@ -14,17 +14,27 @@ const link =
 
 /** The name a row goes by in a sentence. */
 const nameOf = (row: PlanRow) => row.person?.person.name ?? row.company.name;
+/** A company row (company first, #9): nobody named, not an email row. */
+const companyRow = (row: PlanRow) => row.person === null && row.channel !== 'email';
+/** Every row is a company row: the day was a queue of companies. */
+const isQueue = (plan: PlanView) => plan.rows.length > 0 && plan.rows.every(companyRow);
 
-/** "Dana Whitfield at Resend", "Find someone at Hex", "Mintlify by email". */
+/** "Dana Whitfield at Resend", "Hex", "Mintlify by email". */
 function Who({ row }: { row: PlanRow }) {
   if (row.channel === 'email') return <><b className="font-medium">{row.company.name}</b> by email</>;
-  if (row.person === null) return <><b className="font-medium">Find someone</b> at {row.company.name}</>;
+  if (row.person === null) return <b className="font-medium">{row.company.name}</b>;
   return <><b className="font-medium">{row.person.person.name}</b> at {row.company.name}</>;
 }
 
-/** What he did on a row: "your line, request and application", or "reviewed in the Outbox" for an email. */
+/** What he did on a row: "your line, request and application", "3 asked and application" on a company, or
+ * "reviewed in the Outbox" for an email. */
 function stepsDone(row: PlanRow): string {
   if (row.channel === 'email') return 'reviewed in the Outbox';
+  if (row.queue) {
+    const asked = row.steps.some((s) => s.kind === 'request' && s.at !== null) ? [`${Math.max(1, row.queue.standing.asked)} asked`] : [];
+    const applied = row.steps.some((s) => s.kind === 'apply' && s.at !== null) ? ['application'] : [];
+    return [...asked, ...applied].join(' and ') || 'done';
+  }
   const words = row.steps.flatMap((s) => (s.at === null ? [] : [s.kind === 'request' ? 'request' : 'application']));
   const steps = words.length > 0 ? words.join(' and ') : 'done';
   return row.note?.reasonState === 'written' ? `your line, ${steps}` : steps;
@@ -54,6 +64,14 @@ const ledgerWord = (label: string, count: number) => {
  */
 function summary(plan: PlanView, carried: PlanRow[]) {
   const { done, total } = plan;
+  if (isQueue(plan)) {
+    // Company first (#9): a company is reached once a request or an email there is logged (and applied, with a role).
+    const reached = `${done} ${done === 1 ? 'company' : 'companies'} reached`;
+    if (carried.length === 0) return { sub: `${reached}. That is everything on today's queue.`, say: `Done for today. ${reached}.` };
+    const first = carried[0];
+    const carries = carried.length === 1 && first ? `${nameOf(first)} carries to tomorrow` : `${carried.length} carry to tomorrow`;
+    return { sub: `${reached} of ${total}. ${carries}.`, say: `Done for today. ${reached} of ${total}, ${carried.length} carried to tomorrow.` };
+  }
   if (carried.length === 0) {
     const sub = total === 1 ? "The one person on today's plan is done." : `All ${total} people on today's plan are done.`;
     return { sub, say: `All ${total} done for today.` };
@@ -200,7 +218,10 @@ export function FinishPanel({ plan }: { plan: PlanView }) {
           <ul className="grid gap-1.5 text-sm">
             {carried.map((row) => (
               <li key={row.entryId}>
-                <Who row={row} />. <span className="text-muted-foreground">First on tomorrow&apos;s plan, with the note as you left it.</span>
+                <Who row={row} />.{' '}
+                <span className="text-muted-foreground">
+                  {companyRow(row) ? 'First on tomorrow\'s plan.' : 'First on tomorrow\'s plan, with the note as you left it.'}
+                </span>
               </li>
             ))}
           </ul>

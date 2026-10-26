@@ -303,13 +303,13 @@ describe('Today with no row to do', () => {
     expect(screen.queryByRole('heading', { name: "Today's list is done." })).not.toBeInTheDocument();
 
     press('r');
-    press('p');
+    press('a');
     expect(await screen.findByRole('heading', { level: 2, name: 'Jonah Park' })).toBeInTheDocument();
     press('r');
-    press('p');
+    press('a');
     expect(await screen.findByRole('heading', { level: 2, name: 'Ines Duarte' })).toBeInTheDocument();
     press('r');
-    press('p');
+    press('a');
 
     await waitFor(() => expect(heading()).toHaveFocus());
     expect(screen.getAllByRole('status').some((s) => s.textContent === 'All 7 done for today.')).toBe(true);
@@ -323,7 +323,7 @@ describe('Today with no row to do', () => {
     // Row 3 is the only one to do. Its request and apply logs finish the day inside one tick.
     act(() => {
       press('r');
-      press('p');
+      press('a');
     });
     expect(screen.getByRole('heading', { level: 2, name: "Today's list is done." })).toBeInTheDocument();
     expect(document.querySelector('[aria-busy="true"]')).toBeNull();

@@ -62,8 +62,8 @@ export function PlanEmpty() {
         </Button>
       }
     >
-      Add people at the companies you want to reach: copy the picks for Claude from All proposed companies and paste
-      them in the side terminal. Claude adds one person per company and writes their notes.
+      The plan picks the companies to reach; you find the people on LinkedIn and write your own notes. See every
+      company it proposed in All proposed companies.
     </EmptyState>
   );
 }

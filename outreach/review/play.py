@@ -61,8 +61,8 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
 
     A plan row or person on a company merged into another counts for the company it ended up in.
 
-    Picked: the latest list has it as `picked`. Planned: the latest list has it `proposed` or `picked` with a named
-    person. The latest list counts only when its date is within `planned_days` of `today`, so with no recent list
+    Picked: the latest list has it as `picked`. Planned: the latest list has it `proposed`, with or without a named
+    person (company first, #9 2026-10-26: a company row with nobody on it is what the plan proposes). The latest list counts only when its date is within `planned_days` of `today`, so with no recent list
     nobody is in play. Status plays no part here beyond `live_company_ids`: a `working` company on no plan is not in
     play. `canon` as in `live_company_ids`.
     """
@@ -71,14 +71,13 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
     out: dict[int, str] = {}
     when = recent_list_date(conn, today, planned_days)
     if when is not None:
-        for row in conn.execute("SELECT company_id, state, person_id FROM daily_list_entry WHERE list_date = ?",
-                                (when,)):
+        for row in conn.execute("SELECT company_id, state FROM daily_list_entry WHERE list_date = ?", (when,)):
             cid = canon.get(row["company_id"], row["company_id"])  # a merge moves no plan row: follow it
             if cid not in live:
                 continue
             if row["state"] == "picked":
                 out[cid] = "picked"
-            elif row["person_id"] is not None and row["state"] in _ROW_STATES_KEPT:
+            elif row["state"] in _ROW_STATES_KEPT:
                 out.setdefault(cid, "planned")
     return out
 

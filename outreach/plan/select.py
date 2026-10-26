@@ -6,6 +6,9 @@ then an email pass, then a LinkedIn pass that fills the role share (80%) and the
 slots on (role leftovers, reason leftovers, then the `any_us_role` fill pool). A company the plan cannot name a person
 for still gets a find-someone row: nothing is hidden. The output is in display order: rows with a person by score,
 then find-someone rows by score.
+
+With `plan.propose_people = false` (shipped: company first, #9 2026-10-26) the only option is the find-someone row:
+every row is a company row on LinkedIn, no person and no email, and a carried person row comes back as its company.
 """
 from __future__ import annotations
 
@@ -97,7 +100,10 @@ def options(p: Prospect, cfg: PlanConfig) -> list[tuple[str, int | None, str]]:
     """`(channel, person_id, channel_reason)` in preference order. The contact of an HN post that asks for email comes
     first (an explicit invitation outranks the order), then each candidate in `rank_people` order with the channel
     `pick_channel` gives; an email option is dropped once `email.people_per_company` people were emailed there. A
-    carried person who is still a candidate goes to the very front. The find-someone option is always last."""
+    carried person who is still a candidate goes to the very front. The find-someone option is always last, and with
+    `plan.propose_people` false it is the only one."""
+    if not cfg.get("plan", "propose_people"):
+        return [FIND_SOMEONE]
     cands = rank_people(p.candidates)
     email_ok = p.contact.email_people < cfg.get("email", "people_per_company")
     picked = []
@@ -156,7 +162,8 @@ def choose_rows(prospects: Sequence[Prospect], caps: Caps, cfg: PlanConfig) -> l
         if p.company_id in used:
             continue
         opts = options(p, cfg)
-        person = p.carried.person_id
+        # With people off, a carried person row is carried as its company: the else branch below.
+        person = p.carried.person_id if cfg.get("plan", "propose_people") else None
         if person is not None and any(c.person_id == person for c in p.candidates):
             # Their row, or none today: never another person in their place. Without room today, the company waits and
             # the row stays carried (the next build reads it again from the plan that proposed it). With no option

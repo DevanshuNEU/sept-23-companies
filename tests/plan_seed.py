@@ -20,11 +20,21 @@ from outreach.plan.notecheck import Fact, load_unconfirmed
 from outreach.store.timefmt import utcnow
 from outreach.store.writes import log_touch, record_outcome
 
-__all__ = ["TODAY", "seed_scored_company", "seed_person", "seed_source", "seed_outbound", "seed_log_only",
+__all__ = ["TODAY", "PEOPLE_ON", "people_on", "seed_scored_company", "seed_person", "seed_source", "seed_outbound", "seed_log_only",
            "seed_send_day",
            "seed_email_touch", "seed_message", "seed_daily_entry", "PlanSituation", "seed_plan_situation"]
 
 TODAY = date(2026, 11, 10)
+
+
+def people_on(cfg):
+    """`cfg` with `plan.propose_people` true. The shipped config proposes company rows only (company first, #9
+    2026-10-26); the person and email paths stay in the code until they are deleted, so their tests turn them on."""
+    import dataclasses
+    return dataclasses.replace(cfg, plan={**cfg.plan, "propose_people": True})
+
+
+PEOPLE_ON = people_on(default_plan_config())
 _counter = itertools.count(1)
 
 

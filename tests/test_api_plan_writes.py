@@ -173,6 +173,100 @@ class LogRequestTests(PlanWriteCase):
             self.assertEqual(answer, self.row(answer["company"]["name"]))
 
 
+class CompanyRowRequestTests(PlanWriteCase):
+    """Company first (#9, 2026-10-26): a row with nobody on it is a company to reach. He finds the people himself and
+    logs a request by typing the name of the person he asked: one person (added by him), one `linkedin_log` row and
+    one `linkedin_request` touch, source `plan`. The row stays the company's; its request step is done."""
+
+    def log_company(self, name, *, company="Cerebrium", key=None, request_id=None, **extra):
+        eid = self.entry_id(company)
+        body = {"personName": name, "idempotencyKey": key or f"plan:{eid}:request", **extra}
+        return self.post(f"/api/plan/{eid}/request", body, key=request_id)
+
+    def at_company(self, company="Cerebrium"):
+        return self.conn.execute("SELECT * FROM person WHERE company_id = ? ORDER BY person_id",
+                                 (self.ids[company],)).fetchall()
+
+    def test_a_company_row_logs_a_request_for_the_name_he_typed(self):
+        before = len(self.at_company())
+        row = self.ok(self.log_company("  Ana   Silva "))
+        people = self.at_company()
+        self.assertEqual(len(people), before + 1)
+        ana = people[-1]
+        self.assertEqual((ana["name"], ana["title"], ana["role_kind"], ana["channel"], ana["linkedin_reason"],
+                          ana["added_by"], ana["email"]),
+                         ("Ana Silva", "", "other", "linkedin", "no_email", "devanshu", None))
+        (touch,) = self.touches("linkedin_request", person_id=ana["person_id"])
+        (log,) = self.log_rows(ana["person_id"])
+        self.assertEqual((touch["company_id"], touch["sent_at"], touch["idempotency_key"]),
+                         (self.ids["Cerebrium"], NOW, f"plan:{self.entry_id('Cerebrium')}:request"))
+        self.assertEqual(json.loads(touch["context"])["source"], "plan")
+        self.assertEqual((log["kind"], log["at"]), ("request_sent", NOW))
+        self.assertIsNone(row["person"])  # still the company's row
+        self.assertEqual(row["steps"][0], {"kind": "request", "touchId": touch["touch_id"], "at": NOW})
+        self.assertIsNone(self.entry_row("Cerebrium")["person_id"])
+        self.assertEqual(row, self.row("Cerebrium"))
+        added = self.conn.execute("SELECT actor FROM event WHERE entity = 'person' AND kind = 'added' "
+                                  "AND entity_id = ?", (ana["person_id"],)).fetchone()
+        self.assertEqual(added["actor"], "devanshu")
+
+    def test_a_double_press_logs_once_and_a_known_name_is_reused(self):
+        self.ok(self.log_company("Ana Silva"))
+        self.ok(self.log_company("Ana Silva"))  # a new request id, the same key: nothing more is written
+        (ana,) = [p for p in self.at_company() if p["name"] == "Ana Silva"]
+        self.assertEqual(len(self.touches("linkedin_request", person_id=ana["person_id"])), 1)
+        self.assertEqual(len(self.log_rows(ana["person_id"])), 1)
+        # another row, the same person typed another way: the person on file is used, not a second one
+        known = self.people["Turso"]
+        name = self.conn.execute("SELECT name FROM person WHERE person_id = ?", (known,)).fetchone()[0]
+        self.conn.execute("DELETE FROM linkedin_draft")
+        self.conn.execute("UPDATE daily_list_entry SET person_id = NULL WHERE company_id = ?", (self.ids["Turso"],))
+        count = len(self.at_company("Turso"))
+        self.ok(self.log_company(name.upper(), company="Turso"))
+        self.assertEqual(len(self.at_company("Turso")), count)
+        self.assertEqual(len(self.touches("linkedin_request", person_id=known)), 1)
+
+    def test_a_company_row_without_a_name_or_with_a_person_id_logs_nothing(self):
+        before = (len(self.at_company()), len(self.touches("linkedin_request")))
+        for body in ({"personName": "   "}, {"personId": self.people["Pylon"]}, {}):
+            eid = self.entry_id("Cerebrium")
+            res = self.post(f"/api/plan/{eid}/request", {"idempotencyKey": f"plan:{eid}:request", **body})
+            self.assertIn(res.status_code, (400, 409), res.text)
+        self.assertEqual((len(self.at_company()), len(self.touches("linkedin_request"))), before)
+
+    def test_a_typed_name_on_a_person_row_is_refused(self):
+        eid = self.entry_id("Pylon")
+        res = self.post(f"/api/plan/{eid}/request", {"personId": self.people["Pylon"], "personName": "Someone Else",
+                                                     "idempotencyKey": f"plan:{eid}:request"})
+        self.refused(res, "bad_request", 400)
+        self.assertEqual(self.touches("linkedin_request", person_id=self.people["Pylon"]), [])
+
+    def test_a_no_go_person_or_company_refuses_and_writes_nothing(self):
+        ana = self.conn.execute(
+            "INSERT INTO person(company_id, name, role_kind, channel, linkedin_reason, added_by, created_at, "
+            "updated_at) VALUES (?, 'Ana Silva', 'engineer', 'linkedin', 'no_email', 'devanshu', ?, ?)",
+            (self.ids["Cerebrium"], NOW, NOW)).lastrowid
+        self.conn.execute("INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'stop_reply', "
+                          "'devanshu', ?)", (ana, NOW))
+        self.refused(self.log_company("ana silva"), "not_allowed", 409)
+        self.assertEqual((self.touches("linkedin_request", person_id=ana), self.log_rows(ana)), ([], []))
+        self.conn.execute("INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'not_a_fit', "
+                          "'devanshu', ?)", (self.ids["Cerebrium"], NOW))
+        people = len(self.at_company())
+        self.refused(self.log_company("Bo Chen"), "not_allowed", 409)
+        self.assertEqual(len(self.at_company()), people)
+
+    def test_a_company_row_logs_applied_with_no_person(self):
+        eid = self.entry_id("Cerebrium")
+        posting = self.entry_row("Cerebrium")["posting_id"]
+        self.assertIsNotNone(posting)
+        row = self.ok(self.post(f"/api/plan/{eid}/apply", {"postingId": posting,
+                                                           "idempotencyKey": f"plan:{eid}:apply"}))
+        self.assertEqual([s["kind"] for s in row["steps"] if s["at"]], ["apply"])
+        (touch,) = self.touches("application", posting_id=posting)
+        self.assertIsNone(touch["person_id"])
+
+
 class StepLogRevisionTests(PlanWriteCase):
     """Follow-up ruling: a step log is append-only and its touch key stops a double press, so `revision` is optional
     on request and apply and a stale one does not conflict. Skip and the note writes keep the strict check."""

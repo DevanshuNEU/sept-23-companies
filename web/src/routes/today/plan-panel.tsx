@@ -18,6 +18,8 @@ import { nextStep } from './plan-steps';
 /** What the panel's buttons do. The view binds the same handlers to the keys, so a key and its button never differ. */
 export type PanelActions = {
   onLog: (kind: StepKind) => void;
+  /** A company row: log the request he sent to the person he names. */
+  onLogAsked: (name: string) => void;
   onCarry: () => void;
   onNotFit: () => void;
   onCopy: () => void;
@@ -189,7 +191,7 @@ const stepAt = (row: PlanRow, kind: StepKind) => row.steps.find((s) => s.kind ==
  * One log button. The row's next step is the only filled button, unless his line still waits for him: then
  * Confirm line in the note is the filled one (ruling 13). A logged step stays, quiet, with its time.
  */
-function LogButton({ row, kind, filled, onLog }: { row: PlanRow; kind: StepKind; filled: boolean; onLog: (kind: StepKind) => void }) {
+export function LogButton({ row, kind, filled, onLog }: { row: PlanRow; kind: StepKind; filled: boolean; onLog: (kind: StepKind) => void }) {
   const at = stepAt(row, kind);
   const key = kind === 'request' ? 'R' : 'P';
   const label = at ? (kind === 'request' ? `Request logged ${formatClockTime(at)}` : `Applied ${formatClockTime(at)}`) : kind === 'request' ? 'Log request sent' : 'Log applied';

@@ -10,8 +10,9 @@
 - `prepare [--count N]`: the morning prepare step (Task 14): find people for the top companies with nobody to ask and
   draft their notes, one `claude -p` call per company, and print one summary line. It refuses to run outside the live
   checkout before it reads anything (it calls a model through his seat). It starts caffeinate like `build`. `--count`
-  overrides the number of companies (default: twice today's LinkedIn capacity). Until `prepare.deny_rule_checked` is
-  true in config it prints one line saying so and exits 0, touching nothing. Exit 1 when the run stopped on a login
+  overrides the number of companies (default: twice today's LinkedIn capacity). While `prepare.enabled` is false (the
+  shipped value: company first, #9) it prints `prepare is off ...` and exits 0, touching nothing; and until
+  `prepare.deny_rule_checked` is true in config it prints one line saying so and exits 0, touching nothing. Exit 1 when the run stopped on a login
   problem or failed calls, or me.md cannot be read; a session limit is a clean stop (exit 0).
 
 The store is the one at OUTREACH_DB; the default (live) store opens only from the live checkout, so from a worktree
@@ -89,7 +90,8 @@ def _report(conn: sqlite3.Connection, result: PlanResult, dry_run: bool) -> list
     head = f"Plan {result.list_date.isoformat()}: {result.status}{' (dry run, nothing written)' if dry_run else ''}"
     if result.linkedin is None:
         return [head + f", capacity {result.capacity}"] if result.status == "already_built" else [head]
-    lines = [f"{head}, capacity {result.capacity} (LinkedIn {result.linkedin.today}, email {result.email.slots}), "
+    email = result.capacity - result.linkedin.today  # the plan's email slots: 0 with people off (company first)
+    lines = [f"{head}, capacity {result.capacity} (LinkedIn {result.linkedin.today}, email {email}), "
              f"boards {result.boards}, {len(result.chosen)} rows"]
     companies = _names(conn, "company", "company_id", [c.company_id for c in result.chosen])
     people = _names(conn, "person", "person_id", [c.person_id for c in result.chosen])
@@ -160,6 +162,9 @@ def _prepare(args: argparse.Namespace, root: str | None, live_root: str | None, 
     live_checkout.require_live("the daily prepare step", root or live_checkout.REPO_ROOT,
                                live_root or live_checkout.LIVE_ROOT)
     cfg = default_plan_config()
+    if cfg.get("prepare", "enabled") is not True:  # company first (#9): switched off, say so, touch nothing
+        print(PrepareSummary("off", 0, 0, 0, 0, 0).line(), file=stdout)
+        return 0
     if cfg.get("prepare", "deny_rule_checked") is not True:  # off until the deny-rule check: say so, touch nothing
         print(PrepareSummary("deny_rule_unchecked", 0, 0, 0, 0, 0).line(), file=stdout)
         return 0

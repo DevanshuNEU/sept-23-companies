@@ -50,6 +50,9 @@ def _check(data: dict) -> None:
     chars = data["note"]["max_chars"]
     if isinstance(chars, bool) or not isinstance(chars, int) or not 100 <= chars <= 300:
         raise ValueError(f"note.max_chars must be a whole number from 100 to 300, got {chars!r}")
+    for section, key in _SWITCHES:  # a switch that is not a real boolean ("false" is true in Python) fails loudly
+        if not isinstance(data[section][key], bool):
+            raise ValueError(f"{section}.{key} must be true or false, got {data[section][key]!r}")
     tz = data["plan"]["timezone"]
     try:
         ZoneInfo(tz)
@@ -76,8 +79,12 @@ def load_plan_config(path: Path = CONFIG_PATH) -> PlanConfig:
 
 
 # The keys the checks above read directly; every other key is read through `get`, which names a missing one.
-_CHECKED = {"lanes": ("role", "reason", "fill", "role_share", "reason_share"), "plan": ("scan_limit", "timezone"),
-            "linkedin": ("rotate_top_n",), "note": ("max_chars",)}
+_CHECKED = {"lanes": ("role", "reason", "fill", "role_share", "reason_share"),
+            "plan": ("scan_limit", "timezone", "propose_people"), "linkedin": ("rotate_top_n",), "note": ("max_chars",),
+            "prepare": ("enabled", "deny_rule_checked")}
+# The on and off switches, each checked to be a boolean. `prepare.enabled` and `plan.propose_people` are the
+# company-first switches (#9, 2026-10-26); `prepare.deny_rule_checked` records the one-time LinkedIn deny check.
+_SWITCHES = (("prepare", "enabled"), ("prepare", "deny_rule_checked"), ("plan", "propose_people"))
 
 
 def _check_keys(data: dict, path: Path) -> None:

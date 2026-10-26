@@ -30,3 +30,6 @@ export function nextTodoAfter(rows: PlanRow[], entryId: Id): Id | null {
   if (after) return after.entryId;
   return rows.slice(0, at).reverse().find((r) => r.state === 'todo')?.entryId ?? null;
 }
+
+/** The id of a company row's "Who did you ask?" field, so R on the row can put the cursor there. */
+export const askedFieldId = (headingId: string | undefined) => `${headingId ?? 'plan'}-asked`;

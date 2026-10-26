@@ -21,7 +21,7 @@ from outreach.plan.dates import last_seven_days, utc_window
 from outreach.plan.outbound import load_outbound
 
 __all__ = ["LinkedinCapacity", "EmailCapacity", "linkedin_capacity", "current_send_limit", "email_capacity",
-           "plan_capacity", "lane_quotas"]
+           "plan_capacity", "plan_email_slots", "lane_quotas"]
 
 _EPS = 1e-9  # round half up on a float that may sit a hair under .5
 
@@ -85,9 +85,16 @@ def email_capacity(conn: sqlite3.Connection, today: date, cfg: PlanConfig, *,
 def plan_capacity(conn: sqlite3.Connection, canon: dict[int, int], day: date, cfg: PlanConfig, *,
                   limit_fn: Callable[[sqlite3.Connection, date, PlanConfig], int] = current_send_limit) -> int:
     """LinkedIn rows plus email slots for the weekday `day`: what `build_plan` stores in `daily_list.capacity`, and
-    tomorrow's total for the next weekday."""
-    return (linkedin_capacity(conn, canon, day, cfg).today
-            + email_capacity(conn, day, cfg, limit_fn=limit_fn).slots)
+    tomorrow's total for the next weekday. With `plan.propose_people` false the plan has no email rows, so it counts
+    no email slots (`plan_email_slots`)."""
+    return linkedin_capacity(conn, canon, day, cfg).today + plan_email_slots(
+        email_capacity(conn, day, cfg, limit_fn=limit_fn), cfg)
+
+
+def plan_email_slots(email: EmailCapacity, cfg: PlanConfig) -> int:
+    """The email rows the plan may write: the sender's free slots, or 0 when the plan proposes no people (company
+    first, #9). The sender's own limits are not touched."""
+    return email.slots if cfg.get("plan", "propose_people") else 0
 
 
 def lane_quotas(n: int, used: int, reason_used: int, cfg: PlanConfig) -> tuple[int, int]:

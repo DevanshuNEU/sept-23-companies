@@ -6,7 +6,11 @@ and one JSON user message: the company (`prepare_targets.Target`), his facts fro
 (`- ASK:` item) removed, and the note limit. The model never touches the store: `prepare_store` checks the reply and
 stores what passes, one transaction per company.
 
-The step is off until `prepare.deny_rule_checked` is true in config: until then `run_prepare` returns
+Company first (#9, 2026-10-26): Devanshu finds the people and writes the notes himself, so the step ships switched off
+with `prepare.enabled = false`. Then `run_prepare` returns `off` and touches nothing: no call, no job run, no event.
+The code stays until it is deleted.
+
+Also, the step is off until `prepare.deny_rule_checked` is true in config: until then `run_prepare` returns
 `deny_rule_unchecked` and touches nothing (no call, no job run, no event). Devanshu turns it on after the one-time
 check that the LinkedIn deny rule takes effect on his seat (the runbook in `claude_run` and docs/README.md), so a
 `deploy install` that loads the 05:30 job early cannot make a call.
@@ -48,7 +52,9 @@ PROMPT_PATH = Path(__file__).with_name("prompts") / "prepare.md"
 _REPO_MAIL = Path(__file__).resolve().parents[2] / "mail"
 _MAX_DETAIL = 300
 
-Status = Literal["done", "no_capacity", "no_targets", "session_limit", "auth", "failed", "deny_rule_unchecked"]
+Status = Literal["done", "no_capacity", "no_targets", "session_limit", "auth", "failed", "deny_rule_unchecked", "off"]
+OFF_LINE = ("prepare is off (company first: you find the people and write the notes); set prepare.enabled = true in "
+            "outreach/plan/config.toml to turn it back on")
 _JOB_STATUS = {"no_capacity": "ok", "no_targets": "ok", "session_limit": "partial", "auth": "failed",
                "failed": "failed"}
 
@@ -63,6 +69,8 @@ class PrepareSummary:
     failures: int  # failed calls and unreadable replies
 
     def line(self) -> str:
+        if self.status == "off":
+            return OFF_LINE
         if self.status == "deny_rule_unchecked":
             return ("prepare: off until the LinkedIn deny rule is checked on this seat; after the runbook in "
                     "docs/README.md, set prepare.deny_rule_checked = true in outreach/plan/config.toml")
@@ -195,8 +203,10 @@ class _Run:
 def run_prepare(conn: sqlite3.Connection, runner: Runner, *, today: date, cfg: PlanConfig, me_text: str, banned,
                 unconfirmed, count: int | None = None) -> PrepareSummary:
     """One prepare run: a `prepare` job run, up to `count` targets (default `target_count` of today's LinkedIn
-    capacity), one call each. See the module text for how each call ends. Off (nothing touched) until
-    `prepare.deny_rule_checked` is true."""
+    capacity), one call each. See the module text for how each call ends. Off (nothing touched) while
+    `prepare.enabled` is not true, and until `prepare.deny_rule_checked` is true."""
+    if cfg.get("prepare", "enabled") is not True:
+        return PrepareSummary("off", 0, 0, 0, 0, 0)
     if cfg.get("prepare", "deny_rule_checked") is not True:
         return PrepareSummary("deny_rule_unchecked", 0, 0, 0, 0, 0)
     run_id = start_job(conn, "prepare")

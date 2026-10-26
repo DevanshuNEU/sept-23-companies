@@ -32,6 +32,7 @@ from outreach.rules.version import ruleset_version
 from outreach.store import is_shared_key
 from outreach.store.writes import body_sha256
 from tests.contracts import check_review_items
+from tests.plan_seed import PEOPLE_ON
 from tests.insights_seed import outcome_touch
 from tests.fakes import json_response, status_response, text_response
 from outreach.reader import combine as reader_combine
@@ -1109,7 +1110,7 @@ class PlanFlowTests(HarnessCase):
         days = [date(2026, 11, 2) + timedelta(days=n) for n in range(5)]
         reason_rows = total = 0
         for n, day in enumerate(days):
-            run = build_plan(conn, today=day, read_boards=False)
+            run = build_plan(conn, today=day, cfg=PEOPLE_ON, read_boards=False)
             self.assertEqual((run.status, run.linkedin.today), ("built", 7), day)
             rows = conn.execute("SELECT * FROM daily_list_entry WHERE list_date = ? ORDER BY rank",
                                 (day.isoformat(),)).fetchall()
@@ -1131,7 +1132,7 @@ class PlanFlowTests(HarnessCase):
         written = _rows(h, "SELECT count(*) FROM daily_list_entry")[0][0]
 
         def company_rows(day):
-            run = build_plan(h.conn, today=day, read_boards=False, dry_run=True)  # writes nothing
+            run = build_plan(h.conn, today=day, cfg=PEOPLE_ON, read_boards=False, dry_run=True)  # writes nothing
             return {c.company_id: c for c in run.chosen}
 
         before = company_rows(sent + timedelta(days=13))
@@ -1160,6 +1161,39 @@ class PlanFlowTests(HarnessCase):
                 self.assertEqual(r["channel"], "linkedin_request")
             else:
                 self.assertIsNone(why["find_someone"])
+
+    def test_flow_plan_company_only_with_the_shipped_config(self):
+        # The shipped config (plan.propose_people false, company first): the same fixture builds 0 person rows, 0
+        # email rows and no notes; the blocked companies stay off, the stale one still rotates, and the founder's
+        # company comes as a company row.
+        h = self.harness()
+        h.run(through="rank")
+        s = h.plan.seed()
+        on = build_plan(h.conn, today=TODAY, cfg=PEOPLE_ON, read_boards=False, dry_run=True)
+        notes = _rows(h, "SELECT count(*) FROM linkedin_draft")[0][0]
+        off = build_plan(h.conn, today=TODAY, read_boards=False)
+        self.assertFalse(default_plan_config().get("plan", "propose_people"))
+        self.assertEqual(off.status, "built")
+        rows = self.entries(h)
+        self.assertEqual(len(rows), off.linkedin.today)
+        self.assertEqual(off.capacity, off.linkedin.today)
+        self.assertEqual(sum(r["person_id"] is not None for r in rows), 0)
+        self.assertEqual(sum(r["channel"] == "email" for r in rows), 0)
+        self.assertEqual(_rows(h, "SELECT count(*) FROM linkedin_draft")[0][0], notes, "the plan writes no notes")
+        companies = [r["company_id"] for r in rows]
+        for company in s.blocked:
+            self.assertNotIn(company, companies)
+        self.assertIn(s.founder, companies, "the founder's company comes as a company row")
+        self.assertIn(s.rotating, companies, "the stale company still rotates")
+        rotated = json.loads(next(r for r in rows if r["company_id"] == s.rotating)["why"])
+        self.assertEqual(rotated["rotation"], {"previous_person_id": s.rotating_first})
+        for r in rows:
+            why = json.loads(r["why"])
+            self.assertEqual(tuple(sorted(why)), tuple(sorted(WHY_KEYS)))
+            self.assertTrue(why["find_someone"]["search_url"])
+        # with the switch on, the stage's own expectations hold (the invariant below runs on that build)
+        self.assertGreater(sum(c.person_id is not None for c in on.chosen), 0)
+        self.assertEqual(sum(c.channel == "email" for c in on.chosen), 1)
 
     def test_flow_plan_only_proposes_companies_with_a_lane_and_not_hidden_ones(self):
         h = self.harness()

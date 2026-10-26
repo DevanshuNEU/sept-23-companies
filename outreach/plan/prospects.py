@@ -29,8 +29,8 @@ __all__ = ["WHY_KEYS", "HANDOFF", "PostingInfo", "load_prospects", "load_carried
 
 KEPT_STATUSES = ("candidate", "backlog", "working")
 CARRIED_STATES = ("proposed", "picked", "backlog")
-HANDOFF = ("Open the search, pick someone on the team, and paste their profile link and name. "
-           "Your side session drafts the note.")
+# Company first (#9): he finds the people and writes the notes himself, then logs who he asked on the row.
+HANDOFF = "Open the search and reach out to the people you pick. Then log who you asked on this row."
 WHY_KEYS = ("lane", "reason", "reason_sources", "signals", "role", "person", "channel_reason", "find_someone",
             "draft_id", "carried_from", "first_proposed", "rotation", "score", "ranker_version")
 _CHUNK = 500

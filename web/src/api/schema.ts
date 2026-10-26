@@ -1801,12 +1801,17 @@ export interface components {
          *     touch per key, whatever the request id. `revision` is optional and never checked: a log only adds a touch, the key
          *     stops a double press, and two logs sent out of order (the tab closed) must both land. The entry's revision still
          *     moves on.
+         *
+         *     A row with a person sends its `personId`. A company row (nobody on it: company first, #9) sends `personName`
+         *     instead, the name of the person he asked; the person is added at the company (by him) or found there by name.
          */
         LogRequestBody: {
             /** Idempotencykey */
             idempotencyKey: string;
             /** Personid */
-            personId: number;
+            personId?: number | null;
+            /** Personname */
+            personName?: string | null;
             /** Revision */
             revision?: number | null;
         };

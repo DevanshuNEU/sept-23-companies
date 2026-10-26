@@ -1,9 +1,12 @@
-import type { ReactNode } from 'react';
-import { Search, Terminal } from 'lucide-react';
+import { useState, type FormEvent, type ReactNode } from 'react';
+import { Search } from 'lucide-react';
 import type { IsoTime, PlanRow } from '@/api';
+import { StepMarks } from '@/components/step-marks';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { safeHref } from '@/lib/safe-href';
-import { MAIN, CarriedOver, ClosedLine, CompanyLink, KeyHint, PanelHead, PanelReason, PanelRole, QuietActions, type PanelActions } from './plan-panel';
+import { askedFieldId } from './plan-steps';
+import { MAIN, CarriedOver, ClosedLine, CompanyLink, KeyHint, LogButton, PanelHead, PanelReason, PanelRole, QuietActions, type PanelActions } from './plan-panel';
 
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
@@ -15,9 +18,10 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 
 /**
- * A row with nobody on it yet (design 16.1, "Find someone"): the reason and the role, then three steps on paper
- * (search, hand it to Claude, back here) with the handoff text shown, Open LinkedIn search (S) as the one filled
- * button and Copy handoff (C). No note and no logging key: there is nobody to log yet.
+ * A company row (company first, #9): a company to reach, with nobody named. He finds the people on LinkedIn and writes
+ * his own notes, so the row shows the reason and the role, three steps (search, reach out, log it here), Open LinkedIn
+ * search (S) as the filled button, a field for the name of the person he asked with Log request sent (R, then Enter),
+ * Log applied (P) when the row has a role, the step marks and the quiet actions. No note: the app never writes one.
  */
 export function FindSomeonePanel({
   row,
@@ -27,12 +31,19 @@ export function FindSomeonePanel({
 }: {
   row: PlanRow;
   asOf: IsoTime;
-  actions: Pick<PanelActions, 'onCopy' | 'onCarry' | 'onNotFit'>;
+  actions: Pick<PanelActions, 'onCarry' | 'onNotFit' | 'onLog' | 'onLogAsked'>;
   headingId?: string;
 }) {
-  const find = row.findSomeone;
-  const search = safeHref(find?.searchUrl);
+  const [asked, setAsked] = useState('');
+  const search = safeHref(row.findSomeone?.searchUrl);
   const todo = row.state === 'todo';
+  const hasApply = row.steps.some((s) => s.kind === 'apply');
+  const requested = row.steps.some((s) => s.kind === 'request' && s.at !== null);
+  const fieldId = askedFieldId(headingId);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    actions.onLogAsked(asked);
+  };
   return (
     <div className="grid max-w-[720px] gap-4">
       <PanelHead
@@ -42,9 +53,8 @@ export function FindSomeonePanel({
         meta={
           <>
             <span>
-              {'Nobody at '}
               <CompanyLink row={row} />
-              {' is on your list yet'}
+              {' is a company to reach. You find the people.'}
             </span>
             <CarriedOver row={row} asOf={asOf} />
           </>
@@ -53,20 +63,17 @@ export function FindSomeonePanel({
       <PanelReason row={row} />
       <PanelRole row={row} />
 
-      {find ? (
-        <ol aria-label="How to find someone" className="grid rounded-lg border bg-subtle">
-          <Step n={1} title="Search">
-            <span>Open the LinkedIn search and pick one engineer on the team.</span>
-          </Step>
-          <Step n={2} title="Hand it to Claude">
-            <span>Copy the handoff and paste it in the side terminal with their profile.</span>
-            <pre className="mt-1.5 rounded-md bg-muted px-3 py-2.5 font-mono text-xs leading-[18px] whitespace-pre-wrap">{find.handoff}</pre>
-          </Step>
-          <Step n={3} title="Back here">
-            <span>Claude adds them and writes the note. This row becomes theirs.</span>
-          </Step>
-        </ol>
-      ) : null}
+      <ol aria-label="How to reach this company" className="grid rounded-lg border bg-subtle">
+        <Step n={1} title="Search">
+          <span>Open the LinkedIn search and pick the people you want to reach.</span>
+        </Step>
+        <Step n={2} title="Reach out">
+          <span>Send your requests on LinkedIn, with your own note.</span>
+        </Step>
+        <Step n={3} title="Log it here">
+          <span>Type the name of someone you asked and log the request. The row is done once a request at {row.company.name} is logged.</span>
+        </Step>
+      </ol>
 
       {todo ? (
         <div className="flex flex-wrap items-center gap-2">
@@ -79,17 +86,36 @@ export function FindSomeonePanel({
               </a>
             </Button>
           ) : null}
-          {find ? (
-            <Button type="button" variant="outline" size="sm" className={MAIN} aria-keyshortcuts="c" onClick={actions.onCopy}>
-              <Terminal aria-hidden />
-              Copy handoff
-              <KeyHint k="C" />
-            </Button>
-          ) : null}
-          <span className="flex-1" />
-          <QuietActions actions={actions} />
+          {hasApply ? <LogButton row={row} kind="apply" filled={false} onLog={actions.onLog} /> : null}
         </div>
       ) : null}
+
+      {todo && !requested ? (
+        <form aria-label="Log a request" onSubmit={submit} className="flex flex-wrap items-center gap-2">
+          <label htmlFor={fieldId} className="text-[13px] text-muted-foreground">
+            Who did you ask?
+          </label>
+          <Input
+            id={fieldId}
+            value={asked}
+            onChange={(e) => setAsked(e.target.value)}
+            placeholder="Their name"
+            maxLength={200}
+            autoComplete="off"
+            className="h-8 w-56 text-[13px] md:text-[13px]"
+          />
+          <Button type="submit" variant="outline" size="sm" className={MAIN} aria-keyshortcuts="r">
+            Log request sent
+            <KeyHint k="R" />
+          </Button>
+        </form>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <StepMarks steps={row.steps} role={hasApply} />
+        <span className="flex-1" />
+        {todo ? <QuietActions actions={actions} /> : null}
+      </div>
       <ClosedLine row={row} />
     </div>
   );

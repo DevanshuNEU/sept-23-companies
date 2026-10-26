@@ -971,6 +971,12 @@ replies count is this month's replies, the same number Progress shows.
 
 ### 16.1 Today as a plan (replaces 5.1)
 
+> **Company first (2026-10-26, #9).** The plan now proposes company rows only (`[plan] propose_people = false`) and
+> the night prepare step is off, so every row is a "Find someone" row: "<company> is a company to reach. You find the
+> people." Its steps are search, reach out, log it here; he types the name of someone he asked and logs the request
+> (R puts the cursor in the field), and Log applied works when the row has a role. No row has a note, so the note
+> editor and Confirm line never show. The person rows below stay in the code until the company queue replaces them.
+
 **Purpose.** Make today's effort clear and quick: about 7 people, one at a time, in order, ending in a finish line.
 
 **Layout.** Under the date and `7 people, 2 done` (with `Requests this week 26 of 150` on the right: the plan's

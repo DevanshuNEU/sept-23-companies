@@ -9,13 +9,20 @@ NOTE_TEXT_MAX = 3000  # far over any note limit: an over-long note is saved with
 REASON_MAX = 500
 
 
+PERSON_NAME_MAX = 200
+
+
 class LogRequestBody(WireRequest):
     """He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one
     touch per key, whatever the request id. `revision` is optional and never checked: a log only adds a touch, the key
     stops a double press, and two logs sent out of order (the tab closed) must both land. The entry's revision still
-    moves on."""
+    moves on.
 
-    person_id: int = Field(ge=1, le=MAX_ID)
+    A row with a person sends its `personId`. A company row (nobody on it: company first, #9) sends `personName`
+    instead, the name of the person he asked; the person is added at the company (by him) or found there by name."""
+
+    person_id: int | None = Field(default=None, ge=1, le=MAX_ID)
+    person_name: str | None = Field(default=None, max_length=PERSON_NAME_MAX)
     idempotency_key: str = Field(pattern=TOUCH_KEY)
     revision: int | None = Field(default=None, ge=1)
 

@@ -1,4 +1,5 @@
 """Task 8: the pure selection of the day's rows (#15). Hand-built prospects, no store."""
+import dataclasses
 import itertools
 import unittest
 from datetime import date
@@ -8,7 +9,11 @@ from outreach.plan.contact import ContactState
 from outreach.plan.people import Candidate
 from outreach.plan.select import (Caps, CarriedRow, Prospect, choose_rows, eligibility, group_of, options)
 
-CFG = default_plan_config()
+SHIPPED = default_plan_config()
+# The shipped config proposes company rows only (`plan.propose_people = false`, the company-first ruling in #9). The
+# person and email paths stay in the code, so most tests here run with the switch on; CompanyOnlyTest runs the
+# shipped config.
+CFG = dataclasses.replace(SHIPPED, plan={**SHIPPED.plan, "propose_people": True})
 DAY = date(2026, 11, 10)
 _ids = itertools.count(1)
 
@@ -252,6 +257,61 @@ class CarriedTest(unittest.TestCase):
     def test_an_ineligible_carried_company_is_dropped(self):
         p = prospect(1, status="waiting", carried=self.carry(1, None, date(2026, 11, 6)))
         self.assertEqual(choose_rows([p], Caps(7, 3, 6, 1), CFG), [])
+
+
+class CompanyOnlyTest(unittest.TestCase):
+    """`plan.propose_people = false` (shipped): every row is a company row (the find-someone option), never a person
+    or an email; eligibility, carry-forward, rotation and the capacities work as before."""
+
+    def carry(self, company: int, person: int | None, first: date):
+        return CarriedRow(company, person, date(2026, 11, 9), first)
+
+    def test_options_company_only(self):
+        self.assertIs(SHIPPED.get("plan", "propose_people"), False)
+        hn = cand(60, company=1, role="founder", email="f@one.example", basis="published", post=True)
+        team = cand(61, company=1, fit="team")
+        p = prospect(1, candidates=[hn, team], carried=self.carry(1, 61, date(2026, 11, 6)))
+        self.assertEqual(options(p, SHIPPED), [("linkedin_request", None, "find_someone")])
+        self.assertEqual(options(prospect(2), SHIPPED), [("linkedin_request", None, "find_someone")])
+        self.assertEqual(options(p, CFG)[0][1], 61)  # with the switch on, the person path is unchanged
+
+    def test_rows_are_company_rows_only_and_never_email(self):
+        email_cand = lambda c: [cand(company=c, role="founder", email=f"f{c}@x.com", basis="published")]
+        ps = [prospect(c, score=100 - c, candidates=email_cand(c) if c % 2 else [cand(company=c, fit="team")])
+              for c in range(1, 31)]
+        rows = choose_rows(ps, Caps(7, 3, 6, 1), SHIPPED)
+        self.assertEqual(len(rows), 7)  # the LinkedIn capacity only: no email slot is used
+        self.assertEqual({(r.channel, r.person_id, r.channel_reason) for r in rows},
+                         {("linkedin_request", None, "find_someone")})
+        self.assertEqual(chosen_ids(rows), list(range(1, 8)))  # by score, as before
+        with_people = choose_rows(ps, Caps(7, 3, 6, 1), CFG)
+        self.assertEqual(sum(r.channel == "email" for r in with_people), 3)
+        self.assertTrue(any(r.person_id is not None and r.channel == "linkedin_request" for r in with_people))
+
+    def test_carried_person_row_becomes_company_row(self):
+        team = cand(70, company=9, fit="team")
+        p = prospect(9, score=1.0, candidates=[team], carried=self.carry(9, 70, date(2026, 11, 3)))
+        fresh = many(10, ["level_role"], start_score=99, base=500)
+        rows = choose_rows([p] + fresh, Caps(3, 0, 3, 0), SHIPPED)
+        mine = [r for r in rows if r.company_id == 9]
+        # still carried first, with its dates, but as the company: nobody is named
+        self.assertEqual([(r.person_id, r.channel, r.channel_reason, r.carried_from, r.first_proposed) for r in mine],
+                         [(None, "linkedin_request", "find_someone", date(2026, 11, 9), date(2026, 11, 3))])
+        self.assertEqual(len(rows), 3)
+        # a carried email person with no email slot no longer holds the company back
+        ada = cand(71, company=8, role="founder", email="ada@eight.example", basis="published")
+        q = prospect(8, score=1.0, candidates=[ada], carried=self.carry(8, 71, date(2026, 11, 6)))
+        rows = choose_rows([q], Caps(2, 0, 2, 0), SHIPPED)
+        self.assertEqual([(r.company_id, r.person_id, r.carried_from) for r in rows], [(8, None, date(2026, 11, 9))])
+
+    def test_rotation_and_eligibility_are_unchanged(self):
+        stale = prospect(5, status="stale", people=1, position=3, last=7, candidates=[cand(80, company=5)])
+        rows = choose_rows([stale], Caps(1, 0, 1, 0), SHIPPED)
+        self.assertEqual([(r.company_id, r.person_id, r.rotation_from) for r in rows], [(5, None, 7)])
+        for status in ("waiting", "engaged"):
+            self.assertEqual(choose_rows([prospect(6, status=status)], Caps(1, 0, 1, 0), SHIPPED), [])
+        full = prospect(7, status="stale", people=3, position=3)
+        self.assertEqual(choose_rows([full], Caps(1, 0, 1, 0), SHIPPED), [])
 
 
 if __name__ == "__main__":

@@ -23,12 +23,12 @@ class PlanConfigTest(unittest.TestCase):
                       "fill": ["any_us_role"], "role_share": 0.8, "reason_share": 0.2},
             "email": {"start_limit": 20, "rows_max": 15, "people_per_company": 2, "hn_post_days": 90},
             "plan": {"timezone": "America/New_York", "scan_limit": 400, "board_read_top_n": 30,
-                     "roll_forward_days": 5},
+                     "roll_forward_days": 5, "propose_people": False},
             "people": {"founder_max_headcount": 25, "employer_fresh_days": 30,
                        "generic_mailboxes": ["info", "hello", "contact", "support", "sales", "press", "admin",
                                              "team", "careers", "jobs", "hr", "recruiting", "noreply", "no-reply"],
                        "search_hint": "software engineer"},
-            "prepare": {"multiple": 2.0, "retry_days": 7, "max_candidates": 2, "model": "claude-sonnet-5-5",
+            "prepare": {"enabled": False, "multiple": 2.0, "retry_days": 7, "max_candidates": 2, "model": "claude-sonnet-5-5",
                         "call_timeout_s": 600, "max_consecutive_failures": 2,
                         "session_limit_patterns": ["usage limit", "rate limit"],
                         "auth_patterns": ["not logged in", "please run /login"], "schema_version": 1},
@@ -79,6 +79,30 @@ class PlanConfigTest(unittest.TestCase):
     def test_lane_in_two_groups_refused(self):
         with self.assertRaises(ValueError):
             load_plan_config(_variant('fill = ["any_us_role"]', 'fill = ["any_us_role", "reason_no_role"]'))
+
+    def test_company_first_switches_ship_off(self):
+        # #9 company-first ruling (2026-10-26): no night prepare, no person rows in the plan.
+        c = load_plan_config()
+        self.assertIs(c.get("prepare", "enabled"), False)
+        self.assertIs(c.get("plan", "propose_people"), False)
+        self.assertIs(c.get("prepare", "deny_rule_checked"), True)  # a separate fact, kept as it was
+
+    def test_company_first_switches_must_be_booleans(self):
+        for old, new, name in (("enabled = false", 'enabled = "false"', "prepare.enabled"),
+                               ("enabled = false", "enabled = 0", "prepare.enabled"),
+                               ("propose_people = false", "propose_people = 1", "plan.propose_people"),
+                               ("deny_rule_checked = true", 'deny_rule_checked = "yes"', "prepare.deny_rule_checked")):
+            with self.assertRaises(ValueError) as ctx:
+                load_plan_config(_variant(old, new))
+            self.assertIn(name, str(ctx.exception))
+        self.assertIs(load_plan_config(_variant("enabled = false", "enabled = true")).get("prepare", "enabled"), True)
+
+    def test_company_first_switches_missing_name_themselves(self):
+        for old, name in (("enabled = false\n", "prepare.enabled"), ("propose_people = false\n", "plan.propose_people"),
+                          ("deny_rule_checked = true\n", "prepare.deny_rule_checked")):
+            with self.assertRaises(KeyError) as ctx:
+                load_plan_config(_variant(old, ""))
+            self.assertIn(name, str(ctx.exception))
 
     def test_no_dashes_in_config(self):
         text = CONFIG_PATH.read_text(encoding="utf-8")

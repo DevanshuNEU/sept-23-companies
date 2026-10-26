@@ -143,7 +143,7 @@ const ROWS: RowSpec[] = [
 ];
 
 const HANDOFF = (company: string, role: string) =>
-  `Find one person at ${company} to ask for a referral for ${role}. Prefer an engineer on the team, then a manager. Reply with their name, title and LinkedIn profile link.`;
+  `Reach out to the people you pick at ${company} about ${role}. Then log who you asked on this row.`;
 const searchUrl = (company: string) =>
   `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`engineer ${company}`)}&origin=GLOBAL_SEARCH_HEADER`;
 

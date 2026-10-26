@@ -38,7 +38,7 @@ Decisions live in GitHub issue #9. After the switch (#17) the live system is the
 | `tests/test_ranking_*.py`, `tests/ranking_*.py`, `tests/fixtures/ranking/`, `tests/pipeline/stages_ranking.py` | The ranker's tests on seeded stores (no network), 21 fixture employers with 44 postings, and the `rank` stage of the pipeline flow test with its invariants. `tests/mutation_check.py` carries the ranker's mutation entries |
 | `outreach/insights/` (how to run) | #81, PR 1: `uv run python -m outreach.insights --help` lists the commands: `summary` (the counts, the interview companies, what they share in counts with "too few to tell" below 20, and the possible duplicates; company names only), `export --format csv\|json [--out PATH] [--with-people] [--force]` (the outcome dataset, one row per canonical company he reached; company level unless `--with-people`, which adds names only, never an address or a LinkedIn URL; written under `~/Desktop/outreach-scratch/insights/` or the path he names, never inside the repo) and `duplicates [--raise]` (possible duplicate companies; `--raise` makes Needs-you merge items, the only write). Modules: `bands.toml` and `bands.py` (size, stage, level and board bands), `config.toml` and `config.py` (the screen's numbers), `dataset.py` (`load_outcome_rows`), `duplicates.py`, `findings.py`, `export.py`. Every command opens the store through `connect()`, so the live store opens only from the live checkout; from a worktree use a scratch `OUTREACH_DB` |
 | `superpowers/plans/2026-10-21-daily-people-plan.md` | #15: Today as a plan of people, capacity, the prepare step, LinkedIn notes and checks. Built; where the code differs from the plan text, the rulings at the top of the plan and the hand-offs below win. #9's LinkedIn limits ruling (2026-10-26) replaces the plan's month counting and its 200-character note: requests count over the last 7 New York days (150 for the plan, 200 in all), the day is his pace (`linkedin.per_day`, 7), and a note may be 300 characters |
-| `outreach/plan/` (how to run) | `uv run python -m outreach.plan --help` lists the commands: `build` (the day's plan, once per date; `--dry-run`, `--no-read-boards`), `show` (a stored plan, read only) and `prepare` (the morning step through `claude -p`, live checkout only). From a worktree use a scratch `OUTREACH_DB` |
+| `outreach/plan/` (how to run) | `uv run python -m outreach.plan --help` lists the commands: `build` (the day's plan, once per date; `--dry-run`, `--no-read-boards`), `show` (a stored plan, read only) and `prepare` (the morning step through `claude -p`, live checkout only; off while `prepare.enabled` is false, as shipped). From a worktree use a scratch `OUTREACH_DB` |
 | `outreach/plan/` (modules) | `config.toml` and `config.py` (every number), `dates.py`, `outbound.py` (one read of outbound history), `capacity.py` (the last 7 days of requests against both limits, then his daily pace), `contact.py` (the 14-day rule), `people.py` (candidates, channel, `add_candidate`), `notecheck.py` and `drafts.py` (the one note checker and draft writer), `select.py` (pure choice of rows), `prospects.py` (loaders, carry-forward, the `why` keys), `boards.py` and `build.py` (the plan job), `prepare_targets.py`, `prepare_store.py`, `claude_run.py`, `prepare.py` and `prompts/prepare.md` (the prepare step) |
 | `launchd/com.devanshu.outreach-plan.plist.template`, `launchd/com.devanshu.outreach-prepare.plist.template` | The plan job (Monday to Friday 08:00) and the prepare job (Monday to Friday 05:30); `{{LIVE_CHECKOUT}}` and `{{LOG_PATH}}` only; installed by `python -m outreach.deploy install`, never by the repo |
 | `tests/test_plan_*.py`, `tests/plan_seed.py`, `tests/fixtures/plan/`, `tests/pipeline/stages_plan.py` | The plan's tests on scratch stores (no network, no Claude: the prepare runner, the boards reader and the rank runner are fakes), the `plan` stage of the pipeline flow test with its invariants (capacity, one person per company, the 14-day boundary, the lane share, people before find-someone, only laned and visible companies, a second run changes nothing). `tests/mutation_check.py` carries the plan's mutation entries |
@@ -207,13 +207,20 @@ rulings at the top of `superpowers/plans/2026-10-21-daily-people-plan.md` and it
 
 ### Prepare runbook (Devanshu runs it once)
 
+**The prepare step is off (company first, #9, 2026-10-26).** Devanshu finds the people on LinkedIn himself and writes
+his own notes, so `[prepare] enabled = false` in `outreach/plan/config.toml`: the 05:30 job prints `prepare is off ...`,
+exits 0 and touches nothing (no `claude -p` call, no job run, no event). The 08:00 plan proposes company rows only
+(`[plan] propose_people = false`). The code and the job stay until a later cleanup deletes them; `deny_rule_checked`
+below still records the deny-rule check and still gates the step if it is ever turned back on. The rest of this
+runbook applies only then.
+
 The prepare step was built without ever running `claude -p`, so nobody has seen the LinkedIn deny rule in
 `outreach/plan/claude_run.py` take effect on his seat. It is passed both ways at once (`--settings` and
 `--disallowedTools`) and names `linkedin.com`, `*.linkedin.com`, `www.linkedin.com`, `lnkd.in` and `*.lnkd.in`. The
 step shipped **off** and was switched on on 2026-10-25, after the check below passed (both calls DENIED, 0 web fetches,
 with the exact command `claude_command` builds): while `prepare.deny_rule_checked` is false in
-`outreach/plan/config.toml`, `python -m outreach.plan prepare` prints one line and exits 0, touching nothing. Set it back
-to false to switch the step off.
+`outreach/plan/config.toml`, `python -m outreach.plan prepare` prints one line and exits 0, touching nothing.
+`prepare.enabled` is the on and off switch.
 
 1. Run `claude --help` and confirm it still lists `--tools`, `--allowedTools`, `--disallowedTools`, `--settings` and
    `--permission-mode` (with `dontAsk`).

@@ -32,10 +32,11 @@ ROOT = Path(__file__).resolve().parent.parent
 FIX = Path(__file__).resolve().parent / "fixtures" / "plan"
 TEMPLATE = ROOT / "launchd" / "com.devanshu.outreach-prepare.plist.template"
 CFG = default_plan_config()
-# The deny rule was checked on his seat on 2026-10-25 (prepare.deny_rule_checked is true in the shipped config); the
-# tests that need the step OFF build that config with the switch back to false.
-ON = dataclasses.replace(CFG, prepare={**CFG.prepare, "deny_rule_checked": True})
-OFF = dataclasses.replace(CFG, prepare={**CFG.prepare, "deny_rule_checked": False})
+# The shipped config has the step switched off (prepare.enabled false, the company-first ruling in #9, 2026-10-26);
+# the deny rule was checked on his seat on 2026-10-25 (prepare.deny_rule_checked true). The tests of the step itself
+# turn it on (ON); OFF is on but with the deny rule unchecked, so that gate is still tested on its own.
+ON = dataclasses.replace(CFG, prepare={**CFG.prepare, "enabled": True, "deny_rule_checked": True})
+OFF = dataclasses.replace(CFG, prepare={**CFG.prepare, "enabled": True, "deny_rule_checked": False})
 BANNED, _ = load_banned(FIX / "banned_phrases.txt", scopes=("both", "dm"))
 UNCONFIRMED = load_unconfirmed(FIX / "me.md")
 ME_TEXT = (FIX / "me.md").read_text(encoding="utf-8")
@@ -106,6 +107,23 @@ class PrepareCase(unittest.TestCase):
 
 
 class RunTest(PrepareCase):
+    def test_prepare_off_does_nothing(self):
+        # Company first: the shipped config switches the step off, whatever the deny rule says.
+        self.assertIs(CFG.get("prepare", "enabled"), False)
+        for cfg in (CFG, dataclasses.replace(CFG, prepare={**CFG.prepare, "deny_rule_checked": False})):
+            runner = Script(good)
+            events = self.count("event")
+            with mock.patch.object(prepare_module, "start_job") as started, \
+                    mock.patch.object(prepare_module, "select_prepare_targets") as targets:
+                summary = self.run_prepare(runner, cfg=cfg)
+            self.assertEqual(summary, PrepareSummary("off", 0, 0, 0, 0, 0))
+            self.assertEqual(runner.calls, [])
+            started.assert_not_called()
+            targets.assert_not_called()
+            self.assertEqual((self.jobs(), self.count("event"), self.count("person"), self.count("linkedin_draft")),
+                             ([], events, 0, 0))
+            self.assertTrue(summary.line().startswith("prepare is off"), summary.line())
+
     def test_prepare_does_nothing_until_the_deny_rule_is_checked(self):
         self.assertIs(CFG.get("prepare", "deny_rule_checked"), True)  # checked on his seat on 2026-10-25
         runner = Script(good)
@@ -357,6 +375,22 @@ class CliTest(unittest.TestCase):
         self.assertIn("me.md", err.getvalue())
         made.assert_not_called()
 
+
+    def test_prepare_command_with_the_shipped_config_is_off_and_never_calls_claude(self):
+        # The 05:30 job (`python -m outreach.plan prepare`) with the config as shipped: one plain line, exit 0, and no
+        # runner, no claude command line, no store, no caffeinate.
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(cli, "claude_runner") as made, mock.patch.object(cli, "_start_caffeinate") as awake, \
+                mock.patch("outreach.plan.claude_run.claude_command") as command, \
+                mock.patch("subprocess.run") as ran, mock.patch.object(cli, "run_prepare") as runs, \
+                mock.patch("sqlite3.connect") as opened, contextlib.redirect_stderr(err):
+            code = cli.main(["prepare"], root=str(ROOT), live_root=str(ROOT), stdout=out)
+        self.assertEqual(code, 0)
+        self.assertNotIn("prepare", err.getvalue())
+        self.assertTrue(out.getvalue().startswith("prepare is off"), out.getvalue())
+        self.assertEqual(out.getvalue().count("\n"), 1)
+        for fake in (made, awake, command, ran, runs, opened):
+            fake.assert_not_called()
 
     def test_prepare_command_is_off_until_the_deny_rule_is_checked(self):
         out, err = io.StringIO(), io.StringIO()

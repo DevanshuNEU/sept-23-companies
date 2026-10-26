@@ -7,10 +7,12 @@ from pathlib import Path
 from outreach.crawl.config import load_crawl_config
 from outreach.rules.version import ruleset_version
 
-__all__ = ["RANKING_DIR", "CRAWL_DIR", "RANKING_FILES", "NOT_RANKING", "ranker_version"]
+__all__ = ["RANKING_DIR", "CRAWL_DIR", "INSIGHTS_DIR", "RANKING_FILES", "NOT_RANKING", "INSIGHTS_FILES",
+           "NOT_INSIGHTS", "ranker_version"]
 
 RANKING_DIR = Path(__file__).resolve().parent
 CRAWL_DIR = RANKING_DIR.parent / "crawl"
+INSIGHTS_DIR = RANKING_DIR.parent / "insights"
 
 # The files whose bytes decide a score, plus every signals/*.py. Files that do not exist yet hash as empty.
 # job.py is in because compute_rank lives there: how a run builds facts and scores them changes scores.
@@ -18,13 +20,19 @@ RANKING_FILES = ("config.toml", "wages.toml", "config.py", "types.py", "common.p
                  "roles.py", "facts.py", "hide.py", "score.py", "job.py")
 # Files in this folder that cannot change a score. A test fails on any file that is in neither tuple.
 NOT_RANKING = ("__init__.py", "version.py", "scores.py", "review.py", "diff.py", "__main__.py")
+# The insights files the interview tilt (#81) reads: the bands, the outcome rows its profile is built from and the
+# similarity. The rest of outreach/insights cannot change a score. A test fails on any file that is in neither tuple.
+INSIGHTS_FILES = ("bands.toml", "bands.py", "dataset.py", "similar.py")
+NOT_INSIGHTS = ("__init__.py", "__main__.py", "config.toml", "config.py", "findings.py", "duplicates.py",
+                "lookalikes.py", "export.py")
 
 
-def ranker_version(ranking_dir: Path = RANKING_DIR, crawl_dir: Path = CRAWL_DIR) -> str:
-    """`rk-` plus 12 hex over the ranking files (path, NUL, bytes, NUL), the crawler's stale.py bytes, the text
-    `stale_after_months=<n>` and `ruleset=<outreach.rules ruleset_version()>` (the rules decide what is visible, so a
-    new ruleset is a new score)."""
-    ranking_dir, crawl_dir = Path(ranking_dir), Path(crawl_dir)
+def ranker_version(ranking_dir: Path = RANKING_DIR, crawl_dir: Path = CRAWL_DIR,
+                   insights_dir: Path = INSIGHTS_DIR) -> str:
+    """`rk-` plus 12 hex over the ranking files (path, NUL, bytes, NUL), the insights files (`insights/<name>`, NUL,
+    bytes, NUL), the crawler's stale.py bytes, the text `stale_after_months=<n>` and
+    `ruleset=<outreach.rules ruleset_version()>` (the rules decide what is visible, so a new ruleset is a new score)."""
+    ranking_dir, crawl_dir, insights_dir = Path(ranking_dir), Path(crawl_dir), Path(insights_dir)
     signals = ranking_dir / "signals"
     rels = list(RANKING_FILES)
     if signals.is_dir():
@@ -34,6 +42,10 @@ def ranker_version(ranking_dir: Path = RANKING_DIR, crawl_dir: Path = CRAWL_DIR)
         path = ranking_dir / rel
         body = path.read_bytes() if path.is_file() else b""
         digest.update(rel.encode() + b"\0" + body + b"\0")
+    for name in sorted(INSIGHTS_FILES):
+        path = insights_dir / name
+        body = path.read_bytes() if path.is_file() else b""
+        digest.update(f"insights/{name}".encode() + b"\0" + body + b"\0")
     stale = crawl_dir / "stale.py"
     digest.update(stale.read_bytes() if stale.is_file() else b"")
     digest.update(f"stale_after_months={load_crawl_config().stale_after_months}".encode())

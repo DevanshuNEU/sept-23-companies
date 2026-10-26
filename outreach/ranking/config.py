@@ -11,7 +11,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["CONFIG_PATH", "REQUIRED", "BOTTOM_WEIGHTS", "RankerConfig", "load_ranker_config", "default_ranker_config"]
+__all__ = ["CONFIG_PATH", "REQUIRED", "BOTTOM_WEIGHTS", "ZERO_WEIGHT_OK", "TILT_WEIGHT", "RankerConfig",
+           "load_ranker_config", "default_ranker_config"]
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
 
@@ -20,7 +21,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "ranker": ("keep_versions", "size_check_top_n", "many_postings", "lca_software_many", "funding_window_months",
                "lca_recent_years", "hn_post_days", "diff_min_rank_move", "diff_top_n", "lca_wage_min_filings"),
     "weights": ("live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
-                "reachable_person", "funding", "staffing_risk", "large_later_stage"),
+                "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"),
     "hide": ("size_over", "size_confidences"),
     "live_role": ("intern_junior", "level_role", "any_us_role", "fresh_days", "fresh_bonus"),
     "posting_sponsors": ("yes", "opt_only"),
@@ -34,12 +35,18 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "large_later_stage": (),
     "reachable_person": ("role_kinds", "person", "hn_post"),
     "staffing_risk": ("high", "medium", "promoted_high"),
+    "interview_like": ("min_interview_companies", "min_matches", "confident_at", "max_weight_share"),
     "confidence": ("factor_high", "factor_medium", "factor_low", "evidence_old_days", "lca_pay_medium_filings",
                    "rank_high_share", "rank_low_share", "reason_count"),
 }
 
 # The two weights that push a company to the bottom (see _check_bottom_weights).
 BOTTOM_WEIGHTS = ("staffing_risk", "large_later_stage")
+# Weights that may be exactly 0.0 (switched off). Every other weight must be above 0.
+ZERO_WEIGHT_OK = ("interview_like",)
+# The one-way interview tilt (#81), capped by _check_tilt.
+TILT_WEIGHT = "interview_like"
+_TILT_MAX_SHARE = 0.25
 # The negative values of the other signals: (section, key, the weight it is multiplied by).
 _OTHER_NEGATIVES = (("everify", "not_enrolled", "everify"), ("pay_level", "level_1", "pay_level"),
                     ("small", "weak_flag_value", "small"))
@@ -86,6 +93,25 @@ def _check_bottom_weights(data: dict) -> None:
         if points[name] <= limit:
             raise ValueError(f"[weights] {name} gives {points[name]} points at most, which must exceed {limit} (every "
                              f"other weight plus the worst other negative), or a hit company no longer sorts last")
+
+
+def _check_tilt(data: dict) -> None:
+    """The interview tilt stays small: its weight is at most `max_weight_share` of the top score, the sum of every
+    other weight except the bottom push, and the share itself is above 0 and at most 0.25. Its counts are whole
+    numbers of at least 1."""
+    section = data["interview_like"]
+    for key in ("min_interview_companies", "min_matches", "confident_at"):
+        _whole_at_least_one(section[key], f"[interview_like] {key}")
+    share = section["max_weight_share"]
+    if not _is_number(share) or not math.isfinite(share) or not 0 < share <= _TILT_MAX_SHARE:
+        raise ValueError(f"[interview_like] max_weight_share must be above 0 and at most {_TILT_MAX_SHARE}, "
+                         f"got {share!r}")
+    w = data["weights"]
+    top = sum(v for name, v in w.items() if name not in BOTTOM_WEIGHTS and name != TILT_WEIGHT)
+    cap = share * top
+    if w[TILT_WEIGHT] > cap:
+        raise ValueError(f"[weights] {TILT_WEIGHT} is {w[TILT_WEIGHT]:g}, above its cap of {cap:g} "
+                         f"({share:g} of the top score {top:g}), so the tilt would no longer be small")
 
 
 def _check_confidence(c: dict) -> None:
@@ -140,9 +166,10 @@ def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
                 raise KeyError(f"[{section}] {key} is missing from {path.name}")
     weights = data["weights"]
     for name, w in weights.items():
-        if not _is_number(w) or not math.isfinite(w) or w <= 0:
+        if not _is_number(w) or not math.isfinite(w) or w < 0 or (w == 0 and name not in ZERO_WEIGHT_OK):
             raise ValueError(f"[weights] {name} must be a finite number above 0, got {w!r}")
     _check_bottom_weights(data)
+    _check_tilt(data)
     _check_confidence(data["confidence"])
     _check_hide(data["hide"])
     _check_ranker(data)

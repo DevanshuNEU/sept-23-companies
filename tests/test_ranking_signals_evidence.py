@@ -21,7 +21,9 @@ from tests.ranking_helpers import check_assessment, neutral_facts
 
 CFG = default_ranker_config()
 ORDER = ["live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
-         "reachable_person", "funding", "staffing_risk", "large_later_stage"]
+         "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"]
+# The one signal whose grade belongs to the interview profile, not to the company's facts (#81).
+PROFILE_GRADED = "interview_like"
 
 
 def sig(cls, section=None):
@@ -206,7 +208,7 @@ class StaffingRiskTests(unittest.TestCase):
 
 
 class RegistryTests(unittest.TestCase):
-    def test_build_signals_returns_the_eleven_in_order(self):
+    def test_build_signals_returns_the_twelve_in_order(self):
         self.assertEqual([s.name for s in build_signals(CFG)], ORDER)
 
     def test_weights_have_one_entry_per_signal(self):
@@ -228,6 +230,11 @@ class RegistryTests(unittest.TestCase):
         facts = neutral_facts()
         for s in build_signals(CFG):
             with self.subTest(signal=s.name):
+                if s.name == PROFILE_GRADED:
+                    got = s.score(facts)
+                    self.assertEqual(got.value, 0.0)
+                    self.assertEqual(got.confidence.level, "low")
+                    continue
                 got = check_assessment(self, s, facts)
                 self.assertEqual(got.value, 0.0)
                 self.assertEqual(got.confidence.level, "low")
@@ -238,6 +245,9 @@ class RegistryTests(unittest.TestCase):
         grades = {s.name: Confidence("high", f"basis of {s.name}") for s in build_signals(CFG)}
         facts = neutral_facts(grades=grades)
         for s in build_signals(CFG):
+            if s.name == PROFILE_GRADED:  # graded by the profile: "no interview companies yet", never the facts' grade
+                self.assertNotEqual(s.score(facts).confidence, grades[s.name])
+                continue
             self.assertEqual(s.score(facts).confidence, grades[s.name])
 
 

@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 
+from outreach.insights.bands import Features
 from outreach.ranking.common import age_days, clean_text, fact_order_key, size_order_key
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import (Confidence, grade_evidence, grade_no_role, grade_pay, grade_reach,
@@ -52,6 +53,7 @@ class RankFacts(CompanyFacts):
     inactive_postings: int = 0           # the part of ignored_postings on inactive boards
     stale_postings: tuple[Best, ...] = ()
     grades: Mapping[str, Confidence] = field(default_factory=dict)
+    features: Features = Features()      # the four traits the interview tilt compares (#81)
 
     def grade(self, name: str) -> Confidence:
         """The stored grade of a signal, else the low default: unknown is never `high`."""

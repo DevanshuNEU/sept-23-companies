@@ -205,6 +205,25 @@ class PlainReasonsTest(unittest.TestCase):
         self.assertEqual(self.shown(self.merge("alias:fein", "something new")),
                          "Both have the same tax ID number, so they may be one company.")
 
+    def test_insights_bases_read_as_plain_sentences(self):
+        cases = {
+            ("insights_domain", "both have the domain acme.com"):
+                "Both use the domain acme.com, so they may be one company.",
+            ("insights_email_domain", "both have people at gm.com"):
+                "Both have people with email at gm.com, so they may be one company.",
+            ("insights_name_key", "both are known by the name nimbusrobotics"):
+                "The two names come down to the same words, so they may be one company.",
+            ("insights_name_prefix", "micron is the start of microntechnology"):
+                'One name key, "micron", is the start of the other, "microntechnology", so they may be one company.',
+            ("insights_initials", "gm is the initials of General Motors"):
+                "One name is the initials of the other, so they may be one company.",
+        }
+        for (basis, detail), sentence in cases.items():
+            with self.subTest(basis=basis):
+                self.assertEqual(sentence, words.merge_reason(basis, detail))
+        self.assertEqual("One name is the start of the other, so they may be one company.",
+                         words.merge_reason("insights_name_prefix", "garbled"))
+
     def test_an_unknown_basis_or_a_malformed_merge_reason_shows_the_stored_text(self):
         rid = self.merge("teleport", "it came from nowhere", confidence="weak")
         self.assertEqual(self.shown(rid), self.stored(rid))

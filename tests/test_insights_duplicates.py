@@ -155,6 +155,24 @@ class DuplicatesTest(unittest.TestCase):
         (pair,) = self.pairs()
         self.assertEqual("insights_name_key", pair.basis)
 
+    def test_a_pair_the_system_cleared_is_listed_and_raising_puts_it_back_open(self):
+        big, small = self.reached("Crusoe"), self.reached("Crusoe Energy")
+        for cid, key in ((big, "crusoe"), (small, "crusoeenergy")):
+            self.conn.execute("INSERT INTO company_name_key(name_key, company_id, strong) VALUES (?, ?, 1)",
+                              (key, cid))
+        self.conn.execute(
+            "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at, state, "
+            "resolution, resolved_at) VALUES ('merge_candidate', ?, 'Maybe one company: old guess', ?, 'source', "
+            "'2026-10-20T12:00:00Z', 'resolved', 'cleared', '2026-10-21T12:00:00Z')", (big, str(small)))
+        (pair,) = self.pairs()
+        self.assertEqual("insights_name_prefix", pair.basis)
+        self.assertEqual(1, raise_duplicate_items(self.conn, [pair]))
+        state, reason = self.conn.execute(
+            "SELECT state, reason FROM review_item WHERE kind = 'merge_candidate'").fetchone()
+        self.assertEqual("open", state)
+        self.assertIn("insights_name_prefix", reason)
+        self.assertEqual(0, raise_duplicate_items(self.conn, [pair]))  # open now: no second one
+
     def test_listing_writes_nothing(self):
         big, small = self.reached("General Motors", "gm.com"), self.reached("gm", "gm.com")
         S.evidence(self.conn, big, "domain", "gm.com")

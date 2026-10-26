@@ -338,6 +338,20 @@ def merge_reason(basis: str, detail: str) -> str | None:
         return f"One source record points at both companies, {_MAYBE}"
     if basis == "import_near_name":
         return f"The old lists spell the two names almost the same, {_MAYBE}"
+    if basis in ("insights_domain", "insights_email_domain"):
+        m = _found(r"(?:the domain|people at) ([^\s,]+)", detail)
+        d = _piece(m[1].rstrip(".")) if m else ""
+        what = "use the domain" if basis == "insights_domain" else "have people with email at"
+        return f"Both {what} {d}, {_MAYBE}" if d else f"Both share an email domain, {_MAYBE}"
+    if basis == "insights_name_key":
+        return f"The two names come down to the same words, {_MAYBE}"
+    if basis == "insights_name_prefix":
+        m = _found(r"^(\S+) is the start of (\S+)$", detail)
+        if m:
+            return f'One name key, "{_piece(m[1])}", is the start of the other, "{_piece(m[2])}", {_MAYBE}'
+        return f"One name is the start of the other, {_MAYBE}"
+    if basis == "insights_initials":
+        return f"One name is the initials of the other, {_MAYBE}"
     if basis.startswith("alias:"):
         said = _ALIAS_SAID.get(basis[len("alias:"):])
         if said is None:

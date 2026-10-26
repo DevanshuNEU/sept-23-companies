@@ -11,7 +11,8 @@ Two dataset companies (both survivors) may be one company when they share, stron
   (`insights_initials`, `weak`).
 
 A `free`, `peo` or `platform` domain never pairs, and neither does one in `shared_key` (many employers use it). Each pair is listed once, with its strongest basis. A pair he
-already settled as two companies (a resolved `merge_candidate` item) is not listed again. Listing reads only;
+already settled as two companies (a `merge_candidate` item he resolved; one the system cleared is not a decision) is
+not listed again. Listing reads only;
 `raise_duplicate_items` (the `duplicates --raise` command) turns pairs into `merge_candidate` items he settles in
 Needs you, and nothing else here writes.
 """
@@ -27,6 +28,7 @@ from dataclasses import dataclass
 from outreach.identity import ITEM_CONFIDENCES, raise_merge_candidate
 from outreach.insights.dataset import OutcomeRow
 from outreach.ranking.common import canonical_ids
+from outreach.review.items import raise_item
 from outreach.sources.keys import classify_domain, registrable_domain
 from outreach.store import transaction
 
@@ -148,7 +150,8 @@ def possible_duplicates(conn: sqlite3.Connection, rows: Sequence[OutcomeRow]) ->
         (family,))]
     kept_apart = set()
     for r in conn.execute("SELECT company_id, evidence_key FROM review_item WHERE kind = 'merge_candidate' "
-                          "AND state = 'resolved' AND company_id IN (SELECT value FROM json_each(?))", (family,)):
+                          "AND state = 'resolved' AND resolution IN ('marked_ok', 'marked_no_go', 'field_edited') "
+                          "AND company_id IN (SELECT value FROM json_each(?))", (family,)):
         if r[1].isdigit():
             a, b = owner(r[0]), owner(int(r[1]))
             kept_apart.add((min(a, b), max(a, b)))
@@ -156,10 +159,18 @@ def possible_duplicates(conn: sqlite3.Connection, rows: Sequence[OutcomeRow]) ->
 
 
 def raise_duplicate_items(conn: sqlite3.Connection, pairs: Iterable[DuplicatePair]) -> int:
-    """One `merge_candidate` item per pair, all in one transaction; returns how many were new. A pair that already
-    has an item, open or resolved, gets no second one."""
+    """One `merge_candidate` item per pair, all in one transaction; returns how many were new or put back open. A
+    pair that already has an open item, or one he settled, gets no second one; one the system cleared (the old
+    lists' near-name guess, say) comes back open with this basis."""
     new = 0
     with transaction(conn):
         for p in pairs:
-            new += raise_merge_candidate(conn, p.a_id, p.b_id, p.basis, p.detail, confidence=p.confidence)
+            if raise_merge_candidate(conn, p.a_id, p.b_id, p.basis, p.detail, confidence=p.confidence):
+                new += 1
+                continue
+            low, high = sorted((p.a_id, p.b_id))
+            reason = (f"Maybe one company: {p.a_name} (#{p.a_id}) and {p.b_name} (#{p.b_id}). Basis {p.basis}, "
+                      f"confidence {p.confidence}: {p.detail}")
+            new += raise_item(conn, kind="merge_candidate", company_id=low, evidence_key=str(high), reason=reason,
+                              raised_by="source").reopened
     return new

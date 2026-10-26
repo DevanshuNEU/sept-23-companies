@@ -23,6 +23,7 @@ keys and tabs. All data in them is fake; email addresses use `.example` domains.
 | Quiet week (#33) | `progress-quiet.html` | no replies this week: work first, his own usual rate second |
 | Wins (#33) | `wins.html` | 6 kept wins with what he sent, a new one, and no wins yet |
 | Company page, Score (#33) | `company-score.html` | Pylon's 8 signals with points, share, reason and source |
+| Insights (#81) | `insights.html` | where interviews come from: 13 companies, what they share as count strips, 15 lookalikes, the lift; states for a first interview, a hypothetical 25, none yet, loading and error |
 
 ## 1. What the UI is for
 
@@ -101,6 +102,7 @@ chord that waits 1 second for the second key.
 | ⌘K or / | Search and commands |
 | G T, G O, G L, G N, G X, G D | Today, Outbox, LinkedIn, Needs you, No-go, Done |
 | G P, G W | Progress, Wins (#33, section 16.6) |
+| G I | Insights (#81, section 17) |
 | J / K or ↓ / ↑ | Next, previous row |
 | Enter | Open the row (company page, or the item's detail) |
 | Z | Undo the last action (while its toast is up, and for 8 seconds) |
@@ -1095,3 +1097,132 @@ paper 19.1:1, on the active rail row 18.1:1, on the win banner 19.0:1; secondary
 info 6.2, idle 7.0; primary button 17.0:1. Dark: every text pair 5.8:1 or higher. Graphics (3:1 needed): bars and
 empty nodes 5.3:1 light and 7.6:1 dark on the card, the Logged dot 3.4:1 light and 4.8:1 dark, the win check 4.8:1 light. The lowest text
 pair is the existing warn badge at 4.76:1.
+
+## 17. Insights (#81): where your interviews come from
+
+Status: mockup for Devanshu's approval. It gates #81 Task 14 (the web page). Plan:
+`docs/superpowers/plans/2026-10-26-insights.md`. The page has a "Mockup state" switch: Real numbers today (13), First
+interview (1), Enough data later (a hypothetical 25, labelled so on the page), None yet, Loading and Error. Open a state
+directly with `insights.html?tab=st-enough` (or `st-first`, `st-empty`, `st-loading`, `st-error`).
+
+What changes in the shell: the Results group in the sidebar holds Progress, Wins and Insights (compass icon, no count
+and no badge), on every page. `G I` opens it; the palette lists it under Go to.
+
+### 17.1 Purpose and layout
+
+**Purpose.** Show which companies interviewed him, what they have in common, and which top-ranked companies look like
+them, honestly at today's small numbers. It only reads; nothing on it changes a company, a score or a plan.
+
+**Layout**, one column, top to bottom (`/insights`, title "Where your interviews come from", breadcrumb "Insights"):
+
+1. **The counts line** (16/24): `13 companies interviewed you, out of 312 you reached. 1,450 companies are ranked.` Under
+   it in grey: `From 19 interview records. Your 20 replies and 7 referrals are kept too, but only interviews and offers
+   count here.` Export sits top right (17.4).
+2. **A possible duplicate**, when the API lists one, as a grey note: `gm and General Motors may be one company, so they
+   show as one line here. Merge them in Needs you so the rest of Knock counts them once too.` The page never merges.
+3. **Companies that interviewed you** (key 1): a table, newest first interview first. Columns: Company, Outcome
+   (green Interview or Offer badge, the win vocabulary of section 8), First interview, How it started (Email, LinkedIn
+   request, Application, Other), Contact (Engineer, Manager, Founder, Recruiter), Size (band), Stage (band), Role level,
+   Board. A missing value reads "Not known" in grey. A duplicate pair is one row, named by the survivor the merge
+   would suggest, with "Also logged as gm. Possible duplicate: merge in Needs you" under the name.
+4. **What they share** (key 2): one grey rule line, then the shared and mixed findings in one card, then "Too few to
+   tell yet" with the unknown ones, smaller and grey. Each finding is the API's sentence, its compare line, and the
+   **count strip** (17.2). When a finding has enough data the compare line is followed by two rows with rates:
+   `Interview companies 13 of 22 (59%)` and `Reached, no interview 61 of 240 (25%)`.
+5. **More like them** (key 3): one grey rule line, then a table: Rank, Company (with a grey Reached badge when he
+   already contacted it), Why it is like them (the reason, with each named interview company a link), Traits (`3 of
+   4`), Open role (the best posting, a link). At most 15, from the top 300 ranked, most shared traits first, then rank.
+6. **The lift**, a quiet note under a rule: `A small lift for companies like these. It never lowers or hides a
+   company.` then `Weight 6 in the ranking config, so never more than 6 points. Under 20 interview companies it counts
+   at half: at most 3 points today, on a top score of 120. Weight 0 turns it off; lookalikes still show.` and a text
+   link `See what it moved` (it opens the rank diff when that view exists; until then it is text only).
+
+### 17.2 The count strip
+
+The one bold element on the page. One 10 px square per interview company, grouped by value in the order of the
+finding's spread, a 6 px gap between groups:
+
+| Square | Means |
+|---|---|
+| filled `foreground` | the shared value (a shared finding only) |
+| filled `muted-foreground` (`ring` in dark) | another known value |
+| outlined, same color | a company whose value is not known |
+
+So "6 of 13" is six dark squares in a row of thirteen, never a percent and never a bar that empties. Under the strip
+the spread in words (`51 to 300: 6, 1 to 50: 3, over 1,000: 2, not known: 2`), which is also its `aria-label`, so the
+strip never carries a value the text does not. A mixed finding already lists its spread in the sentence, so its
+legend shows only `Not known: N`.
+
+### 17.3 Honest numbers
+
+- No percent anywhere while a group is under the minimum. Today (13 interview companies) the page has none.
+- "Shared" needs at least 3 companies and at least half of those with a known value; under 3 known the finding is
+  "too few to tell". A comparison or a rate needs 20 interview companies with a known value and 20 reached companies
+  without an interview with a known value (`group_min`, the Findings number). The rule line says so in plain words.
+- A rate is drawn only from the API's counts when `enough` is true, always beside its count: `13 of 22 (59%)`.
+- Unknown is counted in "of" and never in "known", never matches another unknown, and reads "Not known".
+- Under 3 interview companies: `Lookalikes start at 3 interview companies. You have 1.` in place of the table, and
+  `The lift starts at 3 interview companies. You have 1. Until then it adds nothing to any score.`
+
+### 17.4 Export
+
+Two outline buttons top right, Export CSV and Export JSON, with the hint `One row per company you reached. Company
+level only: no names, addresses or profile links.` The toast names the file: `Exported 312 companies to
+outcomes-2026-11-10.csv in Desktop, outreach-scratch, insights.` Export works in every state with reached companies,
+the empty one included.
+
+### 17.5 States
+
+- **First interview:** one row; every finding under "Too few to tell yet"; the lookalike and lift notes of 17.3.
+- **None yet:** the counts line `You reached 312 companies so far.`, then the shared empty state: `No interviews logged
+  yet` / `When you log one on Today, or a reply turns into an interview, the company shows up here.` and three lines
+  on what the page will show (the three sections, one phrase each).
+- **Loading:** skeletons at the final height: the counts line, the table head with 8 skeleton rows, three finding rows.
+- **Error:** a neutral alert, grey icon, not red: `Could not load insights` / `Nothing changed. Your logs, the ranking
+  and the lift are as they were. Try again in a moment.` with Retry. A failed read stops nothing, so it takes no
+  status color.
+- **Hypothetical 25** (review only): rates beside counts on the findings with enough data, one shared finding held back
+  by its known count (`that takes 20 with a known first contact, and you have 19`), and medium confidence on the lift
+  (`at most 5.1 points`).
+
+### 17.6 Copy rules for this page
+
+- The finding text, compare text, reason, tilt text and duplicate note come from the API as given (plan Tasks 5, 7 and
+  12); the page adds only the headings, the rule lines, the legends and the two rate rows.
+- Counts beside what they are out of: `7 of your 13`, `(job board known for 11)`, `3 of 4`. No percent under the
+  minimum, no "only" on a count of his work, no "streak", "missed", "overdue", "behind" or "keep it up", no praise.
+- "Too few to tell" is a normal answer, in grey, never amber or red.
+- A mixed finding lists up to four values; with more, the top three and `and N more` (the plan's rule for over four).
+- Nothing on the page says merge, hide or remove as an action: the duplicate note sends him to Needs you.
+
+### 17.7 Keys
+
+| Key | Action |
+|---|---|
+| G I | Open Insights (everywhere) |
+| 1 / 2 / 3 | Focus Companies that interviewed you, What they share, More like them |
+| J / K, ↓ / ↑ | Next, previous row in the two tables |
+| Enter | Open the company |
+
+### 17.8 Data the view needs
+
+`GET /api/insights` as plan Task 12 defines it (`InsightsView`): totals (reached, interview companies, offers,
+ranked) plus the interview record, reply and referral counts for the grey line under the counts line; companies (with
+`alsoKnownAs` and the duplicate note); shared findings with `kind`, `text`, `compareText`, counts and `enough`, plus each
+finding's `spread` (value and count, most first) for the strip; lookalikes with rank, reason, `like` refs, shared
+trait count, source and `reached`; `lookalikesNote`; the tilt state. The records, replies and referrals counts and
+`spread` are not in the plan's `InsightsView` yet: Task 12 adds them if this mockup is approved.
+
+### 17.9 Visual additions and contrast
+
+No new token and no new hue. `mockup.css` gains one family, `.ins-*` (the counts line, the notes, the finding rows, the
+count strip, the lift note, the empty state's list). `mockup.js` gains two icons (compass, download), the palette
+entry and the `G I` chord.
+
+Contrast, computed (WCAG 2.1). Light: body on card 19.9:1, on the active row 18.1:1; secondary text (sub-lines, rule
+lines, legends, reasons, "Not known") 5.3:1 on the card, 4.8:1 on the active row, 5.0:1 on row hover; the duplicate
+note 5.0:1 on `subtle`, its link 19.1:1; Interview badge 4.8:1; Reached badge 7.0:1. Dark: body 18.7:1 (14.3:1 on the
+active row), secondary 7.6:1 (5.8:1 on the active row), note 7.4:1, Interview 9.5:1, Reached 10.1:1. Graphics (3:1
+needed): the shared square 19.9:1 light and 18.7:1 dark on the card; other and outlined squares 5.3:1 light, 4.0:1 dark;
+shared against other squares 3.8:1 light and 4.6:1 dark. The lowest text pair is the existing badge and active-row
+pair at 4.8:1.

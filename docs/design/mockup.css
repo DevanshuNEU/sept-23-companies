@@ -758,3 +758,59 @@ table.ledger { width: 100%; border-collapse: collapse; font-size: 13px; line-hei
   .rail-col, .work { overflow: visible; }
   .rail-col { border-right: 0; border-bottom: 1px solid var(--border); }
 }
+
+/* ======================= #81: Insights, where your interviews come from =======================
+   One family (.ins-*), on the tokens above: no new token, no new hue, no shadow. The one bold element is the
+   count strip: one square per interview company, grouped by value, so 6 of 13 reads as six squares out of
+   thirteen and never as a percent. Filled foreground is the shared value, muted squares are other known
+   values, an outlined square is a company whose value is not known. Squares use the 2 px radius of the
+   other small marks (ladder steps, run squares). */
+.ins-export { flex-direction: column; align-items: flex-end; gap: 6px; }
+.ins-export .hint { max-width: 380px; text-align: right; }
+.ins-lede { font-size: 16px; line-height: 24px; font-variant-numeric: tabular-nums; }
+.ins-sub { margin-top: 2px; font-size: 13px; color: var(--muted-foreground); }
+.ins-note { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--subtle); font-size: 13px; color: var(--muted-foreground); max-width: 760px; }
+.ins-note .i { margin-top: 2px; }
+.ins-note a { color: var(--foreground); }
+.ins-hypo { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; padding: 6px 12px; border: 1px dashed var(--ring); border-radius: var(--radius); font-size: 12px; color: var(--muted-foreground); }
+.ins-h:focus { outline: none; }
+.ins-h:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 4px; }
+.ins-table td { white-space: nowrap; }
+.ins-table td .cell-sub { margin-top: 1px; max-width: 260px; white-space: normal; }
+.ins-table td .cell-sub a { color: var(--foreground); }
+.ins-rule { margin: -2px 0 10px; max-width: 86ch; font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.ins-find { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 6px 32px; align-items: start; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.ins-find:last-child { border-bottom: 0; }
+.ins-find-body { display: grid; gap: 4px; min-width: 0; }
+.ins-find-text { max-width: 72ch; }
+.ins-find.is-shared .ins-find-text { font-weight: 500; }
+.ins-find-cmp { max-width: 92ch; font-size: 13px; color: var(--muted-foreground); }
+.ins-rates { max-width: 360px; margin-top: 4px; }
+.ins-rates td { height: 28px; padding: 4px 0; }
+.ins-rates td.num { padding-left: 16px; }
+.ins-find-viz { display: grid; gap: 6px; justify-items: start; padding-top: 4px; }
+.ins-strip { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; }
+.ins-grp { display: inline-flex; gap: 2px; }
+.ins-grp i { width: 10px; height: 10px; border-radius: 2px; background: var(--muted-foreground); }
+.ins-grp i.top { background: var(--foreground); }
+.ins-grp i.unk { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted-foreground); }
+/* dark: other squares on --ring keep 3:1 from both the card (4.0) and the shared squares (4.6) */
+.dark .ins-grp i { background: var(--ring); }
+.dark .ins-grp i.top { background: var(--foreground); }
+.dark .ins-grp i.unk { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ring); }
+.ins-legend { font-size: 12px; line-height: 16px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ins-few-h { display: flex; gap: 8px; margin: 16px 0 8px; font-size: 13px; font-weight: 500; color: var(--muted-foreground); }
+.ins-few-h .count { font-weight: 400; font-variant-numeric: tabular-nums; }
+.ins-finds.is-few .ins-find { padding-top: 10px; padding-bottom: 10px; }
+.ins-finds.is-few .ins-find-text { font-size: 13px; color: var(--muted-foreground); }
+.ins-look .ins-why { white-space: normal; min-width: 360px; color: var(--muted-foreground); }
+.ins-look .ins-why a { color: var(--foreground); }
+.ins-role { display: inline-flex; align-items: center; gap: 4px; }
+.ins-role .i { color: var(--muted-foreground); }
+.ins-tilt { display: grid; gap: 4px; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); max-width: 86ch; font-size: 13px; }
+.ins-tilt-head { font-weight: 500; }
+.ins-textlink { padding: 0; border: 0; background: none; font-size: 13px; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.ins-textlink:hover { text-decoration-color: currentColor; }
+.ins-will { display: grid; gap: 6px; margin-top: 12px; text-align: left; font-size: 13px; }
+.ins-will li { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 12px; }
+.ins-will b { font-weight: 500; }

@@ -46,7 +46,9 @@
     chart: '<path d="M5 21v-6M12 21V3M19 21V9"/>',
     award: '<path d="m15.477 12.89 1.515 8.526a.5.5 0 0 1-.81.47l-3.58-2.687a1 1 0 0 0-1.197 0l-3.586 2.686a.5.5 0 0 1-.81-.469l1.514-8.526"/><circle cx="12" cy="8" r="6"/>',
     flag: '<path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/>',
-    differs: '<path d="M5 9h14M5 15h14M19 5 5 19"/>'
+    differs: '<path d="M5 9h14M5 15h14M19 5 5 19"/>',
+    compass: '<circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/>',
+    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/>'
   };
   var sprite = '<svg xmlns="http://www.w3.org/2000/svg" style="display:none">' +
     Object.keys(P).map(function (k) { return '<symbol id="' + k + '" viewBox="0 0 24 24">' + P[k] + '</symbol>'; }).join("") + "</svg>";
@@ -137,7 +139,8 @@
   var pages = [
     ["Today", "today.html", "today", "G T"], ["Outbox", "outbox.html", "outbox", "G O"], ["LinkedIn list", "linkedin.html", "linkedin", "G L"],
     ["Needs you", "needs-you.html", "alert", "G N"], ["No-go list", "no-go.html", "ban", "G X"], ["Done companies", "done.html", "done", "G D"],
-    ["Today as a plan", "today-plan.html", "flag", ""], ["Progress", "progress.html", "chart", "G P"], ["Wins", "wins.html", "award", "G W"]
+    ["Today as a plan", "today-plan.html", "flag", ""], ["Progress", "progress.html", "chart", "G P"], ["Wins", "wins.html", "award", "G W"],
+    ["Insights", "insights.html", "compass", "G I"]
   ];
   var companies = [
     ["Browserbase", "Held: reply from Priya Natarajan"], ["Mintlify", "Emailing, day 2 of 3"], ["Resend", "Picked today"],
@@ -202,7 +205,7 @@
     '<div class="row"><h2 class="t-lg">Keyboard shortcuts</h2><button class="btn btn-ghost btn-icon btn-sm" style="margin-left:auto" data-close aria-label="Close">' + icon("x") + "</button></div>" +
     '<div class="keys-grid"><h4>Everywhere</h4>' +
     [["Search and commands", "⌘ K"], ["Search", "/"], ["Today", "G T"], ["Outbox", "G O"], ["LinkedIn list", "G L"], ["Needs you", "G N"],
-     ["No-go list", "G X"], ["Done companies", "G D"], ["Progress", "G P"], ["Wins", "G W"], ["Move down, up", "J K"], ["Open", "Enter"], ["Undo last action", "Z"],
+     ["No-go list", "G X"], ["Done companies", "G D"], ["Progress", "G P"], ["Wins", "G W"], ["Insights", "G I"], ["Move down, up", "J K"], ["Open", "Enter"], ["Undo last action", "Z"],
      ["Close, go back", "Esc"], ["This sheet", "?"], ["Toggle sidebar", "⌘ B"]].map(function (k) {
       return "<div><span>" + k[0] + '</span><span class="kbd-row">' + k[1].split(" ").map(function (x) { return '<span class="kbd">' + x + "</span>"; }).join("") + "</span></div>";
     }).join("") + (tpl ? tpl.innerHTML : "") + "</div></div></div>";
@@ -219,7 +222,7 @@
 
   /* ---------- global keys ---------- */
   var chord = false, chordT = 0;
-  var go = { t: "today.html", o: "outbox.html", l: "linkedin.html", n: "needs-you.html", x: "no-go.html", d: "done.html", c: "company.html", p: "progress.html", w: "wins.html" };
+  var go = { t: "today.html", o: "outbox.html", l: "linkedin.html", n: "needs-you.html", x: "no-go.html", d: "done.html", c: "company.html", p: "progress.html", w: "wins.html", i: "insights.html" };
   document.addEventListener("keydown", function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); ov.hidden ? openCmd() : closeAll(); return; }
     if (e.key === "Escape") { closeAll(); return; }

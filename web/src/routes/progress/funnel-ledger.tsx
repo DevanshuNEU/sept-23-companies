@@ -50,14 +50,14 @@ function Bar({ stage, scale }: { stage: FunnelStage; scale: number }) {
  * denominator, and a bar on one scale. A rate shows only when the API says the period has enough requests and the
  * stage's denominator has 20; otherwise it is the plain count ("2 of 9") and a note says why.
  */
-export function FunnelLedger({ period, minRequests }: { period: ProgressPeriod; minRequests: number }) {
+export function FunnelLedger({ period, minRequests, muted = false }: { period: ProgressPeriod; minRequests: number; muted?: boolean }) {
   const largest = Math.max(0, ...period.stages.map((s) => s.count));
   const scale = Math.max(largest, minRequests, 1);
   const note = smallSampleNote(period, countOf(period, 'requests'), minRequests);
   return (
     <div>
       <div className="overflow-hidden rounded-lg border">
-        <table aria-label={`Funnel for ${periodHeading(period)}`} className="w-full text-[13px] leading-[18px] tabular-nums">
+        <table aria-label={`Funnel for ${periodHeading(period)}`} className={cn('w-full text-[13px] leading-[18px] tabular-nums', muted && 'text-muted-foreground')}>
           <thead>
             <tr className="border-b text-xs text-muted-foreground">
               <th scope="col" className="h-8 px-3 text-left font-medium">Stage</th>
@@ -72,7 +72,7 @@ export function FunnelLedger({ period, minRequests }: { period: ProgressPeriod; 
               const rate = s.from ? formatRate(s.count, s.from.count, rateEnough(period.enough, s.from.count)) : null;
               return (
                 <tr key={s.stage} className="border-b last:border-b-0">
-                  <th scope="row" className="h-10 px-3 py-2 text-left font-medium whitespace-nowrap">{s.label}</th>
+                  <th scope="row" className="h-10 px-3 py-2 text-left font-medium whitespace-nowrap text-foreground">{s.label}</th>
                   <td className={cn('h-10 px-3 py-2 text-right whitespace-nowrap', zero && 'text-muted-foreground')}>{s.count}</td>
                   <td className={cn('h-10 px-3 py-2 whitespace-nowrap', zero && rate === 'None yet' && 'text-muted-foreground')}>
                     {rate === null ? (
@@ -104,12 +104,12 @@ export function FunnelLedger({ period, minRequests }: { period: ProgressPeriod; 
 }
 
 /** What he did in the period: counts only, each beside the API's label. Zero is a plain grey 0. */
-export function EffortList({ period, label }: { period: ProgressPeriod; label: string }) {
+export function EffortList({ period, label, large = false }: { period: ProgressPeriod; label: string; large?: boolean }) {
   return (
     <ul aria-label={label} className="grid">
       {period.effort.map((e) => (
-        <li key={e.label} className="grid grid-cols-[32px_minmax(0,1fr)] items-baseline gap-3 py-0.5 text-sm">
-          <b className={cn('text-right text-sm leading-5 font-semibold tabular-nums', e.count === 0 && 'text-muted-foreground')}>{e.count}</b>
+        <li key={e.label} className={cn('grid grid-cols-[32px_minmax(0,1fr)] items-baseline gap-3 text-sm', large ? 'py-1.5' : 'py-0.5')}>
+          <b className={cn('text-right font-semibold tabular-nums', large ? 'text-xl leading-7' : 'text-sm leading-5', e.count === 0 && 'text-muted-foreground')}>{e.count}</b>
           <span>{e.label}</span>
         </li>
       ))}

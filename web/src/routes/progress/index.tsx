@@ -11,6 +11,7 @@ import { useUrlState } from '@/lib/url-state';
 import { useViewQuery } from '@/pending/pending';
 import { EffortList, FunnelLedger } from './funnel-ledger';
 import { periodHeading } from './period-label';
+import { QuietWeek } from './quiet-week';
 
 type Period = 'week' | 'month';
 
@@ -114,7 +115,11 @@ export default function ProgressPage() {
                   </TabsList>
                 </div>
                 <TabsContent value={period}>
-                  {nothingLogged(current) ? (
+                  {current.quiet && !nothingLogged(current) ? (
+                    <div className="max-w-[760px]">
+                      <QuietWeek period={current} base={v.base} noun={period} />
+                    </div>
+                  ) : nothingLogged(current) ? (
                     <div className="max-w-[760px] rounded-lg border">
                       <EmptyState icon={ChartColumn} title="Nothing logged yet.">
                         Log a request on Today and it counts here.

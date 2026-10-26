@@ -57,3 +57,16 @@ export const MIN_GROUP = 20;
 export function rateEnough(periodEnough: boolean, of: number): boolean {
   return periodEnough && of >= MIN_GROUP;
 }
+
+/**
+ * The one paragraph a quiet week shows from his own data: the rate and, when known, how long replies take. With too
+ * few requests it says what it takes instead. With enough requests and no reply ever there is nothing honest to say.
+ */
+export function baseRateParagraph(b: BaseRates): string | null {
+  if (!b.enough) return `Not enough outcomes yet to say what is usual. It takes about ${b.minRequests} requests.`;
+  const line = baseRateLine(b);
+  if (line === null) return null;
+  if (b.medianDaysToReply === null) return line;
+  const days = b.medianDaysToReply === 1 ? '1 day' : `${b.medianDaysToReply} days`;
+  return `${line.slice(0, -1)}, and replies often take about ${days}.`;
+}

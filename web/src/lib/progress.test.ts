@@ -1,9 +1,10 @@
 import type { BaseRates, PlanRow } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
-import { baseRateLine, didToday, formatRate, oneIn, rateEnough, smallSampleNote } from '@/lib/progress';
+import { baseRateLine, baseRateParagraph, didToday, formatRate, oneIn, rateEnough, smallSampleNote } from '@/lib/progress';
 
 const fixture = () => new FixtureClient(buildFixture('default'));
+const base = async (): Promise<BaseRates> => (await fixture().progress()).base;
 
 describe('formatRate', () => {
   it('shows the count, the denominator and a rounded percent when there is enough data', () => {
@@ -38,7 +39,6 @@ describe('oneIn', () => {
 });
 
 describe('baseRateLine', () => {
-  const base = async (): Promise<BaseRates> => (await fixture().progress()).base;
   it('writes About 1 in N for the default fixture', async () => {
     expect(await base()).toMatchObject({ requests: 142, replies: 9, enough: true });
     expect(baseRateLine(await base())).toBe('About 1 in 16 requests gets a reply.');
@@ -59,6 +59,22 @@ describe('baseRateLine', () => {
   });
   it('keeps the 1 in N form from N of 2', async () => {
     expect(baseRateLine({ ...(await base()), requests: 40, replies: 20 })).toBe('About 1 in 2 requests gets a reply.');
+  });
+});
+
+describe('baseRateParagraph', () => {
+  it('adds the median days to the rate', async () => {
+    expect(baseRateParagraph(await base())).toBe('About 1 in 16 requests gets a reply, and replies often take about 6 days.');
+  });
+  it('uses the singular for one day and drops the clause with no median', async () => {
+    expect(baseRateParagraph({ ...(await base()), medianDaysToReply: 1 })).toBe('About 1 in 16 requests gets a reply, and replies often take about 1 day.');
+    expect(baseRateParagraph({ ...(await base()), medianDaysToReply: null })).toBe('About 1 in 16 requests gets a reply.');
+  });
+  it('says there is not enough to go on, with the minimum, when the sample is small', async () => {
+    expect(baseRateParagraph({ ...(await base()), enough: false, requests: 12 })).toBe('Not enough outcomes yet to say what is usual. It takes about 30 requests.');
+  });
+  it('is null with enough requests and no replies ever, never 1 in 0', async () => {
+    expect(baseRateParagraph({ ...(await base()), replies: 0, medianDaysToReply: null })).toBeNull();
   });
 });
 

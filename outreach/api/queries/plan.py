@@ -183,7 +183,8 @@ def note_draft(row: sqlite3.Row, cfg: PlanConfig) -> NoteDraft:
     return NoteDraft(
         note_id=row["draft_id"], text=row["body"], chars=len(row["body"]), max_chars=cfg.get("note", "max_chars"),
         reason_line=row["reason_line"], reason_state=row["reason_state"],
-        needs_your_line=row["reason_state"] == "proposed", facts=shown, checks=stored_note_checks(row["checks"]),
+        # His own note is his reason (#9, 2026-10-26): only Claude's untouched text asks him to confirm its line.
+        needs_your_line=row["reason_state"] == "proposed" and row["saved_by"] == "claude", facts=shown, checks=stored_note_checks(row["checks"]),
         saved_by=row["saved_by"],
         saved_at=row["updated_at"], revision=row["revision"])
 

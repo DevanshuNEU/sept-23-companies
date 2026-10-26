@@ -47,6 +47,7 @@ IMPORTER = ROOT / "outreach" / "importer"
 REVIEW = ROOT / "outreach" / "review"
 PLAN = ROOT / "outreach" / "plan"
 MCP = ROOT / "outreach" / "mcp"
+API = ROOT / "outreach" / "api"
 INSIGHTS = ROOT / "outreach" / "insights"
 REFRESH = ROOT / "refresh"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
@@ -791,6 +792,39 @@ MUTATIONS = [
     (ROOT / "outreach" / "api" / "services" / "plan.py", "a person added from a company row is recorded as added by Claude",
      'added_by="devanshu", today=date.fromisoformat(ny_day(ctx.now))', 'added_by="claude", today=date.fromisoformat(ny_day(ctx.now))',
      "test_a_company_row_logs_a_request_for_the_name_he_typed"),
+    # #9's authorship ruling (2026-10-26): his note skips only Claude's metadata checks; Claude's text keeps them all
+    (PLAN / "notecheck.py", "his own note is judged by Claude's reason line and fact list again",
+     "        out = [c for c in out if c.code not in AUTHOR_SKIPS]\n", "        out = list(out)\n",
+     "test_the_kabir_note_passes_and_is_ready"),
+    (PLAN / "notecheck.py", "the author defaults to him, so a caller that names none loosens Claude's text",
+     'unconfirmed: Sequence[str] | None, author: str = "claude")', 'unconfirmed: Sequence[str] | None, author: str = "user")',
+     "test_the_same_text_as_claudes_keeps_the_strict_checks"),
+    (PLAN / "notecheck.py", "his note also skips the honesty checks and the limit",
+     'AUTHOR_SKIPS = ("fact_no_link",',
+     'AUTHOR_SKIPS = ("note_too_long", "banned_phrase", "dash", "placeholder", "unconfirmed_fact", "link_shortener", '
+     '"fact_no_link",',
+     "test_honesty_checks_still_block"),
+    (PLAN / "notecheck.py", "is_ready passes Claude's text with a line he never confirmed",
+     '    mine = _author(author) == "user"\n', "    mine = True\n",
+     "test_reason_line_rules"),
+    (PLAN / "drafts.py", "his save is checked as Claude's text, so the night draft's line blocks his note",
+     'author="claude" if saved_by == "claude" else "user")', 'author="claude")',
+     "test_the_kabir_save_is_not_blocked_by_the_night_drafts_line_and_facts"),
+    (PLAN / "drafts.py", "Claude's save is checked as his text",
+     'author="claude" if saved_by == "claude" else "user")', 'author="user")',
+     "test_the_same_text_saved_by_claude_keeps_the_strict_checks"),
+    (PLAN / "drafts.py", "his save keeps Claude's in_note marks, which describe Claude's text",
+     "            facts = _in_his_text(facts, body)\n", "",
+     "test_his_save_recomputes_which_facts_are_in_his_text"),
+    (PLAN / "drafts.py", "a confirm of Claude's text checks it as his",
+     'author="user" if _his_text(conn, draft_id) else "claude")', 'author="user")',
+     "test_confirming_claudes_text_keeps_claudes_checks"),
+    (PLAN / "drafts.py", "a confirm after his save checks his text as Claude's",
+     'author="user" if _his_text(conn, draft_id) else "claude")', 'author="claude")',
+     "test_confirming_after_his_save_keeps_his_checks"),
+    (API / "queries" / "plan.py", "his own note still asks him to confirm Claude's line",
+     ' and row["saved_by"] == "claude", facts=shown,', ", facts=shown,",
+     "test_his_own_note_over_a_night_draft_is_not_judged_by_its_line_or_facts"),
 
     # ---- mcp (#13): the guard's layers, the strict inputs, and the tools' own refusals -------------------------
     (MCP / "guard.py", "the message state trigger is gone: a claude draft may be skipped on Claude's connection",

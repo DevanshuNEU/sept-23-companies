@@ -19,6 +19,7 @@ from outreach.plan.prepare_targets import Target
 from outreach.store import undo_touch
 from tests.apitest import NOW
 from tests.test_api_plan import BANNED, CFG, DAY, FIX, UNCONFIRMED, PlanCase
+from tests.test_plan_notecheck import KABIR_BODY, KABIR_FACTS, KABIR_REASON
 
 DASH = chr(0x2014)
 
@@ -54,10 +55,10 @@ class PlanWriteCase(PlanCase):
     def skip(self, company: str, revision: int = 1):
         return self.post(f"/api/plan/{self.entry_id(company)}/skip", {"revision": revision})
 
-    def save_note(self, note_id: int, text: str, reason_line: str, revision: int):
+    def save_note(self, note_id: int, text: str, reason_line: str, revision: int, key: str | None = None):
         return self.client.put(f"/api/notes/{note_id}",
                                content=json.dumps({"text": text, "reasonLine": reason_line, "revision": revision}),
-                               headers={"Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())})
+                               headers={"Content-Type": "application/json", "Idempotency-Key": key or str(uuid.uuid4())})
 
     def confirm(self, note_id: int, revision: int):
         return self.post(f"/api/notes/{note_id}/confirm", {"revision": revision})
@@ -507,7 +508,8 @@ class NoteTests(PlanWriteCase):
     def test_changing_the_reason_line_makes_it_written(self):
         note = self.jonah_note
         same = self.ok(self.save_note(note.draft_id, note.body + " Thanks.", note.reason_line, note.revision))
-        self.assertEqual((same["reasonState"], same["needsYourLine"]), ("proposed", True))
+        # his note is his reason (#9, 2026-10-26): the line stays Claude's proposal, but nothing asks him to confirm it
+        self.assertEqual((same["reasonState"], same["needsYourLine"], same["savedBy"]), ("proposed", False, "devanshu"))
         line = "Your talk on step functions"
         got = self.ok(self.save_note(note.draft_id, f"Hi Jonah, {line} was great.", line, same["revision"]))
         self.assertEqual((got["reasonState"], got["needsYourLine"], got["reasonLine"]), ("written", False, line))
@@ -536,6 +538,55 @@ class NoteTests(PlanWriteCase):
         self.refused(self.confirm(999999, 1), "not_found", 404)
         note = self.lena_note
         self.refused(self.save_note(note.draft_id, "   ", note.reason_line, note.revision), "bad_request", 400)
+
+    def night_note(self):
+        """A night prepare draft with a reason line and a fact about Claude's text, as Kabir's was."""
+        return save_linkedin_draft(self.conn, person_id=self.people["Turso"], body=f"Hi Ines, {KABIR_REASON}",
+                                   reason_line=KABIR_REASON, facts=KABIR_FACTS, saved_by="claude", cfg=CFG,
+                                   banned=BANNED, unconfirmed=UNCONFIRMED)
+
+    def test_his_own_note_over_a_night_draft_is_not_judged_by_its_line_or_facts(self):
+        night = self.night_note()
+        self.assertTrue(self.row("Turso")["note"]["needsYourLine"])
+        got = self.ok(self.save_note(night.draft_id, KABIR_BODY, night.reason_line, night.revision))
+        self.assertEqual((got["chars"], got["maxChars"]), (297, 300))
+        self.assertEqual(got["checks"], [])
+        self.assertEqual((got["savedBy"], got["reasonState"], got["needsYourLine"]), ("devanshu", "proposed", False))
+        self.assertEqual([f["inNote"] for f in got["facts"]], [False])
+        self.assertEqual(self.row("Turso")["note"], got)
+        # an empty line is fine for his note too
+        again = self.ok(self.save_note(night.draft_id, KABIR_BODY, "", got["revision"]))
+        self.assertEqual((again["checks"], again["needsYourLine"]), ([], False))
+
+    def test_his_own_note_still_blocks_on_the_limit_and_honesty(self):
+        night = self.night_note()
+        revision = night.revision
+        for text, code in ((KABIR_BODY + "abcd", "note_too_long"), (KABIR_BODY[:200] + " Real synergy.", "banned_phrase"),
+                           (KABIR_BODY[:200] + f" Agents {DASH} infra.", "dash"),
+                           (KABIR_BODY[:200] + " We have a mutual connection.", "banned_phrase"),
+                           (KABIR_BODY[:200] + " TODO", "placeholder")):
+            got = self.ok(self.save_note(night.draft_id, text, night.reason_line, revision))
+            revision = got["revision"]
+            blocks = [c["code"] for c in got["checks"] if c["severity"] == "block"]
+            self.assertIn(code, blocks, text)
+            self.assertFalse({"reason_not_in_note", "fact_not_in_note", "reason_missing"} & set(blocks), blocks)
+
+    def test_confirming_is_not_needed_for_his_note_and_still_works(self):
+        night = self.night_note()
+        mine = self.ok(self.save_note(night.draft_id, KABIR_BODY, night.reason_line, night.revision))
+        self.assertFalse(mine["needsYourLine"])
+        got = self.ok(self.confirm(night.draft_id, mine["revision"]))
+        self.assertEqual((got["reasonState"], got["needsYourLine"], got["checks"]), ("confirmed", False, []))
+
+    def test_a_replayed_save_of_his_note_writes_once(self):
+        night = self.night_note()
+        key = str(uuid.uuid4())
+        first = self.ok(self.save_note(night.draft_id, KABIR_BODY, night.reason_line, night.revision, key=key))
+        again = self.ok(self.save_note(night.draft_id, KABIR_BODY, night.reason_line, night.revision, key=key))
+        self.assertEqual(again, first)
+        self.assertEqual(get_draft_by_id(self.conn, night.draft_id).revision, night.revision + 1)
+        self.refused(self.save_note(night.draft_id, KABIR_BODY + " Thanks.", night.reason_line, night.revision),
+                     "conflict", 409)
 
     def test_a_later_claude_prepare_does_not_overwrite_the_saved_note(self):
         note = self.jonah_note

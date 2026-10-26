@@ -178,6 +178,19 @@ class SaveNoteTest(NoteCase):
         self.assertEqual(row["reason_state"], "proposed")
         self.assertEqual([c["code"] for c in json.loads(row["checks"]) if c["severity"] == "block"], codes)
 
+    def test_his_kind_of_note_saved_by_claude_keeps_the_strict_checks(self):
+        """#9's authorship ruling loosens only his own text: the Kabir note sent by Claude still needs its line."""
+        from tests.test_plan_notecheck import KABIR_BODY, KABIR_FACTS, KABIR_REASON
+        fact = KABIR_FACTS[0]
+        got = self.ok("save_linkedin_note", self.args(
+            body=KABIR_BODY, reason_line=KABIR_REASON,
+            facts=[{"text": fact.text, "label": fact.label, "url": fact.url, "in_note": True}]))
+        self.assertEqual([b["code"] for b in got["blocks"]], ["reason_not_in_note"])
+        self.assertEqual([w["code"] for w in got["warns"]], ["fact_not_in_note", "reason_unconfirmed"])
+        self.assertTrue(got["needs_his_line"])
+        row = self.draft()
+        self.assertEqual((row["saved_by"], json.loads(row["facts"])[0]["in_note"]), ("claude", True))
+
     def test_a_removed_company_refuses_the_note(self):
         gone = seed.company(self.db, "Gone Co", "removed")
         at_gone = seed.person(self.db, gone, "Rem Oved", channel="linkedin")

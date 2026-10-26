@@ -517,8 +517,7 @@ export default function NeedsYouPage() {
           <h1 className="text-xl font-semibold tracking-tight">Needs you</h1>
           {query.data ? <ProgressLine data={query.data} /> : null}
           <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
-            Things only you can settle. Your fix is locked, so automation never overwrites it. Items that hold up
-            today's email come first.
+            Things only you can settle. Your answer sticks.
           </p>
         </div>
         {job ? (

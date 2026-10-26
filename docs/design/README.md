@@ -429,9 +429,14 @@ week", collapsed.
 Mon Nov 9", or an amber "Waiting 11 days" once older than 7 days), one plain sentence on what is wrong and what it
 affects, the evidence with its source link (a quoted posting or profile line; a run strip of the last reads, green
 ok, a filled amber square for an error, a hollow amber square for an empty read, with the run in words beside it),
-and the actions on the right. Edit opens an inline
+and the actions on the right. The page says "Things only you can
+settle. Your answer sticks." The fix (Set domain, Set size, Set sponsorship, Edit board) is the one filled button on
+a row. "Mark ok" is an outlined button with a word for its kind: "Leave as is" (most kinds), "Size is fine" (a guessed
+or doubtful size), "Board is fine" (zero jobs), "Keep separate" (a possible duplicate); its key is still O and on hover
+it says "Mark ok", the words the API's sentences use. Mark no-go is a quiet text button. A row with no field to fix
+(a flag, a reader disagreement, a changed careers page) has no filled button. Edit opens an inline
 form in the row: the field (domain, size, sponsorship Yes, OPT only, Unclear or No, board URL), a Source field
-(required), Cancel, and Save and lock. While the form is open, Mark ok is hidden; Mark no-go stays. Sponsorship No
+(required), Cancel, and Save and lock. While the form is open, the ok button is hidden; Mark no-go stays. Sponsorship No
 opens the no-go dialog, since it is the same outcome. A size takes a number or a band ("34", "about 45", "11 to 50").
 
 Trigger badges are amber, the "look at it, nothing is stopped" color of section 8, and so is everything else on the
@@ -528,7 +533,7 @@ the others work.
 **Purpose.** The wins, and the metric.
 
 **Elements.** A metric row: Replies this month with an 8-week bar chart (one series, monochrome, hover tooltip per
-bar, the current week in solid foreground), Reply rate (replies over first emails this month), Referrals,
+bar, the current week in solid foreground), Reply rate (replies over first emails this month; a percent only from 30 first emails up, the API's `min_requests` bar, and below it the counts as "9 of 20" with a plain line saying why; with no first emails, "None yet"), Referrals,
 Interviews. Then a table: company, outcome badge (Interviewing, Interviewed, Referral), how it started, role,
 closed date, note. Imported companies show an Imported tag and blank fields where the old data has none.
 

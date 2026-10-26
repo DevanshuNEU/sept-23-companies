@@ -32,7 +32,9 @@ Live means real contacts and real sends.
 | Reader night job (daily 02:30) | live checkout, `python -m outreach.reader night` | `com.devanshu.outreach-reader-night` |
 
 Live checkout: `~/Desktop/Sept 23 Companies`. The deploy tool renders each job from `launchd/<label>.plist.template`.
-The Needs-you, prepare and plan jobs (#16, #15) install when their templates land. The MCP server has no job: Claude
+The Needs-you, prepare and plan jobs (#16, #15) install when their templates land. The prepare job (05:30) is off by
+config (`[prepare] enabled = false`, company first in #9): it prints one line and exits; the 08:00 plan proposes
+company rows only (`[plan] propose_people = false`). The MCP server has no job: Claude
 Code starts it from the registration (`python -m outreach.mcp --print-registration`).
 
 **Retired at the switch (#17), kept on disk as `.disabled` plists:** `com.devanshu.outreach-mail-sender`,

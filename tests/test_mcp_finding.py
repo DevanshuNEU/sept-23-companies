@@ -131,8 +131,8 @@ class SubmitCandidatesTest(FindingCase):
         self.assertEqual((s["kind"], s["url"], s["observed_on"]), ("team", TEAM_URL, TODAY.isoformat()))
         (d,) = self.db.execute("SELECT * FROM linkedin_draft").fetchall()
         self.assertEqual((d["person_id"], d["reason_state"], d["saved_by"], d["prepared_by_version"]),
-                         (p["person_id"], "proposed", "claude", "mcp:1"))
-        self.assertEqual(self.attempts(), [({"found": 1, "run_id": 0, "version": "mcp:1"}, "claude", self.acme)])
+                         (p["person_id"], "proposed", "claude", "mcp:2"))
+        self.assertEqual(self.attempts(), [({"found": 1, "run_id": 0, "version": "mcp:2"}, "claude", self.acme)])
         self.assertEqual(self.target_ids(), [])  # the person it found takes the company off the list
 
     def test_the_stores_rejections_come_back_as_rejected_with_why(self):
@@ -150,7 +150,7 @@ class SubmitCandidatesTest(FindingCase):
         with mock.patch("outreach.store.writes.utcnow", return_value=NOW):
             got = self.submit(none_reason="The team page lists only the two founders, both already known.")
         self.assertEqual((got["added"], got["drafts"], got["rejected"], got["problems"]), (0, 0, [], []))
-        self.assertEqual(self.attempts(), [({"found": 0, "run_id": 0, "version": "mcp:1"}, "claude", self.acme)])
+        self.assertEqual(self.attempts(), [({"found": 0, "run_id": 0, "version": "mcp:2"}, "claude", self.acme)])
         self.assertNotIn(self.acme, self.target_ids())  # not tried again for seven days
 
     def test_no_candidates_and_no_reason_is_bad_input(self):

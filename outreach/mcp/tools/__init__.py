@@ -18,7 +18,7 @@ from outreach.mcp.guard import Grant
 
 __all__ = ["Ctx", "Input", "ToolError", "ToolSpec", "SERVER_VERSION", "PREPARED_BY"]
 
-SERVER_VERSION = "1"  # raise it when what a tool writes changes
+SERVER_VERSION = "2"  # raise it when what a tool writes changes (2: the terminal bridge, intake and log_sent)
 PREPARED_BY = f"mcp:{SERVER_VERSION}"  # what a note or a find from the side session records as its maker
 
 

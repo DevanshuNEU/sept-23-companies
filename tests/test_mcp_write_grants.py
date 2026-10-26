@@ -10,7 +10,7 @@ import unittest
 from unittest import mock
 
 from outreach.mcp import server
-from outreach.mcp.guard import Grant, open_guarded
+from outreach.mcp.guard import BRIDGE_TABLES, Grant, open_guarded
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase
 from outreach.reader.types import FIELDS
@@ -43,6 +43,9 @@ PINNED = {
                           "linkedin_draft": Grant(insert=True, update=frozenset({
                               "posting_id", "body", "reason_line", "facts", "checks", "prepared_by_version",
                               "updated_at", "revision"}))},
+    "intake": {"person": Grant(insert=True, update=frozenset({"profile_text", "notes", "updated_at", "revision"})),
+               "person_source": INSERT, "event": INSERT},
+    "log_sent": {"linkedin_log": INSERT, "outreach_touch": INSERT, "event": INSERT},
 }
 
 
@@ -128,6 +131,44 @@ class GrantsCase(McpCase):
 
     def test_every_write_tool_is_pinned_here(self):
         self.assertEqual({s.name for s in server.tool_specs() if s.grants}, set(PINNED))
+
+    def test_only_log_sent_may_write_the_bridge_tables(self):
+        holders = {s.name for s in server.tool_specs() if set(s.grants) & BRIDGE_TABLES}
+        self.assertEqual(holders, {"log_sent"})
+        self.assertTrue(all(not spec("log_sent").grants[t].update for t in BRIDGE_TABLES))
+
+    def test_intake_cannot_write_beyond_its_grants(self):
+        self.check_tool("intake", [
+            ("UPDATE person SET email = 'new@acme.example' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET role_kind = 'founder', title = 'CEO' WHERE person_id = ?", (self.pat,)),
+            ("INSERT INTO person(company_id, name, role_kind, channel, linkedin_reason, added_by, created_at, "
+             "updated_at) VALUES (?, 'Dev Anshu', 'engineer', 'linkedin', 'no_email', 'devanshu', ?, ?)",
+             (self.acme, NOW, NOW)),
+            ("INSERT INTO linkedin_log(person_id, kind, at, recorded_at) VALUES (?, 'request_sent', ?, ?)",
+             (self.pat, NOW, NOW)),
+            ("INSERT INTO company(name, status, status_at, created_at) VALUES ('Newco', 'candidate', ?, ?)",
+             (NOW, NOW)),
+            ("INSERT INTO company_alias(alias_key, company_id, alias, source, created_at) "
+             "VALUES ('acmeinc', ?, 'Acme Inc', 'hand', ?)", (self.acme, NOW)),
+        ], {"people": [{"name": "Ida Intake", "title": "Software Engineer", "company": "Acme",
+                        "linkedin_url": "https://www.linkedin.com/in/ida-intake"}]})
+
+    def test_log_sent_cannot_write_beyond_its_grants(self):
+        lin = seed.person(self.db, self.acme, "Lin Kedin", channel="linkedin")
+        self.check_tool("log_sent", [
+            ("INSERT INTO linkedin_log(person_id, kind, reply_kind, at, recorded_at) VALUES (?, 'replied', "
+             "'interested', ?, ?)", (lin, NOW, NOW)),
+            ("INSERT INTO linkedin_log(person_id, kind, at, recorded_at) VALUES (?, 'accepted', ?, ?)",
+             (lin, NOW, NOW)),
+            ("UPDATE person SET notes = 'x' WHERE person_id = ?", (lin,)),
+            ("UPDATE touch SET replied_at = ?, reply_kind = 'interested', state = 'replied' WHERE touch_id = ?",
+             (NOW, self.touch)),
+            ("INSERT INTO person(company_id, name, role_kind, channel, linkedin_reason, added_by, created_at, "
+             "updated_at) VALUES (?, 'Dev Anshu', 'engineer', 'linkedin', 'no_email', 'claude', ?, ?)",
+             (self.acme, NOW, NOW)),
+            ("INSERT INTO daily_list(list_date, built_at, capacity) VALUES ('2026-11-10', ?, 5)", (NOW,)),
+        ], {"requests": [{"person_id": lin, "channel": "linkedin_request",
+                          "note_text": "Hi Lin, I read your post on the queue rewrite."}]})
 
     def test_record_research_cannot_write_beyond_its_grants(self):
         self.check_tool("record_research", [

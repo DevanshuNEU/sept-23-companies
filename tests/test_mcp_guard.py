@@ -319,7 +319,8 @@ BRIDGE_GRANTS = {"linkedin_log": Grant(insert=True), "outreach_touch": Grant(ins
                  "event": Grant(insert=True)}
 CONTEXT = ('{"lane":"own","rankerVersion":null,"roleAgeDays":null,"roleKind":"engineer","roleNamed":false,'
            '"signals":{},"source":"own"}')
-LOG = "INSERT INTO linkedin_log(person_id, kind, reply_kind, undoes, at, note, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+LOG = ("INSERT INTO linkedin_log(person_id, kind, reply_kind, undoes, at, note, recorded_at) "
+       "VALUES (?, ?, ?, ?, ?, ?, ?)")
 TOUCH = ("INSERT INTO outreach_touch(person_id, company_id, channel, email_touch_id, sent_at, accepted_at, replied_at, "
          "reply_kind, referred_at, interview_at, offer_at, quiet_at, undone_at, context, idempotency_key, created_at) "
          "VALUES (:person, :company, :channel, :email_touch, :sent, :accepted, :replied, :reply_kind, :referred, "
@@ -365,7 +366,7 @@ class BridgeGuardTest(GuardCase):
     def hostile_touches(self) -> list[tuple[str, dict]]:
         email_touch = self.touch  # the email thread of self.person
         return [(TOUCH, self.touch_row(**over)) for over in (
-            {"channel": "email", "email_touch": email_touch}, {"channel": "linkedin_message"},
+            {"channel": "email", "email_touch": email_touch}, {"channel": "email"}, {"channel": "linkedin_message"},
             {"channel": "application", "person": None}, {"channel": "other"}, {"channel": "hn_reply"},
             {"accepted": T}, {"replied": T, "reply_kind": "interested"}, {"referred": T}, {"interview": T},
             {"offer": T}, {"quiet": T}, {"undone": T}, {"key": "linkedin:not-the-bridge"}, {"key": None},
@@ -400,8 +401,8 @@ class BridgeGuardTest(GuardCase):
 
     def test_a_request_and_its_touch_pass_the_trigger_alone(self):
         touch = self.write_request(self.triggers_only())
-        self.assertEqual(self.db.execute("SELECT channel FROM outreach_touch WHERE touch_id = ?", (touch,)).fetchone()[0],
-                         "linkedin_request")
+        row = self.db.execute("SELECT channel FROM outreach_touch WHERE touch_id = ?", (touch,)).fetchone()
+        self.assertEqual(row[0], "linkedin_request")
 
     def test_an_accept_reply_message_undo_long_or_misdated_log_is_refused_by_the_trigger_alone(self):
         conn = self.triggers_only()

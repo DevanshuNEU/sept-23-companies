@@ -65,7 +65,7 @@ class SaveNoteTest(NoteCase):
         self.assertEqual(got["blocks"], [])
         self.assertEqual([w["code"] for w in got["warns"]], ["reason_unconfirmed"])
         self.assertEqual((row["body"], row["reason_line"], row["reason_state"], row["saved_by"],
-                          row["prepared_by_version"]), (BODY, REASON, "proposed", "claude", "mcp:1"))
+                          row["prepared_by_version"]), (BODY, REASON, "proposed", "claude", "mcp:2"))
         self.assertEqual(json.loads(row["facts"]), [FACT])
         self.assertEqual([c["code"] for c in json.loads(row["checks"])], ["reason_unconfirmed"])
         self.assertEqual(self.note_events(), [("draft_saved", "claude")])

@@ -1,7 +1,7 @@
 import type { BaseRates, PlanRow } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
-import { baseRateLine, didToday, formatRate, oneIn, smallSampleNote } from '@/lib/progress';
+import { baseRateLine, didToday, formatRate, oneIn, rateEnough, smallSampleNote } from '@/lib/progress';
 
 const fixture = () => new FixtureClient(buildFixture('default'));
 
@@ -98,5 +98,16 @@ describe('didToday', () => {
     const plan = await fixture().plan();
     const rows: PlanRow[] = plan.rows.map((r) => (r.channel === 'email' ? { ...r, state: 'skipped' } : r));
     expect(didToday(rows).map((d) => d.label)).not.toContain('Emails reviewed');
+  });
+});
+
+describe('rateEnough', () => {
+  it('needs the API to say enough and at least 20 in the stage denominator', () => {
+    expect(rateEnough(true, 31)).toBe(true);
+    expect(rateEnough(true, 20)).toBe(true);
+    expect(rateEnough(true, 19)).toBe(false);
+    expect(rateEnough(true, 2)).toBe(false);
+    expect(rateEnough(false, 50)).toBe(false);
+    expect(rateEnough(true, 0)).toBe(false);
   });
 });

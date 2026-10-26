@@ -1,4 +1,4 @@
-import { ageDays, formatAge, formatCarriedDay, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatLongDate, formatMonth, formatRecipientTime, formatWeekdayTime, parseIsoDate } from '@/lib/format';
+import { ageDays, formatAge, formatCarriedDay, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatLongDate, formatMonth, formatRecipientTime, formatWeekday, formatWeekdayTime, parseIsoDate } from '@/lib/format';
 
 const ASOF = '2026-11-10T15:14:00Z'; // Tuesday 10:14 in Boston
 
@@ -154,5 +154,13 @@ describe('formatCarriedDay', () => {
   });
   it('writes the date from a week back', () => {
     expect(formatCarriedDay('2026-11-03', asOf)).toBe('Tue Nov 3');
+  });
+});
+
+describe('formatWeekday', () => {
+  it('reads the weekday in the app zone, not UTC', () => {
+    expect(formatWeekday('2026-11-10T15:14:00Z')).toBe('Tuesday');
+    // 02:00 UTC on Wednesday is still Tuesday evening in Boston.
+    expect(formatWeekday('2026-11-11T02:00:00Z')).toBe('Tuesday');
   });
 });

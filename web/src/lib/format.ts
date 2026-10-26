@@ -144,3 +144,8 @@ export function formatCarriedDay(from: IsoDate, asOf: IsoTime): string {
   const days = ageDays(noon.toISOString(), asOf);
   return days >= 1 && days <= 6 ? WEEKDAY.format(noon) : formatDueDay(from);
 }
+
+/** "Tuesday": the weekday of an instant, read in the app's zone. */
+export function formatWeekday(at: IsoTime): string {
+  return partsOf(at, { timeZone: APP_ZONE, weekday: 'long' }).weekday ?? '';
+}

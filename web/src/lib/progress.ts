@@ -46,3 +46,14 @@ export function didToday(rows: PlanRow[]): { label: string; count: number }[] {
     { label: 'Emails reviewed', count: emails },
   ].filter((d) => d.count > 0);
 }
+
+/** The smallest group a rate may be drawn from (the findings rule, ruling 13). */
+export const MIN_GROUP = 20;
+
+/**
+ * Whether a stage may show a percent: the API says the period has enough requests AND the stage's own denominator
+ * has at least MIN_GROUP in it, so a stage measured against 2 replies shows "0 of 2" and never "0%".
+ */
+export function rateEnough(periodEnough: boolean, of: number): boolean {
+  return periodEnough && of >= MIN_GROUP;
+}

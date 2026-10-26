@@ -207,7 +207,7 @@ describe('Needs you', () => {
     const resolve = vi.spyOn(client, 'resolveReview');
     const mesh = item(MESH);
     expect(within(mesh).queryByRole('button', { name: /Mark no-go/ })).not.toBeInTheDocument();
-    expect(within(mesh).queryByRole('button', { name: /Mark ok/ })).not.toBeInTheDocument();
+    expect(within(mesh).queryByRole('button', { name: /Mark ok|Leave as is/ })).not.toBeInTheDocument();
     expect(within(mesh).getByRole('button', { name: 'Keep separate' })).toBeInTheDocument();
     select(MESH);
     press('n');
@@ -562,6 +562,31 @@ describe('Needs you', () => {
     expect(resolve).toHaveBeenCalledWith(hex.id, { kind: 'edit', field: 'sponsorship', value: 'OPT only', source: 'Recruiter on LinkedIn' }, hex.revision, expect.anything());
   });
 
+  it('says what this page is for in one line', async () => {
+    await openReview();
+    expect(screen.getByText('Things only you can settle. Your answer sticks.')).toBeInTheDocument();
+  });
+
+  it('the fix is the one filled button, "ok" is outlined with a word for its kind, and Mark no-go is quiet', async () => {
+    await openReview();
+    const variant = (el: HTMLElement) => el.getAttribute('data-variant');
+    const hex = within(item('Hex'));
+    expect(variant(hex.getByRole('button', { name: 'Set sponsorship' }))).toBe('default');
+    expect(variant(hex.getByRole('button', { name: 'Leave as is' }))).toBe('outline');
+    expect(variant(hex.getByRole('button', { name: 'Mark no-go' }))).toBe('ghost');
+    expect(hex.getByRole('button', { name: 'Mark no-go' }).className).not.toMatch(/\bborder-border\b/);
+    // Per kind, so the button says what it leaves.
+    expect(within(item('Fernhill')).getByRole('button', { name: 'Size is fine' })).toBeInTheDocument();
+    expect(within(item('Copperline')).getByRole('button', { name: 'Size is fine' })).toBeInTheDocument();
+    // An item with no field to fix has nothing filled: settling it is the outlined button.
+    const quill = within(item('Quillmate'));
+    expect(quill.queryAllByRole('button').filter((b) => variant(b) === 'default')).toHaveLength(0);
+    expect(variant(quill.getByRole('button', { name: 'Leave as is' }))).toBe('outline');
+    // Every "ok" keeps the O key and says "Mark ok" on hover.
+    expect(quill.getByRole('button', { name: 'Leave as is' })).toHaveAttribute('aria-keyshortcuts', 'o');
+    expect(quill.getByRole('button', { name: 'Leave as is' })).toHaveAttribute('title', 'Mark ok');
+  });
+
   it('the new kinds show their words and icon and cannot crash the view', async () => {
     await openReview();
     const words: [string, string][] = [
@@ -577,7 +602,7 @@ describe('Needs you', () => {
     expect(within(item('Copperline')).getByRole('button', { name: 'Set size' })).toBeInTheDocument();
     for (const name of ['Larkspur AI', 'Quillmate', 'Brightwell']) {
       expect(within(item(name)).queryByRole('button', { name: /^Set / })).not.toBeInTheDocument();
-      expect(within(item(name)).getByRole('button', { name: 'Mark ok' })).toBeInTheDocument();
+      expect(within(item(name)).getByRole('button', { name: 'Leave as is' })).toBeInTheDocument();
     }
     expect(item('Larkspur AI')).toHaveTextContent('"We are unable to sponsor work visas for this position."');
   });

@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useListNav } from '@/keyboard/list-nav';
 import { formatDay, formatMonth } from '@/lib/format';
+import { MIN_SAMPLE } from '@/lib/progress';
 import { cn } from '@/lib/utils';
 import { useViewQuery } from '@/pending/pending';
 import { RepliesChart } from './replies-chart';
@@ -63,22 +64,31 @@ function Metric({ label, value, sub, children }: { label: string; value: string;
 
 /** "6.4%": one decimal, trailing zero dropped. */
 function percent(part: number, whole: number): string {
-  return whole > 0 ? `${Number(((part / whole) * 100).toFixed(1))}%` : '0%';
+  return `${Number(((part / whole) * 100).toFixed(1))}%`;
+}
+
+/**
+ * The reply rate, honest (design 16.3): a percent only from `MIN_SAMPLE` first emails up. Below it the big number is
+ * the plain count ("9 of 20"), the line beneath says it in words, and nothing is red for a small sample.
+ */
+function replyRate({ replies, firstEmails }: DoneView['metrics']['replyRate']) {
+  if (firstEmails <= 0) return { value: 'None yet', sub: 'No first emails this month', note: null };
+  const words = `${replies} ${replies === 1 ? 'reply' : 'replies'} from ${firstEmails} first emails this month`;
+  if (firstEmails < MIN_SAMPLE) return { value: `${replies} of ${firstEmails}`, sub: words, note: 'Too few first emails for a percent yet.' };
+  return { value: percent(replies, firstEmails), sub: words, note: null };
 }
 
 function Metrics({ view }: { view: DoneView }) {
   const { metrics } = view;
-  const { replies, firstEmails } = metrics.replyRate;
+  const rate = replyRate(metrics.replyRate);
   return (
     <div data-slot="done-strip" className="mb-5 grid grid-cols-4 overflow-hidden rounded-md border bg-card">
       <Metric label={`Replies in ${formatMonth(view.asOf)}`} value={String(metrics.repliesThisMonth)} sub={`Per week, last ${metrics.repliesPerWeek.length} weeks`}>
         <RepliesChart weeks={metrics.repliesPerWeek} />
       </Metric>
-      <Metric
-        label="Reply rate"
-        value={percent(replies, firstEmails)}
-        sub={firstEmails > 0 ? `${replies} ${replies === 1 ? 'reply' : 'replies'} from ${firstEmails} first emails this month` : 'No first emails this month'}
-      />
+      <Metric label="Reply rate" value={rate.value} sub={rate.sub}>
+        {rate.note ? <span className="text-xs text-muted-foreground">{rate.note}</span> : null}
+      </Metric>
       <Metric label="Referrals" value={String(metrics.referrals)} />
       <Metric label="Interviews" value={String(metrics.interviews)} />
     </div>

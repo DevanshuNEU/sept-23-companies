@@ -201,7 +201,8 @@ describe('the Outbox: keys after a move never reach the row he left or an unsafe
     );
     await act(() => vi.advanceTimersByTimeAsync(0));
     // The first row never rendered, so its c is dropped: no dialog. The second row is on screen and a acts on it alone.
-    expect(screen.getByRole('heading', { level: 2, name: two.name })).toBeInTheDocument();
+    // Approving the second row moves the selection on from it, so what is open now is the row after it.
+    expect(toastText()).toContain(`Approved ${two.name}.`);
     expect(screen.queryByRole('dialog')).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(8000));
     expect(approve).toHaveBeenCalledTimes(1);

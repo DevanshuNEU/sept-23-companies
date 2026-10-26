@@ -69,6 +69,21 @@ export const EDIT_FIELD: Record<ReviewKind, EditField | null> = {
 // eslint-disable-next-line react-refresh/only-export-components
 export const hasNoGo = (kind: ReviewKind): boolean => kind !== 'merge_candidate';
 
+/** What the "ok" button says for each kind: the plain thing it leaves alone. Its key is O, and on hover it still says Mark ok. */
+const OK_LABEL: Record<ReviewKind, string> = {
+  domain_missing: 'Leave as is',
+  size_unknown: 'Leave as is',
+  size_guess: 'Size is fine',
+  sponsorship_unclear: 'Leave as is',
+  board_unreadable: 'Leave as is',
+  board_empty: 'Board is fine',
+  flagged: 'Leave as is',
+  merge_candidate: 'Keep separate',
+  reader_disagrees: 'Leave as is',
+  careers_changed: 'Leave as is',
+  size_check: 'Size is fine',
+};
+
 const FIELD_LABEL: Record<EditField, string> = { domain: 'Email domain', size: 'Size', sponsorship: 'Sponsorship', board_url: 'Board URL' };
 const FIELD_HINT: Record<Exclude<EditField, 'sponsorship'>, string> = {
   domain: 'company.com',
@@ -322,9 +337,9 @@ export function ReviewItemRow({
       </div>
       {merge && item.merge ? null : (
         <div className="col-start-2 row-start-3 mt-1 flex flex-wrap items-start gap-1.5 @4xl:col-start-3 @4xl:row-span-2 @4xl:row-start-1 @4xl:mt-0">
-          {field && !editing ? <ActionButton label={EDIT_BUTTON[field]} keyName="E" variant="outline" onClick={onEdit} /> : null}
-          {!editing ? <ActionButton label={merge ? 'Keep separate' : 'Mark ok'} keyName="O" variant="ghost" onClick={onOk} /> : null}
-          {hasNoGo(item.kind) ? <ActionButton label="Mark no-go" keyName="N" variant="ghost" onClick={() => onNoGo()} /> : null}
+          {field && !editing ? <ActionButton label={EDIT_BUTTON[field]} keyName="E" variant="primary" onClick={onEdit} /> : null}
+          {!editing ? <ActionButton label={OK_LABEL[item.kind]} keyName="O" variant="outline" title="Mark ok" onClick={onOk} /> : null}
+          {hasNoGo(item.kind) ? <ActionButton label="Mark no-go" keyName="N" variant="quiet" onClick={() => onNoGo()} /> : null}
         </div>
       )}
       <div className="col-start-2 grid gap-2 text-[13px]">

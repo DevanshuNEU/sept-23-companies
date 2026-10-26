@@ -68,7 +68,7 @@ test('each of the five triggers is settled through the page with its own fix', a
   await expect(page.getByText('Hex is on the no-go list.')).toBeVisible();
 
   // 1, an unreadable board: mark ok.
-  await page.getByRole('article', { name: 'Zed Industries' }).getByRole('button', { name: 'Mark ok' }).click();
+  await page.getByRole('article', { name: 'Zed Industries' }).getByRole('button', { name: 'Leave as is' }).click();
   await expect(page.getByText('Marked ok. Zed Industries keeps its postings open.')).toBeVisible();
 
   // 2, a board with zero jobs: give the new board.
@@ -147,9 +147,9 @@ test('an edited size leaves the list and its Resolved row has no Undo', async ({
 test('the sidebar count drops with each fix and rises on Undo', async ({ page, consoleErrors }) => {
   await page.goto(REVIEW);
   await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 11 open(,|$)/);
-  await page.getByRole('article', { name: 'Quillmate' }).getByRole('button', { name: 'Mark ok' }).click();
+  await page.getByRole('article', { name: 'Quillmate' }).getByRole('button', { name: 'Leave as is' }).click();
   await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 10 open(,|$)/);
-  await page.getByRole('article', { name: 'Brightwell' }).getByRole('button', { name: 'Mark ok' }).click();
+  await page.getByRole('article', { name: 'Brightwell' }).getByRole('button', { name: 'Leave as is' }).click();
   await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 9 open(,|$)/);
   // Inside the window, Z undoes the last fix: nothing is sent and the item is back at once.
   await page.keyboard.press('z');

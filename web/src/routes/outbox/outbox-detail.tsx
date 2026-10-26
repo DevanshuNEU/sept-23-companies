@@ -221,9 +221,12 @@ function StateLine({ detail }: { detail: OutboxDetail }) {
 function DetailBody({
   detail,
   items,
+  onAdvance,
 }: {
   detail: OutboxDetail;
   items: OutboxItem[];
+  /** Moves the selection on from this email once he has approved, skipped or withdrawn it. */
+  onAdvance: (from: Id) => void;
 }) {
   const client = usePageClient('outbox');
   // Unsaved text per email, so J, K, another view and back never throw it away.
@@ -356,6 +359,7 @@ function DetailBody({
         return done;
       },
     });
+    onAdvance(it.touchId);
   }
 
   /** The one way to approve from the screen: a click on Approve, the A key, or mod+enter. */
@@ -415,12 +419,16 @@ function DetailBody({
         return done;
       },
     });
+    onAdvance(touchId);
   };
 
   const withdraw = async () => {
     if (kind !== 'approved') return;
     // An approval still inside its undo window never reached the API: dropping it is the same as Undo.
-    if (cancel(`approve:${messageId}`)) return;
+    if (cancel(`approve:${messageId}`)) {
+      onAdvance(touchId);
+      return;
+    }
     // An approval whose commit already started: let it land, then withdraw it.
     if (queryClient.getQueryData<OutboxDetail>(detailKey)?.item.state === 'drafted') await flushPending();
     const revision = queryClient.getQueryData<OutboxDetail>(detailKey)?.item.revision ?? item.revision;
@@ -436,6 +444,7 @@ function DetailBody({
       patches: [list, det, shell],
       commit: async (o) => noted(await client.unapprove(messageId, revision, o)),
     });
+    onAdvance(touchId);
   };
 
   /* ------------------------------------------------------------ role kind and reply kind */
@@ -700,12 +709,12 @@ function DetailBody({
 }
 
 /** Spec 5.3, the detail pane: the selected email, its checks and its actions. */
-export function OutboxDetailPane({ touchId, items }: { touchId: Id; items: OutboxItem[] }) {
+export function OutboxDetailPane({ touchId, items, onAdvance }: { touchId: Id; items: OutboxItem[]; onAdvance: (from: Id) => void }) {
   const client = usePageClient('outbox');
   const query = useViewQuery(queryKeys.outboxDetail(touchId), () => client.outboxDetail(touchId), { pollMs: pollMs.outbox });
   return (
     <QueryState query={query} skeleton={<DetailSkeleton />} empty={null}>
-      {(detail) => <DetailBody key={detail.item.messageId} detail={detail} items={items} />}
+      {(detail) => <DetailBody key={detail.item.messageId} detail={detail} items={items} onAdvance={onAdvance} />}
     </QueryState>
   );
 }

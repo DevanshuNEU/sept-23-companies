@@ -129,12 +129,12 @@ own keys in section 16.6.
 
 | Key | Action |
 |---|---|
-| A | Approve the selected draft (refused with a toast if blocked) |
+| A | Approve the selected draft (refused with a toast if blocked), then move to the next row |
 | E | Edit the body (focus moves into the editor) |
 | ⌘S | Save edits (checks run again) |
 | ⌘Enter | Save and approve, from inside the editor |
-| S | Skip (undo with Z) |
-| U | Withdraw approval (only before the sender claims it) |
+| S | Skip (undo with Z), then move to the next row |
+| U | Withdraw approval (only before the sender claims it), then move to the next row |
 | ⇧J / ⇧K | Next group, previous group |
 | P | Pause or resume the company |
 | C | Close the company with a reason |
@@ -146,7 +146,7 @@ own keys in section 16.6.
 |---|---|
 | C | Copy role title for this person's company |
 | L | Open their LinkedIn profile |
-| R, A, M, Y | Log request sent, accepted, message sent, reply |
+| R, A, M, Y | Log request sent, accepted, message sent, reply; then select the next person when this one leaves the tab |
 | 1 to 4 | To reach, Waiting, Replied, All |
 | [ / ] | Previous page, next page (J and K also cross into the next or previous page) |
 
@@ -284,6 +284,11 @@ adds them."); error and stale per section 7.
 **Actions.** Log request, accepted, message, reply: one click, toast with undo. Log reply also asks for the reply
 kind (same four as email). Each log writes one `linkedin_log` row and an `events` row.
 
+When a log takes the person out of the tab he is working in (a request leaves To reach, a reply leaves Waiting), the
+selection moves to the next person in the list (else the one before), so the next key acts on someone still to do.
+Each log is still his own key press: a held key logs once, and Z undoes for 8 seconds. On All nothing moves. One line
+under the page's lede points to Today's plan, where the day's people are in order.
+
 ### 5.3 Outbox
 
 **Purpose.** Review and approve every draft, and see exactly what the sender is doing. The most used view.
@@ -291,9 +296,19 @@ kind (same four as email). Each log writes one `linkedin_log` row and an `events
 **Layout.** A sending strip across the top, then two resizable panes (shadcn `ResizablePanelGroup`): the list
 (400 px default) and the detail of the selected email.
 
+**Arriving.** With no email in the address, the Outbox opens the first reply, else the first draft he can approve.
+A blocked draft is never preselected. This only picks a row to read: approving stays his own A press or click.
+After A, S or U on an email, the selection moves to the next row in the same group (else the one before it), so he
+can go down the list with one key per decision. A refused approve does not move it. Z still undoes for 8 seconds.
+
 #### Sending strip
 
-| Cell | Shows |
+The strip is one line: the sender state, "20 of 30 sent", and the next send ("Next 10:42 ET, Mintlify", or why
+nothing is next). A hard block or Gmail signed out shows Gmail's message in red on the same line. A Details button
+opens a popover with the cells below (the sender's window, sent today with the ramp ladder, the limit, the next
+send). Pause sending (Resume sending when paused) stays on the line, one click, immediate.
+
+| Cell (in Details) | Shows |
 |---|---|
 | Sender | Running (pulsing green dot), Paused by you, Paused: hard block (red), Outside the window, Weekend, or Gmail signed out (red, with the fix). Sub-line: "Weekdays 08:30 to 16:30, their time". |
 | Sent today | big number "20", "of 30", and the **ramp ladder** |
@@ -311,7 +326,7 @@ clean-day signals: bounce rate over the last 3 days, Gmail errors today, spam or
 | Group | Touch states in it | Row shows |
 |---|---|---|
 | Replied (pinned on top, green edge) | replied, until he closes or resumes the company | the first line of the reply, time, "Holding N queued emails at Company" |
-| Drafts to review | drafted, followup_ready, failed | subject, status badge (Draft, Blocked, N warnings, Follow-up N of 3, Failed), the first blocking reason or warning in words |
+| Drafts to review | drafted, followup_ready, failed | subject, status badge (Draft, Blocked, N warnings, Follow-up N of 3, Failed), the first blocking reason or warning in words. Drafts he can approve come first; blocked ones follow under a sub-head "Blocked, fix first (n)", each with a "Fix" cue that opens the email and its Blocking card. The group count still counts them all. |
 | Approved | approved, followup_approved | when it will send ("10:42 ET", "after 11:05 ET", "tomorrow") and why ("60 minutes after the last Graphite email", "Graphite has 3 today already", "Recruiter: day 2") |
 | Sending | sending | "Locked: cannot edit, approve or skip" |
 | Checking whether it went out | send_unknown | "Gmail did not answer. Looking in Sent at 10:15" |
@@ -320,8 +335,9 @@ clean-day signals: bounce rate over the last 3 days, Gmail errors today, spam or
 | Closed (collapsed) | bounced, skipped, closed | a one-line breakdown: "bounced 1, skipped 4, company closed 12" |
 
 Within Drafts to review the order is: first emails before follow-ups due later, then by company in pick order, then
-by person kind (engineers and managers, founders, then recruiters, matching send order). Blocked drafts stay in
-place rather than sinking, so the list does not reorder when checks rerun. Held touches at a replied company are
+by person kind (engineers and managers, founders, then recruiters, matching send order). Blocked drafts follow the
+others under "Blocked, fix first (n)", nothing is hidden. The selected email keeps its slot (and its sub-group) when
+checks rerun or it moves group, so the list does not reorder under the cursor. Held touches at a replied company are
 listed inside the reply's detail, not in Approved, so nothing in Approved can be misread as about to go out.
 
 #### Detail: draft
@@ -379,9 +395,9 @@ shows Withdraw approval (U) until the sender claims it.
 - Loading: strip cells as skeletons, list skeleton rows at real row height, detail empty.
 - Empty Outbox: "No drafts to review. Paste people for a picked company in the side terminal. Claude's drafts show
   up here."
-- Gmail signed out: red strip cell plus an alert above the list naming the fix. Approve still works (approval is
+- Gmail signed out: the strip line in red plus an alert above the list naming the fix. Approve still works (approval is
   not sending); approved mail waits.
-- Hard block: red strip cell, alert with Gmail's message, Resume behind a dialog.
+- Hard block: the strip line in red, alert with Gmail's message, Resume behind a dialog.
 - New items while he works: a "2 new" pill at the top of the group; click or ⇧J to reveal. Nothing moves under the
   cursor.
 - Edit conflict (another tab saved, or Claude saved a new version): the shared conflict alert above the editor,
@@ -418,9 +434,14 @@ week", collapsed.
 Mon Nov 9", or an amber "Waiting 11 days" once older than 7 days), one plain sentence on what is wrong and what it
 affects, the evidence with its source link (a quoted posting or profile line; a run strip of the last reads, green
 ok, a filled amber square for an error, a hollow amber square for an empty read, with the run in words beside it),
-and the actions on the right. Edit opens an inline
+and the actions on the right. The page says "Things only you can
+settle. Your answer sticks." The fix (Set domain, Set size, Set sponsorship, Edit board) is the one filled button on
+a row. "Mark ok" is an outlined button with a word for its kind: "Leave as is" (most kinds), "Size is fine" (a guessed
+or doubtful size), "Board is fine" (zero jobs), "Keep separate" (a possible duplicate); its key is still O and on hover
+it says "Mark ok", the words the API's sentences use. Mark no-go is a quiet text button. A row with no field to fix
+(a flag, a reader disagreement, a changed careers page) has no filled button. Edit opens an inline
 form in the row: the field (domain, size, sponsorship Yes, OPT only, Unclear or No, board URL), a Source field
-(required), Cancel, and Save and lock. While the form is open, Mark ok is hidden; Mark no-go stays. Sponsorship No
+(required), Cancel, and Save and lock. While the form is open, the ok button is hidden; Mark no-go stays. Sponsorship No
 opens the no-go dialog, since it is the same outcome. A size takes a number or a band ("34", "about 45", "11 to 50").
 
 Trigger badges are amber, the "look at it, nothing is stopped" color of section 8, and so is everything else on the
@@ -517,7 +538,7 @@ the others work.
 **Purpose.** The wins, and the metric.
 
 **Elements.** A metric row: Replies this month with an 8-week bar chart (one series, monochrome, hover tooltip per
-bar, the current week in solid foreground), Reply rate (replies over first emails this month), Referrals,
+bar, the current week in solid foreground), Reply rate (replies over first emails this month; a percent only from 30 first emails up, the API's `min_requests` bar, and below it the counts as "9 of 20" with a plain line saying why; with no first emails, "None yet"), Referrals,
 Interviews. Then a table: company, outcome badge (Interviewing, Interviewed, Referral), how it started, role,
 closed date, note. Imported companies show an Imported tag and blank fields where the old data has none.
 
@@ -1024,9 +1045,11 @@ from the touch's history on the company page.
 
 ### 16.2 Finish
 
-When no row is left to do, the work panel becomes the finish panel and focus moves to its heading, "Done for today"
+When no row is left to do, the work panel becomes the finish panel and focus moves to its heading, "Today's list is done."
 (announced once: "All 7 done for today."). The finish node on the rail fills. The panel, on paper: the heading with a
-filled flag and one calm line ("All 7 people on today's plan are done. Nothing else is asked of you today."); What you
+filled flag and one calm line ("All 7 people on today's plan are done."); "Still waiting for you" (neutral, links to
+the Outbox for replies and drafts to review and to Needs you, from the same counts as the sidebar; with all three at
+zero, one line says nothing is waiting there; it never claims nothing is asked of him while the sidebar shows work); What you
 did (counts, then one line per row with its time); Carried to tomorrow (only when a row was carried); Tomorrow's draft
 (rebuilt at 08:00: the API's line, then up to 10 people the next plan's dry run would propose, people first, each with
 company, role and a small channel word, LinkedIn, Email or Find someone, then "and 3 more" counted from the draft; the
@@ -1090,7 +1113,7 @@ Single keys work only outside text fields, as in section 3.
 | View | Key | Action |
 |---|---|---|
 | Today | J / K, ↓ / ↑ | Next, previous person on the rail |
-| Today | Enter | Open the company |
+| Today | Enter | On a person to do with a profile link: open the profile, then copy the note (the "Copy and open" button). A blocked or unsaved note is not copied and the profile stays shut. Any other row: open the company |
 | Today | L | Open profile |
 | Today | O | Open role |
 | Today | A | Open the apply page |

@@ -63,17 +63,36 @@ describe('Done companies', () => {
     expect(within(await metric('Interviews')).queryByText(/still in process/)).toBeNull();
   });
 
-  it('says "1 reply" when there is exactly one', async () => {
-    await done(withMetrics((m) => ({ ...m, replyRate: { replies: 1, firstEmails: 20 } })));
+  it('says "1 reply" when there is exactly one, with a percent once the sample is enough', async () => {
+    await done(withMetrics((m) => ({ ...m, replyRate: { replies: 1, firstEmails: 40 } })));
     const rate = await metric('Reply rate');
-    expect(within(rate).getByText('5%')).toBeInTheDocument();
-    expect(within(rate).getByText('1 reply from 20 first emails this month')).toBeInTheDocument();
+    expect(within(rate).getByText('2.5%')).toBeInTheDocument();
+    expect(within(rate).getByText('1 reply from 40 first emails this month')).toBeInTheDocument();
   });
 
-  it('shows 0% and a plain note when there were no first emails', async () => {
+  it('shows no percent below the minimum sample: the counts, and a plain line that says why', async () => {
+    await done(withMetrics((m) => ({ ...m, replyRate: { replies: 1, firstEmails: 20 } })));
+    const rate = await metric('Reply rate');
+    expect(within(rate).getByText('1 of 20')).toBeInTheDocument();
+    expect(within(rate).getByText('1 reply from 20 first emails this month')).toBeInTheDocument();
+    expect(within(rate).getByText('Too few first emails for a percent yet.')).toBeInTheDocument();
+    expect(rate.textContent).not.toMatch(/%/);
+    expect(rate.innerHTML).not.toMatch(/-bad|destructive/);
+  });
+
+  it('the line is at 30 first emails: 29 shows counts, 30 shows a percent', async () => {
+    const { unmount } = await done(withMetrics((m) => ({ ...m, replyRate: { replies: 3, firstEmails: 29 } })));
+    expect((await metric('Reply rate')).textContent).not.toMatch(/%/);
+    unmount();
+    await done(withMetrics((m) => ({ ...m, replyRate: { replies: 3, firstEmails: 30 } })));
+    expect(within(await metric('Reply rate')).getByText('10%')).toBeInTheDocument();
+  });
+
+  it('shows None yet, not 0%, when there were no first emails', async () => {
     await done(withMetrics((m) => ({ ...m, replyRate: { replies: 0, firstEmails: 0 } })));
     const rate = await metric('Reply rate');
-    expect(within(rate).getByText('0%')).toBeInTheDocument();
+    expect(within(rate).getByText('None yet')).toBeInTheDocument();
+    expect(rate.textContent).not.toMatch(/%/);
     expect(within(rate).getByText('No first emails this month')).toBeInTheDocument();
   });
 

@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Check, Flag } from 'lucide-react';
-import type { PlanRow, PlanView } from '@/api';
+import { pollMs, queryKeys, useClient, type PlanRow, type PlanView, type ShellSummary } from '@/api';
 import { useAnnounce } from '@/keyboard/hotkeys';
 import { formatClockTime } from '@/lib/format';
 import { didToday } from '@/lib/progress';
+import { useViewQuery } from '@/pending/pending';
 import { TomorrowDraft } from './tomorrow-draft';
 
 const plural = (n: number, one: string, many: string) => `${n === 1 ? one : many}`;
@@ -55,15 +56,57 @@ function summary(plan: PlanView, carried: PlanRow[]) {
   const { done, total } = plan;
   if (carried.length === 0) {
     const sub = total === 1 ? "The one person on today's plan is done." : `All ${total} people on today's plan are done.`;
-    return { sub: `${sub} Nothing else is asked of you today.`, say: `All ${total} done for today.` };
+    return { sub, say: `All ${total} done for today.` };
   }
   const first = carried[0];
   const carries = carried.length === 1 && first ? `${nameOf(first)} carries to tomorrow` : `${carried.length} carry to tomorrow`;
   const counts = [`${done} of ${total} done`, `${carried.length} carried to tomorrow`];
   return {
-    sub: `${done} of ${total} done. ${carries}, so nothing else is asked of you today.`,
+    sub: `${done} of ${total} done. ${carries}.`,
     say: `Done for today. ${counts.join(', ')}.`,
   };
+}
+
+/** "1 reply to handle", "7 drafts to review", "5 items in Needs you": what the sidebar counts, as links. */
+function waitingLinks(s: ShellSummary): { to: string; text: string }[] {
+  const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+  return [
+    ...(s.unhandledReplies > 0 ? [{ to: '/outbox', text: n(s.unhandledReplies, 'reply to handle', 'replies to handle') }] : []),
+    ...(s.draftsToReview > 0 ? [{ to: '/outbox', text: n(s.draftsToReview, 'draft to review', 'drafts to review') }] : []),
+    ...(s.openReviewItems > 0 ? [{ to: '/needs-you', text: n(s.openReviewItems, 'item in Needs you', 'items in Needs you') }] : []),
+  ];
+}
+
+/**
+ * The plan being done is not the same as nothing waiting. This reads the same summary as the sidebar and names what
+ * still waits for him, as links, in plain words. It shows nothing until the summary has loaded.
+ */
+function StillWaiting() {
+  const client = useClient();
+  const shell = useViewQuery(queryKeys.shell, () => client.shell(), { pollMs: pollMs.default });
+  const ids = useId();
+  if (!shell.data) return null;
+  const links = waitingLinks(shell.data);
+  if (links.length === 0) {
+    return (
+      <Section id={`${ids}-none`} title="Waiting for you">
+        <p className="text-sm text-muted-foreground">Nothing is waiting in the Outbox or Needs you.</p>
+      </Section>
+    );
+  }
+  return (
+    <Section id={`${ids}-waiting`} title="Still waiting for you" className="rounded-lg border px-4 py-3">
+      <ul className="grid gap-1 text-sm">
+        {links.map((l) => (
+          <li key={l.text}>
+            <Link to={l.to} className={link}>
+              {l.text}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
 }
 
 function Section({ title, children, id, className }: { title: string; children: ReactNode; id: string; className?: string }) {
@@ -113,11 +156,13 @@ export function FinishPanel({ plan }: { plan: PlanView }) {
             <Flag className="size-[15px]" strokeWidth={2.5} />
           </span>
           <h2 ref={headingRef} tabIndex={-1} className="text-2xl leading-8 font-semibold tracking-[-0.01em] outline-none">
-            Done for today
+            Today&apos;s list is done.
           </h2>
         </div>
         <p className="max-w-[62ch] pl-10 text-base leading-6">{sub}</p>
       </div>
+
+      <StillWaiting />
 
       <Section id={`${ids}-did`} title="What you did">
         {did.length === 0 ? (

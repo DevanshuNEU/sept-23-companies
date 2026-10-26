@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Search, Users } from 'lucide-react';
 import {
@@ -247,6 +247,14 @@ export default function LinkedInPage() {
       patches: [viewPatch, shellPatch],
       commit: (o) => (kind ? client.logLinkedIn(p.person.id, step, o, kind) : client.logLinkedIn(p.person.id, step, o)),
     });
+    // A step that takes the person out of the tab he is working in (request sent leaves To reach, a reply leaves
+    // Waiting) moves the selection to the next person, so the next key acts on someone still to do. The last one
+    // looks back to the one before. Undo brings the person back; the selection stays where it moved.
+    if (tab !== 'all' && p.tab === tab && tabAfter(p.tab, step) !== tab) {
+      const at = ids.indexOf(p.person.id);
+      const next = ids[at + 1] ?? ids[at - 1];
+      if (next !== undefined) select(next);
+    }
   };
 
   const askReply = (p: LinkedInPerson) => {
@@ -300,6 +308,16 @@ export default function LinkedInPage() {
           <h1 className="text-xl font-semibold tracking-tight">LinkedIn list</h1>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
             People past the email budget for their company, or with no email. Name the role, then log what happened.
+          </p>
+          <p className="mt-0.5 text-[13px] text-muted-foreground">
+            Who to reach first each day is on{' '}
+            <Link
+              to="/today"
+              className="rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              Today&apos;s plan
+            </Link>
+            .
           </p>
         </div>
         {view ? (

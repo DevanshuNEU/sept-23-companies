@@ -130,7 +130,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
     initial: pinned,
     onOpen: (id) => {
       const row = byId.get(id);
-      if (row) navigate(`/companies/${row.company.id}`);
+      if (row) enter(row);
     },
     announce: (id) => {
       const row = byId.get(id);
@@ -184,24 +184,56 @@ function PlanWork({ plan }: { plan: PlanView }) {
     const draft = row.note ? edits.get(row.note.noteId) : undefined;
     return draft !== undefined && row.note !== null && (draft.text !== row.note.text || draft.line !== row.note.reasonLine);
   };
+  /** Why this note cannot be copied right now, in the words the toast says, or null. C, the Copy button and Enter all obey it. */
+  const copyRefusal = (row: PlanRow, note: NonNullable<PlanRow['note']>): string | null => {
+    if (actions.noteSaving(note.noteId)) return 'Not copied. The note is saving, and the checks run again first.';
+    if (unsavedEdit(row)) return `Not copied. Save your edit first (${isMac() ? 'Cmd+S' : 'Ctrl+S'}), then copy.`;
+    if (note.checks.length === 0) return 'Not copied. The checks have not run yet. Try again in a moment.';
+    const blocks = note.checks.filter((c) => c.severity === 'block').length;
+    if (blocks > 0) return `Not copied. ${plural(blocks, 'check blocks', 'checks block')} this note. Fix it, then copy.`;
+    return null;
+  };
+  /** What the toast says after a copy: plain, or a warning when a fact in the note has no safe link. */
+  const copiedWords = (note: NonNullable<PlanRow['note']>): string => {
+    const unlinked = note.facts.filter((f) => f.inNote && !safeHref(f.source.url)).length;
+    return unlinked === 0
+      ? 'Copied the note.'
+      : unlinked === 1
+        ? 'Copied. One fact has no link: check it before you send.'
+        : `Copied. ${unlinked} facts have no link: check them before you send.`;
+  };
   const copyNote = (row: PlanRow) => {
     if (row.findSomeone) return void copy(row.findSomeone.handoff, 'Copied the handoff for Claude.');
     const note = row.note;
     if (!note) return void toast(row.channel === 'email' ? 'No note on this row. Review the email in the Outbox.' : 'No note on this row yet.');
-    if (actions.noteSaving(note.noteId)) return void toast('Not copied. The note is saving, and the checks run again first.');
-    if (unsavedEdit(row)) return void toast(`Not copied. Save your edit first (${isMac() ? 'Cmd+S' : 'Ctrl+S'}), then copy.`);
-    if (note.checks.length === 0) return void toast('Not copied. The checks have not run yet. Try again in a moment.');
-    const blocks = note.checks.filter((c) => c.severity === 'block').length;
-    if (blocks > 0) return void toast(`Not copied. ${plural(blocks, 'check blocks', 'checks block')} this note. Fix it, then copy.`);
-    const unlinked = note.facts.filter((f) => f.inNote && !safeHref(f.source.url)).length;
-    const done =
-      unlinked === 0
-        ? 'Copied the note.'
-        : unlinked === 1
-          ? 'Copied. One fact has no link: check it before you send.'
-          : `Copied. ${unlinked} facts have no link: check them before you send.`;
-    void copy(note.text, done);
+    const refusal = copyRefusal(row, note);
+    if (refusal) return void toast(refusal);
+    void copy(note.text, copiedWords(note));
   };
+  /**
+   * Enter on a person to do: open the profile, then copy the note, ready to paste. The window opens first and inside
+   * the key press (or the click), so a popup blocker allows it. A note C would refuse is not copied, and then the
+   * profile is not opened either, so nothing stale is left on the clipboard to paste. A row with no note still opens the
+   * profile. Logging the request stays his own R.
+   */
+  const copyAndOpen = (row: PlanRow) => {
+    const profile = row.person?.person.linkedinUrl;
+    const note = row.note;
+    if (!note) {
+      if (openExternal(profile)) toast('Opened the profile. No note on this row yet.');
+      return;
+    }
+    const refusal = copyRefusal(row, note);
+    if (refusal) return void toast(refusal);
+    if (!openExternal(profile)) return void copy(note.text, `No profile link for ${row.person?.person.name ?? 'this person'}. ${copiedWords(note)}`);
+    void copy(note.text, `Opened the profile. ${copiedWords(note)}`);
+  };
+  /** Enter: copy and open for a LinkedIn person to do who has a profile link; for any other row, its company page. */
+  function enter(row: PlanRow) {
+    const toDo = row.state === 'todo' && row.channel === 'linkedin_request' && row.person !== null;
+    if (toDo && safeHref(row.person?.person.linkedinUrl)) copyAndOpen(row);
+    else navigate(`/companies/${row.company.id}`);
+  }
   const copyAllHandoffs = () => {
     const handoffs = rows.flatMap((r) => (r.state === 'todo' && r.findSomeone ? [r.findSomeone.handoff] : []));
     if (handoffs.length === 0) return void toast('Nothing copied. No row today needs someone found.');
@@ -243,6 +275,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
     onCarry: () => carry(row),
     onNotFit: () => askNotAFit(row),
     onCopy: () => copyNote(row),
+    onCopyOpen: () => copyAndOpen(row),
     onEdit: () => edit(row),
     onConfirm: () => confirm(row),
     onEditChange: (e) => {

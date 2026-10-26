@@ -32,7 +32,7 @@ async function openToday(o: { db?: FixtureDb; scenario?: Scenario; shell?: boole
   return { ...view, db };
 }
 
-const heading = () => screen.getByRole('heading', { level: 2, name: 'Done for today' });
+const heading = () => screen.getByRole('heading', { level: 2, name: "Today's list is done." });
 const section = (name: string) => screen.getByRole('region', { name });
 const rail = () => within(screen.getByRole('listbox', { name: "Today's people" })).getAllByRole('option');
 
@@ -82,8 +82,38 @@ describe('FinishPanel', () => {
   it('says what the day was in the heading and the line under it, calm and with no guilt', () => {
     showPanel(planOf());
     expect(heading()).toHaveAttribute('tabindex', '-1');
-    expect(screen.getByText("All 7 people on today's plan are done. Nothing else is asked of you today.")).toBeInTheDocument();
+    expect(screen.getByText("All 7 people on today's plan are done.")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/streak|come back|overdue|behind|missed|keep it up/i);
+  });
+
+  it('never says nothing is asked of him while work waits: a neutral "Still waiting for you" block links to it', async () => {
+    const db = buildFixture('plan_done');
+    expect(db.shell).toMatchObject({ unhandledReplies: 1, draftsToReview: 7, openReviewItems: 5 });
+    renderWithApp(<FinishPanel plan={db.plan} />, { client: new FixtureClient(db) });
+    const waiting = within(await screen.findByRole('region', { name: 'Still waiting for you' }));
+    expect(waiting.getByRole('link', { name: '1 reply to handle' })).toHaveAttribute('href', '/outbox');
+    expect(waiting.getByRole('link', { name: '7 drafts to review' })).toHaveAttribute('href', '/outbox');
+    expect(waiting.getByRole('link', { name: '5 items in Needs you' })).toHaveAttribute('href', '/needs-you');
+    expect(document.body.textContent).not.toMatch(/nothing else is asked|nothing else is waiting/i);
+    expect(document.body.textContent).not.toMatch(/overdue|behind|streak|missed/i);
+  });
+
+  it('says so, in a sentence, when nothing waits', async () => {
+    const db = buildFixture('plan_done');
+    Object.assign(db.shell, { unhandledReplies: 0, draftsToReview: 0, openReviewItems: 0 });
+    renderWithApp(<FinishPanel plan={db.plan} />, { client: new FixtureClient(db) });
+    const waiting = within(await screen.findByRole('region', { name: 'Waiting for you' }));
+    expect(waiting.getByText('Nothing is waiting in the Outbox or Needs you.')).toBeInTheDocument();
+    expect(waiting.queryByRole('link')).toBeNull();
+  });
+
+  it('lists only what waits, in the singular where it is one', async () => {
+    const db = buildFixture('plan_done');
+    Object.assign(db.shell, { unhandledReplies: 0, draftsToReview: 1, openReviewItems: 0 });
+    renderWithApp(<FinishPanel plan={db.plan} />, { client: new FixtureClient(db) });
+    const waiting = within(await screen.findByRole('region', { name: 'Still waiting for you' }));
+    expect(waiting.getAllByRole('link')).toHaveLength(1);
+    expect(waiting.getByRole('link', { name: '1 draft to review' })).toBeInTheDocument();
   });
 
   it("lists tomorrow's draft: ten people with their channel, then how many more the draft has", () => {
@@ -140,7 +170,7 @@ describe('FinishPanel', () => {
     const carried = within(section('Carried to tomorrow'));
     expect(carried.getByText('Ines Duarte')).toBeInTheDocument();
     expect(carried.getByText(/Turso/)).toBeInTheDocument();
-    expect(screen.getByText('6 of 7 done. Ines Duarte carries to tomorrow, so nothing else is asked of you today.')).toBeInTheDocument();
+    expect(screen.getByText('6 of 7 done. Ines Duarte carries to tomorrow.')).toBeInTheDocument();
     // What he did leaves her out: no step was logged.
     expect(within(section('What you did')).queryByText('Ines Duarte')).not.toBeInTheDocument();
     expect(within(section('What you did')).getByText('requests sent').previousSibling).toHaveTextContent('5');
@@ -152,7 +182,7 @@ describe('FinishPanel', () => {
     carry(plan, 6);
     showPanel(plan);
     expect(within(section('Carried to tomorrow')).getAllByRole('listitem')).toHaveLength(2);
-    expect(screen.getByText('5 of 7 done. 2 carry to tomorrow, so nothing else is asked of you today.')).toBeInTheDocument();
+    expect(screen.getByText('5 of 7 done. 2 carry to tomorrow.')).toBeInTheDocument();
   });
 
   it('a company removed as not a fit is off the plan: it is neither carried nor listed as done', () => {
@@ -161,7 +191,7 @@ describe('FinishPanel', () => {
     showPanel(plan);
     expect(screen.queryByRole('region', { name: 'Carried to tomorrow' })).not.toBeInTheDocument();
     expect(screen.queryByText(/carries? to tomorrow/)).not.toBeInTheDocument();
-    expect(screen.getByText("All 6 people on today's plan are done. Nothing else is asked of you today.")).toBeInTheDocument();
+    expect(screen.getByText("All 6 people on today's plan are done.")).toBeInTheDocument();
     expect(within(section('What you did')).queryByText('Ines Duarte')).not.toBeInTheDocument();
   });
 
@@ -239,7 +269,7 @@ describe('FinishPanel', () => {
 describe('Today with no row to do', () => {
   it('shows the finish panel in the work region, with the rail ending on its finish node', async () => {
     await openToday();
-    expect(await screen.findByRole('heading', { level: 2, name: 'Done for today' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: "Today's list is done." })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Finish' })).toBeInTheDocument();
     expect(screen.getByText('7 people, 7 done')).toBeInTheDocument();
     expect(document.querySelector('[data-finish]')).toHaveAttribute('data-done', 'true');
@@ -250,17 +280,17 @@ describe('Today with no row to do', () => {
     const db = buildFixture('plan_done');
     carry(db.plan, 6);
     await openToday({ db });
-    expect(await screen.findByRole('heading', { level: 2, name: 'Done for today' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: "Today's list is done." })).toBeInTheDocument();
     expect(screen.getByText('7 people, 6 done, 1 carried over')).toBeInTheDocument();
     expect(rail()[5]).toHaveAccessibleName('6. Ines Duarte at Turso, Carried over');
   });
 
   it('picking a person on the rail shows their panel, and the heading stays out of it', async () => {
     await openToday();
-    await screen.findByRole('heading', { level: 2, name: 'Done for today' });
+    await screen.findByRole('heading', { level: 2, name: "Today's list is done." });
     fireEvent.click(rail()[0] as HTMLElement);
     expect(await screen.findByRole('heading', { level: 2, name: 'Dana Whitfield' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { level: 2, name: 'Done for today' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: "Today's list is done." })).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Selected person' })).toBeInTheDocument();
   });
 
@@ -270,7 +300,7 @@ describe('Today with no row to do', () => {
     for (const n of [5, 7]) (db.plan.rows[n - 1] as PlanRow).state = 'done';
     await openToday({ db, shell: true });
     expect(await screen.findByRole('heading', { level: 2, name: 'Lena Ortiz' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Done for today' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: "Today's list is done." })).not.toBeInTheDocument();
 
     press('r');
     press('p');
@@ -295,7 +325,7 @@ describe('Today with no row to do', () => {
       press('r');
       press('p');
     });
-    expect(screen.getByRole('heading', { level: 2, name: 'Done for today' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: "Today's list is done." })).toBeInTheDocument();
     expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   });
 
@@ -303,7 +333,7 @@ describe('Today with no row to do', () => {
     const db = buildFixture('plan_done');
     takeOff(db.plan, 6);
     await openToday({ db });
-    expect(await screen.findByRole('heading', { level: 2, name: 'Done for today' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: "Today's list is done." })).toBeInTheDocument();
     expect(screen.getByText('6 people, 6 done')).toBeInTheDocument();
     expect(screen.queryByText(/carried to tomorrow/)).not.toBeInTheDocument();
   });
@@ -311,7 +341,7 @@ describe('Today with no row to do', () => {
   it('the weekend plan (no rows) shows the not-ready state, not the finish panel', async () => {
     await openToday({ scenario: 'weekend' });
     expect(await screen.findByText(/No plan on weekends/)).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Done for today' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: "Today's list is done." })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Finish' })).not.toBeInTheDocument();
   });
 });

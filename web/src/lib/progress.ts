@@ -3,6 +3,13 @@ import type { BaseRates, PlanRow, ProgressPeriod } from '@/api';
 // Honest numbers (spec section 16). Every count sits beside its denominator, no rate shows under the
 // minimum sample, and nothing here reads the clock. `enough` comes from the API; the UI never decides it.
 
+/**
+ * The fewest first emails a reply rate needs before a percent shows. It is the same bar as the API's
+ * `min_requests` (outreach/api/config.toml, 30), which Progress gets as `enough`. Done's metrics carry no
+ * `enough`, so Done asks this instead; if the config bar moves, move this with it.
+ */
+export const MIN_SAMPLE = 30;
+
 /** "9 of 31 (29%)" with enough data, "2 of 9" without (no percent, ever), "None yet" with nothing to count against. */
 export function formatRate(count: number, of: number, enough: boolean): string {
   if (of <= 0) return 'None yet';

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Pause, Play } from 'lucide-react';
+import { ChevronDown, Pause, Play } from 'lucide-react';
 import type { SenderState, SendingStatus } from '@/api';
 import { RampLadder } from '@/components/ramp-ladder';
 import {
@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatLocalTime, formatRecipientTime } from '@/lib/format';
@@ -118,33 +119,32 @@ function Toggle({ s, onPause, onResume }: { s: SendingStatus; onPause: () => voi
   );
 }
 
-/** Spec 5.3: the one place the sender's state, today's count, the limit and the next send live. */
-export function SendingStrip({ sending: s, onPause, onResume }: { sending: SendingStatus; onPause: () => void; onResume: () => void }) {
-  const sender = SENDER[s.state];
-  const red = sender.tone === 'bad';
+/** The next send in one phrase for the line: "Next 10:42 ET, Mintlify", or why nothing is next. */
+function nextLine(s: SendingStatus): string {
+  if (!s.nextSend) return s.noneReason ?? 'Nothing is approved.';
+  return `Next ${formatRecipientTime(s.nextSend.at, s.nextSend.tz)}, ${s.nextSend.companyName}`;
+}
+
+/** The rest of the sender's story, behind Details: the window, the day, the limit and the ramp, the next send. */
+function Details({ s }: { s: SendingStatus }) {
   return (
-    <section aria-label="Sending today" className="flex flex-none items-stretch border-b">
-      <Cell name="Sender" tone={sender.tone} className="max-w-[340px] min-w-[200px]">
-        <span className={cn('flex items-center gap-2 text-sm font-medium', red && 'text-bad')}>
-          <span aria-hidden className={cn('size-2 flex-none rounded-full', DOT[sender.tone], s.state === 'running' && 'ripple')} />
-          {sender.label}
-        </span>
-        <span title={senderSub(s)} className={cn('line-clamp-2 text-xs', red ? 'text-bad' : 'text-muted-foreground')}>
-          {senderSub(s)}
-        </span>
-      </Cell>
-      <Cell name="Sent today">
+    <div className="grid gap-3">
+      <div className="grid gap-0.5">
+        <span className="text-xs text-muted-foreground">Sender</span>
+        <span className="text-sm">{senderSub(s)}</span>
+      </div>
+      <Cell name="Sent today" className="border-r-0 px-0 py-0">
         <span className="flex items-center gap-2 text-sm font-medium">
           <span className="text-xl font-semibold tracking-tight tabular-nums">{s.sentToday}</span>
           <span className="text-muted-foreground">{`of ${s.limitToday}`}</span>
           <Ladder s={s} />
         </span>
       </Cell>
-      <Cell name="Limit">
+      <Cell name="Limit" className="border-r-0 px-0 py-0">
         <span className="text-sm font-medium">{`Level ${s.rampLevel} of ${s.rampLevels.length}, ${s.limitToday} a day`}</span>
         <span className="text-xs text-muted-foreground">{limitSub(s)}</span>
       </Cell>
-      <Cell name="Next send">
+      <Cell name="Next send" className="border-r-0 px-0 py-0">
         {s.nextSend ? (
           <>
             <span className="text-sm font-medium tabular-nums">{formatRecipientTime(s.nextSend.at, s.nextSend.tz)}</span>
@@ -154,22 +154,60 @@ export function SendingStrip({ sending: s, onPause, onResume }: { sending: Sendi
           <span className="text-sm font-medium">{s.noneReason ?? 'Nothing is approved.'}</span>
         )}
       </Cell>
-      <div className="ml-auto flex items-center px-4">
+    </div>
+  );
+}
+
+/** Spec 5.3: the sender in one line (state, today's count, the next send), the detail in a popover, Pause one click away. */
+export function SendingStrip({ sending: s, onPause, onResume }: { sending: SendingStatus; onPause: () => void; onResume: () => void }) {
+  const sender = SENDER[s.state];
+  const red = sender.tone === 'bad';
+  return (
+    <section aria-label="Sending today" className="flex min-h-11 flex-none flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-1.5">
+      <div role="group" aria-label="Sender" data-tone={sender.tone} className="flex min-w-0 items-center gap-2 text-sm">
+        <span aria-hidden className={cn('size-2 flex-none rounded-full', DOT[sender.tone], s.state === 'running' && 'ripple')} />
+        <span className={cn('font-medium whitespace-nowrap', red && 'text-bad')}>{sender.label}</span>
+        {red ? (
+          <span title={senderSub(s)} className="max-w-[44ch] truncate text-xs text-bad">
+            {senderSub(s)}
+          </span>
+        ) : null}
+      </div>
+      <span className="text-sm whitespace-nowrap tabular-nums">{`${s.sentToday} of ${s.limitToday} sent`}</span>
+      <span className="min-w-0 truncate text-sm text-muted-foreground tabular-nums">{nextLine(s)}</span>
+      <div className="ml-auto flex items-center gap-1">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="ghost" size="sm" aria-label="Details about sending today">
+              Details
+              <ChevronDown aria-hidden />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            aria-label="Details about sending today"
+            className="w-80"
+            // Focus goes to the panel, not its first tabbable (the ramp), whose tooltip would open on its own.
+            onOpenAutoFocus={(e) => {
+              e.preventDefault();
+              if (e.currentTarget instanceof HTMLElement) e.currentTarget.focus();
+            }}
+          >
+            <Details s={s} />
+          </PopoverContent>
+        </Popover>
         <Toggle s={s} onPause={onPause} onResume={onResume} />
       </div>
     </section>
   );
 }
 
-/** Loading: the strip's cells as blocks at their final size. */
+/** Loading: the strip's line as blocks at its final size. */
 export function SendingStripSkeleton() {
   return (
-    <section aria-hidden className="flex h-[61px] flex-none items-stretch border-b">
-      {[200, 150, 190, 170].map((w, i) => (
-        <div key={i} className="grid content-center gap-1.5 border-r px-4" style={{ width: w }}>
-          <Skeleton className="h-3 w-16" />
-          <Skeleton className="h-4 w-24" />
-        </div>
+    <section aria-hidden className="flex h-11 flex-none items-center gap-4 border-b px-4">
+      {[96, 88, 176].map((w, i) => (
+        <Skeleton key={i} className="h-4" style={{ width: w }} />
       ))}
     </section>
   );

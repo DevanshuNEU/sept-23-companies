@@ -116,7 +116,8 @@ describe('approve', () => {
     expect(sidebarOutbox()).toHaveAccessibleName('Outbox, 1 reply to handle, 6 drafts to review');
     expect(toastText()).toContain('Approved Omar Haddad. Sends after 10:55 ET.');
     expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    // Approving moves on to the next draft; it is not approved by that.
+    expect(row('Sara Lindqvist')).toHaveAttribute('aria-selected', 'true');
 
     await settle(7999);
     expect(approve).not.toHaveBeenCalled();
@@ -138,9 +139,10 @@ describe('approve', () => {
     press('a', { repeat: true });
     press('a', { repeat: true });
     await settle();
-    // The first press already turned Approve into Withdraw approval: there is nothing left to click.
+    // The first press approved Omar and moved on to Sara; the repeats did not approve her.
     expect(button).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    expect(row('Sara Lindqvist')).toHaveAttribute('aria-selected', 'true');
+    expect(row('Sara Lindqvist')).not.toHaveTextContent('Approved');
     expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(1);
     await settle(8000);
     expect(approve).toHaveBeenCalledTimes(1);
@@ -296,6 +298,9 @@ describe('approve', () => {
     await waitFor(() => expect(unapprove).toHaveBeenCalledTimes(1));
     expect(unapprove.mock.calls[0]?.[0]).toBe(messageOf(T.jordan));
     await waitFor(() => expect(within(row('Jordan Price')).getByText('Draft')).toBeInTheDocument());
+    // Withdrawing moves on to the next approved email; opening Jordan again shows his draft.
+    expect(row('Jordan Price')).toHaveAttribute('aria-selected', 'false');
+    fireEvent.click(row('Jordan Price'));
     expect(await screen.findByRole('button', { name: 'Approve' })).toBeInTheDocument();
   });
 
@@ -307,13 +312,13 @@ describe('approve', () => {
     press('a');
     await settle();
     expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
-    press('u');
+    fireEvent.click(row('Omar Haddad'));
+    await settle();
     press('u');
     await settle(1000);
     expect(within(row('Omar Haddad')).getByText('Draft')).toBeInTheDocument();
     expect(sidebarOutbox()).toHaveAccessibleName('Outbox, 1 reply to handle, 7 drafts to review');
     expect(liveUndos()).toHaveLength(0);
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     await settle(9000);
     expect(approve).not.toHaveBeenCalled();
     expect(unapprove).not.toHaveBeenCalled();
@@ -330,6 +335,8 @@ describe('approve', () => {
     press('a');
     await settle();
     expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(2);
+    fireEvent.click(row('Omar Haddad'));
+    await settle();
     press('u');
     await settle(1000);
     expect(within(row('Omar Haddad')).getByText('Draft')).toBeInTheDocument();
@@ -624,7 +631,10 @@ describe('skip', () => {
     startClock();
     press('s');
     await settle();
-    expect(within(row('Omar Haddad')).getByText('Skipped')).toBeInTheDocument();
+    // A skipped email goes to Closed (collapsed) and the selection moves on to the next draft.
+    expect(findRow('Omar Haddad')).toBeNull();
+    expect(toastText()).toContain('Skipped Omar Haddad.');
+    expect(row('Sara Lindqvist')).toHaveAttribute('aria-selected', 'true');
     expect(sidebarOutbox()).toHaveAccessibleName('Outbox, 1 reply to handle, 6 drafts to review');
     expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
     await settle(8000);
@@ -638,8 +648,9 @@ describe('skip', () => {
     const skip = vi.spyOn(client, 'skip');
     press('a');
     await waitFor(() => expect(within(row('Omar Haddad')).getByText('Approved')).toBeInTheDocument());
+    fireEvent.click(row('Omar Haddad'));
     press('s');
-    await waitFor(() => expect(within(row('Omar Haddad')).getByText('Skipped')).toBeInTheDocument());
+    await waitFor(() => expect(toastText()).toContain('Skipped Omar Haddad.'));
     press('g');
     press('t');
     await screen.findByText('Elsewhere');
@@ -655,6 +666,8 @@ describe('skip', () => {
     const skip = vi.spyOn(client, 'skip').mockRejectedValue(new Error('network down'));
     startClock();
     press('a');
+    await settle();
+    fireEvent.click(row('Omar Haddad'));
     await settle();
     press('s');
     await settle(500);
@@ -682,7 +695,7 @@ describe('writes flushed as the tab closes', () => {
     const { client } = await open(T.omar, 'Omar Haddad');
     const skip = vi.spyOn(client, 'skip');
     press('s');
-    await waitFor(() => expect(within(row('Omar Haddad')).getByText('Skipped')).toBeInTheDocument());
+    await waitFor(() => expect(toastText()).toContain('Skipped Omar Haddad.'));
     vi.spyOn(client, 'outboxDetail').mockImplementation(hang);
     await closeTab();
     expect(skip).toHaveBeenCalledTimes(1);
@@ -698,6 +711,8 @@ describe('writes flushed as the tab closes', () => {
     await settle(100);
     const { revision } = (await client.outboxDetail(T.omar)).item;
     expect(revision).toBeGreaterThan(1);
+    fireEvent.click(row('Omar Haddad'));
+    await settle();
     press('s');
     await settle();
     vi.spyOn(client, 'outboxDetail').mockImplementation(hang);

@@ -1,6 +1,6 @@
 import { expect, test } from './fixtures';
 
-test('r then z leaves Hannah Cole at Not started', async ({ page, consoleErrors }) => {
+test('r moves on to the next person, and z leaves Hannah Cole at Not started', async ({ page, consoleErrors }) => {
   await page.goto('/linkedin');
   const hannah = page.getByRole('row').filter({ hasText: 'Hannah Cole' });
   await expect(hannah).toContainText('Not started');
@@ -10,7 +10,9 @@ test('r then z leaves Hannah Cole at Not started', async ({ page, consoleErrors 
   await expect(hannah).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('r');
   await expect(page.getByText('Logged: request sent to Hannah Cole.')).toBeVisible();
-  await expect(hannah).toContainText('Requested today');
+  // She leaves To reach, and the next person is selected.
+  await expect(hannah).toHaveCount(0);
+  await expect(page.getByRole('row').filter({ hasText: 'Owen Clarke' })).toHaveAttribute('aria-selected', 'true');
 
   await page.keyboard.press('z');
   await expect(hannah).toContainText('Not started');

@@ -2,13 +2,14 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router';
+import { toast } from 'sonner';
 import { queryKeys, type LinkedInView } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
 import { renderWithApp } from '@/test/render';
 import LinkedInPage from './index';
 
-const press = (key: string) => fireEvent.keyDown(document.body, { key });
+const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
 const tab = (name: RegExp) => screen.getByRole('tab', { name });
 // The live region also says the selected name, so rows are looked up inside the table (hidden while a dialog is open).
 const table = () => screen.getByRole('table', { hidden: true });
@@ -32,6 +33,10 @@ async function setup(client = new FixtureClient()) {
   };
   return { ...view, client, spy, idOf };
 }
+
+afterEach(() => {
+  toast.dismiss();
+});
 
 describe('LinkedIn list', () => {
   it('shows the four tabs with their counts and requests this week', async () => {
@@ -64,23 +69,19 @@ describe('LinkedIn list', () => {
     expect(row('Ethan Wu')).toHaveTextContent('No email found');
   });
 
-  it('r on Hannah Cole logs request_sent with Undo and her row moves to Waiting only after the selection moves', async () => {
+  it('r on Hannah Cole logs request_sent with Undo, her row leaves To reach and the next person is selected', async () => {
     const { spy, idOf } = await setup();
     fireEvent.click(row('Hannah Cole'));
     press('r');
 
     expect(await screen.findByText('Logged: request sent to Hannah Cole.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
-    // Counts move at once; the selected row stays where it was.
+    // Counts move at once, she leaves the tab, and the next person is the one in hand.
     expect(tab(/^To reach/)).toHaveTextContent('11');
     expect(tab(/^Waiting/)).toHaveTextContent('10');
-    expect(row('Hannah Cole')).toHaveTextContent('Requested today');
-    expect(row('Hannah Cole')).toHaveAttribute('aria-selected', 'true');
-    expect(spy).not.toHaveBeenCalled();
-
-    press('j');
     await waitFor(() => expect(queryRow('Hannah Cole')).toBeNull());
     expect(row('Owen Clarke')).toHaveAttribute('aria-selected', 'true');
+    expect(spy).not.toHaveBeenCalled();
 
     press('2');
     await waitFor(() => expect(queryRow('Hannah Cole')).not.toBeNull());
@@ -91,10 +92,53 @@ describe('LinkedIn list', () => {
     expect(spy).toHaveBeenCalledWith(idOf('Hannah Cole'), 'request_sent', expect.objectContaining({ requestId: expect.any(String) }));
   });
 
+  it('the next key acts on the next person, and each log needs its own press', async () => {
+    const { spy, idOf } = await setup();
+    fireEvent.click(row('Hannah Cole'));
+    press('r');
+    await screen.findByText('Logged: request sent to Hannah Cole.');
+    // A held key is one press: it never carries on to Owen.
+    press('r', { repeat: true });
+    expect(screen.queryByText('Logged: request sent to Owen Clarke.')).toBeNull();
+    press('r');
+    expect(await screen.findByText('Logged: request sent to Owen Clarke.')).toBeInTheDocument();
+    pagehide();
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([idOf('Hannah Cole'), idOf('Owen Clarke')]);
+  });
+
+  it('the last person in the list looks back to the one before', async () => {
+    await setup();
+    const people = () => [...table().querySelectorAll<HTMLElement>('tbody tr[aria-selected]')];
+    const before = people();
+    const last = before.at(-1) as HTMLElement;
+    const previous = before.at(-2) as HTMLElement;
+    fireEvent.click(last);
+    press('r');
+    await waitFor(() => expect(people()).toHaveLength(before.length - 1));
+    expect(previous).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('on All a logged person stays where she is, selected', async () => {
+    await setup();
+    press('4');
+    fireEvent.click(await screen.findByText('Hannah Cole'));
+    press('r');
+    await screen.findByText('Logged: request sent to Hannah Cole.');
+    expect(row('Hannah Cole')).toHaveAttribute('aria-selected', 'true');
+    expect(row('Hannah Cole')).toHaveTextContent('Requested today');
+  });
+
+  it('points to Today\'s plan in one line', async () => {
+    await setup();
+    expect(screen.getByRole('link', { name: "Today's plan" })).toHaveAttribute('href', '/today');
+  });
+
   it('Undo puts Hannah back at Not started and logs nothing', async () => {
     const { spy } = await setup();
     fireEvent.click(row('Hannah Cole'));
     press('r');
+    await waitFor(() => expect(queryRow('Hannah Cole')).toBeNull());
     fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
     await waitFor(() => expect(row('Hannah Cole')).toHaveTextContent('Not started'));
     expect(tab(/^To reach/)).toHaveTextContent('12');
@@ -107,7 +151,7 @@ describe('LinkedIn list', () => {
     const { spy } = await setup();
     fireEvent.click(row('Hannah Cole'));
     press('r');
-    press('r');
+    press('r', { repeat: true });
     await screen.findByText('Logged: request sent to Hannah Cole.');
     pagehide();
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
@@ -179,8 +223,13 @@ describe('LinkedIn list', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Interested' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(await screen.findByText('Logged: reply from Ibrahim Sall (Interested).')).toBeInTheDocument();
-    expect(row('Ibrahim Sall')).toHaveTextContent('Replied today');
+    // He leaves Waiting, so the next person is selected; the Replied tab has him.
     expect(tab(/^Replied/)).toHaveTextContent('3');
+    expect(tab(/^Waiting/)).toHaveTextContent('8');
+    await waitFor(() => expect(queryRow('Ibrahim Sall')).toBeNull());
+    press('3');
+    expect(await screen.findByText('Ibrahim Sall')).toBeInTheDocument();
+    expect(row('Ibrahim Sall')).toHaveTextContent('Replied today');
 
     pagehide();
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
@@ -442,9 +491,10 @@ describe('LinkedIn list pages', () => {
     press('r');
     expect(await screen.findByText(`Logged: request sent to ${inngest.name}.`)).toBeInTheDocument();
     expect(tab(/^To reach/)).toHaveTextContent('51');
+    // She leaves To reach and the next person on the page is in hand.
+    await waitFor(() => expect(queryRow(inngest.name)).toBeNull());
     expect(pageLine()).toBe('Page 2 of 3');
-    expect(row(inngest.name)).toHaveTextContent('Requested today');
-    expect(row(inngest.name)).toHaveAttribute('aria-selected', 'true');
+    expect(document.querySelector('tbody tr[aria-selected="true"]')).not.toBeNull();
     expect(pageParam()).toBe('2');
   });
 

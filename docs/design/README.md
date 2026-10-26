@@ -146,7 +146,7 @@ own keys in section 16.6.
 |---|---|
 | C | Copy role title for this person's company |
 | L | Open their LinkedIn profile |
-| R, A, M, Y | Log request sent, accepted, message sent, reply |
+| R, A, M, Y | Log request sent, accepted, message sent, reply; then select the next person when this one leaves the tab |
 | 1 to 4 | To reach, Waiting, Replied, All |
 | [ / ] | Previous page, next page (J and K also cross into the next or previous page) |
 
@@ -283,6 +283,11 @@ adds them."); error and stale per section 7.
 
 **Actions.** Log request, accepted, message, reply: one click, toast with undo. Log reply also asks for the reply
 kind (same four as email). Each log writes one `linkedin_log` row and an `events` row.
+
+When a log takes the person out of the tab he is working in (a request leaves To reach, a reply leaves Waiting), the
+selection moves to the next person in the list (else the one before), so the next key acts on someone still to do.
+Each log is still his own key press: a held key logs once, and Z undoes for 8 seconds. On All nothing moves. One line
+under the page's lede points to Today's plan, where the day's people are in order.
 
 ### 5.3 Outbox
 

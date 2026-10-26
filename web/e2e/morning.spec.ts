@@ -121,7 +121,9 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await expect(hannah).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('r');
   await expect(page.getByText('Logged: request sent to Hannah Cole.')).toBeVisible();
-  await expect(hannah).toContainText('Requested today');
+  // She leaves To reach and the next person is selected.
+  await expect(hannah).toHaveCount(0);
+  await expect(page.getByRole('row').filter({ hasText: 'Owen Clarke' })).toHaveAttribute('aria-selected', 'true');
   await expectCleanPage(page, consoleErrors, foreign);
 
   // 7. Done.

@@ -41,6 +41,7 @@ class FindBoardsBase(unittest.TestCase):
     def setUp(self):
         planned_adapters(self)
         self.conn = fresh_store()
+        self.addCleanup(self.conn.close)
         run_discover(self.conn, [LcaSource(FILES), HnSource(fixture_client())])
         self.directory = StapplyDirectory.load(STAPPLY)
 

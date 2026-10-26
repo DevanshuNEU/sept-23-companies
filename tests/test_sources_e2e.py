@@ -7,7 +7,8 @@ fetch commands) is tested in test_sources_cli.py.
 
 Where the numbers differ from the plan's first draft, a ruling explains it (each is said where it is asserted):
 the HN fixture grew two posts (Veltrix Bio on a shared domain, PrairieLearn with only a github link), so the store
-has 19 companies, not 17, and one more `size_check` and one more `domain_missing` item.
+has 19 companies, not 17, and one more `size_check`. The `domain_missing` items the first draft counted are no longer
+raised on a fresh store: the crawler asks only for companies in play or ranked near the top (#9).
 """
 import json
 import unittest
@@ -82,11 +83,9 @@ class SourcesE2E(CliCase):
             ("merge_candidate", "Mesh Systems Inc", "open"),  # the LCA Mesh Systems Inc and the HN Mesh Systems
             ("size_check", "Veltrix Diagnostics Inc", "open"), ("size_check", "Veltrix Pharma Inc", "open"),
             ("size_check", "Veltrix Bio", "open"),  # the third Veltrix: the plan's draft counted the pair
-            ("domain_missing", "Solo Dev Studio Inc", "open"),
-            ("domain_missing", "PrairieLearn", "open"),  # the draft counted Solo Dev alone
-            # a tier 1 company whose only domain is the shared veltrix.com raises one too
-            ("domain_missing", "Veltrix Diagnostics Inc", "open"), ("domain_missing", "Veltrix Pharma Inc", "open"),
-            ("domain_missing", "Veltrix Bio", "open"),
+            # No domain_missing item: Solo Dev, PrairieLearn and the three Veltrix companies have no usable domain,
+            # but nobody is in play and nothing is ranked yet, so the crawler leaves them quiet (#9, company-first
+            # ruling; test_jobs_find_boards covers the scope and the cap).
             # tier 1, no board and a definite "no careers page" (404 on both requests)
             ("flagged", "Greenfield AI Inc", "open"), ("flagged", "Sundial Health Inc", "open")]))
         (merge,) = conn.execute("SELECT reason FROM review_item WHERE kind = 'merge_candidate'").fetchall()

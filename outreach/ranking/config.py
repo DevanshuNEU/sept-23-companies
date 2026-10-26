@@ -42,8 +42,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
 
 # The two weights that push a company to the bottom (see _check_bottom_weights).
 BOTTOM_WEIGHTS = ("staffing_risk", "large_later_stage")
-# Weights that may be exactly 0.0 (switched off). Every other weight must be above 0.
-ZERO_WEIGHT_OK = ("interview_like",)
+# Weights that may be exactly 0.0 (switched off, the reason still stored). Every other weight must be above 0.
+ZERO_WEIGHT_OK = ("interview_like", "reachable_person")
 # The one-way interview tilt (#81), capped by _check_tilt.
 TILT_WEIGHT = "interview_like"
 _TILT_MAX_SHARE = 0.25

@@ -79,10 +79,10 @@ class ScoreTests(unittest.TestCase):
 
     def test_reasons_rank_by_discounted_points_and_include_warnings(self):
         low = Confidence("low", "guess")
-        facts = graded(everify="enrolled", reach_via="person", reach_note="Reachable person: Ada, engineer",
-                       grades={"everify": low})  # everify 12 raw but 6 counted, the person 8 counted in full
+        facts = graded(everify="enrolled", cap_exempt="confirmed",
+                       grades={"everify": low})  # everify 12 raw but 6 counted, cap-exempt 10 counted in full
         got = score(facts)
-        self.assertEqual(got.reasons[0], "Reachable person: Ada, engineer")
+        self.assertEqual(got.reasons[0], "Cap-exempt employer: no lottery")
         warned = score(graded(staffing_risk="high", everify="not_enrolled"))
         self.assertEqual(warned.reasons[0], warned.values["staffing_risk"].reason)
         self.assertIn(warned.values["everify"].reason, warned.reasons)

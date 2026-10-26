@@ -711,6 +711,105 @@ class TiltTests(Base):
         self.assertEqual("Like your interview companies weight 6 to 0", weights_text({"interview_like": [6.0, 0.0]}))
 
 
+def edited_config(old: str, new: str):
+    """The shipped config with one exact line changed."""
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    changed, n = re.subn(rf"(?m)^{re.escape(old)}$", new, text)
+    assert n == 1, old
+    folder = Path(tempfile.mkdtemp(prefix="ranker-cfg-"))
+    (folder / "config.toml").write_text(changed, encoding="utf-8")
+    return load_ranker_config(folder / "config.toml")
+
+
+class ReachOffTests(Base):
+    """reachable_person at weight 0 (P5): he finds people himself. Only the order may change: no hide, no no-go row,
+    and the reason stays stored."""
+
+    def person(self, cid: int, name: str = "Jane Doe") -> None:
+        self.conn.execute(
+            "INSERT INTO person(company_id, name, role_kind, email, channel, added_by, created_at, updated_at) "
+            "VALUES (?, ?, 'engineer', ?, 'email', 'devanshu', ?, ?)",
+            (cid, name, f"p{cid}@example.com", T1, T1))
+
+    def seed_reach(self) -> dict[str, int]:
+        ids = {}
+        for i in range(1, 4):
+            cid, board = self.company(f"Reach {i}")
+            self.role(cid, board)
+            self.person(cid)
+            ids[f"Reach{i}"] = cid
+        cid, board = self.company("Nobody")
+        self.role(cid, board)
+        ids["Nobody"] = cid
+        cid, board = self.company("Refuses")  # a final refusal and a person: hidden, one no-go row
+        self.refusal(cid, board)
+        self.person(cid)
+        ids["Refuses"] = cid
+        cid, board = self.company("Pending")  # a provisional refusal and a person: hidden, pending reader
+        self.refusal(cid, board, final=False)
+        self.person(cid)
+        ids["Pending"] = cid
+        cid, board = self.company("Big")  # over 300 with evidence and a person: hidden by size
+        self.ev(cid, "size", "400 people", num_low=400, num_high=400)
+        self.role(cid, board)
+        self.person(cid)
+        ids["Big"] = cid
+        cid, _ = self.company("Banned", board=False)  # his own no-go and a person
+        rs.no_go(self.conn, cid)
+        self.person(cid)
+        ids["Banned"] = cid
+        cid, board = self.company("Later")  # later stage and a person: the bottom push, never hidden
+        self.ev(cid, "stage", "series_d")
+        self.role(cid, board)
+        self.person(cid)
+        ids["Later"] = cid
+        return ids
+
+    def test_weight_zero_for_reachable_person_changes_no_hide_and_no_no_go_row(self):
+        ids = self.seed_reach()
+        on = edited_config("reachable_person = 0.0", "reachable_person = 8.0")
+        shipped, _ = compute_rank(self.conn, today=TODAY)
+        before, _ = compute_rank(self.conn, today=TODAY, cfg=on)
+        by_now, by_before = {s.company_id: s for s in shipped}, {s.company_id: s for s in before}
+        self.assertEqual(set(by_now), set(by_before))
+        for cid, s in by_now.items():
+            with self.subTest(company=s.name):
+                self.assertEqual(s.hide, by_before[cid].hide)
+                self.assertEqual(0.0, s.values["reachable_person"].points)
+                self.assertEqual(by_before[cid].values["reachable_person"].reason, s.values["reachable_person"].reason)
+        for key in ("Reach1", "Reach2", "Reach3"):
+            now, then = by_now[ids[key]], by_before[ids[key]]
+            self.assertEqual(8.0, then.values["reachable_person"].raw_points)
+            self.assertEqual(0.0, now.values["reachable_person"].raw_points)
+            self.assertLess(now.score, then.score)
+            self.assertEqual("Reachable person: Jane Doe, engineer", now.values["reachable_person"].reason)
+            self.assertEqual(1.0, now.values["reachable_person"].value)  # the value and reason stay stored
+            self.assertNotIn("Reachable person: Jane Doe, engineer", now.reasons)  # no points, no rank reason
+        self.assertEqual("no_sponsorship", by_now[ids["Refuses"]].hide.kind)
+        self.assertTrue(by_now[ids["Pending"]].hide.provisional)
+        self.assertEqual("over_size", by_now[ids["Big"]].hide.kind)
+        self.assertEqual("no_go", by_now[ids["Banned"]].hide.kind)
+        self.assertIsNone(by_now[ids["Later"]].hide)
+
+        def no_go_rows(conn):
+            return [tuple(r) for r in conn.execute(
+                "SELECT company_id, person_id, reason, source, lifted_at FROM no_go ORDER BY company_id, no_go_id")]
+
+        run_rank(self.conn, today=TODAY)
+        with_zero = no_go_rows(self.conn)
+        other = fresh_store()
+        self.addCleanup(other.close)
+        self.conn, mine = other, self.conn
+        try:
+            self.assertEqual(self.seed_reach(), ids)
+            run_rank(other, today=TODAY, cfg=on)
+            with_eight = no_go_rows(other)
+        finally:
+            self.conn = mine
+        self.assertEqual(with_zero, with_eight)
+        self.assertEqual(sorted([ids["Refuses"], ids["Banned"]]), sorted({r[0] for r in with_zero}))
+
+
 class WeightsTextTests(unittest.TestCase):
     def test_one_change_reads_as_one_plain_line(self):
         self.assertEqual(weights_text({"everify": [12.0, 40.0]}), "E-Verify weight 12 to 40")

@@ -144,10 +144,10 @@ function outcomeLabel(t: PromptTouch, kind: OutcomeKind, replyKind: Reply | unde
  *
  * The UI never decides what counts as a win or which recognition to show: an answer lays nothing over the wins
  * view. It names the wins and shell keys so both refetch the moment the commit lands, and an undone answer never
- * appears.
+ * appears. `page` names the view whose client the writes go through: Today by default, and the win log passes `wins`.
  */
-export function usePlanActions() {
-  const client = usePageClient('plan');
+export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan') {
+  const client = usePageClient(page);
   const write = usePendingWrite();
   const { isPending } = usePendingControls();
   const queryClient = useQueryClient();
@@ -322,17 +322,22 @@ export function usePlanActions() {
     });
   };
 
-  const seeWins = (ids: Id[]) => {
+  /**
+   * Marks wins seen. By default at once and without a word (opening the win log does it for every new win). With
+   * `undo` it is a write like the others: the toast says `Marked seen.` with Undo, and the wins come back if he takes
+   * it back inside the window (the W key and the Mark seen button on Today).
+   */
+  const seeWins = (ids: Id[], opts: { undo?: boolean } = {}) => {
     if (ids.length === 0) return;
     const named = new Set(ids);
     const unseenNow = () => queryClient.getQueryData<WinsView>(queryKeys.wins)?.wins.filter((w) => named.has(w.winId) && w.unseen).length ?? ids.length;
     const count = unseenNow();
     write({
       id: 'wins:seen',
-      label: 'Marked as seen.',
-      afterCommit: 'Marked as seen.',
-      immediate: true,
-      silent: true,
+      label: opts.undo ? 'Marked seen.' : 'Marked as seen.',
+      afterCommit: opts.undo ? 'Marked seen.' : 'Marked as seen.',
+      immediate: !opts.undo,
+      silent: !opts.undo,
       patches: [
         {
           key: queryKeys.wins,

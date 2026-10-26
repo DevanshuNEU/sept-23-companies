@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { isMac, useHotkeys, type Binding } from '@/keyboard/hotkeys';
 import { useListNav, type RowProps } from '@/keyboard/list-nav';
 import { formatLongDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { openExternal, safeHref } from '@/lib/safe-href';
 import { useViewQuery } from '@/pending/pending';
 import { RemoveDialog } from '@/routes/proposals/remove-dialog';
@@ -27,8 +28,11 @@ import { FindSomeonePanel } from './find-someone-panel';
 import type { NoteEdit } from './note-editor';
 import { KeyHint, PersonPanel, type PanelActions } from './plan-panel';
 import { PlanEmpty, PlanJobBanner, PlanNotReady, PlanSkeleton } from './plan-states';
+import { OutcomePrompt } from './outcome-prompt';
 import { nextTodoAfter } from './plan-steps';
 import { usePlanActions } from './use-plan-actions';
+import { WatchList } from './watch-list';
+import { WinStrip } from './win-strip';
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -53,6 +57,19 @@ const finishes = (row: PlanRow, kind: StepKind) =>
 
 /** The rows as they are once this one is no longer to do, for `nextTodoAfter`. */
 const without = (rows: PlanRow[], entryId: Id): PlanRow[] => rows.map((r) => (r.entryId === entryId ? { ...r, state: 'done' } : r));
+
+/**
+ * Below the plan, quiet (design 16.1): the 7-day question, then the watch list. Each part draws nothing when it has nothing to say, so the
+ * rule above them only shows with something under it.
+ */
+function BelowPlan({ className }: { className?: string }) {
+  return (
+    <div className={cn('mt-8 grid max-w-[720px] empty:hidden', className)}>
+      <OutcomePrompt />
+      <WatchList />
+    </div>
+  );
+}
 
 function PlanHead({ plan }: { plan: PlanView }) {
   const { used, limit, hardUsed, hardLimit } = plan.linkedinMonth;
@@ -325,6 +342,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
       </div>
       <section aria-label={showFinish ? 'Finish' : 'Selected person'} className="min-w-0 overflow-y-auto px-8 pt-5 pb-12 max-[1100px]:overflow-visible">
         {showFinish ? <FinishPanel plan={plan} /> : panel}
+        <BelowPlan />
       </section>
 
       <RemoveDialog
@@ -351,7 +369,14 @@ function PlanContent({ plan }: { plan: PlanView }) {
           <PlanJobBanner job={plan.listJob} />
         </div>
       ) : null}
-      {plan.notReady ? <PlanNotReady plan={plan} /> : plan.rows.length === 0 ? <PlanEmpty /> : <PlanWork plan={plan} />}
+      {plan.notReady || plan.rows.length === 0 ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {plan.notReady ? <PlanNotReady plan={plan} /> : <PlanEmpty />}
+          <BelowPlan className="mx-auto px-8 pb-12" />
+        </div>
+      ) : (
+        <PlanWork plan={plan} />
+      )}
     </div>
   );
 }
@@ -365,12 +390,15 @@ export default function TodayPage() {
   const client = usePageClient('plan');
   const plan = useViewQuery(queryKeys.plan, () => client.plan(), { pollMs: pollMs.default });
   return (
-    <div className="h-full min-h-0">
+    <div className="flex h-full min-h-0 flex-col">
       {/* The view's name for the outline; the visible heading is the date. */}
       <h1 className="sr-only">Today</h1>
-      <QueryState query={plan} skeleton={<PlanSkeleton />} empty={null}>
-        {(p) => <PlanContent plan={p} />}
-      </QueryState>
+      <WinStrip />
+      <div className="min-h-0 flex-1">
+        <QueryState query={plan} skeleton={<PlanSkeleton />} empty={null}>
+          {(p) => <PlanContent plan={p} />}
+        </QueryState>
+      </div>
     </div>
   );
 }

@@ -104,6 +104,16 @@ class PlanConfigTest(unittest.TestCase):
                 load_plan_config(_variant(old, ""))
             self.assertIn(name, str(ctx.exception))
 
+    def test_route_and_bridge_keys_are_checked(self):
+        c = load_plan_config()
+        self.assertEqual((c.get("route", "wave_size"), c.get("route", "prefer_ic_in_role")), (4, True))
+        self.assertTrue(c.get("bridge", "contacted_txt").endswith("contacted.txt"))
+        for old, new in (("wave_size = 4", "wave_size = 0"), ("wave_size = 4", "wave_size = 9"),
+                         ("prefer_ic_in_role = true", 'prefer_ic_in_role = "yes"'),
+                         ("log_back_days = 3", "log_back_days = 4")):
+            with self.subTest(new=new), self.assertRaises(ValueError):
+                load_plan_config(_variant(old, new))
+
     def test_no_dashes_in_config(self):
         text = CONFIG_PATH.read_text(encoding="utf-8")
         self.assertFalse(any(ord(ch) in (0x2013, 0x2014) for ch in text))

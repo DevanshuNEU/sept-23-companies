@@ -66,3 +66,27 @@ banned_scopes = ["both", "dm"]
 # Regexes, case-insensitive: the playbook's connection-note prose bans.
 extra_banned = ["can you refer", "could you refer", "would you refer", "refer me", "ms from northeastern", "finishing my ms", "graduating from northeastern", "mutual connection"]
 banned_path = "~/Desktop/DevVault/job-search/outreach/banned_phrases.txt"
+
+[route]
+# How a person Devanshu found is reached (outreach/plan/route.py). #9's rules hold whatever these say: email only
+# to a published or verified address, never guessed; the sender's ramp, 3 a day per company and 60 minutes apart.
+wave_size = 4                 # #9 (2026-10-26): one wave of up to 4 people per company, then linkedin.rotate_days
+reach_kinds = ["engineer", "manager", "founder"]   # anyone else is "find someone else" (advice: he may still send)
+# His preference (2026-10-26), not measured yet: plain engineers in the role first. It only orders people inside one
+# company; it never hides a person or a company and never touches company ranking.
+prefer_ic_in_role = true
+founder_title_words = ["founder", "co-founder", "cofounder", "ceo", "chief executive"]
+recruiter_title_words = ["recruiter", "recruiting", "recruitment", "talent", "sourcer", "sourcing"]
+outside_title_words = ["sales", "marketing", "account executive", "business development", "customer success", "finance", "legal", "people operations", "human resources"]
+manager_title_words = ["manager", "head of", "director", "vp", "vice president", "cto", "chief technology"]
+engineering_words = ["engineer", "engineering", "software", "developer", "swe", "sde", "programmer", "platform", "infrastructure", "backend", "frontend", "full stack", "data", "ml", "ai", "technical", "technology", "devops", "sre", "member of technical staff"]
+ic_title_words = ["engineer", "developer", "swe", "sde", "programmer", "member of technical staff", "architect", "devops", "sre"]
+senior_title_words = ["senior", "sr", "staff", "principal"]
+lead_title_words = ["lead", "manager", "head", "director", "vp", "vice president", "chief", "cto", "ceo", "founder", "co-founder", "cofounder"]
+title_exceptions = ["member of technical staff"]   # read as a plain IC, not as staff
+
+[bridge]
+# The terminal bridge (outreach/mcp/tools/bridge.py). contacted.txt is frozen history (#9): read only, to report
+# lines the store lacks. A missing file is fine.
+contacted_txt = "~/Desktop/DevVault/job-search/outreach/contacted.txt"
+log_back_days = 3             # log_sent takes a request sent today or up to this many days back

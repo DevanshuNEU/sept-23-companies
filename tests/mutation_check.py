@@ -47,6 +47,7 @@ IMPORTER = ROOT / "outreach" / "importer"
 REVIEW = ROOT / "outreach" / "review"
 PLAN = ROOT / "outreach" / "plan"
 MCP = ROOT / "outreach" / "mcp"
+INSIGHTS = ROOT / "outreach" / "insights"
 REFRESH = ROOT / "refresh"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
 
@@ -803,6 +804,20 @@ MUTATIONS = [
      '        if (stored is not None and stored.saved_by == "claude"  # the foundation CHECK',
      '        if (stored is not None  # the foundation CHECK',
      "test_a_locked_draft_is_refused_and_stays_byte_identical"),
+
+    # ---- insights (#81): merged companies count once, no people by default, no rate below the minimum ---------
+    (INSIGHTS / "dataset.py", "rows are grouped by the raw company id, so a merged duplicate is its own row",
+     'fam = out.setdefault(canon.get(r["company_id"], r["company_id"]), _Family())',
+     'fam = out.setdefault(r["company_id"], _Family())',
+     "test_merged_duplicates_count_once"),
+    (INSIGHTS / "export.py", "the person's name is exported without --with-people",
+     '        if with_people:\n            rec["best_person"] = r.best_person',
+     '        if True:\n            rec["best_person"] = r.best_person',
+     "test_export_has_no_people_by_default"),
+    (INSIGHTS / "findings.py", "a comparison is drawn below the group minimum",
+     "    enough = known >= cfg.group_min and compare_known >= cfg.group_min",
+     "    enough = known >= 1 and compare_known >= 1",
+     "test_no_rate_below_the_group_minimum"),
 ]
 
 

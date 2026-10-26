@@ -1,0 +1,15 @@
+# The Insights screen's numbers (#81). Not part of the ranker version: nothing here changes a score.
+
+# A comparison with the companies reached without an interview, and any rate, needs this many companies with a known
+# value in each group. The same number as [outcomes] finding_group_min in outreach/api/config.toml (a test pins it).
+group_min = 20
+
+# A "shared" line needs at least this many interview companies with one value, and at least half of the known.
+share_min_count = 3
+
+# Lookalikes: the most similar of the top lookalike_pool ranked companies, at most lookalike_count of them.
+lookalike_pool = 300
+lookalike_count = 15
+
+# Where `python -m outreach.insights export` writes when no --out is given. Never inside the repo.
+export_dir = "~/Desktop/outreach-scratch/insights"

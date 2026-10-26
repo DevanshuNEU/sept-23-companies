@@ -19,6 +19,7 @@ import { History } from './tabs/history';
 import { Overview } from './tabs/overview';
 import { People } from './tabs/people';
 import { Roles } from './tabs/roles';
+import { Score } from './tabs/score';
 import { useCompanyActions } from './use-company-actions';
 
 const TABS = [
@@ -28,6 +29,8 @@ const TABS = [
   { id: 'emails', label: 'Emails', count: (v: CompanyView) => v.touches.length },
   { id: 'evidence', label: 'Evidence', count: (v: CompanyView) => v.evidence.length },
   { id: 'history', label: 'History', count: (v: CompanyView) => v.events.length },
+  // Its count is the signals in the stored score, read on its own below.
+  { id: 'score', label: 'Score', count: null },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
@@ -43,13 +46,16 @@ function LoadingSkeleton() {
   );
 }
 
-/** Everything known about one company: facts, six tabs, and what he can do with it (design 5.6). */
+/** Everything known about one company: facts, seven tabs, and what he can do with it (design 5.6). */
 export default function CompanyPage() {
   const { companyId } = useParams();
   const id = Number(companyId);
   const client = usePageClient('company');
   const query = useViewQuery(queryKeys.company(id), () => client.company(id), { pollMs: pollMs.default });
   const view = query.data;
+  // The score reads on its own: a failing read costs the tab its count and nothing else (the tab shows its own Retry).
+  const scoreQuery = useViewQuery(queryKeys.score(id), () => client.score(id), { pollMs: pollMs.default });
+  const signalCount = scoreQuery.data?.signals.length ?? null;
   const actions = useCompanyActions(view);
   const can = view ? companyActions(view.company) : null;
 
@@ -93,6 +99,7 @@ export default function CompanyPage() {
                     <TabsTrigger key={t.id} value={t.id}>
                       {t.label}
                       {t.count ? <span className="text-xs text-muted-foreground tabular-nums">{t.count(v)}</span> : null}
+                      {t.id === 'score' && signalCount !== null ? <span className="text-xs text-muted-foreground tabular-nums">{signalCount}</span> : null}
                     </TabsTrigger>
                   ))}
                 </TabsList>
@@ -109,6 +116,8 @@ export default function CompanyPage() {
                         <Emails view={v} />
                       ) : t.id === 'evidence' ? (
                         <Evidence view={v} />
+                      ) : t.id === 'score' ? (
+                        <Score companyId={id} />
                       ) : (
                         <History view={v} />
                       )}

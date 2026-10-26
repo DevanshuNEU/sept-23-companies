@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useHotkeys, type Binding } from '@/keyboard/hotkeys';
 import { useViewQuery } from '@/pending/pending';
+import { foldTrigger } from './below-plan';
 import { KeyHint } from './plan-panel';
 import { formatMonthDay } from './short-dates';
 import { usePlanActions } from './use-plan-actions';
@@ -32,9 +33,6 @@ function replyFrom(t: PromptTouch): string {
   if (t.channel === 'linkedin_request' || t.channel === 'linkedin_message') return `${name} on LinkedIn`;
   return t.channel === 'email' ? `${name} by email` : name;
 }
-
-const trigger =
-  'group flex w-full items-center gap-2 rounded-sm py-2 text-left text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 /**
  * The 7-day question (design 16.1): one touch at a time, the oldest first, with Accepted (1), Replied (2) and Nothing
@@ -69,7 +67,7 @@ export function OutcomePrompt() {
     <section aria-labelledby={headingId} className="border-t pt-1">
       <Collapsible open={open} onOpenChange={setOpen}>
         <h3 id={headingId}>
-          <CollapsibleTrigger className={trigger}>
+          <CollapsibleTrigger className={foldTrigger}>
             <ChevronRight aria-hidden className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
             Last week, what happened?
             <span data-testid="count" className="font-normal text-muted-foreground tabular-nums">

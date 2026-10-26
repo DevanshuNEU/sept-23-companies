@@ -31,6 +31,7 @@ import { PlanEmpty, PlanJobBanner, PlanNotReady, PlanSkeleton } from './plan-sta
 import { OutcomePrompt } from './outcome-prompt';
 import { nextTodoAfter } from './plan-steps';
 import { usePlanActions } from './use-plan-actions';
+import { WatchList } from './watch-list';
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -57,13 +58,14 @@ const finishes = (row: PlanRow, kind: StepKind) =>
 const without = (rows: PlanRow[], entryId: Id): PlanRow[] => rows.map((r) => (r.entryId === entryId ? { ...r, state: 'done' } : r));
 
 /**
- * Below the plan, quiet (design 16.1): the 7-day question. Each part draws nothing when it has nothing to say, so the
+ * Below the plan, quiet (design 16.1): the 7-day question, then the watch list. Each part draws nothing when it has nothing to say, so the
  * rule above them only shows with something under it.
  */
 function BelowPlan({ className }: { className?: string }) {
   return (
-    <div className={cn('mt-8 grid max-w-[720px] gap-3 empty:hidden', className)}>
+    <div className={cn('mt-8 grid max-w-[720px] empty:hidden', className)}>
       <OutcomePrompt />
+      <WatchList />
     </div>
   );
 }

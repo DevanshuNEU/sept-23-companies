@@ -45,7 +45,7 @@ function Ladder({ s }: { s: SendingStatus }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span tabIndex={0} className="inline-flex rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        <span tabIndex={0} className="inline-flex rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70">
           <RampLadder levels={s.rampLevels} level={s.rampLevel} sent={s.sentToday} limit={s.limitToday} />
         </span>
       </TooltipTrigger>

@@ -25,7 +25,7 @@ function Message({ m, asOf, open }: { m: ThreadMessage; asOf: string; open: bool
   const kind = m.seq === null ? '' : m.seq === 0 ? 'First email' : `Follow-up ${m.seq}`;
   return (
     <details open={open} className={cn('group rounded-md border', mine ? 'bg-background' : 'border-ok-bd bg-ok-bg/40')}>
-      <summary className="flex cursor-pointer items-baseline gap-2 px-3 py-2 text-[13px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+      <summary className="flex cursor-pointer items-baseline gap-2 px-3 py-2 text-[13px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70">
         <b className="font-medium">{mine ? 'You' : m.from}</b>
         <span className="truncate text-muted-foreground">{[kind, m.subject].filter(Boolean).join(': ')}</span>
         <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground tabular-nums">{when(m.at, asOf)}</span>
@@ -120,7 +120,7 @@ export function ReplyDetail({
                   type="button"
                   aria-pressed={reply.kind === kind}
                   onClick={() => onReplyKind(kind)}
-                  className="border-r px-3 py-1.5 text-[13px] outline-none last:border-r-0 hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-pressed:bg-foreground aria-pressed:text-background"
+                  className="border-r px-3 py-1.5 text-[13px] outline-none last:border-r-0 hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/70 aria-pressed:bg-foreground aria-pressed:text-background"
                 >
                   {label}
                 </button>
@@ -130,7 +130,7 @@ export function ReplyDetail({
               type="button"
               aria-pressed={reply.kind === 'auto_reply'}
               onClick={() => onReplyKind('auto_reply')}
-              className="rounded-md px-2 py-1.5 text-[13px] text-muted-foreground underline decoration-border underline-offset-3 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-pressed:font-medium aria-pressed:text-foreground"
+              className="rounded-md px-2 py-1.5 text-[13px] text-muted-foreground underline decoration-border underline-offset-3 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70 aria-pressed:font-medium aria-pressed:text-foreground"
             >
               Auto-reply, not a person
             </button>

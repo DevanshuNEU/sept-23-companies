@@ -302,7 +302,7 @@ export function OutboxList({
                   data-group-head={b.group}
                   aria-expanded={isOpen}
                   onClick={() => toggle(b.group)}
-                  className="flex h-8 w-full items-center gap-1.5 border-b bg-subtle px-3 text-left text-xs font-medium text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="flex h-8 w-full items-center gap-1.5 border-b bg-subtle px-3 text-left text-xs font-medium text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70"
                 >
                   <ChevronDown aria-hidden className={cn('size-3.5 transition-transform', !isOpen && '-rotate-90')} />
                   {b.group === 'replied' ? <Reply aria-hidden className="size-3.5 text-ok" /> : null}
@@ -315,7 +315,7 @@ export function OutboxList({
                     <button
                       type="button"
                       onClick={reveal}
-                      className="rounded-full border border-info-bd bg-info-bg px-2.5 py-0.5 text-xs font-medium text-info outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      className="rounded-full border border-info-bd bg-info-bg px-2.5 py-0.5 text-xs font-medium text-info outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70"
                     >
                       {`${b.fresh} new`}
                     </button>

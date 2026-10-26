@@ -59,7 +59,7 @@ function TipBadge({ label, tip }: { label: string; tip: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span tabIndex={0} className="inline-flex rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        <span tabIndex={0} className="inline-flex rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70">
           <Badge variant="warn">{label}</Badge>
         </span>
       </TooltipTrigger>

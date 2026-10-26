@@ -55,7 +55,7 @@ function NodeMark({ node, selected }: { node: Node; selected: boolean }) {
 
 const option = cn(
   'relative grid cursor-default grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-md px-3 py-2.5 outline-none',
-  'hover:bg-muted/55 aria-selected:bg-muted aria-selected:hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/50',
+  'hover:bg-muted/55 aria-selected:bg-muted aria-selected:hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/70',
   // The line from under this node to the next one; darker once the row is done, so the distance travelled shows.
   "before:absolute before:top-8 before:-bottom-2.5 before:left-[21.5px] before:w-px before:bg-border before:content-['']",
   'data-[node=done]:before:bg-muted-foreground',

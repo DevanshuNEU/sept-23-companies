@@ -21,7 +21,7 @@ type Show = 'all' | 'big';
 const BIG_KINDS: ReadonlySet<Win['kind']> = new Set<Win['kind']>(['referred', 'interview', 'offer']);
 
 const link =
-  'rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/50';
+  'rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/70';
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
@@ -76,7 +76,7 @@ function WinRow({ win, asOf, isNew }: { win: Win; asOf: string; isNew: boolean }
         </p>
         {win.sentNote ? (
           <Collapsible>
-            <CollapsibleTrigger className="group -ml-1 flex items-center gap-1 rounded-sm px-1 py-1 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
+            <CollapsibleTrigger className="group -ml-1 flex items-center gap-1 rounded-sm px-1 py-1 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70">
               <ChevronRight aria-hidden className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />
               What you sent
             </CollapsibleTrigger>

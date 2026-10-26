@@ -60,7 +60,7 @@ export function CompanyLink({ row, children }: { row: PlanRow; children?: ReactN
   return (
     <Link
       to={companyPath(row)}
-      className="rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      className="rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/70"
     >
       {children ?? row.company.name}
     </Link>

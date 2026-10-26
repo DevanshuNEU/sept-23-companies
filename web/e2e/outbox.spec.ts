@@ -6,8 +6,8 @@ test('the Outbox shows the sending strip and the drafts', async ({ page, console
   await expect(strip.getByText('Running')).toBeVisible();
   await expect(strip.getByText('20 of 30 sent')).toBeVisible();
   // One line; the limit and the ramp are behind Details.
-  await strip.getByRole('button', { name: 'Sending details' }).click();
-  await expect(page.getByRole('dialog', { name: 'Sending details' }).getByText('Level 2 of 9, 30 a day')).toBeVisible();
+  await strip.getByRole('button', { name: 'Details about sending today' }).click();
+  await expect(page.getByRole('dialog', { name: 'Details about sending today' }).getByText('Level 2 of 9, 30 a day')).toBeVisible();
   await expect(page.getByText('Kenji Watanabe', { exact: true })).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });

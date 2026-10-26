@@ -54,8 +54,8 @@ afterEach(() => {
 describe('SendingStrip', () => {
   /** The strip is one line; the rest lives in a popover behind Details. */
   const openDetails = async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Sending details' }));
-    return screen.findByRole('dialog', { name: 'Sending details' });
+    fireEvent.click(screen.getByRole('button', { name: 'Details about sending today' }));
+    return screen.findByRole('dialog', { name: 'Details about sending today' });
   };
 
   it('is one line: the sender, the day so far and the next send', async () => {

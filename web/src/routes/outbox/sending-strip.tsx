@@ -178,14 +178,14 @@ export function SendingStrip({ sending: s, onPause, onResume }: { sending: Sendi
       <div className="ml-auto flex items-center gap-1">
         <Popover>
           <PopoverTrigger asChild>
-            <Button type="button" variant="ghost" size="sm" aria-label="Sending details">
+            <Button type="button" variant="ghost" size="sm" aria-label="Details about sending today">
               Details
               <ChevronDown aria-hidden />
             </Button>
           </PopoverTrigger>
           <PopoverContent
             align="end"
-            aria-label="Sending details"
+            aria-label="Details about sending today"
             className="w-80"
             // Focus goes to the panel, not its first tabbable (the ramp), whose tooltip would open on its own.
             onOpenAutoFocus={(e) => {
@@ -207,7 +207,7 @@ export function SendingStripSkeleton() {
   return (
     <section aria-hidden className="flex h-11 flex-none items-center gap-4 border-b px-4">
       {[96, 88, 176].map((w, i) => (
-        <span key={i} className="h-4 shimmer rounded bg-muted/70" style={{ width: w }} />
+        <Skeleton key={i} className="h-4" style={{ width: w }} />
       ))}
     </section>
   );

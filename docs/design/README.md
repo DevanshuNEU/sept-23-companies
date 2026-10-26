@@ -1014,6 +1014,14 @@ with each fact's link before any action, the check result, and Copy and Edit. Wh
 the block asks first: "Is this why you are writing to him? Confirm it or write your own.", with Confirm line (Y)
 as the next step and Write my own (E).
 
+A note he saved himself is his (#9's authorship ruling, 2026-10-26). His note is his reason, so the block never asks
+about a line Claude proposed under it (`needsYourLine` is false), Y says "Nothing to confirm. You wrote this note, so
+it needs no line.", and the line is not shown as "Why her, in your words" while it is still Claude's proposal. Its
+checks are only honesty and hard limits: the length, banned phrases (a mutual connection named among them), dashes,
+placeholders, open me.md facts and link shorteners block; too many links and a number with no linked fact warn. The
+reason line and "a fact is not in the note" rows never appear for it, "Facts used" lists the facts his text holds,
+and Copy runs when nothing blocks. Claude's own drafts keep every check.
+
 **Row kinds.**
 
 - Person with a role: Log request sent (R), then Log applied (P).

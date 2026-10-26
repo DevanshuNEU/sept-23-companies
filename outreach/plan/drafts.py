@@ -4,6 +4,11 @@ The rule this module enforces: only Devanshu moves a reason line past `proposed`
 `proposed` and can never overwrite a confirmed or written line, or any draft he saved himself (`DraftLocked`).
 Every save recomputes the checks with `outreach.plan.notecheck.check_note`; a note that fails a block check is
 stored with it and is never ready. Writes: `linkedin_draft` and `event` only.
+
+Whose text it is decides the checks (#9's authorship ruling, 2026-10-26). A save by `claude` is checked as Claude's
+text. A save by `devanshu` is his text (`author 'user'`): the reason line and fact rules are not applied, and each
+stored fact's `in_note` is recomputed from his body, so the fact list says what his note holds. A confirm keeps the
+checks of whoever wrote the body: his once he has saved it (a `draft_saved` event by him), else Claude's.
 """
 from __future__ import annotations
 
@@ -11,7 +16,7 @@ import json
 import os
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -75,6 +80,18 @@ def _fact(value) -> Fact:
                 in_note=bool(value.get("in_note", False)))
 
 
+def _in_his_text(facts: Sequence[Fact], body: str) -> tuple[Fact, ...]:
+    """Each fact marked used exactly when its words are in his body (case folded), whatever Claude marked."""
+    low = body.lower()
+    return tuple(replace(f, in_note=bool(f.text.strip()) and f.text.lower() in low) for f in facts)
+
+
+def _his_text(conn: sqlite3.Connection, draft_id: int) -> bool:
+    """He saved this draft's body at least once. Claude can never save over that (`DraftLocked`), so the body is his."""
+    return conn.execute("SELECT 1 FROM event WHERE entity = 'linkedin' AND kind = 'draft_saved' AND actor = 'devanshu' "
+                        "AND entity_id = ? LIMIT 1", (draft_id,)).fetchone() is not None
+
+
 def _facts_json(facts: Sequence[Fact]) -> str:
     return json.dumps([{"text": f.text, "label": f.label, "url": f.url, "in_note": f.in_note} for f in facts])
 
@@ -103,7 +120,8 @@ def save_linkedin_draft(conn: sqlite3.Connection, *, person_id: int, body: str, 
     `saved_by 'claude'` stores `reason_state 'proposed'` and raises `DraftLocked` when the stored state is
     `confirmed` or `written`, or when the stored `saved_by` is `'devanshu'` (his body-only edit leaves the state
     `proposed`, and prepare must still never overwrite it). `saved_by 'devanshu'` stores `written` when `reason_line`
-    differs from the stored line (a new draft stores `''` as the stored line), else keeps the stored state. A
+    differs from the stored line (a new draft stores `''` as the stored line), else keeps the stored state; it is
+    checked as his text (`author 'user'`) and its facts' `in_note` is recomputed from `body`. A
     `revision` that is not the stored one raises `LookupError`. `ValueError` for a blank body or an unknown
     `saved_by`; `LookupError` for an unknown person. `banned` defaults to the configured list and an unreadable one
     blocks the note; `unconfirmed` defaults to me.md and an unreadable file blocks it too.
@@ -133,7 +151,9 @@ def save_linkedin_draft(conn: sqlite3.Connection, *, person_id: int, body: str, 
             state = stored["reason_state"] if stored is not None else "proposed"
             if reason_line != (stored["reason_line"] if stored is not None else ""):
                 state = "written"
-        checks = check_note(body, reason_line, state, facts, cfg=cfg, banned=banned_list, unconfirmed=unconfirmed_list)
+            facts = _in_his_text(facts, body)
+        checks = check_note(body, reason_line, state, facts, cfg=cfg, banned=banned_list, unconfirmed=unconfirmed_list,
+                            author="claude" if saved_by == "claude" else "user")
         checks_json = json.dumps([c.to_json() for c in checks])
         now = utcnow()
         if stored is None:
@@ -176,7 +196,8 @@ def confirm_reason(conn: sqlite3.Connection, draft_id: int, revision: int, *, cf
     """Devanshu's one key: the reason line becomes `confirmed`, `saved_by 'devanshu'`, and the checks are redone.
 
     `LookupError` for an unknown draft or a stale `revision`; `ValueError` for an empty reason line. Confirming does
-    not make a blocked note ready (`is_ready` still needs no block check)."""
+    not make a blocked note ready (`is_ready` still needs no block check). The checks stay those of the body's
+    author: Claude's text he only confirmed keeps Claude's checks."""
     cfg = cfg or default_plan_config()
     banned_list = _banned(cfg, banned)
     unconfirmed_list = _unconfirmed(unconfirmed)
@@ -190,7 +211,8 @@ def confirm_reason(conn: sqlite3.Connection, draft_id: int, revision: int, *, cf
             raise ValueError("there is no reason line to confirm")
         current = _draft(stored)
         checks = check_note(current.body, current.reason_line, "confirmed", current.facts, cfg=cfg,
-                            banned=banned_list, unconfirmed=unconfirmed_list)
+                            banned=banned_list, unconfirmed=unconfirmed_list,
+                            author="user" if _his_text(conn, draft_id) else "claude")
         cur = conn.execute(
             "UPDATE linkedin_draft SET reason_state = 'confirmed', saved_by = 'devanshu', checks = ?, "
             "updated_at = ?, revision = revision + 1 WHERE draft_id = ? AND revision = ?",

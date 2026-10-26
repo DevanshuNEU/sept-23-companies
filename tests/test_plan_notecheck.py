@@ -175,6 +175,97 @@ class NoteCheckTest(unittest.TestCase):
                 self.assertNotRegex(text, "[‒-―]")
 
 
+# The Kabir case (2026-10-26): his own 297 character note, saved over a night draft whose reason line and fact list
+# describe Claude's text, not his.
+KABIR_REASON = "I saw the forward deployed engineer role in New York."
+KABIR_FACTS = (Fact("forward deployed engineer role in New York", "Careers page", "https://tessera.example/jobs/fde",
+                    True),)
+KABIR_BODY = ("Hi Kabir. I saw Tessera is hiring a forward deployed engineer in NYC and I would like to be considered. "
+              "I build agent infra that real users run each day and I like sitting with customers to ship the fixes. "
+              "Would you be open to a short call this week? My work is at devanshu.dev if you want a look.")
+
+
+def his(body=KABIR_BODY, reason=KABIR_REASON, state="proposed", facts=KABIR_FACTS, banned=None, unconfirmed=None):
+    return check_note(body, reason, state, facts, cfg=CFG, banned=BANNED if banned is None else banned,
+                      unconfirmed=UNCONFIRMED if unconfirmed is None else unconfirmed, author="user")
+
+
+class HisNoteTest(unittest.TestCase):
+    """#9's authorship ruling (2026-10-26): a note he wrote or reworked is judged only on honesty and hard limits."""
+
+    def test_the_kabir_note_passes_and_is_ready(self):
+        self.assertEqual(len(KABIR_BODY), 297)
+        self.assertNotIn(KABIR_REASON, KABIR_BODY)
+        checks = his()
+        self.assertEqual(codes(checks, "block"), [])
+        self.assertEqual(codes(checks), [])
+        self.assertTrue(is_ready(checks, "proposed", author="user"))
+
+    def test_the_same_text_as_claudes_keeps_the_strict_checks(self):
+        claude = check_note(KABIR_BODY, KABIR_REASON, "proposed", KABIR_FACTS, cfg=CFG, banned=BANNED,
+                            unconfirmed=UNCONFIRMED)
+        self.assertEqual(codes(claude), ["reason_not_in_note", "fact_not_in_note", "reason_unconfirmed"])
+        self.assertEqual(codes(claude, "block"), ["reason_not_in_note"])
+        self.assertFalse(is_ready(claude, "proposed"))
+        explicit = check_note(KABIR_BODY, KABIR_REASON, "proposed", KABIR_FACTS, cfg=CFG, banned=BANNED,
+                              unconfirmed=UNCONFIRMED, author="claude")
+        self.assertEqual(explicit, claude)
+        self.assertFalse(is_ready(his(), "proposed"))  # is_ready keeps Claude's rule unless told otherwise
+        self.assertIn("reason_missing", codes(run(reason=""), "block"))
+
+    def test_no_reason_line_and_no_fact_rules_for_his_note(self):
+        self.assertEqual(codes(his(reason="")), [])
+        self.assertEqual(codes(his(reason="", facts=())), [])
+        self.assertEqual(codes(his(facts=(Fact("a fact with no page", "src", "", True),))), [])
+        for state in ("proposed", "confirmed", "written"):
+            self.assertEqual(codes(his(state=state)), [], state)
+            self.assertTrue(is_ready(his(state=state), state, author="user"), state)
+
+    def test_over_the_limit_still_blocks(self):
+        long = KABIR_BODY + "abcd"
+        self.assertEqual(len(long), 301)
+        self.assertEqual(codes(his(body=long), "block"), ["note_too_long"])
+        self.assertFalse(is_ready(his(body=long), "written", author="user"))
+        self.assertEqual(codes(his(body=KABIR_BODY + "abc")), [])
+
+    def test_honesty_checks_still_block(self):
+        cases = {
+            "banned_phrase": [" Real synergy.", " I am passionate about agents.", " Could you refer me?",
+                              " We have a mutual connection.", " I have an MS from Northeastern."],
+            "dash": [" Agents \u2014 infra.", " Agents \u2013 infra."],
+            "placeholder": [" TODO", " ASK: x", " {{name}}"],
+            "unconfirmed_fact": [" I need H-1B support.", " No STEM OPT needed."],
+            "link_shortener": [" bit.ly/abc"],
+        }
+        short = KABIR_BODY[:200]
+        for code, tails in cases.items():
+            for tail in tails:
+                checks = his(body=short + tail)
+                self.assertIn(code, codes(checks, "block"), tail)
+                self.assertFalse(is_ready(checks, "written", author="user"), tail)
+        self.assertEqual(codes(his(body="   "), "block"), ["note_empty"])
+
+    def test_unreadable_lists_still_block(self):
+        self.assertEqual(codes(his(banned=[]), "block"), ["banned_list_unreadable"])
+        checks = check_note(KABIR_BODY, "", "written", (), cfg=CFG, banned=BANNED, unconfirmed=None, author="user")
+        self.assertEqual(codes(checks, "block"), ["unconfirmed_list_unreadable"])
+
+    def test_link_count_and_numbers_still_warn(self):
+        short = KABIR_BODY[:150]
+        three = his(body=short + " https://a.example/1 https://b.example/2 https://c.example/3")
+        self.assertEqual(codes(three), ["too_many_links"])
+        self.assertEqual(codes(his(body=short + " We grew to 40 people.")), ["number_not_linked"])
+        self.assertTrue(is_ready(three, "proposed", author="user"))
+
+    def test_an_unknown_author_is_refused(self):
+        for author in ("devanshu", "", "User"):
+            with self.assertRaises(ValueError):
+                check_note(KABIR_BODY, "", "written", (), cfg=CFG, banned=BANNED, unconfirmed=UNCONFIRMED,
+                           author=author)
+            with self.assertRaises(ValueError):
+                is_ready([], "written", author=author)
+
+
 class UnconfirmedLoaderTest(unittest.TestCase):
     def test_reads_backticks_on_ask_items_only(self):
         self.assertEqual(load_unconfirmed(FIX / "me.md"), ["STEM OPT", "H-1B", "installs"])

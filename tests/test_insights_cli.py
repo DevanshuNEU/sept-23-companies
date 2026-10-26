@@ -47,6 +47,7 @@ def seed(conn) -> dict[str, int]:
 class CliTest(unittest.TestCase):
     def setUp(self):
         self.conn = fresh_store()
+        self.addCleanup(self.conn.close)
         self.ids = seed(self.conn)
         env = mock.patch.dict(os.environ, {"OUTREACH_DB": store_path(self.conn)})
         env.start()
@@ -80,6 +81,7 @@ class CliTest(unittest.TestCase):
 
     def test_an_offer_is_dated_and_sorted_by_the_offer_not_the_old_interview(self):
         conn = fresh_store()
+        self.addCleanup(conn.close)
         early = S.company(conn, "Early Interview")
         outcome_touch(conn, early, S.person(conn, early, "A One"), sent_at="2026-05-01T15:00:00Z",
                       interview_at="2026-06-05T15:00:00Z")
@@ -95,6 +97,7 @@ class CliTest(unittest.TestCase):
 
     def test_summary_on_an_empty_store(self):
         empty = fresh_store()
+        self.addCleanup(empty.close)
         with mock.patch.dict(os.environ, {"OUTREACH_DB": store_path(empty)}):
             code, out, _err = self.run_cli("summary")
         self.assertEqual(0, code)

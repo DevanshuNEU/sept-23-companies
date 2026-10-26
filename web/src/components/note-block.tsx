@@ -58,6 +58,9 @@ const onFilled = 'bg-primary-foreground/15 text-primary-foreground';
  * the limit, the question about his line while Claude only proposed it, the text (or `editing` in its place),
  * his line, the facts with their links before any action, the checks, then Copy and Edit.
  *
+ * A note he saved himself is his reason (#9, 2026-10-26): the API stops asking (`needsYourLine` is false) and its
+ * checks hold no reason line or fact rule. A line Claude proposed is never shown as "in your words", even then.
+ *
  * Copy cannot run while a save is pending (`saving`: the checks are unknown until the save lands), before any
  * check ran, or while a check blocks the note, so a blocked note is never copied. Copy and Confirm line are then
  * `aria-disabled`, never `disabled`, so a focused button keeps its focus. The view's `c` and `y` keys follow the
@@ -151,8 +154,9 @@ export function NoteBlock({
         </div>
       )}
 
-      {/* While he edits, the line is a field in the editor, so it is not shown twice. */}
-      {note.needsYourLine || editing ? null : (
+      {/* While he edits, the line is a field in the editor, so it is not shown twice. A line Claude only proposed
+          is not his words, even under a note he saved. */}
+      {note.reasonState === 'proposed' || editing ? null : (
         <div className="grid gap-0.5 px-4 pb-3 text-[13px]">
           <span className="text-xs text-muted-foreground">Why them, in your words</span>
           <span>{note.reasonLine}</span>

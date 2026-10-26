@@ -531,6 +531,38 @@ describe('Today as a plan', () => {
     expect(await within(noteRegion()).findByText('His durable steps post fixed a bug in my job runner.')).toBeInTheDocument();
   });
 
+  it('his own note over a line Claude proposed asks nothing, and y and Copy treat it as his (#9, 2026-10-26)', async () => {
+    const user = userEvent.setup();
+    const writeText = stubClipboard(); // after userEvent, which brings its own clipboard
+    const { client } = await openPlan();
+    const confirm = vi.spyOn(client, 'confirmReason');
+    fireEvent.click(option(4));
+    await screen.findByRole('heading', { level: 2, name: 'Jonah Park' });
+    press('e');
+    const body = await within(panel()).findByRole('textbox', { name: 'Note to Jonah Park' });
+    await user.clear(body);
+    await user.type(body, 'Hi Jonah, I build agent infra and would like to hear how your team ships.');
+    await user.click(within(panel()).getByRole('button', { name: 'Save' }));
+    await leavePage();
+    await waitFor(async () => expect((await client.plan()).rows[3]?.note?.savedBy).toBe('devanshu'));
+    expect((await client.plan()).rows[3]?.note?.reasonState).toBe('proposed');
+    await waitFor(() => expect(option(4)).toHaveAccessibleName('4. Jonah Park at Inngest, To do'));
+    expect(within(noteRegion()).queryByText('Is this why you are writing to them? Confirm it or write your own.')).toBeNull();
+    expect(within(noteRegion()).queryByRole('button', { name: 'Confirm line' })).toBeNull();
+    expect(within(noteRegion()).queryByText('He leads the team that shipped durable steps in November.')).toBeNull();
+    expect(within(panel()).getByRole('button', { name: 'Log request sent' })).toHaveAttribute('data-variant', 'default');
+
+    press('y');
+    expect(await screen.findByText('Nothing to confirm. You wrote this note, so it needs no line.')).toBeInTheDocument();
+    const copy = within(noteRegion()).getByRole('button', { name: 'Copy' });
+    expect(copy).toHaveAttribute('aria-disabled', 'false');
+    fireEvent.click(copy);
+    expect(await screen.findByText('Copied the note.')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith('Hi Jonah, I build agent infra and would like to hear how your team ships.');
+    await leavePage();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
   it('x carries a row: the toast names the company, the rail says Carried over, and done does not change', async () => {
     await openPlan();
     fireEvent.click(option(4));

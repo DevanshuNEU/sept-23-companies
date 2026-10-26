@@ -254,6 +254,28 @@ describe('NoteBlock', () => {
     expect(screen.queryByText('Why them, in your words')).toBeNull();
   });
 
+  it('his own note asks nothing about Claude\'s line, does not show it as his, and Copy runs past warnings', () => {
+    // The Kabir case (#9, 2026-10-26): he saved his own text over a note whose line Claude proposed.
+    const claude = noteOf(plan(), 'Inngest');
+    const warn: Check = { code: 'number_not_linked', severity: 'warn', title: 'A number with no link behind it', detail: 'Add the source.', fix: null, spans: [] };
+    const text = 'Hi Jonah, I build agent infra and would like to hear how your team ships.';
+    const note: NoteDraft = { ...claude, text, chars: text.length, savedBy: 'devanshu', needsYourLine: false, checks: [pass('a', 'Under the limit'), warn] };
+    expect(note.reasonState).toBe('proposed');
+    const calls = noteBlock(note);
+    expect(screen.queryByText('Is this why you are writing to them? Confirm it or write your own.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Confirm line' })).toBeNull();
+    expect(screen.queryByText('Why them, in your words')).toBeNull();
+    expect(screen.queryByText(claude.reasonLine)).toBeNull();
+    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(screen.getByText('A number with no link behind it')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('1 warning.');
+    const copy = screen.getByRole('button', { name: 'Copy' });
+    expect(copy).toHaveAttribute('aria-disabled', 'false');
+    fireEvent.click(copy);
+    expect(calls.copy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+  });
+
   it('Copy and Edit buttons carry aria-keyshortcuts c and e', () => {
     const calls = noteBlock(noteOf(plan(), 'Pylon'));
     const copy = screen.getByRole('button', { name: 'Copy' });

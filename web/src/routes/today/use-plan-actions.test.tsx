@@ -29,6 +29,7 @@ function Harness() {
       <p data-testid="shell-done">{shell.data ? String(shell.data.plan.done) : 'loading'}</p>
       <p data-testid="row3">{row(3)?.state}</p>
       <p data-testid="row3-steps">{row(3)?.steps.map((s) => (s.at ? 'x' : '-')).join('')}</p>
+      <p data-testid="row4-asks">{String(row(4)?.note?.needsYourLine)}</p>
       <p data-testid="prompt">{prompt.data ? String(prompt.data.touches.length) : 'loading'}</p>
       <p data-testid="unseen">{wins.data ? String(wins.data.unseen) : 'loading'}</p>
     </>
@@ -380,6 +381,20 @@ describe('usePlanActions: notes and outcomes', () => {
     );
     await settle(50);
     expect((await client.plan()).rows[2]?.note?.text).toBe('Hi Lena, a shorter note.');
+  });
+
+  it('his save of a note whose line Claude proposed stops asking for the line at once (#9, 2026-10-26)', async () => {
+    const { client, rowOf, act: run } = await open();
+    const row = rowOf(4);
+    expect(row.note).toMatchObject({ reasonState: 'proposed', savedBy: 'claude', needsYourLine: true });
+    expect(text('row4-asks')).toBe('true');
+    run((a) => a.saveNote(row, 'Hi Jonah, my own words about step functions.', row.note?.reasonLine ?? ''));
+    await settle();
+    expect(text('row4-asks')).toBe('false');
+    await settle(8000);
+    await settle(50);
+    expect(text('row4-asks')).toBe('false');
+    expect((await client.plan()).rows[3]?.note).toMatchObject({ reasonState: 'proposed', savedBy: 'devanshu', needsYourLine: false });
   });
 
   it('two saves inside the window both go out, in order, and the server ends with the second text', async () => {

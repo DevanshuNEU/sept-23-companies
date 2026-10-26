@@ -271,6 +271,8 @@ function PlanWork({ plan }: { plan: PlanView }) {
     if (actions.noteSaving(note.noteId)) return void toast('Not confirmed. The note is saving. Press Y again once it is saved.');
     if (actions.confirming(note.noteId)) return;
     if (note.reasonState !== 'proposed') return void toast('The line is already yours.');
+    // A note he saved is his reason (#9, 2026-10-26): Claude's proposed line under it is not his to confirm.
+    if (!note.needsYourLine) return void toast('Nothing to confirm. You wrote this note, so it needs no line.');
     actions.confirmReason(row);
     focusPanel();
   };

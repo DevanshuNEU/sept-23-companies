@@ -1,9 +1,13 @@
 """The one LinkedIn note checker (#15, Task 7). The API and the MCP server import `check_note`; neither keeps a copy.
 
-A note is plain text under `note.max_chars`. It is ready only with no block check and a reason line that Devanshu
-has confirmed or written. The text rules (banned phrases, dashes, placeholders, link shorteners, unconfirmed me.md
-facts) are the email draft rules of `outreach.drafts.checks`, read through its helpers; this module adds the note's
-own: length, facts that need a safe link, and the reason line. Pure: no store, no clock, no network.
+A note is plain text under `note.max_chars`. The text rules (banned phrases, dashes, placeholders, link shorteners,
+unconfirmed me.md facts) are the email draft rules of `outreach.drafts.checks`, read through its helpers; this module
+adds the note's own: length, facts that need a safe link, and the reason line. Pure: no store, no clock, no network.
+
+Two authors (#9's authorship ruling, 2026-10-26). Claude's text (`author 'claude'`, the default) is ready only with
+no block check and a reason line that Devanshu has confirmed or written, and its reason line and fact list must match
+it. A note he wrote or reworked (`author 'user'`) is judged only on honesty and hard limits: the reason line and fact
+rules (`AUTHOR_SKIPS`) describe Claude's text and do not apply to his, and no block check is all it needs.
 """
 from __future__ import annotations
 
@@ -17,13 +21,16 @@ from outreach.drafts.checks import DASHES, PLACEHOLDER, SHORTENERS, find_links, 
 from outreach.plan.config import PlanConfig
 
 __all__ = ["NoteCheck", "Fact", "check_note", "is_ready", "load_unconfirmed", "READY_STATES", "BLOCK_CODES",
-           "WARN_CODES"]
+           "WARN_CODES", "AUTHORS", "AUTHOR_SKIPS"]
 
 READY_STATES = ("confirmed", "written")
 BLOCK_CODES = ("note_empty", "note_too_long", "banned_list_unreadable", "banned_phrase", "dash", "placeholder",
                "unconfirmed_list_unreadable", "unconfirmed_fact", "link_shortener", "fact_no_link", "reason_missing",
                "reason_not_in_note")
 WARN_CODES = ("too_many_links", "fact_not_in_note", "number_not_linked", "reason_unconfirmed")
+AUTHORS = ("claude", "user")
+# The checks that read Claude's metadata about its own text; his note is never judged by them.
+AUTHOR_SKIPS = ("fact_no_link", "fact_not_in_note", "reason_missing", "reason_not_in_note", "reason_unconfirmed")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _DIGITS = re.compile(r"\d+")
 
@@ -101,14 +108,23 @@ def _spans(rx: re.Pattern, text: str) -> list[tuple[int, int]]:
     return [(m.start(), m.end()) for m in rx.finditer(text) if m.end() > m.start()]
 
 
+def _author(author: str) -> str:
+    if author not in AUTHORS:
+        raise ValueError(f"author must be 'claude' or 'user', got {author!r}")
+    return author
+
+
 def check_note(body: str, reason_line: str, reason_state: str, facts: Sequence[Fact], *, cfg: PlanConfig,
-               banned: Sequence, unconfirmed: Sequence[str] | None) -> list[NoteCheck]:
+               banned: Sequence, unconfirmed: Sequence[str] | None, author: str = "claude") -> list[NoteCheck]:
     """Every problem with one LinkedIn note, blocks and warns, in a fixed order.
 
     `banned` is what `outreach.drafts.checks.load_banned` returned for the note scopes; an empty list means the file
     could not be used, and the note does not pass on that (`banned_list_unreadable`). `unconfirmed` is
     `load_unconfirmed`'s answer; None blocks the same way. The banned list is extended by `note.extra_banned`.
+    `author 'user'` (his own text) leaves out the `AUTHOR_SKIPS` checks and nothing else; `ValueError` for any
+    other author than 'claude' or 'user'.
     """
+    claude = _author(author) == "claude"
     out: list[NoteCheck] = []
     body = body or ""
     reason = (reason_line or "").strip()
@@ -201,9 +217,13 @@ def check_note(body: str, reason_line: str, reason_state: str, facts: Sequence[F
     if reason_state not in READY_STATES:
         out.append(_check("reason_unconfirmed", "warn", "The reason line is not yet yours",
                           "Claude proposed this line. Confirm it or write your own before the note goes out."))
+    if not claude:  # his own note is his reason, and its facts are his words: Claude's metadata does not judge it
+        out = [c for c in out if c.code not in AUTHOR_SKIPS]
     return sorted(out, key=lambda c: _ORDER[c.code])
 
 
-def is_ready(checks: Sequence[NoteCheck], reason_state: str) -> bool:
-    """No block check, and a reason line that Devanshu confirmed or wrote."""
-    return reason_state in READY_STATES and not any(c.severity == "block" for c in checks)
+def is_ready(checks: Sequence[NoteCheck], reason_state: str, *, author: str = "claude") -> bool:
+    """No block check, and for Claude's text a reason line that Devanshu confirmed or wrote. His own note
+    (`author 'user'`) needs no confirmed line."""
+    mine = _author(author) == "user"
+    return (mine or reason_state in READY_STATES) and not any(c.severity == "block" for c in checks)

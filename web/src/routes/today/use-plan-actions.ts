@@ -280,7 +280,8 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
         planRowPatch(row.entryId, (r) => {
           if (!r.note) return r;
           const reasonState = reasonLine === r.note.reasonLine ? r.note.reasonState : 'written';
-          return { ...r, note: { ...r.note, text, chars: text.length, reasonLine, reasonState, needsYourLine: reasonState === 'proposed' } };
+          // His save makes the note his, and his note is his reason (#9, 2026-10-26): nothing asks for the line.
+          return { ...r, note: { ...r.note, text, chars: text.length, reasonLine, reasonState, savedBy: 'devanshu', needsYourLine: false } };
         }),
       ],
       commit: (o) =>

@@ -1033,7 +1033,10 @@ export class FixtureClient implements OutreachClient {
       note.text = edit.text;
       note.chars = edit.text.length;
       note.reasonLine = edit.reasonLine;
-      note.needsYourLine = note.reasonState === 'proposed';
+      // As the API does (#9, 2026-10-26): his note is his reason, and a fact is used when his text holds its words.
+      note.needsYourLine = false;
+      const low = edit.text.toLowerCase();
+      note.facts = note.facts.map((f) => ({ ...f, inNote: f.text.trim() !== '' && low.includes(f.text.toLowerCase()) }));
       note.checks = rescanNote(edit.text, note.maxChars);
       note.savedBy = 'devanshu';
       note.savedAt = this.now;

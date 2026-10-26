@@ -285,7 +285,8 @@ def _note_changed() -> ApiProblem:
 def save_note(ctx: WriteCtx, note_id: int, text: str, reason_line: str, revision: int, cfg: PlanConfig,
               banned: Sequence) -> NoteDraft:
     """His edit, through #15's `save_linkedin_draft(saved_by='devanshu')` with the stored facts: a changed reason line
-    becomes `written`, the checks are redone, and Claude's prepare can never overwrite it after this."""
+    becomes `written`, the checks are redone as his text (no reason line or fact rule from Claude's draft, and the
+    facts' `in_note` read from his text), and Claude's prepare can never overwrite it after this."""
     conn = ctx.conn
     stored = _note_row(conn, note_id)
     if not text.strip():

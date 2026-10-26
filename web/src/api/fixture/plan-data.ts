@@ -208,7 +208,7 @@ function buildRows(c: PlanCtx, mode: Mode): Built {
     const noteSpec = spec.note;
     const note: NoteDraft | null = noteSpec ? {
       noteId: 6100 + n, text: noteSpec.text, chars: noteSpec.text.length, maxChars: MAX_CHARS,
-      reasonLine: noteSpec.line, reasonState: noteSpec.state, needsYourLine: noteSpec.state === 'proposed',
+      reasonLine: noteSpec.line, reasonState: noteSpec.state, needsYourLine: noteSpec.state === 'proposed' && (noteSpec.by ?? 'claude') === 'claude',
       facts: noteSpec.facts.map(copyFact), checks: NOTE_CHECKS(), savedBy: noteSpec.by ?? 'claude', savedAt: c.et(c.date, '08:01'), revision: 1,
     } : filledIn ? wenNote(c, n) : null;
 

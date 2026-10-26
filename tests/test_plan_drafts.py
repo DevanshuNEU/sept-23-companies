@@ -11,6 +11,7 @@ from outreach.plan.config import default_plan_config
 from outreach.plan.drafts import DraftLocked, LinkedinDraft, confirm_reason, get_draft, save_linkedin_draft
 from outreach.plan.notecheck import Fact, NoteCheck, is_ready, load_unconfirmed
 from tests.plan_seed import seed_person, seed_scored_company
+from tests.test_plan_notecheck import KABIR_BODY, KABIR_FACTS, KABIR_REASON
 from tests.storetest import fresh_store
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "plan"
@@ -134,7 +135,8 @@ class SaveTest(DraftsCase):
         other = seed_person(self.conn, self.company, "Eli Eng")
         empty = self.save(saved_by="devanshu", person=other, reason="")
         self.assertEqual(empty.reason_state, "proposed")
-        self.assertIn("reason_missing", [c.code for c in empty.checks])
+        self.assertNotIn("reason_missing", [c.code for c in empty.checks])  # his note needs no reason line (#9)
+        self.assertTrue(is_ready(empty.checks, empty.reason_state, author="user"))
 
     def test_stale_revision_raises_lookup_error(self):
         d = self.save()
@@ -207,6 +209,87 @@ class SaveTest(DraftsCase):
         self.save(posting_id=pid)
         self.save(saved_by="devanshu")
         self.assertEqual(self.row()["posting_id"], pid)
+
+
+class HisNoteTest(DraftsCase):
+    """#9's authorship ruling (2026-10-26): his save is checked as his text, Claude's as Claude's."""
+
+    def night_draft(self, body=f"Hi Kabir, {KABIR_REASON} I build agent infra.", **kw):
+        return self.save(body=body, reason=KABIR_REASON, facts=KABIR_FACTS, **kw)
+
+    def test_the_kabir_save_is_not_blocked_by_the_night_drafts_line_and_facts(self):
+        night = self.night_draft()
+        self.assertEqual([c.code for c in night.checks], ["reason_unconfirmed"])
+        # the app passes the stored line and facts back with his text, as `save_note` does
+        mine = self.save(saved_by="devanshu", body=KABIR_BODY, reason=night.reason_line, facts=night.facts,
+                         revision=night.revision)
+        self.assertEqual(len(mine.body), 297)
+        self.assertEqual([c.code for c in mine.checks], [])
+        self.assertEqual((mine.saved_by, mine.reason_state), ("devanshu", "proposed"))
+        self.assertTrue(is_ready(mine.checks, mine.reason_state, author="user"))
+        # the stored fact list now says what is in his text: the night fact is not
+        self.assertEqual([f.in_note for f in mine.facts], [False])
+        self.assertEqual(json.loads(self.row()["facts"])[0]["in_note"], False)
+        self.assertEqual(self.events("draft_saved")[-1]["blocks"], 0)
+
+    def test_the_same_text_saved_by_claude_keeps_the_strict_checks(self):
+        d = self.save(body=KABIR_BODY, reason=KABIR_REASON, facts=KABIR_FACTS)
+        self.assertEqual([c.code for c in d.checks], ["reason_not_in_note", "fact_not_in_note", "reason_unconfirmed"])
+        self.assertFalse(is_ready(d.checks, d.reason_state))
+        self.assertEqual([f.in_note for f in d.facts], [True])  # Claude's own claim is kept as Claude made it
+
+    def test_his_save_recomputes_which_facts_are_in_his_text(self):
+        facts = [Fact("queue rewrite", "post", "https://acme.example/blog/queue", False),
+                 Fact("Series B", "press", "https://acme.example/press", True),
+                 Fact("  ", "blank", "https://acme.example/x", True)]
+        self.save(facts=facts)
+        mine = self.save(saved_by="devanshu", body="Hi Dana, I read about the QUEUE REWRITE and liked it.",
+                         facts=facts)
+        self.assertEqual([f.in_note for f in mine.facts], [True, False, False])
+        self.assertEqual([(f.text, f.label, f.url) for f in mine.facts], [(f.text, f.label, f.url) for f in facts])
+
+    def test_his_note_still_blocks_on_honesty_and_the_limit(self):
+        night = self.night_draft()
+        revision = night.revision
+        for body, code in ((KABIR_BODY + "abcd", "note_too_long"), (KABIR_BODY[:200] + " Real synergy.", "banned_phrase"),
+                           (KABIR_BODY[:200] + " Agents \u2014 infra.", "dash"),
+                           (KABIR_BODY[:200] + " We have a mutual connection.", "banned_phrase"),
+                           (KABIR_BODY[:200] + " {{name}}", "placeholder"),
+                           (KABIR_BODY[:200] + " I need H-1B support.", "unconfirmed_fact")):
+            mine = self.save(saved_by="devanshu", body=body, reason=night.reason_line, facts=night.facts,
+                             revision=revision)
+            revision = mine.revision
+            self.assertIn(code, [c.code for c in mine.checks if c.severity == "block"], body)
+            self.assertFalse(is_ready(mine.checks, mine.reason_state, author="user"), body)
+
+    def test_confirming_claudes_text_keeps_claudes_checks(self):
+        night = self.night_draft(body="Hi Kabir, I build agent infra.")  # the line is not in Claude's text
+        self.assertIn("reason_not_in_note", [c.code for c in night.checks])
+        once = confirm_reason(self.conn, night.draft_id, night.revision, cfg=CFG, banned=BANNED,
+                              unconfirmed=UNCONFIRMED)
+        self.assertEqual([c.code for c in once.checks], ["reason_not_in_note", "fact_not_in_note"])
+        twice = confirm_reason(self.conn, once.draft_id, once.revision, cfg=CFG, banned=BANNED,
+                               unconfirmed=UNCONFIRMED)
+        self.assertEqual([c.code for c in twice.checks], ["reason_not_in_note", "fact_not_in_note"])
+
+    def test_confirming_after_his_save_keeps_his_checks(self):
+        night = self.night_draft()
+        mine = self.save(saved_by="devanshu", body=KABIR_BODY, reason=night.reason_line, facts=night.facts,
+                         revision=night.revision)
+        confirmed = confirm_reason(self.conn, mine.draft_id, mine.revision, cfg=CFG, banned=BANNED,
+                                   unconfirmed=UNCONFIRMED)
+        self.assertEqual((confirmed.reason_state, [c.code for c in confirmed.checks]), ("confirmed", []))
+
+    def test_his_save_keeps_the_lock_and_revisions(self):
+        night = self.night_draft()
+        mine = self.save(saved_by="devanshu", body=KABIR_BODY, reason=night.reason_line, facts=night.facts,
+                         revision=night.revision)
+        self.assertEqual(mine.revision, night.revision + 1)
+        with self.assertRaises(DraftLocked):
+            self.night_draft()
+        with self.assertRaises(LookupError):
+            self.save(saved_by="devanshu", body=KABIR_BODY + ".", revision=night.revision)
+        self.assertEqual(self.row()["body"], KABIR_BODY)
 
 
 class RacingConnection:

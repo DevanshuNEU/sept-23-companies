@@ -32,7 +32,7 @@ class NoteDraft(Wire):
     max_chars: int  # #15's note.max_chars
     reason_line: str
     reason_state: ReasonState
-    needs_your_line: bool  # reason_state == 'proposed'
+    needs_your_line: bool  # reason_state == 'proposed' and saved_by == 'claude': his own note needs no line
     facts: list[NoteFact]
     checks: list[Check]  # the stored ones (#15's check_note)
     saved_by: SavedBy

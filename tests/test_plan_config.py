@@ -32,7 +32,7 @@ class PlanConfigTest(unittest.TestCase):
                         "call_timeout_s": 600, "max_consecutive_failures": 2,
                         "session_limit_patterns": ["usage limit", "rate limit"],
                         "auth_patterns": ["not logged in", "please run /login"], "schema_version": 1},
-            "note": {"max_chars": 200, "max_links": 2, "banned_scopes": ["both", "dm"],
+            "note": {"max_chars": 300, "max_links": 2, "banned_scopes": ["both", "dm"],
                      "extra_banned": ["can you refer", "could you refer", "would you refer", "refer me",
                                       "ms from northeastern", "finishing my ms", "graduating from northeastern",
                                       "mutual connection"],
@@ -68,9 +68,9 @@ class PlanConfigTest(unittest.TestCase):
     def test_note_limit_range(self):
         for bad in (99, 301):
             with self.assertRaises(ValueError):
-                load_plan_config(_variant("max_chars = 200", f"max_chars = {bad}"))
+                load_plan_config(_variant("max_chars = 300", f"max_chars = {bad}"))
         for good in (100, 300):
-            load_plan_config(_variant("max_chars = 200", f"max_chars = {good}"))
+            load_plan_config(_variant("max_chars = 300", f"max_chars = {good}"))
 
     def test_unknown_timezone_refused(self):
         with self.assertRaises(ValueError):

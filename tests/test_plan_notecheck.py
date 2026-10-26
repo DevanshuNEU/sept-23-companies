@@ -44,14 +44,17 @@ class NoteCheckTest(unittest.TestCase):
         self.assertEqual(codes(run(state="written")), [])
 
     def test_length_boundary(self):
-        self.assertEqual(len(padded(200)), 200)
-        self.assertNotIn("note_too_long", codes(run(body=padded(200))))
-        too_long = [c for c in run(body=padded(201)) if c.code == "note_too_long"]
+        # #9: a connection note may be up to 300 characters (LinkedIn Premium), not 200
+        self.assertEqual(CFG.get("note", "max_chars"), 300)
+        self.assertEqual(len(padded(300)), 300)
+        self.assertNotIn("note_too_long", codes(run(body=padded(300))))
+        too_long = [c for c in run(body=padded(301)) if c.code == "note_too_long"]
         self.assertEqual([c.severity for c in too_long], ["block"])
+        self.assertEqual(too_long[0].detail, "301 characters; the limit is 300. Cut 1.")
         # each emoji and curly quote is one character
         tail = "\U0001F600“”"
-        body = padded(197) + tail
-        self.assertEqual(len(body), 200)
+        body = padded(297) + tail
+        self.assertEqual(len(body), 300)
         self.assertNotIn("note_too_long", codes(run(body=body)))
         self.assertIn("note_too_long", codes(run(body=body + "x")))
 

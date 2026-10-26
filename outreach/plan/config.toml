@@ -52,7 +52,7 @@ schema_version = 1
 deny_rule_checked = true
 
 [note]
-max_chars = 200               # #33 ruling 6: safe for free and Premium accounts; he can raise it
+max_chars = 300               # #9 (2026-10-26): his Career Premium seat allows 300; the loader accepts 100 to 300
 max_links = 2
 banned_scopes = ["both", "dm"]
 # Regexes, case-insensitive: the playbook's connection-note prose bans.

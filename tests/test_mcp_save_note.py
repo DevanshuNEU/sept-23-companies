@@ -61,7 +61,7 @@ class SaveNoteTest(NoteCase):
         row = self.draft()
         self.assertEqual((got["draft_id"], got["revision"], got["created"], got["unchanged"]),
                          (row["draft_id"], 1, True, False))
-        self.assertEqual((got["reason_state"], got["needs_his_line"], got["max_chars"]), ("proposed", True, 200))
+        self.assertEqual((got["reason_state"], got["needs_his_line"], got["max_chars"]), ("proposed", True, 300))
         self.assertEqual(got["blocks"], [])
         self.assertEqual([w["code"] for w in got["warns"]], ["reason_unconfirmed"])
         self.assertEqual((row["body"], row["reason_line"], row["reason_state"], row["saved_by"],
@@ -165,7 +165,7 @@ class SaveNoteTest(NoteCase):
         self.assertEqual(self.note_events(), [("draft_saved", "claude"), ("draft_saved", "claude")])
 
     def test_blocks_come_back_with_codes_and_fixes(self):
-        long_body = BODY + " " + "More words here." * 12
+        long_body = BODY + " " + "More words here." * 20  # past the 300 characters a note may have
         got = self.ok("save_linkedin_note", self.args(
             body=long_body.replace("similar", "similar " + chr(0x2014)),
             facts=[FACT, {"text": "talk", "label": "Talk", "url": "https://www.linkedin.com/posts/x", "in_note": False}]))

@@ -90,7 +90,7 @@ class PrepareTargetsTest(FindingCase):
                                       "known_people", "untrusted"})
         self.assertEqual((first["company_id"], first["name"], first["domain"], first["lane"]),
                          (self.acme, "Acme Robotics", "acme.example", "level_role"))
-        self.assertEqual((got["max_candidates"], got["note_max_chars"]), (2, 200))
+        self.assertEqual((got["max_candidates"], got["note_max_chars"]), (2, 300))
         before = fingerprint(self.db)
         for bad in ({"limit": 0}, {"limit": 15}, {"limit": "7"}, {"count": 3}):
             with self.subTest(bad=bad):

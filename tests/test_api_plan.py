@@ -298,7 +298,7 @@ class PlanReadTests(PlanCase):
     def test_note_comes_from_linkedin_draft_with_chars_and_limit(self):
         note = self.row("Pylon")["note"]
         self.assertEqual(note["noteId"], self.lena_note.draft_id)
-        self.assertEqual((note["text"], note["chars"], note["maxChars"]), (NOTE, len(NOTE), 200))
+        self.assertEqual((note["text"], note["chars"], note["maxChars"]), (NOTE, len(NOTE), 300))
         self.assertEqual((note["reasonLine"], note["reasonState"], note["savedBy"]), (REASON, "confirmed", "devanshu"))
         self.assertEqual(note["revision"], self.lena_note.revision)
         self.assertEqual(note["savedAt"], self.lena_note.updated_at)

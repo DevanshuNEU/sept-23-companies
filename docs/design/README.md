@@ -973,7 +973,8 @@ replies count is this month's replies, the same number Progress shows.
 
 **Purpose.** Make today's effort clear and quick: about 7 people, one at a time, in order, ending in a finish line.
 
-**Layout.** Under the date and `7 people, 2 done` (with `Requests this month 52 of 150` on the right), two columns:
+**Layout.** Under the date and `7 people, 2 done` (with `Requests this week 26 of 150` on the right: the plan's
+requests in the last 7 days, against its share of LinkedIn's 200 a week), two columns:
 the day rail (320 px) and the work panel (text at most 62 characters wide). Below the panel, quiet and collapsed: the
 7-day question and the watch list. A win banner, when there is one, sits above everything.
 
@@ -1002,7 +1003,7 @@ block; then the actions, with the one next step as the only filled button, and a
 (Requested, Applied, each with the time once logged) and the quiet actions Carry to tomorrow and Not a fit.
 
 **The note block** is the only tinted surface on Today (paper: `subtle`). It holds the note text, its length
-against the limit from the API (`168 of 200 characters`), "Why her, in your words" (his reason line), "Facts used"
+against the limit from the API (`168 of 300 characters`), "Why her, in your words" (his reason line), "Facts used"
 with each fact's link before any action, the check result, and Copy and Edit. When Claude only proposed the line,
 the block asks first: "Is this why you are writing to him? Confirm it or write your own.", with Confirm line (Y)
 as the next step and Write my own (E).

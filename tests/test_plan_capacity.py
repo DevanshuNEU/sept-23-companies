@@ -29,91 +29,98 @@ class LinkedinCapacityTest(unittest.TestCase):
     def cap(self, today):
         return linkedin_capacity(self.conn, canonical_ids(self.conn), today, CFG)
 
-    def test_fresh_month_gives_about_seven(self):
+    def test_a_fresh_week_gives_his_daily_pace(self):
         self.assertEqual(self.cap(D(2026, 11, 2)).today, 7)
-        self.requests(40, D(2026, 11, 3))
+        self.requests(40, D(2026, 11, 9))
         c = self.cap(D(2026, 11, 10))
-        self.assertEqual((c.today, c.remaining, c.days_left, c.used, c.hard_used), (7, 110, 15, 40, 40))
+        self.assertEqual((c.today, c.remaining, c.used, c.hard_used), (7, 110, 40, 40))
 
-    def test_last_weekday_is_capped_at_daily_max(self):
-        self.requests(140, D(2026, 10, 5))
-        c = self.cap(D(2026, 10, 30))
-        self.assertEqual((c.remaining, c.days_left, c.today), (10, 1, 10))
+    def test_plenty_left_in_the_week_never_raises_the_day_above_the_pace(self):
+        # #9: about 7 a day is his pace, not LinkedIn's limit. 150 left over a few days is still 7, never 30.
+        for day in (D(2026, 11, 6), D(2026, 11, 8), D(2026, 11, 30), D(2026, 10, 31)):
+            self.assertEqual(self.cap(day).today, CFG.get("linkedin", "per_day"), day)
+
+    def test_the_window_is_the_last_seven_days(self):
+        self.requests(5, D(2026, 11, 3))  # Tuesday a week ago: out of the window
+        self.requests(4, D(2026, 11, 4))  # six days before today: in it
+        self.requests(3, D(2026, 11, 10))  # today
+        c = self.cap(TODAY)
+        self.assertEqual((c.used, c.hard_used, c.remaining), (7, 7, 143))
+        self.assertEqual(self.cap(D(2026, 11, 9)).used, 9)  # Monday's window still holds the Tuesday before
+
+    def test_requests_older_than_the_window_free_the_quota(self):
+        self.requests(150, D(2026, 11, 3))
+        self.assertEqual((self.cap(D(2026, 11, 9)).today, self.cap(D(2026, 11, 9)).remaining), (0, 0))
+        c = self.cap(TODAY)
+        self.assertEqual((c.today, c.remaining, c.used), (7, 150, 0))
 
     def test_budget_spent_or_overspent_is_zero_not_negative(self):
-        self.requests(150, D(2026, 11, 3))
+        self.requests(150, D(2026, 11, 9))
         c = self.cap(TODAY)
         self.assertEqual((c.today, c.remaining), (0, 0))
-        self.requests(60, D(2026, 11, 4), source="own")  # 150 plan plus 60 own is over the hard total too
+        self.requests(60, D(2026, 11, 8), source="own")  # 150 plan plus 60 own is over the hard total too
         c = self.cap(TODAY)
         self.assertEqual((c.today, c.remaining), (0, 0))
 
     def test_plan_and_own_overspend_is_zero(self):
-        self.requests(100, D(2026, 11, 3))
-        self.requests(110, D(2026, 11, 4), source="own")
+        self.requests(100, D(2026, 11, 9))
+        self.requests(110, D(2026, 11, 8), source="own")
         c = self.cap(TODAY)
         self.assertEqual((c.today, c.remaining, c.used, c.hard_used), (0, 0, 100, 210))
 
     def test_his_own_requests_count_only_against_the_hard_total(self):
-        self.requests(60, D(2026, 11, 3), source="own")
+        self.requests(60, D(2026, 11, 9), source="own")
         c = self.cap(TODAY)
         self.assertEqual((c.remaining, c.used, c.hard_used), (140, 0, 60))
-        self.requests(130, D(2026, 11, 4), source="own")
+        self.requests(130, D(2026, 11, 8), source="own")
         self.assertEqual(self.cap(TODAY).remaining, 10)
 
     def test_the_quota_binds_when_it_is_lower(self):
-        self.requests(150, D(2026, 11, 3))
+        self.requests(150, D(2026, 11, 9))  # the plan's share is spent while the hard total has 50 left
         self.assertEqual(self.cap(TODAY).remaining, 0)
 
+    def test_the_hard_total_binds_when_it_is_lower(self):
+        self.requests(40, D(2026, 11, 9))
+        self.requests(156, D(2026, 11, 8), source="own")  # 196 in all: the hard total leaves 4, the share 110
+        c = self.cap(TODAY)
+        self.assertEqual((c.remaining, c.today, c.budget, c.hard_limit), (4, 4, 150, 200))
+
     def test_reason_used_counts_plan_reason_lane_only(self):
-        self.requests(3, D(2026, 11, 3), lane="reason_no_role")
-        self.requests(2, D(2026, 11, 3), lane="level_role")
-        self.requests(4, D(2026, 11, 3), lane="reason_no_role", source="own")
+        self.requests(3, D(2026, 11, 9), lane="reason_no_role")
+        self.requests(2, D(2026, 11, 9), lane="level_role")
+        self.requests(4, D(2026, 11, 9), lane="reason_no_role", source="own")
+        self.requests(5, D(2026, 11, 3), lane="reason_no_role")  # out of the window
         self.assertEqual(self.cap(TODAY).reason_used, 3)
 
-    def test_month_boundary_is_new_york(self):
-        log_touch(self.conn, person_id=self.person, company_id=self.company, channel="linkedin_request",
-                  sent_at="2026-11-01T03:30:00Z",
-                  context={"source": "plan", "lane": None, "roleKind": None, "roleAgeDays": None,
-                           "rankerVersion": None, "signals": {}, "roleNamed": False},
-                  idempotency_key="boundary")
-        self.assertEqual(self.cap(D(2026, 10, 15)).hard_used, 1)
-        self.assertEqual(self.cap(D(2026, 11, 2)).hard_used, 0)
+    def test_window_boundary_is_new_york(self):
+        def at(ts, key):
+            log_touch(self.conn, person_id=self.person, company_id=self.company, channel="linkedin_request",
+                      sent_at=ts,
+                      context={"source": "plan", "lane": None, "roleKind": None, "roleAgeDays": None,
+                               "rankerVersion": None, "signals": {}, "roleNamed": False},
+                      idempotency_key=key)
+        at("2026-11-04T04:30:00Z", "late")  # 23:30 on Tuesday 3 November in New York: out of Tuesday 10's window
+        self.assertEqual(self.cap(TODAY).hard_used, 0)
+        self.assertEqual(self.cap(D(2026, 11, 9)).hard_used, 1)
+        at("2026-11-04T05:30:00Z", "early")  # 00:30 on Wednesday 4 November: in it
+        self.assertEqual(self.cap(TODAY).hard_used, 1)
 
     def test_each_touch_counts_once(self):
-        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 11, 3))
-        seed_log_only(self.conn, self.person, "request_sent", D(2026, 11, 3))
+        seed_outbound(self.conn, self.person, self.company, "linkedin_request", D(2026, 11, 9))
+        seed_log_only(self.conn, self.person, "request_sent", D(2026, 11, 9))
         self.assertEqual(self.cap(TODAY).hard_used, 1)
         other = seed_person(self.conn, self.company, "Bo")
-        seed_log_only(self.conn, other, "request_sent", D(2026, 11, 4))
+        seed_log_only(self.conn, other, "request_sent", D(2026, 11, 8))
         c = self.cap(TODAY)
         self.assertEqual((c.hard_used, c.used), (2, 1))  # a log-only import is his own, not the plan's
 
     def test_messages_are_not_requests(self):
-        seed_outbound(self.conn, self.person, self.company, "linkedin_message", D(2026, 11, 3))
-        seed_outbound(self.conn, self.person, self.company, "email", D(2026, 11, 3))
+        seed_outbound(self.conn, self.person, self.company, "linkedin_message", D(2026, 11, 9))
+        seed_outbound(self.conn, self.person, self.company, "email", D(2026, 11, 9))
         self.assertEqual(self.cap(TODAY).hard_used, 0)
 
-    def test_sunday_force_build_has_a_positive_days_left(self):
-        c = self.cap(D(2026, 11, 8))
-        self.assertEqual(c.days_left, 16)
-        self.assertGreaterEqual(c.today, 1)
-        # Review fix H: Saturday 31 October has no weekday left in the month, so a build then gives no row (Friday
-        # took the month's last full day). It is not rounded up to one.
-        sat = self.cap(D(2026, 10, 31))
-        self.assertEqual((sat.days_left, sat.today, sat.remaining), (0, 0, 150))
-
-    def test_one_request_left_with_many_weekdays_left_rounds_down_to_none(self):
-        self.requests(149, D(2026, 11, 3))
-        c = self.cap(D(2026, 11, 10))
-        self.assertEqual((c.remaining, c.days_left, c.today), (1, 15, 0))
-        # it still finishes: half way through the remaining days the half rounds up, and the last day takes the rest
-        self.assertEqual(self.cap(D(2026, 11, 27)).today, 1)  # the last Friday: 2 weekdays left (Fri, Mon 30)
-        self.assertEqual(self.cap(D(2026, 11, 30)).today, 1)
-
-    def test_a_weekend_inside_a_month_with_weekdays_left_still_has_capacity(self):
-        sunday = self.cap(D(2026, 11, 22))
-        self.assertEqual((sunday.days_left, sunday.today), (6, 10))  # 150 over 6 weekdays, capped at daily_max
+    def test_a_weekend_force_build_still_has_capacity(self):
+        self.assertEqual(self.cap(D(2026, 11, 8)).today, 7)
 
 
 class EmailCapacityTest(unittest.TestCase):
@@ -199,7 +206,7 @@ class EmailCapacityTest(unittest.TestCase):
         for day in (D(2026, 11, 10), D(2026, 11, 11)):
             self.assertEqual(plan_capacity(conn, canon, day, CFG),
                              linkedin_capacity(conn, canon, day, CFG).today + email_capacity(conn, day, CFG).slots)
-        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 11), CFG), 10 + 10)
+        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 11), CFG), 7 + 10)
 
 
 class LaneQuotasTest(unittest.TestCase):

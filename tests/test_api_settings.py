@@ -122,7 +122,7 @@ class SettingsTest(unittest.TestCase):
 class ConfigTest(unittest.TestCase):
     def test_the_shipped_numbers(self):
         c = load_config()
-        self.assertEqual(c.notes_max_chars, 200)
+        self.assertEqual(c.notes_max_chars, 300)
         self.assertEqual(
             (c.min_requests, c.finding_group_min, c.prompt_after_days, c.reask_after_days, c.quiet_after_days),
             (30, 20, 7, 7, 21),

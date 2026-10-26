@@ -1,9 +1,9 @@
 # Every number in the daily people plan (#15). Starting values: the owner's calls except where marked.
 
 [linkedin]
-plan_quota = 150              # #9: the system's own share of requests a month, counted by context.source = 'plan'
-hard_total = 200              # every request a month, his own included; wins when it is lower
-daily_max = 10
+plan_quota = 150              # #9: the system's share of requests in any 7 days, counted by context.source = 'plan'
+hard_total = 200              # #9: every request in any 7 days, his own included (LinkedIn's limit); wins when lower
+per_day = 7                   # #9: his pace, about 7 a day from the system; the 7-day limits only ever lower it
 rotate_days = 14              # #9: days of no answer before a company may get a second person
 rotate_top_n = 150            # a stale company rotates only while it is in the top this many of the laned list
 max_people_per_company = 3
@@ -52,7 +52,7 @@ schema_version = 1
 deny_rule_checked = true
 
 [note]
-max_chars = 200               # #33 ruling 6: safe for free and Premium accounts; he can raise it
+max_chars = 300               # #9 (2026-10-26): his Career Premium seat allows 300; the loader accepts 100 to 300
 max_links = 2
 banned_scopes = ["both", "dm"]
 # Regexes, case-insensitive: the playbook's connection-note prose bans.

@@ -397,11 +397,11 @@ class NoteTests(PlanWriteCase):
     def test_save_note_goes_through_save_linkedin_draft_and_its_checks(self):
         note = self.lena_note
         text = ("Hi Lena, I read your post on the queue rewrite " + DASH + " real synergy there. "
-                + "I built a similar job runner and would like to hear how the team works. " * 3)
-        self.assertGreater(len(text), 200)
+                + "I built a similar job runner and would like to hear how the team works. " * 4)
+        self.assertGreater(len(text), 300)
         got = self.ok(self.save_note(note.draft_id, text, note.reason_line, note.revision))
         self.assertEqual((got["noteId"], got["text"], got["chars"], got["maxChars"]),
-                         (note.draft_id, text, len(text), 200))
+                         (note.draft_id, text, len(text), 300))
         blocks = {c["code"] for c in got["checks"] if c["severity"] == "block"}
         self.assertTrue({"note_too_long", "banned_phrase", "dash"} <= blocks, blocks)
         self.assertEqual((got["savedBy"], got["revision"]), ("devanshu", note.revision + 1))

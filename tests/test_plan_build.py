@@ -67,16 +67,16 @@ class BuildTest(Fixture):
         self.assertEqual(result.status, "built")
         self.assertEqual(result.boards, "absent")
         self.assertEqual(result.capacity, result.linkedin.today + result.email.slots)
-        self.assertEqual(result.linkedin.today, 10)
+        self.assertEqual(result.linkedin.today, 7)  # linkedin.per_day: his pace, with the whole week's share left
         rows = self.entries()
-        self.assertEqual(len(rows), 10)  # 12 companies, LinkedIn capacity 10, nobody to email
+        self.assertEqual(len(rows), 7)  # 12 companies, LinkedIn capacity 7, nobody to email
         self.assertEqual(self.conn.execute("SELECT capacity FROM daily_list WHERE list_date = ?",
                                            (TUE.isoformat(),)).fetchone()[0], result.capacity)
         with_person = [r for r in rows if r["person_id"] is not None]
-        self.assertEqual([r["rank"] for r in with_person], [1, 2, 3, 4, 5])  # people rows first
-        self.assertEqual([r["person_id"] for r in with_person], [people[ids[i]] for i in (1, 3, 5, 7, 9)])
+        self.assertEqual([r["rank"] for r in with_person], [1, 2, 3])  # people rows first
+        self.assertEqual([r["person_id"] for r in with_person], [people[ids[i]] for i in (1, 3, 5)])
         self.assertTrue(all(r["channel"] == "linkedin_request" for r in rows))
-        for r in rows[5:]:
+        for r in rows[3:]:
             self.assertIsNone(r["person_id"])
             why = json.loads(r["why"])
             self.assertTrue(why["find_someone"]["search_url"].startswith("https://www.linkedin.com/search/"))
@@ -145,7 +145,7 @@ class BuildTest(Fixture):
 
     def test_zero_capacity_is_a_finished_plan(self):
         self.world()
-        self.history(150, date(2026, 11, 2))
+        self.history(150, date(2026, 11, 4))  # six days before Tuesday: the week's plan share is spent
         self.conn.execute("UPDATE sender SET paused = 1, pause_kind = 'by_you', paused_at = ?", (utcnow(),))
         result = build_plan(self.conn, today=TUE)
         self.assertEqual((result.status, result.capacity, result.chosen), ("built", 0, ()))
@@ -154,14 +154,15 @@ class BuildTest(Fixture):
         self.assertEqual(self.entries(), [])
         self.assertEqual(self.conn.execute("SELECT status FROM job_run WHERE job = 'plan'").fetchone()[0], "ok")
 
-    def test_monday_after_a_slept_friday_builds_from_the_last_plan_and_counts_the_month_correctly(self):
+    def test_monday_after_a_slept_friday_builds_from_the_last_plan_and_counts_the_week_correctly(self):
         ids, people = self.world(with_people=(0,))
         self.history(14, date(2026, 11, 3))
+        self.history(5, date(2026, 11, 2), company_name="Older")  # seven days before Monday: out of the window
         seed_daily_entry(self.conn, FRI, ids[0], rank=1, person_id=people[ids[0]])
         # no plan was built on the days between: Friday's is the last
         result = build_plan(self.conn, today=MON)
-        self.assertEqual((result.linkedin.used, result.linkedin.days_left), (14, 16))
-        self.assertEqual(result.linkedin.today, 9)  # 136 left over 16 weekdays rounds half up
+        self.assertEqual((result.linkedin.used, result.linkedin.remaining), (14, 136))
+        self.assertEqual(result.linkedin.today, 7)  # his pace: a missed day brings no catch-up
         top = self.conn.execute("SELECT person_id, why FROM daily_list_entry WHERE list_date = '2026-11-09' "
                                 "AND rank = 1").fetchone()
         self.assertEqual(top["person_id"], people[ids[0]])
@@ -192,7 +193,7 @@ class BuildTest(Fixture):
         result = build_plan(self.conn, today=TUE, dry_run=True, boards_reader=lambda ids: self.fail("read"),
                             ranker=lambda conn: self.fail("rank"))
         self.assertEqual((result.status, result.run_id, result.boards), ("built", None, "skipped"))
-        self.assertEqual(len(result.chosen), 10)
+        self.assertEqual(len(result.chosen), 7)
         self.assertEqual(snapshot(self.conn), before)
         self.assertEqual(count(self.conn, "daily_list_entry"), 0)
 
@@ -282,7 +283,7 @@ class BoardsAndRankTest(Fixture):
 
         result = build_plan(self.conn, today=TUE, boards_reader=None, ranker=ranker)
         self.assertEqual(result.status, "built")
-        self.assertEqual(len(self.entries()), 10)  # built on the stored scores
+        self.assertEqual(len(self.entries()), 7)  # built on the stored scores
         self.assertFalse(self.conn.in_transaction)
 
     def test_ranker_runs_after_a_successful_board_read(self):

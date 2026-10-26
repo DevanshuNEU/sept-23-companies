@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { vi } from 'vitest';
 import type { Check, Id, NoteDraft, PlanRow, PlanStep, PlanView } from '@/api';
 import { buildFixture } from '@/api/fixture/data';
@@ -167,7 +167,7 @@ describe('DayRail', () => {
 
 describe('NoteBlock', () => {
   it('sets the note he sends in the serif note face, on a card', () => {
-    const note = { ...noteOf(plan(), 'Pylon'), chars: 100, maxChars: 200 };
+    const note = { ...noteOf(plan(), 'Pylon'), chars: 100, maxChars: 300 };
     noteBlock(note);
     const text = screen.getByText(note.text);
     expect(text).toHaveClass('font-serif', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]');
@@ -176,22 +176,25 @@ describe('NoteBlock', () => {
   });
 
   it('shows the count with words', () => {
-    noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 168, maxChars: 200 });
-    const count = screen.getByText('168 of 200 characters');
+    noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 168, maxChars: 300 });
+    const count = screen.getByText('168 of 300 characters');
     expect(count).toHaveAttribute('data-tone', 'idle');
     expect(screen.getByRole('region', { name: 'Note to send' })).toBeInTheDocument();
   });
 
   it('past 90% of the limit the count is warn toned and says how many are left', () => {
-    noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 185, maxChars: 200 });
-    const count = screen.getByText(/185 of 200 characters/, { selector: '[data-tone]' });
+    noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 270, maxChars: 300 });
+    expect(screen.getByText('270 of 300 characters', { selector: '[data-tone]' })).toHaveAttribute('data-tone', 'idle');
+    cleanup();
+    noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 285, maxChars: 300 });
+    const count = screen.getByText(/285 of 300 characters/, { selector: '[data-tone]' });
     expect(count).toHaveAttribute('data-tone', 'warn');
-    expect(count).toHaveTextContent('185 of 200 characters, 15 left');
+    expect(count).toHaveTextContent('285 of 300 characters, 15 left');
   });
 
   it('an over-limit note is bad toned and says "Over the limit by 12 characters"', () => {
-    noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 212, maxChars: 200 });
-    const count = screen.getByText(/212 of 200 characters/, { selector: '[data-tone]' });
+    noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 312, maxChars: 300 });
+    const count = screen.getByText(/312 of 300 characters/, { selector: '[data-tone]' });
     expect(count).toHaveAttribute('data-tone', 'bad');
     expect(count).toHaveTextContent('Over the limit by 12 characters');
   });
@@ -312,17 +315,17 @@ describe('NoteBlock', () => {
   });
 
   it('announces the count and the check result in one polite status region', () => {
-    const note = { ...noteOf(plan(), 'Pylon'), chars: 168, maxChars: 200, checks: [pass('a', 'Under the limit'), pass('b', 'No banned phrases')] };
+    const note = { ...noteOf(plan(), 'Pylon'), chars: 168, maxChars: 300, checks: [pass('a', 'Under the limit'), pass('b', 'No banned phrases')] };
     const props = { note, onCopy: vi.fn(), onEdit: vi.fn(), onConfirm: vi.fn() };
     const { rerender } = render(<NoteBlock {...props} saving />);
     const region = screen.getByRole('status');
     expect(region).toHaveAttribute('aria-live', 'polite');
     expect(region).toHaveAttribute('aria-atomic', 'true');
-    expect(region).toHaveTextContent('168 of 200 characters. Saving. The checks run again before you can copy.');
+    expect(region).toHaveTextContent('168 of 300 characters. Saving. The checks run again before you can copy.');
     expect(screen.getByRole('button', { name: 'Copy' })).toHaveAttribute('aria-disabled', 'true');
     rerender(<NoteBlock {...props} note={{ ...note, chars: 150 }} saving={false} />);
     expect(screen.getByRole('status')).toBe(region);
-    expect(region).toHaveTextContent('150 of 200 characters. 2 checks passed.');
+    expect(region).toHaveTextContent('150 of 300 characters. 2 checks passed.');
     expect(screen.getByRole('button', { name: 'Copy' })).toHaveAttribute('aria-disabled', 'false');
   });
 

@@ -1072,7 +1072,7 @@ class PlanFlowTests(HarnessCase):
         h = self.flow()
         run = h.plan.result
         rows = self.entries(h)
-        self.assertEqual((run.linkedin.today, run.email.slots), (10, 15))
+        self.assertEqual((run.linkedin.today, run.email.slots), (7, 15))  # his pace, with the week's share left
         self.assertEqual(len([r for r in rows if r["channel"] == "linkedin_request"]), run.linkedin.today)
         self.assertEqual(len([r for r in rows if r["channel"] == "email"]), 1, "only the founder has an address")
         self.assertLessEqual(len(rows), _rows(h, "SELECT capacity FROM daily_list")[0][0])
@@ -1187,7 +1187,8 @@ class PlanFlowTests(HarnessCase):
         placed = {r["company_id"] for r in self.entries(h)}
         for label, company in extras.items():
             self.assertNotIn(company, placed, label)
-        self.assertEqual(len(placed), 11, "the extras took no place from the companies that may be reached")
+        # 7 LinkedIn rows (his pace) and the founder's email row
+        self.assertEqual(len(placed), 8, "the extras took no place from the companies that may be reached")
         self.assertIn(s.team, placed)
 
     def test_flow_plan_is_idempotent_and_the_foundation_flow_test_still_passes(self):

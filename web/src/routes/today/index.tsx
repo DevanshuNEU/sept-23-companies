@@ -72,7 +72,7 @@ function BelowPlan({ className }: { className?: string }) {
 }
 
 function PlanHead({ plan }: { plan: PlanView }) {
-  const { used, limit, hardUsed, hardLimit } = plan.linkedinMonth;
+  const { used, limit, hardUsed, hardLimit } = plan.linkedinWeek;
   // Once nothing is left to do, the head says what carried over, as the finish line does (design 16.2).
   const finished = plan.rows.length > 0 && plan.rows.every((r) => r.state !== 'todo');
   const carried = finished ? plan.rows.filter((r) => r.state === 'skipped').length : 0;
@@ -85,8 +85,8 @@ function PlanHead({ plan }: { plan: PlanView }) {
         )}
       </div>
       <div className="ml-auto flex items-center gap-2 text-[13px]">
-        <p data-quota="month" className="flex items-baseline gap-1.5 tabular-nums">
-          <span className="text-muted-foreground">Requests this month</span> <b className="font-semibold">{used}</b>{' '}
+        <p data-quota="week" className="flex items-baseline gap-1.5 tabular-nums">
+          <span className="text-muted-foreground">Requests this week</span> <b className="font-semibold">{used}</b>{' '}
           <span className="text-muted-foreground">{`of ${limit}`}</span>
         </p>
         <Tooltip>
@@ -96,7 +96,7 @@ function PlanHead({ plan }: { plan: PlanView }) {
             </button>
           </TooltipTrigger>
           <TooltipContent className="max-w-64">
-            {`The plan uses ${limit} of LinkedIn's ${hardLimit} a month. ${hardUsed} of ${hardLimit} are used, counting requests sent outside the plan.`}
+            {`The plan uses ${limit} of LinkedIn's ${hardLimit} a week. ${hardUsed} of ${hardLimit} are used in the last 7 days, counting requests sent outside the plan.`}
           </TooltipContent>
         </Tooltip>
       </div>

@@ -66,7 +66,7 @@
         <h2 class="t-xl">Tuesday, November 10</h2>
         <p class="lede num" id="plan-count">7 people, 7 done</p>
       </div>
-      <div class="actions t-sm"><span class="muted">Requests this month</span><b class="num" style="font-weight:600" id="month-used">56</b><span class="muted">of 150</span></div>
+      <div class="actions t-sm"><span class="muted">Requests this week</span><b class="num" style="font-weight:600" id="week-used">30</b><span class="muted">of 150</span></div>
     </div>
 
     <div class="rail-split">
@@ -185,7 +185,7 @@
     $("did-ines").hidden = c; $("carried").hidden = !c; $("tom-ines").hidden = !c; $("tom-3").hidden = c;
     document.querySelectorAll("[data-n]").forEach(function (n, i) { n.textContent = c ? i + 2 : i + 1; });
     $("week-line").textContent = c ? "34 requests, 9 accepted, 2 replies." : "35 requests, 9 accepted, 2 replies.";
-    $("month-used").textContent = c ? "55" : "56";
+    $("week-used").textContent = c ? "29" : "30";
     $("finish-h").focus();
   }
   document.querySelectorAll("[data-state]").forEach(function (b) { b.addEventListener("click", function () { setState(b.getAttribute("data-state")); }); });

@@ -1,17 +1,15 @@
-"""New York dates and month and weekday math for the plan (#15). Pure: no clock, no store.
+"""New York dates, the 7-day window and weekday math for the plan (#15). Pure: no clock, no store.
 
 Timestamps are canonical UTC `YYYY-MM-DDTHH:MM:SSZ`; a "day" is a date in the configured zone (`plan.timezone`).
 """
 from __future__ import annotations
 
-import calendar
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
-__all__ = ["ny_date", "is_weekday", "month_range", "utc_window", "weekdays_left", "business_days_between",
-           "today_ny"]
+__all__ = ["ny_date", "is_weekday", "last_seven_days", "utc_window", "business_days_between", "today_ny"]
 
 
 def ny_date(ts: str, tz: str) -> date:
@@ -28,9 +26,11 @@ def is_weekday(d: date) -> bool:
     return d.weekday() < 5
 
 
-def month_range(d: date) -> tuple[date, date]:
-    """The first and last day of the month `d` is in."""
-    return d.replace(day=1), d.replace(day=calendar.monthrange(d.year, d.month)[1])
+def last_seven_days(d: date) -> tuple[date, date]:
+    """The first and last day (both inclusive) of the 7 days that end on `d`: `d` and the 6 before it. LinkedIn
+    counts requests over any 7 days (#9), so a rolling window never runs ahead of its count the way a calendar week
+    would."""
+    return d - timedelta(days=6), d
 
 
 def utc_window(first: date, last: date, tz: str) -> tuple[str, str]:
@@ -42,12 +42,6 @@ def utc_window(first: date, last: date, tz: str) -> tuple[str, str]:
         return datetime.combine(day, time.min, tzinfo=zone).astimezone(timezone.utc).strftime(ISO_FMT)
 
     return start(first), start(last + timedelta(days=1))
-
-
-def weekdays_left(today: date) -> int:
-    """Monday to Friday days from `today` to the end of its month, both included."""
-    _, end = month_range(today)
-    return sum(1 for n in range((end - today).days + 1) if is_weekday(today + timedelta(days=n)))
 
 
 def business_days_between(a: date, b: date) -> int:

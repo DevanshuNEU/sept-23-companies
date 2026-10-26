@@ -1,8 +1,8 @@
 """The one shape of `outreach_touch.context`.
 
 The schema CHECK pins these seven keys (#30). `source` is `plan` for a touch logged from a plan row and `own`
-otherwise; #15's 150 a month quota counts `source = 'plan'`. The API writes it for LinkedIn and application touches,
-and the sender writes it for email touches.
+otherwise; #15's quota of 150 in any 7 days counts `source = 'plan'`. The API writes it for LinkedIn and application
+touches, and the sender writes it for email touches.
 """
 import math
 from collections.abc import Mapping

@@ -2,7 +2,7 @@
 # the API reads them there and keeps no copy.
 
 [notes]
-max_chars = 200
+max_chars = 300          # a LinkedIn note on his Premium seat (#9); the checks read the plan's note.max_chars
 
 [outcomes]
 min_requests = 30        # a period with fewer requests is "not enough yet"

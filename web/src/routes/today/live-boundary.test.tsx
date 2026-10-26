@@ -25,7 +25,7 @@ function transport(reads: Record<string, unknown> = {}) {
 
 const EMPTY_DAY = {
   asOf: '2026-11-10T13:00:00Z', date: '2026-11-10', builtAt: null, rows: [], done: 0, total: 0,
-  linkedinMonth: { used: 12, limit: 150, hardUsed: 14, hardLimit: 200 },
+  linkedinWeek: { used: 12, limit: 150, hardUsed: 14, hardLimit: 200 },
   tomorrow: { total: 7, text: 'Tomorrow: 7 people.', preview: [] },
   week: { requests: 0, accepts: 0, replies: 0 },
 } satisfies Omit<PlanView, 'listJob' | 'notReady'>;

@@ -1772,8 +1772,8 @@ export interface components {
             /** Requeststhisweek */
             requestsThisWeek: number;
         };
-        /** LinkedinMonth */
-        LinkedinMonth: {
+        /** LinkedinWeek */
+        LinkedinWeek: {
             /** Hardlimit */
             hardLimit: number;
             /** Hardused */
@@ -2405,7 +2405,7 @@ export interface components {
             date: string;
             /** Done */
             done: number;
-            linkedinMonth: components["schemas"]["LinkedinMonth"];
+            linkedinWeek: components["schemas"]["LinkedinWeek"];
             listJob: components["schemas"]["JobRunSummary"] | null;
             notReady: components["schemas"]["NotReady"] | null;
             /** Rows */

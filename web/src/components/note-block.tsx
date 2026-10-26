@@ -11,7 +11,7 @@ type Tone = 'idle' | 'warn' | 'bad';
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** The length against the API's limit, always in words: "168 of 200 characters", then how many are left past 90%. */
+/** The length against the API's limit, always in words: "168 of 300 characters", then how many are left past 90%. */
 function charCount(chars: number, max: number): { tone: Tone; text: string } {
   const of = `${chars} of ${max} characters`;
   if (chars > max) return { tone: 'bad', text: `${of}. Over the limit by ${plural(chars - max, 'character', 'characters')}.` };

@@ -319,7 +319,7 @@ export interface PlanView {
   asOf: IsoTime; date: IsoDate; builtAt: IsoTime | null; listJob: JobRunSummary | null;
   notReady: { reason: 'weekend' | 'not_built' | 'job_failed'; text: string } | null;
   rows: PlanRow[]; done: number; total: number;
-  linkedinMonth: { used: number; limit: number; hardUsed: number; hardLimit: number };   // plan quota, and every request against the hard total
+  linkedinWeek: { used: number; limit: number; hardUsed: number; hardLimit: number };    // the last 7 days: plan quota, and every request against the hard total
   tomorrow: { total: number; text: string; preview: TomorrowRow[] };                     // total is room; preview is a dry run of the next plan
   week: { requests: number; accepts: number; replies: number };
 }

@@ -809,7 +809,7 @@ describe('plan writes: logging', () => {
     expect(progress.week.effort[0]?.count).toBe(32);
     expect(progress.month.effort[0]?.count).toBe(53);
     expect(progress.base.requests).toBe(143);
-    expect(plan.linkedinMonth).toMatchObject({ used: 53, hardUsed: 61 });
+    expect(plan.linkedinWeek).toMatchObject({ used: 27, hardUsed: 32 });
   });
 
   it('the apply step completes the row', async () => {
@@ -846,7 +846,7 @@ describe('plan writes: logging', () => {
     expect(second).toEqual(await rowAt(c, 3));
     expect((await c.progress()).today.requests).toBe(3);
     expect((await c.plan()).week.requests).toBe(32);
-    expect((await c.plan()).linkedinMonth.used).toBe(53);
+    expect((await c.plan()).linkedinWeek.used).toBe(27);
   });
 
   it('same key twice on the apply step makes one touch', async () => {

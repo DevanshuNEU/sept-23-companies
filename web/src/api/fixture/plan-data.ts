@@ -36,7 +36,7 @@ export interface PlanFixture {
   scores: Record<Id, ScoreView>; // fixture-internal lookup by company id, not the wire
 }
 
-const MAX_CHARS = 200;
+const MAX_CHARS = 300; // a LinkedIn note on his Premium seat (#9)
 const MIN_REQUESTS = 30;
 const RANKER = '2026.11.02';
 const link = (label: string, host: string, path: string): SourceLink => ({ label, url: `https://${host}.example/${path}` });
@@ -287,19 +287,19 @@ interface Numbers { week: Counts; month: Counts; weekEffort: Effort; monthEffort
 function numbersFor(scenario: Scenario): Numbers {
   const base: Numbers = {
     week: [31, 9, 2, 0, 1], month: [52, 17, 4, 1, 2], weekEffort: { requests: 31, applications: 24, emails: 8 }, monthEffort: { requests: 52, applications: 41, emails: 14 },
-    base: { requests: 142, accepts: 41, replies: 9, median: 6, since: '2026-09-21' }, quiet: false, linkedin: [52, 60],
+    base: { requests: 142, accepts: 41, replies: 9, median: 6, since: '2026-09-21' }, quiet: false, linkedin: [26, 31],
   };
   switch (scenario) {
     case 'plan_done':
       return { ...base, week: [35, 9, 2, 0, 1], month: [56, 17, 4, 1, 2], weekEffort: { requests: 35, applications: 28, emails: 9 }, monthEffort: { requests: 56, applications: 45, emails: 15 },
-        base: { ...base.base, requests: 146 }, linkedin: [56, 64] };
+        base: { ...base.base, requests: 146 }, linkedin: [30, 35] };
     case 'win':
       return { ...base, week: [31, 10, 2, 0, 1], month: [52, 18, 4, 1, 2], base: { ...base.base, accepts: 42 } };
     case 'quiet_week':
       return { ...base, week: [28, 4, 0, 0, 0], weekEffort: { requests: 28, applications: 22, emails: 6 }, quiet: true };
     case 'first_week':
       return { week: [9, 2, 0, 0, 0], month: [9, 2, 0, 0, 0], weekEffort: { requests: 9, applications: 7, emails: 2 }, monthEffort: { requests: 9, applications: 7, emails: 2 },
-        base: { requests: 9, accepts: 2, replies: 0, median: null, since: '2026-11-04' }, quiet: false, linkedin: [9, 12] };
+        base: { requests: 9, accepts: 2, replies: 0, median: null, since: '2026-11-04' }, quiet: false, linkedin: [7, 9] };
     case 'fresh': case 'empty':
       return { week: [0, 0, 0, 0, 0], month: [0, 0, 0, 0, 0], weekEffort: { requests: 0, applications: 0, emails: 0 }, monthEffort: { requests: 0, applications: 0, emails: 0 },
         base: { requests: 0, accepts: 0, replies: 0, median: null, since: '2026-11-10' }, quiet: false, linkedin: [0, 0] };
@@ -543,7 +543,7 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
 
   const plan: PlanView = {
     asOf: c.asOf, date: c.date, builtAt: noList ? null : c.et(c.date, '08:01'), listJob, notReady, rows, done, total: rows.length,
-    linkedinMonth: { used: n.linkedin[0], limit: 150, hardUsed: n.linkedin[1], hardLimit: 200 },
+    linkedinWeek: { used: n.linkedin[0], limit: 150, hardUsed: n.linkedin[1], hardLimit: 200 },
     tomorrow, week: { requests: week[0], accepts: week[1], replies: week[2] },
   };
 

@@ -894,8 +894,8 @@ export class FixtureClient implements OutreachClient {
     if (kind === 'request') {
       this.countStage('requests');
       this.countEffort('Requests sent');
-      this.db.plan.linkedinMonth.used += 1;
-      this.db.plan.linkedinMonth.hardUsed += 1;
+      this.db.plan.linkedinWeek.used += 1;
+      this.db.plan.linkedinWeek.hardUsed += 1;
     } else {
       this.countEffort('Applications sent');
     }

@@ -52,7 +52,7 @@ describe('plan fixture: default', () => {
     expect(plan.done).toBe(2);
     expect(plan.total).toBe(7);
     expect(plan.notReady).toBeNull();
-    expect(plan.linkedinMonth).toEqual({ used: 52, limit: 150, hardUsed: 60, hardLimit: 200 });
+    expect(plan.linkedinWeek).toEqual({ used: 26, limit: 150, hardUsed: 31, hardLimit: 200 });
     expect(plan.week).toEqual({ requests: 31, accepts: 9, replies: 2 });
     expect(plan.tomorrow.total).toBeGreaterThan(0);
   });
@@ -67,11 +67,11 @@ describe('plan fixture: default', () => {
     expect(row(plan, 1).role?.title).toBe('Software Engineer, New Grad');
   });
 
-  it('row 3 note is 168 of 200 with two linked facts and a confirmed line', async () => {
+  it('row 3 note is 168 of 300 with two linked facts and a confirmed line', async () => {
     const note = row(await client().plan(), 3).note;
     expect(note).not.toBeNull();
     expect(note?.chars).toBe(168);
-    expect(note?.maxChars).toBe(200);
+    expect(note?.maxChars).toBe(300);
     expect(note?.facts).toHaveLength(2);
     expect(note?.facts.every((f) => f.source.url.includes('.example'))).toBe(true);
     expect(note?.reasonState).toBe('confirmed');

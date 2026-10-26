@@ -71,6 +71,15 @@ afterEach(() => {
 });
 
 describe('Today as a plan', () => {
+  it("counts requests over the last 7 days, and the tooltip names LinkedIn's weekly limit", async () => {
+    const user = userEvent.setup();
+    await openPlan();
+    await user.hover(screen.getByRole('button', { name: 'About this limit' }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      "The plan uses 150 of LinkedIn's 200 a week. 31 of 200 are used in the last 7 days, counting requests sent outside the plan.",
+    );
+  });
+
   it('lands on Lena Ortiz with her reason, role link, apply link and note', async () => {
     const { client } = await openPlan();
     const lena = (await client.plan()).rows[2];
@@ -79,7 +88,8 @@ describe('Today as a plan', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: 'Tuesday, November 10' })).toBeInTheDocument();
     expect(screen.getByText('7 people, 2 done')).toBeInTheDocument();
-    expect(screen.getByText((_, el) => el?.getAttribute('data-quota') === 'month' && el.textContent === 'Requests this month 52 of 150')).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.getAttribute('data-quota') === 'week' && el.textContent === 'Requests this week 26 of 150')).toBeInTheDocument();
+    expect(screen.queryByText(/Requests this month/)).toBeNull();
 
     expect(option(3)).toHaveAttribute('aria-selected', 'true');
     expect(option(3)).toHaveAccessibleName('3. Lena Ortiz at Pylon, To do');

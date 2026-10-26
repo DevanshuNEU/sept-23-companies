@@ -199,7 +199,7 @@ describe('Today as a plan', () => {
     expect(carried.className).not.toMatch(/text-(bad|warn)/);
   });
 
-  it('find someone row shows the search link, c copies the handoff, no note, no log button', async () => {
+  it('a company row says what it is: the search link, no note and nothing about Claude, and c copies the handoff', async () => {
     const writeText = stubClipboard();
     const { client } = await openPlan();
     const cerebrium = (await client.plan()).rows[4];
@@ -207,42 +207,69 @@ describe('Today as a plan', () => {
     fireEvent.click(option(5));
     expect(await screen.findByRole('heading', { level: 2, name: 'Find someone at Cerebrium' })).toBeInTheDocument();
 
+    expect(panel()).toHaveTextContent('Cerebrium is a company to reach. You find the people.');
+    expect(panel()).not.toHaveTextContent(/Claude/);
     const search = within(panel()).getByRole('link', { name: 'Open LinkedIn search' });
     expect(search).toHaveAttribute('href', cerebrium.findSomeone.searchUrl);
     expect(search).toHaveAttribute('aria-keyshortcuts', 's');
     expect(search).toHaveAttribute('data-variant', 'default');
-    expect(within(panel()).getByText(cerebrium.findSomeone.handoff)).toBeInTheDocument();
+    expect(within(panel()).getByRole('list', { name: 'How to reach this company' })).toHaveTextContent(
+      '1. SearchOpen the LinkedIn search and pick the people you want to reach.2. Reach outSend your requests on LinkedIn, with your own note.3. Log it here',
+    );
+    // no note editor, no note and no Confirm line on a company row
     expect(within(panel()).queryByRole('region', { name: 'Note to send' })).not.toBeInTheDocument();
-    expect(within(panel()).queryByRole('button', { name: /^Log / })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole('textbox', { name: /note/i })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole('button', { name: /Confirm|Edit/ })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole('button', { name: /Copy handoff/ })).not.toBeInTheDocument();
+    expect(within(panel()).getByRole('textbox', { name: 'Who did you ask?' })).toBeInTheDocument();
+    expect(within(panel()).getByRole('button', { name: 'Log request sent' })).toBeInTheDocument();
+    expect(within(panel()).getByRole('button', { name: 'Log applied' })).toBeInTheDocument();
 
     press('c');
-    expect(await screen.findByText('Copied the handoff for Claude.')).toBeInTheDocument();
+    expect(await screen.findByText('Copied the handoff.')).toBeInTheDocument();
     expect(writeText).toHaveBeenCalledWith(cerebrium.findSomeone.handoff);
+    toast.dismiss();
+    press('e');
+    expect(await screen.findByText('No note on a company row. You write your own notes.')).toBeInTheDocument();
   });
 
-  it('r and p on a find someone row log nothing and say how to start', async () => {
+  it('a company row logs a request for the name he types, r goes to the field, and p logs applied', async () => {
+    const user = userEvent.setup();
     const { client } = await openPlan();
     const request = vi.spyOn(client, 'logRequest');
     const applied = vi.spyOn(client, 'logApplied');
     fireEvent.click(option(5));
     await screen.findByRole('heading', { level: 2, name: 'Find someone at Cerebrium' });
-    press('p');
-    expect(await screen.findByText('Not logged. Find someone at Cerebrium first. Press S to search.')).toBeInTheDocument();
+    const field = within(panel()).getByRole('textbox', { name: 'Who did you ask?' });
+
+    // An empty name logs nothing and says what to type.
+    await user.click(within(panel()).getByRole('button', { name: 'Log request sent' }));
+    expect(await screen.findByText('Not logged. Type the name of the person you asked at Cerebrium, then log it.')).toBeInTheDocument();
     toast.dismiss();
+    // r puts the cursor in the field; Enter logs it.
+    (document.activeElement as HTMLElement | null)?.blur();
     press('r');
-    await waitFor(() => expect(screen.getAllByText('Not logged. Find someone at Cerebrium first. Press S to search.').length).toBeGreaterThan(0));
-    expect(option(5)).toHaveAccessibleName('5. Find someone at Cerebrium, To do');
+    await waitFor(() => expect(field).toHaveFocus());
+    await user.type(field, '  Ana   Silva {Enter}');
+    expect(await screen.findByText('Logged: request sent to Ana Silva.')).toBeInTheDocument();
+    expect(option(5)).toHaveAccessibleName('5. Find someone at Cerebrium, Logged');
+
+    press('p');
     await leavePage();
-    expect(request).not.toHaveBeenCalled();
-    expect(applied).not.toHaveBeenCalled();
+    const row = (await client.plan()).rows[4];
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.slice(0, 2)).toEqual([row?.entryId, { personName: 'Ana Silva', idempotencyKey: `plan:${row?.entryId}:request` }]);
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(row?.steps.every((s) => s.at !== null)).toBe(true);
+    expect(row?.person).toBeNull();
   });
 
-  it('shift+c copies every handoff and toasts "Copied 1 handoff for Claude."', async () => {
+  it('shift+c copies every handoff and toasts "Copied 1 handoff."', async () => {
     const writeText = stubClipboard();
     const { client } = await openPlan();
     const handoff = (await client.plan()).rows[4]?.findSomeone?.handoff;
     press('C', { shiftKey: true });
-    expect(await screen.findByText('Copied 1 handoff for Claude.')).toBeInTheDocument();
+    expect(await screen.findByText('Copied 1 handoff.')).toBeInTheDocument();
     expect(writeText).toHaveBeenCalledWith(handoff);
   });
 
@@ -721,7 +748,8 @@ describe('Today as a plan', () => {
     db.plan.done = 0;
     await open({ db });
     expect(await screen.findByText('Nobody is on today\'s plan.')).toBeInTheDocument();
-    expect(screen.getByText(/side terminal/)).toBeInTheDocument();
+    expect(screen.getByText(/you find the people on LinkedIn and write your own notes/)).toBeInTheDocument();
+    expect(screen.queryByText(/Claude/)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open all proposed companies' })).toHaveAttribute('href', '/proposals');
   });
 

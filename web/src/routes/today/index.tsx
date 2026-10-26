@@ -29,7 +29,7 @@ import type { NoteEdit } from './note-editor';
 import { KeyHint, PersonPanel, type PanelActions } from './plan-panel';
 import { PlanEmpty, PlanJobBanner, PlanNotReady, PlanSkeleton } from './plan-states';
 import { OutcomePrompt } from './outcome-prompt';
-import { nextTodoAfter } from './plan-steps';
+import { askedFieldId, nextTodoAfter } from './plan-steps';
 import { usePlanActions } from './use-plan-actions';
 import { WatchList } from './watch-list';
 import { WinStrip } from './win-strip';
@@ -166,9 +166,16 @@ function PlanWork({ plan }: { plan: PlanView }) {
   /* ------------------------------------------------------------------ what each key and button does */
 
   const log = (row: PlanRow, kind: StepKind) => {
+    // A company row logs a request from its "Who did you ask?" field: R puts the cursor there, Enter logs it.
+    const field = kind === 'request' && row.person === null && row.channel !== 'email' ? document.getElementById(askedFieldId(headingId)) : null;
+    if (field) return void requestAnimationFrame(() => field.focus());
     const done = finishes(row, kind);
     const queued = kind === 'request' ? actions.logRequest(row) : actions.logApplied(row);
     if (queued && done) moveOn(row);
+  };
+  const logAsked = (row: PlanRow, name: string) => {
+    const done = finishes(row, 'request');
+    if (actions.logRequest(row, name) && done) moveOn(row);
   };
   const carry = (row: PlanRow) => {
     if (actions.skip(row)) moveOn(row);
@@ -203,7 +210,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
         : `Copied. ${unlinked} facts have no link: check them before you send.`;
   };
   const copyNote = (row: PlanRow) => {
-    if (row.findSomeone) return void copy(row.findSomeone.handoff, 'Copied the handoff for Claude.');
+    if (row.findSomeone) return void copy(row.findSomeone.handoff, 'Copied the handoff.');
     const note = row.note;
     if (!note) return void toast(row.channel === 'email' ? 'No note on this row. Review the email in the Outbox.' : 'No note on this row yet.');
     const refusal = copyRefusal(row, note);
@@ -237,11 +244,11 @@ function PlanWork({ plan }: { plan: PlanView }) {
   const copyAllHandoffs = () => {
     const handoffs = rows.flatMap((r) => (r.state === 'todo' && r.findSomeone ? [r.findSomeone.handoff] : []));
     if (handoffs.length === 0) return void toast('Nothing copied. No row today needs someone found.');
-    void copy(handoffs.join('\n\n'), `Copied ${plural(handoffs.length, 'handoff', 'handoffs')} for Claude.`);
+    void copy(handoffs.join('\n\n'), `Copied ${plural(handoffs.length, 'handoff', 'handoffs')}.`);
   };
   const edit = (row: PlanRow) => {
     const note = row.note;
-    if (!note) return void toast(row.findSomeone ? 'No note yet. Claude writes it once someone is found.' : 'No note on this row.');
+    if (!note) return void toast(row.findSomeone ? 'No note on a company row. You write your own notes.' : 'No note on this row.');
     if (!edits.has(note.noteId)) setEdit(note.noteId, { text: note.text, line: note.reasonLine });
     // Focus goes into the editor only when he starts an edit, never when he comes back to a row with a kept one.
     requestAnimationFrame(() => document.getElementById(noteFieldId)?.focus());
@@ -272,6 +279,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
   };
   const panelActions = (row: PlanRow): PanelActions => ({
     onLog: (kind) => log(row, kind),
+    onLogAsked: (name) => logAsked(row, name),
     onCarry: () => carry(row),
     onNotFit: () => askNotAFit(row),
     onCopy: () => copyNote(row),

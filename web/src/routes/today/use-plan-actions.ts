@@ -114,9 +114,9 @@ const refetchOnly = <T,>(key: readonly unknown[]): Patch<T> => ({ key, apply: (d
 /** Whether logging this step is the one that finishes the row. */
 const finishes = (row: PlanRow, kind: StepKind) => row.state === 'todo' && row.steps.every((s) => s.kind === kind || s.at !== null);
 
-const stepLabel = (row: PlanRow, kind: StepKind): string =>
+const stepLabel = (row: PlanRow, kind: StepKind, asked?: string): string =>
   kind === 'request'
-    ? `Logged: request sent to ${row.person?.person.name ?? row.company.name}.`
+    ? `Logged: request sent to ${row.person?.person.name ?? asked ?? row.company.name}.`
     : `Logged: applied for ${row.role?.title ?? 'the role'} at ${row.company.name}.`;
 
 function outcomeLabel(t: PromptTouch, kind: OutcomeKind, replyKind: Reply | undefined): string {
@@ -163,23 +163,33 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
     return null;
   };
 
-  /** True when the log was queued; a refused or repeated press returns false (and says why, unless it repeats). */
-  const logStep = (row: PlanRow, kind: StepKind): boolean => {
+  /**
+   * True when the log was queued; a refused or repeated press returns false (and says why, unless it repeats). A
+   * company row (nobody on it: company first) logs a request for `asked`, the name of the person he asked, and logs
+   * applied like any row with a role.
+   */
+  const logStep = (row: PlanRow, kind: StepKind, asked?: string): boolean => {
     const { entryId } = row;
     const id = `log:${entryId}:${kind === 'request' ? 'request' : 'apply'}`;
     if (isPending(id)) return false;
     const company = row.company.name;
     // The sender and the reply reader log email, so no key logs anything on an email row.
     if (row.channel === 'email') return refuse('Review this email in the Outbox.');
-    // Nobody on the row yet: neither a request nor an application can be logged, whatever the role.
-    if (!row.person) return refuse(`Not logged. Find someone at ${company} first. Press S to search.`);
+    const name = asked?.split(/\s+/).filter(Boolean).join(' ') ?? '';
     // The row on screen against the newest poll: a key that lands before the view drew a changed row is refused.
     const latest = cachedRow(queryClient, entryId);
     const gone = goneOrNoGo(row, latest, 'Not logged');
     if (gone) return refuse(gone);
     let call: (revision: Revision, o: WriteOptions) => Promise<PlanRow>;
     const key = `plan:${entryId}:${kind}`;
-    if (kind === 'request') {
+    if (kind === 'request' && !row.person) {
+      // A company row: the request names the person he asked, typed on the row.
+      if (row.state === 'todo' && !row.steps.find((s) => s.kind === 'request')?.at && !name) {
+        return refuse(`Not logged. Type the name of the person you asked at ${company}, then log it.`);
+      }
+      if (latest && latest.person) return refuse(`Not logged. ${company}'s row now names ${latest.person.person.name}. Check the row, then press R again.`);
+      call = (revision, o) => client.logRequest(entryId, { personName: name, idempotencyKey: key }, revision, o);
+    } else if (kind === 'request' && row.person) {
       const personId = row.person.person.id;
       if (latest && latest.person?.person.id !== personId) {
         const now = latest.person ? ` to ${latest.person.person.name}` : '';
@@ -198,7 +208,7 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
     if (row.state === 'skipped') return refuse(`${company} is carried to tomorrow.`);
     if (row.state === 'done' || row.steps.find((s) => s.kind === kind)?.at) return refuse('Already logged.');
 
-    const label = stepLabel(row, kind);
+    const label = stepLabel(row, kind, name || undefined);
     const delta = finishes(row, kind) ? 1 : 0;
     write({
       id,
@@ -223,7 +233,7 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
     return true;
   };
 
-  const logRequest = (row: PlanRow) => logStep(row, 'request');
+  const logRequest = (row: PlanRow, asked?: string) => logStep(row, 'request', asked);
   const logApplied = (row: PlanRow) => logStep(row, 'apply');
 
   /** True when the carry was queued. */

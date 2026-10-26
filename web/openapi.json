@@ -2413,7 +2413,7 @@
       },
       "LogRequestBody": {
         "additionalProperties": false,
-        "description": "He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one\ntouch per key, whatever the request id. `revision` is optional and never checked: a log only adds a touch, the key\nstops a double press, and two logs sent out of order (the tab closed) must both land. The entry's revision still\nmoves on.",
+        "description": "He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one\ntouch per key, whatever the request id. `revision` is optional and never checked: a log only adds a touch, the key\nstops a double press, and two logs sent out of order (the tab closed) must both land. The entry's revision still\nmoves on.\n\nA row with a person sends its `personId`. A company row (nobody on it: company first, #9) sends `personName`\ninstead, the name of the person he asked; the person is added at the company (by him) or found there by name.",
         "properties": {
           "idempotencyKey": {
             "pattern": "^[A-Za-z0-9:._-]{1,200}$",
@@ -2421,10 +2421,29 @@
             "type": "string"
           },
           "personId": {
-            "maximum": 4.611686018427388e+18,
-            "minimum": 1.0,
-            "title": "Personid",
-            "type": "integer"
+            "anyOf": [
+              {
+                "maximum": 4.611686018427388e+18,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personid"
+          },
+          "personName": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personname"
           },
           "revision": {
             "anyOf": [
@@ -2440,7 +2459,6 @@
           }
         },
         "required": [
-          "personId",
           "idempotencyKey"
         ],
         "title": "LogRequestBody",

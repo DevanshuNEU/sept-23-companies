@@ -239,15 +239,18 @@ describe('usePlanActions', () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it('logApplied on a row with nobody on it is refused before the role is looked at, and calls nothing', async () => {
+  it('logApplied on a company row (nobody on it) logs the application for its role', async () => {
     const { client, rowOf, act: run } = await open();
     const apply = vi.spyOn(client, 'logApplied');
-    expect(rowOf(5).role).not.toBeNull();
-    run((a) => a.logApplied(rowOf(5)));
+    const row = rowOf(5);
+    expect(row.person).toBeNull();
+    if (!row.role) throw new Error('fixture: row 5 has a role');
+    run((a) => a.logApplied(row));
     await settle();
-    expect(screen.getByText('Not logged. Find someone at Cerebrium first. Press S to search.')).toBeInTheDocument();
+    expect(screen.getByText('Logged: applied for Member of Technical Staff at Cerebrium.')).toBeInTheDocument();
     await settle(10000);
-    expect(apply).not.toHaveBeenCalled();
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply.mock.calls[0]?.[1]).toEqual({ postingId: row.role.postingId, idempotencyKey: `plan:${row.entryId}:apply` });
   });
 
   it('a press on a row that is no longer on the newest plan is refused', async () => {
@@ -261,17 +264,31 @@ describe('usePlanActions', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it('logRequest on a row with nobody on it or an email row says so and calls nothing', async () => {
+  it('logRequest on a company row with no name typed, or on an email row, says so and calls nothing', async () => {
     const { client, rowOf, act: run } = await open();
     const request = vi.spyOn(client, 'logRequest');
-    run((a) => a.logRequest(rowOf(5)));
-    await settle();
-    expect(screen.getByText('Not logged. Find someone at Cerebrium first. Press S to search.')).toBeInTheDocument();
+    for (const blank of [undefined, '   ']) {
+      run((a) => a.logRequest(rowOf(5), blank));
+      await settle();
+    }
+    expect(screen.getAllByText('Not logged. Type the name of the person you asked at Cerebrium, then log it.').length).toBeGreaterThan(0);
     run((a) => a.logRequest(rowOf(7)));
     await settle();
     expect(screen.getByText('Review this email in the Outbox.')).toBeInTheDocument();
     await settle(10000);
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('logRequest on a company row sends the name he typed, never a person id', async () => {
+    const { client, rowOf, act: run } = await open();
+    const request = vi.spyOn(client, 'logRequest');
+    const row = rowOf(5);
+    run((a) => a.logRequest(row, ' Ana  Silva '));
+    await settle();
+    expect(screen.getByText('Logged: request sent to Ana Silva.')).toBeInTheDocument();
+    await settle(10000);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[1]).toEqual({ personName: 'Ana Silva', idempotencyKey: `plan:${row.entryId}:request` });
   });
 
   it('undo inside the window sends nothing and the row is todo again', async () => {

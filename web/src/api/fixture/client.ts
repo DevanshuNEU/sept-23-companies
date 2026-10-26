@@ -902,9 +902,14 @@ export class FixtureClient implements OutreachClient {
     return row;
   }
 
-  logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow> {
+  logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string } | { personName: string; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow> {
     return this.write(o, () => this.logStep(entryId, 'request', input.idempotencyKey, revision, (row) => {
-      if (!row.person) throw notAllowed('Find someone at this company first');
+      // As the API: a company row takes the name of the person he asked; a row with a person takes its id.
+      if (!row.person) {
+        if (!('personName' in input) || !input.personName.trim()) throw notAllowed('Nobody is on this row. Type the name of the person you asked, then log it');
+        return;
+      }
+      if (!('personId' in input)) throw notAllowed('This row already names its person');
       if (row.person.person.id !== input.personId) throw notAllowed('That person is not on this row');
     }));
   }

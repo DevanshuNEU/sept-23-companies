@@ -6,6 +6,9 @@ or confirms a reason line on anyone's behalf: `confirm_note` runs only from his 
 - `log_request`: one `linkedin_log` row (`request_sent`) and one `linkedin_request` touch together (ruling 1), with a
   context of source `plan` (#15's quota of 150 in any 7 days counts it). The touch's own key is the body's
   `idempotencyKey`, so a press after the first commit landed (a new request id) finds the touch and writes nothing.
+  On a company row (no person: company first, #9) he types the name of the person he asked: `add_candidate` finds
+  them at the company by name or adds them (`added_by 'devanshu'`, role kind `other`, no sources), then the same two
+  rows are written. The entry keeps no person; its request step is done by #15's company rule.
 - `log_applied`: an `application` row and an `application` touch with no person (ruling 2), the same way.
 - `skip_row`: the entry goes to `backlog` with `decided_at` (the next #15 build carries it) and a `row_skipped`
   event records it.
@@ -33,6 +36,7 @@ from outreach.outcomes.context import build_context
 from outreach.outcomes.windows import day_bounds_utc, ny_day
 from outreach.plan.config import PlanConfig
 from outreach.plan.drafts import confirm_reason, save_linkedin_draft
+from outreach.plan.people import add_candidate
 from outreach.store import append_event, log_touch
 
 NO_ROLE = "No role to apply for."
@@ -137,6 +141,10 @@ def _open_to_him(conn: sqlite3.Connection, entry: sqlite3.Row, person: sqlite3.R
 def log_request(ctx: WriteCtx, entry_id: int, body: LogRequestBody, cfg: PlanConfig) -> PlanRow:
     conn = ctx.conn
     entry = _entry(conn, entry_id)
+    if entry["person_id"] is None and entry["channel"] != "email":
+        return _log_company_request(ctx, entry_id, entry, body, cfg)
+    if body.person_name is not None:
+        raise _bad("This row already names its person.")
     found = _keyed(conn, body.idempotency_key)
     if found is not None and (found["channel"] != "linkedin_request" or found["person_id"] is None
                               or found["person_id"] != entry["person_id"] or body.person_id != entry["person_id"]):
@@ -157,6 +165,13 @@ def log_request(ctx: WriteCtx, entry_id: int, body: LogRequestBody, cfg: PlanCon
         (person["person_id"], day_bounds_utc(entry["list_date"])[0])).fetchone()
     if logged is not None:
         raise _refuse(f"Already logged: request sent to {person['name']} on {ny_day(logged['sent_at'])}.")
+    _write_request(ctx, entry, survivor, person, body.idempotency_key, found)
+    return _answer(conn, entry_id, cfg)
+
+
+def _write_request(ctx: WriteCtx, entry: sqlite3.Row, survivor: int, person: sqlite3.Row, key: str,
+                   found: sqlite3.Row | None) -> None:
+    conn = ctx.conn
     posting = _posting(conn, entry["posting_id"])
     if posting is not None and posting["closed_at"] is not None:
         posting = None  # the row shows no role once its posting closed, so the touch names none either
@@ -168,8 +183,39 @@ def log_request(ctx: WriteCtx, entry_id: int, body: LogRequestBody, cfg: PlanCon
                  (person["person_id"], ctx.now, ctx.now))
     log_touch(conn, person_id=person["person_id"], company_id=survivor, channel="linkedin_request", sent_at=ctx.now,
               context=context, posting_id=posting["posting_id"] if posting is not None else None,
-              idempotency_key=body.idempotency_key)
+              idempotency_key=key)
     _bump_logged(ctx, entry)
+
+
+def _log_company_request(ctx: WriteCtx, entry_id: int, entry: sqlite3.Row, body: LogRequestBody,
+                         cfg: PlanConfig) -> PlanRow:
+    """A company row: the request he sent to the person he names. One request per row key: a second press finds the
+    touch and writes nothing."""
+    conn = ctx.conn
+    survivor = survivor_of(merge_parents(conn), entry["company_id"])
+    found = _keyed(conn, body.idempotency_key)
+    if found is not None and (found["channel"] != "linkedin_request" or found["person_id"] is None
+                              or found["company_id"] != survivor or body.person_id is not None):
+        raise _bad("That key belongs to another touch, not this row's request.")
+    if found is not None and found["undone_at"] is None:  # already logged under this key: nothing written
+        return _answer(conn, entry_id, cfg)
+    name = " ".join((body.person_name or "").split())
+    if body.person_id is not None or not name:
+        raise _refuse("Nobody is on this row. Type the name of the person you asked, then log it.")
+    survivor = _open_to_him(conn, entry, None)  # a paused or no-go company first, before anyone is added
+    added = add_candidate(conn, company_id=survivor, name=name, role_kind="other", sources=(),
+                          added_by="devanshu", today=date.fromisoformat(ny_day(ctx.now)), cfg=cfg)
+    if added.refused is not None:
+        raise _refuse(f"{name} could not be added at this company ({added.refused}).")
+    person = conn.execute("SELECT * FROM person WHERE person_id = ?", (added.person_id,)).fetchone()
+    _open_to_him(conn, entry, person)  # a no-go on the person found by that name
+    logged = conn.execute(
+        "SELECT sent_at FROM outreach_touch WHERE person_id = ? AND channel = 'linkedin_request' "
+        "AND undone_at IS NULL AND sent_at >= ? ORDER BY sent_at LIMIT 1",
+        (person["person_id"], day_bounds_utc(entry["list_date"])[0])).fetchone()
+    if logged is not None:
+        raise _refuse(f"Already logged: request sent to {person['name']} on {ny_day(logged['sent_at'])}.")
+    _write_request(ctx, entry, survivor, person, body.idempotency_key, found)
     return _answer(conn, entry_id, cfg)
 
 

@@ -32,8 +32,10 @@ ROOT = Path(__file__).resolve().parent.parent
 FIX = Path(__file__).resolve().parent / "fixtures" / "plan"
 TEMPLATE = ROOT / "launchd" / "com.devanshu.outreach-prepare.plist.template"
 CFG = default_plan_config()
-# The prepare step is off until the deny rule is checked on his seat (prepare.deny_rule_checked); tests turn it on.
+# The deny rule was checked on his seat on 2026-10-25 (prepare.deny_rule_checked is true in the shipped config); the
+# tests that need the step OFF build that config with the switch back to false.
 ON = dataclasses.replace(CFG, prepare={**CFG.prepare, "deny_rule_checked": True})
+OFF = dataclasses.replace(CFG, prepare={**CFG.prepare, "deny_rule_checked": False})
 BANNED, _ = load_banned(FIX / "banned_phrases.txt", scopes=("both", "dm"))
 UNCONFIRMED = load_unconfirmed(FIX / "me.md")
 ME_TEXT = (FIX / "me.md").read_text(encoding="utf-8")
@@ -105,10 +107,10 @@ class PrepareCase(unittest.TestCase):
 
 class RunTest(PrepareCase):
     def test_prepare_does_nothing_until_the_deny_rule_is_checked(self):
-        self.assertIs(CFG.get("prepare", "deny_rule_checked"), False)  # shipped off
+        self.assertIs(CFG.get("prepare", "deny_rule_checked"), True)  # checked on his seat on 2026-10-25
         runner = Script(good)
         events = self.count("event")
-        summary = self.run_prepare(runner, cfg=CFG)
+        summary = self.run_prepare(runner, cfg=OFF)
         self.assertEqual(summary, PrepareSummary("deny_rule_unchecked", 0, 0, 0, 0, 0))
         self.assertEqual(runner.calls, [])
         self.assertEqual((self.jobs(), self.count("event"), self.count("person")), ([], events, 0))
@@ -359,6 +361,7 @@ class CliTest(unittest.TestCase):
     def test_prepare_command_is_off_until_the_deny_rule_is_checked(self):
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(cli, "claude_runner") as made, mock.patch.object(cli, "_start_caffeinate") as awake, \
+                mock.patch.object(cli, "default_plan_config", return_value=OFF), \
                 mock.patch("sqlite3.connect") as opened, contextlib.redirect_stderr(err):
             code = cli.main(["prepare"], root=str(ROOT), live_root=str(ROOT), stdout=out)
         self.assertEqual(code, 0)

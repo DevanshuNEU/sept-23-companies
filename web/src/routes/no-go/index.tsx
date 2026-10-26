@@ -13,6 +13,8 @@ import { useListNav } from '@/keyboard/list-nav';
 import { useUrlState } from '@/lib/url-state';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { openExternal, safeHref } from '@/lib/safe-href';
+import { hideKindLabel } from '@/lib/status';
+import { HiddenCompanies } from './hidden-companies';
 import { LiftDialog } from './lift-dialog';
 import {
   CompaniesTable,
@@ -91,6 +93,7 @@ export default function NoGoPage() {
   const byText = (row: CompanyEntry) => needle === '' || textOf(row).toLowerCase().includes(needle);
   const companies = (view?.companies ?? []).filter((r) => reasonMatches(r, reason) && byText(r));
   const people = (view?.people ?? []).filter(byText);
+  const hidden = (view?.hiddenCompanies ?? []).filter((h) => needle === '' || `${h.company.name} ${hideKindLabel[h.kind]} ${h.reason}`.toLowerCase().includes(needle));
   const rows: CompanyEntry[] = tab === 'companies' ? companies : people;
 
   const openCompany = (companyId: number) => navigate(`/companies/${companyId}`);
@@ -234,7 +237,7 @@ export default function NoGoPage() {
       <QueryState
         query={query}
         skeleton={<TableSkeleton />}
-        isEmpty={(v) => v.companies.length === 0 && v.people.length === 0}
+        isEmpty={(v) => v.companies.length === 0 && v.people.length === 0 && v.hiddenCompanies.length === 0}
         empty={
           <EmptyState icon={Ban} title="Nothing is on the no-go list.">
             Companies and people kept out show here, with why and where that came from.
@@ -283,6 +286,7 @@ export default function NoGoPage() {
 
             <TabsContent value="companies" className="grid gap-2">
               {companies.length === 0 ? noMatch : <CompaniesTable rows={companies} rowProps={rowProps} actions={actions} />}
+              <HiddenCompanies items={hidden} />
               <p className="text-xs text-muted-foreground">
                 Postings hidden for asking for a 2027 graduation or current students are hidden one posting at a time. Their company stays
                 eligible and is not listed here.

@@ -1056,7 +1056,12 @@ function buildNoGo(c: Ctx): NoGoView {
       { reason: 'no_sponsorship', count: countOf('no_sponsorship') }, { reason: 'citizenship', count: countOf('citizenship') },
       { reason: 'over_300', count: countOf('over_300') }, { reason: 'removed', count: companies.filter((r) => r.kind === 'removed').length },
     ],
-    hiddenCompanies: [],
+    // What the ranker hides and the reason it stored. A provisional hide waits on the posting reader.
+    hiddenCompanies: [
+      { company: c.co('Maplewood Insurance'), kind: 'over_size', reason: 'About 640 people, over the 300 limit.', provisional: false },
+      { company: c.co('Quillfeather'), kind: 'no_go', reason: 'On your no-go list: no sponsorship, from their CTO reply.', provisional: false },
+      { company: c.co('Pellucid Software'), kind: 'no_sponsorship', reason: 'The posting says it does not sponsor. The reader has not read it yet.', provisional: true },
+    ],
   };
 }
 
@@ -1128,7 +1133,18 @@ function browserbaseView(c: Ctx, v: Views): CompanyView {
   });
   const postings: PostingRow[] = [
     { ...postingRow(role), lastSeenAt: noon(1), sponsorship: 'yes' },
-    bposting(9001, 'Software Engineer, Stagehand', SF, 39, 1, 'not_stated', 'silent', 'open'),
+    bposting(9001, 'Software Engineer, Stagehand', SF, 39, 1, 'not_stated', 'silent', 'open', {
+      flags: [
+        {
+          field: 'sponsorship', readerValue: 'unclear', rulesValue: 'silent',
+          readerQuote: 'We hire the best people and handle work authorization case by case.', rulesQuote: '',
+        },
+        {
+          field: 'level_tier', readerValue: 'early_career', rulesValue: null,
+          readerQuote: 'Great for engineers in their first or second job.', rulesQuote: '',
+        },
+      ],
+    }),
     bposting(9002, 'Senior Software Engineer, Infrastructure', RM, 59, 1, 'senior', 'silent', 'out_of_lane', { hiddenRule: 'Asks more than 3 years' }),
     bposting(9003, 'Software Engineer Intern, Summer 2027', SF, 41, 15, 'not_stated', 'silent', 'closed', { closedAt: noon(12), closeReason: 'Closed on the board' }),
   ];
@@ -1357,7 +1373,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
     db.details = {}; db.compares = []; db.companies = {};
     db.linkedin.groups = []; db.linkedin.counts = { toReach: 0, waiting: 0, replied: 0, all: 0 }; db.linkedin.requestsThisWeek = 0;
     db.needsYou.open = []; db.needsYou.resolvedThisWeek = []; db.settled = {};
-    db.noGo.companies = []; db.noGo.people = []; db.noGo.countsByReason = [];
+    db.noGo.companies = []; db.noGo.people = []; db.noGo.countsByReason = []; db.noGo.hiddenCompanies = [];
     db.done.companies = [];
     db.done.metrics = { repliesThisMonth: 0, repliesPerWeek: db.done.metrics.repliesPerWeek.map((w) => ({ ...w, count: 0 })), replyRate: { replies: 0, firstEmails: 0 }, referrals: 0, interviews: 0 };
   }

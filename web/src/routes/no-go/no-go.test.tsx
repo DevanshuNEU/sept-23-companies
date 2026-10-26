@@ -286,3 +286,38 @@ describe('No-go list', () => {
     expect(await screen.findByText('Nothing is on the no-go list.')).toBeInTheDocument();
   });
 });
+
+describe('No-go list, ranking hides', () => {
+  it('the No-go view lists ranking hides with their reason and the pending-reader wording', async () => {
+    await page();
+    const hidden = screen.getByRole('region', { name: 'Hidden by the ranking' });
+    const items = within(hidden).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toEqual([
+      'Maplewood InsuranceOver the size limitAbout 640 people, over the 300 limit.',
+      'QuillfeatherNo-goOn your no-go list: no sponsorship, from their CTO reply.',
+      'Pellucid SoftwareNo sponsorshipThe posting says it does not sponsor. The reader has not read it yet.Hidden, pending reader',
+    ]);
+    expect(within(hidden).getByRole('link', { name: 'Maplewood Insurance' })).toHaveAttribute('href', expect.stringMatching(/^\/companies\/\d+$/));
+    // Only a provisional hide carries the pending-reader words.
+    expect(within(hidden).getAllByText('Hidden, pending reader')).toHaveLength(1);
+  });
+
+  it('shows no hidden block when the ranker hides nothing', async () => {
+    const db = buildFixture('default');
+    db.noGo.hiddenCompanies = [];
+    await page('/no-go', new FixtureClient(db));
+    expect(screen.queryByRole('region', { name: 'Hidden by the ranking' })).not.toBeInTheDocument();
+  });
+
+  it('the text filter narrows the hidden list too', async () => {
+    await page('/no-go?q=pellucid');
+    const hidden = screen.getByRole('region', { name: 'Hidden by the ranking' });
+    expect(within(hidden).getAllByRole('listitem')).toHaveLength(1);
+  });
+
+  it('hides are not shown on the People tab', async () => {
+    await page('/no-go/people');
+    expect(screen.queryByRole('region', { name: 'Hidden by the ranking' })).not.toBeInTheDocument();
+  });
+});
+

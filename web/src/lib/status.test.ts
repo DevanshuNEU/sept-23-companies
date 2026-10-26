@@ -14,6 +14,7 @@ import {
   sponsorshipStatus,
   touchStatus,
   watchKindLabel,
+  hideKindLabel,
   winKindLabel,
 } from '@/lib/status';
 
@@ -120,10 +121,11 @@ describe('plan words', () => {
     expect(watchKindLabel).toEqual({
       careers_changed: 'Careers page changed', new_reason_no_role: 'New company to reach', merge_candidate: 'Possible duplicate',
     });
+    expect(hideKindLabel).toEqual({ no_go: 'No-go', over_size: 'Over the size limit', no_sponsorship: 'No sponsorship' });
   });
   it('gives every word a label and writes no dash', () => {
     const dash = new RegExp(`[${String.fromCharCode(0x2013)}${String.fromCharCode(0x2014)}]`);
-    for (const map of [channelLabel, laneLabel, winKindLabel, watchKindLabel]) {
+    for (const map of [channelLabel, laneLabel, winKindLabel, watchKindLabel, hideKindLabel]) {
       for (const label of Object.values(map)) {
         expect(label.length).toBeGreaterThan(0);
         expect(label).not.toMatch(dash);

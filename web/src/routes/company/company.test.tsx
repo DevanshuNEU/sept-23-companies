@@ -319,3 +319,35 @@ describe('Company page', () => {
     expect(screen.getByText('No company with this id')).toBeInTheDocument();
   });
 });
+
+describe('Company page, posting flags', () => {
+  it('posting flags show both values and both quotes', async () => {
+    await open(`/companies/${BROWSERBASE}?tab=roles`);
+    const roles = panel();
+    const flags = within(roles).getByRole('list', { name: 'Where the reader and the rules disagree for Software Engineer, Stagehand' });
+    const [sponsorship, level] = within(flags).getAllByRole('listitem');
+    if (!sponsorship || !level) throw new Error('fixture: two flags');
+    expect(within(sponsorship).getByText('Sponsorship')).toBeInTheDocument();
+    expect(sponsorship).toHaveTextContent('The reader says unclear');
+    expect(sponsorship).toHaveTextContent('"We hire the best people and handle work authorization case by case."');
+    expect(sponsorship).toHaveTextContent('The rules say silent');
+    // The rules had nothing to quote: it says so instead of showing an empty quote.
+    expect(sponsorship).toHaveTextContent('No quote.');
+    expect(within(level).getByText('Level')).toBeInTheDocument();
+    expect(level).toHaveTextContent('The reader says early career');
+    expect(level).toHaveTextContent('The rules say nothing');
+    expect(roles).toHaveTextContent('The reader and the rules read this posting differently.');
+  });
+
+  it('a posting with no flags shows no flag block', async () => {
+    await open(`/companies/${BROWSERBASE}?tab=roles`);
+    expect(within(panel()).getAllByRole('list')).toHaveLength(1);
+  });
+
+  it('a flag does not turn red', async () => {
+    await open(`/companies/${BROWSERBASE}?tab=roles`);
+    const flags = within(panel()).getByRole('list', { name: /^Where the reader and the rules disagree/ });
+    expect(flags.closest('[class*="bad"]')).toBeNull();
+  });
+});
+

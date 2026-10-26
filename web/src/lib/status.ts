@@ -1,6 +1,7 @@
 import type {
   Channel,
   CompanyRef,
+  HideKind,
   JobKind,
   JobRunSummary,
   ListGroup,
@@ -165,6 +166,13 @@ export const winKindLabel = {
   interview: 'Interview',
   offer: 'Offer',
 } satisfies Record<WinKind, string>;
+
+/** Why the ranker hides a company, in the words the No-go view uses. */
+export const hideKindLabel = {
+  no_go: 'No-go',
+  over_size: 'Over the size limit',
+  no_sponsorship: 'No sponsorship',
+} satisfies Record<HideKind, string>;
 
 export const watchKindLabel = {
   careers_changed: 'Careers page changed',

@@ -80,11 +80,11 @@ class PlanRow(Wire):
     revision: int  # the entry's own revision: every write on the row checks it
 
 
-class LinkedinMonth(Wire):
-    used: int  # plan-sourced requests this month
-    limit: int  # the plan quota
-    hard_used: int  # every request this month
-    hard_limit: int
+class LinkedinWeek(Wire):
+    used: int  # plan-sourced requests in the last 7 days (New York days, today included)
+    limit: int  # the plan quota, in any 7 days
+    hard_used: int  # every request in the last 7 days, his own included
+    hard_limit: int  # LinkedIn's limit, in any 7 days
 
 
 class TomorrowRow(Wire):
@@ -116,6 +116,6 @@ class PlanView(Wire):
     rows: list[PlanRow]
     done: int
     total: int
-    linkedin_month: LinkedinMonth
+    linkedin_week: LinkedinWeek
     tomorrow: Tomorrow
     week: PlanWeek

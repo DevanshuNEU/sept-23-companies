@@ -437,13 +437,17 @@ class PlanReadTests(PlanCase):
         self.assertEqual(plan_text("Monday", 7, 2), "Monday's plan builds at 08:00. Room for 7 people. "
                                                     "A draft of who it would propose is below.")
 
-    def test_linkedin_month_comes_from_linkedin_capacity_with_both_limits(self):
+    def test_linkedin_week_comes_from_linkedin_capacity_with_both_limits(self):
         self.request("Pylon", source="own")  # his own request: the hard total only
-        month = self.plan()["linkedinMonth"]
+        self.request("Pylon", at="2026-11-04T05:30:00Z")  # 00:30 on Wednesday 4 November: inside the 7 days
+        self.request("Pylon", at="2026-11-04T04:30:00Z")  # 23:30 on Tuesday 3 November: a day too old
+        view = self.plan()
+        self.assertNotIn("linkedinMonth", view)
+        week = view["linkedinWeek"]
         cap = linkedin_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 10), CFG)
-        self.assertEqual(month, {"used": cap.used, "limit": cap.budget, "hardUsed": cap.hard_used,
-                                 "hardLimit": cap.hard_limit})
-        self.assertEqual(month, {"used": 2, "limit": 150, "hardUsed": 3, "hardLimit": 200})
+        self.assertEqual(week, {"used": cap.used, "limit": cap.budget, "hardUsed": cap.hard_used,
+                                "hardLimit": cap.hard_limit})
+        self.assertEqual(week, {"used": 3, "limit": 150, "hardUsed": 4, "hardLimit": 200})
 
     def test_entry_id_survives_incremental_vacuum(self):
         before = {r["company"]["name"]: r["entryId"] for r in self.plan()["rows"]}
@@ -713,7 +717,7 @@ class EmptyPlanTests(ApiCase):
         self.assertEqual((view["rows"], view["done"], view["total"], view["builtAt"], view["listJob"]),
                          ([], 0, 0, None, None))
         self.assertEqual(view["week"], {"requests": 0, "accepts": 0, "replies": 0})
-        self.assertEqual(view["linkedinMonth"], {"used": 0, "limit": 150, "hardUsed": 0, "hardLimit": 200})
+        self.assertEqual(view["linkedinWeek"], {"used": 0, "limit": 150, "hardUsed": 0, "hardLimit": 200})
         self.assertEqual(view["tomorrow"]["preview"], [])
         self.assertNotIn("carried", view["tomorrow"]["text"])
         self.assertTrue(view["tomorrow"]["text"].startswith("Tomorrow's plan builds at 08:00. Room for "))

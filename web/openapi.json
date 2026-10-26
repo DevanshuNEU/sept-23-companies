@@ -2348,7 +2348,7 @@
         "title": "LinkedInView",
         "type": "object"
       },
-      "LinkedinMonth": {
+      "LinkedinWeek": {
         "properties": {
           "hardLimit": {
             "title": "Hardlimit",
@@ -2373,7 +2373,7 @@
           "hardUsed",
           "hardLimit"
         ],
-        "title": "LinkedinMonth",
+        "title": "LinkedinWeek",
         "type": "object"
       },
       "LogAppliedBody": {
@@ -4229,8 +4229,8 @@
             "title": "Done",
             "type": "integer"
           },
-          "linkedinMonth": {
-            "$ref": "#/components/schemas/LinkedinMonth"
+          "linkedinWeek": {
+            "$ref": "#/components/schemas/LinkedinWeek"
           },
           "listJob": {
             "anyOf": [
@@ -4279,7 +4279,7 @@
           "rows",
           "done",
           "total",
-          "linkedinMonth",
+          "linkedinWeek",
           "tomorrow",
           "week"
         ],

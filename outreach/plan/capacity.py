@@ -1,11 +1,12 @@
 """LinkedIn and email capacity, and the lane quotas (#15, Task 4).
 
-LinkedIn: the plan's own share is `linkedin.plan_quota` a month, counted from touches the plan proposed
-(`context.source = 'plan'`); a hard total (`linkedin.hard_total`) counts every request, his own included, and wins
-when it is lower. A day's number is the remaining budget over the weekdays left, rounded half up, so it lands near 7
-and corrects itself after a missed day with no catch-up pressure. A day with no weekday left in its month has no rows. Email: the sender's limit for the day minus what is
-already committed. Capacity is never negative and a zero day is a finished plan, not an error. Reads only; `today` is
-a parameter.
+LinkedIn counts requests over any 7 days (#9). The plan's own share is `linkedin.plan_quota` in the last 7 New York
+days (today and the 6 before it), counted from touches the plan proposed (`context.source = 'plan'`); a hard total
+(`linkedin.hard_total`) counts every request in the same 7 days, his own included, and wins when it is lower. A day's
+number is his pace, `linkedin.per_day`, cut to what the window has left: the weekly limit is a ceiling, never a
+target, so plenty left in the week does not raise the day, and a missed day brings no catch-up. Email: the sender's
+limit for the day minus what is already committed. Capacity is never negative and a zero day is a finished plan, not
+an error. Reads only; `today` is a parameter.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from outreach.plan.config import PlanConfig
-from outreach.plan.dates import month_range, utc_window, weekdays_left
+from outreach.plan.dates import last_seven_days, utc_window
 from outreach.plan.outbound import load_outbound
 
 __all__ = ["LinkedinCapacity", "EmailCapacity", "linkedin_capacity", "current_send_limit", "email_capacity",
@@ -27,14 +28,13 @@ _EPS = 1e-9  # round half up on a float that may sit a hair under .5
 
 @dataclass(frozen=True)
 class LinkedinCapacity:
-    budget: int  # plan_quota
-    used: int  # plan-sourced requests this month
-    hard_limit: int  # hard_total
-    hard_used: int  # every request this month, his own included
+    budget: int  # plan_quota, in any 7 days
+    used: int  # plan-sourced requests in the last 7 days
+    hard_limit: int  # hard_total, in any 7 days
+    hard_used: int  # every request in the last 7 days, his own included
     remaining: int
-    days_left: int
     today: int
-    reason_used: int  # plan-sourced requests this month in the reason_no_role lane
+    reason_used: int  # plan-sourced requests in the last 7 days in the reason_no_role lane
 
 
 @dataclass(frozen=True)
@@ -47,22 +47,16 @@ class EmailCapacity:
 
 def linkedin_capacity(conn: sqlite3.Connection, canon: dict[int, int], today: date, cfg: PlanConfig) -> LinkedinCapacity:
     tz = cfg.get("plan", "timezone")
-    first, last = month_range(today)
-    month = [o for o in load_outbound(conn, canon, tz=tz, since=first)
-             if o.sent_on <= last and o.channel == "linkedin_request"]
-    plan = [o for o in month if o.context_source == "plan"]
+    first, last = last_seven_days(today)
+    week = [o for o in load_outbound(conn, canon, tz=tz, since=first)
+            if o.sent_on <= last and o.channel == "linkedin_request"]
+    plan = [o for o in week if o.context_source == "plan"]
     budget, hard_limit = cfg.get("linkedin", "plan_quota"), cfg.get("linkedin", "hard_total")
-    used, hard_used = len(plan), len(month)
+    used, hard_used = len(plan), len(week)
     remaining = max(0, min(budget - used, hard_limit - hard_used))
-    days_left = weekdays_left(today)  # 0 on a weekend that has no weekday left in its month
-    if remaining <= 0 or days_left <= 0:
-        day = 0
-    else:
-        # Round half up, no floor of one: a single request left over many weekdays waits until it is owed, and the
-        # last weekday takes whatever is left (up to daily_max), so the budget still finishes.
-        day = min(cfg.get("linkedin", "daily_max"), math.floor(remaining / days_left + 0.5 + _EPS))
+    day = min(cfg.get("linkedin", "per_day"), remaining)
     return LinkedinCapacity(budget=budget, used=used, hard_limit=hard_limit, hard_used=hard_used,
-                            remaining=remaining, days_left=days_left, today=day,
+                            remaining=remaining, today=day,
                             reason_used=sum(1 for o in plan if o.lane == "reason_no_role"))
 
 
@@ -97,9 +91,9 @@ def plan_capacity(conn: sqlite3.Connection, canon: dict[int, int], day: date, cf
 
 
 def lane_quotas(n: int, used: int, reason_used: int, cfg: PlanConfig) -> tuple[int, int]:
-    """`(role_n, reason_n)` for `n` rows, with `role_n + reason_n == n`. The reason share is tracked over the month,
-    not per day, so one row of seven a day does not drift to 14%: `used` and `reason_used` are the month's plan
-    requests so far. The reason lane takes at most `max(1, ceil(0.4 * n))` of a day, and never more than `n`."""
+    """`(role_n, reason_n)` for `n` rows, with `role_n + reason_n == n`. The reason share is tracked over the last 7
+    days, not per day, so one row of seven a day does not drift to 14%: `used` and `reason_used` are the window's
+    plan requests. The reason lane takes at most `max(1, ceil(0.4 * n))` of a day, and never more than `n`."""
     if n <= 0:
         return 0, 0
     share = cfg.get("lanes", "reason_share")

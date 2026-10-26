@@ -17,7 +17,7 @@ class PlanConfigTest(unittest.TestCase):
     def test_config_loads_every_number_named_here(self):
         c = load_plan_config()
         want = {
-            "linkedin": {"plan_quota": 150, "hard_total": 200, "daily_max": 10, "rotate_days": 14,
+            "linkedin": {"plan_quota": 150, "hard_total": 200, "per_day": 7, "rotate_days": 14,
                          "rotate_top_n": 150, "max_people_per_company": 3},
             "lanes": {"role": ["level_role", "intern_junior"], "reason": ["reason_no_role"],
                       "fill": ["any_us_role"], "role_share": 0.8, "reason_share": 0.2},

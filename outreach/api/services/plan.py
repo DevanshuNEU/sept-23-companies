@@ -4,8 +4,8 @@ They record what Devanshu did by hand on a plan row and keep his notes. Nothing 
 or confirms a reason line on anyone's behalf: `confirm_note` runs only from his click on the confirm route.
 
 - `log_request`: one `linkedin_log` row (`request_sent`) and one `linkedin_request` touch together (ruling 1), with a
-  context of source `plan` (#15's 150 a month quota counts it). The touch's own key is the body's `idempotencyKey`,
-  so a press after the first commit landed (a new request id) finds the touch and writes nothing.
+  context of source `plan` (#15's quota of 150 in any 7 days counts it). The touch's own key is the body's
+  `idempotencyKey`, so a press after the first commit landed (a new request id) finds the touch and writes nothing.
 - `log_applied`: an `application` row and an `application` touch with no person (ruling 2), the same way.
 - `skip_row`: the entry goes to `backlog` with `decided_at` (the next #15 build carries it) and a `row_skipped`
   event records it.

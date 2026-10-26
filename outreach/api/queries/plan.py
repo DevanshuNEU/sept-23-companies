@@ -12,10 +12,10 @@ row); its prepare step writes `linkedin_draft` notes. This module reads them and
 - the per-row text, parsed by `parse_plan_why` with exactly #15's `why` keys (its plan's Hand-off). A key that is
   missing or of the wrong type is ignored: the reason falls back to the lane's sentence, the search link is built
   from the company name, the sources are empty;
-- `notReady` (weekend, not built, the plan job failed today), the LinkedIn month from #15's `linkedin_capacity`,
-  tomorrow's total and a draft of its rows from #15's own `build_plan` run dry for the next weekday (it writes
-  nothing and calls no crawler, ranker or model; a failure shows the total from `plan_capacity` alone), and the
-  week's counts with the progress page's own funnel.
+- `notReady` (weekend, not built, the plan job failed today), the LinkedIn week (the last 7 days) from #15's
+  `linkedin_capacity`, tomorrow's total and a draft of its rows from #15's own `build_plan` run dry for the next
+  weekday (it writes nothing and calls no crawler, ranker or model; a failure shows the total from `plan_capacity`
+  alone), and the week's counts with the progress page's own funnel.
 
 `PlanRow.entryId` is the entry's `rowid` (its key is `(list_date, company_id)`); `plan_entry_id` is the only place
 that knows. Reads only: nothing here writes, builds a stored plan or calls a model.
@@ -29,7 +29,7 @@ from urllib.parse import urlsplit
 
 from outreach.api.models.checks import Check
 from outreach.api.models.plan import (
-    FindSomeone, LinkedinMonth, NoteDraft, NoteFact, PlanCompany, PlanPerson, PlanRow, PlanStep, PlanView, PlanWeek,
+    FindSomeone, LinkedinWeek, NoteDraft, NoteFact, PlanCompany, PlanPerson, PlanRow, PlanStep, PlanView, PlanWeek,
     Tomorrow, TomorrowRow,
 )
 from outreach.api.models.today import NotReady
@@ -461,13 +461,13 @@ def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
     if lean:
         built = None
     rows = plan_rows(conn, day, cfg) or []
-    month = linkedin_capacity(conn, canon, date.fromisoformat(day), cfg)
+    week = linkedin_capacity(conn, canon, date.fromisoformat(day), cfg)
     return PlanView(
         as_of=now, date=day, built_at=built["built_at"] if built is not None else None,
         list_job=jobs.run_summary(last, now) if last is not None else None,
         not_ready=None if built is not None else NotReady(reason="not_built", text=LEAN_TEXT) if lean
         else _not_ready(day, last),
         rows=rows, done=sum(1 for r in rows if r.state == "done"), total=len(rows),
-        linkedin_month=LinkedinMonth(used=month.used, limit=month.budget, hard_used=month.hard_used,
-                                     hard_limit=month.hard_limit),
+        linkedin_week=LinkedinWeek(used=week.used, limit=week.budget, hard_used=week.hard_used,
+                                   hard_limit=week.hard_limit),
         tomorrow=_tomorrow(conn, day, canon, cfg), week=_week(conn, now))

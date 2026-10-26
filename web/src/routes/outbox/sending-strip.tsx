@@ -183,7 +183,16 @@ export function SendingStrip({ sending: s, onPause, onResume }: { sending: Sendi
               <ChevronDown aria-hidden />
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" aria-label="Sending details" className="w-80">
+          <PopoverContent
+            align="end"
+            aria-label="Sending details"
+            className="w-80"
+            // Focus goes to the panel, not its first tabbable (the ramp), whose tooltip would open on its own.
+            onOpenAutoFocus={(e) => {
+              e.preventDefault();
+              if (e.currentTarget instanceof HTMLElement) e.currentTarget.focus();
+            }}
+          >
             <Details s={s} />
           </PopoverContent>
         </Popover>

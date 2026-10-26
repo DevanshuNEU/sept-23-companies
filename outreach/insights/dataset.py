@@ -21,10 +21,10 @@ import json
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from outreach.insights.bands import Bands, Features, default_bands, features_of
-from outreach.outcomes.windows import ny_day
+from outreach.outcomes.windows import day_bounds_utc, ny_day
 from outreach.ranking.common import canonical_ids, fact_order_key, size_order_key
 from outreach.ranking.scores import latest_version, load_scores, ranked_list
 from outreach.store.timefmt import ISO_FMT
@@ -225,7 +225,9 @@ def _pick_level(best: _Best, fam: _Family, postings: Sequence[Mapping]) -> tuple
     if t is not None:
         at = t["sent_at"]
     elif best.app is not None:
-        at = f"{best.app['applied_on']}T23:59:59Z"
+        # The last second of the New York day he applied, as a moment (the day ends at the next midnight).
+        at = (datetime.strptime(day_bounds_utc(best.app["applied_on"])[1], ISO_FMT) - timedelta(seconds=1)
+              ).strftime(ISO_FMT)
     else:
         at = best.status_at
     if at is None:

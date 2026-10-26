@@ -78,6 +78,21 @@ class CliTest(unittest.TestCase):
             self.assertNotIn(private, out)
         self.assertFalse(any(c in out for c in chr(0x2013) + chr(0x2014)))
 
+    def test_an_offer_is_dated_and_sorted_by_the_offer_not_the_old_interview(self):
+        conn = fresh_store()
+        early = S.company(conn, "Early Interview")
+        outcome_touch(conn, early, S.person(conn, early, "A One"), sent_at="2026-05-01T15:00:00Z",
+                      interview_at="2026-06-05T15:00:00Z")
+        won = S.company(conn, "Won Late")
+        outcome_touch(conn, won, S.person(conn, won, "B Two"), sent_at="2026-01-01T15:00:00Z",
+                      interview_at="2026-01-05T15:00:00Z",
+                      offer_at="2026-10-20T15:00:00Z")
+        with mock.patch.dict(os.environ, {"OUTREACH_DB": store_path(conn)}):
+            code, out, _err = self.run_cli("summary")
+        self.assertEqual(0, code)
+        self.assertIn("Won Late: offer on 2026-10-20", out)
+        self.assertLess(out.index("Won Late"), out.index("Early Interview"))
+
     def test_summary_on_an_empty_store(self):
         empty = fresh_store()
         with mock.patch.dict(os.environ, {"OUTREACH_DB": store_path(empty)}):

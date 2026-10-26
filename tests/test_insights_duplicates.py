@@ -116,6 +116,45 @@ class DuplicatesTest(unittest.TestCase):
                           "resolved_at = '2026-10-20T12:00:00Z' WHERE kind = 'merge_candidate'")
         self.assertEqual([], self.pairs())
 
+    def test_a_shared_domain_never_pairs_companies_that_use_it_for_different_employers(self):
+        a, b = self.reached("Acme Robotics", "acme.com"), self.reached("Acme Labs", "acme.com")
+        S.evidence(self.conn, a, "domain", "acme.com")
+        S.evidence(self.conn, b, "domain", "acme.com")
+        self.assertEqual(1, len(self.pairs()))  # listed once, with its strongest basis, until the domain is shared
+        self.conn.execute("INSERT INTO shared_key(kind, value, reason, recorded_at) "
+                          "VALUES ('domain', 'acme.com', 'parent company', '2026-10-01T00:00:00Z')")
+        self.assertEqual([], self.pairs())
+
+    def test_a_legal_suffix_does_not_make_a_short_name(self):
+        self.reached("GE Co")
+        self.reached("Great Energy Cloud Operations")  # initials g, e, c, o
+        self.reached("GE")
+        self.reached("General Electric")
+        # "GE Co" is "ge" once the suffix is dropped, so it pairs with General Electric, not with four initials.
+        self.assertEqual({("GE Co", "General Electric"), ("GE", "General Electric")},
+                         {(p.a_name, p.b_name) for p in self.pairs()})
+
+    def test_one_name_that_starts_with_the_other_is_a_weak_pair(self):
+        keys = {"Crusoe": "crusoe", "Crusoe Energy": "crusoeenergy", "Aarden": "aarden", "Aarden AI": "aardenai",
+                "Other Co": "otherco", "Otherwise": "otherwise"}  # otherco does not start otherwise
+        ids = {}
+        for name, key in keys.items():
+            ids[name] = self.reached(name)
+            self.conn.execute("INSERT INTO company_name_key(name_key, company_id, strong) VALUES (?, ?, 1)",
+                              (key, ids[name]))
+        self.assertEqual({("Crusoe", "Crusoe Energy"), ("Aarden", "Aarden AI")},
+                         {(p.a_name, p.b_name) for p in self.pairs() if p.basis == "insights_name_prefix"})
+        (pair,) = [p for p in self.pairs() if p.a_name == "Crusoe"]
+        self.assertEqual(("weak", "crusoe is the start of crusoeenergy"), (pair.confidence, pair.detail))
+
+    def test_a_prefix_pair_keeps_a_stronger_basis(self):
+        a, b = self.reached("Nimbus"), self.reached("Nimbus Robotics")
+        for cid, key in ((a, "nimbus"), (b, "nimbusrobotics"), (a, "nimbusrobotics")):
+            self.conn.execute("INSERT INTO company_name_key(name_key, company_id, strong) VALUES (?, ?, 1)",
+                              (key, cid))
+        (pair,) = self.pairs()
+        self.assertEqual("insights_name_key", pair.basis)
+
     def test_listing_writes_nothing(self):
         big, small = self.reached("General Motors", "gm.com"), self.reached("gm", "gm.com")
         S.evidence(self.conn, big, "domain", "gm.com")

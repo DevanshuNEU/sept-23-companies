@@ -173,6 +173,21 @@ class DatasetTest(unittest.TestCase):
         for cid in (n, later_only):
             self.assertEqual((None, "", None), (by[cid].level_tier, by[cid].level_basis, by[cid].features.level_band))
 
+    def test_an_application_day_is_a_new_york_day_for_the_open_at_the_time_level(self):
+        cid = S.company(self.conn, "Late Evening")
+        # First seen 22:00 on 1 Oct in New York (02:00Z on 2 Oct): open on the day he applied.
+        p = S.posting(self.conn, cid, first_seen_at="2026-10-02T02:00:00Z")
+        S.decision(self.conn, p, level_tier="swe1")
+        application(self.conn, cid, applied_on="2026-10-01")
+        # First seen the next New York morning: not open yet.
+        other = S.company(self.conn, "Next Day")
+        q = S.posting(self.conn, other, first_seen_at="2026-10-02T05:00:00Z")
+        S.decision(self.conn, q, level_tier="swe2")
+        application(self.conn, other, applied_on="2026-10-01")
+        by = rows_by_id(load_outcome_rows(self.conn))
+        self.assertEqual(("swe1", "open at the time"), (by[cid].level_tier, by[cid].level_basis))
+        self.assertIsNone(by[other].level_tier)
+
     def reached_at(self, cid: int, **touch) -> None:
         pid = S.person(self.conn, cid)
         outcome_touch(self.conn, cid, pid, sent_at=SENT, **touch)

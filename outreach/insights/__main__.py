@@ -74,8 +74,15 @@ def _way_in(channel: str | None) -> str:
     return _WAY_IN.get(channel, "no recorded way in") if channel else "no recorded way in"
 
 
+def _outcome_on(r: OutcomeRow) -> str | None:
+    """The day of the company's best outcome: an offer is dated by the offer, anything else by its interview."""
+    if r.best_outcome == "offer":
+        return r.offer_on or r.interview_on
+    return r.interview_on or r.offer_on
+
+
 def _company_line(r: OutcomeRow) -> str:
-    on = r.interview_on or r.offer_on
+    on = _outcome_on(r)
     way = _way_in(r.best_channel)
     level = r.features.level_band
     parts = [f"{r.best_outcome}" + (f" on {on}" if on else ""), way if way.startswith("no ") else f"way in {way}",
@@ -90,7 +97,7 @@ def _pair_line(p: DuplicatePair) -> str:
 
 
 def _summary(rows: list[OutcomeRow], shared: list[Shared], pairs: list[DuplicatePair], ranked: int) -> str:
-    mine = sorted(interview_rows(rows), key=lambda r: (r.interview_on or r.offer_on or "", r.name), reverse=True)
+    mine = sorted(interview_rows(rows), key=lambda r: (_outcome_on(r) or "", r.name), reverse=True)
     lines = []
     if mine:
         head = (f"{_plural(len(mine), 'company', 'companies')} interviewed you, out of {len(rows):,} you reached.")

@@ -49,6 +49,7 @@ Decisions live in GitHub issue #9. After the switch (#17) the live system is the
 | `superpowers/plans/2026-10-22-retire-job-radar.md` | #5: retire Job Radar after its history is imported |
 | `superpowers/plans/2026-10-22-needs-you.md` | #16: the five Needs-you triggers, the sweep, one-click fixes, merge and unmerge. Built: `outreach/review/` (Tasks 1 to 12), the API (Task 13) and the web view in `web/src/routes/needs-you/` (Tasks 15 to 17: a section for every kind, the side-by-side merge confirm, Undo from Resolved, the plain progress line and the All settled panel). `?scenario=review` shows every kind on sample data |
 | `superpowers/plans/2026-10-22-mcp-server.md` | #13: the local MCP server for the Claude side session, with enforced limits |
+| `superpowers/plans/2026-10-26-insights.md` | #81: the outcome dataset per canonical company, what the interview companies share (counts, too few to tell below 20), lookalikes, the one-way `interview_like` ranking lift, the CSV and JSON export, and the Insights screen under Results. Four PRs: dataset and mockup, tilt, API, web |
 | `superpowers/plans/2026-10-22-integration-review.md` | Cross-plan review of the five new plans; every finding was applied in them |
 | `web/` (how to run) | Needs Node 20.19 (see `web/.nvmrc`; `pnpm install` fails on other majors, engines are strict). `cd web && pnpm install && pnpm dev`, then open http://127.0.0.1:5173. Add `?scenario=hard_block` (or `signed_out`, `empty`, `weekend`, `job_failed`, `error`, `many_sent`, `review`) to see each state |
 

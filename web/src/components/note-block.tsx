@@ -145,7 +145,11 @@ export function NoteBlock({
         </div>
       ) : null}
 
-      {editing ?? <p className="max-w-[62ch] bg-card px-4 py-3.5 font-serif text-[16px] leading-[1.65] whitespace-pre-wrap">{note.text}</p>}
+      {editing ?? (
+        <div className="bg-card">
+          <p className="max-w-[62ch] px-4 py-3.5 font-serif text-[16px] leading-[1.65] whitespace-pre-wrap">{note.text}</p>
+        </div>
+      )}
 
       {/* While he edits, the line is a field in the editor, so it is not shown twice. */}
       {note.needsYourLine || editing ? null : (

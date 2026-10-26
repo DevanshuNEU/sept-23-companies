@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
 import { formatLocalTime, formatRecipientTime } from '@/lib/format';
 import type { Tone } from '@/lib/status';
 import { cn } from '@/lib/utils';
@@ -166,8 +167,8 @@ export function SendingStripSkeleton() {
     <section aria-hidden className="flex h-[61px] flex-none items-stretch border-b">
       {[200, 150, 190, 170].map((w, i) => (
         <div key={i} className="grid content-center gap-1.5 border-r px-4" style={{ width: w }}>
-          <span className="h-3 w-16 animate-pulse rounded bg-muted" />
-          <span className="h-4 w-24 animate-pulse rounded bg-muted" />
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-4 w-24" />
         </div>
       ))}
     </section>

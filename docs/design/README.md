@@ -39,7 +39,7 @@ Rules the UI keeps everywhere:
 3. **No layout jumps.** Skeletons take the final height. A row you act on stays where it is, relabelled, until
    you move away (section 6). Numbers use tabular figures so counts do not shift text.
 4. **Keyboard first.** Every action has a key. The mouse works everywhere too.
-5. **Calm.** One neutral palette. Color is used only for status, always with a word or icon.
+5. **Calm.** One neutral palette. Status colors keep their meaning and always come with a word or icon. The one other hue is the brand accent (violet), kept to four jobs: the focus ring, the K tile, the sidebar's active bar and the knock ripple (section 10, Brand accent).
 
 ## 2. Information architecture and navigation
 
@@ -608,23 +608,64 @@ off in text fields, `G` chords, per-view maps registered by each route).
 
 shadcn/ui new-york style, zinc base, as `mockup.css` sets it. Font: Inter, self-hosted through
 `@fontsource-variable/inter` in the build (no network at runtime), `cv11` and `ss01` on, tabular figures for every
-number.
+number. The notes he writes are the one serif exception (Serif notes, below).
 
 ### Color tokens
 
+Depth: the canvas is `background`, cards sit one step above it, the sidebar one step below, and borders stay on
+every card.
+
 | Token | Light | Dark |
 |---|---|---|
-| background | #ffffff | #09090b |
+| background | #f8f8f9 | #0b0b0e |
 | foreground | #09090b | #fafafa |
-| card | #ffffff | #0c0c0e |
-| muted | #f4f4f5 | #27272a |
-| muted-foreground | #6b6b75 | #a1a1aa |
-| subtle (table heads, group rows) | #fafafa | #111113 |
-| border, input | #e4e4e7 | #27272a, #3f3f46 |
-| ring | #a1a1aa | #71717a |
+| sidebar | #f2f2f4 | #09090b |
+| subtle (table heads, group rows) | #f3f3f5 | #101013 |
+| card | #ffffff | #141418 |
+| popover | #ffffff | #1a1a20 |
+| muted | #eeeef1 | #23232a |
+| accent | #f0f0f3 | #1d1d23 |
+| muted-foreground | #66666f | #a1a1aa |
+| border | #e2e2e7 | white at 9% |
+| input | #c4c4cc | #52525b |
+| brand, ring | #5b48d9 | #9187f7 |
+| brand-foreground | #ffffff | #16122e |
 | primary, primary-foreground | #18181b, #fafafa | #fafafa, #18181b |
 | destructive | #dc2626 | #ef4444 |
-| sidebar | #fafafa | #0c0c0e |
+
+`web/src/styles/tokens.test.ts` holds this table and checks every text pair at 4.5:1 or better (muted-foreground on
+the canvas, muted, subtle, card, popover and sidebar; brand and brand-foreground on every surface it sits on) and
+the focus ring at 3:1 on the canvas and on cards.
+
+### Brand accent
+
+One restrained violet (`--brand`, `--brand-foreground`). It is used only for:
+
+1. the focus ring (`--ring` is the brand colour; controls use `focus-visible:ring-ring/70`),
+2. the K tile in the sidebar header and the favicon,
+3. the sidebar's current-view bar (2 px, left edge) and its icon,
+4. the "knock": the K tile scales 1, .92, 1, .92, 1 over 260 ms, once on first load, and the running sender dot's
+   slow ring ripple.
+
+Nothing else is violet: no buttons, links, badges, charts or headings. Status colors keep their meaning and stay
+the only other hues. The knock, the ripple and the skeleton shimmer are all off under `prefers-reduced-motion`.
+
+### Serif notes
+
+The text he writes and sends is the one place that is not Inter: the Today note, the Outbox email body (read-only
+and the editor) and the Today note editor. `--font-serif: ui-serif, "New York", Georgia, serif`, 16 px, line height
+1.65, at most 62ch wide, on `bg-card`.
+
+### Chips, counts and empty states
+
+- In dense lists the soft chips (ok, info, idle) drop their border and keep fill, word and dot. Warning and
+  error chips and the outline chip keep theirs.
+- The sidebar's Needs you count is neutral (`bg-muted text-foreground`). A 6 px amber dot sits beside it only while an
+  open item holds up email. A small count is never red.
+- Skeletons are `bg-muted/70` with a 1.4 s light sweep.
+- One empty state everywhere: a 40 px `bg-muted` tile (rounded-xl) with the icon, one bold line, one line on what
+  to do, and at most one key hint.
+- Done's four numbers are one bordered four-cell strip, like Today's capacity row.
 
 Status tokens (text, soft background, border, dot):
 
@@ -636,8 +677,9 @@ Status tokens (text, soft background, border, dot):
 | info | #1d4ed8, #eff6ff, #bfdbfe, #3b82f6 | #60a5fa, blue at 13%, blue at 32%, #3b82f6 |
 | idle | #52525b, #f4f4f5, #e4e4e7, #a1a1aa | #d4d4d8, #27272a, #3f3f46, #71717a |
 
-Muted foreground is one step darker than shadcn's zinc-500 (#71717a) so that secondary text passes 4.5:1 on the
-active-row grey.
+Muted foreground is one step darker than shadcn's zinc-500 (#71717a) in light so that secondary text passes 4.5:1
+on the muted grey: light 5.4 on the canvas, 5.7 on cards, 4.9 on muted; dark 7.7, 7.2, 6.1. Brand on the canvas,
+cards and muted: light 5.9, 6.2, 5.4; dark 6.6, 6.1, 5.2. Brand-foreground on brand: light 6.2, dark 6.0.
 
 ### Type scale
 
@@ -693,7 +735,7 @@ triangle for warnings, check for passed, reply arrow for replies, pause for paus
   count on the selected tab is 4.1:1 (`.tab .count` on `--input`), on every page that has tabs.
 - **Focus order:** sidebar, top bar, then the view in reading order: strip, list, detail, footer actions. In the
   Outbox, Tab from the list goes to the detail's first control; Esc from the editor returns to the list row.
-  Focus is always visible (2 px ring). Dialogs trap focus and return it on close.
+  Focus is always visible (a 3 px brand ring at 70%). Dialogs trap focus and return it on close.
 - **Lists** are `role="listbox"` or tables with `aria-selected` on the active row; J/K moves selection and focus
   together; the selection change is announced through a polite live region ("Kenji Watanabe, Trigger.dev,
   blocked").

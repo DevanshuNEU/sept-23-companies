@@ -5,6 +5,7 @@ import type { Id, IsoTime, OutboxCounts, OutboxGroup, OutboxItem, OutboxView } f
 import { EmptyState } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useAnnounce, useHotkeys, useLiveSelection } from '@/keyboard/hotkeys';
 import { ageDays, formatDay, formatLocalTime } from '@/lib/format';
 import { useStableOrder } from '@/lib/stable-order';
@@ -355,9 +356,9 @@ export function OutboxListSkeleton() {
     <div aria-hidden>
       {Array.from({ length: 8 }, (_, i) => (
         <div key={i} className="grid gap-2 border-b py-2.5 pr-3 pl-3.5" style={{ height: ROW_PX }}>
-          <span className="h-3.5 w-40 animate-pulse rounded bg-muted" />
-          <span className="h-3 w-56 animate-pulse rounded bg-muted" />
-          <span className="h-3 w-32 animate-pulse rounded bg-muted" />
+          <Skeleton className="h-3.5 w-40" />
+          <Skeleton className="h-3 w-56" />
+          <Skeleton className="h-3 w-32" />
         </div>
       ))}
     </div>

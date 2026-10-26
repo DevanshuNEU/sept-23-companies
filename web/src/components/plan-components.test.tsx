@@ -169,7 +169,10 @@ describe('NoteBlock', () => {
   it('sets the note he sends in the serif note face, on a card', () => {
     const note = { ...noteOf(plan(), 'Pylon'), chars: 100, maxChars: 200 };
     noteBlock(note);
-    expect(screen.getByText(note.text)).toHaveClass('font-serif', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]', 'bg-card');
+    const text = screen.getByText(note.text);
+    expect(text).toHaveClass('font-serif', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]');
+    // The card spans the whole block, so the text never sits in a narrower box than its surroundings.
+    expect(text.parentElement).toHaveClass('bg-card');
   });
 
   it('shows the count with words', () => {

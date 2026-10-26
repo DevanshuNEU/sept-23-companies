@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useHotkeys } from '@/keyboard/hotkeys';
 import { ageDays, formatAge, formatDueDay } from '@/lib/format';
 import { useEdits, type Edit } from '@/pending/edits';
@@ -196,9 +197,9 @@ function ReadOnlyDraft({ subject, body }: { subject: string; body: string }) {
 function DetailSkeleton() {
   return (
     <div aria-hidden className="grid gap-4 p-5">
-      <span className="h-10 w-64 animate-pulse rounded bg-muted" />
-      <span className="h-16 w-full animate-pulse rounded bg-muted" />
-      <span className="h-64 w-full animate-pulse rounded bg-muted" />
+      <Skeleton className="h-10 w-64" />
+      <Skeleton className="h-16 w-full" />
+      <Skeleton className="h-64 w-full" />
     </div>
   );
 }

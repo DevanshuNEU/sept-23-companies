@@ -51,7 +51,7 @@ class ScoreTests(unittest.TestCase):
         got = score(facts)
         w = CFG.weights
         want = (w["live_role"] * 1.0 + w["posting_sponsors"] * 1.0 + w["everify"] * 1.0 + w["cap_exempt"] * 0.7
-                + w["lca_junior"] * 0.3 + w["small"] * 1.0 + w["funding"] * round(1 - 7 / 18, 4))
+                + w["lca_junior"] * 0.3 + w["small"] * 0.5 + w["funding"] * round(1 - 7 / 18, 4))  # 120 people: 0.5
         self.assertEqual(got.score, round(want, 4))
         self.assertEqual(round(got.score, 4), got.score)
         self.assertEqual(got.score, round(sum(p.points for p in got.values.values()), 4))
@@ -79,10 +79,10 @@ class ScoreTests(unittest.TestCase):
 
     def test_reasons_rank_by_discounted_points_and_include_warnings(self):
         low = Confidence("low", "guess")
-        facts = graded(everify="enrolled", reach_via="person", reach_note="Reachable person: Ada, engineer",
-                       grades={"everify": low})  # everify 12 raw but 6 counted, the person 8 counted in full
+        facts = graded(everify="enrolled", cap_exempt="confirmed",
+                       grades={"everify": low})  # everify 12 raw but 6 counted, cap-exempt 10 counted in full
         got = score(facts)
-        self.assertEqual(got.reasons[0], "Reachable person: Ada, engineer")
+        self.assertEqual(got.reasons[0], "Cap-exempt employer: no lottery")
         warned = score(graded(staffing_risk="high", everify="not_enrolled"))
         self.assertEqual(warned.reasons[0], warned.values["staffing_risk"].reason)
         self.assertIn(warned.values["everify"].reason, warned.reasons)
@@ -151,7 +151,7 @@ class ScoreTests(unittest.TestCase):
 
     def test_every_component_has_a_confidence_and_basis_even_when_unknown(self):
         got = score(neutral_facts())
-        self.assertEqual(len(got.values), 12)  # eleven signals and the interview tilt (#81)
+        self.assertEqual(len(got.values), 13)  # twelve signals and the interview tilt (#81)
         for name, p in got.values.items():
             with self.subTest(signal=name):
                 self.assertIn(p.confidence.level, LEVELS)

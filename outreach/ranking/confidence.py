@@ -16,7 +16,7 @@ from outreach.ranking.config import RankerConfig
 from outreach.ranking.types import SignalValue
 
 __all__ = ["LEVELS", "scrub_text", "Confidence", "Assessment", "RankReason", "weaker", "down_one", "grade_evidence", "grade_role",
-           "grade_no_role", "grade_sponsor", "grade_pay", "grade_reach", "factor", "rank_confidence",
+           "grade_no_role", "grade_sponsor", "grade_pay", "grade_reach", "grade_velocity", "factor", "rank_confidence",
            "build_rank_reason"]
 
 LEVELS = ("low", "medium", "high")
@@ -194,6 +194,21 @@ def grade_reach(*, via: str, has_team_source: bool) -> Confidence:
     if via == "":
         return Confidence("low", "no person recorded yet")
     raise ValueError(f"reach route must be 'person', 'hn_post' or '', got {via!r}")
+
+
+def grade_velocity(*, counted: int, undated: int, board_state: str) -> Confidence:
+    """Confidence in the hiring pace: `counted` engineering postings in the window, `undated` of them dated by first
+    seen, and the company's board state. None counted is `low` (unknown, not slow)."""
+    _check_board_state(board_state)
+    if counted <= 0:
+        return Confidence("low", "no engineering role posted in the window")
+    if board_state == "read_ok":
+        if undated == 0:
+            return Confidence("high", "posted dates on a board read ok")
+        return Confidence("medium", f"{undated} of {counted} dated by first seen, on a board read for over the window")
+    if board_state in ("read_empty", "read_failed"):
+        return Confidence("medium", "the board's last read was not ok")
+    return Confidence("low", "board not read by this system yet, dates are from an import")
 
 
 def factor(c: Confidence, cfg: RankerConfig) -> float:

@@ -12,6 +12,7 @@ from outreach.ranking.signals import build_signals
 from outreach.ranking.signals.cap_exempt import CapExempt
 from outreach.ranking.signals.everify import EVerify
 from outreach.ranking.signals.funding import Funding
+from outreach.ranking.signals.hiring_velocity import HiringVelocity
 from outreach.ranking.signals.large_later_stage import LargeLaterStage
 from outreach.ranking.signals.lca_junior import LcaJunior
 from outreach.ranking.signals.reachable_person import ReachablePerson
@@ -21,7 +22,7 @@ from tests.ranking_helpers import check_assessment, neutral_facts
 
 CFG = default_ranker_config()
 ORDER = ["live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
-         "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"]
+         "reachable_person", "funding", "hiring_velocity", "staffing_risk", "large_later_stage", "interview_like"]
 # The one signal whose grade belongs to the interview profile, not to the company's facts (#81).
 PROFILE_GRADED = "interview_like"
 
@@ -67,20 +68,42 @@ class SmallTests(unittest.TestCase):
     def value(self, **facts):
         return check_assessment(self, sig(Small), neutral_facts(**facts))
 
-    def test_small_values(self):
-        self.assertEqual(self.value(size_low=120, size_high=120, stage="seed").value, 1.0)
-        self.assertEqual(self.value(size_low=120, size_high=120, stage="series_c").value, 0.6)
-        self.assertEqual(self.value(size_low=120, size_high=120).value, 1.0)
-        self.assertEqual(self.value(size_low=250, size_high=250).value, 1.0)
+    def test_the_curve_has_one_value_per_band(self):
+        # band_tops = [25, 50, 100, 250], band_values = [1.0, 0.9, 0.7, 0.5]: the band is the first top at or above
+        # the size.
+        for size, want in ((1, 1.0), (10, 1.0), (25, 1.0),  # up to 25 people
+                           (26, 0.9), (50, 0.9),  # 26 to 50
+                           (51, 0.7), (100, 0.7),  # 51 to 100
+                           (101, 0.5), (120, 0.5), (250, 0.5)):  # 101 to 250
+            with self.subTest(size=size):
+                self.assertEqual(self.value(size_low=size, size_high=size).value, want)
+                self.assertEqual(self.value(size_low=size, size_high=size, stage="seed").value, want)
+
+    def test_a_later_stage_multiplies_the_band_by_other_value(self):
+        for size, want in ((20, 0.6), (40, 0.54), (80, 0.42), (200, 0.3)):
+            with self.subTest(size=size):
+                got = self.value(size_low=size, size_high=size, stage="series_c")
+                self.assertEqual(got.value, want)
+                self.assertIn("stage series c", got.reason)
+
+    def test_borderline_and_over_stay_as_they_were(self):
         self.assertEqual(self.value(size_low=251, size_high=251).value, 0.2)
         self.assertEqual(self.value(size_low=280, size_high=280).value, 0.2)
         self.assertEqual(self.value(size_low=300, size_high=300).value, 0.2)
         self.assertEqual(self.value(size_low=301, size_high=301).value, 0.0)
         self.assertEqual(self.value(size_low=400, size_high=400).value, 0.0)
 
+    def test_the_shipped_curve(self):
+        p = CFG.section("small")
+        self.assertEqual(([25, 50, 100, 250], [1.0, 0.9, 0.7, 0.5]), (p["band_tops"], p["band_values"]))
+        self.assertEqual((p["max_headcount"], p["other_value"]), (250, 0.6))
+        self.assertEqual(16.0, CFG.weights["small"])
+
     def test_a_range_is_read_at_its_high_end(self):
         self.assertEqual(self.value(size_low=200, size_high=280).value, 0.2)
-        self.assertEqual(self.value(size_low=200, size_high=None).value, 1.0)
+        self.assertEqual(self.value(size_low=20, size_high=60).value, 0.7)
+        self.assertEqual(self.value(size_low=200, size_high=None).value, 0.5)
+        self.assertEqual(self.value(size_low=20, size_high=None).value, 1.0)
 
     def test_small_unknown_size_is_exactly_neutral(self):
         got = self.value()
@@ -100,7 +123,7 @@ class SmallTests(unittest.TestCase):
         self.assertEqual(self.value(weak_flags=("81 open roles", SHARED_DOMAIN_FLAG)).value, -0.3)
 
     def test_a_known_size_ignores_the_weak_flags(self):
-        self.assertEqual(self.value(size_low=100, size_high=100, weak_flags=("81 open roles",)).value, 1.0)
+        self.assertEqual(self.value(size_low=100, size_high=100, weak_flags=("81 open roles",)).value, 0.7)
 
     def test_the_reason_names_the_size(self):
         self.assertIn("120", self.value(size_low=120, size_high=120, stage="seed").reason)
@@ -180,6 +203,51 @@ class FundingTests(unittest.TestCase):
         self.assertEqual(got.value, 0.5)
 
 
+class HiringVelocityTests(unittest.TestCase):
+    def signal(self):
+        return HiringVelocity(CFG.section("hiring_velocity"), CFG.section("small"), CFG.ranker["many_postings"])
+
+    def value(self, **facts):
+        return check_assessment(self, self.signal(), neutral_facts(**facts))
+
+    def test_one_value_per_band(self):
+        for n, want in ((0, 0.0), (1, 0.4), (2, 0.7), (3, 0.7), (4, 1.0), (12, 1.0)):
+            with self.subTest(roles=n):
+                self.assertEqual(self.value(eng_posted_30d=n, open_postings=n).value, want)
+
+    def test_the_reason_counts_the_roles(self):
+        self.assertEqual("3 engineering roles posted in the last 30 days",
+                         self.value(eng_posted_30d=3, open_postings=5).reason)
+        self.assertEqual("1 engineering role posted in the last 30 days",
+                         self.value(eng_posted_30d=1, open_postings=1).reason)
+        self.assertEqual("No engineering role posted in the last 30 days", self.value().reason)
+
+    def test_a_large_company_earns_nothing(self):
+        for facts in (dict(stage="series_c"), dict(stage="public"), dict(size_low=400, size_high=400)):
+            with self.subTest(**facts):
+                got = self.value(eng_posted_30d=6, open_postings=6, **facts)
+                self.assertEqual(0.0, got.value)
+                self.assertEqual("Hiring pace not counted: a large or later-stage company", got.reason)
+        self.assertEqual(1.0, self.value(eng_posted_30d=6, open_postings=6, size_low=300, size_high=300).value)
+        self.assertEqual(1.0, self.value(eng_posted_30d=6, open_postings=6, stage="seed").value)
+
+    def test_over_many_postings_earns_nothing(self):
+        limit = CFG.ranker["many_postings"]
+        got = self.value(eng_posted_30d=10, open_postings=limit + 1)
+        self.assertEqual(0.0, got.value)
+        self.assertEqual(f"Hiring pace not counted: {limit + 1} open roles", got.reason)
+        self.assertEqual(1.0, self.value(eng_posted_30d=10, open_postings=limit).value)
+
+    def test_the_value_is_never_negative(self):
+        for n in range(0, 20):
+            self.assertGreaterEqual(self.value(eng_posted_30d=n, open_postings=n).value, 0.0)
+
+    def test_the_shipped_section(self):
+        self.assertEqual({"window_days": 30, "min_roles": [1, 2, 4], "values": [0.4, 0.7, 1.0]},
+                         CFG.section("hiring_velocity"))
+        self.assertEqual(8.0, CFG.weights["hiring_velocity"])
+
+
 class StaffingRiskTests(unittest.TestCase):
     def value(self, **facts):
         return check_assessment(self, sig(StaffingRisk), neutral_facts(**facts))
@@ -208,7 +276,7 @@ class StaffingRiskTests(unittest.TestCase):
 
 
 class RegistryTests(unittest.TestCase):
-    def test_build_signals_returns_the_twelve_in_order(self):
+    def test_build_signals_returns_the_thirteen_in_order(self):
         self.assertEqual([s.name for s in build_signals(CFG)], ORDER)
 
     def test_weights_have_one_entry_per_signal(self):

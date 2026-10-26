@@ -6,7 +6,7 @@ from outreach.ranking.config import default_ranker_config
 from outreach.ranking.confidence import (LEVELS, Assessment, Confidence, RankReason, build_rank_reason, down_one,
                                          scrub_text,
                                          factor, grade_evidence, grade_no_role, grade_pay, grade_reach, grade_role,
-                                         grade_sponsor, rank_confidence, weaker)
+                                         grade_sponsor, grade_velocity, rank_confidence, weaker)
 from outreach.ranking.types import CompanyFacts, SignalValue
 from tests.contracts import check_signal
 
@@ -209,6 +209,27 @@ class GradeRoleTests(unittest.TestCase):
             with self.subTest(**kw):
                 got = grade_reach(**kw)
                 self.assertEqual((got.level, got.basis), (level, basis))
+
+    def test_grade_velocity_levels(self):
+        cases = (
+            (dict(counted=3, undated=0, board_state="read_ok"), "high",
+             "posted dates on a board read ok"),
+            (dict(counted=2, undated=1, board_state="read_ok"), "medium",
+             "1 of 2 dated by first seen, on a board read for over the window"),
+            (dict(counted=2, undated=0, board_state="read_failed"), "medium", "the board's last read was not ok"),
+            (dict(counted=2, undated=0, board_state="read_empty"), "medium", "the board's last read was not ok"),
+            (dict(counted=2, undated=0, board_state="never_read"), "low",
+             "board not read by this system yet, dates are from an import"),
+            (dict(counted=1, undated=0, board_state="no_board"), "low",
+             "board not read by this system yet, dates are from an import"),
+            (dict(counted=0, undated=0, board_state="read_ok"), "low", "no engineering role posted in the window"),
+        )
+        for kw, level, basis in cases:
+            with self.subTest(**kw):
+                got = grade_velocity(**kw)
+                self.assertEqual((got.level, got.basis), (level, basis))
+        with self.assertRaises(ValueError):
+            grade_velocity(counted=1, undated=0, board_state="odd")
 
     def test_unknown_inputs_are_refused_not_graded_high(self):
         with self.assertRaises(ValueError):

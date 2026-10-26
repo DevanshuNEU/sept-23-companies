@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insights | Knock mockup</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="sb-head">
+      <a class="brand" href="index.html"><span class="brand-mark">K</span>Knock</a>
+      <button class="btn btn-ghost btn-icon btn-sm" type="button" data-theme-toggle aria-label="Switch theme"><svg class="i"><use href="#moon"/></svg></button>
+    </div>
+    <button class="sb-search" type="button" data-palette><svg class="i"><use href="#search"/></svg>Search<span class="kbd">⌘K</span></button>
+    <nav class="sb-group" aria-label="Views">
+      <a class="sb-item" href="today-plan.html" aria-label="Today, 2 of 7 done"><svg class="i"><use href="#today"/></svg>Today<span class="count" aria-hidden="true">2 of 7</span></a>
+      <a class="sb-item" href="outbox.html"><svg class="i"><use href="#outbox"/></svg>Outbox<span class="badge s-ok" title="1 reply"><span class="dot"></span>1</span><span class="count">7</span></a>
+      <a class="sb-item" href="linkedin.html"><svg class="i"><use href="#linkedin"/></svg>LinkedIn<span class="count">12</span></a>
+      <a class="sb-item" href="needs-you.html"><svg class="i"><use href="#alert"/></svg>Needs you<span class="badge s-warn">5</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Results">
+      <p class="sb-label">Results</p>
+      <a class="sb-item" href="progress.html"><svg class="i"><use href="#chart"/></svg>Progress</a>
+      <a class="sb-item" href="wins.html"><svg class="i"><use href="#award"/></svg>Wins</a>
+      <a class="sb-item" href="insights.html" aria-current="page"><svg class="i"><use href="#compass"/></svg>Insights</a>
+    </nav>
+    <nav class="sb-group" aria-label="Lists">
+      <p class="sb-label">Lists</p>
+      <a class="sb-item" href="no-go.html"><svg class="i"><use href="#ban"/></svg>No-go<span class="count">31</span></a>
+      <a class="sb-item" href="done.html"><svg class="i"><use href="#done"/></svg>Done<span class="count">4</span></a>
+    </nav>
+    <nav class="sb-group" aria-label="Recent companies">
+      <p class="sb-label">Recent</p>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Distyl AI</a>
+      <a class="sb-item sub" href="company-score.html"><svg class="i"><use href="#building"/></svg>Pylon</a>
+      <a class="sb-item sub" href="company.html"><svg class="i"><use href="#building"/></svg>Crusoe</a>
+    </nav>
+    <div class="sb-foot">
+      <div class="row"><span class="dot-only ok"></span><b>Sending</b><span class="num" style="margin-left:auto">20 of 30 today</span></div>
+      <div class="row"><span class="dot-only ok"></span><b>4 replies</b><span style="margin-left:auto">in November</span></div>
+      <div class="row"><svg class="i i-sm"><use href="#activity"/></svg>Boards read Mon 08:04</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs"><b>Insights</b></div>
+      <div class="right">
+        <span class="t-xs muted">Ranked Tue 08:00</span>
+        <span class="vsep"></span>
+        <span class="t-xs muted">Updated 10:14</span>
+        <span class="vsep"></span>
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-keys aria-label="Keyboard shortcuts"><svg class="i"><use href="#keyboard"/></svg></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="page" style="max-width:1160px">
+        <!-- Review device only: each tab is one state of the same page. Not part of the app. -->
+        <div class="mock-states">
+          <span class="mock-note">Mockup state</span>
+          <div class="tabs" role="tablist" aria-label="Mockup state">
+            <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="st-today">Real numbers today<span class="count">13</span></button>
+            <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="st-first">First interview<span class="count">1</span></button>
+            <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="st-enough">Enough data later, hypothetical<span class="count">25</span></button>
+            <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="st-empty">None yet</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="st-loading">Loading</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="st-error">Error</button>
+          </div>
+        </div>
+
+        <div class="page-head" style="align-items:flex-start">
+          <div>
+            <h1 class="t-xl">Where your interviews come from</h1>
+          </div>
+          <div class="actions ins-export">
+            <span class="btn-group">
+              <button class="btn btn-outline btn-sm" type="button" data-toast="Exported 312 companies to outcomes-2026-11-10.csv in Desktop, outreach-scratch, insights."><svg class="i"><use href="#download"/></svg>Export CSV</button>
+              <button class="btn btn-outline btn-sm" type="button" data-toast="Exported 312 companies to outcomes-2026-11-10.json in Desktop, outreach-scratch, insights."><svg class="i"><use href="#download"/></svg>Export JSON</button>
+            </span>
+            <span class="hint">One row per company you reached. Company level only: no names, addresses or profile links.</span>
+          </div>
+        </div>
+
+        <!-- ===================== Real numbers today: 13 interview companies ===================== -->
+        <div id="st-today" role="tabpanel" data-model="today"></div>
+
+        <!-- ===================== First interview: 1 company ===================== -->
+        <div id="st-first" role="tabpanel" data-model="first" hidden></div>
+
+        <!-- ===================== Enough data later: a hypothetical 25 ===================== -->
+        <div id="st-enough" role="tabpanel" data-model="enough" hidden></div>
+
+        <!-- ===================== None yet ===================== -->
+        <div id="st-empty" role="tabpanel" hidden>
+          <p class="ins-lede">You reached 312 companies so far.</p>
+          <div class="table-wrap" style="margin-top:16px">
+            <div class="empty" style="padding:40px 24px 32px">
+              <svg class="i"><use href="#compass"/></svg>
+              <b>No interviews logged yet</b>
+              <span style="max-width:60ch">When you log one on Today, or a reply turns into an interview, the company shows up here.</span>
+              <ul class="ins-will">
+                <li><b>Companies that interviewed you</b><span>each with how it started, its size, stage and job board</span></li>
+                <li><b>What they share</b><span>in plain counts, and "too few to tell" until there are enough</span></li>
+                <li><b>More like them</b><span>the top-ranked companies most like them, from 3 interview companies</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== Loading: skeletons at the final height ===================== -->
+        <div id="st-loading" role="tabpanel" hidden aria-busy="true">
+          <p class="ins-lede"><span class="skeleton" style="width:520px;height:14px;margin:3px 0"></span></p>
+          <p class="t-sm"><span class="skeleton" style="width:360px;margin:3px 0"></span></p>
+          <h2 class="section-title">Companies that interviewed you</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Company</th><th>Outcome</th><th>First interview</th><th>How it started</th><th>Contact</th><th>Size</th><th>Stage</th><th>Role level</th><th>Board</th></tr></thead>
+              <tbody id="skel-rows"></tbody>
+            </table>
+          </div>
+          <h2 class="section-title" style="margin-top:32px">What they share</h2>
+          <div class="card" id="skel-find"></div>
+        </div>
+
+        <!-- ===================== Error ===================== -->
+        <div id="st-error" role="tabpanel" hidden>
+          <div class="alert" role="alert" style="margin-top:4px;max-width:760px">
+            <svg class="i muted"><use href="#refresh"/></svg>
+            <span class="title">Could not load insights</span>
+            <span class="desc">Nothing changed. Your logs, the ranking and the lift are as they were. Try again in a moment.</span>
+            <span class="act"><button class="btn btn-outline btn-sm" type="button" data-toast="Loading insights again."><svg class="i"><use href="#refresh"/></svg>Retry</button></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<template id="page-keys">
+  <h4>Insights</h4>
+  <div><span>Companies that interviewed you</span><span class="kbd-row"><span class="kbd">1</span></span></div>
+  <div><span>What they share</span><span class="kbd-row"><span class="kbd">2</span></span></div>
+  <div><span>More like them</span><span class="kbd-row"><span class="kbd">3</span></span></div>
+  <div><span>Next, previous company</span><span class="kbd-row"><span class="kbd">J</span><span class="kbd">K</span></span></div>
+  <div><span>Open the company</span><span class="kbd-row"><span class="kbd">Enter</span></span></div>
+</template>
+<script src="mockup.js"></script>
+<script>
+/* Mockup behaviour for Insights. The rows below are fake; every count, finding and lookalike on the page is
+   computed from them with the plan's rules (#81 Decisions), so the numbers always agree with each other:
+   shared needs 3 companies and half of the known; a comparison or a rate needs 20 with a known value in both
+   groups; unknown never matches unknown; a lookalike shares at least 2 of 4 traits. */
+(function () {
+  "use strict";
+
+  /* ---------- interview companies ---------- */
+  /* name, first interview (ISO), how it started, contact, size band, stage band, role level, board, home state, sponsorship, E-Verify */
+  var BASE = [
+    ["Distyl AI", "2026-11-06", "email", "manager", "51 to 300", "Series A or B", "entry level", "Ashby", "CA", "yes", null],
+    ["Crusoe", "2026-10-29", "email", "engineer", "51 to 300", "later private", null, "Ashby", null, null, null],
+    ["Inngest", "2026-10-23", "linkedin", "manager", "51 to 300", "Series A or B", null, "Greenhouse", null, null, null],
+    ["Pylon", "2026-10-21", "linkedin", "engineer", "51 to 300", "Series A or B", null, "Ashby", null, null, null],
+    ["Trigger.dev", "2026-10-17", "email", "founder", "1 to 50", "seed or earlier", null, "Ashby", null, null, null],
+    ["Retell AI", "2026-10-14", "linkedin", "founder", "1 to 50", "seed or earlier", null, "Ashby", null, null, null],
+    ["Cerebrium", "2026-10-09", "email", "founder", "1 to 50", "seed or earlier", null, "Ashby", null, null, null],
+    ["Mintlify", "2026-10-03", "linkedin", "engineer", "51 to 300", "Series A or B", null, "Ashby", null, null, null],
+    ["Hex", "2026-09-30", "other", "engineer", "51 to 300", "Series A or B", null, "Greenhouse", null, null, null],
+    ["RealPage", "2026-09-25", "application", null, "over 1,000", "later private", null, "Workday", null, null, null],
+    ["General Motors", "2026-09-18", "application", null, "over 1,000", "public", null, "Workday", "MI", "yes", "yes"],
+    ["Halcyon Health", "2026-09-15", "application", null, null, "Series A or B", null, null, null, null, null],
+    ["Lumen Robotics", "2026-09-12", "other", null, null, null, "intern", null, null, null, null]
+  ];
+  /* twelve more, for the hypothetical "enough data" state only */
+  var MORE = [
+    ["Railway", "2026-12-08", "linkedin", "engineer", "51 to 300", "Series A or B", "entry level", "Ashby", "CA", null, null],
+    ["Warp", "2026-12-03", "linkedin", "engineer", "51 to 300", "Series A or B", "entry level", "Ashby", "NY", null, null],
+    ["Resend", "2026-11-30", "email", "founder", "1 to 50", "seed or earlier", "entry level", "Ashby", "CA", null, null],
+    ["Baseten", "2026-11-26", "email", "engineer", "51 to 300", "Series A or B", "entry level", "Greenhouse", "CA", null, null],
+    ["Ambergate", "2026-11-24", "email", "recruiter", "51 to 300", "seed or earlier", null, "Lever", null, null, null],
+    ["Mesh Systems", "2026-11-20", "linkedin", "engineer", "1 to 50", "seed or earlier", "intern", "Ashby", "CA", null, null],
+    ["Kestrel Data", "2026-11-18", "application", null, "over 1,000", "public", "entry level", "Workday", null, null, null],
+    ["Fernhill AI", "2026-11-17", "linkedin", "manager", "51 to 300", "Series A or B", "entry level", "Greenhouse", "CA", null, null],
+    ["Quillwork", "2026-11-13", "linkedin", "founder", "1 to 50", "seed or earlier", null, "Lever", null, null, null],
+    ["Tessellate", "2026-11-12", "email", "engineer", "51 to 300", "later private", null, "Ashby", null, null, null],
+    ["Orbitly", "2026-11-11", "email", "engineer", "51 to 300", "Series A or B", null, null, null, null, null],
+    ["Halden Robotics", "2026-11-10", "linkedin", null, null, null, null, null, null, null, null]
+  ];
+  var F = ["name", "on", "way", "who", "size", "stage", "level", "board", "hq", "sponsor", "everify"];
+  var rows = function (list) { return list.map(function (r) { var o = {}; F.forEach(function (k, i) { o[k] = r[i]; }); return o; }); };
+
+  /* ---------- top-ranked companies (rank, name, size, stage, level, board, reached, the role to open) ---------- */
+  var RANKED = [
+    [4, "Modal", "51 to 300", "Series A or B", null, "Ashby", false, "Software Engineer, New Grad"],
+    [9, "Browserbase", "51 to 300", "Series A or B", "entry level", "Ashby", true, "Software Engineer, New Grad"],
+    [11, "Graphite", "51 to 300", "Series A or B", null, "Ashby", true, "Software Engineer"],
+    [14, "Sola Security", "301 to 1,000", "Series A or B", "SWE II", "Lever", false, "Software Engineer II"],
+    [18, "Langfuse", "1 to 50", "seed or earlier", null, "Ashby", false, "Founding Engineer"],
+    [23, "Cartesia", "51 to 300", "Series A or B", "entry level", "Ashby", false, "Software Engineer, Early Career"],
+    [31, "Hatchet", "1 to 50", "seed or earlier", null, "Ashby", false, "Software Engineer"],
+    [47, "Tavus", "51 to 300", "Series A or B", null, "Greenhouse", false, "Software Engineer, Platform"],
+    [57, "Hebbia", "51 to 300", "Series A or B", "entry level", "Ashby", false, "Software Engineer I"],
+    [62, "Vellum", "51 to 300", "Series A or B", null, "Ashby", false, "Software Engineer, Product"],
+    [70, "Laminar", "1 to 50", "seed or earlier", null, "Ashby", false, "Software Engineer"],
+    [88, "Lindy", "1 to 50", "seed or earlier", "level not stated", "Ashby", false, "Full Stack Engineer"],
+    [104, "Fireworks AI", "51 to 300", "later private", null, "Ashby", false, "Software Engineer, Inference"],
+    [143, "Anyscale", "301 to 1,000", "later private", null, "Ashby", false, "Software Engineer, Ray"],
+    [176, "Pinewood Bio", "over 1,000", "public", null, "Taleo", false, "Software Engineer"],
+    [212, "Northbeam", "301 to 1,000", "later private", null, "Workday", false, "Software Engineer, Data"],
+    [266, "Census", null, "public", null, "Workday", false, "Software Engineer"],
+    [290, "Fathom Labs", "1 to 50", "seed or earlier", null, "Lever", false, "Software Engineer"],
+    [341, "Rillet", "51 to 300", "Series A or B", null, "Greenhouse", false, "Software Engineer"]
+  ].map(function (r) { return { rank: r[0], name: r[1], size: r[2], stage: r[3], level: r[4], board: r[5], reached: r[6], role: r[7] }; });
+
+  /* ---------- the three states ---------- */
+  var MODELS = {
+    today: { companies: rows(BASE), reached: 312, ranked: "1,450", records: 19, replies: 20, referrals: 7, dup: true, compare: {} },
+    first: { companies: rows(BASE.slice(0, 1)), reached: 96, ranked: "1,310", records: 1, replies: 4, referrals: 1, dup: false, compare: {} },
+    enough: { companies: rows(MORE.concat(BASE)), reached: 410, ranked: "1,610", records: 36, replies: 41, referrals: 12, dup: false, hypothetical: true,
+      /* the reached companies without an interview: how many have the same value, of how many with a known value */
+      compare: { size: [61, 240], board: [48, 197], stage: [72, 260], way: [140, 385], who: [55, 301], level: [40, 118], hq: [88, 160] } }
+  };
+  var GROUP_MIN = 20, SHARE_MIN = 3, POOL = 300, COUNT = 15, MIN_COMPANIES = 3, MIN_MATCHES = 2, WEIGHT = 6;
+
+  /* ---------- words ---------- */
+  var WAY = { email: "Email", linkedin: "LinkedIn request", application: "Application", other: "Other" };
+  var WAY_PL = { email: "emails", linkedin: "LinkedIn requests", application: "applications", other: "other ways in" };
+  var WHO = { engineer: "Engineer", manager: "Manager", founder: "Founder", recruiter: "Recruiter" };
+  var WHO_PL = { engineer: "engineers", manager: "managers", founder: "founders", recruiter: "recruiters" };
+  var DIMS = [
+    { k: "size", noun: "size", phrase: function (v) { return "have " + v + " people"; } },
+    { k: "stage", noun: "stage", phrase: function (v) { return "are " + v; } },
+    { k: "level", noun: "role level", phrase: function (v) { return "were for " + v + " roles"; } },
+    { k: "board", noun: "job board", phrase: function (v) { return "post jobs on " + v; } },
+    { k: "way", noun: "way in", phrase: function (v) { return "started with " + WAY_PL[v]; }, word: function (v) { return WAY_PL[v]; } },
+    { k: "who", noun: "first contact", phrase: function (v) { return "started with a touch to " + WHO_PL[v]; }, word: function (v) { return WHO_PL[v]; } },
+    { k: "sponsor", noun: "sponsorship stance", phrase: function (v) { return "have sponsorship on file as " + v; } },
+    { k: "everify", noun: "E-Verify status", phrase: function (v) { return v === "yes" ? "are E-Verify enrolled" : "are not E-Verify enrolled"; } },
+    { k: "hq", noun: "home state", phrase: function (v) { return "are based in " + v; } }
+  ];
+  var cap = function (s) { return s.charAt(0).toUpperCase() + s.slice(1); };
+  var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var day = function (iso) { var p = iso.split("-"); return MON[+p[1] - 1] + " " + (+p[2]); };
+  var NK = '<span class="muted">Not known</span>';
+  var esc = function (s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); };
+  var pct = function (a, b) { return Math.round(100 * a / b) + "%"; };
+
+  /* ---------- what they share (plan Task 5, word for word) ---------- */
+  function shared(m) {
+    var of = m.companies.length;
+    var out = DIMS.map(function (d, order) {
+      var counts = {};
+      m.companies.forEach(function (c) { var v = c[d.k]; if (v != null) counts[v] = (counts[v] || 0) + 1; });
+      var spread = Object.keys(counts).map(function (v) { return [v, counts[v]]; })
+        .sort(function (a, b) { return b[1] - a[1] || (a[0] < b[0] ? -1 : 1); });
+      var known = spread.reduce(function (s, x) { return s + x[1]; }, 0);
+      var word = d.word || function (v) { return v; };
+      var f = { d: d, order: order, of: of, known: known, spread: spread, word: word };
+      if (known < SHARE_MIN) {
+        f.kind = "unknown";
+        f.text = cap(d.noun) + " is known for only " + known + " of " + of + ", too few to tell.";
+      } else if (spread[0][1] >= SHARE_MIN && spread[0][1] * 2 >= known) {
+        f.kind = "shared"; f.value = spread[0][0]; f.count = spread[0][1];
+        f.text = f.count + " of your " + of + " interview companies " + d.phrase(f.value) + (known < of ? " (" + d.noun + " known for " + known + ")" : "") + ".";
+        var cmp = m.compare[d.k];
+        f.enough = known >= GROUP_MIN && !!cmp && cmp[1] >= GROUP_MIN;
+        if (f.enough) {
+          f.cmp = cmp;
+          f.compare = "Of the " + (m.reached - of) + " companies you reached without an interview, " + cmp[0] + " of " + cmp[1] + " with a known " + d.noun + " do too.";
+        } else if (of < GROUP_MIN) {
+          f.compare = "Too few to tell whether this sets them apart: that takes " + GROUP_MIN + " interview companies, and you have " + of + ".";
+        } else {
+          f.compare = "Too few to tell whether this sets them apart: that takes " + GROUP_MIN + " with a known " + d.noun + ", and you have " + known + ".";
+        }
+      } else {
+        f.kind = "mixed";
+        var shown = spread.length <= 4 ? spread : spread.slice(0, 3);
+        f.text = "No one " + d.noun + " stands out: " + shown.map(function (x) { return word(x[0]) + " " + x[1]; }).join(", ") +
+          (spread.length > 4 ? ", and " + (spread.length - 3) + " more" : "") + ".";
+      }
+      return f;
+    });
+    var rankKind = { shared: 0, mixed: 1, unknown: 2 };
+    return out.sort(function (a, b) { return rankKind[a.kind] - rankKind[b.kind] || (b.count || 0) - (a.count || 0) || a.order - b.order; });
+  }
+
+  /* the count strip: one square per interview company, grouped by value, never a percent */
+  function strip(f) {
+    var groups = f.spread.map(function (x, i) { return { n: x[1], cls: f.kind === "shared" && i === 0 ? "top" : "", label: f.word(x[0]) + ": " + x[1] }; });
+    var unk = f.of - f.known;
+    if (unk) groups.push({ n: unk, cls: "unk", label: "not known: " + unk });
+    var label = groups.map(function (g) { return g.label; }).join(", ");
+    var html = '<span class="ins-strip" role="img" aria-label="' + esc(cap(label)) + '">' + groups.map(function (g) {
+      return '<span class="ins-grp">' + new Array(g.n + 1).join('<i class="' + g.cls + '"></i>') + "</span>";
+    }).join("") + "</span>";
+    var legend = f.kind === "mixed" ? (unk ? "Not known: " + unk : "") : cap(label);
+    return html + (legend ? '<span class="ins-legend">' + esc(legend) + "</span>" : "");
+  }
+
+  function findRow(f) {
+    var body = '<p class="ins-find-text">' + esc(f.text) + "</p>";
+    if (f.kind === "shared" && f.enough) {
+      body += '<p class="ins-find-cmp">' + esc(f.compare) + "</p>" +
+        '<table class="ledger ins-rates"><tbody>' +
+        '<tr><td>Interview companies</td><td class="num">' + f.count + " of " + f.known + " (" + pct(f.count, f.known) + ")</td></tr>" +
+        '<tr><td>Reached, no interview</td><td class="num">' + f.cmp[0] + " of " + f.cmp[1] + " (" + pct(f.cmp[0], f.cmp[1]) + ")</td></tr>" +
+        "</tbody></table>";
+    } else if (f.kind === "shared") {
+      body += '<p class="ins-find-cmp">' + esc(f.compare) + "</p>";
+    }
+    return '<div class="ins-find is-' + f.kind + '"><div class="ins-find-body">' + body + '</div><div class="ins-find-viz">' + strip(f) + "</div></div>";
+  }
+
+  /* ---------- lookalikes (plan Tasks 7 and 11) ---------- */
+  var TRAITS = [["size", function (v) { return v + " people"; }], ["stage", function (v) { return v; }],
+    ["level", function (v) { return v + " role"; }], ["board", function (v) { return v + " board"; }]];
+  function lookalikes(m) {
+    var profile = m.companies.slice().sort(function (a, b) { return a.on < b.on ? 1 : a.on > b.on ? -1 : (a.name < b.name ? -1 : 1); });
+    var interviewNames = {}; profile.forEach(function (p) { interviewNames[p.name] = 1; });
+    return RANKED.filter(function (c) { return c.rank <= POOL && !interviewNames[c.name]; }).map(function (c) {
+      var best = 0, like = [];
+      profile.forEach(function (p) {
+        var n = TRAITS.filter(function (t) { return c[t[0]] != null && p[t[0]] != null && c[t[0]] === p[t[0]]; }).length;
+        if (n > best) { best = n; like = [p]; } else if (n === best && n > 0) like.push(p);
+      });
+      var traits = TRAITS.filter(function (t) { return like[0] && c[t[0]] != null && c[t[0]] === like[0][t[0]]; }).map(function (t) { return t[1](c[t[0]]); });
+      return { c: c, best: best, like: like, traits: traits };
+    }).filter(function (x) { return x.best >= MIN_MATCHES; })
+      .sort(function (a, b) { return b.best - a.best || a.c.rank - b.c.rank; }).slice(0, COUNT);
+  }
+  function likeLinks(like) {
+    var a = function (p) { return '<a class="link" href="company.html">' + esc(p.name) + "</a>"; };
+    if (like.length === 1) return a(like[0]);
+    if (like.length === 2) return a(like[0]) + " and " + a(like[1]);
+    return a(like[0]) + ", " + a(like[1]) + " and " + (like.length - 2) + " more";
+  }
+
+  /* ---------- the page for one state ---------- */
+  function render(el, m) {
+    var of = m.companies.length;
+    var h = "";
+    if (m.hypothetical) {
+      h += '<p class="ins-hypo"><svg class="i i-sm"><use href="#help"/></svg>Hypothetical, for review: 25 interview companies, so you can see where rates appear beside the counts. Not your data.</p>';
+    }
+    h += '<p class="ins-lede">' + of + (of === 1 ? " company" : " companies") + " interviewed you, out of " + m.reached + " you reached. " + m.ranked + " companies are ranked.</p>";
+    h += '<p class="ins-sub">From ' + m.records + " interview " + (m.records === 1 ? "record" : "records") + ". Your " + m.replies + " replies and " + m.referrals + (m.referrals === 1 ? " referral" : " referrals") + " are kept too, but only interviews and offers count here.</p>";
+    if (m.dup) {
+      h += '<p class="ins-note"><svg class="i i-sm"><use href="#building"/></svg><span>gm and General Motors may be one company, so they show as one line here. <a class="link" href="needs-you.html">Merge them in Needs you</a> so the rest of Knock counts them once too.</span></p>';
+    }
+
+    /* 1. companies */
+    h += '<h2 class="section-title ins-h" tabindex="-1" data-sec="1">Companies that interviewed you<span class="count">' + of + '</span><span class="right"><span class="kbd">1</span></span></h2>';
+    h += '<div class="table-wrap"><table class="table ins-table"><thead><tr><th>Company</th><th>Outcome</th><th>First interview</th><th>How it started</th><th>Contact</th><th>Size</th><th>Stage</th><th>Role level</th><th>Board</th></tr></thead><tbody>';
+    m.companies.slice().sort(function (a, b) { return a.on < b.on ? 1 : -1; }).forEach(function (c) {
+      var dup = m.dup && c.name === "General Motors";
+      h += '<tr data-row data-href="company.html">' +
+        '<td><span class="cell-title"><a href="company.html">' + esc(c.name) + "</a></span>" +
+        (dup ? '<div class="cell-sub">Also logged as gm.<br>Possible duplicate: <a class="link" href="needs-you.html">merge in Needs you</a></div>' : "") + "</td>" +
+        '<td><span class="badge s-ok"><span class="dot"></span>Interview</span></td>' +
+        '<td class="num">' + day(c.on) + "</td>" +
+        "<td>" + WAY[c.way] + "</td>" +
+        "<td>" + (c.who ? WHO[c.who] : NK) + "</td>" +
+        "<td>" + (c.size || NK) + "</td>" +
+        "<td>" + (c.stage ? cap(c.stage) : NK) + "</td>" +
+        "<td>" + (c.level ? cap(c.level) : NK) + "</td>" +
+        "<td>" + (c.board || NK) + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+
+    /* 2. what they share */
+    var fs = shared(m);
+    var main = fs.filter(function (f) { return f.kind !== "unknown"; });
+    var few = fs.filter(function (f) { return f.kind === "unknown"; });
+    h += '<h2 class="section-title ins-h" tabindex="-1" data-sec="2" style="margin-top:32px">What they share<span class="right"><span class="kbd">2</span></span></h2>';
+    h += '<p class="ins-rule">A line says "shared" when at least 3 companies and half of those with a known value have it. Comparing with the companies that did not interview you takes ' + GROUP_MIN + " on each side with a known value, so until then you see counts, not rates.</p>";
+    if (main.length) h += '<div class="card ins-finds">' + main.map(findRow).join("") + "</div>";
+    if (few.length) {
+      h += '<h3 class="ins-few-h">Too few to tell yet<span class="count">' + few.length + "</span></h3>";
+      h += '<div class="card ins-finds is-few">' + few.map(findRow).join("") + "</div>";
+    }
+
+    /* 3. more like them */
+    h += '<h2 class="section-title ins-h" tabindex="-1" data-sec="3" style="margin-top:32px">More like them';
+    var la = of >= MIN_COMPANIES ? lookalikes(m) : [];
+    if (la.length) h += '<span class="count">' + la.length + "</span>";
+    h += '<span class="right"><span class="kbd">3</span></span></h2>';
+    if (of < MIN_COMPANIES) {
+      h += '<div class="table-wrap"><div class="empty" style="padding:28px 24px"><svg class="i"><use href="#compass"/></svg><b>Lookalikes start at 3 interview companies. You have ' + of + '.</b><span>Then the top-ranked companies most like them show here, each with the reason.</span></div></div>';
+    } else {
+      h += '<p class="ins-rule">The ' + COUNT + " most like them among your top " + POOL + " ranked companies, most shared traits first, then rank. Interview companies are left out; ones you already reached stay, tagged Reached.</p>";
+      h += '<div class="table-wrap"><table class="table ins-table ins-look"><thead><tr><th class="right">Rank</th><th>Company</th><th>Why it is like them</th><th>Traits</th><th>Open role</th></tr></thead><tbody>';
+      la.forEach(function (x) {
+        h += '<tr data-row data-href="company.html">' +
+          '<td class="num right muted">' + x.c.rank + "</td>" +
+          '<td><span class="row" style="gap:8px"><a class="cell-title" href="company.html">' + esc(x.c.name) + "</a>" + (x.c.reached ? '<span class="badge s-idle">Reached</span>' : "") + "</span></td>" +
+          '<td class="ins-why">Like ' + likeLinks(x.like) + ", where you interviewed: " + esc(x.traits.join(", ")) + "</td>" +
+          '<td class="num muted">' + x.best + " of 4</td>" +
+          '<td><a class="link ins-role" href="#">' + esc(x.c.role) + '<svg class="i i-sm"><use href="#external"/></svg></a></td></tr>';
+      });
+      h += "</tbody></table></div>";
+    }
+
+    /* the lift */
+    var conf = of >= GROUP_MIN ? "medium" : "low";
+    var most = of < MIN_COMPANIES ? 0 : (conf === "low" ? WEIGHT * 0.5 : +(WEIGHT * 0.85).toFixed(1));
+    h += '<div class="ins-tilt">';
+    h += '<p class="ins-tilt-head">A small lift for companies like these. It never lowers or hides a company.</p>';
+    if (of < MIN_COMPANIES) {
+      h += '<p class="muted">The lift starts at 3 interview companies. You have ' + of + ". Until then it adds nothing to any score.</p>";
+    } else {
+      h += '<p class="muted">Weight ' + WEIGHT + " in the ranking config, so never more than " + WEIGHT + " points. " +
+        (conf === "low" ? "Under " + GROUP_MIN + " interview companies it counts at half: at most " + most + " points today, on a top score of 120."
+          : "With " + of + " interview companies it counts at most " + most + " points, on a top score of 120.") +
+        " Weight 0 turns it off; lookalikes still show.</p>";
+      h += '<p><button class="ins-textlink" type="button" data-toast="The rank diff opens here: which companies the lift moved, and by how much.">See what it moved</button></p>';
+    }
+    h += "</div>";
+    el.innerHTML = h;
+  }
+
+  document.querySelectorAll("[data-model]").forEach(function (el) { render(el, MODELS[el.getAttribute("data-model")]); });
+
+  /* skeletons at the final height */
+  var sk = "";
+  for (var i = 0; i < 8; i++) sk += '<tr><td><span class="skeleton" style="width:' + (90 + (i * 37) % 60) + 'px"></span></td><td><span class="skeleton" style="width:72px;height:20px;border-radius:6px"></span></td><td><span class="skeleton" style="width:44px"></span></td><td><span class="skeleton" style="width:84px"></span></td><td><span class="skeleton" style="width:56px"></span></td><td><span class="skeleton" style="width:64px"></span></td><td><span class="skeleton" style="width:88px"></span></td><td><span class="skeleton" style="width:64px"></span></td><td><span class="skeleton" style="width:52px"></span></td></tr>';
+  document.getElementById("skel-rows").innerHTML = sk;
+  var sf = "";
+  for (i = 0; i < 3; i++) sf += '<div class="ins-find"><div class="ins-find-body"><span class="skeleton" style="width:' + (380 - i * 40) + 'px;height:14px;margin:3px 0"></span><span class="skeleton" style="width:440px;margin-top:8px"></span></div><div class="ins-find-viz"><span class="skeleton" style="width:160px;height:10px"></span><span class="skeleton" style="width:200px;margin-top:8px"></span></div></div>';
+  document.getElementById("skel-find").innerHTML = sf;
+
+  /* 1, 2, 3 move focus to the three section headings of the state on screen */
+  document.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || !/^[123]$/.test(e.key)) return;
+    if (e.target.closest && e.target.closest("input, textarea, select")) return;
+    if (document.querySelector(".overlay:not([hidden])")) return;
+    var h = Array.prototype.slice.call(document.querySelectorAll('[data-sec="' + e.key + '"]')).filter(function (x) { return x.offsetParent !== null; })[0];
+    if (h) { e.preventDefault(); h.focus(); h.scrollIntoView({ block: "start" }); }
+  });
+})();
+</script>
+</body>
+</html>

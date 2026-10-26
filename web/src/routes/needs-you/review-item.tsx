@@ -309,7 +309,7 @@ export function ReviewItemRow({
       aria-label={name}
       aria-current={selected || undefined}
       className={cn(
-        'grid grid-cols-[20px_minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b px-4 py-3.5 last:border-b-0',
+        '@container grid grid-cols-[20px_minmax(0,1fr)] gap-x-3 gap-y-1 border-b px-4 py-3.5 last:border-b-0 @4xl:grid-cols-[20px_minmax(0,1fr)_auto]',
         'data-[active=true]:bg-muted data-[active=true]:shadow-[inset_2px_0_0_var(--foreground)] dark:data-[active=true]:bg-muted/60',
       )}
     >
@@ -321,7 +321,7 @@ export function ReviewItemRow({
         <Age item={item} />
       </div>
       {merge && item.merge ? null : (
-        <div className="col-start-3 row-span-2 row-start-1 flex items-start gap-1.5">
+        <div className="col-start-2 row-start-3 mt-1 flex flex-wrap items-start gap-1.5 @4xl:col-start-3 @4xl:row-span-2 @4xl:row-start-1 @4xl:mt-0">
           {field && !editing ? <ActionButton label={EDIT_BUTTON[field]} keyName="E" variant="outline" onClick={onEdit} /> : null}
           {!editing ? <ActionButton label={merge ? 'Keep separate' : 'Mark ok'} keyName="O" variant="ghost" onClick={onOk} /> : null}
           {hasNoGo(item.kind) ? <ActionButton label="Mark no-go" keyName="N" variant="ghost" onClick={() => onNoGo()} /> : null}

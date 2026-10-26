@@ -87,9 +87,18 @@ function DetailPlaceholder() {
  * look at: approving stays his own key or click.
  */
 function Preselect({ items, selected, onSelect }: { items: OutboxView['items']; selected: Id | null; onSelect: (touchId: Id) => void }) {
-  const first = selected === null ? firstToAct(items) : null;
+  // Once only: after the first pick, or after he has chosen a row himself, it never picks again, so clearing the
+  // selection or a slow first paint cannot send him back to the first row.
+  const [armed, setArmed] = useState(true);
+  const first = armed && selected === null ? firstToAct(items) : null;
   useEffect(() => {
-    if (first !== null) onSelect(first);
+    if (selected !== null) setArmed(false);
+  }, [selected]);
+  useEffect(() => {
+    if (first !== null) {
+      setArmed(false);
+      onSelect(first);
+    }
   }, [first, onSelect]);
   return null;
 }

@@ -67,20 +67,42 @@ class SmallTests(unittest.TestCase):
     def value(self, **facts):
         return check_assessment(self, sig(Small), neutral_facts(**facts))
 
-    def test_small_values(self):
-        self.assertEqual(self.value(size_low=120, size_high=120, stage="seed").value, 1.0)
-        self.assertEqual(self.value(size_low=120, size_high=120, stage="series_c").value, 0.6)
-        self.assertEqual(self.value(size_low=120, size_high=120).value, 1.0)
-        self.assertEqual(self.value(size_low=250, size_high=250).value, 1.0)
+    def test_the_curve_has_one_value_per_band(self):
+        # band_tops = [25, 50, 100, 250], band_values = [1.0, 0.9, 0.7, 0.5]: the band is the first top at or above
+        # the size.
+        for size, want in ((1, 1.0), (10, 1.0), (25, 1.0),  # up to 25 people
+                           (26, 0.9), (50, 0.9),  # 26 to 50
+                           (51, 0.7), (100, 0.7),  # 51 to 100
+                           (101, 0.5), (120, 0.5), (250, 0.5)):  # 101 to 250
+            with self.subTest(size=size):
+                self.assertEqual(self.value(size_low=size, size_high=size).value, want)
+                self.assertEqual(self.value(size_low=size, size_high=size, stage="seed").value, want)
+
+    def test_a_later_stage_multiplies_the_band_by_other_value(self):
+        for size, want in ((20, 0.6), (40, 0.54), (80, 0.42), (200, 0.3)):
+            with self.subTest(size=size):
+                got = self.value(size_low=size, size_high=size, stage="series_c")
+                self.assertEqual(got.value, want)
+                self.assertIn("stage series c", got.reason)
+
+    def test_borderline_and_over_stay_as_they_were(self):
         self.assertEqual(self.value(size_low=251, size_high=251).value, 0.2)
         self.assertEqual(self.value(size_low=280, size_high=280).value, 0.2)
         self.assertEqual(self.value(size_low=300, size_high=300).value, 0.2)
         self.assertEqual(self.value(size_low=301, size_high=301).value, 0.0)
         self.assertEqual(self.value(size_low=400, size_high=400).value, 0.0)
 
+    def test_the_shipped_curve(self):
+        p = CFG.section("small")
+        self.assertEqual(([25, 50, 100, 250], [1.0, 0.9, 0.7, 0.5]), (p["band_tops"], p["band_values"]))
+        self.assertEqual((p["max_headcount"], p["other_value"]), (250, 0.6))
+        self.assertEqual(16.0, CFG.weights["small"])
+
     def test_a_range_is_read_at_its_high_end(self):
         self.assertEqual(self.value(size_low=200, size_high=280).value, 0.2)
-        self.assertEqual(self.value(size_low=200, size_high=None).value, 1.0)
+        self.assertEqual(self.value(size_low=20, size_high=60).value, 0.7)
+        self.assertEqual(self.value(size_low=200, size_high=None).value, 0.5)
+        self.assertEqual(self.value(size_low=20, size_high=None).value, 1.0)
 
     def test_small_unknown_size_is_exactly_neutral(self):
         got = self.value()
@@ -100,7 +122,7 @@ class SmallTests(unittest.TestCase):
         self.assertEqual(self.value(weak_flags=("81 open roles", SHARED_DOMAIN_FLAG)).value, -0.3)
 
     def test_a_known_size_ignores_the_weak_flags(self):
-        self.assertEqual(self.value(size_low=100, size_high=100, weak_flags=("81 open roles",)).value, 1.0)
+        self.assertEqual(self.value(size_low=100, size_high=100, weak_flags=("81 open roles",)).value, 0.7)
 
     def test_the_reason_names_the_size(self):
         self.assertIn("120", self.value(size_low=120, size_high=120, stage="seed").reason)

@@ -51,7 +51,7 @@ class ScoreTests(unittest.TestCase):
         got = score(facts)
         w = CFG.weights
         want = (w["live_role"] * 1.0 + w["posting_sponsors"] * 1.0 + w["everify"] * 1.0 + w["cap_exempt"] * 0.7
-                + w["lca_junior"] * 0.3 + w["small"] * 1.0 + w["funding"] * round(1 - 7 / 18, 4))
+                + w["lca_junior"] * 0.3 + w["small"] * 0.5 + w["funding"] * round(1 - 7 / 18, 4))  # 120 people: 0.5
         self.assertEqual(got.score, round(want, 4))
         self.assertEqual(round(got.score, 4), got.score)
         self.assertEqual(got.score, round(sum(p.points for p in got.values.values()), 4))

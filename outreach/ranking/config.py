@@ -31,7 +31,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "lca_junior": ("cap",),
     "funding": (),
     "small": ("max_headcount", "borderline_headcount", "early_stages", "later_stages", "early_value", "other_value",
-              "borderline_value", "weak_flag_value"),
+              "borderline_value", "weak_flag_value", "band_tops", "band_values"),
     "large_later_stage": (),
     "reachable_person": ("role_kinds", "person", "hn_post"),
     "staffing_risk": ("high", "medium", "promoted_high"),
@@ -114,6 +114,23 @@ def _check_tilt(data: dict) -> None:
                          f"({share:g} of the top score {top:g}), so the tilt would no longer be small")
 
 
+def _check_small(small: dict) -> None:
+    """The size curve: `band_tops` are whole numbers of at least 1 that rise, the last one `max_headcount`, so every
+    small size falls in a band; `band_values` hold one number per top, each above 0 and at most 1, never rising, so a
+    bigger company never earns more than a smaller one."""
+    tops, values = small["band_tops"], small["band_values"]
+    if (not isinstance(tops, list) or not tops or any(not isinstance(t, int) or isinstance(t, bool) or t < 1
+                                                      for t in tops)
+            or any(a >= b for a, b in zip(tops, tops[1:])) or tops[-1] != small["max_headcount"]):
+        raise ValueError(f"[small] band_tops must be rising whole numbers of at least 1 that end at max_headcount "
+                         f"({small['max_headcount']!r}), got {tops!r}")
+    if (not isinstance(values, list) or len(values) != len(tops)
+            or any(not _is_number(v) or not math.isfinite(v) or not 0 < v <= 1 for v in values)
+            or any(a < b for a, b in zip(values, values[1:]))):
+        raise ValueError(f"[small] band_values must be one number per band top, each above 0 and at most 1, never "
+                         f"rising, got {values!r}")
+
+
 def _check_confidence(c: dict) -> None:
     factors = [_number(c[f"factor_{level}"], f"[confidence] factor_{level}") for level in ("high", "medium", "low")]
     if not all(0 < f <= 1 for f in factors):
@@ -170,6 +187,7 @@ def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
             raise ValueError(f"[weights] {name} must be a finite number above 0, got {w!r}")
     _check_bottom_weights(data)
     _check_tilt(data)
+    _check_small(data["small"])
     _check_confidence(data["confidence"])
     _check_hide(data["hide"])
     _check_ranker(data)

@@ -70,12 +70,12 @@ def _load_edited(tc: unittest.TestCase, *edits: tuple[str, str, str]):
         return load_ranker_config(p)
 
 
-# Numbers that are exact in binary, so a boundary test can sit exactly on the limit: the positive weights add to 118
+# Numbers that are exact in binary, so a boundary test can sit exactly on the limit: the positive weights add to 122
 # (reachable_person is 0, the interview tilt's 6 counts) and the worst non-bottom negatives are
-# 12 * 0.5 + 10 * 0.25 + 12 * 0.25 = 11.5, a limit of 129.5.
+# 12 * 0.5 + 10 * 0.25 + 16 * 0.25 = 12.5, a limit of 134.5.
 EXACT = (("everify", "not_enrolled", "-0.5"), ("pay_level", "level_1", "-0.25"), ("small", "weak_flag_value", "-0.25"))
-LIMIT = 129.5
-POSITIVE = 118.0  # every weight but the bottom push, added together
+LIMIT = 134.5
+POSITIVE = 122.0  # every weight but the bottom push, added together
 
 
 def _flip(path: Path) -> None:
@@ -314,10 +314,10 @@ class ConfigTests(unittest.TestCase):
     def test_bottom_weights_outweigh_every_positive_weight(self):
         w = default_ranker_config().weights
         positive = sum(v for k, v in w.items() if k not in BOTTOM)
-        # 40 + 10 + 12 + 10 + 10 + 12 + 12 (small) + 0 (reachable_person) + 6 (funding) + 6 (the interview tilt,
+        # 40 + 10 + 12 + 10 + 10 + 12 + 16 (small) + 0 (reachable_person) + 6 (funding) + 6 (the interview tilt,
         # which counts toward the bottom push).
         self.assertEqual(positive, POSITIVE)
-        self.assertEqual(POSITIVE, 118.0)
+        self.assertEqual(POSITIVE, 122.0)
         for name in BOTTOM:
             self.assertGreater(w[name], positive, f"{name} must outweigh every positive weight added together")
 
@@ -486,6 +486,43 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(0.1, cfg.section(TILT)["max_weight_share"])
         self.assertEqual((3, 2, 20), tuple(cfg.section(TILT)[k] for k in
                                           ("min_interview_companies", "min_matches", "confident_at")))
+
+    def test_the_small_curve_is_checked(self):
+        for key, value in (("band_tops", "[25, 50, 100]"),  # the last top must be max_headcount
+                           ("band_tops", "[25, 50, 100, 300]"),
+                           ("band_tops", "[50, 25, 100, 250]"),  # must rise
+                           ("band_tops", "[25, 25, 100, 250]"),
+                           ("band_tops", "[0, 50, 100, 250]"),
+                           ("band_tops", "[25.5, 50, 100, 250]"),
+                           ("band_tops", "[]"), ("band_tops", '"25"'),
+                           ("band_values", "[1.0, 0.9, 0.7]"),  # one value per top
+                           ("band_values", "[1.0, 0.9, 0.7, 0.5, 0.3]"),
+                           ("band_values", "[0.9, 1.0, 0.7, 0.5]"),  # a bigger company never scores more
+                           ("band_values", "[1.5, 0.9, 0.7, 0.5]"),
+                           ("band_values", "[1.0, 0.9, 0.7, 0.0]"),  # a small company is never 0 or below
+                           ("band_values", "[1.0, 0.9, 0.7, -0.5]"),
+                           ("band_values", '[1.0, 0.9, 0.7, "0.5"]'), ("band_values", "[1.0, 0.9, 0.7, true]")):
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ValueError) as cm:
+                    _load_edited(self, ("small", key, value))
+                self.assertIn(key, str(cm.exception))
+        cfg = _load_edited(self, ("small", "band_tops", "[250]"), ("small", "band_values", "[1.0]"))
+        self.assertEqual(([250], [1.0]), (cfg.section("small")["band_tops"], cfg.section("small")["band_values"]))
+        flat = _load_edited(self, ("small", "band_values", "[1.0, 1.0, 1.0, 1.0]"))  # equal values are allowed
+        self.assertEqual([1.0] * 4, flat.section("small")["band_values"])
+
+    def test_the_small_curve_keys_are_required(self):
+        for key in ("band_tops", "band_values"):
+            with self.subTest(key=key):
+                text = CONFIG_PATH.read_text(encoding="utf-8")
+                text, n = re.subn(rf"(?m)^{key}\s*=.*\n", "", text, count=1)
+                self.assertEqual(n, 1)
+                with tempfile.TemporaryDirectory() as d:
+                    p = Path(d) / "config.toml"
+                    p.write_text(text, encoding="utf-8")
+                    with self.assertRaises(KeyError) as cm:
+                        load_ranker_config(p)
+                self.assertIn(key, str(cm.exception))
 
     def test_no_dashes_in_config_or_wages(self):
         for name in ("config.toml", "wages.toml"):

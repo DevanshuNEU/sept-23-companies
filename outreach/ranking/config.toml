@@ -14,7 +14,7 @@ diff_top_n = 50
 lca_wage_min_filings = 3
 
 # Weights. staffing_risk and large_later_stage are the bottom push: each is larger than every other weight added
-# together (118 with the interview tilt), so a company they hit sorts below all the rest and stays on the list. The
+# together (122 with the interview tilt), so a company they hit sorts below all the rest and stays on the list. The
 # loader and a test pin it. reachable_person is 0.0 (P5): he finds people on LinkedIn himself, so a person on file
 # earns no points; its reason stays stored. Only it and interview_like may be 0.
 [weights]
@@ -24,7 +24,7 @@ everify = 12.0
 cap_exempt = 10.0
 pay_level = 10.0
 lca_junior = 12.0
-small = 12.0
+small = 16.0
 reachable_person = 0.0
 funding = 6.0
 interview_like = 6.0
@@ -67,11 +67,16 @@ cap = 10
 # Uses ranker.funding_window_months and has no keys of its own.
 [funding]
 
+# The size curve (P5): a known size up to max_headcount takes the value of the first band top at or above it
+# (up to 25 people 1.0, 26 to 50 0.9, 51 to 100 0.7, 101 to 250 0.5), times early_value for an early or unknown stage
+# and other_value for any other stage. The last band top must be max_headcount; the values never rise.
 [small]
 max_headcount = 250
 borderline_headcount = 300
 early_stages = ["pre_seed", "seed", "series_a", "series_b", "yc", "early"]
 later_stages = ["series_c", "series_d", "series_e_plus", "late_private", "public"]
+band_tops = [25, 50, 100, 250]
+band_values = [1.0, 0.9, 0.7, 0.5]
 early_value = 1.0
 other_value = 0.6
 borderline_value = 0.2
@@ -86,7 +91,7 @@ hn_post = 0.6
 
 # The interview tilt (#81). One way: its value is 0 to 1, so it only adds points; it never lowers a score, never
 # hides a company and never writes a no-go. Its weight may be at most max_weight_share of the top score (every other
-# weight except the bottom push, 112 today, so at most 11.2), and 0.0 switches it off while keeping its reason stored.
+# weight except the bottom push, 116 today, so at most 11.6), and 0.0 switches it off while keeping its reason stored.
 # Under min_interview_companies it lifts nobody; a company needs min_matches of the four traits in common with one
 # interview company; its confidence is low under confident_at interview companies, else medium, never high.
 [interview_like]

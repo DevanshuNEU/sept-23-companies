@@ -11,12 +11,10 @@ import {
   type LinkedInPerson,
   type LinkedInStep,
   type LinkedInView,
-  type ReplyKind,
   type ShellSummary,
 } from '@/api';
+import { ReplyKindDialog, type LoggedReply } from '@/components/reply-kind-dialog';
 import { EmptyState, QueryState } from '@/components/state-views';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -32,7 +30,6 @@ import { LinkedInTable, type ShownGroup } from './linkedin-table';
 
 type PersonTab = LinkedInPerson['tab'];
 type Tab = PersonTab | 'all';
-type LoggedReply = Exclude<ReplyKind, 'unsorted' | 'auto_reply'>;
 
 const TABS: { value: Tab; label: string; count: (c: LinkedInView['counts']) => number }[] = [
   { value: 'to_reach', label: 'To reach', count: (c) => c.toReach },
@@ -51,8 +48,7 @@ const EMPTY: Record<Tab, { title: string; text: string }> = {
   all: { title: 'Nobody on the LinkedIn list.', text: 'People past the email budget land here when Claude adds them.' },
 };
 
-// The four reply kinds, as for email. Said no and Asked to stop commit at once (they add a no-go).
-const REPLY_KINDS: LoggedReply[] = ['interested', 'not_now', 'said_no', 'asked_to_stop'];
+// Said no and Asked to stop commit at once (they add a no-go).
 const AT_ONCE = new Set<LoggedReply>(['said_no', 'asked_to_stop']);
 
 function loggedText(name: string, step: LinkedInStep, kind?: LoggedReply): string {
@@ -111,41 +107,6 @@ function useKeptInTab(selected: Id | null, tab: Tab, selectedTab: PersonTab | nu
   }
   if (next?.id !== kept?.id || next?.tab !== kept?.tab) setKept(next);
   return next?.id ?? null;
-}
-
-function ReplyDialog({
-  person,
-  onPick,
-  onClose,
-}: {
-  person: LinkedInPerson | null;
-  onPick: (kind: LoggedReply) => void;
-  onClose: () => void;
-}) {
-  return (
-    <Dialog open={person !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
-      <DialogContent showCloseButton={false} className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>What kind of reply?</DialogTitle>
-          <DialogDescription>
-            {person ? `From ${person.person.name} on LinkedIn. Said no and Asked to stop add them to the no-go list.` : null}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-2">
-          {REPLY_KINDS.map((kind) => (
-            <Button key={kind} type="button" variant="outline" onClick={() => onPick(kind)}>
-              {replyKindStatus[kind].label}
-            </Button>
-          ))}
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 function TableSkeleton() {
@@ -413,8 +374,8 @@ export default function LinkedInPage() {
         Logging only records what you did, so the company page shows the whole story. Nothing here touches LinkedIn.
       </p>
 
-      <ReplyDialog
-        person={replyPerson}
+      <ReplyKindDialog
+        from={replyPerson ? `${replyPerson.person.name} on LinkedIn` : null}
         onClose={() => setReplyFor(null)}
         onPick={(kind) => {
           if (replyPerson) log(replyPerson, 'replied', kind);

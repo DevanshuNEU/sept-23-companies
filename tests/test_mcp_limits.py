@@ -19,7 +19,7 @@ from unittest import mock
 import live_checkout
 from outreach.mcp import __main__ as cli
 from outreach.mcp import server
-from outreach.mcp.guard import NEVER_TABLES, install_authorizer, install_triggers, open_guarded
+from outreach.mcp.guard import BRIDGE_TABLES, NEVER_TABLES, install_authorizer, install_triggers, open_guarded
 from outreach.mcp.tools import Input, ToolSpec
 from outreach.reader.types import FIELDS
 from outreach.store import DEFAULT_PATH, connect
@@ -51,9 +51,11 @@ def spec(name: str) -> ToolSpec:
     return next(s for s in server.tool_specs() if s.name == name)
 
 
-def never_rows(conn) -> dict[str, str]:
+def never_rows(conn, tool: str = "") -> dict[str, str]:
+    """The tables no tool may write, plus the bridge's two for every tool but `log_sent` (the one that inserts there)."""
     hashes = table_hashes(conn)
-    return {t: hashes[t] for t in NEVER_TABLES}
+    tables = NEVER_TABLES if tool == "log_sent" else NEVER_TABLES | BRIDGE_TABLES
+    return {t: hashes[t] for t in tables}
 
 
 def messages(conn) -> dict[int, tuple]:
@@ -168,9 +170,9 @@ class SweepTest(SweepCase):
         for name in FIFTEEN:
             args, named = calls[name] if name != "reader_submit" else self.valid()["reader_submit"]
             with self.subTest(tool=name):
-                never, before = never_rows(self.db), messages(self.db)
+                never, before = never_rows(self.db, name), messages(self.db)
                 self.ok(name, args)
-                self.assertEqual(never_rows(self.db), never, f"{name} changed a table no tool may write")
+                self.assertEqual(never_rows(self.db, name), never, f"{name} changed a table no tool may write")
                 after = messages(self.db)
                 for mid, row in before.items():
                     if mid != named:

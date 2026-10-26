@@ -315,5 +315,140 @@ class FullGuardTest(GuardCase):
         self.assertEqual(guard.check_store(self.path), os.path.realpath(self.path))
 
 
+BRIDGE_GRANTS = {"linkedin_log": Grant(insert=True), "outreach_touch": Grant(insert=True),
+                 "event": Grant(insert=True)}
+CONTEXT = ('{"lane":"own","rankerVersion":null,"roleAgeDays":null,"roleKind":"engineer","roleNamed":false,'
+           '"signals":{},"source":"own"}')
+LOG = "INSERT INTO linkedin_log(person_id, kind, reply_kind, undoes, at, note, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+TOUCH = ("INSERT INTO outreach_touch(person_id, company_id, channel, email_touch_id, sent_at, accepted_at, replied_at, "
+         "reply_kind, referred_at, interview_at, offer_at, quiet_at, undone_at, context, idempotency_key, created_at) "
+         "VALUES (:person, :company, :channel, :email_touch, :sent, :accepted, :replied, :reply_kind, :referred, "
+         ":interview, :offer, :quiet, :undone, :context, :key, :sent)")
+
+
+class BridgeGuardTest(GuardCase):
+    """The one widening (#9, company-first ruling 2026-10-26): a new LinkedIn request Devanshu says he sent, as one
+    `linkedin_log` `request_sent` row and its `linkedin_request` touch under a `bridge:` key. Nothing else on those two
+    tables: no accept, reply, referral, interview, message, undo, email touch, update or delete."""
+
+    def setUp(self):
+        super().setUp()
+        self.lin = seed.person(self.db, self.company, "Lin Kedin", channel="linkedin")
+        self.db.execute(LOG, (self.lin, "request_sent", None, None, "2026-11-08T15:00:00Z", "", "2026-11-08T15:00:00Z"))
+        self.old_log = self.db.execute("SELECT max(entry_id) FROM linkedin_log").fetchone()[0]
+        self.old_touch = self.db.execute(TOUCH, self.touch_row(person=self.lin, sent="2026-11-08T15:00:00Z",
+                                                               key="linkedin:seed")).lastrowid
+
+    def touch_row(self, **over) -> dict:
+        row = {"person": self.lin, "company": self.company, "channel": "linkedin_request", "email_touch": None,
+               "sent": T, "accepted": None, "replied": None, "reply_kind": None, "referred": None, "interview": None,
+               "offer": None, "quiet": None, "undone": None, "context": CONTEXT, "key": f"bridge:{self.lin}:x"}
+        row.update(over)
+        return row
+
+    def request_log(self, at=T, note="Hi Lin", recorded=T):
+        return (LOG, (self.lin, "request_sent", None, None, at, note, recorded))
+
+    def hostile_logs(self) -> list[tuple[str, tuple]]:
+        return [
+            (LOG, (self.lin, "accepted", None, None, T, "", T)),
+            (LOG, (self.lin, "replied", "interested", None, T, "", T)),
+            (LOG, (self.lin, "replied", "said_no", None, T, "", T)),
+            (LOG, (self.lin, "message_sent", None, None, T, "Thanks", T)),
+            (LOG, (self.lin, "note", None, None, T, "x", T)),
+            (LOG, (self.lin, "undo", None, self.old_log, T, "", T)),
+            self.request_log(note="x" * 301),
+            self.request_log(at="2026-11-05T14:00:00Z"),   # more than 4 days before it is recorded
+            self.request_log(at="2026-11-10T16:00:00Z"),   # after it is recorded
+        ]
+
+    def hostile_touches(self) -> list[tuple[str, dict]]:
+        email_touch = self.touch  # the email thread of self.person
+        return [(TOUCH, self.touch_row(**over)) for over in (
+            {"channel": "email", "email_touch": email_touch}, {"channel": "linkedin_message"},
+            {"channel": "application", "person": None}, {"channel": "other"}, {"channel": "hn_reply"},
+            {"accepted": T}, {"replied": T, "reply_kind": "interested"}, {"referred": T}, {"interview": T},
+            {"offer": T}, {"quiet": T}, {"undone": T}, {"key": "linkedin:not-the-bridge"}, {"key": None},
+            {"sent": "2026-11-10T14:00:00Z"},  # no request_sent log row at this time: a touch never comes alone
+        )]
+
+    def changes(self) -> list[tuple[str, tuple]]:
+        return [
+            ("UPDATE outreach_touch SET replied_at = ?, reply_kind = 'interested' WHERE touch_id = ?",
+             (T, self.old_touch)),
+            ("UPDATE outreach_touch SET interview_at = ? WHERE touch_id = ?", (T, self.old_touch)),
+            ("UPDATE outreach_touch SET undone_at = ? WHERE touch_id = ?", (T, self.old_touch)),
+            ("UPDATE outreach_touch SET idempotency_key = 'bridge:moved' WHERE touch_id = ?", (self.old_touch,)),
+            ("UPDATE linkedin_log SET note = 'changed' WHERE entry_id = ?", (self.old_log,)),
+            ("DELETE FROM outreach_touch WHERE touch_id = ?", (self.old_touch,)),
+            ("DELETE FROM linkedin_log WHERE entry_id = ?", (self.old_log,)),
+        ]
+
+    def write_request(self, conn) -> int:
+        conn.execute(*self.request_log())
+        return conn.execute(TOUCH, self.touch_row()).lastrowid
+
+    def test_the_two_tables_left_the_never_list_and_no_grant_may_update_them(self):
+        self.assertNotIn("linkedin_log", NEVER_TABLES)
+        self.assertNotIn("outreach_touch", NEVER_TABLES)
+        self.assertIsNone(NEVER_COLUMNS["linkedin_log"])
+        self.assertIsNone(NEVER_COLUMNS["outreach_touch"])
+        for table, column in (("outreach_touch", "replied_at"), ("outreach_touch", "undone_at"),
+                              ("outreach_touch", "idempotency_key"), ("linkedin_log", "note")):
+            with self.assertRaises(GrantError, msg=f"{table}.{column}"):
+                guard.check_grants({table: Grant(insert=True, update=frozenset({column}))})
+
+    def test_a_request_and_its_touch_pass_the_trigger_alone(self):
+        touch = self.write_request(self.triggers_only())
+        self.assertEqual(self.db.execute("SELECT channel FROM outreach_touch WHERE touch_id = ?", (touch,)).fetchone()[0],
+                         "linkedin_request")
+
+    def test_an_accept_reply_message_undo_long_or_misdated_log_is_refused_by_the_trigger_alone(self):
+        conn = self.triggers_only()
+        for sql, params in self.hostile_logs():
+            with self.subTest(params=params[1:]):
+                self.assert_trigger_refuses(conn, sql, params)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM linkedin_log").fetchone()[0], 1)
+
+    def test_any_touch_but_a_paired_bridge_request_is_refused_by_the_trigger_alone(self):
+        conn = self.triggers_only()
+        conn.execute(*self.request_log())  # the log row a real request has: each touch below still fails alone
+        for sql, params in self.hostile_touches():
+            with self.subTest(params={k: v for k, v in params.items() if k != "context"}):
+                self.assert_trigger_refuses(conn, sql, params)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM outreach_touch").fetchone()[0], 1)
+
+    def test_an_update_or_delete_of_a_touch_or_log_is_refused_by_the_trigger_alone(self):
+        conn = self.triggers_only()
+        for sql, params in self.changes():
+            with self.subTest(sql=sql):
+                self.assert_trigger_refuses(conn, sql, params)
+
+    def test_the_authorizer_alone_allows_only_inserts_with_the_bridge_grants(self):
+        conn = self.authorizer_only(BRIDGE_GRANTS)
+        for sql, params in self.changes():
+            with self.subTest(sql=sql):
+                self.assert_not_authorized(conn, sql, params)
+        self.write_request(conn)
+        bare = self.authorizer_only()
+        self.assert_not_authorized(bare, *self.request_log(at="2026-11-10T14:30:00Z"))
+        self.assert_not_authorized(bare, TOUCH, self.touch_row(key="bridge:other"))
+
+    def test_the_full_guard_refuses_everything_else_and_the_request_lands(self):
+        conn = self.guarded(BRIDGE_GRANTS)
+        conn.execute(*self.request_log(note="first"))  # the log row a real request has: each touch still fails alone
+        statements = self.hostile_logs() + self.changes() + self.hostile_touches()
+        before = (self.db.execute("SELECT count(*) FROM linkedin_log").fetchone()[0],
+                  self.db.execute("SELECT count(*) FROM outreach_touch").fetchone()[0])
+        for sql, params in statements:
+            with self.subTest(sql=sql, params=params):
+                with self.assertRaises(sqlite3.DatabaseError):
+                    conn.execute(sql, params)
+        self.assertEqual((self.db.execute("SELECT count(*) FROM linkedin_log").fetchone()[0],
+                          self.db.execute("SELECT count(*) FROM outreach_touch").fetchone()[0]), before)
+        self.write_request(conn)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM outreach_touch").fetchone()[0], before[1] + 1)
+
+
 if __name__ == "__main__":
     unittest.main()

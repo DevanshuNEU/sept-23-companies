@@ -7,7 +7,9 @@ live store outside the live checkout are refused exactly as everywhere else), th
    grants: approving, skipping, unapproving or reviving a message; a message born in any state but a drafted first
    email by claude; editing a message he saved or one already approved; any touch but a fresh open one; any
    evidence that is locked, by hand, confirmed, or a size, headcount, domain or hq that is not a guess; a LinkedIn
-   note not saved by claude as proposed; an event or review item by another actor; a reading or a queue row of any
+   note not saved by claude as proposed; any LinkedIn log row or outreach touch but a new request he says he sent
+   (a `request_sent` row and its `linkedin_request` touch under a `bridge:` key, no outcome, no undo), and any
+   change to either table; an event or review item by another actor; a reading or a queue row of any
    reader version but a side session's (`side-`, #32's `side_version`, which can never be promoted, so a reading
    from Claude never decides a posting), and on the night's queue rows any change but their order; any write at all
    to the tables in `NEVER_TABLES` (the sender, companies, no-go rows, decisions and the rest); and every DELETE.
@@ -29,20 +31,26 @@ from outreach.reader.version import is_side_sql
 from outreach.store import connect, db_path
 from outreach.store.db import normalise
 
-__all__ = ["Grant", "GrantError", "NEVER_TABLES", "NEVER_COLUMNS", "TRIGGER_PREFIX", "open_guarded",
+__all__ = ["Grant", "GrantError", "NEVER_TABLES", "NEVER_COLUMNS", "BRIDGE_TABLES", "TRIGGER_PREFIX", "open_guarded",
            "install_triggers", "install_authorizer", "check_grants", "check_store"]
 
 TRIGGER_PREFIX = "mcp_"
 
 # Tables no tool may write, ever. Claude's no-go is a Needs-you item he confirms (#9), never a no_go row.
+# `linkedin_log` and `outreach_touch` are not here: since the company-first ruling (#9, 2026-10-26) the bridge's
+# `log_sent` may insert a LinkedIn request Devanshu says he sent, and nothing else (the `_BRIDGE` triggers below; no
+# grant may update either table, `NEVER_COLUMNS`).
 NEVER_TABLES = frozenset({
-    "sender", "send_day", "api_request", "outreach_touch", "application", "linkedin_log", "inbound_message",
-    "inbound_seen",
+    "sender", "send_day", "api_request", "application", "inbound_message", "inbound_seen",
     "daily_list", "daily_list_entry", "company", "company_alias", "company_name_key", "no_go", "board", "board_read",
     "watched_page", "job_run", "ruleset", "decision", "schema_migration", "import_record", "mx_check", "win_seen",
     "watch_dismissal", "source", "company_source", "shared_key", "work_tier", "company_post", "company_score",
     "posting", "posting_body",
 })
+
+# The two tables only `log_sent` holds a grant on (insert only; tests/test_mcp_write_grants pins it). Every other
+# tool leaves them exactly as they were.
+BRIDGE_TABLES = frozenset({"linkedin_log", "outreach_touch"})
 
 # Columns no grant may name. `touch` maps to None: no column of a touch is ever updated through MCP.
 _MESSAGE_SEND_COLUMNS = frozenset({"touch_id", "seq", "due_on", "approved_at", "pending_rfc_id", "claimed_at",
@@ -54,6 +62,8 @@ NEVER_COLUMNS: dict[str, frozenset[str] | None] = {
     "linkedin_draft": frozenset({"draft_id", "person_id", "reason_state", "saved_by", "created_at"}),
     "read_queue": frozenset({"posting_id", "body_sha256", "reader_version", "enqueued_at"}),
     "posting_reading": None,
+    "linkedin_log": None,
+    "outreach_touch": None,
 }
 
 
@@ -148,6 +158,26 @@ _VALUE_TRIGGERS = (
      "Claude only clears a review item; Devanshu resolves them"),
     ("event_insert", "BEFORE INSERT ON main.event", "NEW.actor IS NOT 'claude'",
      "an event from Claude has actor claude"),
+    # The bridge (#9, company-first ruling): a request he says he sent is one request_sent log row, at most 4 days
+    # before it is recorded and never after, with a note LinkedIn would take (300 characters), then its touch: a
+    # linkedin_request under a bridge key with no outcome and no undo, sent at the time of a request_sent row of
+    # the same person. Never an accept, reply, referral, interview, offer, message, email touch, undo or change.
+    ("linkedin_log_insert", "BEFORE INSERT ON main.linkedin_log",
+     "NEW.kind IS NOT 'request_sent' OR NEW.reply_kind IS NOT NULL OR NEW.undoes IS NOT NULL "
+     "OR length(NEW.note) > 300 OR NEW.at > NEW.recorded_at OR julianday(NEW.recorded_at) - julianday(NEW.at) > 4",
+     "Claude records only a LinkedIn request Devanshu says he sent, never an accept, reply, message or undo"),
+    ("linkedin_log_update", "BEFORE UPDATE ON main.linkedin_log", None, "Claude never changes the LinkedIn log"),
+    ("outreach_touch_insert", "BEFORE INSERT ON main.outreach_touch",
+     "NEW.channel IS NOT 'linkedin_request' OR NEW.person_id IS NULL OR NEW.email_touch_id IS NOT NULL "
+     "OR NEW.accepted_at IS NOT NULL OR NEW.replied_at IS NOT NULL OR NEW.reply_kind IS NOT NULL "
+     "OR NEW.referred_at IS NOT NULL OR NEW.interview_at IS NOT NULL OR NEW.offer_at IS NOT NULL "
+     "OR NEW.quiet_at IS NOT NULL OR NEW.undone_at IS NOT NULL OR NEW.revision IS NOT 1 "
+     "OR substr(NEW.idempotency_key, 1, 7) IS NOT 'bridge:' "
+     "OR NOT EXISTS (SELECT 1 FROM main.linkedin_log l WHERE l.person_id = NEW.person_id "
+     "AND l.kind = 'request_sent' AND l.at = NEW.sent_at)",
+     "a touch from Claude is a LinkedIn request he sent, logged by log_sent, with no outcome"),
+    ("outreach_touch_update", "BEFORE UPDATE ON main.outreach_touch", None,
+     "Claude never changes a touch: no reply, interview, referral or undo"),
 )
 
 

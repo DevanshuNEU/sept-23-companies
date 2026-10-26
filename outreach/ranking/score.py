@@ -10,6 +10,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from outreach.insights.bands import Features
 from outreach.ranking.common import clean_text
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import (Confidence, RankReason, build_rank_reason, factor, rank_confidence,
@@ -51,6 +52,7 @@ class Scored:
     stale_postings: tuple[Best, ...]
     confidence: Confidence      # the rank confidence
     rank_reason: RankReason
+    features: Features = Features()  # the four traits the interview tilt compared (#81), stored for lookalikes
 
 
 def _postings(n: int) -> str:
@@ -95,7 +97,7 @@ def score_company(facts: RankFacts, hide: Hide | None, signals: list[Signal], cf
         lanes=tuple(facts.lanes), values=values, reasons=reasons, hide=hide, flags=tuple(flags),
         best_posting_id=facts.best_posting_id, ignored_postings=facts.ignored_postings,
         stale_postings=tuple(facts.stale_postings), confidence=confidence,
-        rank_reason=build_rank_reason(reasons, confidence, cfg))
+        rank_reason=build_rank_reason(reasons, confidence, cfg), features=facts.features)
 
 
 def to_columns(s: Scored) -> tuple[str, str]:
@@ -114,6 +116,7 @@ def to_columns(s: Scored) -> tuple[str, str]:
         "confidence": {"level": s.confidence.level, "basis": s.confidence.basis},
         "rank_reason": {"text": s.rank_reason.text, "level": s.confidence.level, "basis": s.confidence.basis,
                         "line": s.rank_reason.line},
+        "features": s.features.as_dict(),
     }
     return json.dumps(signals, sort_keys=True), json.dumps(list(s.lanes))
 

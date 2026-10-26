@@ -64,7 +64,7 @@ describe('Needs you', () => {
   it('groups the items by what they hold up, in order', async () => {
     await open();
     const titles = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
-    expect(titles).toEqual(['Holding up email 2', 'Sponsorship 1', 'Job boards 2', 'Resolved this week 6']);
+    expect(titles).toEqual(['Holding up email 2', 'Sponsorship 1', 'Job boards 2', 'Data gaps 2', 'Resolved this week 6']);
 
     const email = screen.getByRole('region', { name: /^Holding up email/ });
     expect(within(email).getAllByRole('article').map((a) => a.getAttribute('aria-label'))).toEqual(['Cerebrium', 'Trigger.dev']);
@@ -258,6 +258,33 @@ describe('Needs you', () => {
     expect(row).toHaveTextContent('Edited, locked');
   });
 
+  it('data gaps wait collapsed under their own plain line, and the sidebar count leaves them out', async () => {
+    const user = userEvent.setup();
+    const { client } = await open();
+    const gaps = screen.getByRole('region', { name: /^Data gaps/ });
+    expect(within(gaps).getByText('Things the crawler could not read, and questions about companies outside your plan. Nothing here holds up an email.')).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: 'Tinybird' })).not.toBeInTheDocument();
+    const shell = await client.shell();
+    expect(shell.openReviewItems).toBe((await client.needsYou()).open.length);
+    await waitFor(() => expect(needsYouLink()).toHaveTextContent(String(shell.openReviewItems)));
+    await user.click(within(gaps).getByRole('button', { name: 'Show gaps' }));
+    expect(within(gaps).getAllByRole('article').map((a) => a.getAttribute('aria-label'))).toEqual(['Tinybird', 'Dagster']);
+    expect(progress()).toHaveTextContent(`${(await client.needsYou()).open.length} open`);
+  });
+
+  it('a data gap settles like any item, and the sidebar count stays where it was', async () => {
+    const user = userEvent.setup();
+    const { client } = await open();
+    const before = (await client.shell()).openReviewItems;
+    const gaps = screen.getByRole('region', { name: /^Data gaps/ });
+    await user.click(within(gaps).getByRole('button', { name: 'Show gaps' }));
+    await user.click(within(item('Tinybird')).getByRole('button', { name: /Leave as is/ }));
+    expect(await screen.findByText('Marked ok. Tinybird still has no email domain.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('article', { name: 'Tinybird' })).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Data gaps 1' })).toBeInTheDocument();
+    expect(needsYouLink()).toHaveTextContent(String(before));
+  });
+
   it('shows the empty state when nothing is open', async () => {
     openScenario('empty');
     expect(await screen.findByText('Nothing needs you.')).toBeInTheDocument();
@@ -276,7 +303,8 @@ describe('Needs you', () => {
     await openReview();
     const titles = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
     expect(titles).toEqual([
-      'Holding up email 2', 'Sponsorship 1', 'Company details 2', 'Job boards 2', 'Possible duplicates 1', 'Other 3', 'Resolved this week 6',
+      'Holding up email 2', 'Sponsorship 1', 'Company details 2', 'Job boards 2', 'Possible duplicates 1', 'Other 3', 'Data gaps 2',
+      'Resolved this week 6',
     ]);
     const other = screen.getByRole('region', { name: /^Other/ });
     expect(within(other).getAllByRole('article').map((a) => a.getAttribute('aria-label'))).toEqual(['Larkspur AI', 'Quillmate', 'Brightwell']);

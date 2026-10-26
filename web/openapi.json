@@ -2737,6 +2737,13 @@
               }
             ]
           },
+          "dataGaps": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewItem"
+            },
+            "title": "Datagaps",
+            "type": "array"
+          },
           "open": {
             "items": {
               "$ref": "#/components/schemas/ReviewItem"
@@ -2759,6 +2766,7 @@
         "required": [
           "asOf",
           "open",
+          "dataGaps",
           "resolvedThisWeek",
           "boardsJob",
           "settledToday"

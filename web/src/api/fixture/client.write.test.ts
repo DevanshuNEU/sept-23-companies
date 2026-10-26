@@ -592,6 +592,21 @@ describe('Needs you: merge, Undo from Resolved and the settled count (#16)', () 
     expect((await c.shell()).openReviewItems).toBe(4);
   });
 
+  it('a data gap settles and comes back in Data gaps, and the shell count never moves for it', async () => {
+    const c = client();
+    const gap = (await c.needsYou()).dataGaps.find((r) => r.company.name === 'Tinybird');
+    if (!gap) throw new Error('no Tinybird gap');
+    await c.resolveReview(gap.id, { kind: 'ok' }, gap.revision, opt());
+    expect((await c.needsYou()).dataGaps.some((r) => r.id === gap.id)).toBe(false);
+    expect((await c.shell()).openReviewItems).toBe(5);
+    const row = await resolvedRow(c, 'Tinybird');
+    await c.reopenReview(row.id, row.revision, opt());
+    const after = await c.needsYou();
+    expect(after.dataGaps.find((r) => r.id === gap.id)?.revision).toBe(row.revision + 1);
+    expect(after.open.some((r) => r.id === gap.id)).toBe(false);
+    expect((await c.shell()).openReviewItems).toBe(5);
+  });
+
   it('reopenReview on a no-go takes the company off the no-go list again', async () => {
     const c = client();
     const zed = await openItem(c, 'Zed Industries');

@@ -1,7 +1,9 @@
 """Needs you: the open review items with their evidence, and the HTTP side of the fixes he makes from them.
 
 Reads are one query per table, joined in Python; every item answers as its company's survivor (a merged id follows
-`merged_into` to its end). Items for companies in play come first, the rest are "Later".
+`merged_into` to its end). Needs you lists only the items of companies he is working (#9, company-first ruling:
+`scope.attention`, in play, emailed or held by a reply; a merge question when either company is), in-play first.
+Every other open item is a data gap: listed apart, by the company's rank, and never counted in the badge.
 
 Every write is `outreach.review` (#16): `apply_fix` (ok, a field with a source, no-go, merge), `reopen_item` (take an
 ok, a no-go or a merge back) and `unmerge_company`, each called inside `run_write`'s one transaction (the review
@@ -36,6 +38,7 @@ from outreach.review.kinds import spec_of
 from outreach.review.merge import merge_compare
 from outreach.review.merge import unmerge_company as review_unmerge
 from outreach.review.play import emailing, in_play
+from outreach.review.scope import attention, ranked_ids
 from outreach.store.timefmt import ISO_FMT
 
 log = logging.getLogger("outreach.api")
@@ -75,14 +78,15 @@ def _merge(conn: sqlite3.Connection, review_id: int) -> MergeCompare:
 
 
 def review_items(conn: sqlite3.Connection, rows: list[sqlite3.Row], parents: dict[int, int],
-                 now: str) -> list[ReviewItem]:
+                 now: str, *, canon: dict[int, int] | None = None) -> list[ReviewItem]:
     """A `ReviewItem` for each `review_item` row, in the rows' order, answered as its company's survivor. A merge
     question whose two companies are one company now (or whose second company cannot be read) is left out: there is
     nothing to decide. The company page and Needs you both build their items here.
 
     The words come from `outreach.review`: a board item's reason is built from the board now
     (`display_reason`), `reopened` is `reopened_note`, `inPlay` is `play.in_play`, and an item holds an email when
-    its kind does (`KindSpec.holds_email`) and the company is one he is emailing (`play.emailing`)."""
+    its kind does (`KindSpec.holds_email`) and the company is one he is emailing (`play.emailing`). `canon` is the
+    company-to-survivor map in-play and emailing follow (read here when not given)."""
     if not rows:
         return []
     today = ny_day(now)
@@ -120,15 +124,7 @@ def review_items(conn: sqlite3.Connection, rows: list[sqlite3.Row], parents: dic
     picked = {survivor_of(parents, r[0]) for r in conn.execute(
         "SELECT company_id FROM daily_list_entry WHERE list_date = ? AND state = 'picked'", (today,))}
     planned_days = load_review_config().planned_days
-    try:
-        canon = canonical_ids(conn)
-    except MergeLoop:
-        # A `merged_into` loop is store corruption. Follow no merge for this request (each company is its own
-        # survivor) rather than fail the list or read it as "nobody in play": a company on the latest plan, or one
-        # with a queued email, still counts. Any other error (a bad list date) surfaces as before.
-        log.warning("Needs you: a merged_into loop in the store; merges are not followed for in-play and emailing "
-                    "on this request.")
-        canon = {}
+    canon = _canon(conn) if canon is None else canon
     playing = in_play(conn, today=today, planned_days=planned_days, canon=canon)
     mailing = emailing(conn, today=today, planned_days=planned_days, canon=canon)
     holds = company_holds(conn)  # a hold left on a merged-away duplicate holds the survivor; so does any reply
@@ -211,30 +207,66 @@ def _boards_job(conn: sqlite3.Connection, now: str) -> JobRunSummary | None:
     return None
 
 
-def open_count(conn: sqlite3.Connection) -> int:
-    """How many items `needs_you_view` lists as open: every open item, less a merge question that is settled (its two
-    companies are one now, or the second cannot be read). The shell polls this."""
-    plain = conn.execute("SELECT count(*) FROM review_item WHERE state = 'open' AND kind <> 'merge_candidate'").fetchone()[0]
-    merges = conn.execute("SELECT company_id, evidence_key FROM review_item WHERE state = 'open' "
-                          "AND kind = 'merge_candidate'").fetchall()
-    if not merges:
-        return plain
+def _canon(conn: sqlite3.Connection) -> dict[int, int]:
+    try:
+        return canonical_ids(conn)
+    except MergeLoop:
+        # A `merged_into` loop is store corruption. Follow no merge for this request (each company is its own
+        # survivor) rather than fail the list or read it as "nobody in play": a company on the latest plan, or one
+        # with a queued email, still counts. Any other error (a bad list date) surfaces as before.
+        log.warning("Needs you: a merged_into loop in the store; merges are not followed for in-play and emailing "
+                    "on this request.")
+        return {}
+
+
+def _focus(conn: sqlite3.Connection, now: str, canon: dict[int, int]) -> frozenset[int]:
+    """The companies whose items belong in Needs you (`scope.attention`)."""
+    return attention(conn, today=ny_day(now), planned_days=load_review_config().planned_days, canon=canon)
+
+
+def _needs_you(r: sqlite3.Row, parents: dict[int, int], focus: frozenset[int]) -> bool:
+    """Whether an open item belongs in Needs you: its kind is not scoped, or its company (a merge question: either
+    company) is one he is working. Every other open item is a data gap."""
+    if not spec_of(r["kind"]).scoped or survivor_of(parents, r["company_id"]) in focus:
+        return True
+    other = _int(r["evidence_key"]) if r["kind"] == "merge_candidate" else None
+    return other is not None and survivor_of(parents, other) in focus
+
+
+def open_count(conn: sqlite3.Connection, now: str) -> int:
+    """How many items `needs_you_view` lists in Needs you (data gaps are not counted): every open item of a company
+    he is working, less a merge question that is settled (its two companies are one now, or the second cannot be
+    read). The shell polls this for the badge."""
+    rows = conn.execute("SELECT company_id, kind, evidence_key FROM review_item WHERE state = 'open'").fetchall()
+    if not rows:
+        return 0
     parents = merge_parents(conn)
+    focus = _focus(conn, now, _canon(conn))
     known = {r[0] for r in conn.execute("SELECT company_id FROM company")}
     count = 0
-    for r in merges:
-        other = _int(r["evidence_key"])
-        if other is not None and other in known and survivor_of(parents, other) != survivor_of(parents, r["company_id"]):
-            count += 1
-    return plain + count
+    for r in rows:
+        if not _needs_you(r, parents, focus):
+            continue
+        if r["kind"] == "merge_candidate":
+            other = _int(r["evidence_key"])
+            if other is None or other not in known or survivor_of(parents, other) == survivor_of(parents, r["company_id"]):
+                continue
+        count += 1
+    return count
 
 
 def needs_you_view(conn: sqlite3.Connection, now: str) -> NeedsYouView:
     parents = merge_parents(conn)
     rows = conn.execute("SELECT * FROM review_item WHERE state = 'open' ORDER BY created_at, review_id").fetchall()
-    items = review_items(conn, rows, parents, now)
+    canon = _canon(conn) if rows else {}
+    focus = _focus(conn, now, canon) if rows else frozenset()
+    items = review_items(conn, [r for r in rows if _needs_you(r, parents, focus)], parents, now, canon=canon)
     items.sort(key=lambda i: not i.in_play)  # stable: in play first, oldest first within each part
-    return NeedsYouView(as_of=now, open=items, resolved_this_week=_resolved_this_week(conn, now),
+    gaps = review_items(conn, [r for r in rows if not _needs_you(r, parents, focus)], parents, now, canon=canon)
+    if gaps:
+        rank = {cid: n for n, cid in enumerate(ranked_ids(conn, None))}
+        gaps.sort(key=lambda i: rank.get(i.company.id, len(rank)))  # stable: by rank, then oldest first
+    return NeedsYouView(as_of=now, open=items, data_gaps=gaps, resolved_this_week=_resolved_this_week(conn, now),
                         boards_job=_boards_job(conn, now), settled_today=review_queries.settled_today(conn, now))
 
 

@@ -72,7 +72,9 @@ class NeedsYou(ApiCase):
         return res.json()
 
     def open_items(self) -> dict[int, dict]:
-        return {i["id"]: i for i in self.view()["open"]}
+        """Every open item the page lists, in Needs you or in Data gaps."""
+        view = self.view()
+        return {i["id"]: i for i in view["open"] + view["dataGaps"]}
 
     def resolve(self, review_id: int, fix: dict, revision: int = 1, key: str | None = None):
         return self.post(f"/api/review/{review_id}/resolve", {"fix": fix, "revision": revision}, key=key)
@@ -108,8 +110,8 @@ class NeedsYou(ApiCase):
     # ------------------------------------------------------------------------------------------ reads
 
     def test_empty_store_is_an_empty_view(self):
-        self.assertEqual(self.view(), {"asOf": NOW, "open": [], "resolvedThisWeek": [], "boardsJob": None,
-                                       "settledToday": 0})
+        self.assertEqual(self.view(), {"asOf": NOW, "open": [], "dataGaps": [], "resolvedThisWeek": [],
+                                       "boardsJob": None, "settledToday": 0})
 
     def test_an_item_shows_a_hold_left_on_a_merged_duplicate(self):
         cid = s.company(self.conn, "Acme", "working")
@@ -138,7 +140,7 @@ class NeedsYou(ApiCase):
                 board_id=b if kind.startswith("board_") else None,
                 posting_id=open_p if kind == "sponsorship_unclear" else read_p if kind == "reader_disagrees" else None,
                 created_at="2026-11-05T08:00:00Z")
-        items = {i["kind"]: i for i in self.view()["open"]}
+        items = {i["kind"]: i for i in self.open_items().values()}
         self.assertEqual(set(items), set(KINDS))
         for kind, item in items.items():
             self.assertEqual(item["id"], ids[kind])
@@ -185,31 +187,74 @@ class NeedsYou(ApiCase):
                                             "previous": "you marked it ok on Nov 10"})
         self.assertIsNone(self.open_items()[first_size]["reopened"])
 
-    def test_in_play_companies_come_first_and_the_rest_are_later(self):
+    def test_needs_you_holds_only_companies_he_is_working_and_the_rest_are_data_gaps(self):
+        # #9, company-first ruling: Needs you holds only companies in play, emailed or holding a reply.
         later = s.company(self.conn, "Later Co")
         working = s.company(self.conn, "Working Co", "working")
         picked = s.company(self.conn, "Picked Co", "backlog")
         planned = s.company(self.conn, "Planned Co")
         stale = s.company(self.conn, "Stale Co")
+        mailing = s.company(self.conn, "Mailing Co")
+        held = s.company(self.conn, "Held Co")
         plan_entry(self.conn, picked, "picked")
         plan_entry(self.conn, planned, "proposed", person_id=s.person(self.conn, planned))
         plan_entry(self.conn, stale, "picked", list_date="2026-11-01")  # an older list
+        s.message(self.conn, s.touch(self.conn, s.person(self.conn, mailing, "Pat Mail")), 0)  # drafted, open touch
+        hold(self.conn, held)
         blocked = s.company(self.conn, "No-go Co", "working")
         no_go(self.conn, blocked)
-        made = {}
-        for n, cid in enumerate((later, blocked, working, picked, planned, stale)):
-            made[cid] = s.review(self.conn, cid, "domain_missing", created_at=f"2026-11-0{n + 1}T08:00:00Z")
-        items = self.view()["open"]
-        self.assertEqual([i["company"]["name"] for i in items],
-                         ["Picked Co", "Planned Co", "Later Co", "No-go Co", "Working Co", "Stale Co"])
-        self.assertEqual([i["inPlay"] for i in items], [True, True, False, False, False, False])
-        by_company = {i["company"]["id"]: i for i in items}
+        for n, cid in enumerate((later, blocked, working, picked, planned, stale, mailing, held)):
+            s.review(self.conn, cid, "domain_missing", created_at=f"2026-11-0{n + 1}T08:00:00Z")
+        view = self.view()
+        self.assertEqual([i["company"]["name"] for i in view["open"]],
+                         ["Picked Co", "Planned Co", "Mailing Co", "Held Co"])
+        self.assertEqual([i["inPlay"] for i in view["open"]], [True, True, False, False])
+        # Planned Co's row is an email to a named person: its missing domain holds that email.
+        self.assertEqual([i["holdsEmail"] for i in view["open"]], [False, True, True, False])
+        self.assertEqual([i["company"]["name"] for i in view["dataGaps"]],
+                         ["Later Co", "No-go Co", "Working Co", "Stale Co"])
+        by_company = {i["company"]["id"]: i for i in view["open"] + view["dataGaps"]}
         self.assertTrue(by_company[picked]["company"]["picked"])
         # Picked, but no email planned or queued there: its missing domain holds no email (`play.emailing`, #16).
         self.assertFalse(by_company[picked]["holdsEmail"])
         # `working` alone is not a pick: it is the status the importer gave every company he ever touched.
         self.assertFalse(by_company[working]["company"]["picked"])
         self.assertFalse(by_company[working]["inPlay"])
+        # The sidebar badge counts Needs you only.
+        self.assertEqual(self.get("/api/shell").json()["openReviewItems"], 4)
+
+    def test_every_kind_follows_the_same_scope(self):
+        plain, picked = s.company(self.conn, "Plain"), s.company(self.conn, "Picked")
+        plan_entry(self.conn, picked, "picked")
+        for cid in (plain, picked):
+            for kind in ("flagged", "board_empty", "sponsorship_unclear", "size_guess", "careers_changed"):
+                s.review(self.conn, cid, kind, evidence_key=f"{kind}-{cid}",
+                         board_id=s.board(self.conn, cid, "ashby", f"b{cid}{kind}") if kind == "board_empty" else None,
+                         posting_id=s.posting(self.conn, cid) if kind == "sponsorship_unclear" else None)
+        view = self.view()
+        self.assertEqual({i["company"]["name"] for i in view["open"]}, {"Picked"})
+        self.assertEqual({i["company"]["name"] for i in view["dataGaps"]}, {"Plain"})
+        self.assertEqual((len(view["open"]), len(view["dataGaps"])), (5, 5))
+
+    def test_a_merge_question_is_in_needs_you_when_either_company_is_in_play(self):
+        a, b, either = self.pair("Bolt", "Bolt Labs")
+        c, d, neither = self.pair("Volt", "Volt Labs")
+        plan_entry(self.conn, b, "picked")  # the item's own company is a, the other side b is in play
+        view = self.view()
+        self.assertEqual([i["id"] for i in view["open"]], [either])
+        self.assertEqual([i["id"] for i in view["dataGaps"]], [neither])
+        self.assertEqual(self.get("/api/shell").json()["openReviewItems"], 1)
+
+    def test_data_gaps_go_by_the_companys_rank_then_age(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        low, high, unranked = (s.company(self.conn, n) for n in ("Low", "High", "Unranked"))
+        for n, cid in enumerate((unranked, low, high)):
+            s.review(self.conn, cid, "flagged", evidence_key="f", created_at=f"2026-11-0{n + 1}T08:00:00Z")
+        rows = [SimpleNamespace(company_id=c) for c in (high, low)]
+        with mock.patch("outreach.ranking.scores.ranked_list", side_effect=lambda conn, *a, limit=None, **kw: rows):
+            gaps = self.view()["dataGaps"]
+        self.assertEqual([i["company"]["name"] for i in gaps], ["High", "Low", "Unranked"])
 
     def test_resolved_this_week_lists_this_new_york_week(self):
         cid = s.company(self.conn, "Acme")
@@ -258,9 +303,9 @@ class NeedsYou(ApiCase):
         raise_again = ("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
                        "VALUES ('size_guess', ?, 'Again.', ?, 'rules', ?) ON CONFLICT DO NOTHING")
         self.conn.execute(raise_again, (cid, "guess:linkedin", NOW))
-        self.assertEqual(self.view()["open"], [])
+        self.assertEqual(self.open_items(), {})
         self.conn.execute(raise_again, (cid, "guess:builtin", NOW))
-        (again,) = self.view()["open"]
+        (again,) = self.open_items().values()
         self.assertEqual(again["reopened"]["previous"], "you marked it ok on Nov 10")
 
     def test_edit_requires_a_source_and_writes_locked_hand_evidence_that_wins_the_fact(self):
@@ -670,6 +715,7 @@ class NeedsYou(ApiCase):
             self.crawl(unreadable, READ_ERROR, n)
         emptied = seed_board(self.conn, seed_company(self.conn, "Emptied"), token="emptied")
         self.crawl(emptied, READ_EMPTY, 4)
+        self.crawl(emptied, READ_EMPTY, 5)  # #9: zero jobs only after 2 runs in a row
         # Triggers 3, 4 and 5: the sweep raises them.
         sponsor = seed_company(self.conn, "Sponsor Co")
         review_seed.seed_plan_row(self.conn, sponsor, TODAY, "picked")
@@ -709,7 +755,7 @@ class NeedsYou(ApiCase):
         sweep_needs_you(self.conn, now=NOW)
         self.crawl(unreadable, READ_ERROR, 5)
         self.crawl(emptied, READ_EMPTY, 6)
-        after = {i["id"]: i for i in self.view()["open"]}
+        after = self.open_items()
         for kind, company in (("board_unreadable", load_board(self.conn, unreadable).company_id),
                               ("board_empty", load_board(self.conn, emptied).company_id),
                               ("sponsorship_unclear", sponsor), ("size_unknown", sized), ("domain_missing", mailed)):

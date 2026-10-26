@@ -190,7 +190,9 @@ export interface ResolvedReview {
   id: Id; kind: ReviewKind; companyName: string; resolution: 'marked_ok' | 'marked_no_go' | 'field_edited'; note: string; at: IsoTime; locked: boolean;
   revision: Revision; canUndo: boolean; // canUndo: a reopen would take it back (ok, no-go or a merge)
 }
-export interface NeedsYouView { asOf: IsoTime; open: ReviewItem[]; resolvedThisWeek: ResolvedReview[]; boardsJob: JobRunSummary | null; settledToday: number }
+// `open` is Needs you: only companies he is working (in play, emailed or holding a reply, #9). `dataGaps` is every other
+// open item, by the company's rank: never in the badge, nothing there holds up an email.
+export interface NeedsYouView { asOf: IsoTime; open: ReviewItem[]; dataGaps: ReviewItem[]; resolvedThisWeek: ResolvedReview[]; boardsJob: JobRunSummary | null; settledToday: number }
 export type ReviewFix =
   | { kind: 'ok' }
   | { kind: 'edit'; field: 'domain' | 'size' | 'sponsorship' | 'board_url'; value: string; source: string }

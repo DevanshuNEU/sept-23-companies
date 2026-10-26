@@ -30,7 +30,8 @@ class ResolvedReview(Wire):
 
 class NeedsYouView(Wire):
     as_of: str
-    open: list[ReviewItem]  # in-play companies first, then the rest ("Later"); oldest first within each
+    open: list[ReviewItem]  # Needs you: companies he is working only (#9); in play first, oldest first within each
+    data_gaps: list[ReviewItem]  # every other open item, by the company's rank then age; never in the badge
     resolved_this_week: list[ResolvedReview]  # his own resolutions this New York week, newest first
     boards_job: JobRunSummary | None  # the last read_boards run, else the last crawl
     settled_today: int  # items he settled (ok, no-go or a field he set) on today's New York date

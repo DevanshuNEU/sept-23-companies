@@ -22,9 +22,9 @@ __all__ = ["ranked_ids", "held_companies", "attention", "crawler_scope", "clear_
 OUT_OF_SCOPE_NOTE = "Not in your plan. It comes back if the company does."
 
 
-def ranked_ids(conn: sqlite3.Connection, top_n: int) -> list[int]:
-    """The top `top_n` company ids of the ranked list, highest first; empty when the ranker is not there or has not
-    run."""
+def ranked_ids(conn: sqlite3.Connection, top_n: int | None) -> list[int]:
+    """The top `top_n` company ids of the ranked list (all of it for None), highest first; empty when the ranker is
+    not there or has not run."""
     try:
         from outreach.ranking.scores import ranked_list
     except ImportError:

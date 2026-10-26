@@ -56,7 +56,7 @@ Sidebar, top to bottom:
 | Today | `3 of 5` | picked today of today's capacity |
 | Outbox | green `1`, then `7` | replies not yet handled (green), drafts waiting for review |
 | LinkedIn | `12` | people in "To reach" |
-| Needs you | amber `5` | open review items |
+| Needs you | amber `5` | open review items for companies he is working (data gaps are not counted) |
 | Lists: No-go | `31` | companies plus people |
 | Lists: Done | `4` | done companies |
 | Recent | | last 3 company pages opened |
@@ -427,8 +427,16 @@ Then sections by what the item holds up, always in this order, an empty one left
 for a company he is emailing whose kind can stop a draft: missing domain, unknown or doubtful size), "Sponsorship"
 (unclear wording, postings that disagree), "Company details" (size and domain items that hold nothing up yet),
 "Job boards" (unreadable, zero jobs, careers page unreadable), "Possible duplicates" (merge questions), "Other"
-(the reader disagrees, a doubtful board match, Claude's suggestions, a changed careers page). Below, "Resolved this
-week", collapsed.
+(the reader disagrees, a doubtful board match, Claude's suggestions, a changed careers page). Below, "Data gaps" and
+"Resolved this week", both collapsed.
+
+**Needs you and Data gaps** (#9, company-first ruling, 2026-10-26). The sections above hold only items for companies
+he is working: on the newest plan, being emailed, or holding a reply (a merge question counts when either company
+is). Every other open item is a data gap: a quiet collapsed section, "Data gaps 12" with "Show gaps", under one grey
+line: "Things the crawler could not read, and questions about companies outside your plan. Nothing here holds up an
+email." Gaps are listed by the company's rank, settle with the same buttons, and never count in the sidebar badge or
+the progress line. The crawler asks about a missing domain only for a company he is working or one in the top 150,
+at most 10 new a run, so a careers pass over the whole store cannot flood the page again.
 
 **Elements.** Each item: icon, company, trigger badge, context badge (Picked today, Claude suggests), age ("Opened
 Mon Nov 9", or an amber "Waiting 11 days" once older than 7 days), one plain sentence on what is wrong and what it

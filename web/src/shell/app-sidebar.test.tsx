@@ -4,6 +4,7 @@ import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
 import { usePendingWrite } from '@/pending/pending';
 import { AppShell } from '@/shell/app-shell';
+import { resetKnock } from '@/shell/k-tile';
 import { renderWithApp } from '@/test/render';
 
 function Where() {
@@ -58,10 +59,31 @@ beforeEach(() => {
 describe('AppShell sidebar', () => {
   it('is branded Knock, with a K in the logo square', async () => {
     await shell();
+    expect(within(sidebar()).getByText('K')).toHaveClass('bg-brand', 'text-brand-foreground');
     const brand = sidebar().querySelector<HTMLElement>('[data-slot="sidebar-header"] .font-semibold');
     expect(brand).toHaveTextContent('KKnock');
     expect(within(sidebar()).queryByText('Outreach')).toBeNull();
     expect(within(sidebar()).getByText('K')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('knocks the K tile once on first load, and not when the shell mounts again', async () => {
+    resetKnock();
+    const first = await shell();
+    expect(within(sidebar()).getByText('K')).toHaveClass('knock');
+    first.unmount();
+    await shell();
+    expect(within(sidebar()).getByText('K')).not.toHaveClass('knock');
+  });
+
+  it('tells hover from the current view: a soft hover, a brand bar and icon on the current one', async () => {
+    await shell('/outbox');
+    const current = nav(/^Outbox/);
+    expect(current).toHaveAttribute('aria-current', 'page');
+    expect(current).toHaveClass('hover:bg-sidebar-accent/60', 'aria-[current=page]:bg-sidebar-accent');
+    expect(current.className).toContain('aria-[current=page]:before:bg-brand');
+    expect(current.className).toContain('before:inset-y-1.5');
+    expect(current.className).toContain('before:w-0.5');
+    expect(current.className).toContain('aria-[current=page]:[&>svg]:text-brand');
   });
 
   it('shows the counts by each view', async () => {
@@ -76,7 +98,9 @@ describe('AppShell sidebar', () => {
 
     expect(within(nav(/^LinkedIn/)).getByText('12')).toBeInTheDocument();
     const review = within(nav(/^Needs you/)).getByText('5');
-    expect(review.closest('[data-slot="badge"]')).toHaveAttribute('data-variant', 'warn');
+    const reviewBadge = review.closest('[data-slot="badge"]');
+    expect(reviewBadge).toHaveClass('bg-muted', 'text-foreground');
+    expect(reviewBadge).not.toHaveAttribute('data-variant', 'warn');
     expect(within(nav(/^No-go/)).getByText('31')).toBeInTheDocument();
     expect(within(nav(/^Done/)).getByText('4')).toBeInTheDocument();
   });
@@ -84,6 +108,22 @@ describe('AppShell sidebar', () => {
   it('names what each count means for screen readers', async () => {
     await shell();
     expect(nav(/^Outbox/)).toHaveAccessibleName('Outbox, 1 reply to handle, 7 drafts to review');
+    await waitFor(() => expect(nav(/^Needs you/)).toHaveAccessibleName('Needs you, 5 open, 2 hold up email'));
+  });
+
+  it('puts a small amber dot by the Needs you count only while an item holds up email', async () => {
+    await shell();
+    await waitFor(() => expect(within(nav(/^Needs you/)).getByTestId('holds-email-dot')).toHaveClass('size-1.5', 'bg-warn-dot'));
+  });
+
+  it('shows no amber dot when no open item holds up email', async () => {
+    const client = new FixtureClient();
+    const view = await client.needsYou();
+    for (const i of view.open) i.holdsEmail = false;
+    vi.spyOn(client, 'needsYou').mockResolvedValue(view);
+    await shell('/today', client);
+    await waitFor(() => expect(client.needsYou).toHaveBeenCalled());
+    expect(within(nav(/^Needs you/)).queryByTestId('holds-email-dot')).toBeNull();
     expect(nav(/^Needs you/)).toHaveAccessibleName('Needs you, 5 open');
   });
 
@@ -135,6 +175,15 @@ describe('AppShell sidebar', () => {
     expect(screen.getByText('9 replies')).toBeInTheDocument();
     expect(screen.getByText('in November')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Boards read Mon 08:04' })).toBeInTheDocument();
+  });
+
+  it('sends a slow ring out of the sender dot while running, and not otherwise', async () => {
+    const view = await shell();
+    expect(screen.getByTestId('sender-dot')).toHaveClass('ripple');
+    expect(screen.getByTestId('sender-dot')).not.toHaveClass('animate-pulse');
+    view.unmount();
+    await shell('/today', new FixtureClient(buildFixture('hard_block')));
+    expect(screen.getByTestId('sender-dot')).not.toHaveClass('ripple');
   });
 
   it('names a hard block in red in the footer', async () => {

@@ -21,7 +21,7 @@ type Show = 'all' | 'big';
 const BIG_KINDS: ReadonlySet<Win['kind']> = new Set<Win['kind']>(['referred', 'interview', 'offer']);
 
 const link =
-  'rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/70';
+  'rounded-sm text-foreground underline decoration-foreground/30 underline-offset-3 transition-colors outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70';
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 

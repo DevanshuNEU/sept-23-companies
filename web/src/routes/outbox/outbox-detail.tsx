@@ -121,13 +121,13 @@ function DetailHeader({ detail }: { detail: OutboxDetail }) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-muted-foreground">
           <span>
             {`${person.title} at `}
-            <Link to={`/companies/${company.id}`} className="underline decoration-border underline-offset-3 hover:decoration-current">
+            <Link to={`/companies/${company.id}`} className="underline decoration-foreground/30 underline-offset-3 transition-colors hover:decoration-foreground">
               {company.name}
             </Link>
           </span>
           {person.email ? <span className="font-mono text-xs">{person.email}</span> : null}
           {safeHref(person.linkedinUrl) ? (
-            <a href={safeHref(person.linkedinUrl)} target="_blank" rel="noreferrer" className="underline decoration-border underline-offset-3 hover:decoration-current">
+            <a href={safeHref(person.linkedinUrl)} target="_blank" rel="noreferrer" className="underline decoration-foreground/30 underline-offset-3 transition-colors hover:decoration-foreground">
               LinkedIn
             </a>
           ) : null}

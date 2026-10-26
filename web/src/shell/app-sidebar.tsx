@@ -23,10 +23,12 @@ import { jobKindLabel, jobStatus, type Tone } from '@/lib/status';
 import { cn } from '@/lib/utils';
 import { useViewQuery } from '@/pending/pending';
 import { useTheme } from '@/theme/theme';
+import { KTile } from './k-tile';
 import { useRecentCompanies } from './recent';
 
+// Hover is a soft wash; the current view is a full wash, a 2px brand bar on the left and a brand icon.
 const ITEM =
-  'h-8 gap-2 px-2 text-sm aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium [&>svg]:text-muted-foreground aria-[current=page]:[&>svg]:text-foreground';
+  "relative h-8 gap-2 px-2 text-sm before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full hover:bg-sidebar-accent/60 aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:hover:bg-sidebar-accent aria-[current=page]:before:bg-brand [&>svg]:text-muted-foreground aria-[current=page]:[&>svg]:text-brand";
 const COUNT = 'ml-auto text-xs text-muted-foreground tabular-nums';
 const DOT: Record<Tone, string> = {
   ok: 'bg-ok-dot',
@@ -94,7 +96,7 @@ function Count({ value, after = false }: { value: number | string; after?: boole
   );
 }
 
-function CountBadge({ value, tone, dot = false }: { value: number; tone: 'ok' | 'warn'; dot?: boolean }) {
+function CountBadge({ value, tone, dot = false }: { value: number; tone: 'ok'; dot?: boolean }) {
   return (
     <Badge aria-hidden variant={tone} className="ml-auto h-5 px-1.5 tabular-nums">
       {dot ? <span aria-hidden className={cn('size-1.5 rounded-full', DOT[tone])} /> : null}
@@ -103,7 +105,23 @@ function CountBadge({ value, tone, dot = false }: { value: number; tone: 'ok' | 
   );
 }
 
+/** Needs you is a neutral count: a small number is not an alarm. An amber dot shows only while an item holds up email. */
+function ReviewCount({ value, holdsEmail }: { value: number; holdsEmail: boolean }) {
+  return (
+    <span aria-hidden className="ml-auto flex items-center gap-1.5">
+      {holdsEmail ? <span data-testid="holds-email-dot" className="size-1.5 rounded-full bg-warn-dot" /> : null}
+      <Badge variant="secondary" className="h-5 bg-muted px-1.5 text-foreground tabular-nums">
+        {value}
+      </Badge>
+    </span>
+  );
+}
+
 function ViewItems({ s }: { s: ShellSummary | undefined }) {
+  const client = useClient();
+  // The same query the Needs you view reads, so on that page it is shared and the sidebar adds no request.
+  const review = useViewQuery(queryKeys.needsYou, () => client.needsYou(), { pollMs: pollMs.default });
+  const holding = (review.data?.open ?? []).filter((i) => i.holdsEmail).length;
   // The count is people done of today's plan; with nothing planned (a weekend, no list yet) there is no count.
   const planned = s !== undefined && s.plan.total > 0;
   const outboxParts = s
@@ -126,8 +144,8 @@ function ViewItems({ s }: { s: ShellSummary | undefined }) {
           <NavItem to="/linkedin" icon={LinkedInIcon} label="LinkedIn" described={s && s.linkedinToReach > 0 ? `${s.linkedinToReach} to reach` : undefined}>
             {s && s.linkedinToReach > 0 ? <Count value={s.linkedinToReach} /> : null}
           </NavItem>
-          <NavItem to="/needs-you" icon={CircleAlert} label="Needs you" described={s && s.openReviewItems > 0 ? `${s.openReviewItems} open` : undefined}>
-            {s && s.openReviewItems > 0 ? <CountBadge value={s.openReviewItems} tone="warn" /> : null}
+          <NavItem to="/needs-you" icon={CircleAlert} label="Needs you" described={s && s.openReviewItems > 0 ? `${s.openReviewItems} open${holding > 0 ? `, ${holding} hold up email` : ''}` : undefined}>
+            {s && s.openReviewItems > 0 ? <ReviewCount value={s.openReviewItems} holdsEmail={holding > 0} /> : null}
           </NavItem>
         </SidebarMenu>
       </nav>
@@ -261,7 +279,11 @@ function Footer({ s }: { s: ShellSummary | undefined }) {
   return (
     <SidebarFooter className="gap-2.5 border-t border-sidebar-border p-4 text-xs text-muted-foreground">
       <div className="flex h-5 items-center gap-2">
-        <span data-testid="sender-dot" aria-hidden className={cn('size-2 rounded-full', DOT[sender.tone])} />
+        <span
+          data-testid="sender-dot"
+          aria-hidden
+          className={cn('size-2 rounded-full', DOT[sender.tone], s.sending.state === 'running' && 'ripple')}
+        />
         <span className="font-medium text-foreground">{sender.label}</span>
         <span className="ml-auto whitespace-nowrap tabular-nums">{`${s.sending.sentToday} of ${s.sending.limitToday} today`}</span>
       </div>
@@ -291,9 +313,7 @@ export function AppSidebar({ onSearch }: { onSearch?: () => void }) {
       <SidebarHeader className="gap-1 px-2 pt-3 pb-0">
         <div className="flex h-8 items-center justify-between pr-1 pl-2">
           <span className="flex items-center gap-2 font-semibold">
-            <span aria-hidden className="grid size-6 place-items-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
-              K
-            </span>
+            <KTile />
             Knock
           </span>
           <Button variant="ghost" size="icon-sm" className="size-7" aria-label="Switch theme" onClick={toggle}>

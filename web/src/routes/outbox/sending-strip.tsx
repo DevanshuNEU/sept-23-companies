@@ -125,7 +125,7 @@ export function SendingStrip({ sending: s, onPause, onResume }: { sending: Sendi
     <section aria-label="Sending today" className="flex flex-none items-stretch border-b">
       <Cell name="Sender" tone={sender.tone} className="max-w-[340px] min-w-[200px]">
         <span className={cn('flex items-center gap-2 text-sm font-medium', red && 'text-bad')}>
-          <span aria-hidden className={cn('size-2 flex-none rounded-full', DOT[sender.tone], s.state === 'running' && 'animate-pulse')} />
+          <span aria-hidden className={cn('size-2 flex-none rounded-full', DOT[sender.tone], s.state === 'running' && 'ripple')} />
           {sender.label}
         </span>
         <span title={senderSub(s)} className={cn('line-clamp-2 text-xs', red ? 'text-bad' : 'text-muted-foreground')}>

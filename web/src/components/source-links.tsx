@@ -27,7 +27,7 @@ export function SourceAnchor({ link, className }: { link: SourceLink; className?
       target="_blank"
       rel="noopener noreferrer"
       className={cn(
-        'rounded-sm underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/70',
+        'rounded-sm underline decoration-foreground/30 underline-offset-3 transition-colors outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70',
         className,
       )}
     >

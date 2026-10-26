@@ -113,7 +113,7 @@ describe('Needs you', () => {
 
     expect(await screen.findByText("Saved and locked. Cerebrium's drafts will be checked now.")).toBeInTheDocument();
     expect(screen.queryByRole('article', { name: 'Cerebrium' })).not.toBeInTheDocument();
-    expect(needsYouLink()).toHaveAccessibleName('Needs you, 4 open');
+    expect(needsYouLink()).toHaveAccessibleName(/^Needs you, 4 open/);
     expect(resolve).not.toHaveBeenCalled();
 
     // Leaving the page commits what waits in the undo window.
@@ -163,11 +163,11 @@ describe('Needs you', () => {
     press('o');
     expect(await screen.findByText('Marked ok. Trigger.dev stays at unknown size.')).toBeInTheDocument();
     expect(screen.queryByRole('article', { name: 'Trigger.dev' })).not.toBeInTheDocument();
-    expect(needsYouLink()).toHaveAccessibleName('Needs you, 4 open');
+    expect(needsYouLink()).toHaveAccessibleName(/^Needs you, 4 open/);
 
     await user.click(screen.getByRole('button', { name: 'Undo' }));
     expect(await screen.findByRole('article', { name: 'Trigger.dev' })).toBeInTheDocument();
-    expect(needsYouLink()).toHaveAccessibleName('Needs you, 5 open');
+    expect(needsYouLink()).toHaveAccessibleName(/^Needs you, 5 open/);
     expect(resolve).not.toHaveBeenCalled();
   });
 
@@ -303,20 +303,20 @@ describe('Needs you', () => {
     const { client } = await openReview();
     const mesh = await reviewOf(client, 'Mesh Systems');
     const resolve = vi.spyOn(client, 'resolveReview');
-    expect(needsYouLink()).toHaveAccessibleName('Needs you, 11 open');
+    expect(needsYouLink()).toHaveAccessibleName(/^Needs you, 11 open/);
 
     select(MESH);
     press('m');
     expect(await screen.findByText('Merged Mesh into Mesh Systems.')).toBeInTheDocument();
     expect(screen.queryByRole('article', { name: MESH })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: /^Possible duplicates/ })).not.toBeInTheDocument();
-    expect(needsYouLink()).toHaveAccessibleName('Needs you, 10 open');
+    expect(needsYouLink()).toHaveAccessibleName(/^Needs you, 10 open/);
     expect(progress()).toHaveTextContent('3 settled today, 10 open');
     expect(resolve).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: 'Undo' }));
     expect(await screen.findByRole('article', { name: MESH })).toBeInTheDocument();
-    expect(needsYouLink()).toHaveAccessibleName('Needs you, 11 open');
+    expect(needsYouLink()).toHaveAccessibleName(/^Needs you, 11 open/);
 
     select(MESH);
     press('o');
@@ -393,7 +393,7 @@ describe('Needs you', () => {
     expect(reopen).toHaveBeenCalledWith(railway.id, railway.revision, expect.objectContaining({ requestId: expect.any(String) }));
     expect(await screen.findByRole('article', { name: 'Railway' })).toBeInTheDocument();
     expect(screen.queryByRole('row', { name: /^Railway/ })).not.toBeInTheDocument();
-    await waitFor(() => expect(needsYouLink()).toHaveAccessibleName('Needs you, 6 open'));
+    await waitFor(() => expect(needsYouLink()).toHaveAccessibleName(/^Needs you, 6 open/));
   });
 
   it('after a no-go commits and the list refetches, its Resolved row has Undo and the day counts it once', async () => {
@@ -436,7 +436,7 @@ describe('Needs you', () => {
     });
     expect(screen.getByRole('row', { name: /^Railway/ })).toBeInTheDocument();
     expect(within(screen.getByRole('row', { name: /^Railway/ })).getByRole('button', { name: 'Undo' })).toBeDisabled();
-    expect(needsYouLink()).toHaveAccessibleName('Needs you, 5 open');
+    expect(needsYouLink()).toHaveAccessibleName(/^Needs you, 5 open/);
     expect(screen.queryByRole('article', { name: 'Railway' })).not.toBeInTheDocument();
     await act(async () => answer());
   });
@@ -449,7 +449,7 @@ describe('Needs you', () => {
     expect(await screen.findByText('This item changed since you loaded it. Nothing was saved.')).toBeInTheDocument();
     const row = screen.getByRole('row', { name: /^Railway/ });
     await waitFor(() => expect(within(row).getByRole('button', { name: 'Undo' })).toBeEnabled());
-    expect(needsYouLink()).toHaveAccessibleName('Needs you, 5 open');
+    expect(needsYouLink()).toHaveAccessibleName(/^Needs you, 5 open/);
     expect(progress()).toHaveTextContent(/^5 open$/);
   });
 

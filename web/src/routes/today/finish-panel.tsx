@@ -9,7 +9,7 @@ import { TomorrowDraft } from './tomorrow-draft';
 
 const plural = (n: number, one: string, many: string) => `${n === 1 ? one : many}`;
 const link =
-  'rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/70';
+  'rounded-sm text-foreground underline decoration-foreground/30 underline-offset-3 transition-colors outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70';
 
 /** The name a row goes by in a sentence. */
 const nameOf = (row: PlanRow) => row.person?.person.name ?? row.company.name;

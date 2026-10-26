@@ -130,7 +130,7 @@ export function ReplyDetail({
               type="button"
               aria-pressed={reply.kind === 'auto_reply'}
               onClick={() => onReplyKind('auto_reply')}
-              className="rounded-md px-2 py-1.5 text-[13px] text-muted-foreground underline decoration-border underline-offset-3 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70 aria-pressed:font-medium aria-pressed:text-foreground"
+              className="rounded-md px-2 py-1.5 text-[13px] text-muted-foreground underline decoration-foreground/30 underline-offset-3 transition-colors outline-none hover:text-foreground hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70 aria-pressed:font-medium aria-pressed:text-foreground"
             >
               Auto-reply, not a person
             </button>

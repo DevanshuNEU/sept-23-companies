@@ -50,7 +50,7 @@ function Source({ fact }: { fact: Fact }) {
           href={href}
           target="_blank"
           rel="noreferrer"
-          className="underline decoration-border underline-offset-3 hover:decoration-current"
+          className="underline decoration-foreground/30 underline-offset-3 transition-colors hover:decoration-foreground"
         >
           {SOURCE_LABELS[fact.sourceKind]}
         </a>

@@ -334,7 +334,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
           </Button>
           <Link
             to="/proposals"
-            className="ml-2.5 rounded-sm text-xs text-muted-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/70"
+            className="ml-2.5 rounded-sm text-xs text-muted-foreground underline decoration-foreground/30 underline-offset-3 transition-colors outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70"
           >
             All proposed companies
           </Link>

@@ -116,7 +116,7 @@ export class FixtureClient implements OutreachClient {
   /** Every call waits `latencyMs`, and fails in the `error` scenario. */
   private async gate(): Promise<void> {
     if (this.latencyMs > 0) await new Promise((resolve) => setTimeout(resolve, this.latencyMs));
-    if (this.db.scenario === 'error') throw new ApiError('network', 'Cannot reach the outreach server');
+    if (this.db.scenario === 'error') throw new ApiError('network', 'Cannot reach the Knock server');
   }
 
   /** Reads hand back a copy so a caller cannot change the db. */

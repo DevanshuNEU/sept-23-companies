@@ -85,7 +85,7 @@ export function QueryState<T>({
       return (
         <StateBanner
           tone="bad"
-          title="Cannot reach the outreach server"
+          title="Cannot reach the Knock server"
           action={<Button variant="outline" size="sm" onClick={() => void query.refetch()}>Retry</Button>}
         >
           Nothing was changed.
@@ -100,7 +100,7 @@ export function QueryState<T>({
 
   return (
     <div className="flex flex-col gap-4">
-      <StateBanner tone="bad" title="Cannot reach the outreach server">
+      <StateBanner tone="bad" title="Cannot reach the Knock server">
         {`Nothing was changed. Showing what loaded at ${formatLocalTime(new Date(query.dataUpdatedAt).toISOString())}.`}
       </StateBanner>
       {body}

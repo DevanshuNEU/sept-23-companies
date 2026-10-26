@@ -5,11 +5,15 @@ page shows from it and from the touches: the row state, the reason, the search l
 no network, no model.
 """
 import json
+import time
 from datetime import date
 from pathlib import Path
+from unittest import mock
 
 from outreach.drafts.checks import load_banned
 from outreach.outcomes.context import build_context
+from outreach.outcomes.windows import next_weekday, ny_day
+from outreach.plan.build import build_plan
 from outreach.plan.capacity import linkedin_capacity, plan_capacity
 from outreach.plan.config import default_plan_config
 from outreach.plan.drafts import confirm_reason, save_linkedin_draft
@@ -17,7 +21,7 @@ from outreach.plan.notecheck import load_unconfirmed
 from outreach.api.queries.plan import tomorrow_text as plan_text
 from outreach.plan.prospects import HANDOFF
 from outreach.ranking.common import canonical_ids
-from outreach.store import log_touch
+from outreach.store import log_touch, transaction
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
 
@@ -160,6 +164,26 @@ class PlanCase(ApiCase):
 
     def row(self, company: str) -> dict:
         return next(r for r in self.plan()["rows"] if r["company"]["name"] == company)
+
+    def expected_draft(self) -> list[dict]:
+        """Tomorrow's preview as #15's own dry run of the next weekday's plan chooses it: its rows in its order, each
+        with the names the store holds and the title of the company's best posting. Never empty here."""
+        day = date.fromisoformat(next_weekday(ny_day(self.now)))
+        result = build_plan(self.conn, today=day, cfg=CFG, read_boards=False, dry_run=True)
+        self.assertEqual(result.status, "built")
+        out = []
+        for row in result.chosen:
+            company = self.conn.execute("SELECT name FROM company WHERE company_id = ?", (row.company_id,)).fetchone()
+            person = self.conn.execute("SELECT name FROM person WHERE person_id = ?", (row.person_id,)).fetchone()
+            role = self.conn.execute(
+                "SELECT p.title FROM company_score s JOIN posting p "
+                "ON p.posting_id = json_extract(s.signals, '$.best_posting_id') WHERE s.company_id = ?",
+                (row.company_id,)).fetchone()
+            out.append({"companyName": company[0], "personName": person[0] if person else None,
+                        "roleTitle": role[0] if role else None, "channel": row.channel,
+                        "findSomeone": row.person_id is None})
+        self.assertTrue(out)
+        return out
 
 
 class PlanReadTests(PlanCase):
@@ -337,13 +361,10 @@ class PlanReadTests(PlanCase):
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 16), CFG)
         self.assertEqual(view["tomorrow"]["total"], total)
         preview = view["tomorrow"]["preview"]
-        self.assertEqual([p["companyName"] for p in preview][:4], ["Pylon", "Inngest", "Cerebrium", "Turso"])
-        self.assertEqual(preview[0], {"companyName": "Pylon", "personName": "Lena Ortiz",
-                                      "roleTitle": "Software Engineer I"})
-        self.assertEqual(preview[2]["personName"], None)
-        self.assertNotIn("Resend", [p["companyName"] for p in preview])  # done rows do not carry
-        self.assertEqual(view["tomorrow"]["text"],
-                         f"Monday: {total} people, {len(preview)} carried over.")
+        self.assertEqual(preview, self.expected_draft())
+        self.assertNotIn("Resend", [p["companyName"] for p in preview])  # asked on Tuesday: the company waits
+        self.assertEqual(view["tomorrow"]["text"], f"Monday's plan builds at 08:00. Room for {total} people. "
+                                                   "A draft of who it would propose is below.")
 
     def test_weekday_with_no_list_is_not_built(self):
         self.set_now("2026-11-11T12:00:00Z")  # Wednesday 07:00, before the 08:00 build
@@ -352,9 +373,9 @@ class PlanReadTests(PlanCase):
         self.assertEqual((view["rows"], view["builtAt"], view["date"]), ([], None, "2026-11-11"))
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 12), CFG)
         self.assertEqual(view["tomorrow"]["total"], total)
-        carried = len(view["tomorrow"]["preview"])
-        self.assertEqual(view["tomorrow"]["text"], f"Tomorrow: {total} people, {carried} carried over."
-                         if carried else f"Tomorrow's plan builds at 08:00. Room for {total} people.")
+        self.assertEqual(view["tomorrow"]["preview"], self.expected_draft())
+        self.assertEqual(view["tomorrow"]["text"], f"Tomorrow's plan builds at 08:00. Room for {total} people. "
+                                                   "A draft of who it would propose is below.")
 
     def test_failed_plan_job_is_job_failed_with_its_error(self):
         self.set_now("2026-11-11T15:00:00Z")
@@ -374,10 +395,9 @@ class PlanReadTests(PlanCase):
                           "VALUES ('plan', '2026-11-09T13:00:00Z', '2026-11-09T13:00:05Z', 'failed', 'old')")
         self.assertEqual(self.plan()["notReady"]["reason"], "not_built")
 
-    def test_tomorrow_on_friday_names_monday_and_counts_carried(self):
+    def test_tomorrow_on_friday_names_monday_and_drafts_mondays_plan(self):
         today = self.plan()["tomorrow"]
-        self.assertTrue(today["text"].startswith("Tomorrow: "), today["text"])
-        self.assertTrue(today["text"].endswith(" carried over."), today["text"])
+        self.assertTrue(today["text"].startswith("Tomorrow's plan builds at 08:00. "), today["text"])
         friday = "2026-11-13"
         self.conn.execute("UPDATE daily_list_entry SET state = 'removed', decided_at = ? WHERE list_date = ?",
                           (EARLIER, DAY))  # Tuesday's rows would carry too: this test is about Friday's
@@ -386,15 +406,19 @@ class PlanReadTests(PlanCase):
                        posting_id=self.postings[company], why=why(first_proposed=friday), list_date=friday)
         self.request("Resend", at="2026-11-13T15:00:00Z")  # Friday's Resend row is done
         self.set_now("2026-11-13T16:00:00Z")
-        view = self.plan()
+        with mock.patch("outreach.api.queries.plan.build_plan", wraps=build_plan) as spy:
+            view = self.plan()
+        self.assertEqual(spy.call_args.kwargs["today"], date(2026, 11, 16))
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 16), CFG)
-        self.assertEqual(view["tomorrow"]["text"], f"Monday: {total} people, 2 carried over.")
-        self.assertEqual([p["companyName"] for p in view["tomorrow"]["preview"]], ["Pylon", "Inngest"])
+        self.assertEqual(view["tomorrow"]["text"], f"Monday's plan builds at 08:00. Room for {total} people. "
+                                                   "A draft of who it would propose is below.")
+        preview = view["tomorrow"]["preview"]
+        self.assertEqual(preview, self.expected_draft())
+        self.assertEqual([p["companyName"] for p in preview][:2], ["Pylon", "Inngest"])  # Friday's, still to do
+        self.assertNotIn("Resend", [p["companyName"] for p in preview])
 
-    def test_tomorrow_text_has_no_carried_clause_when_nothing_carries(self):
-        for company in ("Pylon", "Inngest", "Cerebrium", "Turso", "Mintlify"):
-            self.conn.execute("UPDATE daily_list_entry SET state = 'removed', decided_at = ? WHERE company_id = ?",
-                              (EARLIER, self.ids[company]))
+    def test_tomorrow_text_has_no_below_when_the_draft_is_empty(self):
+        self.conn.execute("DELETE FROM company_score")  # nothing ranked: the next plan would propose nobody
         tomorrow = self.plan()["tomorrow"]
         total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 11), CFG)
         self.assertEqual((tomorrow["text"], tomorrow["preview"]),
@@ -403,14 +427,15 @@ class PlanReadTests(PlanCase):
         self.assertNotIn("below", tomorrow["text"])
 
     def test_tomorrow_text_says_person_for_one_and_names_the_weekday_for_monday(self):
-        self.conn.execute("UPDATE daily_list_entry SET state = 'removed', decided_at = ?", (EARLIER,))
+        self.conn.execute("DELETE FROM company_score")
         self.set_now("2026-11-13T16:00:00Z")  # Friday: the next plan is Monday's
         tomorrow = self.plan()["tomorrow"]
         self.assertEqual(tomorrow["preview"], [])
         self.assertEqual(tomorrow["text"], f"Monday's plan builds at 08:00. Room for {tomorrow['total']} "
                                            f"{'person' if tomorrow['total'] == 1 else 'people'}.")
         self.assertEqual(plan_text("Tomorrow", 1, 0), "Tomorrow's plan builds at 08:00. Room for 1 person.")
-        self.assertEqual(plan_text("Monday", 1, 2), "Monday: 1 person, 2 carried over.")
+        self.assertEqual(plan_text("Monday", 7, 2), "Monday's plan builds at 08:00. Room for 7 people. "
+                                                    "A draft of who it would propose is below.")
 
     def test_linkedin_month_comes_from_linkedin_capacity_with_both_limits(self):
         self.request("Pylon", source="own")  # his own request: the hard total only
@@ -507,6 +532,136 @@ class PlanReadTests(PlanCase):
                           "WHERE company_id = ?", (survivor, self.ids["Pylon"]))
         three = self.plan()["rows"][2]
         self.assertEqual((three["company"]["id"], three["company"]["name"]), (survivor, "Pylon Labs"))
+
+
+SATURDAY = "2026-11-14T15:00:00Z"
+COUNTED = ("daily_list", "daily_list_entry", "job_run", "event", "person", "linkedin_draft")
+
+
+class TomorrowDraftTests(PlanCase):
+    """Tomorrow's preview is #15's dry run of the next weekday's plan: the people it would propose, not only the rows
+    carried from earlier plans. It writes nothing, never reads boards, ranks or calls out, and a failure is the count
+    alone."""
+
+    def setUp(self):
+        super().setUp()
+        from tests.plan_seed import seed_person, seed_scored_company
+        for company, posting in self.postings.items():
+            self.conn.execute("UPDATE company_score SET signals = json_set(signals, '$.best_posting_id', ?) "
+                              "WHERE company_id = ?", (posting, self.ids[company]))
+        self.ids["Hex"] = seed_scored_company(self.conn, "Hex", 95, ["level_role"], version="rk-1")
+        seed_person(self.conn, self.ids["Hex"], "Ada Lin", "founder", email="ada@hex.example",
+                    sources=[("email", "https://hex.example/about", "ada@hex.example")])
+        self.set_now(SATURDAY)
+
+    def counts(self) -> dict:
+        return {t: self.conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in COUNTED}
+
+    def test_the_draft_lists_the_next_plans_people_then_its_find_someone_rows(self):
+        tomorrow = self.plan()["tomorrow"]
+        def row(company, person, title, channel="linkedin_request"):
+            return {"companyName": company, "personName": person, "roleTitle": title, "channel": channel,
+                    "findSomeone": person is None}
+        self.assertEqual(tomorrow["preview"], [
+            row("Hex", "Ada Lin", "Software Engineer", "email"),
+            row("Pylon", "Lena Ortiz", "Software Engineer I"),
+            row("Inngest", "Jonah Park", "Software Engineer II"),
+            row("Turso", "Ines Duarte", "Software Engineering Intern"),
+            row("Cerebrium", None, "Member of Technical Staff"),  # a lower id than Turso, but nobody to ask yet
+        ])
+        self.assertEqual(tomorrow["preview"], self.expected_draft())
+        self.assertTrue(tomorrow["text"].endswith(" A draft of who it would propose is below."))
+
+    def test_reading_the_draft_writes_nothing(self):
+        before = self.counts()
+        version = self.conn.execute("PRAGMA data_version").fetchone()[0]
+        for now in (SATURDAY, NOW, "2026-11-11T12:00:00Z", "2026-11-13T16:00:00Z"):
+            with self.subTest(now=now):
+                self.set_now(now)
+                self.assertTrue(self.plan()["tomorrow"]["preview"])
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(self.conn.execute("PRAGMA data_version").fetchone()[0], version)  # nobody committed
+
+    def test_the_draft_is_a_dry_run_that_reads_no_boards_and_runs_no_ranker(self):
+        with mock.patch("outreach.api.queries.plan.build_plan", wraps=build_plan) as spy:
+            self.plan()
+        self.assertEqual(spy.call_count, 1)
+        kwargs = spy.call_args.kwargs
+        self.assertEqual(kwargs["today"], date(2026, 11, 16))
+        self.assertEqual((kwargs["dry_run"], kwargs["read_boards"]), (True, False))
+        self.assertIsNone(kwargs.get("boards_reader"))
+        self.assertIsNone(kwargs.get("ranker"))
+
+    def test_a_failing_dry_run_falls_back_to_the_count_and_logs_once(self):
+        total = plan_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 16), CFG)
+        for target in ("build_plan", "people_by_ids"):  # the dry run itself, then naming its rows
+            with self.subTest(target=target):
+                error = RuntimeError(f"draft broke in {target}")
+                with mock.patch(f"outreach.api.queries.plan.{target}", side_effect=error):
+                    with self.assertLogs("outreach.api", level="WARNING") as logs:
+                        first = self.plan()["tomorrow"]
+                        second = self.plan()["tomorrow"]
+                self.assertEqual(first, {"total": total, "preview": [],
+                                         "text": f"Monday's plan builds at 08:00. Room for {total} people."})
+                self.assertEqual(second, first)
+                self.assertEqual(sum(str(error) in r.getMessage() for r in logs.records), 1)
+
+    def test_a_plan_already_built_for_the_next_day_gives_no_draft(self):
+        build_plan(self.conn, today=date(2026, 11, 16), cfg=CFG, read_boards=False)
+        tomorrow = self.plan()["tomorrow"]
+        self.assertEqual(tomorrow["preview"], [])
+        self.assertNotIn("below", tomorrow["text"])
+
+    def test_weekday_and_weekend_labels(self):
+        for now, label in ((NOW, "Tomorrow"), ("2026-11-13T16:00:00Z", "Monday"), (SATURDAY, "Monday"),
+                           ("2026-11-15T15:00:00Z", "Tomorrow")):
+            with self.subTest(now=now):
+                self.set_now(now)
+                text = self.plan()["tomorrow"]["text"]
+                self.assertTrue(text.startswith(f"{label}'s plan builds at 08:00. Room for "), text)
+                self.assertTrue(text.endswith(" A draft of who it would propose is below."), text)
+
+
+class TomorrowDraftSpeedTests(ApiCase):
+    """The draft runs on every plan read: on a store of the real shape it stays well under a second."""
+
+    def test_the_draft_stays_fast_on_a_large_store(self):
+        c = self.conn
+        lanes = ("level_role", "intern_junior", "reason_no_role", "any_us_role")
+        with transaction(c):
+            c.executemany("INSERT INTO company(name, status, status_at, created_at) VALUES (?, 'candidate', ?, ?)",
+                          [(f"Bulk {n}", s.T0, s.T0) for n in range(5000)])
+            first = c.execute("SELECT min(company_id) FROM company WHERE name = 'Bulk 0'").fetchone()[0]
+            c.executemany(
+                "INSERT INTO posting(company_id, source_key, title, location, url, first_seen_at, last_seen_at) "
+                "VALUES (?, ?, 'Software Engineer', 'Remote', ?, ?, ?)",
+                [(first + n % 5000, f"url:bulk-{n}", f"https://jobs.example/{n}", s.T0, s.T0) for n in range(15000)])
+            postings = {r[0]: r[1] for r in c.execute("SELECT company_id, min(posting_id) FROM posting GROUP BY 1")}
+            c.executemany(
+                "INSERT INTO company_score(company_id, ranker_version, score, signals, lanes, scored_at) "
+                "VALUES (?, 'rk-1', ?, ?, ?, '2026-11-10T08:00:00Z')",
+                [(first + n, 90 - n / 100, json.dumps({"values": {}, "reasons": ["Hiring"], "hide": None, "flags": [],
+                                                       "best_posting_id": postings[first + n]}),
+                  json.dumps([lanes[n % 4]])) for n in range(5000)])
+            c.executemany(
+                "INSERT INTO person(company_id, name, title, role_kind, linkedin_url, channel, linkedin_reason, "
+                "added_by, created_at, updated_at) VALUES (?, ?, 'Engineer', 'engineer', ?, 'linkedin', 'no_email', "
+                "'claude', ?, ?)",
+                [(first + n * 2, f"Person {n}", f"https://www.linkedin.com/in/p{n}", s.T0, s.T0) for n in range(2000)])
+        self.set_now(SATURDAY)
+        self.get("/api/plan")  # warm: the first call imports and compiles
+        started = time.perf_counter()
+        tomorrow = self.ok(self.get("/api/plan"))["tomorrow"]
+        elapsed = time.perf_counter() - started
+        # Nobody here has an email address, so the draft fills Monday's LinkedIn rows only.
+        monday = linkedin_capacity(self.conn, canonical_ids(self.conn), date(2026, 11, 16), CFG).today
+        self.assertEqual(len(tomorrow["preview"]), monday)
+        self.assertGreater(monday, 0)
+        self.assertLess(elapsed, 1.0, f"the plan read took {elapsed * 1000:.0f} ms on 5,000 scored companies")
+
+    def ok(self, res) -> dict:
+        self.assertEqual(res.status_code, 200, res.text)
+        return res.json()
 
 
 class LeanTodayTests(ApiCase):

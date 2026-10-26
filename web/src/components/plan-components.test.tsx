@@ -111,7 +111,7 @@ describe('DayRail', () => {
     const { container } = render(rail(plan()));
     const finish = container.querySelector('[data-finish]');
     expect(finish).toHaveTextContent('Done for today');
-    expect(finish).toHaveTextContent('Tomorrow: 7 people, 5 carried over.');
+    expect(finish).toHaveTextContent("Tomorrow's plan builds at 08:00. Room for 25 people.");
     expect(finish).toHaveAttribute('data-done', 'false');
     expect(finish).not.toHaveAttribute('aria-current');
     // The finish node is not a person: it is outside the listbox.

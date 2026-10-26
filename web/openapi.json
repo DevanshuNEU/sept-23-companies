@@ -6690,9 +6690,29 @@
       },
       "TomorrowRow": {
         "properties": {
+          "channel": {
+            "anyOf": [
+              {
+                "enum": [
+                  "linkedin_request",
+                  "email"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
           "companyName": {
             "title": "Companyname",
             "type": "string"
+          },
+          "findSomeone": {
+            "default": false,
+            "title": "Findsomeone",
+            "type": "boolean"
           },
           "personName": {
             "anyOf": [
@@ -6720,7 +6740,9 @@
         "required": [
           "companyName",
           "personName",
-          "roleTitle"
+          "roleTitle",
+          "channel",
+          "findSomeone"
         ],
         "title": "TomorrowRow",
         "type": "object"

@@ -943,7 +943,7 @@ describe('plan writes: logging', () => {
     expect(fresh.note?.text).not.toBe('Changed');
     expect(fresh.note?.reasonState).toBe('confirmed');
     expect((await rowAt(b, 4)).state).toBe('todo');
-    expect((await b.plan()).tomorrow.total).toBe(7);
+    expect((await b.plan()).tomorrow.total).toBe(25);
   });
 
   it('no two fixtures share a source link or a note fact', () => {
@@ -1120,10 +1120,11 @@ describe('plan writes: skip, notes, wins, watch', () => {
     const plan = await c.plan();
     expect(plan.rows[3]?.state).toBe('skipped');
     expect(plan.rows.map((r) => r.entryId)).toEqual(before.rows.map((r) => r.entryId));
-    expect(plan.tomorrow.total).toBe(before.tomorrow.total + 1);
-    expect(plan.tomorrow.text).toBe('Tomorrow: 8 people, 5 carried over.');
-    expect(plan.tomorrow.preview[0]).toMatchObject({ companyName: 'Inngest', personName: 'Jonah Park' });
-    expect(plan.tomorrow.preview.length).toBeLessThanOrEqual(5);
+    // As the API: the room stays, and tomorrow's draft proposes the carried person again, first among the people.
+    expect(plan.tomorrow.total).toBe(before.tomorrow.total);
+    expect(plan.tomorrow.preview[0]).toEqual({ companyName: 'Inngest', personName: 'Jonah Park', roleTitle: 'Software Engineer II', channel: 'linkedin_request', findSomeone: false });
+    expect(plan.tomorrow.preview).toHaveLength(before.tomorrow.preview.length + 1);
+    expect(plan.tomorrow.text).toBe(`Tomorrow's plan builds at 08:00. Room for 25 people. A draft of who it would propose is below.`);
     expect(plan.done).toBe(2);
     expect((await c.shell()).plan.done).toBe(2);
   });
@@ -1159,6 +1160,18 @@ describe('plan writes: skip, notes, wins, watch', () => {
     expect(await rowAt(c, 1)).toMatchObject({ entryId: dana.entryId, state: 'done' });
   });
 
+  it('a skipped find-someone row joins the draft first among the find-someone rows', async () => {
+    const c = client();
+    const row = await rowAt(c, 5);
+    expect(row.person).toBeNull();
+    await c.skipRow(row.entryId, row.revision, opt());
+    const { preview } = (await c.plan()).tomorrow;
+    const at = preview.findIndex((p) => p.companyName === row.company.name);
+    expect(preview[at]).toMatchObject({ personName: null, findSomeone: true });
+    expect(preview.slice(0, at).every((p) => !p.findSomeone)).toBe(true);
+    expect(preview.slice(at).every((p) => p.findSomeone)).toBe(true);
+  });
+
   it('skipRow on a done row is not_allowed, and a stale revision conflicts', async () => {
     const c = client();
     const done = await rowAt(c, 1);
@@ -1166,7 +1179,7 @@ describe('plan writes: skip, notes, wins, watch', () => {
     const row = await rowAt(c, 4);
     expect((await rejection(c.skipRow(row.entryId, row.revision + 2, opt()))).code).toBe('conflict');
     expect((await rejection(c.skipRow(1, 1, opt()))).code).toBe('not_found');
-    expect((await c.plan()).tomorrow.total).toBe(7);
+    expect((await c.plan()).tomorrow.total).toBe(25);
   });
 
   it('a skipped row cannot be logged', async () => {

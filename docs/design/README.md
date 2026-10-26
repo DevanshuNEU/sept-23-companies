@@ -983,9 +983,11 @@ from the touch's history on the company page.
 When no row is left to do, the work panel becomes the finish panel and focus moves to its heading, "Done for today"
 (announced once: "All 7 done for today."). The finish node on the rail fills. The panel, on paper: the heading with a
 filled flag and one calm line ("All 7 people on today's plan are done. Nothing else is asked of you today."); What you
-did (counts, then one line per row with its time); Carried to tomorrow (only when a row was carried); Tomorrow (the
-count, when the plan is built, up to 3 people, then "and 4 more"); This week so far (plain counts and a link to
-Progress). Nothing red, no counting of days in a row, no "come back".
+did (counts, then one line per row with its time); Carried to tomorrow (only when a row was carried); Tomorrow's draft
+(rebuilt at 08:00: the API's line, then up to 10 people the next plan's dry run would propose, people first, each with
+company, role and a small channel word, LinkedIn, Email or Find someone, then "and 3 more" counted from the draft; the
+line alone when the draft is empty); This week so far (plain counts and a link to Progress). The weekend and a plan not
+built yet show the same draft under their one line. Nothing red, no counting of days in a row, no "come back".
 
 ### 16.3 Progress and the quiet week
 

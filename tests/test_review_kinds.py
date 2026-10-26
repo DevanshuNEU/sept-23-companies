@@ -81,6 +81,10 @@ class KindsTest(unittest.TestCase):
         self.assertEqual(KINDS["sponsorship_unclear"].edit_field, "sponsorship")
         self.assertEqual(KINDS["domain_missing"].edit_field, "domain")
 
+    def test_every_kind_is_scoped_to_the_companies_he_is_working(self):
+        # The company-first ruling (#9): Needs you holds only companies in play, emailed or holding a reply.
+        self.assertEqual({k for k, s in KINDS.items() if not s.scoped}, set())
+
     def test_no_go_reasons_equal_the_schema_check(self):
         sql = self.conn.execute("SELECT sql FROM sqlite_master WHERE name = 'no_go'").fetchone()[0]
         self.assertEqual(set(NO_GO_REASONS), _check_list(sql, "reason"))
@@ -101,17 +105,27 @@ class ConfigTest(unittest.TestCase):
         return load_review_config(path)
 
     def test_config_loads_and_refuses_an_unknown_key_or_zero(self):
-        self.assertEqual(load_review_config(), ReviewConfig(sponsorship_top_n=150, planned_days=4, stale_days=14))
-        good = "[sweep]\nsponsorship_top_n = 10\nplanned_days = 2\nstale_days = 3\n"
-        self.assertEqual(self._load(good), ReviewConfig(10, 2, 3))
+        self.assertEqual(load_review_config(), ReviewConfig(sponsorship_top_n=150, planned_days=4, stale_days=14,
+                                                            crawler_scope_top=150, crawler_cap_per_run=10))
+        scope = "[needs_you]\ncrawler_scope_top = 20\ncrawler_cap_per_run = 5\n"
+        good = "[sweep]\nsponsorship_top_n = 10\nplanned_days = 2\nstale_days = 3\n" + scope
+        self.assertEqual(self._load(good), ReviewConfig(10, 2, 3, 20, 5))
         with self.assertRaisesRegex(ValueError, "sweep_top"):
             self._load(good + "sweep_top = 1\n")
+        with self.assertRaisesRegex(ValueError, r"\[needs_you\] is missing"):
+            self._load(good.replace(scope, ""))
+        with self.assertRaisesRegex(ValueError, "crawler_cap_per_run"):
+            self._load(good.replace("crawler_cap_per_run = 5", "crawler_cap_per_run = 0"))
+        with self.assertRaisesRegex(ValueError, "crawler_scope_top"):
+            self._load(good.replace("crawler_scope_top = 20\n", ""))
+        with self.assertRaisesRegex(ValueError, "unknown section"):
+            self._load(good + "[other]\nx = 1\n")
         with self.assertRaisesRegex(ValueError, "planned_days"):
             self._load(good.replace("planned_days = 2", "planned_days = 0"))
         with self.assertRaisesRegex(ValueError, "stale_days"):
             self._load(good.replace("stale_days = 3", "stale_days = -1"))
         with self.assertRaisesRegex(ValueError, "stale_days"):
-            self._load("[sweep]\nsponsorship_top_n = 10\nplanned_days = 2\n")
+            self._load("[sweep]\nsponsorship_top_n = 10\nplanned_days = 2\n" + scope)
         with self.assertRaisesRegex(ValueError, "sponsorship_top_n"):
             self._load(good.replace("sponsorship_top_n = 10", "sponsorship_top_n = 1.5"))
 

@@ -60,7 +60,7 @@ class Shell(ApiCase):
         conn.execute("INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'other', 'devanshu', ?)", (nogo, s.T0))
         gone = s.company(conn, "Gone", "removed", remove_reason="not_a_fit")
         s.person(conn, gone, "G1", channel="linkedin")
-        # Needs you: two open items and a resolved one.
+        # Needs you: two open items and a resolved one. Only Work's is in Needs you: a reply holds Work.
         s.review(conn, li, "size_unknown", evidence_key="a")
         s.review(conn, work, "domain_missing", evidence_key="b")
         s.review(conn, work, "size_guess", evidence_key="c", state="resolved")
@@ -102,7 +102,7 @@ class Shell(ApiCase):
         self.assertEqual(body["unhandledReplies"], 2)
         self.assertEqual(body["draftsToReview"], 2)
         self.assertEqual(body["linkedinToReach"], 3)  # L1 to L3; the rest have a request, a no-go or a removed company
-        self.assertEqual(body["openReviewItems"], 2)
+        self.assertEqual(body["openReviewItems"], 1)  # Work holds replies; Li's item is a data gap (#9)
         self.assertEqual(body["noGoCount"], 3)  # company, person and the removed company
         self.assertEqual(body["doneCount"], 2)
         self.assertEqual(body["repliesThisMonth"], 3)

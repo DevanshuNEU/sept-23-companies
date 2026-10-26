@@ -729,7 +729,9 @@ export class FixtureClient implements OutreachClient {
 
   resolveReview(reviewId: Id, fix: ReviewFix, revision: Revision, o: WriteOptions): Promise<void> {
     return this.write(o, () => {
-      const open = this.db.needsYou.open;
+      // An item settles the same way from Needs you or from Data gaps.
+      const gap = !this.db.needsYou.open.some((r) => r.id === reviewId);
+      const open = gap ? this.db.needsYou.dataGaps : this.db.needsYou.open;
       const index = open.findIndex((r) => r.id === reviewId);
       const review = open[index];
       if (!review) throw new ApiError('not_found', `No review item ${reviewId}`);
@@ -738,7 +740,7 @@ export class FixtureClient implements OutreachClient {
       if (fix.kind === 'edit' && fix.field === 'sponsorship' && fix.value.trim().toLowerCase() === 'no') throw notAllowed('Sponsorship No is a no-go. Use Mark no-go.');
       if (fix.kind === 'merge' && (review.kind !== 'merge_candidate' || !review.merge)) throw notAllowed('Only a possible duplicate can be merged.');
       const v = this.view(review.company.id);
-      const settled: SettledReview = { item: structuredClone(review), index };
+      const settled: SettledReview = { item: structuredClone(review), index, ...(gap ? { gap } : {}) };
       // The API's notes (outreach.review.words), so Resolved reads the same on sample data.
       let resolution: ResolvedReview['resolution'] = 'marked_ok';
       let note = review.kind === 'merge_candidate' ? 'Kept separate by you' : 'Marked ok by you';
@@ -773,7 +775,8 @@ export class FixtureClient implements OutreachClient {
         resolution = 'field_edited';
         note = `Merged ${loser.name} into ${keeper.name} by you`;
       }
-      this.db.needsYou.open = open.filter((r) => r.id !== reviewId);
+      if (gap) this.db.needsYou.dataGaps = open.filter((r) => r.id !== reviewId);
+      else this.db.needsYou.open = open.filter((r) => r.id !== reviewId);
       const locked = fix.kind === 'edit';
       this.db.needsYou.resolvedThisWeek.unshift({ id: reviewId, kind: review.kind, companyName: review.company.name, resolution, note, at: this.now, locked, revision: revision + 1, canUndo: !locked });
       if (!locked) this.db.settled[reviewId] = settled;
@@ -785,7 +788,7 @@ export class FixtureClient implements OutreachClient {
   reopenReview(reviewId: Id, revision: Revision, o: WriteOptions): Promise<void> {
     return this.write(o, () => {
       const view = this.db.needsYou;
-      if (view.open.some((r) => r.id === reviewId)) throw notAllowed('This item is open. There is nothing to take back.');
+      if ([...view.open, ...view.dataGaps].some((r) => r.id === reviewId)) throw notAllowed('This item is open. There is nothing to take back.');
       const row = view.resolvedThisWeek.find((r) => r.id === reviewId);
       if (!row) throw new ApiError('not_found', `No review item ${reviewId}`);
       if (row.revision !== revision) throw new ApiError('conflict', 'This item changed since you loaded it. Nothing was saved.');
@@ -805,7 +808,8 @@ export class FixtureClient implements OutreachClient {
         v.company.closed = null;
       }
       const item = { ...settled.item, revision: revision + 1 };
-      view.open.splice(Math.min(settled.index, view.open.length), 0, item);
+      const back = settled.gap ? view.dataGaps : view.open;
+      back.splice(Math.min(settled.index, back.length), 0, item);
       view.resolvedThisWeek = view.resolvedThisWeek.filter((r) => r.id !== reviewId);
       delete this.db.settled[reviewId];
       const company = this.db.companies[item.company.id];

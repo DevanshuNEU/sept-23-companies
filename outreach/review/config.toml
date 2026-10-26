@@ -1,4 +1,4 @@
-# The three numbers the Needs you sweep uses (#16). Each must be 1 or more.
+# The numbers the Needs you sweep uses (#16). Each must be 1 or more.
 [sweep]
 # Trigger 3 looks at companies in play and the top this-many of the ranked list.
 sponsorship_top_n = 150
@@ -6,3 +6,10 @@ sponsorship_top_n = 150
 planned_days = 4
 # An open size or domain item that no list or queue has touched for this many days clears itself.
 stale_days = 14
+
+# Which crawler data gaps ask for his attention (#9, company-first ruling). The rest never reach Needs you.
+[needs_you]
+# The crawler raises a missing-domain item only for a company in play or in the top this-many of the ranked list.
+crawler_scope_top = 150
+# At most this many new missing-domain items from one find_boards run; the rest wait for the next run.
+crawler_cap_per_run = 10

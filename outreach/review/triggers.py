@@ -23,6 +23,7 @@ from outreach.review.config import ReviewConfig, load_review_config
 from outreach.review.items import clear_item, decided_before, raise_item, unit
 from outreach.review.merge import follow_merge_questions
 from outreach.review.play import emailing, in_play, live_company_ids, ny_date, recent_list_date
+from outreach.review.scope import clear_out_of_scope, ranked_ids
 from outreach.rules import Decision, passes, ruleset_version
 from outreach.rules.rebuild import stored_decision
 from outreach.sources.keys import registrable_domain
@@ -134,11 +135,7 @@ def wording_key(quote: str) -> str:
 
 def _top_company_ids(conn: sqlite3.Connection, top_n: int) -> set[int]:
     """The top `top_n` of the ranked list, or nobody when the ranker is not there or has not run."""
-    try:
-        from outreach.ranking.scores import ranked_list
-    except ImportError:
-        return set()
-    return {row.company_id for row in ranked_list(conn, limit=top_n)}
+    return set(ranked_ids(conn, top_n))
 
 
 def _doubtful_boards(conn: sqlite3.Connection) -> frozenset[int]:
@@ -392,7 +389,8 @@ def _heartbeat_key(at: str) -> str:
 def sweep_needs_you(conn: sqlite3.Connection, *, now: str | None = None, company_ids: Collection[int] | None = None,
                     cfg: ReviewConfig | None = None) -> SweepReport:
     """Raise and clear every Needs-you item that has a sweep behind it: clear what went away, trigger 4, trigger 5,
-    trigger 3, then clear what is stale, each in its own write unit. Idempotent and cheap. `company_ids` limits
+    trigger 3, clear what is stale, then clear the crawler's out-of-scope gaps (`scope.clear_out_of_scope`), each in
+    its own write unit. Idempotent and cheap. `company_ids` limits
     every step to those companies (right after a pick or a person is added).
 
     A full run (no `company_ids`) then appends one heartbeat event, `review_item` / `sweep_run` by `system`, whether
@@ -419,6 +417,12 @@ def sweep_needs_you(conn: sqlite3.Connection, *, now: str | None = None, company
         skipped.append("stale items: no recent daily list, so nothing was cleared for being out of the plan")
     else:
         cleared.update(stale)
+    gaps = clear_out_of_scope(conn, now=at, cfg=cfg, company_ids=company_ids)
+    if gaps is None:
+        skipped.append(f"crawler domain items: no ranked list, so none was cleared for leaving the top "
+                       f"{cfg.crawler_scope_top}")
+    else:
+        cleared["domain_missing"] += gaps
     report = SweepReport({k: n for k, n in raised.items() if n}, {k: n for k, n in cleared.items() if n},
                          tuple(skipped))
     if company_ids is None:

@@ -648,17 +648,21 @@ class MassEmptyTests(TickCase):
         report = self.empty_tick(["e0"], 1)
         self.assertEqual((report.empty, report.deferred), (1, 0))
         self.assertEqual(self.open_postings(), 3)
-        item, = self.conn.execute("SELECT * FROM review_item").fetchall()
-        self.assertEqual(item["kind"], "board_empty")
+        self.assertEqual(self.conn.execute("SELECT * FROM review_item").fetchall(), [])  # #9: not on the first
         report = self.empty_tick(["e0"], 3)
         self.assertEqual((report.empty, report.closed), (1, 3))
         self.assertEqual(self.open_postings(), 0)
         self.assertEqual(self.row(bid)["empty_streak"], 2)
+        item, = self.conn.execute("SELECT * FROM review_item").fetchall()
+        self.assertEqual(item["kind"], "board_empty")
 
     def test_four_boards_reading_empty_are_four_empties(self):
         self.open_boards(4)
         report = self.empty_tick([f"e{i}" for i in range(4)], 1)
         self.assertEqual((report.empty, report.deferred), (4, 0))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE kind = 'board_empty'")
+                         .fetchone()[0], 0)  # the first empty read raises nothing (#9)
+        self.empty_tick([f"e{i}" for i in range(4)], 3)
         self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE kind = 'board_empty'")
                          .fetchone()[0], 4)
 

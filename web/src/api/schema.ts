@@ -1917,6 +1917,8 @@ export interface components {
             /** Asof */
             asOf: string;
             boardsJob: components["schemas"]["JobRunSummary"] | null;
+            /** Datagaps */
+            dataGaps: components["schemas"]["ReviewItem"][];
             /** Open */
             open: components["schemas"]["ReviewItem"][];
             /** Resolvedthisweek */

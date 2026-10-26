@@ -64,7 +64,7 @@ export interface FixtureDb {
  * list; `restoreStatus` is a company the settling changed (a no-go closed it, a merge removed the loser) and the
  * status it had; `noGoId` is the no-go row the settling added.
  */
-export interface SettledReview { item: ReviewItem; index: number; restoreStatus?: { companyId: Id; status: CompanyStatus }; noGoId?: Id }
+export interface SettledReview { item: ReviewItem; index: number; gap?: boolean; restoreStatus?: { companyId: Id; status: CompanyStatus }; noGoId?: Id }
 
 /* ------------------------------------------------------------------ time */
 
@@ -918,6 +918,11 @@ function buildNeedsYou(c: Ctx, scenario: Scenario): { view: NeedsYouView; settle
         lastOkAt: et('2026-11-02', '08:04'), openPostings: 0,
       }),
   ];
+  // Data gaps (#9): companies on no plan, not emailed and holding no reply. Listed apart, never in the badge.
+  const dataGaps: ReviewItem[] = [
+    item('domain_missing', 'Tinybird', false, et('2026-11-06', '10:34'), 4, 'No company domain is known, so its careers page cannot be checked for a board.', { inPlay: false }),
+    item('flagged', 'Dagster', false, et('2026-11-02', '08:00'), 8, 'The old tracker names a board for Dagster that no adapter reads, so nobody reads its jobs.', { inPlay: false }),
+  ];
   const settled: Record<Id, SettledReview> = {};
   /** A row he settled; with `was`, the item it was while open, so Undo from Resolved can put it back. */
   const done = (kind: ReviewKind, companyName: string, resolution: ResolvedReview['resolution'], note: string, at: IsoTime, was?: Omit<SettledReview, 'index'>): ResolvedReview => {
@@ -940,7 +945,7 @@ function buildNeedsYou(c: Ctx, scenario: Scenario): { view: NeedsYouView; settle
       item: item('size_guess', 'Fly.io', false, et('2026-11-01', '08:00'), 9, 'Claude guessed about 80 people from the team page. A guess never hides a company.'),
     }),
   ];
-  if (scenario !== 'review') return { view: { asOf: AS_OF, open, resolvedThisWeek, boardsJob: JOBS.crawl(), settledToday: settledOn(resolvedThisWeek, TODAY) }, settled };
+  if (scenario !== 'review') return { view: { asOf: AS_OF, open, dataGaps, resolvedThisWeek, boardsJob: JOBS.crawl(), settledToday: settledOn(resolvedThisWeek, TODAY) }, settled };
 
   // The review scenario: the mockup's other kinds, one of each, and what he settled today and earlier this week.
   const larkspur = c.role('Larkspur AI', 'Backend Engineer', 'early_career', SF, 7);
@@ -996,7 +1001,7 @@ function buildNeedsYou(c: Ctx, scenario: Scenario): { view: NeedsYouView; settle
     }),
   );
   for (const r of earlier) delete settled[r.id];
-  return { view: { asOf: AS_OF, open, resolvedThisWeek, boardsJob: JOBS.crawl(), settledToday: settledOn(resolvedThisWeek, TODAY) }, settled };
+  return { view: { asOf: AS_OF, open, dataGaps, resolvedThisWeek, boardsJob: JOBS.crawl(), settledToday: settledOn(resolvedThisWeek, TODAY) }, settled };
 }
 
 /* ------------------------------------------------------------------ No-go (no-go.html) */
@@ -1229,7 +1234,7 @@ function genericCompany(c: Ctx, name: string, v: Views): CompanyView {
   const noGoRow = v.noGo.companies.find((r) => (r.kind === 'no_go' ? r.target.kind === 'company' && r.target.company.name === name : r.company.name === name));
   const items = v.outbox.items.filter((i) => i.company.name === name);
   const group = v.linkedin.groups.find((g) => g.company.name === name);
-  const reviewItems = v.needsYou.open.filter((r) => r.company.name === name);
+  const reviewItems = [...v.needsYou.open, ...v.needsYou.dataGaps].filter((r) => r.company.name === name);
   const role = entry?.role ?? group?.role ?? null;
   const facts = entry
     ? [entry.size, entry.stage, entry.sponsorshipFact, entry.domainFact].filter((f): f is Fact => f !== null)
@@ -1372,7 +1377,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
     s.sentToday = 0; s.nextSend = null; s.noneReason = 'Nothing is approved.';
     db.details = {}; db.compares = []; db.companies = {};
     db.linkedin.groups = []; db.linkedin.counts = { toReach: 0, waiting: 0, replied: 0, all: 0 }; db.linkedin.requestsThisWeek = 0;
-    db.needsYou.open = []; db.needsYou.resolvedThisWeek = []; db.settled = {};
+    db.needsYou.open = []; db.needsYou.dataGaps = []; db.needsYou.resolvedThisWeek = []; db.settled = {};
     db.noGo.companies = []; db.noGo.people = []; db.noGo.countsByReason = []; db.noGo.hiddenCompanies = [];
     db.done.companies = [];
     db.done.metrics = { repliesThisMonth: 0, repliesPerWeek: db.done.metrics.repliesPerWeek.map((w) => ({ ...w, count: 0 })), replyRate: { replies: 0, firstEmails: 0 }, referrals: 0, interviews: 0 };

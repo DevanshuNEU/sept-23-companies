@@ -39,6 +39,17 @@ describe('settleView', () => {
     expect(after.settledToday).toBe(d.settledToday + 1);
   });
 
+  it('takes a data gap out of dataGaps and leaves Needs you as it was', () => {
+    const d = view();
+    const [gap] = d.dataGaps;
+    if (!gap) throw new Error('no data gap');
+    const after = settleView(d, gap, { resolution: 'marked_ok', note: 'Marked ok by you', locked: false });
+    expect(after.dataGaps.some((x) => x.id === gap.id)).toBe(false);
+    expect(after.open).toEqual(d.open);
+    expect(after.settledToday).toBe(d.settledToday + 1);
+    expect(settleView(after, gap, { resolution: 'marked_ok', note: 'Marked ok by you', locked: false })).toBe(after);
+  });
+
   it('applied again to its own result (a refetch that failed and kept the old data patched), never counts twice', () => {
     const d = view();
     const hex = hexOf(d);

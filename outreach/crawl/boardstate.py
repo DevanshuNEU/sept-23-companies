@@ -62,9 +62,11 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
     empty validators, which must never overwrite good ones); `empty` clears both, so a board that comes back after
     emptying can never be read as `unchanged` and its postings get the chance to reopen (Review Focus 4).
     Review items (raised by the crawler, keyed on `streak_since` so a resolved item stays resolved while the same
-    streak goes on): `board_unreadable` from the third error in a row, `board_empty` on the empty read that starts an
-    empty run (an error inside the run neither ends it nor raises the item again; the empty read that closes the
-    postings rewrites the open item's reason to say they closed). An `ok` or `unchanged` read clears
+    streak goes on): `board_unreadable` from the third error in a row, `board_empty` on the second empty read of an
+    empty run, the one that closes the postings (#9: zero jobs only after 2 runs in a row; an error inside the run
+    neither ends it nor raises the item again). The `board_empty` key is the run's first empty read, so an item an
+    older first-read rule raised is the same item, and its reason is rewritten to say the postings closed. An `ok`
+    or `unchanged` read clears
     both when open; an `empty` read clears only `board_unreadable`. The `read_state` event is appended when the state
     flips, with `ok` and `unchanged` as one state. Returns the new streaks.
 
@@ -102,11 +104,11 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
             _clear(conn, board.board_id, ("board_unreadable", "board_empty"), now)
         elif result.result == "empty":
             _clear(conn, board.board_id, ("board_unreadable",), now)
-            if board.empty_streak == 0:  # this read starts the empty run
-                _raise(conn, board, "board_empty", streaks.streak_since, now,
-                       board_empty_reason(board, streaks.empty_streak, now))
-            elif streaks.empty_streak == EMPTIES_TO_CLOSE:  # the read that closes: the open item must say so
+            if streaks.empty_streak == EMPTIES_TO_CLOSE:  # #9: zero jobs only after 2 runs in a row
                 closed = board_empty_reason(board, streaks.empty_streak, now)
+                _raise(conn, board, "board_empty", _empty_run_start(conn, board.board_id, streaks.streak_since),
+                       now, closed)
+                # An item the first empty read raised before the two-read rule must say the postings closed.
                 conn.execute(
                     "UPDATE review_item SET reason = ?, revision = revision + 1 "
                     "WHERE board_id = ? AND kind = 'board_empty' AND state = 'open' AND reason <> ?",
@@ -131,6 +133,16 @@ def board_empty_reason(board: BoardRow, empty_streak: int, now: str) -> str:
                 f"(the last on {now[:10]}), so its postings closed.")
     return (f"The {board.ats} board {board.token} listed no jobs on {now[:10]}. Its postings stay open for now; "
             "they close if the next read is empty too.")
+
+
+def _empty_run_start(conn: sqlite3.Connection, board_id: int, fallback: str) -> str:
+    """When the board's current empty run began: its first `empty` read since the last `ok` or `unchanged` one, from
+    the reads kept. That is the `streak_since` the first empty read set, which an error inside the run moves on.
+    `fallback` when the kept reads no longer hold it."""
+    row = conn.execute(
+        "SELECT min(at) FROM board_read WHERE board_id = ? AND result = 'empty' AND at > (SELECT coalesce(max(at), '') "
+        "FROM board_read WHERE board_id = ? AND result IN ('ok', 'unchanged'))", (board_id, board_id)).fetchone()
+    return row[0] or fallback
 
 
 def _clear(conn: sqlite3.Connection, board_id: int, kinds: tuple[str, ...], now: str) -> None:

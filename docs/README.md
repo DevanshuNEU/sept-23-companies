@@ -49,6 +49,7 @@ Decisions live in GitHub issue #9. After the switch (#17) the live system is the
 | `superpowers/plans/2026-10-22-import-and-switch-over.md` | #17: import all history (interviews included), the rehearsal, the deploy tool and the switch runbook (migration 0004). Part A (the importer, `outreach/importer/`) and B1 (the deploy tool, `outreach/deploy/`) are built; B2 (CLAUDE.md, this map and the cold-email skill) merges on switch day. The runbook in this plan is the switch: rehearsal (R1), switch day (S1 to S14) and rollback (R-back) |
 | `superpowers/plans/2026-10-22-retire-job-radar.md` | #5: retire Job Radar after its history is imported |
 | `superpowers/plans/2026-10-22-needs-you.md` | #16: the five Needs-you triggers, the sweep, one-click fixes, merge and unmerge. Built: `outreach/review/` (Tasks 1 to 12), the API (Task 13) and the web view in `web/src/routes/needs-you/` (Tasks 15 to 17: a section for every kind, the side-by-side merge confirm, Undo from Resolved, the plain progress line and the All settled panel). `?scenario=review` shows every kind on sample data |
+| `outreach/review/scope.py` | #16, the company-first ruling in #9: Needs you lists only items for companies he is working (`attention`: in play, emailed or held by a reply; a merge question when either side is), every other open item is a Data gap (`dataGaps` on `GET /api/needs-you`, by rank, never in the badge). The careers pass raises a missing-domain item only for those or the top `[needs_you] crawler_scope_top` ranked, at most `crawler_cap_per_run` a run; the sweep clears the rest (`clear_out_of_scope`) |
 | `superpowers/plans/2026-10-22-mcp-server.md` | #13: the local MCP server for the Claude side session, with enforced limits |
 | `superpowers/plans/2026-10-26-insights.md` | #81: the outcome dataset per canonical company, what the interview companies share (counts, too few to tell below 20), lookalikes, the one-way `interview_like` ranking lift, the CSV and JSON export, and the Insights screen under Results. Four PRs: dataset and mockup, tilt, API, web |
 | `superpowers/plans/2026-10-22-integration-review.md` | Cross-plan review of the five new plans; every finding was applied in them |
@@ -120,7 +121,7 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
   stopped) or `failed`. `error` names at most 20 failures.
 - `job_run` `watch_pages`: its own row per tick, summary from `WatchReport`. `probe-slugs` writes no `job_run`.
 - Needs-you items the crawler raises, all with `raised_by = 'crawler'`: `board_unreadable` (three errors in a row),
-  `board_empty` (first empty read), `careers_changed`, and `flagged` for a doubtful board (`board-doubtful:<board_id>`),
+  `board_empty` (second empty read in a row, #9; keyed on the run's first empty read), `careers_changed`, and `flagged` for a doubtful board (`board-doubtful:<board_id>`),
   an unreadable careers page (`careers-unreadable:<company_id>:<hash>`) and a blocked host.
 - Host-blocked item: `flagged`, `evidence_key` `host-blocked:<bucket>:<date the oldest streak began>`, set on the board
   with the oldest streak. It replaces the per-board `board_unreadable` items when three or more boards of one ATS are in

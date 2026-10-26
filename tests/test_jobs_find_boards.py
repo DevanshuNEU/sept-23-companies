@@ -10,6 +10,10 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.crawl.base import BOARD_ATS
+from outreach.review.config import ReviewConfig
+from outreach.review.items import resolve_item
+from outreach.review.play import ny_date
+from outreach.review.scope import clear_out_of_scope
 from outreach.sources.boards import BoardRef, add_board
 from outreach.sources.byhand import add_by_hand
 from outreach.sources.careers import CareersChecker
@@ -18,7 +22,8 @@ from outreach.sources.jobs import FindBoardsReport, run_discover, run_find_board
 from outreach.sources.lca import LcaSource
 from outreach.sources.stapply import StapplyDirectory
 from outreach.sources.tiers import promote
-from outreach.store import add_alias, append_event
+from outreach.store import add_alias, append_event, utcnow
+from tests import review_seed
 from tests.fakes import FakeClient, status_response
 from tests.storetest import planned_adapters, fresh_store, seed_company, table_marks
 from tests.test_hn import fixture_client
@@ -36,6 +41,7 @@ class FindBoardsBase(unittest.TestCase):
     def setUp(self):
         planned_adapters(self)
         self.conn = fresh_store()
+        self.addCleanup(self.conn.close)
         run_discover(self.conn, [LcaSource(FILES), HnSource(fixture_client())])
         self.directory = StapplyDirectory.load(STAPPLY)
 
@@ -441,8 +447,25 @@ class CareersStepTest(FindBoardsBase):
         self.assertEqual({json.loads(e["detail"])["domain"] for e in events}, {"veltrix.com"})
         self.assertEqual(report.careers_skipped, 3)
 
+    def ranked(self, *names):
+        """The ranked list holds these companies, in this order (every live company when none is named)."""
+        if names:
+            ids = [self.company(n) for n in names]
+        else:
+            ids = [r[0] for r in self.conn.execute("SELECT company_id FROM company WHERE merged_into IS NULL "
+                                                   "ORDER BY company_id")]
+        rows = [types.SimpleNamespace(company_id=c) for c in ids]
+        return mock.patch("outreach.ranking.scores.ranked_list",
+                          side_effect=lambda conn, *a, limit=None, **kw: rows[:limit])
+
+    def gaps(self):
+        return {self.conn.execute("SELECT name FROM company WHERE company_id = ?", (r["company_id"],)).fetchone()[0]:
+                r["state"] for r in self.conn.execute(
+                    "SELECT company_id, state FROM review_item WHERE kind = 'domain_missing' AND raised_by = 'crawler'")}
+
     def test_free_mail_tier_1_company_raises_domain_missing(self):
-        _, report = self.run_careers()
+        with self.ranked():
+            _, report = self.run_careers()
         rows = {self.conn.execute("SELECT name FROM company WHERE company_id = ?", (r["company_id"],)).fetchone()[0]:
                 dict(r) for r in self.conn.execute("SELECT * FROM review_item WHERE kind = 'domain_missing'")}
         # a gmail contact, a github link, and the three companies whose only domain is shared (next test)
@@ -452,7 +475,8 @@ class CareersStepTest(FindBoardsBase):
             self.assertEqual((item["raised_by"], item["evidence_key"], item["state"]),
                              ("crawler", "no-usable-domain", "open"))
         self.assertEqual(report.domain_missing, 5)
-        _, again = self.run_careers()
+        with self.ranked():
+            _, again = self.run_careers()
         self.assertEqual(again.domain_missing, 0)  # the same item is not raised twice
         self.assertEqual(count(self.conn, "SELECT count(*) FROM review_item WHERE kind = 'domain_missing'"), 5)
 
@@ -460,7 +484,8 @@ class CareersStepTest(FindBoardsBase):
         ids = {r["name"]: r["company_id"] for r in self.conn.execute("SELECT * FROM company WHERE name LIKE 'Veltrix%'")}
         self.assertEqual(self.conn.execute("UPDATE work_tier SET tier = 2 WHERE company_id = ?",
                                            (ids["Veltrix Diagnostics Inc"],)).rowcount, 1)
-        _, report = self.run_careers()
+        with self.ranked():
+            _, report = self.run_careers()
         rows = {r["name"]: dict(r) for r in self.conn.execute(
             "SELECT c.name, i.reason, i.evidence_key, i.raised_by, i.state FROM review_item i "
             "JOIN company c USING (company_id) WHERE i.kind = 'domain_missing' AND c.name LIKE 'Veltrix%'")}
@@ -470,15 +495,72 @@ class CareersStepTest(FindBoardsBase):
             self.assertEqual((row["evidence_key"], row["raised_by"], row["state"]), ("no-usable-domain", "crawler", "open"))
         self.assertEqual(len(self.events("careers_skipped")), 3)  # the event stays for all three
         self.assertEqual(report.careers_skipped, 3)
-        _, again = self.run_careers()
+        with self.ranked():
+            _, again = self.run_careers()
         self.assertEqual(again.domain_missing, 0)  # the same item is not raised twice
 
     def test_a_lower_tier_company_with_no_domain_raises_no_item(self):
         cid = self.company("Solo Dev Studio Inc")
         self.assertEqual(self.conn.execute("UPDATE work_tier SET tier = 2 WHERE company_id = ?", (cid,)).rowcount, 1)
-        self.run_careers()
+        with self.ranked():
+            self.run_careers()
         self.assertEqual(count(self.conn, "SELECT count(*) FROM review_item WHERE kind = 'domain_missing' AND "
                                           "company_id = ?", cid), 0)
+
+    # The company-first ruling (#9): a crawler data gap asks only for a company in play or near the top.
+
+    def test_a_company_neither_in_play_nor_in_the_top_raises_no_domain_item(self):
+        with self.ranked("Solo Dev Studio Inc"):
+            _, report = self.run_careers()
+        self.assertEqual(self.gaps(), {"Solo Dev Studio Inc": "open"})
+        self.assertEqual((report.domain_missing, report.domain_missing_quiet), (1, 4))
+        self.assertEqual(len(self.events("careers_skipped")), 3)  # the shared-domain events stay for all three
+        _, none_ranked = self.run_careers()  # no ranked list and nobody in play: nothing new asks
+        self.assertEqual((none_ranked.domain_missing, none_ranked.domain_missing_quiet), (0, 5))
+
+    def test_a_company_in_play_raises_its_domain_item_outside_the_top(self):
+        cid = self.company("PrairieLearn")
+        review_seed.seed_plan_row(self.conn, cid, ny_date(utcnow()), "picked")
+        _, report = self.run_careers()
+        self.assertEqual(self.gaps(), {"PrairieLearn": "open"})
+        self.assertEqual(report.domain_missing, 1)
+
+    def test_at_most_the_cap_of_new_domain_items_a_run_in_play_first_then_by_rank(self):
+        cfg = ReviewConfig(150, 4, 14, crawler_scope_top=150, crawler_cap_per_run=2)
+        review_seed.seed_plan_row(self.conn, self.company("Veltrix Bio"), ny_date(utcnow()), "picked")
+        order = ("Veltrix Pharma Inc", "Solo Dev Studio Inc", "PrairieLearn", "Veltrix Diagnostics Inc")
+        with self.ranked(*order):
+            _, report = self.run_careers(review_cfg=cfg)
+        self.assertEqual(sorted(self.gaps()), ["Veltrix Bio", "Veltrix Pharma Inc"])
+        self.assertEqual((report.domain_missing, report.domain_missing_quiet), (2, 3))
+        with self.ranked(*order):
+            _, report = self.run_careers(review_cfg=cfg)  # the next run asks the next two
+        self.assertEqual(sorted(self.gaps()), ["PrairieLearn", "Solo Dev Studio Inc", "Veltrix Bio",
+                                               "Veltrix Pharma Inc"])  # the open two take no place in the cap
+        self.assertEqual(report.domain_missing, 2)
+
+    def test_a_cleared_out_of_scope_item_comes_back_when_the_company_does(self):
+        with self.ranked("PrairieLearn"):
+            self.run_careers()
+        item = self.conn.execute("SELECT review_id FROM review_item WHERE kind = 'domain_missing'").fetchone()[0]
+        with self.ranked("Orchard"):
+            self.assertEqual(clear_out_of_scope(self.conn, now=utcnow()), 1)
+        self.assertEqual(self.gaps(), {"PrairieLearn": "resolved"})
+        with self.ranked("PrairieLearn"):
+            _, report = self.run_careers()
+        self.assertEqual(self.gaps(), {"PrairieLearn": "open"})
+        self.assertEqual(report.domain_missing, 1)
+        self.assertEqual(self.conn.execute("SELECT review_id FROM review_item WHERE kind = 'domain_missing'"
+                                           ).fetchone()[0], item)
+
+    def test_a_domain_item_he_settled_is_never_raised_again(self):
+        with self.ranked("PrairieLearn"):
+            self.run_careers()
+        item = self.conn.execute("SELECT review_id FROM review_item WHERE kind = 'domain_missing'").fetchone()[0]
+        resolve_item(self.conn, item, resolution="marked_ok", note="Marked ok by you", revision=1)
+        with self.ranked("PrairieLearn"):
+            _, report = self.run_careers()
+        self.assertEqual((self.gaps(), report.domain_missing), ({"PrairieLearn": "resolved"}, 0))
 
     def flagged(self, name=None):
         sql, args = "SELECT i.*, c.name FROM review_item i JOIN company c USING (company_id) WHERE i.kind = 'flagged'", []

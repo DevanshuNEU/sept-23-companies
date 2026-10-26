@@ -85,9 +85,9 @@ _PLAIN = {"merge_candidate": _merge_text, "size_check": _size_text, "reader_disa
 
 
 def display_reason(conn: sqlite3.Connection, row: sqlite3.Row | int) -> str:
-    """The reason to show. A board item's is built from the board now (`words.board_reason`): #21 raises
-    `board_empty` on the first empty read, so a stored sentence would still say "once" after the second empty read
-    closed the postings. Closed postings are those closed `board_empty_twice` since the streak began. A merge
+    """The reason to show. A board item's is built from the board now (`words.board_reason`): before #9's two-read
+    rule #21 raised `board_empty` on the first empty read, so such a stored sentence would still say "once" after
+    the second empty read closed the postings. Closed postings are those closed `board_empty_twice` since the streak began. A merge
     question, a reader disagreement and a shared-domain size check show plain sentences built from their stored text
     (`words.merge_reason`, `reader_reason`, `shared_domain_size_reason`); a stored text these cannot read shows as it
     is. Every other kind, and a board never read, shows the stored reason. A missing reason shows as empty text."""

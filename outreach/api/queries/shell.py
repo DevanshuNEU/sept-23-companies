@@ -47,7 +47,7 @@ def shell_summary(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sen
         unhandled_replies=conn.execute("SELECT count(*) FROM touch WHERE state = 'replied' "
                                        "AND reply_kind = 'unsorted'").fetchone()[0],
         drafts_to_review=drafts_to_review(conn), linkedin_to_reach=linkedin.to_reach_count(conn),
-        open_review_items=needs_you.open_count(conn), no_go_count=no_go.no_go_count(conn),
+        open_review_items=needs_you.open_count(conn, now), no_go_count=no_go.no_go_count(conn),
         done_count=done.done_count(conn), sending=summary_of(sender),
         replies_this_month=done.replies_this_month(conn, now), jobs=jobs.last_runs(conn, now),
         plan=PlanProgress(done=finished, total=planned), wins_unseen=progress.wins_unseen(conn))

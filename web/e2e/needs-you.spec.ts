@@ -96,7 +96,7 @@ test('merge two companies with one key, then undo it from Resolved', async ({ pa
 
   await commitByLeaving(page);
   await expect(page.getByRole('article', { name: MESH })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Show' }).click();
+  await page.getByRole('button', { name: 'Show', exact: true }).click();
   const row = page.getByRole('row', { name: /^Mesh Systems/ });
   await expect(row).toContainText('Merged Mesh into Mesh Systems by you');
   await row.getByRole('button', { name: 'Undo' }).click();
@@ -136,7 +136,7 @@ test('an edited size leaves the list and its Resolved row has no Undo', async ({
   await expect(page.getByRole('article', { name: 'Fernhill' })).toHaveCount(0);
 
   await commitByLeaving(page);
-  await page.getByRole('button', { name: 'Show' }).click();
+  await page.getByRole('button', { name: 'Show', exact: true }).click();
   const row = page.getByRole('row', { name: /^Fernhill/ });
   await expect(row).toContainText('Size set to about 60 by you, from LinkedIn company page. To change it, set it again on the company page.');
   await expect(row).toContainText('Edited, locked');
@@ -158,7 +158,7 @@ test('the sidebar count drops with each fix and rises on Undo', async ({ page, c
 
   // After the window, Undo from Resolved asks the server, and the count rises again.
   await commitByLeaving(page);
-  await page.getByRole('button', { name: 'Show' }).click();
+  await page.getByRole('button', { name: 'Show', exact: true }).click();
   await page.getByRole('row', { name: /^Ambergate/ }).getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByText("Undone. Ambergate's sponsorship question is open again.")).toBeVisible();
   await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 11 open(,|$)/);
@@ -169,7 +169,7 @@ test('the sidebar count drops with each fix and rises on Undo', async ({ page, c
 test('no console error and no red element on the page', async ({ page, consoleErrors }) => {
   await page.goto(REVIEW);
   await expect(page.getByRole('article', { name: MESH })).toBeVisible();
-  await page.getByRole('button', { name: 'Show' }).click();
+  await page.getByRole('button', { name: 'Show', exact: true }).click();
   await expect(page.getByRole('row', { name: /^Ambergate/ })).toBeVisible();
   const red = await page.evaluate(() => {
     // The red tokens as the browser resolves them, then every visible element's colors against them.

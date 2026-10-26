@@ -282,6 +282,33 @@ function NeedsYouSkeleton() {
   );
 }
 
+/**
+ * Data gaps (#9, company-first ruling): open items for companies he is not working today, by the company's rank.
+ * Collapsed and quiet: no badge, no alarm. Each row still settles the same way as in Needs you.
+ */
+function DataGaps({ count, open, onOpenChange, children }: { count: number; open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange} asChild>
+      <section aria-labelledby="ny-gaps">
+        <SectionTitle id="ny-gaps" title="Data gaps" count={count}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm">
+              <ChevronDown aria-hidden className={cn('transition-transform motion-reduce:transition-none', open && 'rotate-180')} />
+              {open ? 'Hide gaps' : 'Show gaps'}
+            </Button>
+          </CollapsibleTrigger>
+        </SectionTitle>
+        <p className="mb-2 text-xs text-muted-foreground">
+          Things the crawler could not read, and questions about companies outside your plan. Nothing here holds up an email.
+        </p>
+        <CollapsibleContent>
+          <Card className="gap-0 overflow-hidden py-0">{children}</Card>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  );
+}
+
 function OpenItems({ data }: { data: NeedsYouView }) {
   const client = usePageClient('needs-you');
   const shellClient = usePageClient('shell');
@@ -291,11 +318,16 @@ function OpenItems({ data }: { data: NeedsYouView }) {
   const [editing, setEditing] = useState<Id | null>(null);
   // Kept after close so the dialog keeps its words through the exit animation; `n` keys each open afresh.
   const [noGo, setNoGo] = useState<{ item: ReviewItem; start: NoGoStart; n: number; open: boolean } | null>(null);
+  const [gapsOpen, setGapsOpen] = useState(false);
 
   const sections = sectionsOf(data.open);
   const ordered = sections.flatMap((s) => s.items);
-  const ids = ordered.map((r) => r.id);
-  const byId = new Map(ordered.map((r) => [r.id, r]));
+  const gaps = data.dataGaps;
+  const gapIds = new Set(gaps.map((r) => r.id));
+  // A data gap joins the keyboard list only while its section is open.
+  const listed = gapsOpen ? [...ordered, ...gaps] : ordered;
+  const ids = listed.map((r) => r.id);
+  const byId = new Map(listed.map((r) => [r.id, r]));
   const { selected, select, rowProps } = useListNav<Id>({
     ids,
     // One next action: the first item is selected when he arrives, so the first key settles it.
@@ -312,9 +344,9 @@ function OpenItems({ data }: { data: NeedsYouView }) {
   const current = selected === null ? undefined : byId.get(selected);
 
   /**
-   * The item leaves the list, the sidebar count drops and today's settled count rises at once, and Resolved shows
-   * the settling in the API's words until the refetch brings the stored row. That row has no Undo of its own: the
-   * toast holds it.
+   * The item leaves the list, the sidebar count drops (a data gap was never in it) and today's settled count rises
+   * at once, and Resolved shows the settling in the API's words until the refetch brings the stored row. That row has
+   * no Undo of its own: the toast holds it.
    */
   const patchesFor = (
     r: ReviewItem,
@@ -325,7 +357,10 @@ function OpenItems({ data }: { data: NeedsYouView }) {
       key: queryKeys.needsYou,
       apply: (d: NeedsYouView) => settleView(d, r, settled),
     },
-    { key: queryKeys.shell, apply: (s: ShellSummary) => ({ ...s, openReviewItems: Math.max(0, s.openReviewItems - 1), ...extra?.(s) }) },
+    {
+      key: queryKeys.shell,
+      apply: (s: ShellSummary) => ({ ...s, openReviewItems: gapIds.has(r.id) ? s.openReviewItems : Math.max(0, s.openReviewItems - 1), ...extra?.(s) }),
+    },
   ];
   const moveOn = (r: ReviewItem) => {
     const at = ids.indexOf(r.id);
@@ -430,50 +465,56 @@ function OpenItems({ data }: { data: NeedsYouView }) {
     { selection: selected },
   );
 
+  const row = (r: ReviewItem) => (
+    <ReviewItemRow
+      key={r.id}
+      item={r}
+      row={rowProps(r.id)}
+      editing={editing === r.id}
+      onEdit={() => {
+        select(r.id);
+        setEditing(r.id);
+      }}
+      onOk={() => markOk(r)}
+      onNoGo={(source) => openNoGo(r, source)}
+      onSave={(fix) => saveEdit(r, fix)}
+      onCancelEdit={() => setEditing(null)}
+      onMerge={(keep) => merge(r, keep)}
+    />
+  );
+
+  let main: ReactNode;
   if (ordered.length === 0) {
-    if (data.settledToday > 0) {
-      return (
+    main =
+      data.settledToday > 0 ? (
         <SettledPanel
           settledToday={data.settledToday}
           today={data.resolvedThisWeek.filter((r) => ageDays(r.at, data.asOf) === 0)}
           nextReadAt={data.boardsJob?.expectedNextAt ?? null}
           drafts={shell.data?.draftsToReview ?? 0}
         />
+      ) : (
+        <EmptyState icon={CircleCheck} title="Nothing needs you.">
+          New items appear after each board read and when you pick a company.
+        </EmptyState>
       );
-    }
-    return (
-      <EmptyState icon={CircleCheck} title="Nothing needs you.">
-        New items appear after each board read and when you pick a company.
-      </EmptyState>
-    );
+  } else {
+    main = sections.map((s) => (
+      <section key={s.id} aria-labelledby={`ny-${s.id}`}>
+        <SectionTitle id={`ny-${s.id}`} title={s.title} count={s.items.length} />
+        <Card className="gap-0 overflow-hidden py-0">{s.items.map(row)}</Card>
+      </section>
+    ));
   }
 
   return (
     <>
-      {sections.map((s) => (
-        <section key={s.id} aria-labelledby={`ny-${s.id}`}>
-          <SectionTitle id={`ny-${s.id}`} title={s.title} count={s.items.length} />
-          <Card className="gap-0 overflow-hidden py-0">
-            {s.items.map((r) => (
-              <ReviewItemRow
-                key={r.id}
-                item={r}
-                row={rowProps(r.id)}
-                editing={editing === r.id}
-                onEdit={() => {
-                  select(r.id);
-                  setEditing(r.id);
-                }}
-                onOk={() => markOk(r)}
-                onNoGo={(source) => openNoGo(r, source)}
-                onSave={(fix) => saveEdit(r, fix)}
-                onCancelEdit={() => setEditing(null)}
-                onMerge={(keep) => merge(r, keep)}
-              />
-            ))}
-          </Card>
-        </section>
-      ))}
+      {main}
+      {gaps.length > 0 ? (
+        <DataGaps count={gaps.length} open={gapsOpen} onOpenChange={setGapsOpen}>
+          {gaps.map(row)}
+        </DataGaps>
+      ) : null}
       {noGo ? (
         <NoGoDialog
           key={noGo.n}
@@ -503,8 +544,9 @@ function ProgressLine({ data }: { data: NeedsYouView }) {
 }
 
 /**
- * Needs you (design 5.4): every review item with its reason and a one-click fix. A fix is locked. Under the title,
- * the plain progress line; when nothing is open and he settled something today, the settled panel.
+ * Needs you (design 5.4): the review items of companies he is working, each with its reason and a one-click fix. A
+ * fix is locked. Under the title, the plain progress line; when nothing is open and he settled something today, the
+ * settled panel. Below, the quiet Data gaps: every other open item, collapsed.
  */
 export default function NeedsYouPage() {
   const client = usePageClient('needs-you');

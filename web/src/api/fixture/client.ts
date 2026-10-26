@@ -2,7 +2,7 @@ import { ApiError, type OutreachClient, type WriteOptions } from '../client';
 import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
-  ResolvedReview, ReviewFix, Revision, RoleKind, SearchIndex, SendingStatus, ShellSummary, TodayView,
+  ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
   FindingsView, FunnelKey, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
@@ -108,6 +108,8 @@ export class FixtureClient implements OutreachClient {
   /** Funnel stages already counted for a touch, so an outcome logged twice never counts twice. */
   private readonly counted = new Map<Id, Set<FunnelKey>>();
   private nextId = 900_000;
+  /** The pulse: one more for every write that ran (a replay of a request id is no write). */
+  private revision = 1;
 
   constructor(protected db: FixtureDb = buildFixture(), opts: { latencyMs?: number } = {}) {
     this.latencyMs = opts.latencyMs ?? 0;
@@ -131,6 +133,7 @@ export class FixtureClient implements OutreachClient {
     if (this.results.has(o.requestId)) return structuredClone(this.results.get(o.requestId) as T);
     const result = work();
     this.settle();
+    this.revision += 1;
     this.results.set(o.requestId, structuredClone(result));
     return structuredClone(result);
   }
@@ -148,6 +151,7 @@ export class FixtureClient implements OutreachClient {
     }));
   }
   shell(): Promise<ShellSummary> { return this.read(() => this.db.shell); }
+  pulse(): Promise<Pulse> { return this.read(() => ({ revision: this.revision })); }
   searchIndex(): Promise<SearchIndex> { return this.read(() => this.db.searchIndex); }
   searchPostings(q: string): Promise<PostingHit[]> { return this.read(() => this.db.postings.filter((p) => postingMatches(p.title, q)).slice(0, 20)); }
   today(): Promise<TodayView> { return this.read(() => this.db.today); }

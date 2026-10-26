@@ -26,6 +26,7 @@ export const ALL_VIEWS: readonly ViewName[] = [
 export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, ViewName> = {
   health: 'health',
   shell: 'shell',
+  pulse: 'shell',
   searchIndex: 'search',
   searchPostings: 'search',
   today: 'today',

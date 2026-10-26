@@ -15,4 +15,11 @@ describe('shellMethods', () => {
     expect(await shellMethods(t).shell!()).toEqual(EMPTY);
     expect(get).toHaveBeenCalledWith('/api/shell', undefined);
   });
+
+  it('reads /api/pulse: one number', async () => {
+    const get = vi.fn(async () => ({ revision: 42 }));
+    const t = { get, send: vi.fn() } as unknown as Transport;
+    expect(await shellMethods(t).pulse!()).toEqual({ revision: 42 });
+    expect(get).toHaveBeenCalledWith('/api/pulse', undefined);
+  });
 });

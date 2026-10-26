@@ -72,6 +72,8 @@ export interface HealthView {
 }
 
 // Shell (spec 13.1)
+/** `GET /api/pulse`: the newest event id. It only grows; a change means something was written (the MCP bridge too). */
+export interface Pulse { revision: number }
 export interface ShellSummary {
   asOf: IsoTime; pickedToday: number; capacityToday: number; unhandledReplies: number; draftsToReview: number;
   linkedinToReach: number; openReviewItems: number; noGoCount: number; doneCount: number;

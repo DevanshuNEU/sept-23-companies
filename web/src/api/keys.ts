@@ -2,6 +2,7 @@ import type { Id } from './types';
 
 export const queryKeys = {
   shell: ['shell'],
+  pulse: ['pulse'],
   search: ['search'],
   today: ['today'],
   outbox: ['outbox'],
@@ -20,7 +21,7 @@ export const queryKeys = {
   score: (id: Id) => ['score', id],
 } as const;
 
-export const pollMs = { outbox: 15000, default: 60000 } as const;
+export const pollMs = { outbox: 15000, default: 60000, pulse: 5000 } as const;
 
 export function newRequestId(): string {
   return crypto.randomUUID();

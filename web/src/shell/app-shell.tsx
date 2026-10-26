@@ -20,6 +20,7 @@ import { AppSidebar } from './app-sidebar';
 import { CommandPalette } from './command-palette';
 import { recordRecentCompany } from './recent';
 import { ShortcutSheet } from './shortcut-sheet';
+import { useLivePulse } from './use-pulse';
 
 const VIEW_TITLE: Record<string, string> = {
   today: 'Today',
@@ -62,6 +63,7 @@ function ShellBehaviour({ openPalette, openSheet }: { openPalette: () => void; o
   const { companyId } = useParams();
   const { toggleSidebar } = useSidebar();
   const { undoLast, flushPending } = usePendingControls();
+  useLivePulse(); // a write from the terminal (the MCP bridge) shows here within seconds
 
   // Leaving a view commits what waits in its undo window. A new `?sel=` is the same view.
   const view = viewOf(location.pathname);

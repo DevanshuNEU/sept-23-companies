@@ -91,12 +91,14 @@ class TomorrowRow(Wire):
     company_name: str
     person_name: str | None
     role_title: str | None
+    channel: PlanChannel | None = None  # the channel the plan would use; None when not known
+    find_someone: bool = False  # no person yet: the row asks him to find someone at the company
 
 
 class Tomorrow(Wire):
-    total: int
+    total: int  # room on the next plan, not a count of the draft
     text: str
-    preview: list[TomorrowRow]  # the rows carried over; the page says "and N more"
+    preview: list[TomorrowRow]  # a dry run of the next plan, in its order; the page says "and N more"
 
 
 class PlanWeek(Wire):

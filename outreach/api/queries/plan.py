@@ -13,13 +13,15 @@ row); its prepare step writes `linkedin_draft` notes. This module reads them and
   missing or of the wrong type is ignored: the reason falls back to the lane's sentence, the search link is built
   from the company name, the sources are empty;
 - `notReady` (weekend, not built, the plan job failed today), the LinkedIn month from #15's `linkedin_capacity`,
-  tomorrow's total from #15's `plan_capacity` and its carried rows from #15's `load_carried`, and the week's counts
-  with the progress page's own funnel.
+  tomorrow's total and a draft of its rows from #15's own `build_plan` run dry for the next weekday (it writes
+  nothing and calls no crawler, ranker or model; a failure shows the total from `plan_capacity` alone), and the
+  week's counts with the progress page's own funnel.
 
 `PlanRow.entryId` is the entry's `rowid` (its key is `(list_date, company_id)`); `plan_entry_id` is the only place
-that knows. Reads only: nothing here writes, builds a plan or calls a model.
+that knows. Reads only: nothing here writes, builds a stored plan or calls a model.
 """
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -39,12 +41,20 @@ from outreach.api.queries.progress import live_touches
 from outreach.api.queries.today import LANE_WORDS, build_entries
 from outreach.outcomes import report
 from outreach.outcomes.windows import day_bounds_utc, next_weekday, ny_day, week_bounds
+from outreach.plan.build import build_plan
 from outreach.plan.capacity import linkedin_capacity, plan_capacity
 from outreach.plan.config import PlanConfig
 from outreach.plan.outbound import load_outbound
 from outreach.plan.people import people_search_url
-from outreach.plan.prospects import HANDOFF, load_carried
+from outreach.plan.prospects import HANDOFF
+from outreach.plan.select import Chosen
 from outreach.ranking.common import canonical_ids
+from outreach.ranking.confidence import scrub_text
+from outreach.ranking.scores import latest_version
+from outreach.store import describe_error
+
+log = logging.getLogger("outreach.api")
+_DRAFT_ERRORS: set[str] = set()  # the dry-run failures already logged by this process
 
 EMAIL_DONE = ("approved", "sending", "send_unknown", "sent")  # the first email left drafted
 SEARCH_PREFIX = "https://www.linkedin.com/search/results/people/"
@@ -52,6 +62,7 @@ SEARCH_HINT = "engineer"
 WEEKEND_TEXT = "No plan on weekends."
 NOT_BUILT_TEXT = "Today's plan is not built yet. It builds at 8:00 on weekdays."
 LEAN_TEXT = "Today's list came from the old Today page, so there is no people plan today. It builds again tomorrow."
+DRAFT_TEXT = "A draft of who it would propose is below."
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 ENTRY_SQL = "SELECT rowid, * FROM daily_list_entry"
@@ -337,50 +348,80 @@ def _not_ready(day: str, last: sqlite3.Row | None) -> NotReady:
 
 
 def _tomorrow(conn: sqlite3.Connection, day: str, canon: dict[int, int], cfg: PlanConfig) -> Tomorrow:
-    nxt = next_weekday(day)
-    when = date.fromisoformat(nxt)
-    total = plan_capacity(conn, canon, when, cfg)
-    carried = load_carried(conn, when, cfg, load_outbound(conn, canon, tz=cfg.get("plan", "timezone")))
-    preview = _preview(conn, carried, canon)
+    when = date.fromisoformat(next_weekday(day))
     label = "Tomorrow" if when == date.fromisoformat(day) + timedelta(days=1) else WEEKDAYS[when.weekday()]
+    drafted = _draft(conn, when, canon, cfg)
+    total, preview = drafted if drafted is not None else (plan_capacity(conn, canon, when, cfg), [])
     return Tomorrow(total=total, text=tomorrow_text(label, total, len(preview)), preview=preview)
 
 
-def tomorrow_text(label: str, total: int, carried: int) -> str:
-    """The one line about the next plan. The total is room, not a list: the plan builds at 08:00, and the carried rows
-    (when there are any) are the list the screen shows under this line."""
+def tomorrow_text(label: str, total: int, drafted: int) -> str:
+    """The one line about the next plan. The total is room, not a list: the plan builds at 08:00. When the dry run
+    named anyone, the line says the list under it is a draft of that plan."""
     people = f"{total} {'person' if total == 1 else 'people'}"
-    if carried:
-        return f"{label}: {people}, {carried} carried over."
-    return f"{label}'s plan builds at 08:00. Room for {people}."
+    line = f"{label}'s plan builds at 08:00. Room for {people}."
+    return f"{line} {DRAFT_TEXT}" if drafted else line
 
 
-def _preview(conn: sqlite3.Connection, carried: dict, canon: dict[int, int]) -> list[TomorrowRow]:
-    """The carried rows, newest plan first, then by rank, with the company, person and role names they show."""
-    if not carried:
+def _draft(conn: sqlite3.Connection, when: date, canon: dict[int, int], cfg: PlanConfig
+           ) -> tuple[int, list[TomorrowRow]] | None:
+    """The room and the rows of #15's plan for `when`, chosen but not written: `dry_run` writes nothing (not even a
+    job run) and never calls the crawler or the ranker, so it reads the stored scores the 08:00 job refreshes first.
+    None when that date already has a plan, or when anything here fails: the page then shows the count alone. A
+    failure is logged once per distinct error, so a page that polls does not fill the log."""
+    try:
+        result = build_plan(conn, today=when, cfg=cfg, boards_reader=None, ranker=None, read_boards=False,
+                            dry_run=True)
+        if result.status != "built":
+            return None
+        return result.capacity, _draft_rows(conn, result.chosen, canon)
+    except Exception as err:
+        text = describe_error(err)
+        if text not in _DRAFT_ERRORS:
+            _DRAFT_ERRORS.add(text)
+            log.warning("tomorrow's draft could not be built, so the plan shows the count only: %s", text)
+        return None
+
+
+def _draft_rows(conn: sqlite3.Connection, chosen: tuple[Chosen, ...], canon: dict[int, int]) -> list[TomorrowRow]:
+    """The dry run's rows in the plan's own order (people first, then find-someone rows, each by score), with the
+    company and person names and the title of the company's best posting, as the plan's `why` would name it."""
+    if not chosen:
         return []
-    dates = sorted({c.carried_from.isoformat() for c in carried.values()})
-    entries = {}
-    for e in conn.execute(f"{ENTRY_SQL} WHERE list_date IN ({','.join('?' * len(dates))})", dates):
-        entries[(e["list_date"], canon.get(e["company_id"], e["company_id"]))] = e
+    ids = {c.company_id for c in chosen}
     names = {r["company_id"]: r["name"] for r in by_ids(conn, "SELECT company_id, name FROM company WHERE company_id "
-                                                              "IN ({ids})", set(carried))}
-    people = people_by_ids(conn, {c.person_id for c in carried.values() if c.person_id is not None})
+                                                              "IN ({ids})", ids)}
+    people = people_by_ids(conn, {c.person_id for c in chosen if c.person_id is not None})
+    best = _best_postings(conn, ids, canon)
     titles = {r["posting_id"]: r["title"] for r in by_ids(
-        conn, "SELECT posting_id, title FROM posting WHERE posting_id IN ({ids})",
-        {e["posting_id"] for e in entries.values() if e["posting_id"] is not None})}
-    found = []
-    for company, c in carried.items():
-        e = entries.get((c.carried_from.isoformat(), company))
-        rank = e["rank"] if e is not None else 10**6
-        title = parse_plan_why(e["why"]).role_title if e is not None else None
-        if title is None and e is not None and e["posting_id"] is not None:
-            title = titles.get(e["posting_id"])
+        conn, "SELECT posting_id, title FROM posting WHERE posting_id IN ({ids})", set(best.values()))}
+    rows = []
+    for c in chosen:
         person = people.get(c.person_id) if c.person_id is not None else None
-        found.append(((-c.carried_from.toordinal(), rank, company), TomorrowRow(
-            company_name=names.get(company, "Unknown company"), person_name=person["name"] if person else None,
-            role_title=title)))
-    return [row for _, row in sorted(found, key=lambda x: x[0])]
+        title = titles.get(best.get(c.company_id))
+        rows.append(TomorrowRow(
+            company_name=names.get(c.company_id, "Unknown company"), person_name=person["name"] if person else None,
+            role_title=(scrub_text(title) or None) if title else None,
+            channel="email" if c.channel == "email" else "linkedin_request", find_someone=c.person_id is None))
+    return rows
+
+
+def _best_postings(conn: sqlite3.Connection, survivors: set[int], canon: dict[int, int]) -> dict[int, int]:
+    """Each surviving company's `signals.best_posting_id` from the latest ranked scores. Across a merged family the
+    first row of the ranked list wins (highest score, then lowest id), as the plan job picks it."""
+    version = latest_version(conn)
+    if version is None:
+        return {}
+    family = survivors | {c for c, s in canon.items() if s in survivors}
+    rows = [r for r in by_ids(conn, "SELECT company_id, ranker_version, score, "
+                                    "json_extract(signals, '$.best_posting_id') AS posting FROM company_score "
+                                    "WHERE company_id IN ({ids}) AND json_extract(signals, '$.hide') IS NULL "
+                                    "AND json_array_length(lanes) > 0", family)
+            if r["ranker_version"] == version]
+    found: dict[int, int | None] = {}
+    for r in sorted(rows, key=lambda r: (-r["score"], r["company_id"])):
+        found.setdefault(canon.get(r["company_id"], r["company_id"]), r["posting"])
+    return {c: p for c, p in found.items() if isinstance(p, int)}
 
 
 def _week(conn: sqlite3.Connection, now: str) -> PlanWeek:

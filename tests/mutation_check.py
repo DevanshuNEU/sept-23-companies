@@ -47,6 +47,7 @@ IMPORTER = ROOT / "outreach" / "importer"
 REVIEW = ROOT / "outreach" / "review"
 PLAN = ROOT / "outreach" / "plan"
 MCP = ROOT / "outreach" / "mcp"
+API = ROOT / "outreach" / "api"
 INSIGHTS = ROOT / "outreach" / "insights"
 REFRESH = ROOT / "refresh"
 SCHEMA = STORE / "migrations" / "0001_initial.sql"
@@ -365,9 +366,10 @@ MUTATIONS = [
      '    if r.status != 200:\n        return _Fetched("error", why=f"HTTP {r.status}")\n', "",
      "test_a_503_with_a_long_readable_page_is_an_error"),
     (CRAWL / "boardstate.py",
-     "the empty read that closes the postings leaves the board_empty item saying they stay open",
-     "            elif streaks.empty_streak == EMPTIES_TO_CLOSE:", "            elif False:",
-     "test_the_empty_read_that_closes_updates_the_open_board_empty_reason"),
+     "the empty read that closes the postings leaves an older board_empty item saying they stay open",
+     "\"WHERE board_id = ? AND kind = 'board_empty' AND state = 'open' AND reason <> ?\",",
+     "\"WHERE board_id = ? AND kind = 'board_empty' AND state = 'open' AND reason <> ? AND 0\",",
+     "test_the_empty_read_that_closes_updates_an_open_legacy_board_empty_reason"),
     (CRAWL / "tick.py", "the tick counts errors of never-read and already-erroring boards toward its own breaker",
      "if bucket is not None and board.last_read in _GOOD_LAST and result.http_status not in _BOARD_STATUSES:",
      "if bucket is not None and result.http_status not in _BOARD_STATUSES:",
@@ -859,6 +861,47 @@ MUTATIONS = [
      "    signals = build_signals(cfg, profile)",
      "    signals = build_signals(cfg)",
      "test_flow_rank_the_interview_tilt_only_lifts_and_hides_nothing"),
+    # ---- Needs you scope (#16, the company-first ruling in #9): crawler gaps never flood Needs you -------------
+    (CRAWL / "boardstate.py", "board_empty is raised on the first empty read again (#9: only after 2 in a row)",
+     "            if streaks.empty_streak == EMPTIES_TO_CLOSE:  # #9", "            if streaks.empty_streak >= 1:  # #9",
+     "test_the_first_empty_read_raises_nothing_and_the_second_raises_board_empty"),
+    (CRAWL / "boardstate.py", "board_empty is keyed on streak_since, so an error inside the run makes a second item",
+     "_raise(conn, board, \"board_empty\", _empty_run_start(conn, board.board_id, streaks.streak_since),",
+     "_raise(conn, board, \"board_empty\", streaks.streak_since,",
+     "test_an_error_between_empties_still_raises_once_keyed_on_the_first_empty_read"),
+    (SOURCES / "jobs.py", "the careers pass raises a missing-domain item for every tier 1 company, in scope or not",
+     "        wanted = sorted((m for m in self.missing if m[0] in focus or m[0] in rank),",
+     "        wanted = sorted((m for m in self.missing),",
+     "test_a_company_neither_in_play_nor_in_the_top_raises_no_domain_item"),
+    (SOURCES / "jobs.py", "the per-run cap on new missing-domain items is gone",
+     "            if self.report.domain_missing >= cfg.crawler_cap_per_run:", "            if False:",
+     "test_at_most_the_cap_of_new_domain_items_a_run_in_play_first_then_by_rank"),
+    (SOURCES / "jobs.py", "an item the sweep cleared never comes back when its company does",
+     "evidence_key=\"no-usable-domain\", raised_by=\"crawler\", actor=\"crawler\", now=now)",
+     "evidence_key=\"no-usable-domain\", raised_by=\"crawler\", actor=\"crawler\", now=now, reopen=False)",
+     "test_a_cleared_out_of_scope_item_comes_back_when_the_company_does"),
+    (REVIEW / "scope.py", "with no ranked list the sweep clears every crawler domain item outside play",
+     "    if not top:\n        return None\n", "",
+     "test_with_no_ranked_list_nothing_is_cleared"),
+    (REVIEW / "scope.py", "the out-of-scope sweep clears another producer's domain item",
+     "\"AND raised_by = 'crawler' AND state = 'open' ORDER BY review_id\"",
+     "\"AND state = 'open' ORDER BY review_id\"",
+     "test_never_touches_an_item_he_settled_or_another_producers_or_kinds"),
+    (REVIEW / "scope.py", "a company holding a reply no longer asks for his attention",
+     "    return frozenset(playing) | mailing | held_companies(conn)", "    return frozenset(playing) | mailing",
+     "test_in_play_emailed_and_held_companies_ask_for_attention_and_a_plain_one_does_not"),
+    (REVIEW / "triggers.py", "the sweep no longer clears the crawler's out-of-scope gaps",
+     "    gaps = clear_out_of_scope(conn, now=at, cfg=cfg, company_ids=company_ids)", "    gaps = 0",
+     "test_the_sweep_runs_the_step_and_reports_it"),
+    (API / "queries" / "needs_you.py", "a merge question shows only when its own company is in play",
+     "    return other is not None and survivor_of(parents, other) in focus", "    return False",
+     "test_a_merge_question_is_in_needs_you_when_either_company_is_in_play"),
+    (API / "queries" / "needs_you.py", "the badge counts data gaps too",
+     "        if not _needs_you(r, parents, focus):\n            continue\n", "",
+     "test_needs_you_holds_only_companies_he_is_working_and_the_rest_are_data_gaps"),
+    (API / "queries" / "needs_you.py", "data gaps are not ordered by the company's rank",
+     "gaps.sort(key=lambda i: rank.get(i.company.id, len(rank)))", "gaps.sort(key=lambda i: 0)",
+     "test_data_gaps_go_by_the_companys_rank_then_age"),
 ]
 
 

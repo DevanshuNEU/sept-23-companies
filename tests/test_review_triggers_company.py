@@ -66,6 +66,26 @@ class TriggerCompanyTest(unittest.TestCase):
         (item,) = self.items()
         self.assertEqual(item["reason"], words.size_reason("Plan Co", "planned"))
 
+    def test_a_working_company_on_no_plan_gets_no_size_or_domain_item(self):
+        # The importer sets `working` on every company he ever touched; none of them is a pick.
+        cid = self.company("Touched")
+        seed_status(self.conn, cid, "working")
+        self.assertEqual(self.size(), SyncResult(0, 0))
+        self.assertEqual(self.domain(), SyncResult(0, 0))
+        self.assertEqual(self.items(), [])
+        self.assertEqual(self.items("domain_missing"), [])
+
+    def test_a_working_company_gets_a_size_item_once_the_latest_list_has_it(self):
+        proposed, picked = self.company("Proposed"), self.company("Picked")
+        for cid in (proposed, picked):
+            seed_status(self.conn, cid, "working")
+        seed_plan_row(self.conn, proposed, TODAY, "proposed", person_id=seed_email_person(self.conn, proposed))
+        seed_plan_row(self.conn, picked, TODAY, "picked")
+        self.assertEqual(self.size(), SyncResult(raised=2, cleared=0))
+        reasons = {i["company_id"]: i["reason"] for i in self.items()}
+        self.assertEqual(reasons, {proposed: words.size_reason("Proposed", "planned"),
+                                   picked: words.size_reason("Picked", "picked")})
+
     def test_a_size_guess_row_means_the_size_is_known_here(self):
         cid = self.picked()
         add_fact(self.conn, cid, "size", "11-50", num_low=11, num_high=50, confidence="guess")

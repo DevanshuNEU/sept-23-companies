@@ -201,13 +201,15 @@ class NeedsYou(ApiCase):
             made[cid] = s.review(self.conn, cid, "domain_missing", created_at=f"2026-11-0{n + 1}T08:00:00Z")
         items = self.view()["open"]
         self.assertEqual([i["company"]["name"] for i in items],
-                         ["Working Co", "Picked Co", "Planned Co", "Later Co", "No-go Co", "Stale Co"])
-        self.assertEqual([i["inPlay"] for i in items], [True, True, True, False, False, False])
+                         ["Picked Co", "Planned Co", "Later Co", "No-go Co", "Working Co", "Stale Co"])
+        self.assertEqual([i["inPlay"] for i in items], [True, True, False, False, False, False])
         by_company = {i["company"]["id"]: i for i in items}
         self.assertTrue(by_company[picked]["company"]["picked"])
         # Picked, but no email planned or queued there: its missing domain holds no email (`play.emailing`, #16).
         self.assertFalse(by_company[picked]["holdsEmail"])
+        # `working` alone is not a pick: it is the status the importer gave every company he ever touched.
         self.assertFalse(by_company[working]["company"]["picked"])
+        self.assertFalse(by_company[working]["inPlay"])
 
     def test_resolved_this_week_lists_this_new_york_week(self):
         cid = s.company(self.conn, "Acme")
@@ -943,6 +945,7 @@ class NeedsYou(ApiCase):
         b = s.company(self.conn, "Loop B", "removed", remove_reason="merged", merged_into=a)
         self.conn.execute("UPDATE company SET merged_into = ? WHERE company_id = ?", (b, a))  # store corruption
         cid = s.company(self.conn, "Acme", "working")
+        plan_entry(self.conn, cid, "picked")
         s.message(self.conn, s.touch(self.conn, s.person(self.conn, cid, "Pat Mail")), 0)  # drafted, open touch
         item = s.review(self.conn, cid, "size_unknown")
         with self.assertLogs("outreach.api", "WARNING") as logged:

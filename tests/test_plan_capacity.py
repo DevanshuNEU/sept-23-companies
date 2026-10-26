@@ -7,7 +7,7 @@ from outreach.plan.config import default_plan_config
 from outreach.ranking.common import canonical_ids
 from outreach.store.timefmt import utcnow
 from outreach.store.writes import log_touch
-from tests.plan_seed import (TODAY, seed_log_only, seed_outbound, seed_person, seed_scored_company,
+from tests.plan_seed import (PEOPLE_ON, TODAY, seed_log_only, seed_outbound, seed_person, seed_scored_company,
                              seed_send_day)
 from tests.storetest import fresh_store
 
@@ -202,11 +202,15 @@ class EmailCapacityTest(unittest.TestCase):
         conn = self.conn
         canon = canonical_ids(conn)
         seed_send_day(conn, D(2026, 11, 2), 10)
-        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 2), CFG), 7 + 10)
+        on = PEOPLE_ON  # with people on, the plan may write email rows
+        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 2), on), 7 + 10)
         for day in (D(2026, 11, 10), D(2026, 11, 11)):
-            self.assertEqual(plan_capacity(conn, canon, day, CFG),
-                             linkedin_capacity(conn, canon, day, CFG).today + email_capacity(conn, day, CFG).slots)
-        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 11), CFG), 7 + 10)
+            self.assertEqual(plan_capacity(conn, canon, day, on),
+                             linkedin_capacity(conn, canon, day, on).today + email_capacity(conn, day, on).slots)
+        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 11), on), 7 + 10)
+        # shipped (company first): no email rows, so no email slots in the plan's total; the sender's own are kept
+        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 11), CFG), 7)
+        self.assertEqual(email_capacity(conn, D(2026, 11, 11), CFG).slots, 10)
 
 
 class LaneQuotasTest(unittest.TestCase):

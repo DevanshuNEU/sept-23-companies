@@ -6,6 +6,11 @@ at rank 2, a request 20 days old and a second candidate at rank 3, an accepted r
 founder with a published address at rank 6, nobody at rank 7, then recruiters and nobody), then runs the real
 `build_plan` for `TODAY` with `read_boards=False`: no crawler and no ranker, so no network and no model.
 
+The stage builds with `plan.propose_people` on (`tests.plan_seed.PEOPLE_ON`). The shipped config has it off (company
+first, #9 2026-10-26: company rows only), but the person and email paths stay in the code and the later stages (the
+founder's email row, the note) exercise them; `test_flow_plan_company_only_with_the_shipped_config` builds the same
+fixture with the shipped config.
+
 `register` leaves the stage on the harness as `harness.plan` (a `PlanStage`): `.situation` is what was seeded and
 `.result` the last `PlanResult`. The registered callable seeds if it has not yet, then builds, so calling it again is
 a re-run of the build for the same date, which changes nothing.
@@ -14,7 +19,7 @@ from __future__ import annotations
 
 from outreach.plan.build import PlanResult, build_plan
 from outreach.ranking.scores import ranked_list
-from tests.plan_seed import TODAY, PlanSituation, seed_plan_situation
+from tests.plan_seed import PEOPLE_ON, TODAY, PlanSituation, seed_plan_situation
 
 __all__ = ["register", "PlanStage", "TODAY"]
 
@@ -33,7 +38,7 @@ class PlanStage:
 
     def run(self) -> PlanResult:
         self.seed()
-        self.result = build_plan(self.conn, today=TODAY, read_boards=False)
+        self.result = build_plan(self.conn, today=TODAY, cfg=PEOPLE_ON, read_boards=False)
         return self.result
 
 

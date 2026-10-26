@@ -50,15 +50,17 @@ class PlayTest(unittest.TestCase):
         proposed, picked, bare = (self.company(status="working") for _ in range(3))
         seed_plan_row(self.conn, proposed, TODAY, "proposed", person_id=seed_email_person(self.conn, proposed))
         seed_plan_row(self.conn, picked, TODAY, "picked")
-        seed_plan_row(self.conn, bare, TODAY, "proposed")  # no person: a find-someone row is not in play
-        self.assertEqual(self.play(), {proposed: "planned", picked: "picked"})
+        seed_plan_row(self.conn, bare, TODAY, "proposed")  # no person: a company row, in play too (company first)
+        self.assertEqual(self.play(), {proposed: "planned", picked: "picked", bare: "planned"})
 
-    def test_ready_plan_row_is_in_play_as_planned_and_a_find_someone_row_is_not(self):
-        ready, find = self.company(), self.company()
-        person = seed_email_person(self.conn, ready)
-        seed_plan_row(self.conn, ready, TODAY, "proposed", person_id=person)
-        seed_plan_row(self.conn, find, TODAY, "proposed")
-        self.assertEqual(self.play(), {ready: "planned"})
+    def test_a_company_row_counts_as_in_play(self):
+        # Company first (#9, 2026-10-26): the plan proposes companies with nobody named; each is in play as planned.
+        ready, company_row, backlog, removed = self.company(), self.company(), self.company(), self.company()
+        seed_plan_row(self.conn, ready, TODAY, "proposed", person_id=seed_email_person(self.conn, ready))
+        seed_plan_row(self.conn, company_row, TODAY, "proposed")
+        seed_plan_row(self.conn, backlog, TODAY, "backlog")
+        seed_plan_row(self.conn, removed, TODAY, "removed")
+        self.assertEqual(self.play(), {ready: "planned", company_row: "planned"})
 
     def test_picked_entry_beats_planned(self):
         both = self.company()

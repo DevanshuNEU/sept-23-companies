@@ -63,9 +63,13 @@ class BuildCommandTest(CliBase):
         self.assertEqual((code, err), (0, ""))
         self.assertIn(f"Plan {DAY}: built", out)
         self.assertIn("boards skipped", out)
-        self.assertIn("Co00 | Ada Lovelace | linkedin_request | level_role", out)
-        self.assertIn("| find someone | linkedin_request | level_role", out)
+        # Company first (plan.propose_people false, shipped): Ada is on file, but Co00 is a company row too.
+        self.assertIn("Co00 | find someone | linkedin_request | level_role", out)
+        self.assertNotIn("Ada Lovelace", out)
+        self.assertIn("capacity 7 (LinkedIn 7, email 0)", out)  # the plan writes no email rows
         self.assertEqual(self.count("daily_list_entry"), 4)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM daily_list_entry WHERE person_id IS NOT NULL "
+                                           "OR channel = 'email'").fetchone()[0], 0)
         code, out, _ = self.run_main("build", "--date", DAY, "--no-read-boards")
         self.assertEqual(code, 0)
         self.assertIn("already_built", out)
@@ -89,7 +93,7 @@ class BuildCommandTest(CliBase):
         code, out, _ = self.run_main("build", "--date", DAY, "--no-read-boards", "--dry-run")
         self.assertEqual(code, 0)
         self.assertIn("dry run, nothing written", out)
-        self.assertIn("Co00 | Ada Lovelace", out)
+        self.assertIn("Co00 | find someone", out)
         self.assertEqual((self.count("daily_list"), self.count("daily_list_entry"), self.count("job_run"),
                           self.count("event")), (0, 0, jobs, events))
 
@@ -118,13 +122,12 @@ class ShowCommandTest(CliBase):
         self.assertEqual(code, 0)
         lines = out.splitlines()
         self.assertTrue(lines[0].startswith(f"Plan {DAY}: capacity "))
-        self.assertIn(" 1 Co00 | Ada Lovelace | linkedin_request | level_role", lines[1])
+        self.assertIn(" 1 Co00 | find someone | linkedin_request | level_role", lines[1])  # company first
         find = [i for i, line in enumerate(lines) if "| find someone |" in line]
-        self.assertEqual(len(find), 3)
+        self.assertEqual(len(find), 4)
         for i in find:
             self.assertTrue(lines[i + 1].strip().startswith(
                 "search: https://www.linkedin.com/search/results/people/?keywords=Co"))
-        self.assertNotIn("search:", lines[1])  # a person row has no search link
 
     def test_show_with_no_plan_says_so_and_writes_nothing(self):
         code, out, _ = self.run_main("show", "--date", DAY)

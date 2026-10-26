@@ -13,7 +13,7 @@ from outreach.plan.config import default_plan_config
 from outreach.ranking.common import canonical_ids
 from outreach.store import transaction
 from outreach.store.timefmt import utcnow
-from tests.plan_seed import TODAY, seed_daily_entry, seed_outbound, seed_person, seed_scored_company
+from tests.plan_seed import PEOPLE_ON, TODAY, seed_daily_entry, seed_outbound, seed_person, seed_scored_company
 from tests.storetest import fresh_store
 
 CFG = default_plan_config()
@@ -63,7 +63,7 @@ class Fixture(unittest.TestCase):
 class BuildTest(Fixture):
     def test_builds_a_plan_with_people_and_find_someone_rows(self):
         ids, people = self.world()
-        result = build_plan(self.conn, today=TUE)
+        result = build_plan(self.conn, today=TUE, cfg=PEOPLE_ON)
         self.assertEqual(result.status, "built")
         self.assertEqual(result.boards, "absent")
         self.assertEqual(result.capacity, result.linkedin.today + result.email.slots)
@@ -88,6 +88,33 @@ class BuildTest(Fixture):
         self.assertEqual([(r["job"], r["status"]) for r in runs], [("plan", "ok")])
         event = self.conn.execute("SELECT actor, kind, entity FROM event WHERE entity = 'daily_list'").fetchone()
         self.assertEqual((event["actor"], event["kind"]), ("daily_list", "built"))
+
+    def test_company_first_build_has_no_person_and_no_email_rows(self):
+        # The shipped config (plan.propose_people false): every row is a company row, the email slots are not used,
+        # and nothing but the plan's own tables is written (no person, no note).
+        ids, people = self.world()
+        founder = seed_scored_company(self.conn, "Founded", 99, ["level_role"])
+        seed_person(self.conn, founder, "Fay Founder", "founder", email="fay@founded.example", sources=[TEAM])
+        seed_daily_entry(self.conn, MON, ids[1], rank=1, person_id=people[ids[1]], why={"first_proposed": "2026-11-05"})
+        before = (count(self.conn, "person"), count(self.conn, "linkedin_draft"), count(self.conn, "outreach_touch"))
+        result = build_plan(self.conn, today=TUE)
+        self.assertEqual(result.status, "built")
+        self.assertEqual(result.capacity, result.linkedin.today)  # no email slots: the plan writes no email rows
+        rows = self.entries()
+        self.assertEqual(len(rows), result.linkedin.today)
+        self.assertEqual({(r["channel"], r["person_id"]) for r in rows}, {("linkedin_request", None)})
+        self.assertIn(founder, [r["company_id"] for r in rows])  # the company still comes, as a company
+        carried = {r["company_id"]: json.loads(r["why"]) for r in rows}[ids[1]]
+        self.assertEqual((carried["carried_from"], carried["first_proposed"]), ("2026-11-09", "2026-11-05"))
+        for r in rows:
+            why = json.loads(r["why"])
+            self.assertIsNone(why["person"])
+            self.assertIsNone(why["draft_id"])
+            self.assertTrue(why["find_someone"]["search_url"].startswith("https://www.linkedin.com/search/"))
+        self.assertEqual((count(self.conn, "person"), count(self.conn, "linkedin_draft"),
+                          count(self.conn, "outreach_touch")), before)
+        summary = json.loads(self.conn.execute("SELECT summary FROM job_run WHERE job = 'plan'").fetchone()[0])
+        self.assertEqual((summary["people_rows"], summary["email_rows"]), (0, 0))
 
     def test_second_run_changes_nothing(self):
         self.world()
@@ -131,7 +158,7 @@ class BuildTest(Fixture):
                          why={"first_proposed": "2026-11-05"})
         seed_daily_entry(self.conn, MON, ids[1], rank=2, person_id=people[ids[1]])
         seed_outbound(self.conn, people[ids[1]], ids[1], "linkedin_request", MON)  # done on the row's day
-        build_plan(self.conn, today=TUE)
+        build_plan(self.conn, today=TUE, cfg=PEOPLE_ON)
         old = {r["company_id"]: r for r in self.conn.execute(
             "SELECT * FROM daily_list_entry WHERE list_date = '2026-11-09'")}
         self.assertTrue(all(r["state"] == "backlog" and r["decided_at"] and r["revision"] == 2
@@ -160,7 +187,7 @@ class BuildTest(Fixture):
         self.history(5, date(2026, 11, 2), company_name="Older")  # seven days before Monday: out of the window
         seed_daily_entry(self.conn, FRI, ids[0], rank=1, person_id=people[ids[0]])
         # no plan was built on the days between: Friday's is the last
-        result = build_plan(self.conn, today=MON)
+        result = build_plan(self.conn, today=MON, cfg=PEOPLE_ON)
         self.assertEqual((result.linkedin.used, result.linkedin.remaining), (14, 136))
         self.assertEqual(result.linkedin.today, 7)  # his pace: a missed day brings no catch-up
         top = self.conn.execute("SELECT person_id, why FROM daily_list_entry WHERE list_date = '2026-11-09' "

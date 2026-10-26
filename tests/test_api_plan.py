@@ -561,17 +561,19 @@ class TomorrowDraftTests(PlanCase):
     def counts(self) -> dict:
         return {t: self.conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in COUNTED}
 
-    def test_the_draft_lists_the_next_plans_people_then_its_find_someone_rows(self):
+    def test_the_draft_lists_the_next_plans_companies(self):
+        # Company first (plan.propose_people false, shipped): the people on file (Ada Lin with an address, Lena,
+        # Jonah, Ines) are not proposed; every row is the company, by score, on LinkedIn.
         tomorrow = self.plan()["tomorrow"]
-        def row(company, person, title, channel="linkedin_request"):
-            return {"companyName": company, "personName": person, "roleTitle": title, "channel": channel,
-                    "findSomeone": person is None}
+        def row(company, title):
+            return {"companyName": company, "personName": None, "roleTitle": title, "channel": "linkedin_request",
+                    "findSomeone": True}
         self.assertEqual(tomorrow["preview"], [
-            row("Hex", "Ada Lin", "Software Engineer", "email"),
-            row("Pylon", "Lena Ortiz", "Software Engineer I"),
-            row("Inngest", "Jonah Park", "Software Engineer II"),
-            row("Turso", "Ines Duarte", "Software Engineering Intern"),
-            row("Cerebrium", None, "Member of Technical Staff"),  # a lower id than Turso, but nobody to ask yet
+            row("Hex", "Software Engineer"),
+            row("Pylon", "Software Engineer I"),
+            row("Inngest", "Software Engineer II"),
+            row("Cerebrium", "Member of Technical Staff"),
+            row("Turso", "Software Engineering Intern"),
         ])
         self.assertEqual(tomorrow["preview"], self.expected_draft())
         self.assertTrue(tomorrow["text"].endswith(" A draft of who it would propose is below."))
@@ -686,7 +688,8 @@ class LeanTodayTests(ApiCase):
         self.assertEqual(result.status, "built")
         view = self.get("/api/plan").json()
         self.assertIsNone(view["notReady"])
-        self.assertEqual([r["person"]["person"]["name"] for r in view["rows"]], ["Lena Ortiz"])
+        # company first: Lena is on file, but the row is Pylon's, with nobody named
+        self.assertEqual([(r["company"]["name"], r["person"]) for r in view["rows"]], [("Pylon", None)])
 
     def test_a_lean_built_list_reads_as_not_built(self):
         self.seed()

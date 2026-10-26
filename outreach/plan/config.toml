@@ -26,6 +26,10 @@ timezone = "America/New_York"
 scan_limit = 400
 board_read_top_n = 30
 roll_forward_days = 5
+# Company first (#9, 2026-10-26): Devanshu finds the people on LinkedIn himself, so the plan proposes company rows
+# only: no person rows, no email rows, no notes. Carry-forward, rotation and the capacity windows stay as they are.
+# True brings the person and email rows back (the code stays until it is deleted).
+propose_people = false
 
 [people]
 founder_max_headcount = 25
@@ -34,6 +38,10 @@ generic_mailboxes = ["info", "hello", "contact", "support", "sales", "press", "a
 search_hint = "software engineer"
 
 [prepare]
+# Company first (#9, 2026-10-26): the night step that finds people and drafts their notes is off. When false the
+# job prints "prepare is off", exits 0 and touches nothing: no claude call, no job run, no event. This is not the
+# deny-rule switch below, which only records that the LinkedIn deny check was done.
+enabled = false
 multiple = 2.0                # design 10
 retry_days = 7
 max_candidates = 2
@@ -47,8 +55,8 @@ schema_version = 1
 # The prepare step does nothing (one line, exit 0) until this is true: it is the one-time check that the LinkedIn deny
 # rule takes effect on his seat (the runbook in docs/README.md and outreach/plan/claude_run.py). Checked 2026-10-25 with
 # the exact command `claude_command` builds and example.com in place of linkedin.com: `https://example.com` and
-# `https://uk.example.com` both came back DENIED with 0 web fetches (so the `*.` pattern is honoured). Set back to
-# false to switch the step off.
+# `https://uk.example.com` both came back DENIED with 0 web fetches (so the `*.` pattern is honoured). Set it back
+# to false only if that check no longer holds; `enabled` above is the on and off switch.
 deny_rule_checked = true
 
 [note]

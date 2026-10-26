@@ -17,7 +17,7 @@ from typing import Literal
 
 from outreach.plan.boards import BoardsReader, Ranker
 from outreach.plan.capacity import (EmailCapacity, LinkedinCapacity, email_capacity, lane_quotas,
-                                    linkedin_capacity)
+                                    linkedin_capacity, plan_email_slots)
 from outreach.plan.config import PlanConfig, default_plan_config
 from outreach.plan.dates import is_weekday
 from outreach.plan.outbound import load_outbound
@@ -124,8 +124,9 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
     role_n, reason_n = lane_quotas(linkedin.today, linkedin.used, linkedin.reason_used, cfg)
     outbound = load_outbound(conn, canon, tz=tz)
     prospects = load_prospects(conn, ranked, canon, today, cfg, outbound)
-    chosen = choose_rows(prospects, Caps(linkedin.today, email.slots, role_n, reason_n), cfg)
-    capacity = linkedin.today + email.slots
+    email_slots = plan_email_slots(email, cfg)  # 0 with people off: company rows only
+    chosen = choose_rows(prospects, Caps(linkedin.today, email_slots, role_n, reason_n), cfg)
+    capacity = linkedin.today + email_slots
     if dry_run:
         return PlanResult("built", today, capacity, linkedin, email, tuple(chosen), boards, None)
 

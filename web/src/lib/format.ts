@@ -149,3 +149,10 @@ export function formatCarriedDay(from: IsoDate, asOf: IsoTime): string {
 export function formatWeekday(at: IsoTime): string {
   return partsOf(at, { timeZone: APP_ZONE, weekday: 'long' }).weekday ?? '';
 }
+
+const MONTH_NAME = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'long' });
+
+/** "October" for a calendar date. A date is a calendar date: no zone moves it. */
+export function formatMonthName(on: IsoDate): string {
+  return MONTH_NAME.format(noonOf(on));
+}

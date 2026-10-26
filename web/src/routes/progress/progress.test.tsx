@@ -165,6 +165,14 @@ describe('ProgressPage', () => {
     expect(within(effort).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['31Requests sent', '24Applications sent', '8Emails reviewed']);
   });
 
+  it('puts what the data says below the ledger', async () => {
+    await open();
+    const ledger = await screen.findByRole('table', { name: /^Funnel/ });
+    const findings = screen.getByRole('heading', { level: 2, name: 'What the data says' });
+    expect(Boolean(ledger.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(await screen.findByText('Engineers on the team accepted more often than founders.')).toBeInTheDocument();
+  });
+
   it('links to the win log', async () => {
     await open();
     await screen.findByRole('table', { name: /^Funnel/ });

@@ -1,4 +1,4 @@
-import { ageDays, formatAge, formatCarriedDay, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatLongDate, formatMonth, formatRecipientTime, formatWeekday, formatWeekdayTime, parseIsoDate } from '@/lib/format';
+import { ageDays, formatAge, formatCarriedDay, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatLongDate, formatMonth, formatMonthName, formatRecipientTime, formatWeekday, formatWeekdayTime, parseIsoDate } from '@/lib/format';
 
 const ASOF = '2026-11-10T15:14:00Z'; // Tuesday 10:14 in Boston
 
@@ -162,5 +162,12 @@ describe('formatWeekday', () => {
     expect(formatWeekday('2026-11-10T15:14:00Z')).toBe('Tuesday');
     // 02:00 UTC on Wednesday is still Tuesday evening in Boston.
     expect(formatWeekday('2026-11-11T02:00:00Z')).toBe('Tuesday');
+  });
+});
+
+describe('formatMonthName', () => {
+  it('names the month of a calendar date, with no zone shift', () => {
+    expect(formatMonthName('2026-10-01')).toBe('October');
+    expect(formatMonthName('2026-12-31')).toBe('December');
   });
 });

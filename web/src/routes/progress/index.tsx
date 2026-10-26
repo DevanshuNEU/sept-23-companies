@@ -9,6 +9,7 @@ import { formatWeekday } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useUrlState } from '@/lib/url-state';
 import { useViewQuery } from '@/pending/pending';
+import { Findings } from './findings';
 import { EffortList, FunnelLedger } from './funnel-ledger';
 import { periodHeading } from './period-label';
 import { QuietWeek } from './quiet-week';
@@ -142,6 +143,8 @@ export default function ProgressPage() {
                   )}
                 </TabsContent>
               </Tabs>
+
+              <Findings />
             </div>
           );
         }}

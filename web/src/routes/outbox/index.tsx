@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { usePanelRef } from 'react-resizable-panels';
@@ -12,6 +12,7 @@ import { useUrlState } from '@/lib/url-state';
 import { useEdits } from '@/pending/edits';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { OutboxList, OutboxListSkeleton } from './outbox-list';
+import { firstToAct } from './outbox-order';
 import { OutboxDetailPane } from './outbox-detail';
 import { forCompany } from './outbox-patches';
 import { SendingStrip, SendingStripSkeleton } from './sending-strip';
@@ -81,6 +82,18 @@ function DetailPlaceholder() {
   );
 }
 
+/**
+ * Arriving with nothing selected opens the first reply, else the first draft he can approve. It only picks a row to
+ * look at: approving stays his own key or click.
+ */
+function Preselect({ items, selected, onSelect }: { items: OutboxView['items']; selected: Id | null; onSelect: (touchId: Id) => void }) {
+  const first = selected === null ? firstToAct(items) : null;
+  useEffect(() => {
+    if (first !== null) onSelect(first);
+  }, [first, onSelect]);
+  return null;
+}
+
 /** Spec 5.3: the sending strip, then the list and the selected email side by side. */
 export default function OutboxPage() {
   const client = usePageClient('outbox');
@@ -107,6 +120,9 @@ export default function OutboxPage() {
   // Reports the selection the URL shows; the list records each move at once, so keys follow it (see useHotkeys).
   useSelectionSync(selected);
   const select = (touchId: Id) => navigate({ pathname: `/outbox/${touchId}`, search }, { replace: true });
+  // The list fills this with its "move on from this row" function; the detail calls it after approve, skip or withdraw.
+  const advanceRef = useRef<((from: Id) => void) | null>(null);
+  const advance = (from: Id) => advanceRef.current?.(from);
 
   // Pausing and resuming commit at once: a pause that waited 8 seconds could let an email out.
   const pauseSending = () =>
@@ -161,6 +177,7 @@ export default function OutboxPage() {
                   <SenderAlert s={view.sending} />
                 </div>
               ) : null}
+              <Preselect items={view.items} selected={selected} onSelect={select} />
               {filterName !== undefined ? <CompanyFilterBar name={filterName} onClear={() => setCompanyParam('')} /> : null}
               {filterName !== undefined && view.items.length === 0 ? (
                 <EmptyState
@@ -187,6 +204,7 @@ export default function OutboxPage() {
                       items={view.items}
                       selected={selected}
                       onSelect={select}
+                      advanceRef={advanceRef}
                       asOf={view.asOf}
                       counts={view.counts}
                       closedBreakdown={view.closedBreakdown}
@@ -200,7 +218,7 @@ export default function OutboxPage() {
                         <DetailPlaceholder />
                       </div>
                     ) : (
-                      <OutboxDetailPane key={selected} touchId={selected} items={view.items} />
+                      <OutboxDetailPane key={selected} touchId={selected} items={view.items} onAdvance={advance} />
                     )}
                   </ResizablePanel>
                 </ResizablePanelGroup>

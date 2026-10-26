@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MutableRefObject, type Ref } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, Inbox, Reply, Search } from 'lucide-react';
+import { ArrowRight, ChevronDown, Inbox, OctagonAlert, Reply, Search } from 'lucide-react';
 import type { Id, IsoTime, OutboxCounts, OutboxGroup, OutboxItem, OutboxView } from '@/api';
 import { EmptyState } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAnnounce, useHotkeys, useLiveSelection } from '@/keyboard/hotkeys';
 import { ageDays, formatDay, formatLocalTime } from '@/lib/format';
+import { byKey, isBlocked, slotOf, type Slot } from './outbox-order';
 import { useStableOrder } from '@/lib/stable-order';
 import { messageStatus, touchStatus, type Status } from '@/lib/status';
 import { cn } from '@/lib/utils';
@@ -57,10 +58,6 @@ function groupNote(group: OutboxGroup, rows: OutboxItem[], x: Extra): string | n
   switch (group) {
     case 'replied':
       return 'holds the company';
-    case 'review': {
-      const blocked = rows.filter((i) => i.state === 'drafted' && i.blockCount > 0).length;
-      return blocked > 0 ? `${blocked} blocked` : null;
-    }
     case 'approved':
       return 'waiting for a slot';
     case 'sent':
@@ -82,18 +79,16 @@ function groupNote(group: OutboxGroup, rows: OutboxItem[], x: Extra): string | n
  * The group a selected row shows in. A refresh can move it (approved, sent); while it stays selected it
  * keeps the group it had when it was selected, so nothing moves under the cursor (spec section 6).
  */
-function useHeldGroup(items: OutboxItem[], selected: Id | null): (i: OutboxItem) => OutboxGroup {
-  const [held, setHeld] = useState<{ id: Id; group: OutboxGroup } | null>(null);
+function useHeldSlot(items: OutboxItem[], selected: Id | null): (i: OutboxItem) => Slot {
+  const [held, setHeld] = useState<{ id: Id; group: Slot } | null>(null);
   const current = selected === null ? undefined : items.find((i) => i.touchId === selected);
   let next = held;
   if (!current) next = null;
-  else if (held?.id !== current.touchId) next = { id: current.touchId, group: current.group };
+  else if (held?.id !== current.touchId) next = { id: current.touchId, group: slotOf(current) };
   // Adjusting state while rendering: React re-runs this render at once and the second pass changes nothing.
   if (next !== held) setHeld(next);
-  return (i) => (next !== null && i.touchId === next.id ? next.group : i.group);
+  return (i) => (next !== null && i.touchId === next.id ? next.group : slotOf(i));
 }
-
-const bySortKey = (a: OutboxItem, b: OutboxItem) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0);
 
 function Row({
   item,
@@ -103,7 +98,9 @@ function Row({
   rowRef,
   style,
   index,
+  fix,
 }: {
+  fix?: boolean;
   item: OutboxItem;
   asOf: IsoTime;
   active: boolean;
@@ -139,6 +136,13 @@ function Row({
       <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
         <StatusBadge status={rowStatus(item)} dot />
         <span className="truncate">{item.summary}</span>
+        {fix ? (
+          // The row opens the email, and its Blocking card there carries the button that fixes it.
+          <span aria-hidden className="ml-auto flex flex-none items-center gap-1 font-medium text-foreground">
+            Fix
+            <ArrowRight className="size-3" />
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -148,8 +152,15 @@ export function OutboxList({
   items,
   selected,
   onSelect,
+  advanceRef,
   ...extra
-}: { items: OutboxItem[]; selected: Id | null; onSelect: (touchId: Id) => void } & Extra) {
+}: {
+  items: OutboxItem[];
+  selected: Id | null;
+  onSelect: (touchId: Id) => void;
+  /** Filled with the function that moves the selection on from a row he just acted on. */
+  advanceRef: MutableRefObject<((from: Id) => void) | null>;
+} & Extra) {
   const say = useAnnounce();
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<ReadonlySet<OutboxGroup>>(() => new Set(['closed']));
@@ -159,15 +170,21 @@ export function OutboxList({
   const sentRef = useRef<HTMLDivElement>(null);
   const rowEls = useRef(new Map<Id, HTMLElement>());
 
-  const ordered = useStableOrder([...items].sort(bySortKey), selected, (i) => i.touchId, (i) => i.group);
-  const groupOf = useHeldGroup(items, selected);
+  // Blocked drafts sort after every other row, so inside Drafts to review they follow the ones he can approve.
+  const ranked = [...items].sort((a, b) => Number(isBlocked(a)) - Number(isBlocked(b)) || byKey(a, b));
+  const ordered = useStableOrder(ranked, selected, (i) => i.touchId, slotOf);
+  const slot = useHeldSlot(items, selected);
   const isFresh = (i: OutboxItem) => !seen.has(i.touchId) && i.touchId !== selected;
   const q = query.trim().toLowerCase();
   const matches = (i: OutboxItem) => q === '' || [i.person.name, i.company.name, i.subject].some((s) => s.toLowerCase().includes(q));
 
   const buckets = GROUPS.map(({ group, label }) => {
-    const all = ordered.filter((i) => groupOf(i) === group && matches(i));
-    return { group, label, rows: all.filter((i) => !isFresh(i)), fresh: all.filter(isFresh).length };
+    const all = ordered.filter((i) => (slot(i) === 'blocked' ? 'review' : slot(i)) === group && matches(i));
+    const shown = all.filter((i) => !isFresh(i));
+    // Ready first, blocked after, each in list order. A selected row keeps its held slot, so it does not jump between them.
+    const ready = shown.filter((i) => slot(i) !== 'blocked');
+    const blocked = shown.filter((i) => slot(i) === 'blocked');
+    return { group, label, ready, blocked, rows: [...ready, ...blocked], fresh: all.filter(isFresh).length };
   });
   const open = (group: OutboxGroup) => !collapsed.has(group);
   const visible = buckets.flatMap((b) => (open(b.group) ? b.rows : []));
@@ -221,6 +238,26 @@ export function OutboxList({
     if (id !== undefined && id !== from) go(id);
   };
 
+  // After approve, skip or withdraw, the selection moves on: the next row in the same group, else the one before it.
+  // The acted row then settles in its new group. Nothing else in the group means it stays where it is.
+  const advance = (from: Id) => {
+    const bucket = buckets.find((b) => b.rows.some((i) => i.touchId === from));
+    if (!bucket || !open(bucket.group)) return;
+    const at = bucket.rows.findIndex((i) => i.touchId === from);
+    const target = bucket.rows[at + 1] ?? bucket.rows[at - 1];
+    if (target) go(target.touchId);
+  };
+  useEffect(() => {
+    advanceRef.current = advance;
+    return () => {
+      advanceRef.current = null;
+    };
+  });
+  // A row opened by the page (on arrival) scrolls into view; one already in view does not move.
+  useEffect(() => {
+    if (selected !== null) rowEls.current.get(selected)?.scrollIntoView?.({ block: 'nearest' });
+  }, [selected]);
+
   const moveGroup = (step: 1 | -1) => {
     if (step === 1 && anyFresh) {
       reveal();
@@ -268,6 +305,7 @@ export function OutboxList({
       rowRef={rowRef(item.touchId, opts.measure)}
       style={opts.style}
       index={opts.index}
+      fix={slot(item) === 'blocked'}
     />
   );
 
@@ -322,7 +360,7 @@ export function OutboxList({
                     </button>
                   </div>
                 ) : null}
-                {isOpen ? (
+                {isOpen && (b.group !== 'review' || b.ready.length > 0 || b.blocked.length === 0) ? (
                   <div role="listbox" aria-label={b.label}>
                     {b.group === 'sent' && virtual ? (
                       <div ref={sentRef} className="relative" style={{ height: virtualizer.getTotalSize() }}>
@@ -337,9 +375,23 @@ export function OutboxList({
                         })}
                       </div>
                     ) : (
-                      b.rows.map((item) => row(item))
+                      (b.group === 'review' ? b.ready : b.rows).map((item) => row(item))
                     )}
                   </div>
+                ) : null}
+                {isOpen && b.group === 'review' && b.blocked.length > 0 ? (
+                  <>
+                    <div
+                      data-subgroup="blocked"
+                      className="flex h-7 items-center gap-1.5 border-b bg-subtle/60 px-3 text-xs font-medium text-muted-foreground"
+                    >
+                      <OctagonAlert aria-hidden className="size-3.5" />
+                      {`Blocked, fix first (${b.blocked.length})`}
+                    </div>
+                    <div role="listbox" aria-label="Blocked, fix first">
+                      {b.blocked.map((item) => row(item))}
+                    </div>
+                  </>
                 ) : null}
               </section>
             );

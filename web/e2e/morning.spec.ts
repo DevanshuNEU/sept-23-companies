@@ -105,8 +105,7 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await page.clock.runFor(8000);
   await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
   await expect(outboxLink(page)).toHaveAccessibleName('Outbox, 1 reply to handle, 6 drafts to review');
-  // While Omar is selected the list holds his old slot (spec 5.3); moving the selection lets him settle.
-  await page.keyboard.press('j');
+  // Approving moved the selection on to the next draft, which let Omar settle into Approved.
   await expect(omar).toHaveAttribute('aria-selected', 'false');
   const approved = page.getByRole('listbox', { name: 'Approved' });
   await expect(approved.getByRole('option').filter({ hasText: 'Omar Haddad' })).toBeVisible();

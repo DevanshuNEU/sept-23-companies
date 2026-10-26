@@ -135,13 +135,14 @@ class BoardStateTests(unittest.TestCase):
 
     def test_an_ok_read_clears_the_open_items(self):
         self.read(EMPTY)
+        self.read(EMPTY)
         for _ in range(3):
             self.read(ERROR)
         self.assertEqual(sorted(i["kind"] for i in self.items() if i["state"] == "open"),
                          ["board_empty", "board_unreadable"])
         self.read(OK)
         for item in self.items():
-            self.assertEqual((item["state"], item["resolution"], item["resolved_at"]), ("resolved", "cleared", at(5)))
+            self.assertEqual((item["state"], item["resolution"], item["resolved_at"]), ("resolved", "cleared", at(6)))
             self.assertEqual(item["revision"], 2)
 
     def test_an_unchanged_read_clears_the_open_items(self):
@@ -175,54 +176,74 @@ class BoardStateTests(unittest.TestCase):
             self.read(ERROR)
         self.assertEqual([i["state"] for i in self.items()], ["resolved", "open"])
 
-    def test_first_empty_raises_board_empty(self):
+    def test_the_first_empty_read_raises_nothing_and_the_second_raises_board_empty(self):
+        # #9: zero jobs only after 2 runs in a row.
         self.read(OK)
-        s = self.read(EMPTY)
-        items = self.items()
-        self.assertEqual([(i["kind"], i["raised_by"], i["evidence_key"]) for i in items],
-                         [("board_empty", "crawler", s.streak_since)])
+        first = self.read(EMPTY)
+        self.assertEqual(self.items(), [])
         self.read(EMPTY)
+        items = self.items()
+        self.assertEqual([(i["kind"], i["raised_by"], i["evidence_key"], i["state"]) for i in items],
+                         [("board_empty", "crawler", first.streak_since, "open")])
+        self.assertIn("its postings closed", items[0]["reason"])
+        self.read(EMPTY)  # a third empty read in the same run raises nothing new
         self.assertEqual(len(self.items()), 1)
 
-    def test_an_error_between_empties_raises_no_second_board_empty(self):
+    def test_an_error_between_empties_still_raises_once_keyed_on_the_first_empty_read(self):
         self.read(EMPTY)
         self.read(ERROR)
+        self.assertEqual(self.items(), [])
         self.read(EMPTY)
-        self.assertEqual([(i["kind"], i["state"]) for i in self.items()], [("board_empty", "open")])
+        self.assertEqual([(i["kind"], i["state"], i["evidence_key"]) for i in self.items()],
+                         [("board_empty", "open", at(1))])
 
     def test_a_resolved_board_empty_is_not_raised_again_inside_the_same_empty_run(self):
         self.read(EMPTY)
+        self.read(EMPTY)
         self.conn.execute("UPDATE review_item SET state = 'resolved', resolution = 'marked_ok', resolved_at = ? "
-                          "WHERE board_id = ?", (at(1), self.board))
+                          "WHERE board_id = ?", (at(2), self.board))
         self.read(ERROR)
-        self.read(EMPTY)  # the empty run goes on (an error does not reset it): the postings close, no new item
+        self.read(EMPTY)  # the empty run goes on (an error does not reset it): no new item
         self.assertEqual([(i["kind"], i["state"]) for i in self.items()], [("board_empty", "resolved")])
-        # An ok read ends the run; the next empty starts a new one and raises a new item.
+        # An ok read ends the run; a new run raises a new item on its second empty read.
         self.read(OK)
+        self.read(EMPTY)
+        self.assertEqual([i["state"] for i in self.items()], ["resolved"])
         self.read(EMPTY)
         self.assertEqual([i["state"] for i in self.items()], ["resolved", "open"])
 
-    def test_the_empty_read_that_closes_updates_the_open_board_empty_reason(self):
+    def legacy_item(self, key, state="open"):
+        """An item the first empty read raised before #9's two-read rule was enforced, still in the store."""
+        board = load_board(self.conn, self.board)
+        from outreach.crawl.boardstate import board_empty_reason
+        self.conn.execute(
+            "INSERT INTO review_item(kind, company_id, board_id, reason, evidence_key, raised_by, created_at, state, "
+            "resolution, resolved_at) VALUES ('board_empty', ?, ?, ?, ?, 'crawler', ?, ?, ?, ?)",
+            (self.company, self.board, board_empty_reason(board, 1, key), key, key, state,
+             None if state == "open" else "marked_ok", None if state == "open" else key))
+
+    def test_the_empty_read_that_closes_updates_an_open_legacy_board_empty_reason(self):
         self.read(OK)
         self.read(EMPTY)
+        self.legacy_item(at(2))
         first, = self.items("board_empty")
         self.assertIn("close if the next read is empty", first["reason"])
         self.read(ERROR)  # an error inside the run changes nothing
         self.assertIn("close if the next read is empty", self.items("board_empty")[0]["reason"])
         self.read(EMPTY)
         item, = self.items("board_empty")
-        self.assertEqual(item["state"], "open")
+        self.assertEqual((item["review_id"], item["state"]), (first["review_id"], "open"))
         self.assertIn("its postings closed", item["reason"])
         self.assertNotIn("close if the next read is empty", item["reason"])
         self.assertEqual(item["revision"], first["revision"] + 1)
 
-    def test_a_resolved_board_empty_keeps_its_reason_on_the_closing_read(self):
+    def test_a_resolved_legacy_board_empty_keeps_its_reason_and_stays_resolved_on_the_closing_read(self):
         self.read(EMPTY)
-        self.conn.execute("UPDATE review_item SET state = 'resolved', resolution = 'marked_ok', resolved_at = ? "
-                          "WHERE board_id = ?", (at(1), self.board))
+        self.legacy_item(at(1), state="resolved")
         before = self.items("board_empty")[0]["reason"]
         self.read(EMPTY)
-        self.assertEqual(self.items("board_empty")[0]["reason"], before)
+        item, = self.items("board_empty")
+        self.assertEqual((item["reason"], item["state"]), (before, "resolved"))
 
     def test_the_board_empty_reason_says_whether_postings_closed(self):
         from outreach.crawl.boardstate import board_empty_reason

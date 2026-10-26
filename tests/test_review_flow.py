@@ -82,7 +82,8 @@ class TriggerTests(FlowBase):
         self.assertEqual(item["evidence_key"], load_board(self.conn, board).streak_since)
         check_review_items(self, self.conn)
 
-    def test_trigger_2_board_empty_is_raised_by_the_crawler_on_the_first_empty_read(self):
+    def test_trigger_2_board_empty_is_raised_by_the_crawler_on_the_second_empty_read(self):
+        # #9: zero jobs only after 2 runs in a row.
         h = PipelineHarness()
         self.addCleanup(h.close)
         h.run(through="read_boards")
@@ -91,15 +92,13 @@ class TriggerTests(FlowBase):
                                        "AND board_id = ?", (board,)).fetchone()[0]
         self.assertEqual(count(), 0)
         h.crawl.run(h.crawl.empty())
+        self.assertEqual(count(), 0)
+        self.assertEqual(h.conn.execute("SELECT count(*) FROM posting WHERE board_id = ? AND closed_at IS NULL",
+                                        (board,)).fetchone()[0] > 0, True)
+        h.crawl.run(h.crawl.empty())  # the second empty read closes the postings and raises the item
         (item,) = h.conn.execute("SELECT * FROM review_item WHERE kind = 'board_empty' AND board_id = ?",
                                  (board,)).fetchall()
         self.assertEqual((item["raised_by"], item["state"]), ("crawler", "open"))
-        self.assertEqual(h.conn.execute("SELECT count(*) FROM posting WHERE board_id = ? AND closed_at IS NULL",
-                                        (board,)).fetchone()[0] > 0, True)
-        self.assertNotIn("twice in a row", queries.display_reason(h.conn, item))
-        h.crawl.run(h.crawl.empty())  # the second empty read closes the postings
-        self.assertEqual(count(), 1)
-        item = h.conn.execute("SELECT * FROM review_item WHERE review_id = ?", (item["review_id"],)).fetchone()
         self.assertIn("twice in a row", queries.display_reason(h.conn, item))
         check_review_items(self, h.conn)
 
@@ -148,6 +147,7 @@ class SettledOnceTests(FlowBase):
             self.read(board, result)
         empty_board = seed_board(self.conn, seed_company(self.conn, "Emptied"), token="emptied")
         self.read(empty_board, EMPTY)
+        self.read(empty_board, EMPTY)  # #9: zero jobs only after 2 runs in a row
         self.assertEqual(len(self.open_items("board_unreadable")), 1)
         self.assertEqual(len(self.open_items("board_empty")), 1)
         for kind in sweep_kinds + ("board_unreadable", "board_empty"):

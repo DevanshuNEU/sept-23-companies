@@ -27,6 +27,9 @@ class KindSpec:
     edit_field: str | None  # the field the edit fix sets
     holds_email: bool  # an open item of this kind holds up an email
     raised_by: tuple[str, ...]  # the producers that raise it
+    # Needs you shows an open item of this kind only for a company that asks for his attention (`scope.attention`);
+    # the rest wait in Data gaps. True for every kind today: a kind that must always show is a decision.
+    scoped: bool = True
 
 
 def _spec(kind, trigger, family, fixes, edit_field, raised_by, holds_email=False) -> KindSpec:

@@ -20,6 +20,10 @@ from dataclasses import asdict, dataclass, field
 from outreach import identity
 from outreach.crawl import config as crawl_config  # stdlib only: the one [ats_off] list (#46)
 from outreach.identity import StoreResolveReport, resolve_store
+from outreach.review.config import ReviewConfig, load_review_config
+from outreach.review.items import decided_before, raise_item
+from outreach.review.play import ny_date
+from outreach.review.scope import crawler_scope
 from outreach.sources.base import Source
 from outreach.sources.boards import BoardRef, add_board
 from outreach.sources.careers import CareersChecker, CareersResult
@@ -265,7 +269,8 @@ class FindBoardsReport:
     careers_none: int = 0  # definite "no careers page": marked, not fetched again for 30 days
     careers_errors: int = 0  # fetch errors, 5xx and 429: nothing concluded, no marker, asked again next run
     careers_skipped: int = 0  # the company's only domain is a shared key (a parent's portal)
-    domain_missing: int = 0  # tier 1 companies with no usable domain: one item each
+    domain_missing: int = 0  # tier 1 companies with no usable domain whose item this run raised (or reopened)
+    domain_missing_quiet: int = 0  # the same, left with no item: out of scope or over the run's cap (#9)
     no_careers_flagged: int = 0  # tier 1 companies with no board and a definite "no careers page": one item each
     ambiguous_boards: int = 0  # a careers page naming two or more boards: none added, the page is watched instead
     adapter_unknown: int = 0  # companies not checked for a crawler adapter: `outreach.crawl.ats` does not exist yet
@@ -399,9 +404,11 @@ class _Careers:
     """One run's careers checks: the limit, the results already fetched, and what each answer leaves behind."""
 
     def __init__(self, conn: sqlite3.Connection, checker: CareersChecker | None, max_checks: int,
-                 report: FindBoardsReport):
+                 report: FindBoardsReport, review_cfg: ReviewConfig | None = None):
         self.conn, self.checker, self.max_checks, self.report = conn, checker, max_checks, report
+        self.review_cfg = review_cfg
         self.results: dict[int, CareersResult] = {}
+        self.missing: list[tuple[int, str]] = []  # (company id, reason): tier 1 companies with no usable domain
 
     def check(self, company_id: int, domain: str) -> CareersResult | None:
         """The careers result, fetched once per run. None when no check was made: no checker, the company was
@@ -432,8 +439,8 @@ class _Careers:
 
     def no_domain(self, company_id: int, shared: list[str]) -> None:
         """A company with no usable domain: a shared domain also leaves a `careers_skipped` event; a tier 1 company
-        raises one `domain_missing` item either way (the reason names the shared domain, if any); a lower tier raises
-        no item."""
+        is noted for one `domain_missing` item either way (the reason names the shared domain, if any), which
+        `raise_missing` raises when the company is in scope; a lower tier raises no item."""
         if self.checker is None:
             return
         if shared:
@@ -446,10 +453,38 @@ class _Careers:
         else:
             reason = "No company domain is known, so its careers page cannot be checked for a board."
         if effective_tier(self.conn, company_id) == 1:
-            self.report.domain_missing += self.conn.execute(
-                "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
-                "VALUES ('domain_missing', ?, ?, 'no-usable-domain', 'crawler', ?) ON CONFLICT DO NOTHING",
-                (company_id, reason, utcnow())).rowcount
+            self.missing.append((company_id, reason))
+
+    def raise_missing(self) -> None:
+        """Raise the run's `domain_missing` items, scoped by the company-first ruling (#9): only a company that
+        asks for his attention (`scope.attention`: in play, emailed or held) or is in the top `crawler_scope_top`
+        of the ranked list, those first and then by rank, and at most `crawler_cap_per_run` new or reopened items
+        a run (an item already open takes no place). A row the sweep cleared reopens; one he settled stays
+        settled. The rest are counted in `domain_missing_quiet` and asked again next run."""
+        if not self.missing:
+            return
+        cfg = self.review_cfg or load_review_config()
+        now = utcnow()
+        focus, top = crawler_scope(self.conn, today=ny_date(now), cfg=cfg)
+        rank = {cid: n for n, cid in enumerate(top)}
+        wanted = sorted((m for m in self.missing if m[0] in focus or m[0] in rank),
+                        key=lambda m: (m[0] not in focus, rank.get(m[0], len(rank)), m[0]))
+        self.report.domain_missing_quiet += len(self.missing) - len(wanted)
+        for company_id, reason in wanted:
+            if self.report.domain_missing >= cfg.crawler_cap_per_run:
+                if not self._already_open(company_id):
+                    self.report.domain_missing_quiet += 1
+                continue
+            if decided_before(self.conn, kind="domain_missing", company_id=company_id,
+                              evidence_key="no-usable-domain") is not None:
+                continue
+            got = raise_item(self.conn, kind="domain_missing", company_id=company_id, reason=reason,
+                             evidence_key="no-usable-domain", raised_by="crawler", actor="crawler", now=now)
+            self.report.domain_missing += got.created or got.reopened
+
+    def _already_open(self, company_id: int) -> bool:
+        return self.conn.execute("SELECT 1 FROM review_item WHERE kind = 'domain_missing' AND raised_by = 'crawler' "
+                                 "AND company_id = ? AND state = 'open'", (company_id,)).fetchone() is not None
 
 
 def _careers_boards(conn: sqlite3.Connection, company_id: int, name: str, careers: _Careers,
@@ -529,7 +564,8 @@ def _unread_boards(conn: sqlite3.Connection, careers: _Careers, report: FindBoar
 
 
 def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | None,
-                    careers: CareersChecker | None = None, max_careers: int = 100) -> tuple[int, FindBoardsReport]:
+                    careers: CareersChecker | None = None, max_careers: int = 100,
+                    review_cfg: ReviewConfig | None = None) -> tuple[int, FindBoardsReport]:
     """The `find_boards` job: give each live company with no active board and no watched page its boards.
 
     Companies with no active board go in order of effective tier, then id; tier 3 is skipped unless promoted. Per
@@ -537,7 +573,8 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
     or slug match is `found_by` `stapply_name`, a host match `import`); (2) only when 0 and 1 added nothing, the
     company has no watched page and `careers` is given, at most `max_careers` companies a run, in the order of the
     last careers attempt (oldest first, never tried first, then tier and id): the careers page (see
-    `_careers_boards`). A company with a watched page and no board still gets steps 0 and 1, never step 2. With no directory the lookup does not run, and the run
+    `_careers_boards`; its `domain_missing` items are scoped and capped by `review_cfg`, see `_Careers.raise_missing`).
+    A company with a watched page and no board still gets steps 0 and 1, never step 2. With no directory the lookup does not run, and the run
     is `partial` with that said: never a quiet "nothing found". A last pass gives every company whose boards have no
     crawler adapter, or only a switched-off one, a watched page (see `_unread_boards`).
 
@@ -555,7 +592,7 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
             problems.append("no stapply directory: the name lookup did not run")
         if careers is not None:
             register_source(conn, "careers", "careers-1", run_id)
-        step = _Careers(conn, careers, max_careers, report)
+        step = _Careers(conn, careers, max_careers, report, review_cfg)
         needs_careers: list[sqlite3.Row] = []
         for row in _live_companies(conn, NO_BOARD):
             company_id = row["company_id"]
@@ -580,6 +617,7 @@ def run_find_boards(conn: sqlite3.Connection, *, directory: StapplyDirectory | N
                 _careers_boards(conn, row["company_id"], row["name"], step, report)
             except (sqlite3.Error, ValueError) as err:
                 report.failed.append(f"#{row['company_id']} {row['name']}: {describe_error(err)}")
+        step.raise_missing()
         _unread_boards(conn, step, report)
     except BaseException as err:
         try:

@@ -7,7 +7,7 @@ from typing import Literal
 
 from outreach.api.models.base import Wire
 from outreach.api.models.checks import Check
-from outreach.api.models.company import CompanyRef, PersonRef, RoleToName
+from outreach.api.models.company import CompanyRef, PersonRef, RoleKind, RoleToName
 from outreach.api.models.health import JobRunSummary
 from outreach.api.models.outbox import SavedBy
 from outreach.api.models.today import DailyCompany, ListGroup, NotReady
@@ -122,6 +122,23 @@ class PlanRow(Wire):
     carried_from: str | None
     revision: int  # the entry's own revision: every write on the row checks it
     queue: CompanyQueue | None = None  # set only on a company row (no person, not an email row)
+
+
+class LoggedPerson(Wire):
+    """One line of a pasted people log, as written."""
+
+    person_id: int
+    name: str
+    title: str
+    role_kind: RoleKind
+    added: bool  # new to Knock (else a person already on record at the company)
+    note_chars: int
+    warnings: list[str]  # the note checks (his own note: honesty and hard limits); it was logged as sent
+
+
+class LogPeopleResult(Wire):
+    row: PlanRow
+    people: list[LoggedPerson]
 
 
 class LinkedinWeek(Wire):

@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -67,6 +67,13 @@ export interface OutreachClient {
   /** A row with a person sends `personId`; a company row (nobody on it) sends `personName`, the person he asked. */
   logRequest(entryId: Id, input: { personId: Id; idempotencyKey: string } | { personName: string; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>;
   logApplied(entryId: Id, input: { postingId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PlanRow>; // 'not_allowed' with no role
+  // Company first (#9, P2). The people he asked at a company row, pasted as `Name | Title | note` lines (up to 10): the API reads them,
+  // adds or finds each person and logs one request each with the note. `idempotencyKey` is the paste's (`plan:<entryId>:people:<n>`):
+  // the same key again writes nothing. A paused or no-go company or person, or a person already asked since the list date, is
+  // 'not_allowed' and nothing is written; a line it cannot read is the API's bad_request. Each person comes back with the note's checks.
+  logPeople(entryId: Id, input: { lines: string; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<LogPeopleResult>;
+  /** His LinkedIn people search for the row's company; the same address again writes nothing. Not a people search: 'not_allowed'. */
+  saveSearch(entryId: Id, url: string, o: WriteOptions): Promise<PlanRow>;
   logOutcome(touchId: Id, kind: OutcomeKind, revision: Revision, o: WriteOptions, replyKind?: Exclude<ReplyKind, 'unsorted' | 'auto_reply'>): Promise<{ revision: Revision }>;
   skipRow(entryId: Id, revision: Revision, o: WriteOptions): Promise<PlanRow>; // carried to tomorrow; 'not_allowed' on a done row
   saveNote(noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions): Promise<NoteDraft>;

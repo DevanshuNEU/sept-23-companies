@@ -1,4 +1,5 @@
-"""The bodies of the plan's writes: log a request, log applied, skip a row, save a note, confirm its reason line."""
+"""The bodies of the plan's writes: log a request, log applied, log the people he asked at a company, save his
+people search, skip a row, save a note, confirm its reason line."""
 from pydantic import Field
 
 from outreach.api.models.base import WireRequest
@@ -25,6 +26,28 @@ class LogRequestBody(WireRequest):
     person_name: str | None = Field(default=None, max_length=PERSON_NAME_MAX)
     idempotency_key: str = Field(pattern=TOUCH_KEY)
     revision: int | None = Field(default=None, ge=1)
+
+
+PEOPLE_TEXT_MAX = 8000  # 10 lines of name, title and a 300 character note, with room to spare
+PEOPLE_KEY = r"^[A-Za-z0-9:._-]{1,190}$"  # TOUCH_KEY with room for the line number (`<key>:<n>`)
+SEARCH_URL_MAX = 2100  # over linkedin_search_url's 2000, so a long paste is refused in words, not by size
+
+
+class LogPeopleBody(WireRequest):
+    """The people he asked at a company row, pasted as `Name | Title | note` lines (up to 10; the terminal's paste
+    block `Company | Name | Title | note` is read too). The API reads the lines; the page sends them as typed.
+    `idempotencyKey` is the paste's own key (`plan:<entryId>:people:<n>`): line n's touch key is `<key>:<n>`, so the
+    same paste sent twice writes once."""
+
+    lines: str = Field(max_length=PEOPLE_TEXT_MAX)
+    idempotency_key: str = Field(pattern=PEOPLE_KEY)
+    revision: int | None = Field(default=None, ge=1)
+
+
+class SaveSearchBody(WireRequest):
+    """His LinkedIn people search for the row's company, the address as he copied it from his browser."""
+
+    url: str = Field(max_length=SEARCH_URL_MAX)
 
 
 class LogAppliedBody(WireRequest):

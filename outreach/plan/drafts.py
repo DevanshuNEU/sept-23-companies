@@ -27,7 +27,8 @@ from outreach.store.atomic import atomic
 from outreach.store.timefmt import utcnow
 from outreach.store.writes import append_event
 
-__all__ = ["DraftLocked", "LinkedinDraft", "save_linkedin_draft", "confirm_reason", "get_draft", "get_draft_by_id"]
+__all__ = ["DraftLocked", "LinkedinDraft", "save_linkedin_draft", "confirm_reason", "get_draft", "get_draft_by_id",
+           "me_unconfirmed"]
 
 _REPO_MAIL = Path(__file__).resolve().parents[2] / "mail"
 
@@ -108,6 +109,12 @@ def _unconfirmed(unconfirmed: Sequence[str] | None) -> Sequence[str] | None:
         return unconfirmed
     home = Path(os.environ.get("OUTREACH_MAIL_HOME") or _REPO_MAIL)
     return load_unconfirmed(home / "me.md")  # None when unreadable: the note is blocked, not passed
+
+
+def me_unconfirmed() -> list[str] | None:
+    """me.md's open questions (its `ASK:` values), from `OUTREACH_MAIL_HOME`, else the repo's mail folder. None when
+    the file cannot be read."""
+    return _unconfirmed(None)
 
 
 def save_linkedin_draft(conn: sqlite3.Connection, *, person_id: int, body: str, reason_line: str,

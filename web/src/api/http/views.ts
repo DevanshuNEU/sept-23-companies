@@ -65,6 +65,8 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   plan: 'plan',
   logRequest: 'plan',
   logApplied: 'plan',
+  logPeople: 'plan',
+  saveSearch: 'plan',
   skipRow: 'plan',
   saveNote: 'plan',
   confirmReason: 'plan',

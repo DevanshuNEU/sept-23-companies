@@ -75,4 +75,6 @@ export const _parity: [
   Same<T.InFlightCompany, S['InFlightCompany']>,
   Same<T.PlanRow, S['PlanRow']>,
   Same<T.PlanView, S['PlanView']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<T.LoggedPerson, S['LoggedPerson']>,
+  Same<T.LogPeopleResult, S['LogPeopleResult']>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

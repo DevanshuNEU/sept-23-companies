@@ -2576,6 +2576,60 @@
         "title": "LogAppliedBody",
         "type": "object"
       },
+      "LogPeopleBody": {
+        "additionalProperties": false,
+        "description": "The people he asked at a company row, pasted as `Name | Title | note` lines (up to 10; the terminal's paste\nblock `Company | Name | Title | note` is read too). The API reads the lines; the page sends them as typed.\n`idempotencyKey` is the paste's own key (`plan:<entryId>:people:<n>`): line n's touch key is `<key>:<n>`, so the\nsame paste sent twice writes once.",
+        "properties": {
+          "idempotencyKey": {
+            "pattern": "^[A-Za-z0-9:._-]{1,190}$",
+            "title": "Idempotencykey",
+            "type": "string"
+          },
+          "lines": {
+            "maxLength": 8000,
+            "title": "Lines",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "required": [
+          "lines",
+          "idempotencyKey"
+        ],
+        "title": "LogPeopleBody",
+        "type": "object"
+      },
+      "LogPeopleResult": {
+        "properties": {
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/LoggedPerson"
+            },
+            "title": "People",
+            "type": "array"
+          },
+          "row": {
+            "$ref": "#/components/schemas/PlanRow"
+          }
+        },
+        "required": [
+          "row",
+          "people"
+        ],
+        "title": "LogPeopleResult",
+        "type": "object"
+      },
       "LogRequestBody": {
         "additionalProperties": false,
         "description": "He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one\ntouch per key, whatever the request id. `revision` is optional and never checked: a log only adds a touch, the key\nstops a double press, and two logs sent out of order (the tab closed) must both land. The entry's revision still\nmoves on.\n\nA row with a person sends its `personId`. A company row (nobody on it: company first, #9) sends `personName`\ninstead, the name of the person he asked; the person is added at the company (by him) or found there by name.",
@@ -2722,6 +2776,61 @@
           "idempotencyKey"
         ],
         "title": "LogTouchBody",
+        "type": "object"
+      },
+      "LoggedPerson": {
+        "description": "One line of a pasted people log, as written.",
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "noteChars": {
+            "title": "Notechars",
+            "type": "integer"
+          },
+          "personId": {
+            "title": "Personid",
+            "type": "integer"
+          },
+          "roleKind": {
+            "enum": [
+              "engineer",
+              "manager",
+              "founder",
+              "recruiter",
+              "alum",
+              "other"
+            ],
+            "title": "Rolekind",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "personId",
+          "name",
+          "title",
+          "roleKind",
+          "added",
+          "noteChars",
+          "warnings"
+        ],
+        "title": "LoggedPerson",
         "type": "object"
       },
       "LoggedStep": {
@@ -5968,6 +6077,22 @@
           "revision"
         ],
         "title": "SaveNoteBody",
+        "type": "object"
+      },
+      "SaveSearchBody": {
+        "additionalProperties": false,
+        "description": "His LinkedIn people search for the row's company, the address as he copied it from his browser.",
+        "properties": {
+          "url": {
+            "maxLength": 2100,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "SaveSearchBody",
         "type": "object"
       },
       "Schedule": {
@@ -11223,6 +11348,120 @@
         ]
       }
     },
+    "/api/plan/{entry_id}/people": {
+      "post": {
+        "operationId": "log_people",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogPeopleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogPeopleResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Log People",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
     "/api/plan/{entry_id}/request": {
       "post": {
         "operationId": "log_request",
@@ -11332,6 +11571,120 @@
           }
         },
         "summary": "Log Request",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/{entry_id}/search": {
+      "post": {
+        "operationId": "save_search",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanRow"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Save Search",
         "tags": [
           "plan"
         ]

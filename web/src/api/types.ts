@@ -328,6 +328,9 @@ export interface PlanRow {
   carriedFrom: IsoDate | null; revision: Revision;
   queue: CompanyQueue | null;                                                        // set only on a company row (no person, not an email row)
 }
+/** One line of a pasted people log (`POST /api/plan/{entryId}/people`), as the API wrote it. */
+export interface LoggedPerson { personId: Id; name: string; title: string; roleKind: RoleKind; added: boolean; noteChars: number; warnings: string[] }
+export interface LogPeopleResult { row: PlanRow; people: LoggedPerson[] }
 /** One person the next weekday's plan would propose (a dry run, rebuilt at 08:00): findSomeone when nobody is named yet. */
 export interface TomorrowRow {
   companyName: string; personName: string | null; roleTitle: string | null;

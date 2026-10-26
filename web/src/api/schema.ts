@@ -633,6 +633,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plan/{entry_id}/people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Log People */
+        post: operations["log_people"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plan/{entry_id}/request": {
         parameters: {
             query?: never;
@@ -644,6 +661,23 @@ export interface paths {
         put?: never;
         /** Log Request */
         post: operations["log_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan/{entry_id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Search */
+        post: operations["save_search"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1866,6 +1900,27 @@ export interface components {
             revision?: number | null;
         };
         /**
+         * LogPeopleBody
+         * @description The people he asked at a company row, pasted as `Name | Title | note` lines (up to 10; the terminal's paste
+         *     block `Company | Name | Title | note` is read too). The API reads the lines; the page sends them as typed.
+         *     `idempotencyKey` is the paste's own key (`plan:<entryId>:people:<n>`): line n's touch key is `<key>:<n>`, so the
+         *     same paste sent twice writes once.
+         */
+        LogPeopleBody: {
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Lines */
+            lines: string;
+            /** Revision */
+            revision?: number | null;
+        };
+        /** LogPeopleResult */
+        LogPeopleResult: {
+            /** People */
+            people: components["schemas"]["LoggedPerson"][];
+            row: components["schemas"]["PlanRow"];
+        };
+        /**
          * LogRequestBody
          * @description He sent the LinkedIn request by hand. `idempotencyKey` is the touch's own key (`plan:<entryId>:request`): one
          *     touch per key, whatever the request id. `revision` is optional and never checked: a log only adds a touch, the key
@@ -1917,6 +1972,29 @@ export interface components {
             personId?: number | null;
             /** Postingid */
             postingId?: number | null;
+        };
+        /**
+         * LoggedPerson
+         * @description One line of a pasted people log, as written.
+         */
+        LoggedPerson: {
+            /** Added */
+            added: boolean;
+            /** Name */
+            name: string;
+            /** Notechars */
+            noteChars: number;
+            /** Personid */
+            personId: number;
+            /**
+             * Rolekind
+             * @enum {string}
+             */
+            roleKind: "engineer" | "manager" | "founder" | "recruiter" | "alum" | "other";
+            /** Title */
+            title: string;
+            /** Warnings */
+            warnings: string[];
         };
         /** LoggedStep */
         LoggedStep: {
@@ -3005,6 +3083,14 @@ export interface components {
             revision: number;
             /** Text */
             text: string;
+        };
+        /**
+         * SaveSearchBody
+         * @description His LinkedIn people search for the row's company, the address as he copied it from his browser.
+         */
+        SaveSearchBody: {
+            /** Url */
+            url: string;
         };
         /** Schedule */
         Schedule: {
@@ -6469,6 +6555,95 @@ export interface operations {
             };
         };
     };
+    log_people: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogPeopleBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogPeopleResult"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     log_request: {
         parameters: {
             query?: never;
@@ -6481,6 +6656,95 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["LogRequestBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanRow"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    save_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveSearchBody"];
             };
         };
         responses: {

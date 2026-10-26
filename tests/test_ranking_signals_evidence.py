@@ -12,6 +12,7 @@ from outreach.ranking.signals import build_signals
 from outreach.ranking.signals.cap_exempt import CapExempt
 from outreach.ranking.signals.everify import EVerify
 from outreach.ranking.signals.funding import Funding
+from outreach.ranking.signals.hiring_velocity import HiringVelocity
 from outreach.ranking.signals.large_later_stage import LargeLaterStage
 from outreach.ranking.signals.lca_junior import LcaJunior
 from outreach.ranking.signals.reachable_person import ReachablePerson
@@ -21,7 +22,7 @@ from tests.ranking_helpers import check_assessment, neutral_facts
 
 CFG = default_ranker_config()
 ORDER = ["live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
-         "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"]
+         "reachable_person", "funding", "hiring_velocity", "staffing_risk", "large_later_stage", "interview_like"]
 # The one signal whose grade belongs to the interview profile, not to the company's facts (#81).
 PROFILE_GRADED = "interview_like"
 
@@ -202,6 +203,51 @@ class FundingTests(unittest.TestCase):
         self.assertEqual(got.value, 0.5)
 
 
+class HiringVelocityTests(unittest.TestCase):
+    def signal(self):
+        return HiringVelocity(CFG.section("hiring_velocity"), CFG.section("small"), CFG.ranker["many_postings"])
+
+    def value(self, **facts):
+        return check_assessment(self, self.signal(), neutral_facts(**facts))
+
+    def test_one_value_per_band(self):
+        for n, want in ((0, 0.0), (1, 0.4), (2, 0.7), (3, 0.7), (4, 1.0), (12, 1.0)):
+            with self.subTest(roles=n):
+                self.assertEqual(self.value(eng_posted_30d=n, open_postings=n).value, want)
+
+    def test_the_reason_counts_the_roles(self):
+        self.assertEqual("3 engineering roles posted in the last 30 days",
+                         self.value(eng_posted_30d=3, open_postings=5).reason)
+        self.assertEqual("1 engineering role posted in the last 30 days",
+                         self.value(eng_posted_30d=1, open_postings=1).reason)
+        self.assertEqual("No engineering role posted in the last 30 days", self.value().reason)
+
+    def test_a_large_company_earns_nothing(self):
+        for facts in (dict(stage="series_c"), dict(stage="public"), dict(size_low=400, size_high=400)):
+            with self.subTest(**facts):
+                got = self.value(eng_posted_30d=6, open_postings=6, **facts)
+                self.assertEqual(0.0, got.value)
+                self.assertEqual("Hiring pace not counted: a large or later-stage company", got.reason)
+        self.assertEqual(1.0, self.value(eng_posted_30d=6, open_postings=6, size_low=300, size_high=300).value)
+        self.assertEqual(1.0, self.value(eng_posted_30d=6, open_postings=6, stage="seed").value)
+
+    def test_over_many_postings_earns_nothing(self):
+        limit = CFG.ranker["many_postings"]
+        got = self.value(eng_posted_30d=10, open_postings=limit + 1)
+        self.assertEqual(0.0, got.value)
+        self.assertEqual(f"Hiring pace not counted: {limit + 1} open roles", got.reason)
+        self.assertEqual(1.0, self.value(eng_posted_30d=10, open_postings=limit).value)
+
+    def test_the_value_is_never_negative(self):
+        for n in range(0, 20):
+            self.assertGreaterEqual(self.value(eng_posted_30d=n, open_postings=n).value, 0.0)
+
+    def test_the_shipped_section(self):
+        self.assertEqual({"window_days": 30, "min_roles": [1, 2, 4], "values": [0.4, 0.7, 1.0]},
+                         CFG.section("hiring_velocity"))
+        self.assertEqual(8.0, CFG.weights["hiring_velocity"])
+
+
 class StaffingRiskTests(unittest.TestCase):
     def value(self, **facts):
         return check_assessment(self, sig(StaffingRisk), neutral_facts(**facts))
@@ -230,7 +276,7 @@ class StaffingRiskTests(unittest.TestCase):
 
 
 class RegistryTests(unittest.TestCase):
-    def test_build_signals_returns_the_twelve_in_order(self):
+    def test_build_signals_returns_the_thirteen_in_order(self):
         self.assertEqual([s.name for s in build_signals(CFG)], ORDER)
 
     def test_weights_have_one_entry_per_signal(self):

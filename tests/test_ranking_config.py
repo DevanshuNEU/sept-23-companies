@@ -70,12 +70,12 @@ def _load_edited(tc: unittest.TestCase, *edits: tuple[str, str, str]):
         return load_ranker_config(p)
 
 
-# Numbers that are exact in binary, so a boundary test can sit exactly on the limit: the positive weights add to 122
+# Numbers that are exact in binary, so a boundary test can sit exactly on the limit: the positive weights add to 130
 # (reachable_person is 0, the interview tilt's 6 counts) and the worst non-bottom negatives are
-# 12 * 0.5 + 10 * 0.25 + 16 * 0.25 = 12.5, a limit of 134.5.
+# 12 * 0.5 + 10 * 0.25 + 16 * 0.25 = 12.5, a limit of 142.5.
 EXACT = (("everify", "not_enrolled", "-0.5"), ("pay_level", "level_1", "-0.25"), ("small", "weak_flag_value", "-0.25"))
-LIMIT = 134.5
-POSITIVE = 122.0  # every weight but the bottom push, added together
+LIMIT = 142.5
+POSITIVE = 130.0  # every weight but the bottom push, added together
 
 
 def _flip(path: Path) -> None:
@@ -100,6 +100,13 @@ class VersionTests(unittest.TestCase):
                 self.assertNotEqual(ranker_version(ranking, crawl), base)
                 path.write_bytes(original)
                 self.assertEqual(ranker_version(ranking, crawl), base)
+
+    def test_the_hiring_velocity_signal_file_is_hashed(self):
+        self.assertTrue((RANKING_DIR / "signals" / "hiring_velocity.py").is_file())
+        ranking, crawl = _temp_ranking_dir(self)
+        base = ranker_version(ranking, crawl)
+        _flip(ranking / "signals" / "hiring_velocity.py")
+        self.assertNotEqual(ranker_version(ranking, crawl), base)
 
     def test_version_moves_with_every_hashed_code_file(self):
         ranking, crawl = _temp_ranking_dir(self)
@@ -314,10 +321,10 @@ class ConfigTests(unittest.TestCase):
     def test_bottom_weights_outweigh_every_positive_weight(self):
         w = default_ranker_config().weights
         positive = sum(v for k, v in w.items() if k not in BOTTOM)
-        # 40 + 10 + 12 + 10 + 10 + 12 + 16 (small) + 0 (reachable_person) + 6 (funding) + 6 (the interview tilt,
-        # which counts toward the bottom push).
+        # 40 + 10 + 12 + 10 + 10 + 12 + 16 (small) + 0 (reachable_person) + 6 (funding) + 8 (hiring_velocity)
+        # + 6 (the interview tilt, which counts toward the bottom push).
         self.assertEqual(positive, POSITIVE)
-        self.assertEqual(POSITIVE, 122.0)
+        self.assertEqual(POSITIVE, 130.0)
         for name in BOTTOM:
             self.assertGreater(w[name], positive, f"{name} must outweigh every positive weight added together")
 
@@ -523,6 +530,24 @@ class ConfigTests(unittest.TestCase):
                     with self.assertRaises(KeyError) as cm:
                         load_ranker_config(p)
                 self.assertIn(key, str(cm.exception))
+
+    def test_the_hiring_velocity_section_is_checked(self):
+        for key, value in (("window_days", "0"), ("window_days", "2.5"), ("window_days", "true"),
+                           ("window_days", '"30"'),
+                           ("min_roles", "[]"), ("min_roles", "[2, 1, 4]"), ("min_roles", "[1, 1, 4]"),
+                           ("min_roles", "[0, 2, 4]"), ("min_roles", "[1, 2.5, 4]"), ("min_roles", '"1"'),
+                           ("values", "[0.4, 0.7]"),  # one value per count
+                           ("values", "[0.7, 0.4, 1.0]"),  # more roles never earn less
+                           ("values", "[0.0, 0.7, 1.0]"), ("values", "[-0.4, 0.7, 1.0]"),  # one way: above 0
+                           ("values", "[0.4, 0.7, 1.5]"), ("values", '[0.4, 0.7, "1"]'), ("values", '"0.4"')):
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ValueError) as cm:
+                    _load_edited(self, ("hiring_velocity", key, value))
+                self.assertIn(key, str(cm.exception))
+        cfg = _load_edited(self, ("hiring_velocity", "min_roles", "[3]"), ("hiring_velocity", "values", "[1.0]"),
+                           ("hiring_velocity", "window_days", "14"))
+        self.assertEqual({"window_days": 14, "min_roles": [3], "values": [1.0]}, cfg.section("hiring_velocity"))
+        _load_edited(self, ("hiring_velocity", "values", "[0.5, 0.5, 0.5]"))  # equal values are allowed
 
     def test_no_dashes_in_config_or_wages(self):
         for name in ("config.toml", "wages.toml"):

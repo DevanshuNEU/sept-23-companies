@@ -16,13 +16,14 @@ from outreach.ranking.pay import load_wages
 from outreach.ranking.roles import load_roles
 from outreach.ranking.signals.pay_level import PayLevel as PayLevelSignal
 from outreach.ranking.types import CompanyFacts
+from outreach.store import append_event
 from tests import ranking_store as rs
 from tests.storetest import fresh_store, seed_company
 
 TODAY = date(2026, 10, 21)
 NG, INTERN, SENIOR = "Software Engineer, New Grad", "Software Engineering Intern", "Senior Software Engineer"
 SIGNALS = ("live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
-           "reachable_person", "funding", "staffing_risk", "large_later_stage")
+           "reachable_person", "funding", "hiring_velocity", "staffing_risk", "large_later_stage")
 NOW = "2026-10-01T08:00:00Z"
 
 
@@ -701,7 +702,7 @@ class GradeTests(Store):
             g = f.grade(name)
             self.assertIsInstance(g, Confidence)
             self.assertTrue(g.basis.strip())
-        self.assertEqual(set(SIGNALS) - set(f.grades), set(), "the loader grades all eleven signals")
+        self.assertEqual(set(SIGNALS) - set(f.grades), set(), "the loader grades all twelve signals")
         self.assertEqual(RankFacts.__dataclass_fields__["grades"].default_factory(), {})
         self.assertEqual(f.grade("not_a_signal"), Confidence("low", "no data for not a signal"))
 
@@ -733,6 +734,127 @@ class StaleFactsTests(Store):
         self.assertEqual(f.lanes, ("level_role",))
         self.assertEqual(f.stale_postings, ())
         self.assertEqual(f.grade("live_role").level, "medium")
+
+
+class VelocityFactsTests(Store):
+    """eng_posted_30d (P5): open, visible engineering postings posted in the last 30 days. A posting with no posted
+    date counts only when it was first seen in the window on a board whose first read is over 30 days old, else
+    every posting would look new after a first crawl."""
+
+    def first_read(self, board_id: int, days_ago: int, *, via: str = "event") -> None:
+        at = (TODAY - timedelta(days=days_ago)).isoformat() + "T08:00:00Z"
+        if via == "event":
+            append_event(self.conn, entity="board", kind="read_state", actor="crawler", entity_id=board_id,
+                         detail={"from": None, "to": "ok"}, at=at)
+        else:
+            rs.board_read(self.conn, board_id, "ok", at=at)
+
+    def seen(self, days_ago: int) -> str:
+        return (TODAY - timedelta(days=days_ago)).isoformat() + "T09:00:00Z"
+
+    def test_dated_engineering_postings_in_the_window_count(self):
+        for days in (0, 5, 29, 30):
+            self.add("ng", posted_on=ago(days))
+        self.add("senior", posted_on=ago(3))  # engineering above his level still shows the team is hiring
+        self.add("ng", posted_on=ago(31))  # outside the window
+        self.add("ng", posted_on=ago(200))
+        f = self.one()
+        self.assertEqual(5, f.eng_posted_30d)
+        self.assertEqual(7, f.open_postings)
+
+    def test_interns_closed_hidden_and_stale_postings_do_not_count(self):
+        self.add("intern", posted_on=ago(2))  # not an engineering posting
+        self.add("ng", posted_on=ago(2), closed=True)
+        self.add("ng", posted_on=ago(2), us="no")  # outside the US: not visible
+        self.add("ng", posted_on=ago(2), sponsorship="no", sponsorship_quote="We do not sponsor.")
+        stale = self.company("Stale")
+        b = rs.board(self.conn, stale)
+        self.add("ng", company_id=stale, board_id=b, posted_on="2016-03-02")
+        got = self.load()
+        self.assertEqual(0, got[self.co].eng_posted_30d)
+        self.assertEqual(0, got[stale].eng_posted_30d)
+
+    def test_postings_on_a_doubtful_board_do_not_count(self):
+        rs.flag_board(self.conn, self.co, self.board)
+        self.add("ng", posted_on=ago(2))
+        self.assertEqual(0, self.one().eng_posted_30d)
+
+    def test_an_undated_posting_counts_only_on_a_board_first_read_over_30_days_ago(self):
+        old, fresh, edge, never = (self.company(n) for n in ("Old", "Fresh", "Edge", "Never"))
+        boards = {cid: rs.board(self.conn, cid) for cid in (old, fresh, edge, never)}
+        self.first_read(boards[old], 31)
+        self.first_read(boards[fresh], 3)
+        self.first_read(boards[edge], 30)  # exactly 30 days is not over 30
+        for cid in (old, fresh, edge, never):
+            self.add("ng", company_id=cid, board_id=boards[cid], posted_on=None, first_seen_at=self.seen(4))
+        got = self.load()
+        self.assertEqual(1, got[old].eng_posted_30d)
+        self.assertEqual(0, got[fresh].eng_posted_30d)
+        self.assertEqual(0, got[edge].eng_posted_30d)
+        self.assertEqual(0, got[never].eng_posted_30d)
+
+    def test_an_undated_posting_first_seen_before_the_window_does_not_count(self):
+        self.first_read(self.board, 90)
+        self.add("ng", posted_on=None, first_seen_at=self.seen(31))
+        self.add("ng", posted_on=None, first_seen_at=self.seen(30))
+        self.assertEqual(1, self.one().eng_posted_30d)
+
+    def test_the_first_read_is_the_earliest_of_the_events_and_the_kept_reads(self):
+        self.first_read(self.board, 5)  # a later state flip
+        self.first_read(self.board, 45, via="board_read")  # the earliest read on record
+        self.add("ng", posted_on=None, first_seen_at=self.seen(2))
+        self.assertEqual(1, self.one().eng_posted_30d)
+        other = self.company("Other")
+        b = rs.board(self.conn, other)
+        self.first_read(b, 45)  # the first read's event survives the board_read trim
+        self.first_read(b, 1, via="board_read")
+        self.add("ng", company_id=other, board_id=b, posted_on=None, first_seen_at=self.seen(2))
+        self.assertEqual(1, self.load()[other].eng_posted_30d)
+
+    def test_an_other_kind_of_board_event_is_no_read(self):
+        append_event(self.conn, entity="board", kind="token_changed", actor="crawler", entity_id=self.board,
+                     detail={}, at=self.seen(60))
+        self.add("ng", posted_on=None, first_seen_at=self.seen(2))
+        self.assertEqual(0, self.one().eng_posted_30d)
+
+    def test_a_merged_duplicate_counts_for_the_survivor(self):
+        dup = self.company("Acme Inc")
+        b = rs.board(self.conn, dup)
+        self.add("ng", company_id=dup, board_id=b, posted_on=ago(3))
+        self.add("ng", posted_on=ago(4))
+        rs.merge(self.conn, dup, self.co)
+        self.assertEqual(2, self.one().eng_posted_30d)
+
+    def test_no_posting_is_zero(self):
+        f = self.one()
+        self.assertEqual((0, 0), (f.eng_posted_30d, f.open_postings))
+        self.assertEqual("low", f.grade("hiring_velocity").level)
+
+    def test_the_grade_rests_on_the_dates_and_the_board_read(self):
+        self.add("ng", posted_on=ago(3))
+        self.assertEqual("high", self.one().grade("hiring_velocity").level)
+        self.first_read(self.board, 60)
+        self.add("ng", posted_on=None, first_seen_at=self.seen(2))
+        g = self.one().grade("hiring_velocity")
+        self.assertEqual("medium", g.level)
+        self.assertIn("1 of 2", g.basis)
+        never = self.company("Never")
+        b = rs.board(self.conn, never, last_read=None)
+        self.add("ng", company_id=never, board_id=b, posted_on=ago(3))
+        self.assertEqual("low", self.load()[never].grade("hiring_velocity").level)
+
+    def test_the_count_is_one_query_over_the_store(self):
+        statements = []
+        self.conn.set_trace_callback(statements.append)
+        self.addCleanup(self.conn.set_trace_callback, None)
+        for i in range(5):
+            cid = self.company(f"Co {i}")
+            self.add("ng", company_id=cid, board_id=rs.board(self.conn, cid), posted_on=None,
+                     first_seen_at=self.seen(2))
+        statements.clear()
+        self.load()
+        reads = [q for q in statements if "posted_on IS NULL" in q]
+        self.assertEqual(1, len(reads), reads)
 
 
 if __name__ == "__main__":

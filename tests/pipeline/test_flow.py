@@ -1004,6 +1004,40 @@ class RankFlowTests(HarnessCase):
                             tilted[key].signals["values"]["interview_like"]["reason"] for key in like_b),
                         "a company like B names B")
 
+    def test_flow_rank_the_hiring_pace_only_lifts_and_a_person_on_file_earns_nothing(self):
+        """P5: hiring_velocity is one way (it only adds points, never changes a hide or a no-go row), and
+        reachable_person at weight 0 adds no points anywhere while its reason stays stored."""
+        h = self.flow()
+        ids = h.ranking.ids
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        changed, n = re.subn(r"(?m)^min_roles = \[1, 2, 4\]$", "min_roles = [1000, 1001, 1002]", text)
+        self.assertEqual(n, 1)  # nobody posts 1000 roles: the pace lifts nobody
+        folder = Path(tempfile.mkdtemp(prefix="ranker-cfg-"))
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        (folder / "config.toml").write_text(changed, encoding="utf-8")
+        off = load_ranker_config(folder / "config.toml")
+
+        def no_go():
+            return [tuple(r) for r in h.conn.execute(
+                "SELECT company_id, person_id, reason, source, lifted_at FROM no_go ORDER BY no_go_id")]
+
+        run_rank(h.conn, today=stages_ranking.TODAY, cfg=off)
+        flat = {key: self.row(h, key) for key in ids if key != "L"}
+        flat_no_go = no_go()
+        run_rank(h.conn, today=stages_ranking.TODAY)
+        paced = {key: self.row(h, key) for key in ids if key != "L"}
+        self.assertEqual(no_go(), flat_no_go, "the hiring pace wrote or lifted a no-go row")
+        lifted = 0
+        for key in flat:
+            with self.subTest(company=key):
+                self.assertGreaterEqual(paced[key].score, flat[key].score)
+                self.assertEqual(paced[key].signals["hide"], flat[key].signals["hide"])
+                self.assertGreaterEqual(self.points(paced[key], "hiring_velocity"), 0)
+                self.assertEqual(self.points(paced[key], "reachable_person"), 0)
+                self.assertTrue(paced[key].signals["values"]["reachable_person"]["reason"].strip())
+                lifted += paced[key].score > flat[key].score
+        self.assertGreater(lifted, 0, "a fixture company posted a role lately, so the check is not empty")
+
     def test_flow_rank_is_idempotent(self):
         h = self.flow()
 

@@ -21,7 +21,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "ranker": ("keep_versions", "size_check_top_n", "many_postings", "lca_software_many", "funding_window_months",
                "lca_recent_years", "hn_post_days", "diff_min_rank_move", "diff_top_n", "lca_wage_min_filings"),
     "weights": ("live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
-                "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"),
+                "reachable_person", "funding", "hiring_velocity", "staffing_risk", "large_later_stage",
+                "interview_like"),
     "hide": ("size_over", "size_confidences"),
     "live_role": ("intern_junior", "level_role", "any_us_role", "fresh_days", "fresh_bonus"),
     "posting_sponsors": ("yes", "opt_only"),
@@ -34,6 +35,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
               "borderline_value", "weak_flag_value", "band_tops", "band_values"),
     "large_later_stage": (),
     "reachable_person": ("role_kinds", "person", "hn_post"),
+    "hiring_velocity": ("window_days", "min_roles", "values"),
     "staffing_risk": ("high", "medium", "promoted_high"),
     "interview_like": ("min_interview_companies", "min_matches", "confident_at", "max_weight_share"),
     "confidence": ("factor_high", "factor_medium", "factor_low", "evidence_old_days", "lca_pay_medium_filings",
@@ -131,6 +133,23 @@ def _check_small(small: dict) -> None:
                          f"rising, got {values!r}")
 
 
+def _check_velocity(v: dict) -> None:
+    """The hiring pace is one way: `values` are above 0 and at most 1, one per count in `min_roles`, never falling
+    as the counts rise, so it only adds points and the bottom push needs no new negative. The counts are rising whole
+    numbers of at least 1 and the window is a whole number of days of at least 1."""
+    _whole_at_least_one(v["window_days"], "[hiring_velocity] window_days")
+    counts, values = v["min_roles"], v["values"]
+    if (not isinstance(counts, list) or not counts
+            or any(not isinstance(c, int) or isinstance(c, bool) or c < 1 for c in counts)
+            or any(a >= b for a, b in zip(counts, counts[1:]))):
+        raise ValueError(f"[hiring_velocity] min_roles must be rising whole numbers of at least 1, got {counts!r}")
+    if (not isinstance(values, list) or len(values) != len(counts)
+            or any(not _is_number(x) or not math.isfinite(x) or not 0 < x <= 1 for x in values)
+            or any(a > b for a, b in zip(values, values[1:]))):
+        raise ValueError(f"[hiring_velocity] values must be one number per min_roles count, each above 0 and at most "
+                         f"1, never falling, got {values!r}")
+
+
 def _check_confidence(c: dict) -> None:
     factors = [_number(c[f"factor_{level}"], f"[confidence] factor_{level}") for level in ("high", "medium", "low")]
     if not all(0 < f <= 1 for f in factors):
@@ -188,6 +207,7 @@ def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
     _check_bottom_weights(data)
     _check_tilt(data)
     _check_small(data["small"])
+    _check_velocity(data["hiring_velocity"])
     _check_confidence(data["confidence"])
     _check_hide(data["hide"])
     _check_ranker(data)

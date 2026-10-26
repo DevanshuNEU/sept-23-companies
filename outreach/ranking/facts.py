@@ -13,13 +13,13 @@ import json
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from outreach.insights.bands import Features, default_bands, features_of
 from outreach.ranking.common import age_days, clean_text, fact_order_key, size_order_key
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import (Confidence, grade_evidence, grade_no_role, grade_pay, grade_reach,
-                                         grade_sponsor, weaker)
+                                         grade_sponsor, grade_velocity, weaker)
 from outreach.ranking.pay import Area, lca_pay_level, level_at, matching_areas, pay_level
 from outreach.ranking.roles import Best, Roles, company_board_states
 from outreach.ranking.types import CompanyFacts
@@ -29,6 +29,18 @@ __all__ = ["SHARED_DOMAIN_FLAG", "RankFacts", "recent_fiscal_years", "is_large",
 SHARED_DOMAIN_FLAG = "domain shared with other employers"
 LISTED_STATUSES = ("candidate", "backlog", "working")
 _FACTS = ("everify", "cap_exempt", "staffing_risk", "stage", "size", "headcount")
+# The hiring pace's engineering lanes: an intern posting is not counted.
+_ENGINEERING_LANES = ("level_role", "any_us_role")
+# Open postings with no posted date, first seen on or after :since, on a board whose first read (the earliest
+# read_state event, which the crawler writes on a board's first read and never prunes, or the earliest kept board_read
+# row) is before :since. One query over the store.
+_UNDATED_NEW = (
+    "SELECT p.posting_id FROM posting p JOIN ("
+    "SELECT board_id, min(at) AS first_at FROM ("
+    "SELECT entity_id AS board_id, at FROM event WHERE entity = 'board' AND kind = 'read_state' "
+    "UNION ALL SELECT board_id, at FROM board_read) GROUP BY board_id) f ON f.board_id = p.board_id "
+    "WHERE p.closed_at IS NULL AND p.posted_on IS NULL AND substr(p.first_seen_at, 1, 10) >= :since "
+    "AND substr(f.first_at, 1, 10) < :since")
 
 
 @dataclass(frozen=True)
@@ -54,6 +66,8 @@ class RankFacts(CompanyFacts):
     stale_postings: tuple[Best, ...] = ()
     grades: Mapping[str, Confidence] = field(default_factory=dict)
     features: Features = Features()      # the four traits the interview tilt compares (#81)
+    eng_posted_30d: int = 0              # visible engineering postings posted in the hiring_velocity window (P5)
+    open_postings: int = 0               # trusted open postings that are not stale (Roles.open_count)
 
     def grade(self, name: str) -> Confidence:
         """The stored grade of a signal, else the low default: unknown is never `high`."""
@@ -199,6 +213,11 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
         if cid not in tiers or (r["tier"], not r["promoted"]) > (tiers[cid]["tier"], not tiers[cid]["promoted"]):
             tiers[cid] = r
     watched = {owner(r[0]) for r in conn.execute("SELECT company_id FROM watched_page")}
+    # The hiring pace window: a posting posted at most `window` days ago (its age, as live_role reads it), or an
+    # undated one first seen since then on a board first read before it.
+    window = cfg.section("hiring_velocity")["window_days"]
+    since = (today - timedelta(days=window)).isoformat()
+    undated_new = {r[0] for r in conn.execute(_UNDATED_NEW, {"since": since})}
     states = company_board_states(conn, canon, doubtful)
     # Imported here, not at the top: outreach.insights.dataset imports the ranking's stored scores, which import
     # this module.
@@ -268,6 +287,16 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             if "any_us_role" in role_lanes and not large:
                 lanes.append("any_us_role")
 
+        # The hiring pace: visible engineering postings dated in the window, or undated and new on an old board.
+        dated = undated = 0
+        for b in (rl.visible if rl else ()):
+            if b.lane not in _ENGINEERING_LANES:
+                continue
+            if b.posted_on is not None:  # then age_days is the posted date's age
+                dated += b.age_days is not None and b.age_days <= window
+            else:
+                undated += b.posting_id in undated_new
+
         # Weak reasons to doubt the company is small. None of them hides anything.
         flags: list[str] = []
         if rl and rl.open_count > ranker["many_postings"]:
@@ -285,7 +314,8 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             everify=row(cid, "everify"), cap=row(cid, "cap_exempt"), staffing=row(cid, "staffing_risk"),
             stage_row=stage_row, size_row=size_row, counted=counted, funding=funding.get(cid), work=work,
             promoted=promoted, large=large, stage=stage, size_low=size_low, pay_basis=pay_basis, straddles=straddles,
-            jr=jr, reach_via=reach_via, has_team=has_team, has_old_lca=bool(years))
+            jr=jr, reach_via=reach_via, has_team=has_team, has_old_lca=bool(years), posted=dated + undated,
+            undated=undated)
 
         out.append(RankFacts(
             company_id=cid, lanes=tuple(lanes), best_posting_id=best.posting_id if best else None,
@@ -305,7 +335,8 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             features=features_of(size_low=size_low, size_high=size_high, stage=stage,
                                  level_tier=best.level_tier if best else None,
                                  intern=tuple(lanes[:1]) == ("intern_junior",),
-                                 board_system=board_systems.get(cid), bands=bands)))
+                                 board_system=board_systems.get(cid), bands=bands),
+            eng_posted_30d=dated + undated, open_postings=rl.open_count if rl else 0))
     return out
 
 
@@ -323,8 +354,8 @@ def _row_grade(r: sqlite3.Row | None, label: str, today: date, old_days: int) ->
 
 def _grade_all(*, today, old_days, cfg, rl, best, state, everify, cap, staffing, stage_row, size_row, counted,
                funding, work, promoted, large, stage, size_low, pay_basis, straddles, jr, reach_via, has_team,
-               has_old_lca) -> dict[str, Confidence]:
-    """The eleven grades of one company, each from its own evidence. A grade is `low` when the evidence is missing."""
+               has_old_lca, posted, undated) -> dict[str, Confidence]:
+    """The twelve grades of one company, each from its own evidence. A grade is `low` when the evidence is missing."""
     def graded(r, label):
         return _row_grade(r, label, today, old_days)
 
@@ -376,6 +407,7 @@ def _grade_all(*, today, old_days, cfg, rl, best, state, everify, cap, staffing,
         "small": graded(size_row, size_label),
         "reachable_person": grade_reach(via=reach_via, has_team_source=has_team),
         "funding": graded(funding[1] if funding else None, "funding"),
+        "hiring_velocity": grade_velocity(counted=posted, undated=undated, board_state=state),
         "staffing_risk": staffing_grade,
         "large_later_stage": large_grade,
     }

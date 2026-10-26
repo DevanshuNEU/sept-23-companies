@@ -28,6 +28,11 @@ def ny_day(now: str) -> str:
     return moment.astimezone(NY).date().isoformat()
 
 
+def ny_days_between(earlier: str, later: str) -> int:
+    """New York days from the moment `earlier` to the moment `later` (negative when `later` is the earlier day)."""
+    return (_date(ny_day(later)) - _date(ny_day(earlier))).days
+
+
 def week_bounds(now: str) -> tuple[str, str]:
     """Monday and Sunday (both inclusive) of the New York week that holds `now`."""
     today = _date(ny_day(now))

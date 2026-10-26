@@ -19,7 +19,7 @@ from unittest import mock
 import live_checkout
 from outreach.mcp import __main__ as cli
 from outreach.mcp import server
-from outreach.mcp.guard import NEVER_TABLES, install_authorizer, install_triggers, open_guarded
+from outreach.mcp.guard import BRIDGE_TABLES, NEVER_TABLES, install_authorizer, install_triggers, open_guarded
 from outreach.mcp.tools import Input, ToolSpec
 from outreach.reader.types import FIELDS
 from outreach.store import DEFAULT_PATH, connect
@@ -33,9 +33,9 @@ from tests.test_mcp_write_grants import table_hashes
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "tests" / "fixtures"
-FIFTEEN = ("ranked_companies", "company", "person", "followups_due", "record_research", "flag_review", "mark_no_go",
-           "save_draft", "save_followup", "save_linkedin_note", "add_people", "reader_next", "reader_submit",
-           "prepare_targets", "submit_candidates")
+NINETEEN = ("ranked_companies", "company", "person", "followups_due", "record_research", "flag_review", "mark_no_go",
+            "save_draft", "save_followup", "save_linkedin_note", "add_people", "reader_next", "reader_submit",
+            "prepare_targets", "submit_candidates", "knock_status", "contact_check", "intake", "log_sent")
 BODY = ("Hi Lee,\n\nI read your post on the queue rewrite at Acme and how the team moved billing off a nightly batch. "
         "I build backend systems in Go and Python, and last year I shipped a queue that handled thousands of "
         "requests a minute without a page. I would like to help your team keep that kind of work calm, and I am "
@@ -51,9 +51,11 @@ def spec(name: str) -> ToolSpec:
     return next(s for s in server.tool_specs() if s.name == name)
 
 
-def never_rows(conn) -> dict[str, str]:
+def never_rows(conn, tool: str = "") -> dict[str, str]:
+    """The tables no tool may write, plus the bridge's two for every tool but `log_sent` (the one that inserts there)."""
     hashes = table_hashes(conn)
-    return {t: hashes[t] for t in NEVER_TABLES}
+    tables = NEVER_TABLES if tool == "log_sent" else NEVER_TABLES | BRIDGE_TABLES
+    return {t: hashes[t] for t in tables}
 
 
 def messages(conn) -> dict[int, tuple]:
@@ -140,6 +142,12 @@ class SweepCase(McpCase):
                 "name": "Grace Hopper", "role_kind": "engineer",
                 "sources": [{"kind": "team", "url": "https://bolt.example/team",
                              "quote": "Grace Hopper, Software Engineer at Bolt Robotics"}]}]}, None),
+            "knock_status": ({}, None),
+            "contact_check": ({"company": "Acme", "people": [{"name": "Lin Kedin"}]}, None),
+            "intake": ({"people": [{"name": "Ida Intake", "title": "Software Engineer", "company": "Acme",
+                                    "linkedin_url": "https://www.linkedin.com/in/ida-intake"}]}, None),
+            "log_sent": ({"requests": [{"person_id": self.lin, "channel": "linkedin_request",
+                                        "note_text": "Hi Lin, I read your post on the queue rewrite."}]}, None),
         }
 
     def leased_sha(self) -> str:
@@ -152,10 +160,10 @@ class SweepCase(McpCase):
 
 
 class ToolListTest(unittest.TestCase):
-    def test_the_tool_list_is_exactly_the_fifteen(self):
+    def test_the_tool_list_is_exactly_the_nineteen(self):
         names = [s.name for s in server.tool_specs()]
-        self.assertEqual(sorted(names), sorted(FIFTEEN))
-        self.assertEqual(len(names), 15)
+        self.assertEqual(sorted(names), sorted(NINETEEN))
+        self.assertEqual(len(names), 19)
 
 
 class SweepTest(SweepCase):
@@ -164,13 +172,13 @@ class SweepTest(SweepCase):
                           for m in self.states.values()},
                          {"planned", "drafted", "approved", "sending", "sent", "failed", "skipped"})
         calls = self.valid()
-        self.assertEqual(set(calls), set(FIFTEEN))
-        for name in FIFTEEN:
+        self.assertEqual(set(calls), set(NINETEEN))
+        for name in NINETEEN:
             args, named = calls[name] if name != "reader_submit" else self.valid()["reader_submit"]
             with self.subTest(tool=name):
-                never, before = never_rows(self.db), messages(self.db)
+                never, before = never_rows(self.db, name), messages(self.db)
                 self.ok(name, args)
-                self.assertEqual(never_rows(self.db), never, f"{name} changed a table no tool may write")
+                self.assertEqual(never_rows(self.db, name), never, f"{name} changed a table no tool may write")
                 after = messages(self.db)
                 for mid, row in before.items():
                     if mid != named:
@@ -189,7 +197,7 @@ class SweepTest(SweepCase):
                   for mid in self.states.values()}
         calls = self.valid()
         before = table_hashes(self.db)  # the reader_next inside valid() leased a posting; start after it
-        for name in FIFTEEN:
+        for name in NINETEEN:
             args, _named = calls[name]
             for extra in HOSTILE:
                 with self.subTest(tool=name, extra=extra):
@@ -228,8 +236,8 @@ class RawStoreTest(SweepCase):
     def test_no_write_tools_connection_can_approve_skip_or_send_on_the_raw_store(self):
         calls = self.valid()
         statements = self.statements()
-        writers = [name for name in FIFTEEN if spec(name).grants]
-        self.assertEqual(len(writers), 10)
+        writers = [name for name in NINETEEN if spec(name).grants]
+        self.assertEqual(len(writers), 12)
         for name in writers:
             args, _named = calls[name] if name != "reader_submit" else self.valid()["reader_submit"]
             self.ok(name, args)

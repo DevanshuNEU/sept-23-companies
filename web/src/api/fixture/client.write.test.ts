@@ -1337,3 +1337,17 @@ describe('plan writes: skip, notes, wins, watch', () => {
     expect((await rejection(c.dismissWatch(first.id, opt()))).code).toBe('not_found');
   });
 });
+
+describe('the pulse', () => {
+  it('moves on with each write and not with a replayed request id or a read', async () => {
+    const c = client();
+    const start = (await c.pulse()).revision;
+    await c.today();
+    expect((await c.pulse()).revision).toBe(start);
+    const o = opt();
+    await c.pauseSending(o);
+    expect((await c.pulse()).revision).toBe(start + 1);
+    await c.pauseSending(o); // the same request id again is a replay, not a write
+    expect((await c.pulse()).revision).toBe(start + 1);
+  });
+});

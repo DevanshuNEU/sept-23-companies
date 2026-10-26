@@ -6,8 +6,8 @@ harness store with a fixed clock: `add_people` for an emailed engineer and a Lin
 the engineer, `save_linkedin_note` for the manager and `flag_review` once. The banned list and me.md are the test
 fixtures, set for the stage only. A tool call that fails stops the stage.
 
-Before the calls it keeps a fingerprint of every table no tool may write (`guard.NEVER_TABLES`) and the last event
-id; `register` leaves those and the ids the calls returned on the harness as `harness.mcp` (an `McpStage`).
+Before the calls it keeps a fingerprint of every table no tool may write (`guard.NEVER_TABLES`, and the bridge's
+`BRIDGE_TABLES`, which only `log_sent` writes) and the last event id; `register` leaves those and the ids the calls returned on the harness as `harness.mcp` (an `McpStage`).
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.mcp import server
-from outreach.mcp.guard import NEVER_TABLES
+from outreach.mcp.guard import BRIDGE_TABLES, NEVER_TABLES
 
 __all__ = ["register", "McpStage", "COMPANY", "never_fingerprint"]
 
@@ -36,9 +36,10 @@ BODY = ("Hi Eda,\n\nI read your post on how the Draftwell Labs ledger moved off 
 
 
 def never_fingerprint(conn) -> str:
-    """A hash of every row of every table no MCP tool may write."""
+    """A hash of every row of every table no MCP tool this stage calls may write (the bridge tables too: only
+    `log_sent` writes them, and the stage never calls it)."""
     digest = hashlib.sha256()
-    for table in sorted(NEVER_TABLES):
+    for table in sorted(NEVER_TABLES | BRIDGE_TABLES):
         digest.update(table.encode())
         for row in conn.execute(f"SELECT * FROM {table} ORDER BY 1"):
             digest.update(repr(tuple(row)).encode())

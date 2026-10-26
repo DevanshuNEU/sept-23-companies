@@ -3,9 +3,10 @@
 They record what Devanshu did by hand on a plan row and keep his notes. Nothing here sends, approves, reaches LinkedIn
 or confirms a reason line on anyone's behalf: `confirm_note` runs only from his click on the confirm route.
 
-- `log_request`: one `linkedin_log` row (`request_sent`) and one `linkedin_request` touch together (ruling 1), with a
-  context of source `plan` (#15's quota of 150 in any 7 days counts it). The touch's own key is the body's
-  `idempotencyKey`, so a press after the first commit landed (a new request id) finds the touch and writes nothing.
+- `log_request`: one `linkedin_log` row (`request_sent`) and one `linkedin_request` touch together (ruling 1), written by
+  `outreach.outcomes.requests.record_request` as every request log is, with a context of source `plan` (#15's quota
+  of 150 in any 7 days counts it). The touch's own key is the body's `idempotencyKey`, so a press after the first
+  commit landed (a new request id) finds the touch and writes nothing.
   On a company row (no person: company first, #9) he types the name of the person he asked: `add_candidate` finds
   them at the company by name or adds them (`added_by 'devanshu'`, role kind `other`, no sources), then the same two
   rows are written. The entry keeps no person; its request step is done by #15's company rule.
@@ -29,10 +30,10 @@ from outreach.api.models.plan import NoteDraft, PlanRow
 from outreach.api.models.plan_writes import LogAppliedBody, LogRequestBody
 from outreach.api.queries import plan as queries
 from outreach.api.queries.company import merge_parents, survivor_of
-from outreach.api.queries.outcomes import NOT_SAVED, newest_score_parts
+from outreach.api.queries.outcomes import NOT_SAVED
 from outreach.api.revisions import bump
 from outreach.drafts.followups import company_map, no_go_sets
-from outreach.outcomes.context import build_context
+from outreach.outcomes.requests import plan_context, record_request
 from outreach.outcomes.windows import day_bounds_utc, ny_day
 from outreach.plan.config import PlanConfig
 from outreach.plan.drafts import confirm_reason, save_linkedin_draft
@@ -88,23 +89,12 @@ def _keyed(conn: sqlite3.Connection, key: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM outreach_touch WHERE idempotency_key = ?", (key,)).fetchone()
 
 
-def _role_age(posting: sqlite3.Row | None, now: str) -> int | None:
-    """Days since the role was posted (else first seen), New York dates: as #15's `why.role.age_days`."""
-    if posting is None:
-        return None
-    since = date.fromisoformat(posting["posted_on"]) if posting["posted_on"] else \
-        date.fromisoformat(ny_day(posting["first_seen_at"]))
-    return max(0, (date.fromisoformat(ny_day(now)) - since).days)
-
-
 def _context(conn: sqlite3.Connection, entry: sqlite3.Row, survivor: int, role_kind: str | None,
              posting: sqlite3.Row | None, now: str) -> dict:
-    """`build_context(source='plan')`: the lane is the row's, the role kind the person's (None for an application),
-    the role age the posting's, the ranker version and signal values the company's newest score at write time."""
-    _, version, signals = newest_score_parts(conn, survivor)
-    return build_context(source="plan", lane=entry["list_group"], role_kind=role_kind,
-                         role_age_days=_role_age(posting, now), ranker_version=version, signals=signals,
-                         role_named=posting is not None)
+    """`plan_context`: the lane is the row's, the role kind the person's (None for an application), the role age
+    the posting's, the ranker version and signal values the company's newest score at write time."""
+    return plan_context(conn, lane=entry["list_group"], survivor=survivor, role_kind=role_kind, posting=posting,
+                        now=now)
 
 
 def _posting(conn: sqlite3.Connection, posting_id: int | None) -> sqlite3.Row | None:
@@ -179,11 +169,9 @@ def _write_request(ctx: WriteCtx, entry: sqlite3.Row, survivor: int, person: sql
     if found is not None:  # taken back on the LinkedIn page: the old touch stays, undone, under a derived key
         _release_key(ctx, found)
     # The log row first, the touch second, in one transaction: if either fails, neither stays.
-    conn.execute("INSERT INTO linkedin_log(person_id, kind, at, recorded_at) VALUES (?, 'request_sent', ?, ?)",
-                 (person["person_id"], ctx.now, ctx.now))
-    log_touch(conn, person_id=person["person_id"], company_id=survivor, channel="linkedin_request", sent_at=ctx.now,
-              context=context, posting_id=posting["posting_id"] if posting is not None else None,
-              idempotency_key=key)
+    record_request(conn, person_id=person["person_id"], company_id=survivor, sent_at=ctx.now, recorded_at=ctx.now,
+                   context=context, posting_id=posting["posting_id"] if posting is not None else None,
+                   idempotency_key=key)
     _bump_logged(ctx, entry)
 
 

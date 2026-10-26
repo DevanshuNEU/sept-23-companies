@@ -9,6 +9,8 @@ for _var, _prefix in (("OUTREACH_MAIL_HOME", "outreach-mail-test-"), ("OUTREACH_
                        ("OUTREACH_SOURCES_DIR", "outreach-sources-test-")):
     os.environ[_var] = tempfile.mkdtemp(prefix=_prefix)
 os.environ["OUTREACH_DB"] = os.path.join(tempfile.mkdtemp(prefix="outreach-db-test-"), "outreach.db")
+# The bridge reads the frozen contacted.txt; no test reads DevVault's. A missing file is what most tests want.
+os.environ["OUTREACH_CONTACTED_TXT"] = os.path.join(tempfile.mkdtemp(prefix="outreach-contacted-test-"), "none.txt")
 SCRATCH = True
 
 

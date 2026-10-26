@@ -7,7 +7,10 @@ live store outside the live checkout are refused exactly as everywhere else), th
    grants: approving, skipping, unapproving or reviving a message; a message born in any state but a drafted first
    email by claude; editing a message he saved or one already approved; any touch but a fresh open one; any
    evidence that is locked, by hand, confirmed, or a size, headcount, domain or hq that is not a guess; a LinkedIn
-   note not saved by claude as proposed; an event or review item by another actor; a reading or a queue row of any
+   note not saved by claude as proposed; any LinkedIn log row or outreach touch but a new request he says he sent
+   (a `request_sent` row and its `linkedin_request` touch under a `bridge:` key, no outcome, no undo, paired with
+   a log row that was not taken back and has no live touch), any insert there at all on a connection whose grants
+   do not insert there, and any change to either table; an event or review item by another actor; a reading or a queue row of any
    reader version but a side session's (`side-`, #32's `side_version`, which can never be promoted, so a reading
    from Claude never decides a posting), and on the night's queue rows any change but their order; any write at all
    to the tables in `NEVER_TABLES` (the sender, companies, no-go rows, decisions and the rest); and every DELETE.
@@ -29,20 +32,26 @@ from outreach.reader.version import is_side_sql
 from outreach.store import connect, db_path
 from outreach.store.db import normalise
 
-__all__ = ["Grant", "GrantError", "NEVER_TABLES", "NEVER_COLUMNS", "TRIGGER_PREFIX", "open_guarded",
+__all__ = ["Grant", "GrantError", "NEVER_TABLES", "NEVER_COLUMNS", "BRIDGE_TABLES", "TRIGGER_PREFIX", "open_guarded",
            "install_triggers", "install_authorizer", "check_grants", "check_store"]
 
 TRIGGER_PREFIX = "mcp_"
 
 # Tables no tool may write, ever. Claude's no-go is a Needs-you item he confirms (#9), never a no_go row.
+# `linkedin_log` and `outreach_touch` are not here: since the company-first ruling (#9, 2026-10-26) the bridge's
+# `log_sent` may insert a LinkedIn request Devanshu says he sent, and nothing else (the `_BRIDGE` triggers below; no
+# grant may update either table, `NEVER_COLUMNS`).
 NEVER_TABLES = frozenset({
-    "sender", "send_day", "api_request", "outreach_touch", "application", "linkedin_log", "inbound_message",
-    "inbound_seen",
+    "sender", "send_day", "api_request", "application", "inbound_message", "inbound_seen",
     "daily_list", "daily_list_entry", "company", "company_alias", "company_name_key", "no_go", "board", "board_read",
     "watched_page", "job_run", "ruleset", "decision", "schema_migration", "import_record", "mx_check", "win_seen",
     "watch_dismissal", "source", "company_source", "shared_key", "work_tier", "company_post", "company_score",
     "posting", "posting_body",
 })
+
+# The two tables only `log_sent` holds a grant on (insert only; tests/test_mcp_write_grants pins it). Every other
+# tool leaves them exactly as they were.
+BRIDGE_TABLES = frozenset({"linkedin_log", "outreach_touch"})
 
 # Columns no grant may name. `touch` maps to None: no column of a touch is ever updated through MCP.
 _MESSAGE_SEND_COLUMNS = frozenset({"touch_id", "seq", "due_on", "approved_at", "pending_rfc_id", "claimed_at",
@@ -54,6 +63,8 @@ NEVER_COLUMNS: dict[str, frozenset[str] | None] = {
     "linkedin_draft": frozenset({"draft_id", "person_id", "reason_state", "saved_by", "created_at"}),
     "read_queue": frozenset({"posting_id", "body_sha256", "reader_version", "enqueued_at"}),
     "posting_reading": None,
+    "linkedin_log": None,
+    "outreach_touch": None,
 }
 
 
@@ -95,6 +106,12 @@ _SEND_COLUMNS_CHANGED = " OR ".join(f"NEW.{c} IS NOT OLD.{c}" for c in sorted(_M
 
 # A reader version that is not a side session's (#32 `side_version`: `side-` and the files' version).
 _NOT_SIDE = f"NOT ({is_side_sql('{0}.reader_version')})"
+
+# The end of the merge chain of NEW.person_id's company (the company every read answers as), at most 32 steps.
+_CHAIN_END = ("WITH RECURSIVE chain(id, step) AS (SELECT p.company_id, 0 FROM main.person p "
+              "WHERE p.person_id = NEW.person_id UNION ALL SELECT c.merged_into, chain.step + 1 FROM chain "
+              "JOIN main.company c ON c.company_id = chain.id WHERE c.merged_into IS NOT NULL AND chain.step < 32) "
+              "SELECT id FROM chain ORDER BY step DESC LIMIT 1")
 
 _VALUE_TRIGGERS = (
     ("message_insert", "BEFORE INSERT ON main.message",
@@ -148,10 +165,39 @@ _VALUE_TRIGGERS = (
      "Claude only clears a review item; Devanshu resolves them"),
     ("event_insert", "BEFORE INSERT ON main.event", "NEW.actor IS NOT 'claude'",
      "an event from Claude has actor claude"),
+    # The bridge (#9, company-first ruling): a request he says he sent is one new request_sent log row, at most 5
+    # days before it is recorded and never after (log_sent itself takes 3 New York days; 5 leaves room for a clock
+    # change), with a note LinkedIn would take (300 characters), then its touch: a linkedin_request under a bridge
+    # key with no outcome and no undo, at the end of the person's merge chain, recorded at most 5 days after it was
+    # sent, at the time of a request_sent row of the same person that was not taken back and has no live touch yet.
+    # Never an accept, reply, referral, interview, offer, message, email touch, undo, replace or change.
+    ("linkedin_log_insert", "BEFORE INSERT ON main.linkedin_log",
+     "NEW.kind IS NOT 'request_sent' OR NEW.reply_kind IS NOT NULL OR NEW.undoes IS NOT NULL "
+     "OR length(NEW.note) > 300 OR NEW.at > NEW.recorded_at OR julianday(NEW.recorded_at) - julianday(NEW.at) > 5 "
+     "OR (NEW.entry_id IS NOT NULL AND EXISTS (SELECT 1 FROM main.linkedin_log r WHERE r.entry_id = NEW.entry_id))",
+     "Claude records only a LinkedIn request Devanshu says he sent, never an accept, reply, message or undo"),
+    ("linkedin_log_update", "BEFORE UPDATE ON main.linkedin_log", None, "Claude never changes the LinkedIn log"),
+    ("outreach_touch_insert", "BEFORE INSERT ON main.outreach_touch",
+     "NEW.channel IS NOT 'linkedin_request' OR NEW.person_id IS NULL OR NEW.email_touch_id IS NOT NULL "
+     "OR NEW.accepted_at IS NOT NULL OR NEW.replied_at IS NOT NULL OR NEW.reply_kind IS NOT NULL "
+     "OR NEW.referred_at IS NOT NULL OR NEW.interview_at IS NOT NULL OR NEW.offer_at IS NOT NULL "
+     "OR NEW.quiet_at IS NOT NULL OR NEW.undone_at IS NOT NULL OR NEW.revision IS NOT 1 "
+     "OR substr(NEW.idempotency_key, 1, 7) IS NOT 'bridge:' "
+     "OR julianday(NEW.created_at) - julianday(NEW.sent_at) > 5 "
+     "OR (NEW.touch_id IS NOT NULL AND EXISTS (SELECT 1 FROM main.outreach_touch r WHERE r.touch_id = NEW.touch_id)) "
+     f"OR NEW.company_id IS NOT ({_CHAIN_END}) "
+     "OR NOT EXISTS (SELECT 1 FROM main.linkedin_log l WHERE l.person_id = NEW.person_id "
+     "AND l.kind = 'request_sent' AND l.at = NEW.sent_at "
+     "AND NOT EXISTS (SELECT 1 FROM main.linkedin_log u WHERE u.undoes = l.entry_id)) "
+     "OR EXISTS (SELECT 1 FROM main.outreach_touch t WHERE t.person_id = NEW.person_id "
+     "AND t.channel = 'linkedin_request' AND t.sent_at = NEW.sent_at AND t.undone_at IS NULL)",
+     "a touch from Claude is a LinkedIn request he sent, logged by log_sent, with no outcome"),
+    ("outreach_touch_update", "BEFORE UPDATE ON main.outreach_touch", None,
+     "Claude never changes a touch: no reply, interview, referral or undo"),
 )
 
 
-def _trigger_sql(conn: sqlite3.Connection) -> list[str]:
+def _trigger_sql(conn: sqlite3.Connection, grants: Mapping[str, Grant]) -> list[str]:
     statements = []
     for name, when_on, condition, why in _VALUE_TRIGGERS:
         when = f" WHEN {condition}" if condition else ""
@@ -162,6 +208,11 @@ def _trigger_sql(conn: sqlite3.Connection) -> list[str]:
     for table in tables:
         statements.append(f"CREATE TEMP TRIGGER {TRIGGER_PREFIX}no_delete_{table} BEFORE DELETE ON main.{table} "
                           f"FOR EACH ROW BEGIN {_refuse('Claude never deletes a row')} END")
+        if table in BRIDGE_TABLES and not (grants.get(table) and grants[table].insert):
+            # Only log_sent's connection may insert here; on every other tool's it stays a never table.
+            statements.append(
+                f"CREATE TEMP TRIGGER {TRIGGER_PREFIX}never_insert_{table} BEFORE INSERT ON main.{table} "
+                f"FOR EACH ROW BEGIN {_refuse(f'Claude never writes {table}')} END")
         if table in NEVER_TABLES:
             for verb in ("INSERT", "UPDATE"):
                 statements.append(
@@ -170,9 +221,10 @@ def _trigger_sql(conn: sqlite3.Connection) -> list[str]:
     return statements
 
 
-def install_triggers(conn: sqlite3.Connection) -> None:
-    """Adds the guard's temp triggers to `conn` (layer 1). They live only as long as the connection."""
-    for sql in _trigger_sql(conn):
+def install_triggers(conn: sqlite3.Connection, grants: Mapping[str, Grant] | None = None) -> None:
+    """Adds the guard's temp triggers to `conn` (layer 1). They live only as long as the connection. `grants` only
+    decide whether the bridge tables are never tables on this connection (they are unless the grant inserts)."""
+    for sql in _trigger_sql(conn, dict(grants or {})):
         conn.execute(sql)
 
 
@@ -213,7 +265,7 @@ def open_guarded(grants: Mapping[str, Grant] | None = None, *, path: str | None 
     check_grants(grants)
     conn = connect(path)
     try:
-        install_triggers(conn)
+        install_triggers(conn, grants)
         install_authorizer(conn, grants)
     except BaseException:
         conn.close()

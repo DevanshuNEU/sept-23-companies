@@ -37,7 +37,7 @@ from outreach.sources.keys import EMAIL, linkedin_key
 from outreach.sources.keys import person_name_key as name_key
 from outreach.store import append_event, transaction
 
-__all__ = ["TOOLS", "linkedin_key", "said_no_ids"]
+__all__ = ["TOOLS", "PersonIn", "SourceIn", "clean_people", "record_people", "linkedin_key", "said_no_ids"]
 
 class SourceIn(Input):
     kind: Literal["profile", "team", "context", "email", "post"]
@@ -205,42 +205,53 @@ def _new(ctx: Ctx, want: dict, survivor: int, flags: list[str]) -> dict:
             if flags else None}
 
 
-def add_people(ctx: Ctx, args: AddPeopleInput) -> dict:
+def clean_people(people) -> list[dict]:
+    """Every person as stored, checked before any write: bad_input names `people.<i>` for the first problem."""
+    return [_clean(i, p) for i, p in enumerate(people)]
+
+
+def record_people(ctx: Ctx, company_id: int, wanted: list[dict]) -> dict:
+    """The add_people rules for people already through `clean_people`, inside the caller's transaction. `intake`
+    records the people he pastes through this same door."""
     conn = ctx.conn
-    wanted = [_clean(i, p) for i, p in enumerate(args.people)]  # the whole call is checked before any write
-    with transaction(conn):
-        family, survivor, note = resolve(conn, args.company_id)
-        main = company_row(conn, survivor)
-        no_go_people, no_go_companies = no_go_sets(conn, family.companies)
-        if main["status"] == "removed":
-            raise ToolError("company_removed", f"{main['name']} was removed, so no one is added there.",
-                            "Tell Devanshu if it should come back.")
-        if survivor in no_go_companies:
-            raise ToolError("company_no_go", f"{main['name']} is on the no-go list, so no one is added there.",
-                            "Nothing goes to anyone at a no-go company. Tell Devanshu if that should change.")
-        ids = family.members(survivor)
-        results = []
-        for i, want in enumerate(wanted):
-            known, conflict = _match(conn, want)
-            namesakes = _namesakes(conn, want, ids)
-            stopped = _stop_reason(conn, namesakes, no_go_people)
-            if conflict is not None:
-                out = {"person_id": None, "created": False, "refused": "two_people", "flags": [],
-                       "message": conflict + " Nothing was added for this person."}
-            elif known is not None:
-                out = _known(ctx, known, want, family=family, survivor=survivor, no_go_people=no_go_people)
-            elif stopped is not None:  # a new address or profile never brings back someone who must not be emailed
-                out = stopped
-            elif namesakes and not want["email"] and not want["linkedin"]:
-                out = {"person_id": namesakes[0]["person_id"], "created": False, "refused": None,
-                       "flags": ["duplicate", "name_only_match"],
-                       "message": "Matched by name only, so nothing was filled in or added for them. Give their "
-                                  "email or LinkedIn URL to add details."}
-            else:
-                out = _new(ctx, want, survivor, [f"same_name_as:{p['person_id']}" for p in namesakes])
-            results.append({"index": i, "name": want["name"], **out})
+    family, survivor, note = resolve(conn, company_id)
+    main = company_row(conn, survivor)
+    no_go_people, no_go_companies = no_go_sets(conn, family.companies)
+    if main["status"] == "removed":
+        raise ToolError("company_removed", f"{main['name']} was removed, so no one is added there.",
+                        "Tell Devanshu if it should come back.")
+    if survivor in no_go_companies:
+        raise ToolError("company_no_go", f"{main['name']} is on the no-go list, so no one is added there.",
+                        "Nothing goes to anyone at a no-go company. Tell Devanshu if that should change.")
+    ids = family.members(survivor)
+    results = []
+    for i, want in enumerate(wanted):
+        known, conflict = _match(conn, want)
+        namesakes = _namesakes(conn, want, ids)
+        stopped = _stop_reason(conn, namesakes, no_go_people)
+        if conflict is not None:
+            out = {"person_id": None, "created": False, "refused": "two_people", "flags": [],
+                   "message": conflict + " Nothing was added for this person."}
+        elif known is not None:
+            out = _known(ctx, known, want, family=family, survivor=survivor, no_go_people=no_go_people)
+        elif stopped is not None:  # a new address or profile never brings back someone who must not be emailed
+            out = stopped
+        elif namesakes and not want["email"] and not want["linkedin"]:
+            out = {"person_id": namesakes[0]["person_id"], "created": False, "refused": None,
+                   "flags": ["duplicate", "name_only_match"],
+                   "message": "Matched by name only, so nothing was filled in or added for them. Give their "
+                              "email or LinkedIn URL to add details."}
+        else:
+            out = _new(ctx, want, survivor, [f"same_name_as:{p['person_id']}" for p in namesakes])
+        results.append({"index": i, "name": want["name"], **out})
     return {"company": {"id": survivor, "name": main["name"], "status": main["status"]}, "merged_note": note,
             "results": results}
+
+
+def add_people(ctx: Ctx, args: AddPeopleInput) -> dict:
+    wanted = clean_people(args.people)  # the whole call is checked before any write
+    with transaction(ctx.conn):
+        return record_people(ctx, args.company_id, wanted)
 
 
 TOOLS = (

@@ -3,8 +3,9 @@
 A step is one `linkedin_log` row and, for the steps that make an outcome record, the `outreach_touch` row, written
 together in the caller's transaction (`run_write`):
 
-- `request_sent` makes a `linkedin_request` touch and `message_sent` a `linkedin_message` touch, both with a context
-  of source `own` (a request logged from a plan row goes through Task 11 and has source `plan`);
+- `request_sent` makes a `linkedin_request` touch (through `outreach.outcomes.requests.record_request`, as every
+  request log does) and `message_sent` a `linkedin_message` touch, both with a context of source `own` (a request
+  logged from a plan row goes through Task 11 and has source `plan`);
 - `accepted` sets `accepted_at` on the request touch and `replied` the reply on the message touch (the request touch
   when no message went out), through Task 12's `answer`, so a stop reply adds the person's `no_go` and stops their
   unsent email there too;
@@ -38,6 +39,7 @@ from outreach.api.queries.company import (
 from outreach.api.queries.outcomes import NOT_SAVED, by_ids, company_refs
 from outreach.api.queries.people import day, live_steps
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
+from outreach.outcomes.requests import record_request
 from outreach.outcomes.windows import day_bounds_utc, week_bounds
 from outreach.store import log_touch, undo_touch
 
@@ -282,9 +284,13 @@ def _log_outbound(ctx: WriteCtx, row: sqlite3.Row, step: str, parents: dict[int,
         raise _refuse(f"{row['name']} is on the no-go list, so nothing goes to them. Lift it first.")
     role = roles(conn, parents, {survivor}).get(survivor)  # the role the list shows beside them
     context = outcomes.own_context(conn, survivor, row["role_kind"], role.first_seen_at if role else None, ctx.now)
+    key = f"linkedin:{ctx.request_id}"
+    if step == "request_sent":  # the one write every request log goes through
+        record_request(conn, person_id=row["person_id"], company_id=survivor, sent_at=ctx.now, recorded_at=ctx.now,
+                       context=context, posting_id=role.posting_id if role else None, idempotency_key=key)
+        return person_view(conn, row["person_id"])
     log_touch(conn, person_id=row["person_id"], company_id=survivor, channel=TOUCH_OF_STEP[step], sent_at=ctx.now,
-              context=context, posting_id=role.posting_id if role else None,
-              idempotency_key=f"linkedin:{ctx.request_id}")
+              context=context, posting_id=role.posting_id if role else None, idempotency_key=key)
     _append(ctx, row["person_id"], step)
     return person_view(conn, row["person_id"])
 

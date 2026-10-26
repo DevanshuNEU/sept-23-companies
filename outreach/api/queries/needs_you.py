@@ -124,8 +124,8 @@ def review_items(conn: sqlite3.Connection, rows: list[sqlite3.Row], parents: dic
         canon = canonical_ids(conn)
     except MergeLoop:
         # A `merged_into` loop is store corruption. Follow no merge for this request (each company is its own
-        # survivor) rather than fail the list or read it as "nobody in play": a working company, or one with a
-        # queued email, still counts. Any other error (a bad list date) surfaces as before.
+        # survivor) rather than fail the list or read it as "nobody in play": a company on the latest plan, or one
+        # with a queued email, still counts. Any other error (a bad list date) surfaces as before.
         log.warning("Needs you: a merged_into loop in the store; merges are not followed for in-play and emailing "
                     "on this request.")
         canon = {}

@@ -28,6 +28,7 @@ class PlayTest(unittest.TestCase):
     def test_a_given_mapping_is_used_instead_of_following_merges(self):
         # The API passes the identity mapping ({}) when the store has a merged_into loop.
         working = self.company(status="working")
+        seed_plan_row(self.conn, working, TODAY, "picked")
         seed_queued_message(self.conn, seed_email_person(self.conn, working), "drafted")
         x, y = self.company(), self.company()
         for a, b in ((x, y), (y, x)):
@@ -39,10 +40,18 @@ class PlayTest(unittest.TestCase):
         self.assertEqual(emailing(self.conn, today=TODAY, planned_days=DAYS, canon={}), {working})
         self.assertEqual(live_company_ids(self.conn, canon={}), {working})
 
-    def test_working_company_is_in_play_as_picked(self):
-        working = self.company(status="working")
+    def test_working_company_on_no_plan_is_not_in_play(self):
+        # The importer sets `working` on every company he ever touched; that alone is not a pick.
+        self.company(status="working")
         self.company()
-        self.assertEqual(self.play(), {working: "picked"})
+        self.assertEqual(self.play(), {})
+
+    def test_working_company_is_in_play_once_the_latest_list_has_it(self):
+        proposed, picked, bare = (self.company(status="working") for _ in range(3))
+        seed_plan_row(self.conn, proposed, TODAY, "proposed", person_id=seed_email_person(self.conn, proposed))
+        seed_plan_row(self.conn, picked, TODAY, "picked")
+        seed_plan_row(self.conn, bare, TODAY, "proposed")  # no person: a find-someone row is not in play
+        self.assertEqual(self.play(), {proposed: "planned", picked: "picked"})
 
     def test_ready_plan_row_is_in_play_as_planned_and_a_find_someone_row_is_not(self):
         ready, find = self.company(), self.company()
@@ -59,11 +68,11 @@ class PlayTest(unittest.TestCase):
         seed_plan_row(self.conn, picked_alone, TODAY, "picked")
         self.assertEqual(self.play(), {both: "picked", picked_alone: "picked"})
 
-    def test_picked_beats_planned_across_the_working_status(self):
+    def test_status_does_not_change_the_plan_basis(self):
         cid = self.company(status="working")
         person = seed_email_person(self.conn, cid)
         seed_plan_row(self.conn, cid, TODAY, "proposed", person_id=person)
-        self.assertEqual(self.play(), {cid: "picked"})
+        self.assertEqual(self.play(), {cid: "planned"})
 
     def test_backlog_and_removed_rows_are_not_in_play(self):
         a, b = self.company(), self.company()
@@ -82,8 +91,14 @@ class PlayTest(unittest.TestCase):
         seed_plan_row(self.conn, cid, "2026-11-05", "picked")
         self.assertEqual(self.play(), {})
         self.assertEqual(self.play(today="2026-11-09"), {cid: "picked"})
+        self.company(status="working")
+        self.assertEqual(self.play(), {})
+
+    def test_a_working_company_on_an_old_plan_is_not_in_play(self):
         working = self.company(status="working")
-        self.assertEqual(self.play(), {working: "picked"})
+        seed_plan_row(self.conn, working, "2026-11-05", "picked", person_id=seed_email_person(self.conn, working))
+        self.assertEqual(self.play(), {})
+        self.assertEqual(self.play(today="2026-11-09"), {working: "picked"})
 
     def test_merged_removed_closed_and_no_go_companies_are_never_in_play(self):
         keep = self.company()
@@ -139,6 +154,7 @@ class PlayTest(unittest.TestCase):
 
     def test_an_active_no_go_on_a_duplicate_bars_the_keeper_and_a_lifted_one_does_not(self):
         keeper, dupe, far = self.company(status="working"), self.company(), self.company()
+        seed_plan_row(self.conn, keeper, TODAY, "picked")
         self.merge(dupe, keeper)
         self.merge(far, dupe)  # a chain: far into dupe into keeper
         self.conn.execute("INSERT INTO no_go(company_id, reason, source, created_at) "

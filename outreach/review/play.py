@@ -1,5 +1,8 @@
 """Which companies he has picked or planned, and which he is emailing (#16, Decisions).
 
+A company is picked or planned only by the latest daily list, never by its status: the importer sets `working` on
+every company he ever touched, so status says nothing about what he chose today.
+
 Items for size and domain are raised only for these companies, so the list never floods: of 18,000 stored
 companies a plan names at most 60. Each function is a few set-based queries, never one per company.
 """
@@ -58,16 +61,14 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
 
     A plan row or person on a company merged into another counts for the company it ended up in.
 
-    Picked: the company is `working`, or the latest list has it as `picked`. Planned: the latest list has it
-    `proposed` or `picked` with a named person. The latest list counts only when its date is within `planned_days`
-    of `today`. `canon` as in `live_company_ids`.
+    Picked: the latest list has it as `picked`. Planned: the latest list has it `proposed` or `picked` with a named
+    person. The latest list counts only when its date is within `planned_days` of `today`, so with no recent list
+    nobody is in play. Status plays no part here beyond `live_company_ids`: a `working` company on no plan is not in
+    play. `canon` as in `live_company_ids`.
     """
     canon = canonical_ids(conn) if canon is None else canon
     live = live_company_ids(conn, canon=canon)
     out: dict[int, str] = {}
-    for (cid,) in conn.execute("SELECT company_id FROM company WHERE status = 'working'"):
-        if cid in live:
-            out[cid] = "picked"
     when = recent_list_date(conn, today, planned_days)
     if when is not None:
         for row in conn.execute("SELECT company_id, state, person_id FROM daily_list_entry WHERE list_date = ?",

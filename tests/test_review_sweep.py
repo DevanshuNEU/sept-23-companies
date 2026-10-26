@@ -144,6 +144,17 @@ class ClearStaleTest(SweepBase):
         for review_id in (b, d, e):
             self.assertEqual(self.state(review_id), ("resolved", "cleared", "No longer in your plan."))
 
+    def test_a_working_company_that_left_the_plan_is_cleared_only_after_the_stale_age(self):
+        left = self.company("Left", "working")
+        self.plan(self.company())  # the latest list exists but no longer holds `left`
+        a = seed_item(self.conn, "size_unknown", left)
+        self.old(a, days=13)
+        self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 0)
+        self.assertEqual(self.state(a)[0], "open")
+        self.old(a, days=14)
+        self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 1)
+        self.assertEqual(self.state(a), ("resolved", "cleared", "No longer in your plan."))
+
     def test_with_no_ranked_list_old_sponsorship_items_are_held_and_the_report_says_so(self):
         out = self.company("Out")
         self.plan(self.company())

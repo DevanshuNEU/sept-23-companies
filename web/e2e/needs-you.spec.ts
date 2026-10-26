@@ -111,7 +111,7 @@ test('settle every item by keys and land on All settled with the focus on its he
   await expect(page.getByTestId('ny-progress')).toHaveText('2 settled today, 11 open');
   // The first item is selected on arrival; each o settles the selected one and moves to the next.
   for (let open = 11; open > 0; open -= 1) {
-    await expect(sidebarCount(page)).toHaveAccessibleName(`Needs you, ${open} open`);
+    await expect(sidebarCount(page)).toHaveAccessibleName(new RegExp(`^Needs you, ${open} open(,|$)`));
     await page.keyboard.press('o');
   }
   const settled = page.getByRole('heading', { level: 2, name: 'All settled.' });

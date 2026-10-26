@@ -88,15 +88,15 @@ function DetailPlaceholder() {
  */
 function Preselect({ items, selected, onSelect }: { items: OutboxView['items']; selected: Id | null; onSelect: (touchId: Id) => void }) {
   // Once only: after the first pick, or after he has chosen a row himself, it never picks again, so clearing the
-  // selection or a slow first paint cannot send him back to the first row.
-  const [armed, setArmed] = useState(true);
-  const first = armed && selected === null ? firstToAct(items) : null;
+  // selection or a slow first paint cannot send him back to the first row. The ref is read and written in effects only.
+  const done = useRef(false);
+  const first = selected === null ? firstToAct(items) : null;
   useEffect(() => {
-    if (selected !== null) setArmed(false);
+    if (selected !== null) done.current = true;
   }, [selected]);
   useEffect(() => {
-    if (first !== null) {
-      setArmed(false);
+    if (first !== null && !done.current) {
+      done.current = true;
       onSelect(first);
     }
   }, [first, onSelect]);

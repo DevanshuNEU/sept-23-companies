@@ -72,6 +72,32 @@ class ContactStateTest(unittest.TestCase):
         s = state([row(30, person=1), row(20, person=1, channel="linkedin_message")])
         self.assertEqual(s.people_contacted, 1)
 
+    def test_a_full_wave_waits_fourteen_days(self):
+        # #9 company first: one wave of up to queue.requests_per_company people, then the company waits.
+        s = state([row(6, person=p) for p in (1, 2, 3, 4)])
+        self.assertEqual((s.status, s.wave_people, s.wave_room, s.free_on), ("waiting", 4, 0, ago(6) + timedelta(days=14)))
+
+    def test_a_wave_with_room_lets_him_add_the_rest_the_same_day(self):
+        s = state([row(0, person=1), row(0, person=2)])
+        self.assertEqual((s.status, s.wave_people, s.wave_room, s.free_on), ("waiting", 2, 2, TODAY + timedelta(days=14)))
+        s = state([row(0, person=p) for p in (1, 2, 3)])
+        self.assertEqual((s.wave_people, s.wave_room), (3, 1))
+        s = state([row(0, person=p) for p in (1, 2, 3, 4, 5)])  # he sent more than a wave: never negative
+        self.assertEqual((s.wave_people, s.wave_room), (5, 0))
+
+    def test_the_wave_counts_people_inside_the_window_once(self):
+        s = state([row(30, person=1), row(3, person=2), row(2, person=2, channel="linkedin_message")])
+        self.assertEqual((s.people_contacted, s.wave_people, s.wave_room), (2, 1, 3))
+        self.assertEqual(s.free_on, ago(2) + timedelta(days=14))
+
+    def test_free_stale_and_engaged_waves(self):
+        free = state([])
+        self.assertEqual((free.wave_people, free.wave_room, free.free_on), (0, 4, None))
+        stale = state([row(20, person=1), row(15, person=2)])
+        self.assertEqual((stale.status, stale.wave_people, stale.wave_room, stale.free_on), ("stale", 0, 4, None))
+        engaged = state([row(3, person=1, replied=True)])
+        self.assertEqual((engaged.status, engaged.wave_people, engaged.wave_room), ("engaged", 1, 0))
+
     def test_reason_lines(self):
         self.assertEqual(state([row(5)]).reason, "Request sent 5 days ago, no answer yet")
         self.assertEqual(state([row(1, channel="email")]).reason, "Email sent 1 day ago, no answer yet")

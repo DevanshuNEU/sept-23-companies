@@ -44,8 +44,10 @@ export function smallSampleNote(p: Pick<ProgressPeriod, 'enough'>, requests: num
 
 /** What today's plan has done so far, in a fixed order, zero counts left out. */
 export function didToday(rows: PlanRow[]): { label: string; count: number }[] {
+  // A company row's request step stands for the wave he sent there (company first, #9): count its people.
+  const asked = (r: PlanRow) => (r.queue ? Math.max(1, r.queue.standing.asked) : 1);
   const doneSteps = (kind: 'request' | 'apply') =>
-    rows.reduce((n, r) => n + r.steps.filter((s) => s.kind === kind && s.at !== null).length, 0);
+    rows.reduce((n, r) => n + r.steps.filter((s) => s.kind === kind && s.at !== null).length * (kind === 'request' ? asked(r) : 1), 0);
   const emails = rows.filter((r) => r.channel === 'email' && r.state === 'done').length;
   return [
     { label: 'Requests sent', count: doneSteps('request') },

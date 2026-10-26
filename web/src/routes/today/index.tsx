@@ -22,14 +22,15 @@ import { cn } from '@/lib/utils';
 import { openExternal, safeHref } from '@/lib/safe-href';
 import { useViewQuery } from '@/pending/pending';
 import { RemoveDialog } from '@/routes/proposals/remove-dialog';
+import { CompanyPanel } from './company-panel';
 import { EmailRowPanel } from './email-row-panel';
 import { FinishPanel } from './finish-panel';
-import { FindSomeonePanel } from './find-someone-panel';
+import { InFlightList } from './in-flight-list';
 import type { NoteEdit } from './note-editor';
 import { KeyHint, PersonPanel, type PanelActions } from './plan-panel';
 import { PlanEmpty, PlanJobBanner, PlanNotReady, PlanSkeleton } from './plan-states';
 import { OutcomePrompt } from './outcome-prompt';
-import { askedFieldId, nextTodoAfter } from './plan-steps';
+import { isCompanyRow, nextTodoAfter, peopleFieldId } from './plan-steps';
 import { usePlanActions } from './use-plan-actions';
 import { WatchList } from './watch-list';
 import { WinStrip } from './win-strip';
@@ -48,8 +49,12 @@ async function copy(text: string, done: string) {
 /** The row's name as the rail and the live region say it. */
 function nameOf(row: PlanRow): string {
   if (row.channel === 'email') return `${row.company.name} by email`;
+  if (isCompanyRow(row)) return row.company.name;
   return `${row.person?.person.name ?? 'Find someone'} at ${row.company.name}`;
 }
+
+/** A queue of companies (company first, #9): every row is a company row, so the page counts companies. */
+const isQueue = (plan: PlanView) => plan.rows.length > 0 && plan.rows.every(isCompanyRow);
 
 /** Whether logging this step is the one that finishes the row, so the selection moves on. */
 const finishes = (row: PlanRow, kind: StepKind) =>
@@ -62,9 +67,10 @@ const without = (rows: PlanRow[], entryId: Id): PlanRow[] => rows.map((r) => (r.
  * Below the plan, quiet (design 16.1): the 7-day question, then the watch list. Each part draws nothing when it has nothing to say, so the
  * rule above them only shows with something under it.
  */
-function BelowPlan({ className }: { className?: string }) {
+function BelowPlan({ className, plan }: { className?: string; plan?: PlanView }) {
   return (
-    <div className={cn('mt-8 grid max-w-[720px] empty:hidden', className)}>
+    <div className={cn('mt-8 grid max-w-[720px] gap-6 empty:hidden', className)}>
+      {plan ? <InFlightList items={plan.inFlight} /> : null}
       <OutcomePrompt />
       <WatchList />
     </div>
@@ -81,7 +87,11 @@ function PlanHead({ plan }: { plan: PlanView }) {
       <div>
         <h2 className="text-xl leading-7 font-semibold tracking-[-0.01em]">{formatLongDate(plan.date)}</h2>
         {plan.notReady ? null : (
-          <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums">{`${plural(plan.total, 'person', 'people')}, ${plan.done} done${carried > 0 ? `, ${carried} carried over` : ''}`}</p>
+          <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums">
+            {isQueue(plan)
+              ? `${plural(plan.total, 'company', 'companies')}, ${plan.done} reached${carried > 0 ? `, ${carried} carried over` : ''}`
+              : `${plural(plan.total, 'person', 'people')}, ${plan.done} done${carried > 0 ? `, ${carried} carried over` : ''}`}
+          </p>
         )}
       </div>
       <div className="ml-auto flex items-center gap-2 text-[13px]">
@@ -165,17 +175,23 @@ function PlanWork({ plan }: { plan: PlanView }) {
 
   /* ------------------------------------------------------------------ what each key and button does */
 
-  const log = (row: PlanRow, kind: StepKind) => {
-    // A company row logs a request from its "Who did you ask?" field: R puts the cursor there, Enter logs it.
-    const field = kind === 'request' && row.person === null && row.channel !== 'email' ? document.getElementById(askedFieldId(headingId)) : null;
+  /** A company row's Log people box: L (and R) put the cursor there; Cmd+Enter or the button logs the paste. */
+  const focusPeople = (row: PlanRow) => {
+    const field = document.getElementById(peopleFieldId(headingId));
     if (field) return void requestAnimationFrame(() => field.focus());
+    toast(row.state === 'skipped' ? `${row.company.name} is carried to tomorrow.` : `Nothing to log at ${row.company.name}: its wave is full.`);
+  };
+  const log = (row: PlanRow, kind: StepKind) => {
+    if (kind === 'request' && isCompanyRow(row)) return focusPeople(row);
     const done = finishes(row, kind);
     const queued = kind === 'request' ? actions.logRequest(row) : actions.logApplied(row);
     if (queued && done) moveOn(row);
   };
-  const logAsked = (row: PlanRow, name: string) => {
+  const logPeople = (row: PlanRow, lines: string): boolean => {
     const done = finishes(row, 'request');
-    if (actions.logRequest(row, name) && done) moveOn(row);
+    const queued = actions.logPeople(row, lines);
+    if (queued && done) moveOn(row);
+    return queued;
   };
   const carry = (row: PlanRow) => {
     if (actions.skip(row)) moveOn(row);
@@ -209,8 +225,13 @@ function PlanWork({ plan }: { plan: PlanView }) {
         ? 'Copied. One fact has no link: check it before you send.'
         : `Copied. ${unlinked} facts have no link: check them before you send.`;
   };
-  const copyNote = (row: PlanRow) => {
+  /** A company row: the one line his terminal skills read (`Knock: <Company> (company <id>), role: <title>`). */
+  const copyLine = (row: PlanRow) => {
+    if (row.queue) return void copy(row.queue.terminalLine, 'Copied the line for your terminal.');
     if (row.findSomeone) return void copy(row.findSomeone.handoff, 'Copied the handoff.');
+  };
+  const copyNote = (row: PlanRow) => {
+    if (row.queue || row.findSomeone) return copyLine(row);
     const note = row.note;
     if (!note) return void toast(row.channel === 'email' ? 'No note on this row. Review the email in the Outbox.' : 'No note on this row yet.');
     const refusal = copyRefusal(row, note);
@@ -242,13 +263,15 @@ function PlanWork({ plan }: { plan: PlanView }) {
     else navigate(`/companies/${row.company.id}`);
   }
   const copyAllHandoffs = () => {
+    const queueLines = rows.flatMap((r) => (r.state === 'todo' && r.queue ? [r.queue.terminalLine] : []));
+    if (queueLines.length > 0) return void copy(queueLines.join('\n'), `Copied ${plural(queueLines.length, 'line', 'lines')} for your terminal.`);
     const handoffs = rows.flatMap((r) => (r.state === 'todo' && r.findSomeone ? [r.findSomeone.handoff] : []));
-    if (handoffs.length === 0) return void toast('Nothing copied. No row today needs someone found.');
+    if (handoffs.length === 0) return void toast('Nothing copied. No company on today\'s list is still to do.');
     void copy(handoffs.join('\n\n'), `Copied ${plural(handoffs.length, 'handoff', 'handoffs')}.`);
   };
   const edit = (row: PlanRow) => {
     const note = row.note;
-    if (!note) return void toast(row.findSomeone ? 'No note on a company row. You write your own notes.' : 'No note on this row.');
+    if (!note) return void toast(isCompanyRow(row) ? 'No note on a company row. You write your own notes.' : 'No note on this row.');
     if (!edits.has(note.noteId)) setEdit(note.noteId, { text: note.text, line: note.reasonLine });
     // Focus goes into the editor only when he starts an edit, never when he comes back to a row with a kept one.
     requestAnimationFrame(() => document.getElementById(noteFieldId)?.focus());
@@ -281,7 +304,9 @@ function PlanWork({ plan }: { plan: PlanView }) {
   };
   const panelActions = (row: PlanRow): PanelActions => ({
     onLog: (kind) => log(row, kind),
-    onLogAsked: (name) => logAsked(row, name),
+    onLogPeople: (lines) => logPeople(row, lines),
+    onSaveSearch: (url) => actions.saveSearch(row, url),
+    onCopyLine: () => copyLine(row),
     onCarry: () => carry(row),
     onNotFit: () => askNotAFit(row),
     onCopy: () => copyNote(row),
@@ -303,16 +328,25 @@ function PlanWork({ plan }: { plan: PlanView }) {
   };
   const has = current !== null;
   const editing = current?.note ? edits.has(current.note.noteId) : false;
+  const company = current !== null && isCompanyRow(current);
+  const person = current?.person ?? null;
   const onRow: Binding[] = [
-    { keys: 'l', label: 'Open profile', group, enabled: has, run: on((r) => open(r.person?.person.linkedinUrl, r.person ? `No profile link for ${r.person.person.name}.` : 'Nobody on this row yet. Press S to search.')) },
-    { keys: 'o', label: 'Open role', group, enabled: has, run: on((r) => open(r.role?.url, 'No role on this row.')) },
-    { keys: 'a', label: 'Open the apply page', group, enabled: has, run: on((r) => open(r.applyUrl, 'No apply page on this row.')) },
-    { keys: 's', label: 'Open LinkedIn search', group, enabled: has, run: on((r) => open(r.findSomeone?.searchUrl, 'This row already has someone. Press L to open their profile.')) },
-    { keys: 'c', label: 'Copy the note or handoff', group, enabled: has, run: on(copyNote) },
-    { keys: 'e', label: 'Edit the note', group, enabled: has, run: on(edit) },
-    { keys: 'y', label: 'Confirm your line', group, enabled: has, run: on(confirm) },
-    { keys: 'r', label: 'Log request sent', group, enabled: has, run: on((r) => log(r, 'request')) },
-    { keys: 'p', label: 'Log applied', group, enabled: has, run: on((r) => log(r, 'apply')) },
+    // L: the profile on a person row; the Log people box on a company row (company first, #9).
+    {
+      keys: 'l', label: company ? 'Log people you asked' : 'Open profile', group, enabled: has,
+      run: on((r) => (isCompanyRow(r) ? focusPeople(r) : open(r.person?.person.linkedinUrl, r.person ? `No profile link for ${r.person.person.name}.` : 'Nobody on this row.'))),
+    },
+    {
+      keys: 'o', label: company ? 'Open the careers page' : 'Open role', group, enabled: has,
+      run: on((r) => (r.queue ? open(r.queue.careersUrl, `No careers page known for ${r.company.name}.`) : open(r.role?.url, 'No role on this row.'))),
+    },
+    { keys: 's', label: 'Open LinkedIn search', group, enabled: has, run: on((r) => open(r.queue?.peopleSearchUrl ?? r.findSomeone?.searchUrl, 'This row already has someone. Press L to open their profile.')) },
+    { keys: 'c', label: company ? 'Copy the line for your terminal' : 'Copy the note', group, enabled: has, run: on(copyNote) },
+    { keys: 'a', label: 'Log applied', group, enabled: has, run: on((r) => log(r, 'apply')) },
+    // The note keys and R act on a person row only; a company row has no note, and its people are logged with L.
+    { keys: 'e', label: 'Edit the note', group, enabled: has && person !== null, run: on(edit) },
+    { keys: 'y', label: 'Confirm your line', group, enabled: has && person !== null, run: on(confirm) },
+    { keys: 'r', label: company ? 'Log people you asked' : 'Log request sent', group, enabled: has, run: on((r) => log(r, 'request')) },
     { keys: 'x', label: 'Carry to tomorrow', group, enabled: has, run: on(carry) },
     // Only a row to do has a Not a fit button, so only a row to do answers n.
     { keys: 'n', label: 'Not a fit', group, enabled: current?.state === 'todo', run: on(askNotAFit) },
@@ -320,13 +354,15 @@ function PlanWork({ plan }: { plan: PlanView }) {
   ];
   // These act on the selected person, so a key right after j, k or a click waits for that move to render.
   useHotkeys(onRow, { selection: selected });
-  useHotkeys([{ keys: 'shift+c', label: 'Copy every find-someone handoff', group, run: copyAllHandoffs }]);
+  useHotkeys([{ keys: 'shift+c', label: isQueue(plan) ? 'Copy every company line for the terminal' : 'Copy every find-someone handoff', group, run: copyAllHandoffs }]);
 
   /* ------------------------------------------------------------------ layout */
 
   let panel = (
     <p className="max-w-[62ch] text-sm text-muted-foreground">
-      {allDone ? 'Nothing is left to do on the plan. Pick anyone on the left to see what you did.' : 'Pick a person on the left to see their work.'}
+      {allDone
+        ? `Nothing is left to do on the plan. Pick ${isQueue(plan) ? 'a company' : 'anyone'} on the left to see what you did.`
+        : `Pick ${isQueue(plan) ? 'a company' : 'a person'} on the left to see the work.`}
     </p>
   );
   if (current) {
@@ -342,7 +378,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
       current.channel === 'email' ? (
         <EmailRowPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} headingId={headingId} />
       ) : current.person === null ? (
-        <FindSomeonePanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} headingId={headingId} />
+        <CompanyPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} headingId={headingId} />
       ) : (
         <PersonPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} note={state} headingId={headingId} />
       );
@@ -369,7 +405,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
         <div className="mx-3 mt-6 grid justify-items-start gap-2">
           <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="shift+c" onClick={copyAllHandoffs}>
             <Terminal aria-hidden />
-            Copy every find-someone handoff
+            {isQueue(plan) ? 'Copy every company line' : 'Copy every find-someone handoff'}
             <span aria-hidden className="inline-flex gap-0.5">
               <KeyHint k="⇧" />
               <KeyHint k="C" />
@@ -383,9 +419,12 @@ function PlanWork({ plan }: { plan: PlanView }) {
           </Link>
         </div>
       </div>
-      <section aria-label={showFinish ? 'Finish' : 'Selected person'} className="min-w-0 overflow-y-auto px-8 pt-5 pb-12 max-[1100px]:overflow-visible">
+      <section
+        aria-label={showFinish ? 'Finish' : current && isCompanyRow(current) ? 'Selected company' : 'Selected person'}
+        className="min-w-0 overflow-y-auto px-8 pt-5 pb-12 max-[1100px]:overflow-visible"
+      >
         {showFinish ? <FinishPanel plan={plan} /> : panel}
-        <BelowPlan />
+        <BelowPlan plan={plan} />
       </section>
 
       <RemoveDialog
@@ -415,7 +454,7 @@ function PlanContent({ plan }: { plan: PlanView }) {
       {plan.notReady || plan.rows.length === 0 ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           {plan.notReady ? <PlanNotReady plan={plan} /> : <PlanEmpty />}
-          <BelowPlan className="mx-auto px-8 pb-12" />
+          <BelowPlan className="mx-auto px-8 pb-12" plan={plan} />
         </div>
       ) : (
         <PlanWork plan={plan} />
@@ -425,7 +464,10 @@ function PlanContent({ plan }: { plan: PlanView }) {
 }
 
 /**
- * Today as a plan of people (design 16.1): about 7 people in order, one next step each, ending in a finish line.
+ * Today as a queue of companies (company first, #9 2026-10-26; design 16.1 for the layout): about 8 companies in
+ * order, each with what Knock knows and where it stands, ending in a finish line, with the companies in flight under
+ * it. He finds the people on LinkedIn and logs them from his terminal (or the row's Log people box). A plan built with
+ * person rows (the switch back on) still renders them.
  * Every reason, state, count and not-ready line comes from the client; the page lays them out. The phase-1 picks
  * and backlog live at /proposals.
  */

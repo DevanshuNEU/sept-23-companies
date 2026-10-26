@@ -38,6 +38,7 @@ from outreach.api.queries import jobs
 from outreach.api.queries.company import company_holds, merge_parents, person_ref
 from outreach.api.queries.outcomes import by_ids, people_by_ids
 from outreach.api.queries.progress import live_touches
+from outreach.api.queries.queue import in_flight, queue_facts
 from outreach.api.queries.today import LANE_WORDS, build_entries
 from outreach.outcomes import report
 from outreach.outcomes.windows import day_bounds_utc, next_weekday, ny_day, week_bounds
@@ -58,7 +59,6 @@ _DRAFT_ERRORS: set[str] = set()  # the dry-run failures already logged by this p
 
 EMAIL_DONE = ("approved", "sending", "send_unknown", "sent")  # the first email left drafted
 SEARCH_PREFIX = "https://www.linkedin.com/search/results/people/"
-SEARCH_HINT = "engineer"
 WEEKEND_TEXT = "No plan on weekends."
 NOT_BUILT_TEXT = "Today's plan is not built yet. It builds at 8:00 on weekdays."
 LEAN_TEXT = "Today's list came from the old Today page, so there is no people plan today. It builds again tomorrow."
@@ -283,9 +283,14 @@ def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanCo
               f"AND state IN ({states}) AND touch_id IN ({{ids}}) GROUP BY touch_id",
         {t["touch_id"] for t in threads.values()})}
     asked = _company_asked(conn, [e for e in entries if e["person_id"] is None and e["channel"] != "email"], cfg)
+    parsed_all = [parse_plan_why(e["why"]) for e in entries]
+    reasons = {plan_entry_id(e): p.reason or f"Ranked for {LANE_WORDS[e['list_group']]}."
+               for e, p in zip(entries, parsed_all)}
+    # Company first (#9): a company row's lines, as of the list's own date (every entry here shares it).
+    facts = queue_facts(conn, entries, daily, canonical_ids(conn), cfg, date.fromisoformat(entries[0]["list_date"]),
+                        reasons)
     rows = []
-    for position, (e, d) in enumerate(zip(entries, daily), 1):
-        parsed = parse_plan_why(e["why"])
+    for position, (e, d, parsed) in enumerate(zip(entries, daily, parsed_all), 1):
         person = people.get(e["person_id"]) if e["person_id"] is not None else None
         channel = "email" if e["channel"] == "email" else "linkedin_request"
         role = d.role
@@ -312,18 +317,21 @@ def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanCo
         state = "done" if done else "skipped" if e["state"] == "backlog" else "todo"
         draft = drafts.get(e["person_id"]) if person is not None and channel == "linkedin_request" else None
         find = None
+        queue = facts.get(plan_entry_id(e))
         if person is None:
             find = parsed.find_someone or FindSomeone(
-                search_url=people_search_url(d.company.name, SEARCH_HINT), handoff=HANDOFF)
+                search_url=people_search_url(d.company.name), handoff=HANDOFF)
+            if queue is not None:  # his saved search or the stored LinkedIn id, read now
+                find = FindSomeone(search_url=queue.people_search_url, handoff=find.handoff)
         rows.append(PlanRow(
             entry_id=plan_entry_id(e), position=position, channel=channel, lane=e["list_group"],
             company=PlanCompany(**d.company.model_dump(), revision=d.revision),
             person=PlanPerson(person=person_ref(person), found_on=parsed.found_on) if person is not None else None,
             role=role, apply_url=(parsed.role_url or role.url or None) if role is not None else None,
-            reason=parsed.reason or f"Ranked for {LANE_WORDS[e['list_group']]}.",
+            reason=reasons[plan_entry_id(e)],
             reason_sources=parsed.reason_sources, note=note_draft(draft, cfg) if draft is not None else None,
             find_someone=find, email_touch_id=email_touch, steps=steps, state=state,
-            carried_from=parsed.carried_from, revision=e["revision"]))
+            carried_from=parsed.carried_from, revision=e["revision"], queue=queue))
     return rows
 
 
@@ -353,14 +361,20 @@ def _tomorrow(conn: sqlite3.Connection, day: str, canon: dict[int, int], cfg: Pl
     label = "Tomorrow" if when == date.fromisoformat(day) + timedelta(days=1) else WEEKDAYS[when.weekday()]
     drafted = _draft(conn, when, canon, cfg)
     total, preview = drafted if drafted is not None else (plan_capacity(conn, canon, when, cfg), [])
-    return Tomorrow(total=total, text=tomorrow_text(label, total, len(preview)), preview=preview)
+    return Tomorrow(total=total, text=tomorrow_text(label, total, len(preview),
+                                                    companies=not cfg.get("plan", "propose_people")),
+                    preview=preview)
 
 
-def tomorrow_text(label: str, total: int, drafted: int) -> str:
+def tomorrow_text(label: str, total: int, drafted: int, *, companies: bool = False) -> str:
     """The one line about the next plan. The total is room, not a list: the plan builds at 08:00. When the dry run
-    named anyone, the line says the list under it is a draft of that plan."""
-    people = f"{total} {'person' if total == 1 else 'people'}"
-    line = f"{label}'s plan builds at 08:00. Room for {people}."
+    named anyone, the line says the list under it is a draft of that plan. A company queue (company first, #9)
+    counts companies; a plan with person rows counts people."""
+    if companies:
+        room = f"{total} {'company' if total == 1 else 'companies'}"
+    else:
+        room = f"{total} {'person' if total == 1 else 'people'}"
+    line = f"{label}'s plan builds at 08:00. Room for {room}."
     return f"{line} {DRAFT_TEXT}" if drafted else line
 
 
@@ -471,4 +485,5 @@ def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
         rows=rows, done=sum(1 for r in rows if r.state == "done"), total=len(rows),
         linkedin_week=LinkedinWeek(used=week.used, limit=week.budget, hard_used=week.hard_used,
                                    hard_limit=week.hard_limit),
-        tomorrow=_tomorrow(conn, day, canon, cfg), week=_week(conn, now))
+        tomorrow=_tomorrow(conn, day, canon, cfg), week=_week(conn, now),
+        in_flight=in_flight(conn, canon, company_holds(conn), cfg, date.fromisoformat(day)))

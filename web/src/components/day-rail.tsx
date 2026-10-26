@@ -23,12 +23,17 @@ function nodeOf(row: PlanRow, selected: boolean): Node {
   return selected ? 'current' : 'todo';
 }
 
+/** A company row (company first, #9): nobody named, not an email row. */
+const companyRow = (row: PlanRow) => row.person === null && row.channel !== 'email';
+
 function title(row: PlanRow): string {
-  if (row.channel === 'email') return row.company.name;
+  if (row.channel === 'email' || companyRow(row)) return row.company.name;
   return row.person?.person.name ?? 'Find someone';
 }
 
 function sub(row: PlanRow): string {
+  // A company row says where it stands ("New", "3 asked today, room for 1 more, ..."), as the API words it.
+  if (companyRow(row)) return row.queue?.standing.text ?? row.role?.title ?? 'A company to reach';
   if (row.channel !== 'email') return row.company.name;
   return row.state === 'done' ? 'By email, reviewed' : 'By email, in the Outbox';
 }
@@ -67,7 +72,7 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
   const word = WORD[node];
   const carried = row.carriedFrom !== null && row.state === 'todo' ? `Carried over from ${formatCarriedDay(row.carriedFrom, asOf)}` : null;
   const ask = row.state === 'todo' && row.note?.needsYourLine === true ? 'Your line to confirm' : null;
-  const where = row.channel === 'email' ? `${title(row)} by email` : `${title(row)} at ${row.company.name}`;
+  const where = row.channel === 'email' ? `${title(row)} by email` : companyRow(row) ? title(row) : `${title(row)} at ${row.company.name}`;
   const label = [`${row.position}. ${where}`, word, ...[carried, ask].flatMap((p) => (p ? [lowerFirst(p)] : []))].join(', ');
 
   return (
@@ -107,8 +112,8 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
 }
 
 /**
- * The day rail (design 16.1, `.rail-*`): one node per person in plan order, joined by a line, ending in a
- * finish node. The rows stay where the API put them; a logged row is relabelled in place, never moved.
+ * The day rail (design 16.1, `.rail-*`): one node per row in plan order (a company on the queue, or a person on a
+ * plan with person rows), joined by a line, ending in a finish node. The rows stay where the API put them; a logged row is relabelled in place, never moved.
  * `aria-current="step"` marks the first row still to do, or the finish node once the day is done. The
  * selection itself belongs to the view (`rowProps` from `useListNav`).
  */
@@ -126,9 +131,10 @@ export function DayRail({
   asOf: IsoTime;
 }) {
   const firstTodo = allDone ? null : (rows.find((r) => r.state === 'todo')?.entryId ?? null);
+  const queue = rows.length > 0 && rows.every(companyRow);
   return (
     <div className="grid">
-      <div role="listbox" aria-label="Today's people" className="grid">
+      <div role="listbox" aria-label={queue ? "Today's companies" : "Today's people"} className="grid">
         {rows.map((row) => (
           <RailRow key={row.entryId} row={row} props={rowProps(row.entryId)} current={row.entryId === firstTodo} asOf={asOf} />
         ))}

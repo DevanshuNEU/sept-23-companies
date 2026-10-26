@@ -91,7 +91,7 @@ def _report(conn: sqlite3.Connection, result: PlanResult, dry_run: bool) -> list
     if result.linkedin is None:
         return [head + f", capacity {result.capacity}"] if result.status == "already_built" else [head]
     email = result.capacity - result.linkedin.today  # the plan's email slots: 0 with people off (company first)
-    lines = [f"{head}, capacity {result.capacity} (LinkedIn {result.linkedin.today}, email {email}), "
+    lines = [f"{head}, capacity {result.capacity} (companies {result.linkedin.today}, email {email}), "
              f"boards {result.boards}, {len(result.chosen)} rows"]
     companies = _names(conn, "company", "company_id", [c.company_id for c in result.chosen])
     people = _names(conn, "person", "person_id", [c.person_id for c in result.chosen])

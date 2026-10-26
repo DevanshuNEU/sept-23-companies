@@ -6,6 +6,7 @@ from datetime import date
 
 from outreach.plan.config import default_plan_config
 from outreach.plan.outbound import load_outbound
+from outreach.plan.people import people_search_url
 from outreach.plan.prospects import (HANDOFF, WHY_KEYS, build_why, explanation, load_carried, load_postings,
                                      load_prospects)
 from outreach.plan.select import Chosen
@@ -306,8 +307,8 @@ class WhyTest(unittest.TestCase):
         self.assertIsNone(why["person"])
         self.assertIsNone(why["draft_id"])
         self.assertEqual(why["find_someone"]["handoff"], HANDOFF)
-        self.assertTrue(why["find_someone"]["search_url"].startswith(
-            "https://www.linkedin.com/search/results/people/?keywords=Acme%20"))
+        self.assertEqual(why["find_someone"]["search_url"], people_search_url("Acme"))
+        self.assertIn("geoUrn=%5B%22103644278%22%5D", why["find_someone"]["search_url"])
         self.assertEqual(why["channel_reason"], "find_someone")
 
     def test_a_row_with_no_posting_has_no_role_and_no_sources(self):

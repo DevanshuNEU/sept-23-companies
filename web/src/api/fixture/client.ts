@@ -3,10 +3,11 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  FindingsView, FunnelKey, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView,
+  FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
+import { askedToday } from './queue-data';
 
 const STOP_WORDS = new Set(['of', 'the', 'and', 'a', 'an', 'at', 'for', 'in', 'to']);
 
@@ -101,6 +102,8 @@ export class FixtureClient implements OutreachClient {
   private readonly removedPlanRows = new Map<Id, PlanRow[]>();
   /** Idempotency keys (`plan:<entryId>:request`) and the touch each one made, so a repeated key writes nothing. Only successes are kept. */
   private readonly keys = new Map<string, Id>();
+  /** Pasted people logs by their key, so the same paste again writes nothing. */
+  private readonly pastes = new Map<string, LoggedPerson[]>();
   /** Prompt touches that got an outcome and left the prompt. A reply on a quiet touch still finds its person here. */
   private readonly leftPrompt = new Map<Id, PromptTouch>();
   /** Touch revisions after an outcome. A touch with no entry is at its own revision, or 1. */
@@ -927,6 +930,86 @@ export class FixtureClient implements OutreachClient {
       if (!row.role) throw notAllowed('This row has no role to apply to');
       if (row.role.postingId !== input.postingId) throw notAllowed('That role is not on this row');
     }));
+  }
+
+  /**
+   * The people he asked at a company row, as the API reads a paste: one line each, `Name | Title | note`, up to 10.
+   * Each logs one request; the row's request step is done, the wave grows, and the note's dash or banned phrase comes
+   * back as a warning (the note was already sent). The same key again is a replay that writes nothing.
+   */
+  logPeople(entryId: Id, input: { lines: string; idempotencyKey: string }, _revision: Revision, o: WriteOptions): Promise<LogPeopleResult> {
+    return this.write(o, () => {
+      const row = this.planRow(entryId);
+      const replay = this.pastes.get(input.idempotencyKey);
+      if (replay) return { row, people: replay.map((p) => ({ ...p, added: false })) };
+      if (row.channel === 'email') throw notAllowed('This row is an email. Review it in the Outbox');
+      if (row.person) throw notAllowed('This row already names its person');
+      if (row.company.pausedAt) throw notAllowed(`${row.company.name} is paused. Resume it on its page first`);
+      const lines = input.lines.split('\n').filter((l) => l.trim());
+      if (lines.length === 0) throw notAllowed('Paste one line per person: Name | Title | note');
+      if (lines.length > 10) throw notAllowed(`Paste at most 10 people at a time; this has ${lines.length}`);
+      const people: LoggedPerson[] = lines.map((line, i) => {
+        const parts = line.split('|');
+        const [name = '', title = '', ...rest] = parts.length >= 4 && parts[0]?.trim().toLowerCase() === row.company.name.toLowerCase() ? parts.slice(1) : parts;
+        const note = rest.join('|').trim();
+        const clean = name.split(/\s+/).filter(Boolean).join(' ');
+        if (!clean) throw notAllowed(`Line ${i + 1} has no name. Start it with the person's name`);
+        if (note.length > 300) throw notAllowed(`A note is ${note.length} characters; LinkedIn takes 300. Paste the note exactly as you sent it`);
+        const t = title.trim().toLowerCase();
+        const roleKind = /recruit|talent/.test(t) ? 'recruiter' : /founder|ceo/.test(t) ? 'founder' : /manager|head of|director|cto/.test(t) ? 'manager' : /engineer|developer|staff/.test(t) ? 'engineer' : 'other';
+        const warnings = /[\u2013\u2014]/.test(note) ? ['Em or en dash: Use a comma, a colon, a full stop or a plain hyphen instead.'] : [];
+        return { personId: this.nextId++, name: clean, title: title.trim(), roleKind, added: true, noteChars: note.length, warnings };
+      });
+      const step = row.steps.find((st) => st.kind === 'request');
+      if (step && step.at === null) {
+        step.at = this.now;
+        step.touchId = this.nextId++;
+      }
+      row.revision += 1;
+      for (let i = 0; i < people.length; i += 1) {
+        this.countStage('requests');
+        this.countEffort('Requests sent');
+      }
+      this.db.plan.linkedinWeek.used += people.length;
+      this.db.plan.linkedinWeek.hardUsed += people.length;
+      const q = row.queue;
+      if (q) {
+        const before = q.standing.status === 'in_flight' && q.standing.text.includes('today') ? q.standing.asked : 0;
+        q.standing = askedToday(before + people.length, this.addDays(this.db.plan.date, 14));
+        q.peopleOnRecord += people.length;
+        q.peopleLine = `${q.peopleOnRecord} ${q.peopleOnRecord === 1 ? 'person' : 'people'} on record, ${before + people.length} asked`;
+        const last = people.at(-1);
+        if (last) q.lastTouch = `Request to ${last.name} (${last.roleKind.charAt(0).toUpperCase()}${last.roleKind.slice(1)}) on ${this.dayText(this.db.plan.date)}`;
+      }
+      this.pastes.set(input.idempotencyKey, people);
+      return { row, people };
+    });
+  }
+
+  /** His LinkedIn people search for the row's company: the link the row opens from now on. */
+  saveSearch(entryId: Id, url: string, o: WriteOptions): Promise<PlanRow> {
+    return this.write(o, () => {
+      const row = this.planRow(entryId);
+      const clean = url.trim();
+      if (!/^https:\/\/(www\.)?linkedin\.com\/search\/results\/people\/?(\?\S*)?$/.test(clean)) {
+        throw notAllowed('That is not a LinkedIn people search. Copy the address of the search page; it starts with https://www.linkedin.com/search/results/people/');
+      }
+      if (row.queue?.peopleSearchUrl === clean && row.queue.searchSaved) return row;
+      if (row.queue) row.queue = { ...row.queue, peopleSearchUrl: clean, searchSaved: true };
+      if (row.findSomeone) row.findSomeone = { ...row.findSomeone, searchUrl: clean };
+      row.revision += 1;
+      return row;
+    });
+  }
+
+  private addDays(date: string, n: number): string {
+    const [y, m, d] = date.split('-').map(Number);
+    return new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1, (d ?? 1) + n)).toISOString().slice(0, 10);
+  }
+
+  private dayText(date: string): string {
+    const [, m, d] = date.split('-').map(Number);
+    return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(m ?? 1) - 1]} ${d}`;
   }
 
   skipRow(entryId: Id, revision: Revision, o: WriteOptions): Promise<PlanRow> {

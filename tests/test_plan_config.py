@@ -17,8 +17,9 @@ class PlanConfigTest(unittest.TestCase):
     def test_config_loads_every_number_named_here(self):
         c = load_plan_config()
         want = {
-            "linkedin": {"plan_quota": 150, "hard_total": 200, "per_day": 7, "rotate_days": 14,
-                         "rotate_top_n": 150, "max_people_per_company": 3},
+            "linkedin": {"plan_quota": 150, "hard_total": 200, "rotate_days": 14,
+                         "rotate_top_n": 150, "max_people_per_company": 8},
+            "queue": {"companies_per_day": 8, "requests_per_company": 4},
             "lanes": {"role": ["level_role", "intern_junior"], "reason": ["reason_no_role"],
                       "fill": ["any_us_role"], "role_share": 0.8, "reason_share": 0.2},
             "email": {"start_limit": 20, "rows_max": 15, "people_per_company": 2, "hn_post_days": 90},
@@ -26,8 +27,7 @@ class PlanConfigTest(unittest.TestCase):
                      "roll_forward_days": 5, "propose_people": False},
             "people": {"founder_max_headcount": 25, "employer_fresh_days": 30,
                        "generic_mailboxes": ["info", "hello", "contact", "support", "sales", "press", "admin",
-                                             "team", "careers", "jobs", "hr", "recruiting", "noreply", "no-reply"],
-                       "search_hint": "software engineer"},
+                                             "team", "careers", "jobs", "hr", "recruiting", "noreply", "no-reply"]},
             "prepare": {"enabled": False, "multiple": 2.0, "retry_days": 7, "max_candidates": 2, "model": "claude-sonnet-5-5",
                         "call_timeout_s": 600, "max_consecutive_failures": 2,
                         "session_limit_patterns": ["usage limit", "rate limit"],
@@ -106,13 +106,41 @@ class PlanConfigTest(unittest.TestCase):
 
     def test_route_and_bridge_keys_are_checked(self):
         c = load_plan_config()
-        self.assertEqual((c.get("route", "wave_size"), c.get("route", "prefer_ic_in_role")), (4, True))
+        self.assertIs(c.get("route", "prefer_ic_in_role"), True)
         self.assertTrue(c.get("bridge", "contacted_txt").endswith("contacted.txt"))
-        for old, new in (("wave_size = 4", "wave_size = 0"), ("wave_size = 4", "wave_size = 9"),
-                         ("prefer_ic_in_role = true", 'prefer_ic_in_role = "yes"'),
+        for old, new in (("prefer_ic_in_role = true", 'prefer_ic_in_role = "yes"'),
                          ("log_back_days = 3", "log_back_days = 4")):
             with self.subTest(new=new), self.assertRaises(ValueError):
                 load_plan_config(_variant(old, new))
+
+    def test_the_queue_is_the_one_source_for_the_day_and_the_wave(self):
+        # #9 company-first ruling: about 8 companies a day, one wave of up to 4 people each. The old per-request
+        # pace and the route's own wave size are gone, so no second number can disagree.
+        c = load_plan_config()
+        self.assertEqual((c.get("queue", "companies_per_day"), c.get("queue", "requests_per_company")), (8, 4))
+        for section, key in (("linkedin", "per_day"), ("route", "wave_size")):
+            with self.subTest(key=key), self.assertRaises(KeyError):
+                c.get(section, key)
+
+    def test_queue_keys_are_checked(self):
+        for old, new, name in (("companies_per_day = 8", "companies_per_day = 0", "queue.companies_per_day"),
+                               ("companies_per_day = 8", "companies_per_day = 31", "queue.companies_per_day"),
+                               ("companies_per_day = 8", "companies_per_day = true", "queue.companies_per_day"),
+                               ("requests_per_company = 4", "requests_per_company = 0", "queue.requests_per_company"),
+                               ("requests_per_company = 4", "requests_per_company = 9", "queue.requests_per_company"),
+                               ("requests_per_company = 4", "requests_per_company = 2.5",
+                                "queue.requests_per_company"),
+                               ("max_people_per_company = 8", "max_people_per_company = 3",
+                                "linkedin.max_people_per_company")):
+            with self.subTest(new=new), self.assertRaises(ValueError) as ctx:
+                load_plan_config(_variant(old, new))
+            self.assertIn(name, str(ctx.exception))
+        for key in ("companies_per_day", "requests_per_company"):
+            with self.subTest(key=key), self.assertRaises(KeyError) as ctx:
+                load_plan_config(_variant(f"\n{key} = ", "\nunused = "))
+            self.assertIn(f"queue.{key}", str(ctx.exception))
+        self.assertEqual(load_plan_config(_variant("companies_per_day = 8", "companies_per_day = 30"))
+                         .get("queue", "companies_per_day"), 30)
 
     def test_no_dashes_in_config(self):
         text = CONFIG_PATH.read_text(encoding="utf-8")

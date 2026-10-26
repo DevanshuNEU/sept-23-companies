@@ -981,6 +981,47 @@ describe('plan writes: logging', () => {
   });
 });
 
+describe('plan writes: the company queue', () => {
+  it('a pasted people log finishes the request step, grows the wave and replays as one', async () => {
+    const c = client('queue');
+    const pylon = await rowAt(c, 3);
+    expect(pylon.company.name).toBe('Pylon');
+    const key = `plan:${pylon.entryId}:people:1`;
+    const lines = `Jane Doe | Senior Software Engineer | Hi Jane ${String.fromCharCode(0x2014)} quick question\n\nOmar Diaz | Engineering Manager`;
+    const out = await c.logPeople(pylon.entryId, { lines, idempotencyKey: key }, pylon.revision, opt());
+    expect(out.people.map((p) => [p.name, p.roleKind, p.added, p.warnings.length])).toEqual([['Jane Doe', 'engineer', true, 1], ['Omar Diaz', 'manager', true, 0]]);
+    const row = await rowAt(c, 3);
+    expect(row.steps[0]?.at).not.toBeNull();
+    expect(row.queue?.standing.text).toBe('2 asked today, room for 2 more, free again Nov 24');
+    expect(row.queue?.lastTouch).toBe('Request to Omar Diaz (Manager) on Nov 10');
+    const week = (await c.plan()).linkedinWeek.used;
+    const again = await c.logPeople(pylon.entryId, { lines, idempotencyKey: key }, row.revision, opt());
+    expect(again.people.every((p) => !p.added)).toBe(true);
+    expect((await c.plan()).linkedinWeek.used).toBe(week);
+  });
+
+  it('a paste it cannot read, or one on an email row, is refused and writes nothing', async () => {
+    const c = client('queue');
+    const pylon = await rowAt(c, 3);
+    for (const lines of ['', ' | Engineer', Array.from({ length: 11 }, (_, i) => `P${i}`).join('\n'), `Ana | Eng | ${'y'.repeat(301)}`]) {
+      expect((await rejection(c.logPeople(pylon.entryId, { lines, idempotencyKey: `k-${lines.length}` }, pylon.revision, opt()))).code).toBe('not_allowed');
+    }
+    expect((await rowAt(c, 3)).steps[0]?.at).toBeNull();
+    const email = (await client().plan()).rows.find((r) => r.channel === 'email');
+    if (!email) throw new Error('no email row');
+    expect((await rejection(client().logPeople(email.entryId, { lines: 'Ana', idempotencyKey: 'k' }, 1, opt()))).code).toBe('not_allowed');
+  });
+
+  it('a saved search becomes the row link; anything but a LinkedIn people search is refused', async () => {
+    const c = client('queue');
+    const hex = await rowAt(c, 8);
+    const url = 'https://www.linkedin.com/search/results/people/?currentCompany=%5B%2299%22%5D';
+    const row = await c.saveSearch(hex.entryId, url, opt());
+    expect([row.queue?.peopleSearchUrl, row.queue?.searchSaved, row.findSomeone?.searchUrl]).toEqual([url, true, url]);
+    expect((await rejection(c.saveSearch(hex.entryId, 'https://evil.example/search/results/people/', opt()))).code).toBe('not_allowed');
+  });
+});
+
 describe('plan writes: outcomes', () => {
   const firstPrompt = async (c: FixtureClient) => {
     const t = (await c.outcomePrompt()).touches[0];

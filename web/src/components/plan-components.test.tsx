@@ -58,7 +58,7 @@ describe('DayRail', () => {
       '2. Tomas Reyes at Baseten, Done',
       '3. Lena Ortiz at Pylon, To do',
       '4. Jonah Park at Inngest, To do, your line to confirm',
-      '5. Find someone at Cerebrium, To do',
+      '5. Cerebrium, To do',
       '6. Ines Duarte at Turso, To do, carried over from Monday',
       '7. Mintlify by email, To do',
     ]);

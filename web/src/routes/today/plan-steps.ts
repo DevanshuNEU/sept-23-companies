@@ -31,5 +31,10 @@ export function nextTodoAfter(rows: PlanRow[], entryId: Id): Id | null {
   return rows.slice(0, at).reverse().find((r) => r.state === 'todo')?.entryId ?? null;
 }
 
-/** The id of a company row's "Who did you ask?" field, so R on the row can put the cursor there. */
-export const askedFieldId = (headingId: string | undefined) => `${headingId ?? 'plan'}-asked`;
+/** A company row (company first, #9): nobody named, not an email row. */
+export const isCompanyRow = (row: PlanRow) => row.person === null && row.channel !== 'email';
+
+/** The id of a company row's "Log people you asked" box, so L (and R) on the row can put the cursor there. */
+export const peopleFieldId = (headingId: string | undefined) => `${headingId ?? 'plan'}-people`;
+/** The id of a company row's "Save this search" field. */
+export const searchFieldId = (headingId: string | undefined) => `${headingId ?? 'plan'}-search`;

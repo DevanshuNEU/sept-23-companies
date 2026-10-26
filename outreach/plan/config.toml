@@ -3,10 +3,19 @@
 [linkedin]
 plan_quota = 150              # #9: the system's share of requests in any 7 days, counted by context.source = 'plan'
 hard_total = 200              # #9: every request in any 7 days, his own included (LinkedIn's limit); wins when lower
-per_day = 7                   # #9: his pace, about 7 a day from the system; the 7-day limits only ever lower it
-rotate_days = 14              # #9: days of no answer before a company may get a second person
+rotate_days = 14              # #9: days of no answer after a company's wave before it may get anyone new
 rotate_top_n = 150            # a stale company rotates only while it is in the top this many of the laned list
-max_people_per_company = 3
+max_people_per_company = 8    # #9 (2026-10-26): up to 8 people per company over time, across its waves
+
+[queue]
+# Today is a queue of companies (#9 company-first ruling, 2026-10-26). He finds the people on LinkedIn himself and
+# sends one wave of up to requests_per_company requests per company, then the company waits linkedin.rotate_days.
+# The day's size: min(companies_per_day, floor(remaining / requests_per_company)), where remaining is what the
+# 7-day windows above have left (plan_quota and hard_total, whichever is lower). A heavy day lowers the next ones;
+# nothing catches up. This section is the one source for the day's size and the wave (it replaced
+# linkedin.per_day and route.wave_size).
+companies_per_day = 8         # #9: 150 a week over 5 weekdays is 30 a day, at about 4 people per company
+requests_per_company = 4      # #9: one wave of up to 4 people per company
 
 [lanes]
 role = ["level_role", "intern_junior"]   # the 80% share
@@ -35,7 +44,6 @@ propose_people = false
 founder_max_headcount = 25
 employer_fresh_days = 30      # playbook v3.5
 generic_mailboxes = ["info", "hello", "contact", "support", "sales", "press", "admin", "team", "careers", "jobs", "hr", "recruiting", "noreply", "no-reply"]
-search_hint = "software engineer"
 
 [prepare]
 # Company first (#9, 2026-10-26): the night step that finds people and drafts their notes is off. When false the
@@ -70,7 +78,6 @@ banned_path = "~/Desktop/DevVault/job-search/outreach/banned_phrases.txt"
 [route]
 # How a person Devanshu found is reached (outreach/plan/route.py). #9's rules hold whatever these say: email only
 # to a published or verified address, never guessed; the sender's ramp, 3 a day per company and 60 minutes apart.
-wave_size = 4                 # #9 (2026-10-26): one wave of up to 4 people per company, then linkedin.rotate_days
 reach_kinds = ["engineer", "manager", "founder"]   # anyone else is "find someone else" (advice: he may still send)
 # His preference (2026-10-26), not measured yet: plain engineers in the role first. It only orders people inside one
 # company; it never hides a person or a company and never touches company ranking.

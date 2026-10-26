@@ -105,12 +105,12 @@ class RouteTest(unittest.TestCase):
 
     def test_a_full_wave_waits_until_the_company_is_free_again(self):
         got = route(c=company(contact="waiting", wave_people=4, free_on=date(2026, 11, 20)))
-        self.assert_route(got, "wait", "route.wave_size")
+        self.assert_route(got, "wait", "queue.requests_per_company")
         self.assertIn("Nov 20", got.reason)
         self.assert_route(route(c=company(contact="waiting", wave_people=2, free_on=date(2026, 11, 20)),
                                 taken=Taken(wave=1)), "linkedin_note", "linkedin.hard_total")
         self.assert_route(route(c=company(contact="waiting", wave_people=2, free_on=date(2026, 11, 20)),
-                                taken=Taken(wave=2)), "wait", "route.wave_size")
+                                taken=Taken(wave=2)), "wait", "queue.requests_per_company")
 
     def test_email_only_where_pick_channel_said_email_and_the_company_has_room(self):
         founder = person("Ana Ruiz", "Founder", email_code="founder_published_email", has_email=True)

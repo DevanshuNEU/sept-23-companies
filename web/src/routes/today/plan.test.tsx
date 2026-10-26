@@ -104,13 +104,14 @@ describe('Today as a plan', () => {
     expect(role).toHaveAttribute('aria-keyshortcuts', 'o');
     const apply = within(panel()).getByRole('link', { name: 'Apply page' });
     expect(apply).toHaveAttribute('href', lena.applyUrl);
-    expect(apply).toHaveAttribute('aria-keyshortcuts', 'a');
+    expect(apply).not.toHaveAttribute('aria-keyshortcuts');  // A logs applied (company first)
     expect(within(noteRegion()).getByText(lena.note.text)).toBeInTheDocument();
 
     const primary = within(panel()).getByRole('button', { name: 'Log request sent' });
     expect(primary).toHaveAttribute('aria-keyshortcuts', 'r');
     expect(primary).toHaveAttribute('data-variant', 'default');
     expect(within(panel()).getByRole('button', { name: 'Log applied' })).toHaveAttribute('data-variant', 'outline');
+    expect(within(panel()).getByRole('button', { name: 'Log applied' })).toHaveAttribute('aria-keyshortcuts', 'a');
     expect(within(panel()).getByRole('link', { name: 'Open profile' })).toHaveAttribute('aria-keyshortcuts', 'l');
   });
 
@@ -137,10 +138,10 @@ describe('Today as a plan', () => {
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('p then moves the selection to Jonah Park and the sidebar reads 3 of 7', async () => {
+  it('a then moves the selection to Jonah Park and the sidebar reads 3 of 7', async () => {
     await openPlan({ shell: true });
     press('r');
-    press('p');
+    press('a');
     expect(await screen.findByRole('heading', { level: 2, name: 'Jonah Park' })).toBeInTheDocument();
     expect(option(4)).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('7 people, 3 done')).toBeInTheDocument();
@@ -151,7 +152,7 @@ describe('Today as a plan', () => {
     await openPlan();
     const before = options().map((o) => o.getAttribute('data-entry'));
     press('r');
-    press('p');
+    press('a');
     await screen.findByRole('heading', { level: 2, name: 'Jonah Park' });
     expect(options().map((o) => o.getAttribute('data-entry'))).toEqual(before);
     expect(option(3)).toHaveAccessibleName('3. Lena Ortiz at Pylon, Done');
@@ -170,7 +171,7 @@ describe('Today as a plan', () => {
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('a row with no role has no apply button and p says "No role to apply for."', async () => {
+  it('a row with no role has no apply button and a says "No role to apply for."', async () => {
     const db = buildFixture();
     const ines = db.plan.rows[5];
     if (!ines) throw new Error('fixture: row 6');
@@ -184,7 +185,7 @@ describe('Today as a plan', () => {
     expect(within(panel()).queryByRole('button', { name: 'Log applied' })).not.toBeInTheDocument();
     expect(within(panel()).queryByRole('link', { name: 'Apply page' })).not.toBeInTheDocument();
     expect(within(panel()).queryByText('Applied')).not.toBeInTheDocument();
-    press('p');
+    press('a');
     expect(await screen.findByText('No role to apply for.')).toBeInTheDocument();
     await leavePage();
     expect(applied).not.toHaveBeenCalled();
@@ -199,78 +200,23 @@ describe('Today as a plan', () => {
     expect(carried.className).not.toMatch(/text-(bad|warn)/);
   });
 
-  it('a company row says what it is: the search link, no note and nothing about Claude, and c copies the handoff', async () => {
+  it('the one company row on a people plan is drawn by the company panel (the queue itself: company-queue.test.tsx)', async () => {
     const writeText = stubClipboard();
     const { client } = await openPlan();
     const cerebrium = (await client.plan()).rows[4];
-    if (!cerebrium?.findSomeone) throw new Error('fixture: row 5 has a handoff');
+    if (!cerebrium?.queue) throw new Error('fixture: row 5 is a company row');
     fireEvent.click(option(5));
-    expect(await screen.findByRole('heading', { level: 2, name: 'Find someone at Cerebrium' })).toBeInTheDocument();
-
-    expect(panel()).toHaveTextContent('Cerebrium is a company to reach. You find the people.');
-    expect(panel()).not.toHaveTextContent(/Claude/);
-    const search = within(panel()).getByRole('link', { name: 'Open LinkedIn search' });
-    expect(search).toHaveAttribute('href', cerebrium.findSomeone.searchUrl);
-    expect(search).toHaveAttribute('aria-keyshortcuts', 's');
-    expect(search).toHaveAttribute('data-variant', 'default');
-    expect(within(panel()).getByRole('list', { name: 'How to reach this company' })).toHaveTextContent(
-      '1. SearchOpen the LinkedIn search and pick the people you want to reach.2. Reach outSend your requests on LinkedIn, with your own note.3. Log it here',
-    );
-    // no note editor, no note and no Confirm line on a company row
-    expect(within(panel()).queryByRole('region', { name: 'Note to send' })).not.toBeInTheDocument();
-    expect(within(panel()).queryByRole('textbox', { name: /note/i })).not.toBeInTheDocument();
-    expect(within(panel()).queryByRole('button', { name: /Confirm|Edit/ })).not.toBeInTheDocument();
-    expect(within(panel()).queryByRole('button', { name: /Copy handoff/ })).not.toBeInTheDocument();
-    expect(within(panel()).getByRole('textbox', { name: 'Who did you ask?' })).toBeInTheDocument();
-    expect(within(panel()).getByRole('button', { name: 'Log request sent' })).toBeInTheDocument();
-    expect(within(panel()).getByRole('button', { name: 'Log applied' })).toBeInTheDocument();
-
+    const region = await screen.findByRole('region', { name: 'Selected company' });
+    expect(within(region).getByRole('heading', { level: 2, name: 'Cerebrium' })).toBeInTheDocument();
+    expect(option(5)).toHaveAccessibleName('5. Cerebrium, To do');
+    expect(region).not.toHaveTextContent(/Claude/);
+    expect(within(region).queryByRole('region', { name: 'Note to send' })).not.toBeInTheDocument();
     press('c');
-    expect(await screen.findByText('Copied the handoff.')).toBeInTheDocument();
-    expect(writeText).toHaveBeenCalledWith(cerebrium.findSomeone.handoff);
+    expect(await screen.findByText('Copied the line for your terminal.')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith(cerebrium.queue.terminalLine);
     toast.dismiss();
-    press('e');
-    expect(await screen.findByText('No note on a company row. You write your own notes.')).toBeInTheDocument();
-  });
-
-  it('a company row logs a request for the name he types, r goes to the field, and p logs applied', async () => {
-    const user = userEvent.setup();
-    const { client } = await openPlan();
-    const request = vi.spyOn(client, 'logRequest');
-    const applied = vi.spyOn(client, 'logApplied');
-    fireEvent.click(option(5));
-    await screen.findByRole('heading', { level: 2, name: 'Find someone at Cerebrium' });
-    const field = within(panel()).getByRole('textbox', { name: 'Who did you ask?' });
-
-    // An empty name logs nothing and says what to type.
-    await user.click(within(panel()).getByRole('button', { name: 'Log request sent' }));
-    expect(await screen.findByText('Not logged. Type the name of the person you asked at Cerebrium, then log it.')).toBeInTheDocument();
-    toast.dismiss();
-    // r puts the cursor in the field; Enter logs it.
-    (document.activeElement as HTMLElement | null)?.blur();
-    press('r');
-    await waitFor(() => expect(field).toHaveFocus());
-    await user.type(field, '  Ana   Silva {Enter}');
-    expect(await screen.findByText('Logged: request sent to Ana Silva.')).toBeInTheDocument();
-    expect(option(5)).toHaveAccessibleName('5. Find someone at Cerebrium, Logged');
-
-    press('p');
-    await leavePage();
-    const row = (await client.plan()).rows[4];
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(request.mock.calls[0]?.slice(0, 2)).toEqual([row?.entryId, { personName: 'Ana Silva', idempotencyKey: `plan:${row?.entryId}:request` }]);
-    expect(applied).toHaveBeenCalledTimes(1);
-    expect(row?.steps.every((s) => s.at !== null)).toBe(true);
-    expect(row?.person).toBeNull();
-  });
-
-  it('shift+c copies every handoff and toasts "Copied 1 handoff."', async () => {
-    const writeText = stubClipboard();
-    const { client } = await openPlan();
-    const handoff = (await client.plan()).rows[4]?.findSomeone?.handoff;
     press('C', { shiftKey: true });
-    expect(await screen.findByText('Copied 1 handoff.')).toBeInTheDocument();
-    expect(writeText).toHaveBeenCalledWith(handoff);
+    expect(await screen.findByText('Copied 1 line for your terminal.')).toBeInTheDocument();
   });
 
   it('the email row shows its status and a Review in Outbox link to the item, and no log key acts on it', async () => {
@@ -289,7 +235,7 @@ describe('Today as a plan', () => {
     press('r');
     expect(await screen.findByText('Review this email in the Outbox.')).toBeInTheDocument();
     toast.dismiss();
-    press('p');
+    press('a');
     await waitFor(() => expect(screen.getAllByText('Review this email in the Outbox.').length).toBeGreaterThan(0));
     await leavePage();
     expect(request).not.toHaveBeenCalled();
@@ -572,11 +518,11 @@ describe('Today as a plan', () => {
     expect(option(4)).toHaveAccessibleName('4. Jonah Park at Inngest, Carried over');
     expect(screen.getByText('7 people, 2 done')).toBeInTheDocument();
     // The selection moves to the next row to do.
-    expect(await screen.findByRole('heading', { level: 2, name: 'Find someone at Cerebrium' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Cerebrium' })).toBeInTheDocument();
 
     press('x');
     expect(await screen.findByText('Carried to tomorrow: Cerebrium.')).toBeInTheDocument();
-    expect(option(5)).toHaveAccessibleName('5. Find someone at Cerebrium, Carried over');
+    expect(option(5)).toHaveAccessibleName('5. Cerebrium, Carried over');
     expect(screen.getByText('7 people, 2 done')).toBeInTheDocument();
   });
 

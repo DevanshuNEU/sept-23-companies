@@ -14,12 +14,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 __all__ = ["CONFIG_PATH", "SECTIONS", "PlanConfig", "load_plan_config", "default_plan_config"]
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
-SECTIONS = ("linkedin", "lanes", "email", "plan", "people", "prepare", "note", "route", "bridge")
+SECTIONS = ("linkedin", "queue", "lanes", "email", "plan", "people", "prepare", "note", "route", "bridge")
 
 
 @dataclass(frozen=True, eq=False)  # eq=False: the dict fields are not hashable, identity hashing is enough
 class PlanConfig:
     linkedin: dict
+    queue: dict
     lanes: dict
     email: dict
     plan: dict
@@ -55,9 +56,12 @@ def _check(data: dict) -> None:
     for section, key in _SWITCHES:  # a switch that is not a real boolean ("false" is true in Python) fails loudly
         if not isinstance(data[section][key], bool):
             raise ValueError(f"{section}.{key} must be true or false, got {data[section][key]!r}")
-    wave = data["route"]["wave_size"]
-    if isinstance(wave, bool) or not isinstance(wave, int) or not 1 <= wave <= 8:
-        raise ValueError(f"route.wave_size must be a whole number from 1 to 8, got {wave!r}")
+    _whole(data, "queue", "companies_per_day", 1, 30)
+    wave = _whole(data, "queue", "requests_per_company", 1, 8)
+    most = data["linkedin"]["max_people_per_company"]
+    if isinstance(most, bool) or not isinstance(most, int) or most < wave:
+        raise ValueError(f"linkedin.max_people_per_company must be a whole number of at least "
+                         f"queue.requests_per_company ({wave}), got {most!r}")
     if not isinstance(data["route"]["prefer_ic_in_role"], bool):
         raise ValueError("route.prefer_ic_in_role must be true or false")
     back = data["bridge"]["log_back_days"]
@@ -76,6 +80,13 @@ def _check(data: dict) -> None:
             seen[lane] = group
 
 
+def _whole(data: dict, section: str, key: str, low: int, high: int) -> int:
+    value = data[section][key]
+    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+        raise ValueError(f"{section}.{key} must be a whole number from {low} to {high}, got {value!r}")
+    return value
+
+
 def load_plan_config(path: Path = CONFIG_PATH) -> PlanConfig:
     path = Path(path)
     raw = path.read_bytes()
@@ -90,9 +101,10 @@ def load_plan_config(path: Path = CONFIG_PATH) -> PlanConfig:
 
 # The keys the checks above read directly; every other key is read through `get`, which names a missing one.
 _CHECKED = {"lanes": ("role", "reason", "fill", "role_share", "reason_share"),
-            "plan": ("scan_limit", "timezone", "propose_people"), "linkedin": ("rotate_top_n",), "note": ("max_chars",),
-            "prepare": ("enabled", "deny_rule_checked"),
-            "route": ("wave_size", "prefer_ic_in_role"), "bridge": ("log_back_days",)}
+            "plan": ("scan_limit", "timezone", "propose_people"),
+            "linkedin": ("rotate_top_n", "max_people_per_company"), "note": ("max_chars",),
+            "queue": ("companies_per_day", "requests_per_company"), "prepare": ("enabled", "deny_rule_checked"),
+            "route": ("prefer_ic_in_role",), "bridge": ("log_back_days",)}
 # The on and off switches, each checked to be a boolean. `prepare.enabled` and `plan.propose_people` are the
 # company-first switches (#9, 2026-10-26); `prepare.deny_rule_checked` records the one-time LinkedIn deny check.
 _SWITCHES = (("prepare", "enabled"), ("prepare", "deny_rule_checked"), ("plan", "propose_people"))

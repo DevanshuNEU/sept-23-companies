@@ -16,6 +16,7 @@ import type {
   SourceLink, TomorrowRow, WatchView, WinsView, Win,
 } from '../types';
 import type { Scenario } from './data';
+import { buildInFlight, buildQueueRows, keywordSearch, terminalLine } from './queue-data';
 
 /** What data.ts hands over: the clock, the company registry and the people and roles it already made. */
 export interface PlanCtx {
@@ -223,10 +224,23 @@ function buildRows(c: PlanCtx, mode: Mode): Built {
       emailTouchId: spec.channel === 'email' ? c.touch.marcus : null,
       steps, state: isDone ? 'done' : 'todo',
       carriedFrom: spec.carriedFrom && !isDone ? spec.carriedFrom : null, revision: 1,
+      queue: person || spec.channel === 'email' ? null : companyQueue(c, spec.company, role?.title ?? null),
     };
   });
   // An email row has no steps of its own: it is done once its draft is reviewed in the Outbox.
   return { rows, requests, applications };
+}
+
+/** The API's lines for the one company row of the people plan (Cerebrium): nobody on record, nobody asked. */
+function companyQueue(c: PlanCtx, company: string, role: string | null): PlanRow['queue'] {
+  const id = c.companies.find((x) => x.name === company)?.id ?? 0;
+  return {
+    sizeLine: '18 people (estimate), seed (guess)', roleLine: role ? `${role}, posted 3 days ago` : null, hiring: 1,
+    hiringLine: '1 new engineering role in the last 30 days', sponsorshipLine: 'Sponsorship not stated, E-Verify enrolled',
+    reasons: ['Open role at your level', 'Small company'], standing: { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null },
+    lastTouch: null, emailHint: null, peopleOnRecord: 0, peopleLine: 'Nobody on record yet',
+    peopleSearchUrl: keywordSearch(company), searchSaved: false, careersUrl: 'https://cerebrium.example/careers/mts', terminalLine: terminalLine(company, id, role),
+  };
 }
 
 function wenNote(c: PlanCtx, n: number): NoteDraft {
@@ -259,6 +273,10 @@ const TOMORROW_PREVIEW: TomorrowRow[] = [
 ];
 /** Room on the next plan: LinkedIn rows plus email slots, as the API's `plan_capacity`. */
 const TOMORROW_ROOM = 25;
+/** The company queue's next day: 8 companies, no email rows (company first). */
+const QUEUE_ROOM = 8;
+const QUEUE_PREVIEW: TomorrowRow[] = ['Warp', 'Modal', 'Temporal', 'Render', 'Clerk', 'Railway', 'Tailscale', 'Convex']
+  .map((name, i) => tomorrowRow(name, null, i % 3 === 2 ? null : 'Software Engineer, New Grad'));
 
 /* ------------------------------------------------------------------ progress */
 
@@ -513,8 +531,9 @@ function buildScores(c: PlanCtx, scenario: Scenario): Record<Id, ScoreView> {
 
 /** The API's one line about the next plan (`tomorrow_text` in outreach/api/queries/plan.py): room, and a pointer to
  * the draft when the dry run named anyone. */
-export function tomorrowText(label: string, total: number, drafted: number): string {
-  const line = `${label}'s plan builds at 08:00. Room for ${total} ${total === 1 ? 'person' : 'people'}.`;
+export function tomorrowText(label: string, total: number, drafted: number, companies = false): string {
+  const room = companies ? `${total} ${total === 1 ? 'company' : 'companies'}` : `${total} ${total === 1 ? 'person' : 'people'}`;
+  const line = `${label}'s plan builds at 08:00. Room for ${room}.`;
   return drafted > 0 ? `${line} A draft of who it would propose is below.` : line;
 }
 
@@ -522,7 +541,10 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
   const n = numbersFor(scenario);
   const noList = scenario === 'weekend' || scenario === 'job_failed' || scenario === 'empty';
   const mode: Mode = scenario === 'plan_done' ? 'done' : scenario === 'fresh' ? 'fresh' : 'default';
-  const built: Built = noList ? { rows: [], requests: 0, applications: 0 } : buildRows(c, mode);
+  // `queue` is Today as the company queue the shipped config builds (company first, #9); the other scenarios keep
+  // the people plan, whose person and email rows the page still renders until they are deleted (P6).
+  const queue = scenario === 'queue';
+  const built: Built = noList ? { rows: [], requests: 0, applications: 0 } : queue ? buildQueueRows(c, 'default') : buildRows(c, mode);
   const { rows } = built;
   const done = rows.filter((r) => r.state === 'done').length;
 
@@ -535,7 +557,9 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
     : null;
   const tomorrow: PlanView['tomorrow'] = scenario === 'empty'
     ? { total: 0, text: 'Nothing is planned yet.', preview: [] }
-    : { total: TOMORROW_ROOM, text: tomorrowText(scenario === 'weekend' ? 'Monday' : 'Tomorrow', TOMORROW_ROOM, TOMORROW_PREVIEW.length), preview: TOMORROW_PREVIEW.map((p) => ({ ...p })) };
+    : queue
+      ? { total: QUEUE_ROOM, text: tomorrowText('Tomorrow', QUEUE_ROOM, QUEUE_PREVIEW.length, true), preview: QUEUE_PREVIEW.map((p) => ({ ...p })) }
+      : { total: TOMORROW_ROOM, text: tomorrowText(scenario === 'weekend' ? 'Monday' : 'Tomorrow', TOMORROW_ROOM, TOMORROW_PREVIEW.length), preview: TOMORROW_PREVIEW.map((p) => ({ ...p })) };
   const [week, month] = [n.week, n.month];
   const [asOfDate, to] = [c.date, c.date];
   const weekFrom = c.addDays(asOfDate, -6);
@@ -545,6 +569,7 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
     asOf: c.asOf, date: c.date, builtAt: noList ? null : c.et(c.date, '08:01'), listJob, notReady, rows, done, total: rows.length,
     linkedinWeek: { used: n.linkedin[0], limit: 150, hardUsed: n.linkedin[1], hardLimit: 200 },
     tomorrow, week: { requests: week[0], accepts: week[1], replies: week[2] },
+    inFlight: scenario === 'empty' || scenario === 'fresh' ? [] : buildInFlight(c, rows),
   };
 
   const wins = buildWins(c, scenario, rows);

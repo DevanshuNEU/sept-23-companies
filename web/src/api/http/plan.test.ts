@@ -9,6 +9,7 @@ const EMPTY: PlanView = {
   linkedinWeek: { used: 0, limit: 150, hardUsed: 0, hardLimit: 200 },
   tomorrow: { total: 7, text: 'Tomorrow: 7 people.', preview: [] },
   week: { requests: 0, accepts: 0, replies: 0 },
+  inFlight: [],
 };
 
 describe('planMethods', () => {
@@ -34,6 +35,19 @@ describe('plan writes', () => {
     expect(send).toHaveBeenLastCalledWith('POST', '/api/plan/31/apply', { postingId: 9, idempotencyKey: 'plan:31:apply', revision: 2 }, o);
     await m.skipRow!(31, 3, o);
     expect(send).toHaveBeenLastCalledWith('POST', '/api/plan/31/skip', { revision: 3 }, o);
+  });
+
+  it('a pasted people log posts the lines and its key, and a saved search posts the address', async () => {
+    const result = { row: { state: 'done', revision: 3 }, people: [] };
+    const send = vi.fn(async () => result);
+    const t = { get: vi.fn(), send } as unknown as Transport;
+    const m = planMethods(t);
+    const lines = 'Jane Doe | Senior Software Engineer | Hi Jane';
+    expect(await m.logPeople!(31, { lines, idempotencyKey: 'plan:31:people:1' }, 2, o)).toBe(result);
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/plan/31/people', { lines, idempotencyKey: 'plan:31:people:1', revision: 2 }, o);
+    const url = 'https://www.linkedin.com/search/results/people/?currentCompany=%5B%221304%22%5D';
+    await m.saveSearch!(31, url, o);
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/plan/31/search', { url }, o);
   });
 
   it('a note save puts the edit and a confirm posts the revision', async () => {

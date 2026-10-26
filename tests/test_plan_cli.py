@@ -66,7 +66,7 @@ class BuildCommandTest(CliBase):
         # Company first (plan.propose_people false, shipped): Ada is on file, but Co00 is a company row too.
         self.assertIn("Co00 | find someone | linkedin_request | level_role", out)
         self.assertNotIn("Ada Lovelace", out)
-        self.assertIn("capacity 7 (LinkedIn 7, email 0)", out)  # the plan writes no email rows
+        self.assertIn("capacity 8 (companies 8, email 0)", out)  # the plan writes no email rows
         self.assertEqual(self.count("daily_list_entry"), 4)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM daily_list_entry WHERE person_id IS NOT NULL "
                                            "OR channel = 'email'").fetchone()[0], 0)

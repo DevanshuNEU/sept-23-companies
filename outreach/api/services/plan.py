@@ -10,6 +10,18 @@ or confirms a reason line on anyone's behalf: `confirm_note` runs only from his 
   On a company row (no person: company first, #9) he types the name of the person he asked: `add_candidate` finds
   them at the company by name or adds them (`added_by 'devanshu'`, role kind `other`, no sources), then the same two
   rows are written. The entry keeps no person; its request step is done by #15's company rule.
+- `log_people` (company first, #9 P2): the fallback for a company row when the terminal bridge is not there. He
+  pastes `Name | Title | note` lines (up to 10); each is one person found or added at the company by the same
+  `add_candidate` door (`added_by 'devanshu'`, the role kind read from the title by `outreach.plan.route.classify_role`)
+  and one request through the company row's own path above, with his note on the log row. One `request_logged` event
+  per new request says it came from the app and which note checks fired. His note already went out, so it is checked
+  as his own (`check_note(author='user')`) and logged as sent; only a note over `note.max_chars` is refused, since
+  LinkedIn could not have sent it (a paste mistake). A paused or no-go company or person refuses the whole paste.
+- `save_search`: his LinkedIn people search for the row's company, kept as an `event` (`entity 'company'`, `kind
+  'linkedin_search_saved'`, `detail {url}`, actor devanshu). Only a LinkedIn people search is kept, and the same
+  address twice writes nothing. A `currentCompany=["<id>"]` filter is also stored as the company's LinkedIn id
+  (`company_alias` source `linkedin`, key `linkedin:<id>`) unless another company already holds that id: identity
+  never moves an alias, so that one is left as it is.
 - `log_applied`: an `application` row and an `application` touch with no person (ruling 2), the same way.
 - `skip_row`: the entry goes to `backlog` with `decided_at` (the next #15 build carries it) and a `row_skipped`
   event records it.
@@ -26,9 +38,10 @@ from datetime import date
 
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
-from outreach.api.models.plan import NoteDraft, PlanRow
-from outreach.api.models.plan_writes import LogAppliedBody, LogRequestBody
+from outreach.api.models.plan import LoggedPerson, LogPeopleResult, NoteDraft, PlanRow
+from outreach.api.models.plan_writes import LogAppliedBody, LogPeopleBody, LogRequestBody
 from outreach.api.queries import plan as queries
+from outreach.api.queries.queue import LINKEDIN_ALIAS, SAVED_SEARCH, saved_searches
 from outreach.api.queries.company import merge_parents, survivor_of
 from outreach.api.queries.outcomes import NOT_SAVED
 from outreach.api.revisions import bump
@@ -37,10 +50,17 @@ from outreach.outcomes.requests import plan_context, record_request
 from outreach.outcomes.windows import day_bounds_utc, ny_day
 from outreach.plan.config import PlanConfig
 from outreach.plan.drafts import confirm_reason, save_linkedin_draft
-from outreach.plan.people import add_candidate
-from outreach.store import append_event, log_touch
+from outreach.plan.notecheck import check_note
+from outreach.plan.people import add_candidate, linkedin_company_id, linkedin_search_url
+from outreach.plan.route import classify_role
+from outreach.ranking.common import canonical_ids
+from outreach.store import add_alias, append_event, log_touch, name_key
 
 NO_ROLE = "No role to apply for."
+PEOPLE_MAX = 10
+NAME_MAX = TITLE_MAX = 200
+# The checks that say the checker could not run (a list it could not read): not a fault in his note.
+CHECKER_CODES = ("banned_list_unreadable", "unconfirmed_list_unreadable")
 
 
 def _bad(text: str) -> ApiProblem:
@@ -81,8 +101,11 @@ def _bump(ctx: WriteCtx, entry: sqlite3.Row, revision: int, sets: dict | None = 
 
 
 def _bump_logged(ctx: WriteCtx, entry: sqlite3.Row) -> None:
-    """A step log moves the revision on from wherever it stands, inside this write's transaction (no check)."""
-    _bump(ctx, entry, entry["revision"])
+    """A step log moves the revision on from wherever it stands, inside this write's transaction (no check): the
+    stored revision, so several logs in one write (a pasted list of people) each move it on by one."""
+    current = ctx.conn.execute("SELECT revision FROM daily_list_entry WHERE rowid = ?",
+                               (queries.plan_entry_id(entry),)).fetchone()[0]
+    _bump(ctx, entry, current)
 
 
 def _keyed(conn: sqlite3.Connection, key: str) -> sqlite3.Row | None:
@@ -103,14 +126,14 @@ def _posting(conn: sqlite3.Connection, posting_id: int | None) -> sqlite3.Row | 
     return conn.execute("SELECT * FROM posting WHERE posting_id = ?", (posting_id,)).fetchone()
 
 
-def _release_key(ctx: WriteCtx, touch: sqlite3.Row) -> None:
+def _release_key(ctx: WriteCtx, touch: sqlite3.Row, n: int = 1) -> None:
     """An undone touch gives its key back: it keeps a derived key (`<key>#undone-<touch_id>`), so a new touch can take
     the row's key. Body keys cannot hold `#` (`LogRequestBody`), so the derived key is never anyone else's."""
     moved = f"{touch['idempotency_key']}#undone-{touch['touch_id']}"
     ctx.conn.execute("UPDATE outreach_touch SET idempotency_key = ? WHERE touch_id = ?", (moved, touch["touch_id"]))
     append_event(ctx.conn, entity="outreach_touch", entity_id=touch["touch_id"], company_id=touch["company_id"],
                  kind="key_released", actor="devanshu", at=ctx.now,
-                 detail={"from": touch["idempotency_key"], "to": moved}, idempotency_key=ctx.event_key(1))
+                 detail={"from": touch["idempotency_key"], "to": moved}, idempotency_key=ctx.event_key(n))
 
 
 def _open_to_him(conn: sqlite3.Connection, entry: sqlite3.Row, person: sqlite3.Row | None) -> int:
@@ -160,19 +183,44 @@ def log_request(ctx: WriteCtx, entry_id: int, body: LogRequestBody, cfg: PlanCon
 
 
 def _write_request(ctx: WriteCtx, entry: sqlite3.Row, survivor: int, person: sqlite3.Row, key: str,
-                   found: sqlite3.Row | None) -> None:
+                   found: sqlite3.Row | None, *, note: str = "", release: int = 1) -> tuple[int, bool]:
     conn = ctx.conn
     posting = _posting(conn, entry["posting_id"])
     if posting is not None and posting["closed_at"] is not None:
         posting = None  # the row shows no role once its posting closed, so the touch names none either
     context = _context(conn, entry, survivor, person["role_kind"], posting, ctx.now)
     if found is not None:  # taken back on the LinkedIn page: the old touch stays, undone, under a derived key
-        _release_key(ctx, found)
+        _release_key(ctx, found, release)
     # The log row first, the touch second, in one transaction: if either fails, neither stays.
-    record_request(conn, person_id=person["person_id"], company_id=survivor, sent_at=ctx.now, recorded_at=ctx.now,
-                   context=context, posting_id=posting["posting_id"] if posting is not None else None,
-                   idempotency_key=key)
+    written = record_request(conn, person_id=person["person_id"], company_id=survivor, sent_at=ctx.now,
+                             recorded_at=ctx.now, context=context,
+                             posting_id=posting["posting_id"] if posting is not None else None,
+                             idempotency_key=key, note=note)
     _bump_logged(ctx, entry)
+    return written
+
+
+def _found_at_company(ctx: WriteCtx, entry: sqlite3.Row, survivor: int, name: str, title: str, role_kind: str,
+                      cfg: PlanConfig) -> tuple[sqlite3.Row, bool]:
+    """The person of that name at the company, found or added by him (`add_candidate`), after refusing a no-go on
+    them. `(person, added)`."""
+    conn = ctx.conn
+    added = add_candidate(conn, company_id=survivor, name=name, title=title, role_kind=role_kind, sources=(),
+                          added_by="devanshu", today=date.fromisoformat(ny_day(ctx.now)), cfg=cfg)
+    if added.refused is not None:
+        raise _refuse(f"{name} could not be added at this company ({added.refused}).")
+    person = conn.execute("SELECT * FROM person WHERE person_id = ?", (added.person_id,)).fetchone()
+    _open_to_him(conn, entry, person)  # a no-go on the person found by that name
+    return person, added.created
+
+
+def _not_asked_yet(conn: sqlite3.Connection, entry: sqlite3.Row, person: sqlite3.Row) -> None:
+    logged = conn.execute(
+        "SELECT sent_at FROM outreach_touch WHERE person_id = ? AND channel = 'linkedin_request' "
+        "AND undone_at IS NULL AND sent_at >= ? ORDER BY sent_at LIMIT 1",
+        (person["person_id"], day_bounds_utc(entry["list_date"])[0])).fetchone()
+    if logged is not None:
+        raise _refuse(f"Already logged: request sent to {person['name']} on {ny_day(logged['sent_at'])}.")
 
 
 def _log_company_request(ctx: WriteCtx, entry_id: int, entry: sqlite3.Row, body: LogRequestBody,
@@ -191,19 +239,113 @@ def _log_company_request(ctx: WriteCtx, entry_id: int, entry: sqlite3.Row, body:
     if body.person_id is not None or not name:
         raise _refuse("Nobody is on this row. Type the name of the person you asked, then log it.")
     survivor = _open_to_him(conn, entry, None)  # a paused or no-go company first, before anyone is added
-    added = add_candidate(conn, company_id=survivor, name=name, role_kind="other", sources=(),
-                          added_by="devanshu", today=date.fromisoformat(ny_day(ctx.now)), cfg=cfg)
-    if added.refused is not None:
-        raise _refuse(f"{name} could not be added at this company ({added.refused}).")
-    person = conn.execute("SELECT * FROM person WHERE person_id = ?", (added.person_id,)).fetchone()
-    _open_to_him(conn, entry, person)  # a no-go on the person found by that name
-    logged = conn.execute(
-        "SELECT sent_at FROM outreach_touch WHERE person_id = ? AND channel = 'linkedin_request' "
-        "AND undone_at IS NULL AND sent_at >= ? ORDER BY sent_at LIMIT 1",
-        (person["person_id"], day_bounds_utc(entry["list_date"])[0])).fetchone()
-    if logged is not None:
-        raise _refuse(f"Already logged: request sent to {person['name']} on {ny_day(logged['sent_at'])}.")
+    person, _ = _found_at_company(ctx, entry, survivor, name, "", "other", cfg)
+    _not_asked_yet(conn, entry, person)
     _write_request(ctx, entry, survivor, person, body.idempotency_key, found)
+    return _answer(conn, entry_id, cfg)
+
+
+# ---------------------------------------------------------------------------------------------- company first (P2)
+
+def parse_people(text: str, company_name: str) -> list[tuple[str, str, str]]:
+    """`(name, title, note)` for each non-blank line of `Name | Title | note`. A line of the terminal's paste block,
+    `Company | Name | Title | note`, drops its company first. The note keeps his text as he sent it (a `|` inside
+    it too); only its ends are trimmed. `ApiProblem` (bad_request) names the line that cannot be read."""
+    lines = [line for line in (text or "").splitlines() if line.strip()]
+    if not lines:
+        raise _bad("Paste one line per person: Name | Title | note.")
+    if len(lines) > PEOPLE_MAX:
+        raise _bad(f"Paste at most {PEOPLE_MAX} people at a time; this has {len(lines)}.")
+    company = name_key(company_name)
+    out, seen = [], set()
+    for n, line in enumerate(lines, 1):
+        head, _, rest = line.partition("|")
+        if line.count("|") >= 3 and company and name_key(head) == company:
+            line = rest
+        parts = line.split("|", 2)
+        name = " ".join(parts[0].split())
+        title = " ".join(parts[1].split()) if len(parts) > 1 else ""
+        note = parts[2].strip() if len(parts) > 2 else ""
+        if not name:
+            raise _bad(f"Line {n} has no name. Start it with the person's name.")
+        if len(name) > NAME_MAX or len(title) > TITLE_MAX:
+            raise _bad(f"Line {n}: a name or title is over {NAME_MAX} characters.")
+        if name_key(name) in seen:
+            raise _bad(f"{name} is in the paste twice.")
+        seen.add(name_key(name))
+        out.append((name, title, note))
+    return out
+
+
+def _note_warnings(note: str, cfg: PlanConfig, banned: Sequence, unconfirmed) -> tuple[list[str], list[str]]:
+    """His note's checks as his own text: `(warnings, codes)`. Over the length limit raises: it cannot have gone."""
+    if not note:
+        return [], []
+    checks = [c for c in check_note(note, "", "written", [], cfg=cfg, banned=banned, unconfirmed=unconfirmed,
+                                    author="user") if c.code not in CHECKER_CODES]
+    if any(c.code == "note_too_long" for c in checks):
+        raise _bad(f"A note is {len(note)} characters; LinkedIn takes {cfg.get('note', 'max_chars')}. Paste the note "
+                   "exactly as you sent it.")
+    return [f"{c.title}: {c.detail}" for c in checks], sorted({c.code for c in checks})
+
+
+def log_people(ctx: WriteCtx, entry_id: int, body: LogPeopleBody, cfg: PlanConfig, banned: Sequence,
+               unconfirmed) -> LogPeopleResult:
+    conn = ctx.conn
+    entry = _entry(conn, entry_id)
+    if entry["channel"] == "email":
+        raise _refuse("This row is an email. Review it in the Outbox.")
+    if entry["person_id"] is not None:
+        raise _bad("This row already names its person.")
+    survivor = _open_to_him(conn, entry, None)  # a paused or no-go company refuses before anyone is added
+    company = conn.execute("SELECT name FROM company WHERE company_id = ?", (survivor,)).fetchone()["name"]
+    lines = parse_people(body.lines, company)
+    checked = [_note_warnings(note, cfg, banned, unconfirmed) for _, _, note in lines]
+    logged = []
+    for n, ((name, title, note), (warnings, codes)) in enumerate(zip(lines, checked), 1):
+        key = f"{body.idempotency_key}:{n}"
+        found = _keyed(conn, key)
+        if found is not None and (found["channel"] != "linkedin_request" or found["company_id"] != survivor):
+            raise _bad("That key belongs to another touch, not this row's people.")
+        person, added = _found_at_company(ctx, entry, survivor, name, title, classify_role(title, cfg), cfg)
+        if found is not None and found["undone_at"] is None:  # this paste was logged before: nothing written
+            logged.append(_logged(person, False, note, warnings))
+            continue
+        _not_asked_yet(conn, entry, person)
+        touch_id, created = _write_request(ctx, entry, survivor, person, key, found, note=note, release=n + 1)
+        if created:
+            append_event(conn, entity="outreach_touch", entity_id=touch_id, company_id=survivor,
+                         kind="request_logged", actor="devanshu", at=ctx.now, idempotency_key=f"{key}:logged",
+                         detail={"via": "app", "personId": person["person_id"], "noteChars": len(note),
+                                 "source": "plan", "checks": codes})
+        logged.append(_logged(person, added, note, warnings))
+    return LogPeopleResult(row=_answer(conn, entry_id, cfg), people=logged)
+
+
+def _logged(person: sqlite3.Row, added: bool, note: str, warnings: list[str]) -> LoggedPerson:
+    return LoggedPerson(person_id=person["person_id"], name=person["name"], title=person["title"],
+                        role_kind=person["role_kind"], added=added, note_chars=len(note), warnings=warnings)
+
+
+def save_search(ctx: WriteCtx, entry_id: int, url: str, cfg: PlanConfig) -> PlanRow:
+    conn = ctx.conn
+    entry = _entry(conn, entry_id)
+    survivor = survivor_of(merge_parents(conn), entry["company_id"])
+    clean = linkedin_search_url(url)
+    if clean is None:
+        raise _bad("That is not a LinkedIn people search. Copy the address of the search page; it starts with "
+                   "https://www.linkedin.com/search/results/people/.")
+    if saved_searches(conn, canonical_ids(conn), {survivor}).get(survivor) == clean:
+        return _answer(conn, entry_id, cfg)  # the same search again: nothing written
+    append_event(conn, entity="company", entity_id=survivor, company_id=survivor, kind=SAVED_SEARCH,
+                 actor="devanshu", at=ctx.now, detail={"url": clean}, idempotency_key=ctx.event_key(0))
+    company_id = linkedin_company_id(clean)
+    if company_id is not None:
+        try:
+            add_alias(conn, survivor, f"{LINKEDIN_ALIAS}{company_id}", "linkedin")
+        except ValueError:
+            pass  # another company holds this LinkedIn id: identity never moves an alias
+    _bump_logged(ctx, entry)
     return _answer(conn, entry_id, cfg)
 
 

@@ -224,7 +224,8 @@ def build_why(prospect: Prospect, chosen: Chosen, stored: StoredScore, posting: 
         if chosen.person_id is not None else None
     find = None
     if chosen.person_id is None:
-        find = {"search_url": people_search_url(prospect.name, cfg.get("people", "search_hint")), "handoff": HANDOFF}
+        # The keywords rule: the page reads his saved search or a stored LinkedIn id when it shows the row.
+        find = {"search_url": people_search_url(prospect.name), "handoff": HANDOFF}
     return {
         "lane": chosen.list_group,
         "reason": scrub_text(str(reasons[0])) if reasons else "",

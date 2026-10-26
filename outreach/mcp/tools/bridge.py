@@ -50,7 +50,7 @@ from outreach.plan.config import PlanConfig, default_plan_config
 from outreach.plan.contact import contact_states
 from outreach.plan.outbound import Outbound, load_outbound
 from outreach.plan.people import load_candidates, pick_channel
-from outreach.plan.route import (Budget, CompanyFacts, PersonFacts, Route, classify_role, free_again, route_all,
+from outreach.plan.route import (Budget, CompanyFacts, PersonFacts, Route, classify_role, route_all,
                                  seniority)
 from outreach.ranking.common import canonical_ids
 from outreach.sources.keys import linkedin_key, person_name_key
@@ -232,19 +232,15 @@ class _Company:
 def _company(conn: sqlite3.Connection, family: Family, survivor: int, outbound: list[Outbound], queue: dict,
              no_go_companies: set[int], held: set[int], today: date, cfg: PlanConfig) -> _Company:
     row = company_row(conn, survivor)
-    st = contact_states(outbound, [survivor], today, cfg)[survivor]
-    rotate = cfg.get("linkedin", "rotate_days")
-    mine = [o for o in outbound if o.company_id == survivor]
-    wave = [o for o in mine if o.queued or (today - o.anchor_on).days < rotate]
+    st = contact_states(outbound, [survivor], today, cfg)[survivor]  # the wave and its free day: contact.py's
     contact, reason = st.status, st.reason
     if survivor in held and contact != "engaged":
         contact, reason = "engaged", "Someone replied"
-    free_on = free_again(max((o.anchor_on for o in wave), default=None), cfg) if wave else None
+    free_on = st.free_on
     facts = CompanyFacts(
         name=row["name"], status=row["status"], close_reason=row["close_reason"], no_go=survivor in no_go_companies,
         paused=row["paused_at"] is not None, contact=contact, contact_reason=reason,
-        wave_people=len({o.person_id for o in wave if o.person_id is not None}), free_on=free_on,
-        email_people=st.email_people, on_queue=survivor in queue)
+        wave_people=st.wave_people, free_on=free_on, email_people=st.email_people, on_queue=survivor in queue)
     if facts.no_go:
         label = "no_go"
     elif row["status"] == "removed":
@@ -257,7 +253,7 @@ def _company(conn: sqlite3.Connection, family: Family, survivor: int, outbound: 
         label = {"engaged": "engaged", "waiting": "in_flight", "stale": "asked_before", "free": "new"}[contact]
     state = {"label": label, "reason": reason, "free_again": free_on.isoformat() if free_on else None,
              "on_today_queue": facts.on_queue, "wave_people": facts.wave_people,
-             "wave_size": cfg.route["wave_size"], "people_contacted": st.people_contacted,
+             "wave_size": cfg.get("queue", "requests_per_company"), "people_contacted": st.people_contacted,
              "email_people": st.email_people, "close_reason": row["close_reason"]}
     return _Company(survivor, row, facts, state, queue.get(survivor))
 

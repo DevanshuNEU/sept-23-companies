@@ -10,7 +10,8 @@ setting can change, `#9 <the rule>`. First match wins:
    this person was asked under `linkedin.rotate_days` ago.
 3. find_someone_else: this person was asked longer ago with no answer; their role is outside `route.reach_kinds`
    (advice only: the note is still his pick); a recruiter while anyone else at the company is known (#9).
-4. wait: the company's wave is full (`route.wave_size` people inside `linkedin.rotate_days`), until it is free.
+4. wait: the company's wave is full (`queue.requests_per_company` people inside `linkedin.rotate_days`), until it
+   is free.
 5. email: `outreach.plan.people.pick_channel` already said email (a published or verified address, for a founder,
    an HN post that asks, or a company of recruiters only) and the company has room (`email.people_per_company`).
    The sender then holds every other #9 email rule: the ramp, 3 a day per company, 60 minutes apart.
@@ -178,11 +179,11 @@ def route_person(p: PersonFacts, c: CompanyFacts, budget: Budget, taken: Taken, 
     if p.role_kind == "recruiter" and p.recruiter_blocked:
         return Route("find_someone_else", f"{p.name} is a recruiter and {c.name} has someone else on record; "
                                           "recruiters come last.", "#9 recruiters last")
-    wave_size = cfg.route["wave_size"]
+    wave_size = cfg.get("queue", "requests_per_company")
     if c.wave_people + taken.wave >= wave_size:
         free = f"; free again {day_text(c.free_on)}" if c.free_on is not None else ""
         return Route("wait", f"{c.wave_people + taken.wave} people at {c.name} are in this wave (up to "
-                             f"{wave_size}){free}.", "route.wave_size")
+                             f"{wave_size}){free}.", "queue.requests_per_company")
     room = cfg.get("email", "people_per_company") - c.email_people - taken.email
     if p.email_code is not None and room > 0:
         return Route("email", f"Email: {_EMAIL_WHY.get(p.email_code, 'the address is published or verified')}. "

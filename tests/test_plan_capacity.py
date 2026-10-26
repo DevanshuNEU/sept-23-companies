@@ -1,8 +1,8 @@
 import unittest
 from datetime import date
 
-from outreach.plan.capacity import (current_send_limit, email_capacity, lane_quotas, linkedin_capacity,
-                                    plan_capacity)
+from outreach.plan.capacity import (companies_today, current_send_limit, email_capacity, lane_quotas,
+                                    linkedin_capacity, plan_capacity)
 from outreach.plan.config import default_plan_config
 from outreach.ranking.common import canonical_ids
 from outreach.store.timefmt import utcnow
@@ -29,16 +29,32 @@ class LinkedinCapacityTest(unittest.TestCase):
     def cap(self, today):
         return linkedin_capacity(self.conn, canonical_ids(self.conn), today, CFG)
 
-    def test_a_fresh_week_gives_his_daily_pace(self):
-        self.assertEqual(self.cap(D(2026, 11, 2)).today, 7)
+    def test_a_fresh_week_gives_the_queue_of_eight(self):
+        self.assertEqual(self.cap(D(2026, 11, 2)).today, 8)
         self.requests(40, D(2026, 11, 9))
         c = self.cap(D(2026, 11, 10))
-        self.assertEqual((c.today, c.remaining, c.used, c.hard_used), (7, 110, 40, 40))
+        self.assertEqual((c.today, c.remaining, c.used, c.hard_used), (8, 110, 40, 40))
 
-    def test_plenty_left_in_the_week_never_raises_the_day_above_the_pace(self):
-        # #9: about 7 a day is his pace, not LinkedIn's limit. 150 left over a few days is still 7, never 30.
+    def test_plenty_left_in_the_week_never_raises_the_day_above_the_queue(self):
+        # #9 company first: about 8 companies a day is the queue, not what the week could hold (150 / 4 is 37).
         for day in (D(2026, 11, 6), D(2026, 11, 8), D(2026, 11, 30), D(2026, 10, 31)):
-            self.assertEqual(self.cap(day).today, CFG.get("linkedin", "per_day"), day)
+            self.assertEqual(self.cap(day).today, CFG.get("queue", "companies_per_day"), day)
+
+    def test_a_heavy_week_cuts_the_queue_to_whole_waves(self):
+        # companies_today = min(companies_per_day, floor(remaining / requests_per_company))
+        for used, want in ((120, 7), (122, 7), (124, 6), (140, 2), (146, 1), (147, 0), (150, 0)):
+            conn = fresh_store()
+            company = seed_scored_company(conn, "Acme", 5.0, ["level_role"])
+            person = seed_person(conn, company, "Ada")
+            for _ in range(used):
+                seed_outbound(conn, person, company, "linkedin_request", D(2026, 11, 9))
+            with self.subTest(used=used):
+                c = linkedin_capacity(conn, canonical_ids(conn), TODAY, CFG)
+                self.assertEqual((c.remaining, c.today), (150 - used, want))
+
+    def test_companies_today_formula(self):
+        for remaining, want in ((150, 8), (32, 8), (31, 7), (8, 2), (7, 1), (4, 1), (3, 0), (0, 0), (-5, 0)):
+            self.assertEqual(companies_today(remaining, CFG), want, remaining)
 
     def test_the_window_is_the_last_seven_days(self):
         self.requests(5, D(2026, 11, 3))  # Tuesday a week ago: out of the window
@@ -52,7 +68,7 @@ class LinkedinCapacityTest(unittest.TestCase):
         self.requests(150, D(2026, 11, 3))
         self.assertEqual((self.cap(D(2026, 11, 9)).today, self.cap(D(2026, 11, 9)).remaining), (0, 0))
         c = self.cap(TODAY)
-        self.assertEqual((c.today, c.remaining, c.used), (7, 150, 0))
+        self.assertEqual((c.today, c.remaining, c.used), (8, 150, 0))
 
     def test_budget_spent_or_overspent_is_zero_not_negative(self):
         self.requests(150, D(2026, 11, 9))
@@ -83,7 +99,9 @@ class LinkedinCapacityTest(unittest.TestCase):
         self.requests(40, D(2026, 11, 9))
         self.requests(156, D(2026, 11, 8), source="own")  # 196 in all: the hard total leaves 4, the share 110
         c = self.cap(TODAY)
-        self.assertEqual((c.remaining, c.today, c.budget, c.hard_limit), (4, 4, 150, 200))
+        self.assertEqual((c.remaining, c.today, c.budget, c.hard_limit), (4, 1, 150, 200))  # one wave of 4 left
+        self.requests(1, D(2026, 11, 8), source="own")  # 3 left: not a whole wave
+        self.assertEqual((self.cap(TODAY).remaining, self.cap(TODAY).today), (3, 0))
 
     def test_reason_used_counts_plan_reason_lane_only(self):
         self.requests(3, D(2026, 11, 9), lane="reason_no_role")
@@ -120,7 +138,7 @@ class LinkedinCapacityTest(unittest.TestCase):
         self.assertEqual(self.cap(TODAY).hard_used, 0)
 
     def test_a_weekend_force_build_still_has_capacity(self):
-        self.assertEqual(self.cap(D(2026, 11, 8)).today, 7)
+        self.assertEqual(self.cap(D(2026, 11, 8)).today, 8)
 
 
 class EmailCapacityTest(unittest.TestCase):
@@ -203,13 +221,13 @@ class EmailCapacityTest(unittest.TestCase):
         canon = canonical_ids(conn)
         seed_send_day(conn, D(2026, 11, 2), 10)
         on = PEOPLE_ON  # with people on, the plan may write email rows
-        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 2), on), 7 + 10)
+        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 2), on), 8 + 10)
         for day in (D(2026, 11, 10), D(2026, 11, 11)):
             self.assertEqual(plan_capacity(conn, canon, day, on),
                              linkedin_capacity(conn, canon, day, on).today + email_capacity(conn, day, on).slots)
-        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 11), on), 7 + 10)
+        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 11), on), 8 + 10)
         # shipped (company first): no email rows, so no email slots in the plan's total; the sender's own are kept
-        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 11), CFG), 7)
+        self.assertEqual(plan_capacity(conn, canon, D(2026, 11, 11), CFG), 8)
         self.assertEqual(email_capacity(conn, D(2026, 11, 11), CFG).slots, 10)
 
 

@@ -215,7 +215,7 @@ class IntakeTest(BridgeCase):
         verdicts = [p["route"]["verdict"] for p in out["people"]]
         self.assertEqual(verdicts, ["find_someone_else", "linkedin_note", "linkedin_note", "linkedin_note",
                                     "linkedin_note", "wait"])
-        self.assertEqual(out["people"][5]["route"]["key"], "route.wave_size")
+        self.assertEqual(out["people"][5]["route"]["key"], "queue.requests_per_company")
 
     def test_a_company_on_todays_queue_routes_against_the_plan_quota(self):
         self.plan_today(self.acme)

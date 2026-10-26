@@ -120,8 +120,12 @@ class EligibilityTest(unittest.TestCase):
     def test_stale_rotates_only_near_the_top(self):
         self.assertTrue(eligibility(prospect(status="stale", position=150, people=1), CFG)[0])
         self.assertFalse(eligibility(prospect(status="stale", position=151, people=1), CFG)[0])
-        self.assertTrue(eligibility(prospect(status="stale", position=10, people=2), CFG)[0])
-        self.assertFalse(eligibility(prospect(status="stale", position=10, people=3), CFG)[0])
+        # #9 company first: up to linkedin.max_people_per_company (8) people over time, so a company whose first
+        # wave of 4 got no answer comes back for people not yet asked.
+        self.assertTrue(eligibility(prospect(status="stale", position=10, people=4), CFG)[0])
+        self.assertTrue(eligibility(prospect(status="stale", position=10, people=7), CFG)[0])
+        self.assertEqual(eligibility(prospect(status="stale", position=10, people=8), CFG),
+                         (False, "max_people_contacted"))
 
     def test_rotation_picks_a_different_person_and_records_who_it_replaced(self):
         new = cand(60, company=5, fit="team")
@@ -310,7 +314,7 @@ class CompanyOnlyTest(unittest.TestCase):
         self.assertEqual([(r.company_id, r.person_id, r.rotation_from) for r in rows], [(5, None, 7)])
         for status in ("waiting", "engaged"):
             self.assertEqual(choose_rows([prospect(6, status=status)], Caps(1, 0, 1, 0), SHIPPED), [])
-        full = prospect(7, status="stale", people=3, position=3)
+        full = prospect(7, status="stale", people=8, position=3)
         self.assertEqual(choose_rows([full], Caps(1, 0, 1, 0), SHIPPED), [])
 
 

@@ -1073,7 +1073,7 @@ class PlanFlowTests(HarnessCase):
         h = self.flow()
         run = h.plan.result
         rows = self.entries(h)
-        self.assertEqual((run.linkedin.today, run.email.slots), (7, 15))  # his pace, with the week's share left
+        self.assertEqual((run.linkedin.today, run.email.slots), (8, 15))  # the queue, with the week's share left
         self.assertEqual(len([r for r in rows if r["channel"] == "linkedin_request"]), run.linkedin.today)
         self.assertEqual(len([r for r in rows if r["channel"] == "email"]), 1, "only the founder has an address")
         self.assertLessEqual(len(rows), _rows(h, "SELECT capacity FROM daily_list")[0][0])
@@ -1111,19 +1111,19 @@ class PlanFlowTests(HarnessCase):
         reason_rows = total = 0
         for n, day in enumerate(days):
             run = build_plan(conn, today=day, cfg=PEOPLE_ON, read_boards=False)
-            self.assertEqual((run.status, run.linkedin.today), ("built", 7), day)
+            self.assertEqual((run.status, run.linkedin.today), ("built", 8), day)
             rows = conn.execute("SELECT * FROM daily_list_entry WHERE list_date = ? ORDER BY rank",
                                 (day.isoformat(),)).fetchall()
-            self.assertEqual(len(rows), 7)
+            self.assertEqual(len(rows), 8)
             reason = sum(1 for r in rows if r["list_group"] == "reason_no_role")
             if n == 0:
-                self.assertEqual((7 - reason, reason), (6, 1), "capacity 7 gives 6 role rows and 1 reason row")
+                self.assertEqual((8 - reason, reason), (6, 2), "a queue of 8 gives 6 role rows and 2 reason rows")
             for r in rows:  # he sends every row the same day
                 self.assertIsNotNone(r["person_id"])
                 seed_outbound(conn, r["person_id"], r["company_id"], "linkedin_request", day, lane=r["list_group"])
             reason_rows, total = reason_rows + reason, total + len(rows)
             self.assertLessEqual(abs(reason_rows - 0.2 * total), 1, f"after day {n + 1}: {reason_rows} of {total}")
-        self.assertEqual(total, 35)
+        self.assertEqual(total, 40)
 
     def test_flow_plan_14_day_rule_boundary(self):
         h = self.flow()
@@ -1153,11 +1153,10 @@ class PlanFlowTests(HarnessCase):
         self.assertTrue(named[0], "the first row has a person")
         self.assertIn(False, named, "the situation leaves companies with nobody")
         names = dict(_rows(h, "SELECT company_id, name FROM company"))
-        hint = default_plan_config().get("people", "search_hint")
         for r in rows:
             why = json.loads(r["why"])
             if r["person_id"] is None:
-                self.assertEqual(why["find_someone"]["search_url"], people_search_url(names[r["company_id"]], hint))
+                self.assertEqual(why["find_someone"]["search_url"], people_search_url(names[r["company_id"]]))
                 self.assertEqual(r["channel"], "linkedin_request")
             else:
                 self.assertIsNone(why["find_someone"])
@@ -1221,8 +1220,8 @@ class PlanFlowTests(HarnessCase):
         placed = {r["company_id"] for r in self.entries(h)}
         for label, company in extras.items():
             self.assertNotIn(company, placed, label)
-        # 7 LinkedIn rows (his pace) and the founder's email row
-        self.assertEqual(len(placed), 8, "the extras took no place from the companies that may be reached")
+        # 8 LinkedIn rows (the queue) and the founder's email row
+        self.assertEqual(len(placed), 9, "the extras took no place from the companies that may be reached")
         self.assertIn(s.team, placed)
 
     def test_flow_plan_is_idempotent_and_the_foundation_flow_test_still_passes(self):

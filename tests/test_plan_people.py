@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 from outreach.plan.config import default_plan_config
 from outreach.plan.people import (AddResult, Candidate, SourceInput, SourceRef, add_candidate, load_candidates,
+                                  linkedin_company_id, linkedin_search_url,
                                   pick_channel, people_search_url, rank_people, tier)
 from outreach.ranking.common import canonical_ids
 from tests.plan_seed import TODAY, seed_person, seed_scored_company, seed_source
@@ -275,11 +276,60 @@ class ChannelTest(unittest.TestCase):
         self.assertEqual(pick_channel(initial, [verified], CFG), ("email", "founder_published_email"))
 
 
+US = "geoUrn=%5B%22103644278%22%5D"  # the United States on LinkedIn's people search
+SAVED = ("https://www.linkedin.com/search/results/people/?currentCompany=%5B%221304%22%5D&geoUrn=%5B%22103644278%22%5D"
+         "&origin=FACETED_SEARCH&titleFreeText=engineer")
+
+
 class SearchUrlTest(unittest.TestCase):
-    def test_search_url_encodes_company_and_hint(self):
-        self.assertEqual(people_search_url("Acme AI", "software engineer"),
-                         "https://www.linkedin.com/search/results/people/?keywords=Acme%20AI%20software%20engineer")
-        self.assertIn("%26", people_search_url("A&B", "x"))
+    def test_keywords_are_the_company_name_in_the_us(self):
+        self.assertEqual(people_search_url("Acme AI"),
+                         f"https://www.linkedin.com/search/results/people/?keywords=Acme%20AI&{US}&origin=FACETED_SEARCH")
+        self.assertIn("keywords=A%26B%3F%23&", people_search_url("A&B?#"))
+
+    def test_a_stored_linkedin_id_filters_by_company(self):
+        self.assertEqual(people_search_url("Acme AI", linkedin_id="1304"),
+                         "https://www.linkedin.com/search/results/people/?currentCompany=%5B%221304%22%5D"
+                         f"&{US}&origin=FACETED_SEARCH")
+        for bad in ("13a4", "", "1304&x=1", "1" * 21):
+            with self.subTest(bad=bad):
+                self.assertIn("keywords=Acme", people_search_url("Acme", linkedin_id=bad))
+
+    def test_his_saved_search_wins_as_he_pasted_it(self):
+        self.assertEqual(people_search_url("Acme AI", saved_url=SAVED, linkedin_id="99"), SAVED)
+        # a stored value that is not a LinkedIn people search is never used
+        self.assertEqual(people_search_url("Acme", saved_url="https://evil.example/search/results/people/",
+                                           linkedin_id="7"),
+                         f"https://www.linkedin.com/search/results/people/?currentCompany=%5B%227%22%5D&{US}"
+                         "&origin=FACETED_SEARCH")
+
+    def test_what_counts_as_a_people_search(self):
+        for good in (SAVED, "https://linkedin.com/search/results/people/?keywords=acme",
+                     "https://www.linkedin.com/search/results/people?keywords=acme", "  " + SAVED + "\n"):
+            with self.subTest(good=good):
+                self.assertEqual(linkedin_search_url(good), good.strip())
+        for bad in ("http://www.linkedin.com/search/results/people/?keywords=a",
+                    "https://www.linkedin.com.evil.example/search/results/people/",
+                    "https://user:pw@www.linkedin.com/search/results/people/",
+                    "https://www.linkedin.com:8443/search/results/people/",
+                    "https://www.linkedin.com/search/results/companies/?keywords=a",
+                    "https://www.linkedin.com/in/someone", "https://www.linkedin.com/search/results/people/ x",
+                    "https://www.linkedin.com/search/results/people/#frag", "javascript:alert(1)", "", None, 5,
+                    "https://www.linkedin.com/search/results/people/?k=" + "a" * 2000):
+            with self.subTest(bad=bad):
+                self.assertIsNone(linkedin_search_url(bad))
+
+    def test_the_company_id_in_a_saved_search(self):
+        self.assertEqual(linkedin_company_id(SAVED), "1304")
+        self.assertEqual(linkedin_company_id('https://www.linkedin.com/search/results/people/?currentCompany=["88"]'),
+                         "88")
+        for none in ("https://www.linkedin.com/search/results/people/?keywords=acme",
+                     "https://www.linkedin.com/search/results/people/?currentCompany=%5B%221%22%2C%222%22%5D",
+                     "https://www.linkedin.com/search/results/people/?currentCompany=%5B%22x1%22%5D",
+                     "https://www.linkedin.com/search/results/people/?currentCompany=1304",
+                     "https://evil.example/search/results/people/?currentCompany=%5B%221304%22%5D"):
+            with self.subTest(none=none):
+                self.assertIsNone(linkedin_company_id(none))
 
 
 def count(conn, table="person") -> int:

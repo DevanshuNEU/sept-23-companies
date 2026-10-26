@@ -222,7 +222,8 @@ class PlanReadTests(PlanCase):
         self.set_why("Cerebrium", "{}")
         five = self.row("Cerebrium")
         self.assertEqual(five["findSomeone"]["searchUrl"],
-                         "https://www.linkedin.com/search/results/people/?keywords=Cerebrium%20engineer")
+                         "https://www.linkedin.com/search/results/people/?keywords=Cerebrium"
+                         "&geoUrn=%5B%22103644278%22%5D&origin=FACETED_SEARCH")
         self.assertEqual(five["findSomeone"]["handoff"], HANDOFF)
 
     def test_email_row_points_at_its_outbox_touch_and_has_no_steps_to_log(self):

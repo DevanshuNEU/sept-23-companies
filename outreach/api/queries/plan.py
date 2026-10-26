@@ -58,7 +58,6 @@ _DRAFT_ERRORS: set[str] = set()  # the dry-run failures already logged by this p
 
 EMAIL_DONE = ("approved", "sending", "send_unknown", "sent")  # the first email left drafted
 SEARCH_PREFIX = "https://www.linkedin.com/search/results/people/"
-SEARCH_HINT = "engineer"
 WEEKEND_TEXT = "No plan on weekends."
 NOT_BUILT_TEXT = "Today's plan is not built yet. It builds at 8:00 on weekdays."
 LEAN_TEXT = "Today's list came from the old Today page, so there is no people plan today. It builds again tomorrow."
@@ -314,7 +313,7 @@ def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanCo
         find = None
         if person is None:
             find = parsed.find_someone or FindSomeone(
-                search_url=people_search_url(d.company.name, SEARCH_HINT), handoff=HANDOFF)
+                search_url=people_search_url(d.company.name), handoff=HANDOFF)
         rows.append(PlanRow(
             entry_id=plan_entry_id(e), position=position, channel=channel, lane=e["list_group"],
             company=PlanCompany(**d.company.model_dump(), revision=d.revision),

@@ -16,7 +16,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Literal
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from outreach.plan.config import PlanConfig, default_plan_config
 from outreach.plan.dates import ny_date
@@ -26,7 +26,8 @@ from outreach.store.timefmt import utcnow
 from outreach.store.writes import append_event, name_key
 
 __all__ = ["SourceRef", "SourceInput", "Candidate", "AddResult", "ROLE_KINDS", "SOURCE_KINDS", "load_candidates",
-           "tier", "rank_people", "pick_channel", "people_search_url", "add_candidate", "small_company_ids",
+           "tier", "rank_people", "pick_channel", "people_search_url", "linkedin_search_url", "linkedin_company_id",
+           "SEARCH_PREFIX", "US_GEO", "add_candidate", "small_company_ids",
            "holds_email", "is_linkedin_url", "is_github_host", "linkedin_profile_url"]
 
 ROLE_KINDS = ("engineer", "manager", "founder", "recruiter", "alum", "other")
@@ -36,7 +37,11 @@ _EMPLOYER_KINDS = ("profile", "team", "post")
 _FIT_TIER = {"team": 1, "context": 2, "founder_small": 3, "other": 4, "recruiter": 5}
 _EMPLOYER_RANK = {"ok": 0, "unknown": 1, "stale": 2}
 _BASIS_RANK = {"published": 0, "verified": 1, "pattern": 2}
-_SEARCH = "https://www.linkedin.com/search/results/people/?keywords="
+SEARCH_PREFIX = "https://www.linkedin.com/search/results/people/"
+US_GEO = "103644278"  # the United States on LinkedIn's people search
+_FACETS = f"geoUrn=%5B%22{US_GEO}%22%5D&origin=FACETED_SEARCH"
+_SEARCH_HOSTS = ("www.linkedin.com", "linkedin.com")
+_SEARCH_MAX = 2000
 _LINKEDIN_IN = re.compile(r"https://(?:www\.)?linkedin\.com/in/([^/?#\s]+)/?(?:[?#].*)?\Z", re.I)
 _EMAIL_SHAPE = re.compile(r"[^@\s]+@[^@\s.]+\.[^@\s]+\Z")
 _CHUNK = 500
@@ -312,8 +317,49 @@ def pick_channel(c: Candidate, siblings: Sequence[Candidate], cfg: PlanConfig) -
     return "linkedin_request", "linkedin"
 
 
-def people_search_url(company_name: str, hint: str) -> str:
-    return _SEARCH + quote(f"{company_name} {hint}", safe="")
+def linkedin_search_url(url) -> str | None:
+    """The URL, stripped, when it is a LinkedIn people search: https, host www.linkedin.com or linkedin.com, no
+    credentials, no port, no fragment, no whitespace, path /search/results/people, at most 2000 characters. Else
+    None. It is only ever opened in his browser; the app never fetches it."""
+    if not isinstance(url, str):
+        return None
+    url = url.strip()
+    if not url or len(url) > _SEARCH_MAX or re.search(r"\s", url):
+        return None
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    if parts.scheme != "https" or (parts.hostname or "") not in _SEARCH_HOSTS or parts.username is not None \
+            or parts.password is not None or port is not None or parts.fragment or "@" in parts.netloc:
+        return None
+    return url if parts.path.rstrip("/") == "/search/results/people" else None
+
+
+def linkedin_company_id(url) -> str | None:
+    """The one LinkedIn company id in a people search's `currentCompany=["<id>"]` filter, or None (no filter, more
+    than one company, or not a people search)."""
+    url = linkedin_search_url(url)
+    if url is None:
+        return None
+    values = parse_qs(urlsplit(url).query).get("currentCompany", [])
+    if len(values) != 1:
+        return None
+    ids = re.fullmatch(r'\[\s*"(\d{1,20})"\s*\]', values[0].strip())
+    return ids.group(1) if ids else None
+
+
+def people_search_url(company_name: str, *, saved_url: str | None = None, linkedin_id: str | None = None) -> str:
+    """The LinkedIn people search a queue row opens (design company-first, section 1): his saved search for the
+    company as he pasted it; else, with a stored LinkedIn company id, that company's people in the United States;
+    else the company's name as keywords in the United States."""
+    saved = linkedin_search_url(saved_url)
+    if saved is not None:
+        return saved
+    if isinstance(linkedin_id, str) and re.fullmatch(r"\d{1,20}", linkedin_id):
+        return f"{SEARCH_PREFIX}?currentCompany=%5B%22{linkedin_id}%22%5D&{_FACETS}"
+    return f"{SEARCH_PREFIX}?keywords={quote(company_name or '', safe='')}&{_FACETS}"
 
 
 # add_candidate

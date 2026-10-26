@@ -44,7 +44,6 @@ propose_people = false
 founder_max_headcount = 25
 employer_fresh_days = 30      # playbook v3.5
 generic_mailboxes = ["info", "hello", "contact", "support", "sales", "press", "admin", "team", "careers", "jobs", "hr", "recruiting", "noreply", "no-reply"]
-search_hint = "software engineer"
 
 [prepare]
 # Company first (#9, 2026-10-26): the night step that finds people and drafts their notes is off. When false the

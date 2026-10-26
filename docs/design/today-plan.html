@@ -79,8 +79,8 @@
         <p class="lede num" id="plan-count">7 people, 2 done</p>
       </div>
       <div class="actions t-sm">
-        <span class="muted">Requests this month</span><b class="num" style="font-weight:600">52</b><span class="muted">of 150</span>
-        <span class="t-xs muted" data-tip="The plan uses 150 of LinkedIn's 200 a month. 60 of 200 are used, counting requests sent outside the plan." tabindex="0"><svg class="i i-sm" aria-label="About this limit"><use href="#help"/></svg></span>
+        <span class="muted">Requests this week</span><b class="num" style="font-weight:600">26</b><span class="muted">of 150</span>
+        <span class="t-xs muted" data-tip="The plan uses 150 of LinkedIn's 200 a week. 31 of 200 are used in the last 7 days, counting requests sent outside the plan." tabindex="0"><svg class="i i-sm" aria-label="About this limit"><use href="#help"/></svg></span>
       </div>
     </div>
 
@@ -194,7 +194,7 @@
           </div>
 
           <div class="note" id="note3">
-            <div class="note-head"><b>Note to send</b><span class="chars">168 of 200 characters</span></div>
+            <div class="note-head"><b>Note to send</b><span class="chars">168 of 300 characters</span></div>
             <p class="note-text" id="note3-text">Hi Lena, I saw Pylon's post on shipping usage billing. I'm a new grad engineer and built OpenCodeIntel, code search for AI agents. I'm applying for Software Engineer I.</p>
             <div id="note3-edit" hidden>
               <textarea class="note-edit" aria-label="Note to Lena Ortiz">Hi Lena, I saw Pylon's post on shipping usage billing. I'm a new grad engineer and built OpenCodeIntel, code search for AI agents. I'm applying for Software Engineer I.</textarea>
@@ -249,7 +249,7 @@
             <a class="btn btn-outline btn-sm" href="https://jobs.ashby.example/inngest/software-engineer-ii/apply" target="_blank" rel="noopener noreferrer" data-key="a" aria-keyshortcuts="a"><svg class="i"><use href="#external"/></svg>Apply page<span class="kbd">A</span></a>
           </div>
           <div class="note">
-            <div class="note-head"><b>Note to send</b><span class="chars">168 of 200 characters</span></div>
+            <div class="note-head"><b>Note to send</b><span class="chars">168 of 300 characters</span></div>
             <div class="note-ask" id="ask4">
               <b style="font-weight:500">Is this why you are writing to him? Confirm it or write your own.</b>
               <q>His step functions post is the closest thing to the agent tooling I build.</q>
@@ -340,7 +340,7 @@ Person: paste their LinkedIn profile here.</div></li>
             <a class="btn btn-outline btn-sm" href="https://jobs.ashby.example/turso/intern/apply" target="_blank" rel="noopener noreferrer" data-key="a" aria-keyshortcuts="a"><svg class="i"><use href="#external"/></svg>Apply page<span class="kbd">A</span></a>
           </div>
           <div class="note">
-            <div class="note-head"><b>Note to send</b><span class="chars">165 of 200 characters</span></div>
+            <div class="note-head"><b>Note to send</b><span class="chars">165 of 300 characters</span></div>
             <p class="note-text">Hi Ines, I saw Turso's Software Engineering Intern role is open to graduates on OPT. I built OpenCodeIntel, code search for AI coding agents, and would value a chat.</p>
             <div class="note-line"><span class="k">Why her, in your words</span><span>A small team where an intern role can turn into a full-time one.</span></div>
             <div class="note-facts">
@@ -580,7 +580,7 @@ Person: paste their LinkedIn profile here.</div></li>
     if (t.hasAttribute("data-edit")) { $("note3-text").hidden = true; $("note3-edit").hidden = false; $("note3-edit").querySelector("textarea").focus(); return; }
     if (t.hasAttribute("data-edit-cancel") || t.hasAttribute("data-edit-save")) {
       var ta = $("note3-edit").querySelector("textarea");
-      if (t.hasAttribute("data-edit-save")) { $("note3-text").textContent = ta.value; document.querySelector("#note3 .chars").textContent = ta.value.length + " of 200 characters"; toast("Saved the note. The checks ran again: 5 passed."); }
+      if (t.hasAttribute("data-edit-save")) { $("note3-text").textContent = ta.value; document.querySelector("#note3 .chars").textContent = ta.value.length + " of 300 characters"; toast("Saved the note. The checks ran again: 5 passed."); }
       $("note3-text").hidden = false; $("note3-edit").hidden = true; return;
     }
     if (t.id === "confirm4") { $("b4-req").className = "btn"; $("ask4").hidden = true; $("line4").hidden = false; $("r4-ask").hidden = true; toast("Confirmed your line.", true); return; }

@@ -9,10 +9,9 @@ message on their email touch.
 """
 import itertools
 import json
-import math
 import sqlite3
 from collections.abc import Iterator, Mapping
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
@@ -21,10 +20,10 @@ from outreach.api.models.outcomes import (
     CorrectionBody, LogTouchBody, OutcomeBody, OutcomePromptView, PromptTouch, TouchHistory, TouchLogged,
 )
 from outreach.api.queries.company import Holds, company_holds, merge_parents, person_ref, survivor_of, to_event
-from outreach.outcomes.context import build_context
 from outreach.outcomes.correct import OUTCOME_COLUMNS, correct_outcome
 from outreach.outcomes.prompt import PromptConfig, due_for_prompt, should_mark_quiet
-from outreach.outcomes.windows import ny_day
+from outreach.outcomes.requests import newest_score_parts, own_context  # noqa: F401 - the API's callers import them here
+from outreach.outcomes.windows import ny_day, ny_days_between
 from outreach.sending.followups import stop_planned
 from outreach.store import append_event, iso_utc, log_touch, record_outcome
 from outreach.store.timefmt import ISO_FMT
@@ -65,10 +64,6 @@ ORDER BY sent_at, touch_id
 def _shift(now: str, days: int) -> str:
     moment = datetime.strptime(now, ISO_FMT).replace(tzinfo=timezone.utc) - timedelta(days=days)
     return moment.strftime(ISO_FMT)
-
-
-def ny_days_between(earlier: str, later: str) -> int:
-    return (date.fromisoformat(ny_day(later)) - date.fromisoformat(ny_day(earlier))).days
 
 
 def open_touches(conn: sqlite3.Connection, now: str, at_least_days: int) -> list[sqlite3.Row]:
@@ -369,50 +364,6 @@ def touch_history(conn: sqlite3.Connection, touch_id: int) -> TouchHistory | Non
 
 
 # ---------------------------------------------------------------------------------------------- his own touches
-
-def _newest_score(conn: sqlite3.Connection, company_id: int) -> sqlite3.Row | None:
-    return conn.execute(
-        "SELECT ranker_version, signals, lanes FROM company_score WHERE company_id = ? "
-        "ORDER BY scored_at DESC, ranker_version DESC LIMIT 1", (company_id,)).fetchone()
-
-
-def _score_parts(score: sqlite3.Row | None) -> tuple[str, str | None, dict[str, float]]:
-    """The lane (the newest score's first lane, else `own`), the ranker version and the signal values."""
-    if score is None:
-        return "own", None, {}
-    try:
-        lanes = json.loads(score["lanes"])
-        signals = json.loads(score["signals"])
-    except ValueError:
-        return "own", score["ranker_version"], {}
-    lane = lanes[0] if isinstance(lanes, list) and lanes and isinstance(lanes[0], str) and lanes[0] else "own"
-    values: dict[str, float] = {}
-    raw = signals.get("values") if isinstance(signals, dict) else None
-    for name, entry in (raw.items() if isinstance(raw, dict) else ()):
-        value = entry.get("value") if isinstance(entry, dict) else None
-        if isinstance(name, str) and name and isinstance(value, (int, float)) and not isinstance(value, bool) \
-                and math.isfinite(value):
-            values[name] = float(value)
-    return lane, score["ranker_version"], values
-
-
-def newest_score_parts(conn: sqlite3.Connection, company_id: int) -> tuple[str, str | None, dict[str, float]]:
-    """`(lane, ranker_version, signal values)` of the company's newest score, as `own_context` reads them (lane
-    `own` when it has none). The plan's writes use the version and the values; their lane is the row's."""
-    return _score_parts(_newest_score(conn, company_id))
-
-
-def own_context(conn: sqlite3.Connection, company_id: int, role_kind: str | None, role_first_seen_at: str | None,
-                now: str) -> dict:
-    """The context of a touch he logged himself (`source 'own'`): the lane, ranker version and signals come from the
-    company's newest score (lane `own` when it has none), and a role was named when `role_first_seen_at` is given."""
-    lane, version, signals = _score_parts(_newest_score(conn, company_id))
-    return build_context(
-        source="own", lane=lane, role_kind=role_kind,
-        role_age_days=max(ny_days_between(role_first_seen_at, now), 0) if role_first_seen_at is not None else None,
-        ranker_version=version, signals=signals, role_named=role_first_seen_at is not None,
-    )
-
 
 def log_own_touch(ctx: WriteCtx, body: LogTouchBody) -> TouchLogged:
     """Log an HN reply or another touch he made himself, once per `idempotencyKey`, with `source 'own'`. Every input

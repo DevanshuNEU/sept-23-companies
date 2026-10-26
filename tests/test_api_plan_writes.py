@@ -101,7 +101,7 @@ class LogRequestTests(PlanWriteCase):
         bad = {"source": "bogus", "lane": "level_role", "roleKind": None, "roleAgeDays": None, "rankerVersion": None,
                "signals": {}, "roleNamed": False}
         before = self.conn.execute("SELECT count(*) FROM api_request").fetchone()[0]
-        with mock.patch("outreach.api.services.plan.build_context", return_value=bad):
+        with mock.patch("outreach.outcomes.requests.build_context", return_value=bad):
             res = self.log_request("Inngest")
         self.assertEqual(res.status_code, 500, res.text)
         self.assertEqual((self.touches("linkedin_request", person_id=jonah), self.log_rows(jonah)), ([], []))

@@ -117,7 +117,7 @@ describe('plan fixture: default', () => {
         if (!r.note) continue;
         expect(r.note.chars).toBe(r.note.text.length);
         expect(r.note.chars).toBeLessThanOrEqual(r.note.maxChars);
-        expect(r.note.needsYourLine).toBe(r.note.reasonState === 'proposed');
+        expect(r.note.needsYourLine).toBe(r.note.reasonState === 'proposed' && r.note.savedBy === 'claude');
         for (const f of r.note.facts) expect(safeHref(f.source.url)).toBeDefined();
       }
     }

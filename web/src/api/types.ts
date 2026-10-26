@@ -293,7 +293,7 @@ export interface NoteFact { text: string; source: SourceLink; inNote: boolean } 
 export interface NoteDraft {
   noteId: Id; text: string; chars: number; maxChars: number;                         // maxChars from config, never hard-coded in the UI
   reasonLine: string; reasonState: 'proposed' | 'confirmed' | 'written';             // the one line that says why this person; Claude only proposes it
-  needsYourLine: boolean;                                                            // derived: reasonState === 'proposed'
+  needsYourLine: boolean;                                                            // derived: reasonState === 'proposed' and savedBy === 'claude'
   facts: NoteFact[]; checks: Check[]; savedBy: SavedBy; savedAt: IsoTime; revision: Revision;
 }
 export interface PlanStep { kind: StepKind; touchId: Id | null; at: IsoTime | null }  // at null: not done yet

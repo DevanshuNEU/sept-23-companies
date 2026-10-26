@@ -1234,12 +1234,26 @@ describe('plan writes: skip, notes, wins, watch', () => {
     expect(same).toMatchObject({ reasonState: 'confirmed', needsYourLine: false, savedBy: 'devanshu' });
     const changed = await save(c, 'Hi Lena, a short note.', 'Her team shipped usage billing.');
     expect(changed).toMatchObject({ reasonState: 'written', needsYourLine: false, reasonLine: 'Her team shipped usage billing.' });
-    // A line Claude only proposed stays proposed through an edit of the text alone.
+    // A line Claude only proposed stays proposed through an edit of the text alone, but his note is his reason
+    // (#9, 2026-10-26): nothing asks him to confirm Claude's line any more.
     const jonah = (await rowAt(c, 4)).note;
     if (!jonah) throw new Error('No note');
+    expect(jonah.needsYourLine).toBe(true);
     const proposed = await c.saveNote(jonah.noteId, { text: 'Hi Jonah, a short note.', reasonLine: jonah.reasonLine, revision: jonah.revision }, opt());
-    expect(proposed).toMatchObject({ reasonState: 'proposed', needsYourLine: true });
+    expect(proposed).toMatchObject({ reasonState: 'proposed', needsYourLine: false, savedBy: 'devanshu' });
     expect(proposed.revision).toBe(jonah.revision + 1);
+  });
+
+  it('saveNote marks a fact used only when his text holds its words', async () => {
+    const c = client();
+    const n = await note3(c);
+    const [first] = n.facts;
+    if (!first) throw new Error('No fact on the note');
+    const kept = await save(c, `Hi Lena, ${first.text.toUpperCase()} was a good read.`);
+    expect(kept.facts.map((f) => f.inNote)).toEqual(n.facts.map((f) => f === first));
+    const dropped = await save(c, 'Hi Lena, your post was good.');
+    expect(dropped.facts.every((f) => !f.inNote)).toBe(true);
+    expect(dropped.facts.map((f) => f.text)).toEqual(n.facts.map((f) => f.text));
   });
 
   it('saveNote with a stale revision conflicts and an unknown note is not_found', async () => {

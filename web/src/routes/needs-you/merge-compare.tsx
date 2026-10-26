@@ -89,12 +89,12 @@ export function MergeCompare({
 
   return (
     <>
-      <div className="col-start-3 row-span-2 row-start-1 flex items-start gap-1.5">
+      <div className="col-start-2 row-start-3 mt-1 flex flex-wrap items-start gap-1.5 @4xl:col-start-3 @4xl:row-span-2 @4xl:row-start-1 @4xl:mt-0">
         <ActionButton label={`Merge into ${keeper.name}`} keyName="M" variant="outline" onClick={() => onMerge(keep)} />
         <ActionButton label={`Merge into ${other.name}`} variant="ghost" onClick={() => onMerge(otherKeep)} />
         <ActionButton label="Keep separate" keyName="O" variant="ghost" onClick={onKeepSeparate} />
       </div>
-      <div className="col-span-2 col-start-2 grid gap-2 text-[13px]">
+      <div className="col-start-2 grid gap-2 text-[13px] @4xl:col-span-2">
         {m.warning ? (
           <p className="flex items-start gap-1.5 text-xs text-warn">
             <TriangleAlert aria-hidden className="mt-px size-3.5 flex-none" />

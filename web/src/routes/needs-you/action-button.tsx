@@ -18,6 +18,7 @@ export function ActionButton({
       type="button"
       size="sm"
       variant={variant}
+      className={variant === 'ghost' ? 'border-border' : undefined}
       aria-keyshortcuts={keyName?.toLowerCase()}
       onClick={(e) => {
         e.stopPropagation();

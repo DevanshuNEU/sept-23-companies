@@ -90,6 +90,15 @@ describe('DraftEditor', () => {
     spans: [], savedBy: 'claude', savedAt: '2026-11-10T14:58:00Z', kind: 'engineer', seq: 0, dirty: false,
   };
 
+  it('sets the body in the serif note face, on a card', async () => {
+    const detail = await kenji();
+    render(<DraftEditor {...base} subject={detail.item.subject} body={detail.body} onChange={() => {}} />);
+    const body = screen.getByLabelText('Email body');
+    expect(body).toHaveClass('font-serif', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]');
+    // The card is the editor's own box, so the flag marks behind the text stay visible.
+    expect(body.closest('.bg-card')).not.toBeNull();
+  });
+
   it('shows the Kenji meter: 91 words, 2 links, plain text and who saved when', async () => {
     const detail = await kenji();
     render(<DraftEditor {...base} subject={detail.item.subject} body={detail.body} onChange={() => {}} />);

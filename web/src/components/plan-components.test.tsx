@@ -166,6 +166,12 @@ describe('DayRail', () => {
 });
 
 describe('NoteBlock', () => {
+  it('sets the note he sends in the serif note face, on a card', () => {
+    const note = { ...noteOf(plan(), 'Pylon'), chars: 100, maxChars: 200 };
+    noteBlock(note);
+    expect(screen.getByText(note.text)).toHaveClass('font-serif', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]', 'bg-card');
+  });
+
   it('shows the count with words', () => {
     noteBlock({ ...noteOf(plan(), 'Pylon'), chars: 168, maxChars: 200 });
     const count = screen.getByText('168 of 200 characters');

@@ -95,7 +95,7 @@ export function DraftEditor({
   const [lo, hi] = wordRange(kind, seq);
   const inRange = words >= lo && words <= hi;
   return (
-    <div className="overflow-hidden rounded-md border border-input bg-background focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/30">
+    <div className="overflow-hidden rounded-md border border-input bg-card focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/30">
       <div className="flex items-center gap-2 border-b px-3">
         <label htmlFor={subjectId} className="w-[52px] text-xs text-muted-foreground">
           Subject
@@ -117,7 +117,7 @@ export function DraftEditor({
       <div className="relative">
         <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
           <div
-            className="p-3 text-sm leading-[22px] break-words whitespace-pre-wrap text-transparent"
+            className="max-w-[62ch] p-3 font-serif text-[16px] leading-[1.65] break-words whitespace-pre-wrap text-transparent"
             style={{ transform: `translateY(-${scrollTop}px)` }}
           >
             <Marks parts={pieces(body, spans, 'body')} />
@@ -131,7 +131,7 @@ export function DraftEditor({
           rows={18}
           onChange={(e) => onChange({ subject, body: e.target.value })}
           onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-          className="relative block min-h-[280px] w-full resize-y border-0 bg-transparent p-3 text-sm leading-[22px] outline-none"
+          className="relative block min-h-[280px] w-full max-w-[62ch] resize-y border-0 bg-transparent p-3 font-serif text-[16px] leading-[1.65] outline-none"
         />
       </div>
       <div className="flex items-center gap-3.5 border-t bg-subtle px-3 py-2 text-xs text-muted-foreground">

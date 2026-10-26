@@ -181,12 +181,14 @@ function ContextRow({ detail }: { detail: OutboxDetail }) {
 
 function ReadOnlyDraft({ subject, body }: { subject: string; body: string }) {
   return (
-    <div className="overflow-hidden rounded-md border">
+    <div className="overflow-hidden rounded-md border bg-card">
       <div className="flex items-baseline gap-2 border-b px-3 py-2 text-sm">
         <span className="w-[52px] text-xs text-muted-foreground">Subject</span>
         <b className="font-medium">{subject}</b>
       </div>
-      <p className="p-3 text-sm leading-[22px] break-words whitespace-pre-wrap">{body}</p>
+      <p data-slot="email-body" className="max-w-[62ch] p-3 font-serif text-[16px] leading-[1.65] break-words whitespace-pre-wrap">
+        {body}
+      </p>
     </div>
   );
 }

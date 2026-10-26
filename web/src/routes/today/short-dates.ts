@@ -17,3 +17,14 @@ export function formatDateMonthDay(on: IsoDate): string {
   const { m, d } = parseIsoDate(on);
   return `${MONTHS[m - 1] ?? ''} ${d}`;
 }
+
+/** The month of an instant in the app's zone: a key to group by, and "November" (with the year when it is not this one). */
+export function monthOf(at: IsoTime, asOf: IsoTime): { key: string; heading: string } {
+  const read = (t: IsoTime) => {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: APP_ZONE, month: 'long', year: 'numeric' }).formatToParts(new Date(t));
+    const get = (k: Intl.DateTimeFormatPartTypes) => p.find((x) => x.type === k)?.value ?? '';
+    return { month: get('month'), year: get('year') };
+  };
+  const { month, year } = read(at);
+  return { key: `${year} ${month}`, heading: year === read(asOf).year ? month : `${month} ${year}` };
+}

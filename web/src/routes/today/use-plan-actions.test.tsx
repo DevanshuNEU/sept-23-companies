@@ -485,4 +485,35 @@ describe('usePlanActions: notes and outcomes', () => {
     await settle(50);
     expect(text('unseen')).toBe('0');
   });
+
+  it('seeWins with undo shows the toast with Undo, commits after the window, and undo takes it back', async () => {
+    const { client, act: run } = await open('win');
+    const ids: Id[] = (await client.wins()).wins.filter((w) => w.unseen).map((w) => w.winId);
+    const spy = vi.spyOn(client, 'markWinsSeen');
+    run((a) => a.seeWins(ids, { undo: true }));
+    await settle();
+    expect(text('unseen')).toBe('0');
+    expect(screen.getByText('Marked seen.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    await settle(7999);
+    expect(spy).not.toHaveBeenCalled();
+    await settle(1);
+    expect(spy).toHaveBeenCalledWith(ids, { requestId: expect.any(String) });
+  });
+
+  it('seeWins with undo: undo inside the window sends nothing and the win is unseen again', async () => {
+    const { client, act: run } = await open('win');
+    const ids: Id[] = (await client.wins()).wins.filter((w) => w.unseen).map((w) => w.winId);
+    const spy = vi.spyOn(client, 'markWinsSeen');
+    run((a) => a.seeWins(ids, { undo: true }));
+    await settle();
+    expect(text('unseen')).toBe('0');
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    });
+    await settle();
+    expect(text('unseen')).toBe(String(ids.length));
+    await settle(8000);
+    expect(spy).not.toHaveBeenCalled();
+  });
 });

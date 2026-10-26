@@ -20,7 +20,9 @@ describe('App routes for results', () => {
     window.history.pushState({}, '', path);
     render(<App client={new FixtureClient()} />);
     expect(await screen.findByRole('heading', { level: 1, name: title })).toBeInTheDocument();
-    expect(screen.getByText('Coming in this branch')).toBeInTheDocument();
+    // Progress is still a titled stub; the win log is a real page.
+    if (path === '/wins') expect(screen.queryByText('Coming in this branch')).not.toBeInTheDocument();
+    else expect(screen.getByText('Coming in this branch')).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Results' })).toBeInTheDocument();
     window.history.pushState({}, '', '/');
   });

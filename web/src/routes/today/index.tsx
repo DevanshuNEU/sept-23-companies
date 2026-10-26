@@ -32,6 +32,7 @@ import { OutcomePrompt } from './outcome-prompt';
 import { nextTodoAfter } from './plan-steps';
 import { usePlanActions } from './use-plan-actions';
 import { WatchList } from './watch-list';
+import { WinStrip } from './win-strip';
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -389,12 +390,15 @@ export default function TodayPage() {
   const client = usePageClient('plan');
   const plan = useViewQuery(queryKeys.plan, () => client.plan(), { pollMs: pollMs.default });
   return (
-    <div className="h-full min-h-0">
+    <div className="flex h-full min-h-0 flex-col">
       {/* The view's name for the outline; the visible heading is the date. */}
       <h1 className="sr-only">Today</h1>
-      <QueryState query={plan} skeleton={<PlanSkeleton />} empty={null}>
-        {(p) => <PlanContent plan={p} />}
-      </QueryState>
+      <WinStrip />
+      <div className="min-h-0 flex-1">
+        <QueryState query={plan} skeleton={<PlanSkeleton />} empty={null}>
+          {(p) => <PlanContent plan={p} />}
+        </QueryState>
+      </div>
     </div>
   );
 }

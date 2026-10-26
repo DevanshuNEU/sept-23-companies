@@ -53,6 +53,18 @@ the no-go list (a reply that says no or stop) and only raises a Needs-you item h
 a size, stage, domain or HQ you found on a public page, with the page and a quote, as a guess. None of them hides a
 company or stops email on its own.
 
+## From the terminal: intake and log_sent
+
+- **First, `knock_status`.** If it fails or is not loaded, say "Not logged in Knock", print a paste block (one line
+  per person: `Company | Name | Title | note or email`) and write nothing to disk.
+- **`contact_check`** before reaching anyone at a company. A near name or a tie is a question for him. "Not in
+  Knock" means ask once whether to add it; on his yes, run the `add_command` it gives in the live checkout.
+- **`intake`** when he pastes people (any company, up to 20). It records them as found, not contacted, and gives
+  each a route with its reason. `email` means draft through the steps above; `linkedin_note` means he writes and
+  sends the note himself; `wait`, `find_someone_else` and `stop` are said in one line. It never sends.
+- **`log_sent`** only after he says he sent LinkedIn requests: each person, the exact note he sent (empty if
+  none) and `at` when it was not just now. It records requests only, never an email, accept, reply or undo.
+
 ## Draft rules
 
 **Voice.** His, cleaned up. In his own messages he writes very short sentences, says what he wants straight out

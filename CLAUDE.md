@@ -36,6 +36,10 @@ The Needs-you, prepare and plan jobs (#16, #15) install when their templates lan
 config (`[prepare] enabled = false`, company first in #9): it prints one line and exits; the 08:00 plan proposes
 company rows only (`[plan] propose_people = false`). The MCP server has no job: Claude
 Code starts it from the registration (`python -m outreach.mcp --print-registration`).
+The MCP server's guard refuses every write on `linkedin_log` and `outreach_touch` but one: `log_sent` may insert a
+LinkedIn request Devanshu says he sent (a `request_sent` row and its `linkedin_request` touch under a `bridge:` key,
+no outcome, no undo). Claude calls it only after he says "sent"; it never records a reply, accept, interview,
+email touch or undo, and no update or delete of either table is allowed (#9, company-first ruling).
 
 **Retired at the switch (#17), kept on disk as `.disabled` plists:** `com.devanshu.outreach-mail-sender`,
 `-mail-server`, `-dashboard`, `-refresh`, and Job Radar (`com.devanshu.jobradar`, per #5). Their code (`mail/`,

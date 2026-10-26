@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 
+from outreach.insights.bands import Features, default_bands, features_of
 from outreach.ranking.common import age_days, clean_text, fact_order_key, size_order_key
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import (Confidence, grade_evidence, grade_no_role, grade_pay, grade_reach,
@@ -52,6 +53,7 @@ class RankFacts(CompanyFacts):
     inactive_postings: int = 0           # the part of ignored_postings on inactive boards
     stale_postings: tuple[Best, ...] = ()
     grades: Mapping[str, Confidence] = field(default_factory=dict)
+    features: Features = Features()      # the four traits the interview tilt compares (#81)
 
     def grade(self, name: str) -> Confidence:
         """The stored grade of a signal, else the low default: unknown is never `high`."""
@@ -198,6 +200,11 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             tiers[cid] = r
     watched = {owner(r[0]) for r in conn.execute("SELECT company_id FROM watched_page")}
     states = company_board_states(conn, canon, doubtful)
+    # Imported here, not at the top: outreach.insights.dataset imports the ranking's stored scores, which import
+    # this module.
+    from outreach.insights.dataset import load_board_systems
+    board_systems = load_board_systems(conn, canon)  # the interview tilt's board trait (#81)
+    bands = default_bands()
 
     basis = cfg.section("pay_level")["basis"]
     out: list[RankFacts] = []
@@ -294,7 +301,11 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             size_confidence=size_row["confidence"] if size_row else None, work_tier=work_tier,
             work_promoted=promoted, reach_via=reach_via, reach_note=reach_note,
             ignored_postings=rl.ignored if rl else 0, inactive_postings=rl.inactive if rl else 0,
-            stale_postings=rl.stale if rl else (), grades=grades))
+            stale_postings=rl.stale if rl else (), grades=grades,
+            features=features_of(size_low=size_low, size_high=size_high, stage=stage,
+                                 level_tier=best.level_tier if best else None,
+                                 intern=tuple(lanes[:1]) == ("intern_junior",),
+                                 board_system=board_systems.get(cid), bands=bands)))
     return out
 
 

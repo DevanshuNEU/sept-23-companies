@@ -7,6 +7,8 @@ companies, never a global total, because earlier stages may have put other rows 
 """
 import importlib.util
 import json
+import re
+import shutil
 import tempfile
 import unittest
 from datetime import date, timedelta
@@ -22,13 +24,15 @@ from outreach.plan.people import people_search_url
 from outreach.plan.prospects import WHY_KEYS
 from outreach.ranking.common import canonical_ids
 from outreach.ranking.confidence import LEVELS
-from outreach.ranking.config import default_ranker_config
+from outreach.insights.dataset import interview_rows, load_outcome_rows
+from outreach.ranking.config import CONFIG_PATH, default_ranker_config, load_ranker_config
 from outreach.ranking.job import run_rank
 from outreach.ranking.scores import hidden_list, latest_version, load_scores, ranked_list
 from outreach.rules.version import ruleset_version
 from outreach.store import is_shared_key
 from outreach.store.writes import body_sha256
 from tests.contracts import check_review_items
+from tests.insights_seed import outcome_touch
 from tests.fakes import json_response, status_response, text_response
 from outreach.reader import combine as reader_combine
 from outreach.review.triggers import sweep_needs_you
@@ -259,6 +263,9 @@ def ranking_puts_the_sponsoring_new_grad_employer_first_and_keeps_every_rule(h):
         assert row.signals["best_posting_id"] not in stale, f"{key}: a stale posting is the best posting"
         say = row.signals["rank_reason"]
         assert say["level"] in LEVELS and say["basis"].strip(), f"{key}: the rank reason lacks a level or a basis"
+        tilt = row.signals["values"]["interview_like"]
+        assert tilt["value"] >= 0 and tilt["points"] >= 0, f"{key}: the interview tilt took points away"
+        assert set(row.signals["features"]) == {"size_band", "stage_band", "level_band", "board_system"}, key
 
 
 @invariant("plan")
@@ -837,8 +844,15 @@ class RankFlowTests(HarnessCase):
             run_rank(without, today=stages_ranking.TODAY)
             b_without = load_scores(without, latest_version(without))[other["B"]]
         b = self.row(h, "B")
-        self.assertEqual((b.score, b.lanes, b.signals["values"], b.signals["flags"]),
-                         (b_without.score, b_without.lanes, b_without.signals["values"], b_without.signals["flags"]))
+
+        def own(values):
+            """The values, with the interview tilt's basis left out: it counts the interview companies of the whole
+            store (the import history stage made one here), not anything B or its duplicate holds."""
+            return {name: {k: v for k, v in part.items() if not (name == "interview_like" and k == "basis")}
+                    for name, part in values.items()}
+
+        self.assertEqual((b.score, b.lanes, own(b.signals["values"]), b.signals["flags"]),
+                         (b_without.score, b_without.lanes, own(b_without.signals["values"]), b_without.signals["flags"]))
 
     def test_flow_rank_orders_the_cap_exempt_lab_above_a_company_with_only_lca_history(self):
         h = self.flow()
@@ -936,6 +950,58 @@ class RankFlowTests(HarnessCase):
         self.assertIn("guess", u.signals["values"]["everify"]["basis"])
         self.assertEqual(t.signals["values"]["everify"]["confidence"], "high")
         self.assertEqual(u.signals["values"]["everify"]["confidence"], "low")
+
+    def test_flow_rank_the_interview_tilt_only_lifts_and_hides_nothing(self):
+        h = self.flow()
+        ids = h.ranking.ids
+        before = h.ranking.report.interview_companies  # the import history stage may have made some already
+        self.assertEqual(before, len(interview_rows(load_outcome_rows(h.conn, scores=False))))
+        # Interviews at B, I and M, B the newest, through applications (no person needed).
+        for key, day in (("I", "2026-10-15"), ("M", "2026-10-16"), ("B", "2026-10-18")):
+            outcome_touch(h.conn, ids[key], None, channel="application", sent_at=f"{day}T12:00:00Z",
+                          interview_at=f"{day}T15:00:00Z")
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        changed, n = re.subn(r"(?m)^interview_like = 6\.0$", "interview_like = 0.0", text)
+        self.assertEqual(n, 1)
+        folder = Path(tempfile.mkdtemp(prefix="ranker-cfg-"))
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        (folder / "config.toml").write_text(changed, encoding="utf-8")
+        off = load_ranker_config(folder / "config.toml")
+
+        def no_go():
+            return [tuple(r) for r in h.conn.execute(
+                "SELECT company_id, person_id, reason, source, lifted_at FROM no_go ORDER BY no_go_id")]
+
+        run_rank(h.conn, today=stages_ranking.TODAY, cfg=off)
+        flat = {key: self.row(h, key) for key in ids if key != "L"}
+        flat_no_go = no_go()
+        report = run_rank(h.conn, today=stages_ranking.TODAY)
+        tilted = {key: self.row(h, key) for key in ids if key != "L"}
+        self.assertEqual(report.interview_companies, before + 3)
+        self.assertEqual(no_go(), flat_no_go, "the tilt wrote or lifted a no-go row")
+        for key in flat:
+            with self.subTest(company=key):
+                self.assertGreaterEqual(tilted[key].score, flat[key].score)
+                self.assertEqual(tilted[key].signals["hide"], flat[key].signals["hide"])
+                self.assertGreaterEqual(self.points(tilted[key], "interview_like"), 0)
+        self.assertEqual(self.points(tilted["B"], "interview_like") > 0,
+                         "Datacor" in tilted["B"].signals["values"]["interview_like"]["reason"]
+                         or "Planet Labs" in tilted["B"].signals["values"]["interview_like"]["reason"],
+                         "B is never like itself: a lift for B names I or M")
+        self.assertNotIn("Allen Institute", tilted["B"].signals["values"]["interview_like"]["reason"])
+        b_traits = tilted["B"].signals["features"]
+        profile_b = {r.company_id: r.features for r in load_outcome_rows(h.conn, scores=False)}[ids["B"]]
+        like_b = [key for key in tilted if key != "B" and sum(
+            1 for name, v in profile_b.as_dict().items() if v is not None and tilted[key].signals["features"][name] == v
+        ) >= 2]
+        self.assertTrue(like_b, f"no fixture company shares two traits with B ({profile_b}, stored {b_traits})")
+        for key in like_b:
+            with self.subTest(like_b=key):
+                self.assertGreater(self.points(tilted[key], "interview_like"), 0)
+                self.assertGreater(tilted[key].score, flat[key].score)
+        self.assertTrue(any("Allen Institute for Artificial Intelligence" in
+                            tilted[key].signals["values"]["interview_like"]["reason"] for key in like_b),
+                        "a company like B names B")
 
     def test_flow_rank_is_idempotent(self):
         h = self.flow()

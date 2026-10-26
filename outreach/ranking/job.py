@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from outreach.crawl import stale as crawl_stale
+from outreach.insights.dataset import load_outcome_rows
+from outreach.insights.similar import interview_profile
 from outreach.ranking.common import canonical_ids, doubtful_board_ids
 from outreach.ranking.config import RankerConfig, default_ranker_config
 from outreach.ranking.facts import LISTED_STATUSES, load_facts
@@ -46,7 +48,7 @@ __all__ = ["CONFLICT_FLAG", "HIDDEN_KINDS", "RankRun", "compute_rank", "run_rank
 CONFLICT_FLAG = "postings disagree on sponsorship"
 # The summary's hidden counts: the three hide kinds, and a provisional hide (pending reader) as its own count.
 HIDDEN_KINDS = ("no_go", "over_size", "no_sponsorship", "provisional")
-_LABELS = {"everify": "E-Verify"}
+_LABELS = {"everify": "E-Verify", "interview_like": "Like your interview companies"}
 _TEXT_MAX_CHANGES = 3
 
 
@@ -61,6 +63,8 @@ class RankRun:
     undecided_postings: int     # trusted open postings with no current decision
     ignored_postings: int       # open postings on doubtful boards
     stale_postings: int         # open postings that would have been visible but are stale
+    interview_companies: int    # the interview profile the tilt compared with (#81)
+    interview_confidence: str   # its confidence level: low or medium, never high
 
 
 def _utc_today() -> date:
@@ -81,6 +85,10 @@ def compute_rank(conn: sqlite3.Connection, *, today: date, cfg: RankerConfig | N
     Read only. With no transaction open it reads inside one deferred read transaction (WAL: a snapshot, no write
     lock); inside the caller's transaction it reads there. Raises RulesetNotCurrent when the store's current ruleset
     is not this code's.
+
+    The interview profile (#81) is loaded once per run, in the same snapshot, from outcomes only (touches,
+    applications and companies closed as interviewed; never scores, proposals, picks or plans). The tilt it feeds only
+    adds points: `decide_hide` never sees it.
     """
     cfg = cfg if cfg is not None else default_ranker_config()
     wages = wages if wages is not None else load_wages()
@@ -90,6 +98,8 @@ def compute_rank(conn: sqlite3.Connection, *, today: date, cfg: RankerConfig | N
     try:
         _check_ruleset(conn)
         canon = canonical_ids(conn)
+        profile = interview_profile(load_outcome_rows(conn, canon=canon, scores=False),
+                                    confident_at=cfg.section("interview_like")["confident_at"])
         doubtful = doubtful_board_ids(conn)
         stale = crawl_stale.load_stale(conn, today, max_age_months=stale_after_months)
         roles = load_roles(conn, canon, doubtful, today, stale)
@@ -99,7 +109,7 @@ def compute_rank(conn: sqlite3.Connection, *, today: date, cfg: RankerConfig | N
         if own and conn.in_transaction:
             conn.execute("COMMIT")  # a read transaction: nothing to keep or undo
 
-    signals = build_signals(cfg)
+    signals = build_signals(cfg, profile)
     scored: list[Scored] = []
     inputs: dict[int, HideInputs] = {}
     undecided = 0
@@ -117,6 +127,8 @@ def compute_rank(conn: sqlite3.Connection, *, today: date, cfg: RankerConfig | N
         "undecided_postings": undecided,
         "ignored_postings": sum(f.ignored_postings for f in facts),
         "stale_postings": sum(len(f.stale_postings) for f in facts),
+        "interview_companies": profile.count,
+        "interview_confidence": profile.confidence.level,
     }
     return scored, data
 
@@ -246,11 +258,12 @@ def _result(version: str, scored: list[Scored], data: dict, written: int, size_i
     return RankRun(version=version, scored=tuple(scored), hidden=_hidden_counts(scored), no_go_written=written,
                    size_items=size_items, conflict_items=conflict_items,
                    undecided_postings=data["undecided_postings"], ignored_postings=data["ignored_postings"],
-                   stale_postings=data["stale_postings"])
+                   stale_postings=data["stale_postings"], interview_companies=data["interview_companies"],
+                   interview_confidence=data["interview_confidence"])
 
 
 def _summary(run: RankRun) -> dict:
     return {"version": run.version, "scored": len(run.scored), "hidden": run.hidden,
             "no_go_written": run.no_go_written, "size_items": run.size_items, "conflict_items": run.conflict_items,
             "undecided_postings": run.undecided_postings, "ignored_postings": run.ignored_postings,
-            "stale_postings": run.stale_postings}
+            "stale_postings": run.stale_postings, "interview_companies": run.interview_companies}

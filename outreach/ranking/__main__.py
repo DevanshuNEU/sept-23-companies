@@ -60,6 +60,8 @@ def _report(run: RankRun, dry_run: bool) -> str:
         f"No-go rows written {run.no_go_written}; size items {run.size_items}; conflict items {run.conflict_items}",
         f"Postings: {run.undecided_postings} undecided, {run.ignored_postings} ignored (board match doubtful), "
         f"{run.stale_postings} stale",
+        f"Interview companies: {run.interview_companies} (tilt weight "
+        f"{default_ranker_config().weights['interview_like']:g}, {run.interview_confidence} confidence)",
         f"Top {_TOP}:",
     ]
     for place, s in enumerate(list_order(run.scored)[:_TOP], 1):

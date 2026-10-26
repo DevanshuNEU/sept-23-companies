@@ -6,6 +6,7 @@ import dataclasses
 import json
 import unittest
 
+from outreach.insights.bands import FEATURE_NAMES, Features
 from outreach.ranking.config import default_ranker_config
 from outreach.ranking.confidence import LEVELS, Assessment, Confidence
 from outreach.ranking.facts import RankFacts
@@ -150,7 +151,7 @@ class ScoreTests(unittest.TestCase):
 
     def test_every_component_has_a_confidence_and_basis_even_when_unknown(self):
         got = score(neutral_facts())
-        self.assertEqual(len(got.values), 11)
+        self.assertEqual(len(got.values), 12)  # eleven signals and the interview tilt (#81)
         for name, p in got.values.items():
             with self.subTest(signal=name):
                 self.assertIn(p.confidence.level, LEVELS)
@@ -259,7 +260,7 @@ class ColumnsTests(unittest.TestCase):
         self.assertEqual(lane_list, list(got.lanes))
         self.assertIsInstance(lane_list, list)
         self.assertEqual(set(stored), {"values", "reasons", "hide", "flags", "best_posting_id", "ignored_postings",
-                                       "stale_postings", "confidence", "rank_reason"})
+                                       "stale_postings", "confidence", "rank_reason", "features"})
         self.assertEqual(list(stored["values"]), sorted(NAMES))
         for name, v in stored["values"].items():
             self.assertEqual(set(v), {"value", "weight", "raw_points", "points", "reason", "confidence", "basis"}, name)
@@ -277,6 +278,17 @@ class ColumnsTests(unittest.TestCase):
         self.assertEqual(stored["flags"], list(got.flags))
         self.assertIsInstance(stored["stale_postings"], list)
         self.assertEqual(set(stored["stale_postings"][0]), {"posting_id", "title", "reason"})
+
+    def test_features_are_stored_beside_the_values(self):
+        feats = Features(size_band="51 to 300", stage_band="Series A or B", level_band="entry level",
+                         board_system="ashby")
+        got = score(neutral_facts(features=feats))
+        self.assertEqual(feats, got.features)
+        stored = json.loads(to_columns(got)[0])
+        self.assertEqual({"size_band": "51 to 300", "stage_band": "Series A or B", "level_band": "entry level",
+                          "board_system": "ashby"}, stored["features"])
+        unknown = json.loads(to_columns(score(neutral_facts()))[0])["features"]
+        self.assertEqual(dict.fromkeys(FEATURE_NAMES), unknown, "unknown traits are stored as null, never guessed")
 
     def test_a_company_with_no_hide_stores_null_and_empty_lists(self):
         stored = json.loads(to_columns(score(neutral_facts()))[0])

@@ -28,13 +28,14 @@ from outreach.rules import RulesetNotCurrent
 from outreach.rules.version import ruleset_version
 from outreach.store.timefmt import utcnow
 from tests import ranking_store as rs
+from tests.insights_seed import outcome_touch
 from tests.storetest import fresh_store, seed_company
 
 TODAY = date(2026, 10, 22)
 T1, T2, T3, T4, T5 = ("2026-10-22T0%d:00:00Z" % h for h in (1, 2, 3, 4, 5))
 REFUSE = "We are unable to sponsor visas for this role."
 SUMMARY_KEYS = {"version", "scored", "hidden", "no_go_written", "size_items", "conflict_items", "undecided_postings",
-                "ignored_postings", "stale_postings"}
+                "ignored_postings", "stale_postings", "interview_companies"}
 
 
 def ago(days: int, today: date = TODAY) -> str:
@@ -549,6 +550,165 @@ class VersionTests(Base):
         self.assertEqual(got.version, eighteen)
         self.assertEqual(self.row(cid, eighteen).lanes, ("level_role",))
         self.assertEqual(self.row(cid, twelve).lanes, ())  # the old version's row is kept as it was
+
+
+def tilt_off():
+    """The shipped config with the interview tilt switched off (weight 0.0)."""
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    changed, n = re.subn(r"(?m)^interview_like = 6\.0$", "interview_like = 0.0", text)
+    assert n == 1
+    folder = Path(tempfile.mkdtemp(prefix="ranker-cfg-"))
+    (folder / "config.toml").write_text(changed, encoding="utf-8")
+    return load_ranker_config(folder / "config.toml")
+
+
+class TiltTests(Base):
+    """The interview tilt (#81): one way. It only adds points, never changes a hide or a no-go row, and its profile
+    comes from interview and offer outcomes only."""
+
+    def interviewed(self, cid: int, day: str = "2026-10-05") -> None:
+        outcome_touch(self.conn, cid, None, channel="application", sent_at=f"{day}T12:00:00Z",
+                      interview_at=f"{day}T15:00:00Z")
+
+    def like_them(self, name: str, *, stage: str = "series_b", low: int = 100, high: int = 150, **role) -> int:
+        """51 to 300 people, Series A or B, an Ashby board with a new-grad role: all four traits of the profile."""
+        cid, board = self.company(name, ats="ashby")
+        self.ev(cid, "size", f"{low} to {high} people", num_low=low, num_high=high)
+        self.ev(cid, "stage", stage)
+        self.role(cid, board, **role)
+        return cid
+
+    def seed_tilt(self) -> dict[str, int]:
+        ids = {f"X{i}": self.like_them(f"Interview {i}", stage="series_a", low=120, high=200) for i in (1, 2, 3)}
+        for i, cid in enumerate(ids.values(), 1):
+            self.interviewed(cid, f"2026-10-0{i}")
+        ids.update({f"Like{i}": self.like_them(f"Like {i}") for i in range(1, 7)})
+        cid, board = self.company("Refuses", ats="ashby")  # a final sponsorship refusal: hidden, a no-go row
+        self.ev(cid, "size", "150 people", num_low=150, num_high=150)
+        self.refusal(cid, board)
+        ids["Refuses"] = cid
+        ids["Big"] = self.like_them("Big", low=400, high=500)  # over 300 with evidence: hidden by size
+        cid, board = self.company("Later", ats="ashby")  # later stage: the bottom push
+        self.ev(cid, "stage", "series_d")
+        self.role(cid, board)
+        ids["Later"] = cid
+        ids["Unknown1"], _ = self.company("Unknown 1", board=False)
+        ids["Unknown2"], _ = self.company("Unknown 2", board=False)
+        cid, board = self.company("Half")  # a greenhouse board and a new-grad role: one trait, no lift
+        self.role(cid, board)
+        ids["Half"] = cid
+        return ids
+
+    def test_rank_with_the_tilt_never_lowers_a_score_or_changes_a_hide(self):
+        ids = self.seed_tilt()
+        self.assertEqual(15, len(ids))
+        off = tilt_off()
+        tilted, data = compute_rank(self.conn, today=TODAY)
+        flat, _ = compute_rank(self.conn, today=TODAY, cfg=off)
+        self.assertEqual(3, data["interview_companies"])
+        by_tilt, by_flat = {s.company_id: s for s in tilted}, {s.company_id: s for s in flat}
+        self.assertEqual(set(by_tilt), set(by_flat))
+        self.assertTrue(set(ids.values()) <= set(by_tilt))
+        lifted = 0
+        for cid, s in by_tilt.items():
+            with self.subTest(company=s.name):
+                self.assertGreaterEqual(s.score, by_flat[cid].score)
+                self.assertEqual(s.hide, by_flat[cid].hide)
+                self.assertGreaterEqual(s.values["interview_like"].points, 0.0)
+                lifted += s.score > by_flat[cid].score
+        self.assertGreaterEqual(lifted, 6, "the six like companies are lifted, so the check is not empty")
+        for key in ("Unknown1", "Unknown2", "Half"):
+            self.assertEqual(by_tilt[ids[key]].score, by_flat[ids[key]].score, key)
+        self.assertEqual("no_sponsorship", by_tilt[ids["Refuses"]].hide.kind)
+        self.assertEqual("over_size", by_tilt[ids["Big"]].hide.kind)
+        self.assertGreater(by_tilt[ids["Big"]].values["interview_like"].points, 0, "a hidden company keeps its reason")
+        self.assertIsNone(by_tilt[ids["Later"]].hide)
+
+        def no_go_rows(conn):
+            return [tuple(r) for r in conn.execute(
+                "SELECT company_id, person_id, reason, source, lifted_at FROM no_go ORDER BY company_id, no_go_id")]
+
+        run_rank(self.conn, today=TODAY)
+        with_tilt = no_go_rows(self.conn)
+        other = fresh_store()
+        self.addCleanup(other.close)
+        self.conn, mine = other, self.conn
+        try:
+            self.assertEqual(self.seed_tilt(), ids)
+            run_rank(other, today=TODAY, cfg=off)
+            without = no_go_rows(other)
+        finally:
+            self.conn = mine
+        self.assertEqual(with_tilt, without)
+        self.assertEqual([ids["Refuses"]], [r[0] for r in with_tilt])
+
+    def test_the_profile_counts_only_interview_outcomes(self):
+        ids = self.seed_tilt()
+        top, board = self.company("Replied Only", ats="ashby")
+        self.ev(top, "everify", "enrolled")
+        self.role(top, board)
+        outcome_touch(self.conn, top, None, channel="application", sent_at="2026-10-06T12:00:00Z",
+                      replied_at="2026-10-07T12:00:00Z", referred_at="2026-10-08T12:00:00Z")
+        run = run_rank(self.conn, today=TODAY)
+        self.assertEqual(3, run.interview_companies)
+        names = [s.name for s in run.scored if s.company_id == ids["Like1"]]
+        reason = next(s for s in run.scored if s.company_id == ids["Like1"]).values["interview_like"].reason
+        self.assertEqual(["Like 1"], names)
+        self.assertNotIn("Replied Only", reason)
+        self.assertIn("Interview 3", reason, "the newest interview is named first")
+        self.assertEqual(3, json.loads(self.jobs()[-1]["summary"])["interview_companies"])
+
+    def test_a_listed_interview_company_is_not_lifted_by_itself(self):
+        alone, board = self.company("Alone", ats="lever")
+        self.ev(alone, "size", "20 people", num_low=20, num_high=20)
+        self.ev(alone, "stage", "seed")
+        self.role(alone, board)
+        self.interviewed(alone)
+        for i in (1, 2):
+            self.interviewed(self.like_them(f"Other {i}"))
+        scored, data = compute_rank(self.conn, today=TODAY)
+        self.assertEqual(3, data["interview_companies"])
+        me = next(s for s in scored if s.company_id == alone)
+        self.assertEqual((0.0, 0.0), (me.values["interview_like"].value, me.values["interview_like"].points))
+        self.assertEqual("Not like your interview companies yet", me.values["interview_like"].reason)
+        other = next(s for s in scored if s.name == "Other 1")
+        self.assertEqual(1.0, other.values["interview_like"].value, "Other 1 is like Other 2, not like itself")
+        self.assertIn("Other 2", other.values["interview_like"].reason)
+        self.assertNotIn("Other 1", other.values["interview_like"].reason)
+
+    def test_fewer_than_three_interview_companies_lift_nobody(self):
+        a = self.like_them("A")
+        b = self.like_them("B")
+        self.interviewed(a)
+        self.interviewed(b)
+        target = self.like_them("Target")
+        scored, data = compute_rank(self.conn, today=TODAY)
+        self.assertEqual(2, data["interview_companies"])
+        got = next(s for s in scored if s.company_id == target).values["interview_like"]
+        self.assertEqual((0.0, "Fewer than 3 interview companies so far"), (got.points, got.reason))
+
+    def test_stored_rows_carry_the_four_traits(self):
+        cid = self.like_them("Traits")
+        self.rank()
+        self.assertEqual({"size_band": "51 to 300", "stage_band": "Series A or B", "level_band": "entry level",
+                          "board_system": "ashby"}, self.row(cid).signals["features"])
+
+    def test_rank_summary_names_the_interview_count(self):
+        from outreach.ranking.__main__ import main
+        self.seed_tilt()
+        with self.at(T1):
+            run = self.rank()
+        self.assertEqual(3, run.interview_companies)
+        self.assertEqual(3, json.loads(self.jobs()[-1]["summary"])["interview_companies"])
+        path = self.conn.execute("PRAGMA database_list").fetchone()["file"]
+        out = io.StringIO()
+        with mock.patch.dict("os.environ", {"OUTREACH_DB": path}), contextlib.redirect_stdout(out):
+            code = main(["rank", "--dry-run", "--today", TODAY.isoformat()])
+        self.assertEqual(code, 0)
+        self.assertIn("Interview companies: 3 (tilt weight 6, low confidence)", out.getvalue())
+
+    def test_weights_changed_names_the_tilt(self):
+        self.assertEqual("Like your interview companies weight 6 to 0", weights_text({"interview_like": [6.0, 0.0]}))
 
 
 class WeightsTextTests(unittest.TestCase):

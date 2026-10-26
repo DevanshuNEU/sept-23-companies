@@ -10,9 +10,11 @@ from outreach.crawl.config import load_crawl_config
 from outreach.crawl import stale as stale_module
 from outreach.ranking import version as ranking_version
 from outreach.ranking.config import CONFIG_PATH, RankerConfig, default_ranker_config, load_ranker_config
-from outreach.ranking.version import NOT_RANKING, RANKING_DIR, RANKING_FILES, ranker_version
+from outreach.ranking.version import (INSIGHTS_DIR, OUTCOMES_DIR, INSIGHTS_FILES, NOT_INSIGHTS, NOT_RANKING, RANKING_DIR,
+                                      RANKING_FILES, ranker_version)
 
 BOTTOM = ("staffing_risk", "large_later_stage")
+TILT = "interview_like"
 
 
 def _temp_ranking_dir(tc: unittest.TestCase) -> tuple[Path, Path]:
@@ -36,6 +38,17 @@ def _temp_ranking_dir(tc: unittest.TestCase) -> tuple[Path, Path]:
     return ranking, crawl
 
 
+def _temp_insights_dir(tc: unittest.TestCase) -> Path:
+    """A copy of every hashed insights file, plus the not-hashed ones as stubs."""
+    tmp = Path(tempfile.mkdtemp())
+    tc.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+    for name in INSIGHTS_FILES:
+        (tmp / name).write_bytes((INSIGHTS_DIR / name).read_bytes())
+    for name in NOT_INSIGHTS:
+        (tmp / name).write_text("# not hashed\n", encoding="utf-8")
+    return tmp
+
+
 def _set(text: str, section: str, key: str, value: str) -> str:
     """The config text with `key` in `[section]` set to the TOML text `value`."""
     head = text.index(f"\n[{section}]\n") + 1
@@ -56,10 +69,11 @@ def _load_edited(tc: unittest.TestCase, *edits: tuple[str, str, str]):
         return load_ranker_config(p)
 
 
-# Numbers that are exact in binary, so a boundary test can sit exactly on the limit: the positive weights add to 120
-# and the worst non-bottom negatives are 12 * 0.5 + 10 * 0.25 + 12 * 0.25 = 11.5, a limit of 131.5.
+# Numbers that are exact in binary, so a boundary test can sit exactly on the limit: the positive weights add to 126
+# (120 plus the interview tilt's 6) and the worst non-bottom negatives are 12 * 0.5 + 10 * 0.25 + 12 * 0.25 = 11.5, a
+# limit of 137.5.
 EXACT = (("everify", "not_enrolled", "-0.5"), ("pay_level", "level_1", "-0.25"), ("small", "weak_flag_value", "-0.25"))
-LIMIT = 131.5
+LIMIT = 137.5
 
 
 def _flip(path: Path) -> None:
@@ -160,7 +174,10 @@ class VersionTests(unittest.TestCase):
         rels = sorted([*RANKING_FILES, *(f"signals/{p.name}" for p in (ranking / "signals").glob("*.py"))])
         for rel in rels:
             digest.update(rel.encode() + b"\0" + (ranking / rel).read_bytes() + b"\0")
+        for name in sorted(INSIGHTS_FILES):
+            digest.update(f"insights/{name}".encode() + b"\0" + (INSIGHTS_DIR / name).read_bytes() + b"\0")
         digest.update((crawl / "stale.py").read_bytes())
+        digest.update((OUTCOMES_DIR / "windows.py").read_bytes())
         digest.update(f"stale_after_months={load_crawl_config().stale_after_months}".encode())
         digest.update(f"ruleset={ranking_version.ruleset_version()}".encode())
         self.assertEqual(ranker_version(ranking, crawl), "rk-" + digest.hexdigest()[:12])
@@ -170,6 +187,43 @@ class VersionTests(unittest.TestCase):
         self.assertFalse(set(RANKING_FILES) & set(NOT_RANKING), "a file cannot be in both groups")
         on_disk = {p.name for p in RANKING_DIR.iterdir() if p.is_file() and p.suffix in (".py", ".toml")}
         self.assertEqual(sorted(on_disk - listed), [], "a new ranking file must choose: RANKING_FILES or NOT_RANKING")
+
+    def test_version_moves_with_the_insights_band_files(self):
+        ranking, crawl = _temp_ranking_dir(self)
+        insights = _temp_insights_dir(self)
+        base = ranker_version(ranking, crawl, insights)
+        self.assertEqual(ranker_version(ranking, crawl, insights), base)
+        self.assertEqual(("bands.toml", "bands.py", "dataset.py", "similar.py"), INSIGHTS_FILES)
+        for name in INSIGHTS_FILES:
+            with self.subTest(file=name):
+                path = insights / name
+                original = path.read_bytes()
+                _flip(path)
+                self.assertNotEqual(ranker_version(ranking, crawl, insights), base)
+                path.write_bytes(original)
+                self.assertEqual(ranker_version(ranking, crawl, insights), base)
+        for name in ("export.py", "findings.py", "config.toml"):
+            with self.subTest(file=name):
+                (insights / name).write_text("# changed\n", encoding="utf-8")
+                self.assertEqual(ranker_version(ranking, crawl, insights), base)
+
+    def test_version_moves_with_the_new_york_day_rules(self):
+        ranking, crawl = _temp_ranking_dir(self)
+        insights = _temp_insights_dir(self)
+        outcomes = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, outcomes, ignore_errors=True)
+        (outcomes / "windows.py").write_bytes((OUTCOMES_DIR / "windows.py").read_bytes())
+        base = ranker_version(ranking, crawl, insights, outcomes)
+        _flip(outcomes / "windows.py")
+        self.assertNotEqual(ranker_version(ranking, crawl, insights, outcomes), base)
+
+    def test_every_insights_file_is_hashed_or_not(self):
+        self.assertFalse(set(INSIGHTS_FILES) & set(NOT_INSIGHTS), "a file cannot be in both groups")
+        on_disk = {p.relative_to(INSIGHTS_DIR).as_posix() for p in INSIGHTS_DIR.rglob("*")
+                   if p.is_file() and "__pycache__" not in p.parts}
+        listed = set(INSIGHTS_FILES) | set(NOT_INSIGHTS)
+        self.assertEqual(sorted(on_disk - listed), [], "a new insights file must choose: INSIGHTS_FILES or NOT_INSIGHTS")
+        self.assertTrue(set(INSIGHTS_FILES) <= on_disk)
 
     def test_confidence_and_stale_are_in_the_hashed_set(self):
         self.assertIn("confidence.py", RANKING_FILES)
@@ -250,7 +304,7 @@ class ConfigTests(unittest.TestCase):
     def test_bottom_weights_outweigh_every_positive_weight(self):
         w = default_ranker_config().weights
         positive = sum(v for k, v in w.items() if k not in BOTTOM)
-        self.assertEqual(positive, 120.0)
+        self.assertEqual(positive, 126.0, "120 plus the interview tilt's 6: the tilt counts toward the bottom push")
         for name in BOTTOM:
             self.assertGreater(w[name], positive, f"{name} must outweigh every positive weight added together")
 
@@ -281,12 +335,12 @@ class ConfigTests(unittest.TestCase):
                 self.assertEqual(cfg.weights[name], LIMIT + 1)
 
     def test_the_limit_includes_the_worst_non_bottom_negatives(self):
-        # Without the negatives the limit would be 120, so 125 passes; with them (131.5) it must not.
-        edits = (("weights", "staffing_risk", "125.0"), ("weights", "large_later_stage", "300.0"))
+        # Without the negatives the limit would be 126, so 130 passes; with them (137.5) it must not.
+        edits = (("weights", "staffing_risk", "130.0"), ("weights", "large_later_stage", "300.0"))
         with self.assertRaises(ValueError):
             _load_edited(self, *EXACT, *edits)
         zero = (("everify", "not_enrolled", "0.0"), ("pay_level", "level_1", "0.0"), ("small", "weak_flag_value", "0.0"))
-        _load_edited(self, *zero, *edits)  # no negatives: 125 > 120 is fine
+        _load_edited(self, *zero, *edits)  # no negatives: 130 > 126 is fine
         # Each negative moves the limit on its own.
         for section, key, weight, value in (("everify", "not_enrolled", "everify", "-1.0"),
                                             ("pay_level", "level_1", "pay_level", "-1.0"),
@@ -364,6 +418,50 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(key=key, value=value):
                 with self.assertRaises(ValueError):
                     _load_edited(self, ("confidence", key, value))
+
+    def test_interview_like_weight_above_the_cap_is_refused(self):
+        with self.assertRaises(ValueError) as cm:
+            _load_edited(self, ("weights", TILT, "12.5"))
+        self.assertIn("12.5", str(cm.exception))
+        self.assertIn("12", str(cm.exception).replace("12.5", ""))
+        self.assertEqual(_load_edited(self, ("weights", TILT, "12.0")).weights[TILT], 12.0)  # exactly the cap
+
+    def test_the_tilt_cap_follows_its_share(self):
+        cfg = _load_edited(self, ("interview_like", "max_weight_share", "0.2"), ("weights", TILT, "20.0"))
+        self.assertEqual(20.0, cfg.weights[TILT])
+        for value in ("0.0", "-0.1", "0.3", '"0.1"', "true"):
+            with self.subTest(max_weight_share=value):
+                with self.assertRaises(ValueError) as cm:
+                    _load_edited(self, ("interview_like", "max_weight_share", value))
+                self.assertIn("max_weight_share", str(cm.exception))
+
+    def test_the_tilt_counts_must_be_whole_numbers_of_at_least_one(self):
+        for key in ("min_interview_companies", "min_matches", "confident_at"):
+            for value in ("0", "-1", "2.5", "true", '"3"'):
+                with self.subTest(key=key, value=value):
+                    with self.assertRaises(ValueError) as cm:
+                        _load_edited(self, ("interview_like", key, value))
+                    self.assertIn(key, str(cm.exception))
+
+    def test_zero_is_allowed_only_for_interview_like(self):
+        self.assertEqual(0.0, _load_edited(self, ("weights", TILT, "0.0")).weights[TILT])
+        with self.assertRaises(ValueError):
+            _load_edited(self, ("weights", TILT, "-1.0"))
+        for name in ("everify", "funding", "live_role"):
+            with self.subTest(weight=name):
+                with self.assertRaises(ValueError) as cm:
+                    _load_edited(self, ("weights", name, "0.0"))
+                self.assertIn(name, str(cm.exception))
+
+    def test_the_shipped_tilt_is_small(self):
+        cfg = default_ranker_config()
+        w = cfg.weights
+        others = sum(v for k, v in w.items() if k not in BOTTOM and k != TILT)
+        self.assertEqual(120.0, others)
+        self.assertLessEqual(w[TILT], 0.1 * others)
+        self.assertEqual(0.1, cfg.section(TILT)["max_weight_share"])
+        self.assertEqual((3, 2, 20), tuple(cfg.section(TILT)[k] for k in
+                                          ("min_interview_companies", "min_matches", "confident_at")))
 
     def test_no_dashes_in_config_or_wages(self):
         for name in ("config.toml", "wages.toml"):

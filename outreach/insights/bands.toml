@@ -1,0 +1,17 @@
+# Bands for the insights dataset, the findings and the interview tilt (#81). One source for all three.
+# This file and bands.py are part of the ranker version once the tilt reads them, so a change here is a new version.
+# Unknown is never a band: a company with no size, stage, level or board has None, which matches nothing.
+
+# Size bands, from size_high, else size_low: 1 to 50, 51 to 300, 301 to 1,000, over 1,000.
+size_tops = [50, 300, 1000]
+
+# Posting level tiers that read as "entry level". swe2 is "SWE II", open and not_stated are "level not stated",
+# senior is "senior", and a posting in the intern lane is "intern" whatever its tier.
+entry_tiers = ["new_grad", "early_career", "swe1"]
+
+# Stage codes (the stage evidence vocabulary) by band. A code may be in one band only.
+[stages]
+seed_or_earlier = ["pre_seed", "seed", "yc", "early"]
+series_a_b = ["series_a", "series_b"]
+later_private = ["series_c", "series_d", "series_e_plus", "late_private"]
+public = ["public"]

@@ -331,8 +331,8 @@ def linkedin_search_url(url) -> str | None:
         port = parts.port
     except ValueError:
         return None
-    if parts.scheme != "https" or (parts.hostname or "") not in _SEARCH_HOSTS or parts.username is not None \
-            or parts.password is not None or port is not None or parts.fragment or "@" in parts.netloc:
+    if parts.scheme != "https" or (parts.hostname or "") not in _SEARCH_HOSTS or port is not None \
+            or parts.fragment or "@" in parts.netloc:  # an @ in the host part is a user name or password
         return None
     return url if parts.path.rstrip("/") == "/search/results/people" else None
 

@@ -979,11 +979,63 @@ replies count is this month's replies, the same number Progress shows.
 
 ### 16.1 Today as a plan (replaces 5.1)
 
-> **Company first (2026-10-26, #9).** The plan now proposes company rows only (`[plan] propose_people = false`) and
-> the night prepare step is off, so every row is a "Find someone" row: "<company> is a company to reach. You find the
-> people." Its steps are search, reach out, log it here; he types the name of someone he asked and logs the request
-> (R puts the cursor in the field), and Log applied works when the row has a role. No row has a note, so the note
-> editor and Confirm line never show. The person rows below stay in the code until the company queue replaces them.
+> **Company first (2026-10-26, #9): Today is a queue of companies.** The plan proposes company rows only
+> (`[plan] propose_people = false`), about 8 a day, and the night prepare step is off. He finds the people on LinkedIn
+> and writes his own notes; Knock picks the companies, tracks them and mails. Section 16.1a below describes the queue
+> as built (P2). The person rows, the note block and their keys described after it stay in the code for a plan built
+> with person rows, until the cleanup (P6) deletes them.
+
+#### 16.1a Today as a company queue (P2)
+
+No separate mockup file was drawn for the queue: it keeps 16.1's layout (rail, work panel, below the plan), and the
+sample data's `?scenario=queue` stands in for one (open `/today?scenario=queue` with `?live=none` on a dev server).
+
+**Head.** The date and `8 companies, 2 reached` (`, 1 carried over` once the day is done), with `Requests this week
+26 of 150` on the right as before.
+
+**Rail.** One node per company: its number, the company's name and, under it, where it stands in the API's words
+(`New`, `3 asked today, room for 1 more, free again Nov 24`, `2 asked before. No answer for 20 days`). The listbox is
+"Today's companies". Node words as in 16.1.
+
+**Work panel (`company-panel.tsx`).** The company's name (the focus target), "A company to reach. You find the
+people.", the lane word, then one quiet list of what Knock knows, every line as the API words it:
+
+| Line | Example |
+|---|---|
+| Size and stage | 30 people (estimate), Series A (or "Not known yet", grey) |
+| Role | Software Engineer I, posted 1 day ago (a link to the posting; "No open role at your level" when none) |
+| Hiring now | 3 new engineering roles in the last 30 days |
+| Sponsorship | Says it sponsors, E-Verify enrolled |
+| Why it ranks | up to 3 of the ranker's stored reasons |
+| Where it stands | New / 4 asked 6 days ago, free again Nov 18 / Someone replied (the info hue, never red) |
+| Last touch | Request to Priya Rao (Engineer) on Oct 20 (only when there is one) |
+| Email | Email works here: a founder has a published address. (only when #9's email rule allows it) |
+| People | 2 people on record, none asked |
+
+Then the actions: Open LinkedIn search (S, the one filled button; his saved search, else the company's LinkedIn id,
+else its name, all in the United States), Careers page (O), Copy for terminal (C: `Knock: Pylon (company 1304), role:
+Software Engineer I`), Log applied (A) when there is a role. Both links open a new tab with `noopener`; the app never
+fetches LinkedIn. Under them, on paper: **Log people you asked** (L puts the cursor there; one `Name | Title | the
+note you sent` line per person, up to 10, the terminal's `Company | Name | Title | note` block too; Cmd+Enter or Log
+people) for when the terminal bridge cannot log them. Then **Save this search**: he pastes the address of his LinkedIn
+people search for the company (after setting the company filter and anything else he uses); S opens it from then on,
+and the line says "Your saved search opens with S." Footer: the step marks, Carry to tomorrow (X) and Not a fit (N).
+
+**Done.** A row is done once a LinkedIn request or an email at the company is logged on or after the list date (and
+the application, when it has a role), from the terminal (`log_sent`, the normal way) or from Log people. A log from
+the terminal shows within seconds: the pulse refetches the plan, so the row turns Done with no click. While the wave
+has room the Log people box stays ("Room for 2 more in this wave.").
+
+**In flight.** Below the panel, before the 7-day question: a collapsed "In flight" heading with its counts (`5
+companies, 1 reply`). Open, one line per company with a wave out in the last 14 days or a reply, replies first, then
+by the day each is free again: the company (a link to its page) and where it stands.
+
+**Finish.** "Today's list is done." with "8 companies reached. That is everything on today's queue." (or "6 companies
+reached of 8. Turso carries to tomorrow."). What you did counts the people asked, not the rows.
+
+**Toasts.** Logged: 2 people at Trigger.dev. (Z undoes, 8 seconds; a note check the API reports comes after the log
+lands: "Logged as sent. A note check fired for ..."), Saved the search for Hex. S opens it., Copied the line for your
+terminal., Copied 6 lines for your terminal. (⇧C), Carried to tomorrow: Pylon.
 
 **Purpose.** Make today's effort clear and quick: about 7 people, one at a time, in order, ending in a finish line.
 
@@ -1032,10 +1084,9 @@ and Copy runs when nothing blocks. Claude's own drafts keep every check.
 
 **Row kinds.**
 
-- Person with a role: Log request sent (R), then Log applied (P).
-- Person without a role: Log request sent only; P says "No role to apply for."
-- Find someone (no person yet): three numbered steps (search, hand it to Claude, back here), Open LinkedIn search (S)
-  as the next step, Copy handoff (C) with the handoff text shown. No note, no logging key.
+- Person with a role: Log request sent (R), then Log applied (A).
+- Person without a role: Log request sent only; A says "No role to apply for."
+- A company (no person): the company panel of 16.1a.
 - Email row: the company's drafts in the Outbox and Review in Outbox as the next step. The sender and the reply reader
   log email outcomes, so no logging key acts on it.
 - Done: the step marks with their times and "To change a log, open Resend's page."
@@ -1055,11 +1106,12 @@ Proposals.
 | Action | Key | Toast | Undo |
 |---|---|---|---|
 | Log request sent | R | Logged: request sent to Lena Ortiz. | Z, 8 seconds |
-| Log applied | P | Logged: applied for Software Engineer I at Pylon. | Z |
+| Log applied | A | Logged: applied for Software Engineer I at Pylon. | Z |
+| Log people you asked (a company row) | L, then Cmd+Enter | Logged: 2 people at Trigger.dev. | Z |
 | Carry to tomorrow | X | Carried to tomorrow: Inngest. | Z |
 | Not a fit | N | the phase-1 remove dialog: Removed Pylon. Find it on the No-go list. | None: a dialog action, it commits at once (phase 1). The row stays in place, reads Not a fit, and takes no key. |
 | Confirm line | Y | Confirmed your line. | Z |
-| Copy the note, the handoff | C, ⇧C | Copied the note. / Copied 1 handoff for Claude. | |
+| Copy the note, the line for the terminal | C, ⇧C | Copied the note. / Copied the line for your terminal. / Copied 6 lines for your terminal. | |
 | Answer the question | 1, 2, 3 | Logged: Kai Brennan accepted. | Z (Said no and Asked to stop log at once) |
 | Mark wins seen | W | Marked seen. | Z |
 
@@ -1135,22 +1187,21 @@ Single keys work only outside text fields, as in section 3.
 
 | View | Key | Action |
 |---|---|---|
-| Today | J / K, ↓ / ↑ | Next, previous person on the rail |
+| Today | J / K, ↓ / ↑ | Next, previous row on the rail |
 | Today | Enter | On a person to do with a profile link: open the profile, then copy the note (the "Copy and open" button). A blocked or unsaved note is not copied and the profile stays shut. Any other row: open the company |
-| Today | L | Open profile |
-| Today | O | Open role |
-| Today | A | Open the apply page |
-| Today | S | Open LinkedIn search (find someone rows) |
-| Today | C | Copy the note, or the handoff on a find-someone row |
-| Today | E | Edit the note |
-| Today | Y | Confirm your line |
-| Today | R | Log request sent |
-| Today | P | Log applied |
-| Today | X | Carry to tomorrow |
+| Today | S | Open the LinkedIn people search (his saved one first) |
+| Today | O | A company row: open the careers page. A person row: open the role |
+| Today | C | A company row: copy the line for the terminal. A person row: copy the note |
+| Today | A | Log applied |
+| Today | L | A company row: put the cursor in Log people you asked (Cmd+Enter logs the paste). A person row: open the profile |
+| Today | R | A person row: log request sent. A company row: as L |
+| Today | E | Edit the note (person rows) |
+| Today | Y | Confirm your line (person rows) |
+| Today | X | Carry to tomorrow (K stays the rail's previous row, so carry keeps X) |
 | Today | N | Not a fit (dialog) |
 | Today | 1 / 2 / 3 | Answer the question: Accepted, Replied, Nothing yet |
 | Today | W | Mark wins seen |
-| Today | ⇧C | Copy every find-someone handoff |
+| Today | ⇧C | Copy every company line for the terminal (a plan with person rows: every find-someone handoff) |
 | Today | Z | Undo the last log (8 seconds) |
 | Progress | 1 / 2 | Week, Month |
 | Wins | 1 / 2 | All, Referrals and interviews |

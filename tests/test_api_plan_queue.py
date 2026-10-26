@@ -136,6 +136,17 @@ class CompanyRowTest(QueueCase):
         self.assertEqual((q["standing"]["status"], q["standing"]["text"]), ("replied", "Someone replied"))
         self.assertEqual(q["standing"]["room"], 0)
 
+    def test_a_hold_on_the_company_counts_as_a_reply(self):
+        # The sender's hold (an email reply), with no outbound row that says so: still "Someone replied", no room.
+        pat = self.conn.execute("SELECT person_id FROM person WHERE company_id = ? ORDER BY person_id",
+                                (self.tessera,)).fetchone()[0]
+        thread = s.touch(self.conn, pat)
+        self.conn.execute("UPDATE company SET status = 'working', held_by_touch = ?, held_at = '2026-11-09T12:00:00Z' WHERE company_id = ?",
+                          (thread, self.tessera))
+        q = self.row(self.tessera_entry)["queue"]
+        self.assertEqual((q["standing"]["status"], q["standing"]["text"], q["standing"]["room"]),
+                         ("replied", "Someone replied", 0))
+
     def test_the_why_falls_back_to_the_row_reason(self):
         q = self.row(self.avante_entry)["queue"]
         self.assertEqual(q["reasons"], ["Ranked high"])

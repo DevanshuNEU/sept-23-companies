@@ -115,8 +115,8 @@ export function PreviewPanel({
   if (!e) {
     return (
       <aside aria-label="Preview" className="min-h-0 overflow-y-auto border-l">
-        <EmptyState icon={MousePointerClick} title="No company selected">
-          Press J to start at the top, or click a row.
+        <EmptyState icon={MousePointerClick} title="No company selected" hint="J">
+          Start at the top, or click a row.
         </EmptyState>
       </aside>
     );

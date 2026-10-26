@@ -136,7 +136,7 @@ function Evidence({ item }: { item: ReviewItem }) {
       <p key="posting" className="text-xs text-muted-foreground">
         {`${q.postingTitle} posting, first seen ${formatDay(q.firstSeenAt)}. `}
         {safeHref(q.url) ? (
-          <a className="text-foreground underline underline-offset-2" href={safeHref(q.url)} target="_blank" rel="noreferrer">
+          <a className="text-foreground underline decoration-foreground/30 underline-offset-2 transition-colors hover:decoration-foreground" href={safeHref(q.url)} target="_blank" rel="noreferrer">
             Open the posting
           </a>
         ) : null}

@@ -66,8 +66,29 @@ describe.each([
     expect(ratio(t['foreground'] as string, t['background'] as string)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it.each(['background', 'muted', 'subtle'])('muted-foreground on %s is at least 4.5', (surface) => {
+  it.each(['background', 'muted', 'subtle', 'card', 'popover', 'sidebar'])('muted-foreground on %s is at least 4.5', (surface) => {
     expect(ratio(t['muted-foreground'] as string, t[surface] as string)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('brand-foreground on brand is at least 4.5', () => {
+    expect(ratio(t['brand-foreground'] as string, t['brand'] as string)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(['background', 'card', 'muted', 'sidebar', 'popover'])('brand on %s is at least 4.5', (surface) => {
+    expect(ratio(t['brand'] as string, t[surface] as string)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the focus ring is the brand colour and reads at 3:1 on the canvas and on cards', () => {
+    expect(t['ring']).toBe(t['brand']);
+    expect(t['sidebar-ring']).toBe(t['brand']);
+    expect(ratio(t['ring'] as string, t['background'] as string)).toBeGreaterThanOrEqual(3);
+    expect(ratio(t['ring'] as string, t['card'] as string)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('cards sit one step above the canvas and the sidebar one step below it', () => {
+    const lum = (key: string) => luminance(hex(t[key] as string));
+    expect(lum('card')).toBeGreaterThan(lum('background'));
+    expect(lum('background')).toBeGreaterThan(lum('sidebar'));
   });
 
   it.each(STATUSES)('%s text on its soft background is at least 4.5', (status) => {
@@ -83,12 +104,47 @@ describe.each([
   });
 });
 
+// The look PR's token table (docs/design/README.md, section 10).
+const TABLE: Record<string, [light: string, dark: string]> = {
+  background: ['#f8f8f9', '#0b0b0e'],
+  sidebar: ['#f2f2f4', '#09090b'],
+  subtle: ['#f3f3f5', '#101013'],
+  card: ['#ffffff', '#141418'],
+  popover: ['#ffffff', '#1a1a20'],
+  muted: ['#eeeef1', '#23232a'],
+  accent: ['#f0f0f3', '#1d1d23'],
+  border: ['#e2e2e7', 'rgb(255 255 255 / 0.09)'],
+  input: ['#c4c4cc', '#52525b'],
+  'muted-foreground': ['#66666f', '#a1a1aa'],
+  brand: ['#5b48d9', '#9187f7'],
+  ring: ['#5b48d9', '#9187f7'],
+  'brand-foreground': ['#ffffff', '#16122e'],
+};
+
 describe('spec section 10 values', () => {
-  it('uses the darker light muted-foreground', () => {
-    expect(block(':root')['muted-foreground']).toBe('#6b6b75');
+  it.each(Object.entries(TABLE))('%s', (name, [light, dark]) => {
+    expect(block(':root')[name]).toBe(light);
+    expect(block('.dark')[name]).toBe(dark);
   });
 
-  it('keeps the spec dark muted-foreground', () => {
-    expect(block('.dark')['muted-foreground']).toBe('#a1a1aa');
+  it('maps brand and brand-foreground into the Tailwind theme', () => {
+    expect(css).toContain('--color-brand: var(--brand);');
+    expect(css).toContain('--color-brand-foreground: var(--brand-foreground);');
+  });
+
+  it('defines the serif note face', () => {
+    expect(css).toContain('--font-serif: ui-serif, "New York", Georgia, serif;');
+  });
+});
+
+describe('motion tokens', () => {
+  const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+
+  it.each(['knock', 'ripple', 'shimmer'])('defines the %s animation', (name) => {
+    expect(css).toContain(`@keyframes ${name}`);
+  });
+
+  it('turns every animation off under reduced motion', () => {
+    expect(reduced).toMatch(/animation:\s*none\s*!important/);
   });
 });

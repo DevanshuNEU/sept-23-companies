@@ -52,7 +52,7 @@ function DoneBody({ view }: { view: DoneView }) {
 
 function Metric({ label, value, sub, children }: { label: string; value: string; sub?: string; children?: ReactNode }) {
   return (
-    <div role="group" aria-label={label} className="grid content-start gap-1 rounded-lg border px-4 py-3.5">
+    <div role="group" aria-label={label} className="grid content-start gap-1 border-r px-4 py-3.5 last:border-r-0">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-2xl leading-8 font-semibold tracking-[-0.015em]">{value}</span>
       {children}
@@ -70,7 +70,7 @@ function Metrics({ view }: { view: DoneView }) {
   const { metrics } = view;
   const { replies, firstEmails } = metrics.replyRate;
   return (
-    <div className="mb-5 grid grid-cols-4 gap-3">
+    <div data-slot="done-strip" className="mb-5 grid grid-cols-4 overflow-hidden rounded-md border bg-card">
       <Metric label={`Replies in ${formatMonth(view.asOf)}`} value={String(metrics.repliesThisMonth)} sub={`Per week, last ${metrics.repliesPerWeek.length} weeks`}>
         <RepliesChart weeks={metrics.repliesPerWeek} />
       </Metric>
@@ -148,11 +148,7 @@ function DoneTable({ companies }: { companies: DoneCompany[] }) {
 function DoneSkeleton() {
   return (
     <div className="flex flex-col gap-5" aria-hidden>
-      <div className="grid grid-cols-4 gap-3">
-        {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-28 rounded-lg" />
-        ))}
-      </div>
+      <Skeleton className="h-28 w-full rounded-md" />
       <Skeleton className="h-48 w-full rounded-lg" />
     </div>
   );

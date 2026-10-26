@@ -5,24 +5,26 @@
 
 :root {
   --radius: 0.5rem;
-  --background: #ffffff;
+  --background: #f8f8f9;
   --foreground: #09090b;
   --card: #ffffff;
   --card-foreground: #09090b;
   --popover: #ffffff;
-  --muted: #f4f4f5;
-  --muted-foreground: #6b6b75; /* zinc-500 darkened one step so it passes 4.5:1 on --muted */
-  --subtle: #fafafa;
-  --border: #e4e4e7;
-  --input: #e4e4e7;
-  --ring: #a1a1aa;
+  --muted: #eeeef1;
+  --muted-foreground: #66666f;
+  --subtle: #f3f3f5;
+  --border: #e2e2e7;
+  --input: #c4c4cc;
+  --ring: #5b48d9;
+  --brand: #5b48d9; /* the one accent: focus ring, K tile, sidebar active bar, knock ripple */
+  --brand-foreground: #ffffff;
   --primary: #18181b;
   --primary-foreground: #fafafa;
-  --secondary: #f4f4f5;
-  --accent: #f4f4f5;
+  --secondary: #eeeef1;
+  --accent: #f0f0f3;
   --destructive: #dc2626;
-  --sidebar: #fafafa;
-  --sidebar-border: #e4e4e7;
+  --sidebar: #f2f2f4;
+  --sidebar-border: #e2e2e7;
   --overlay: rgb(9 9 11 / 0.4);
   --shadow-pop: 0 10px 38px -10px rgb(9 9 11 / 0.18), 0 10px 20px -15px rgb(9 9 11 / 0.12);
 
@@ -36,28 +38,31 @@
   --row: 36px;
   --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --serif: ui-serif, "New York", Georgia, serif;
   color-scheme: light;
 }
 
 .dark {
-  --background: #09090b;
+  --background: #0b0b0e;
   --foreground: #fafafa;
-  --card: #0c0c0e;
+  --card: #141418;
   --card-foreground: #fafafa;
-  --popover: #18181b;
-  --muted: #27272a;
+  --popover: #1a1a20;
+  --muted: #23232a;
   --muted-foreground: #a1a1aa;
-  --subtle: #111113;
-  --border: #27272a;
-  --input: #3f3f46;
-  --ring: #71717a;
+  --subtle: #101013;
+  --border: rgb(255 255 255 / 0.09);
+  --input: #52525b;
+  --ring: #9187f7;
+  --brand: #9187f7;
+  --brand-foreground: #16122e;
   --primary: #fafafa;
   --primary-foreground: #18181b;
-  --secondary: #27272a;
-  --accent: #1f1f23;
+  --secondary: #23232a;
+  --accent: #1d1d23;
   --destructive: #ef4444;
-  --sidebar: #0c0c0e;
-  --sidebar-border: #1f1f23;
+  --sidebar: #09090b;
+  --sidebar-border: rgb(255 255 255 / 0.09);
   --overlay: rgb(0 0 0 / 0.6);
   --shadow-pop: 0 10px 38px -10px rgb(0 0 0 / 0.6);
 

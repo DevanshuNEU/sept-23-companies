@@ -280,6 +280,13 @@ describe('approve', () => {
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
   });
 
+  it('sets the body of an approved email in the serif note face, on a card', async () => {
+    await open(T.jordan, 'Jordan Price');
+    const body = document.querySelector('[data-slot="email-body"]') as HTMLElement;
+    expect(body).toHaveClass('font-serif', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]');
+    expect(body.parentElement).toHaveClass('bg-card');
+  });
+
   it('u withdraws an approved email at once', async () => {
     const { client } = await open(T.jordan, 'Jordan Price');
     const unapprove = vi.spyOn(client, 'unapprove');

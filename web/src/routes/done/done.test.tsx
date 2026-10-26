@@ -41,6 +41,18 @@ const bars = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLElement>('[
 const bodyRows = () => screen.getAllByRole('row').slice(1);
 
 describe('Done companies', () => {
+  it('folds the four metrics into one bordered strip, not four boxes', async () => {
+    await done();
+    await metric('Referrals');
+    const strip = document.querySelector('[data-slot="done-strip"]') as HTMLElement;
+    expect(strip).toHaveClass('grid-cols-4', 'border', 'overflow-hidden', 'bg-card');
+    const cells = within(strip).getAllByRole('group');
+    expect(cells).toHaveLength(4);
+    for (const cell of cells) expect(cell).not.toHaveClass('border');
+    expect(cells[0]).toHaveClass('border-r');
+    expect(cells[3]).toHaveClass('last:border-r-0');
+  });
+
   it('shows the four metrics', async () => {
     await done();
     expect(within(await metric('Replies in November')).getByText('9')).toBeInTheDocument();

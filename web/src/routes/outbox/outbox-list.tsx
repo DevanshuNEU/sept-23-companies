@@ -5,6 +5,7 @@ import type { Id, IsoTime, OutboxCounts, OutboxGroup, OutboxItem, OutboxView } f
 import { EmptyState } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useAnnounce, useHotkeys, useLiveSelection } from '@/keyboard/hotkeys';
 import { ageDays, formatDay, formatLocalTime } from '@/lib/format';
 import { useStableOrder } from '@/lib/stable-order';
@@ -302,7 +303,7 @@ export function OutboxList({
                   data-group-head={b.group}
                   aria-expanded={isOpen}
                   onClick={() => toggle(b.group)}
-                  className="flex h-8 w-full items-center gap-1.5 border-b bg-subtle px-3 text-left text-xs font-medium text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="flex h-8 w-full items-center gap-1.5 border-b bg-subtle px-3 text-left text-xs font-medium text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70"
                 >
                   <ChevronDown aria-hidden className={cn('size-3.5 transition-transform', !isOpen && '-rotate-90')} />
                   {b.group === 'replied' ? <Reply aria-hidden className="size-3.5 text-ok" /> : null}
@@ -315,7 +316,7 @@ export function OutboxList({
                     <button
                       type="button"
                       onClick={reveal}
-                      className="rounded-full border border-info-bd bg-info-bg px-2.5 py-0.5 text-xs font-medium text-info outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      className="rounded-full border border-info-bd bg-info-bg px-2.5 py-0.5 text-xs font-medium text-info outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70"
                     >
                       {`${b.fresh} new`}
                     </button>
@@ -355,9 +356,9 @@ export function OutboxListSkeleton() {
     <div aria-hidden>
       {Array.from({ length: 8 }, (_, i) => (
         <div key={i} className="grid gap-2 border-b py-2.5 pr-3 pl-3.5" style={{ height: ROW_PX }}>
-          <span className="h-3.5 w-40 animate-pulse rounded bg-muted" />
-          <span className="h-3 w-56 animate-pulse rounded bg-muted" />
-          <span className="h-3 w-32 animate-pulse rounded bg-muted" />
+          <Skeleton className="h-3.5 w-40" />
+          <Skeleton className="h-3 w-56" />
+          <Skeleton className="h-3 w-32" />
         </div>
       ))}
     </div>

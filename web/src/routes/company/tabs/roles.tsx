@@ -111,7 +111,7 @@ export function Roles({ view }: { view: CompanyView }) {
                 <TableRow className={p.flags.length > 0 ? 'border-b-0' : undefined}>
                   <TableCell className="font-medium">
                     {safeHref(p.url) ? (
-                      <a href={safeHref(p.url)} target="_blank" rel="noreferrer" className="underline decoration-border underline-offset-3 hover:decoration-current">
+                      <a href={safeHref(p.url)} target="_blank" rel="noreferrer" className="underline decoration-foreground/30 underline-offset-3 transition-colors hover:decoration-foreground">
                         {p.title}
                       </a>
                     ) : (

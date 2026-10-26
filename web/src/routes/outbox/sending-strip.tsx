@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
 import { formatLocalTime, formatRecipientTime } from '@/lib/format';
 import type { Tone } from '@/lib/status';
 import { cn } from '@/lib/utils';
@@ -45,7 +46,7 @@ function Ladder({ s }: { s: SendingStatus }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span tabIndex={0} className="inline-flex rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        <span tabIndex={0} className="inline-flex rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70">
           <RampLadder levels={s.rampLevels} level={s.rampLevel} sent={s.sentToday} limit={s.limitToday} />
         </span>
       </TooltipTrigger>
@@ -125,7 +126,7 @@ export function SendingStrip({ sending: s, onPause, onResume }: { sending: Sendi
     <section aria-label="Sending today" className="flex flex-none items-stretch border-b">
       <Cell name="Sender" tone={sender.tone} className="max-w-[340px] min-w-[200px]">
         <span className={cn('flex items-center gap-2 text-sm font-medium', red && 'text-bad')}>
-          <span aria-hidden className={cn('size-2 flex-none rounded-full', DOT[sender.tone], s.state === 'running' && 'animate-pulse')} />
+          <span aria-hidden className={cn('size-2 flex-none rounded-full', DOT[sender.tone], s.state === 'running' && 'ripple')} />
           {sender.label}
         </span>
         <span title={senderSub(s)} className={cn('line-clamp-2 text-xs', red ? 'text-bad' : 'text-muted-foreground')}>
@@ -166,8 +167,8 @@ export function SendingStripSkeleton() {
     <section aria-hidden className="flex h-[61px] flex-none items-stretch border-b">
       {[200, 150, 190, 170].map((w, i) => (
         <div key={i} className="grid content-center gap-1.5 border-r px-4" style={{ width: w }}>
-          <span className="h-3 w-16 animate-pulse rounded bg-muted" />
-          <span className="h-4 w-24 animate-pulse rounded bg-muted" />
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-4 w-24" />
         </div>
       ))}
     </section>

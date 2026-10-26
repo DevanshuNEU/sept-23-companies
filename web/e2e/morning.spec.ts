@@ -79,7 +79,7 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await page.keyboard.press('n');
   await expect(page.getByRole('heading', { level: 1, name: 'Needs you' })).toBeVisible();
   const needsYou = page.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: /^Needs you, / });
-  await expect(needsYou).toHaveAccessibleName('Needs you, 5 open');
+  await expect(needsYou).toHaveAccessibleName(/^Needs you, 5 open(,|$)/);
   const cerebrium = page.getByRole('article', { name: 'Cerebrium' });
   await cerebrium.getByRole('button', { name: /^Set domain/ }).click();
   await cerebrium.getByRole('textbox', { name: 'Email domain' }).fill('cerebrium.example');
@@ -89,7 +89,7 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await save.click();
   await expect(page.getByText("Saved and locked. Cerebrium's drafts will be checked now.")).toBeVisible();
   await expect(page.getByRole('article', { name: 'Cerebrium' })).toHaveCount(0);
-  await expect(needsYou).toHaveAccessibleName('Needs you, 4 open');
+  await expect(needsYou).toHaveAccessibleName(/^Needs you, 4 open(,|$)/);
   await expectCleanPage(page, consoleErrors, foreign);
 
   // 5. Outbox: approve Omar with a, wait out the undo window, see him under Approved and drafts at 6.

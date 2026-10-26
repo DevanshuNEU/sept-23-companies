@@ -98,7 +98,7 @@ export function CheckList({
       ) : null}
       {passed.length > 0 ? (
         <Collapsible className="group/passed">
-          <CollapsibleTrigger className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+          <CollapsibleTrigger className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left text-[13px] text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70">
             <Check aria-hidden className="size-4 text-ok" />
             {passed.length === 1 ? '1 check passed' : `${passed.length} checks passed`}
             <ChevronDown aria-hidden className="ml-auto size-4 transition-transform group-data-[state=open]/passed:rotate-180" />

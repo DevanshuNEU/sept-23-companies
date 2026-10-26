@@ -75,8 +75,8 @@ function CompanyFilterBar({ name, onClear }: { name: string | null; onClear: () 
 
 function DetailPlaceholder() {
   return (
-    <EmptyState icon={Mail} title="No email selected">
-      Press J or K to move through the list.
+    <EmptyState icon={Mail} title="No email selected" hint="J">
+      Move down the list to open one.
     </EmptyState>
   );
 }

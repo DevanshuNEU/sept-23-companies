@@ -91,7 +91,7 @@ function PlanHead({ plan }: { plan: PlanView }) {
         </p>
         <Tooltip>
           <TooltipTrigger asChild>
-            <button type="button" aria-label="About this limit" className="rounded-sm text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+            <button type="button" aria-label="About this limit" className="rounded-sm text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70">
               <HelpCircle aria-hidden className="size-3.5" />
             </button>
           </TooltipTrigger>
@@ -334,7 +334,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
           </Button>
           <Link
             to="/proposals"
-            className="ml-2.5 rounded-sm text-xs text-muted-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="ml-2.5 rounded-sm text-xs text-muted-foreground underline decoration-foreground/30 underline-offset-3 transition-colors outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70"
           >
             All proposed companies
           </Link>

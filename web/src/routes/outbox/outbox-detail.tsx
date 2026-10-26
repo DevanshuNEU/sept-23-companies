@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useHotkeys } from '@/keyboard/hotkeys';
 import { ageDays, formatAge, formatDueDay } from '@/lib/format';
 import { useEdits, type Edit } from '@/pending/edits';
@@ -121,13 +122,13 @@ function DetailHeader({ detail }: { detail: OutboxDetail }) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-muted-foreground">
           <span>
             {`${person.title} at `}
-            <Link to={`/companies/${company.id}`} className="underline decoration-border underline-offset-3 hover:decoration-current">
+            <Link to={`/companies/${company.id}`} className="underline decoration-foreground/30 underline-offset-3 transition-colors hover:decoration-foreground">
               {company.name}
             </Link>
           </span>
           {person.email ? <span className="font-mono text-xs">{person.email}</span> : null}
           {safeHref(person.linkedinUrl) ? (
-            <a href={safeHref(person.linkedinUrl)} target="_blank" rel="noreferrer" className="underline decoration-border underline-offset-3 hover:decoration-current">
+            <a href={safeHref(person.linkedinUrl)} target="_blank" rel="noreferrer" className="underline decoration-foreground/30 underline-offset-3 transition-colors hover:decoration-foreground">
               LinkedIn
             </a>
           ) : null}
@@ -181,12 +182,14 @@ function ContextRow({ detail }: { detail: OutboxDetail }) {
 
 function ReadOnlyDraft({ subject, body }: { subject: string; body: string }) {
   return (
-    <div className="overflow-hidden rounded-md border">
+    <div className="overflow-hidden rounded-md border bg-card">
       <div className="flex items-baseline gap-2 border-b px-3 py-2 text-sm">
         <span className="w-[52px] text-xs text-muted-foreground">Subject</span>
         <b className="font-medium">{subject}</b>
       </div>
-      <p className="p-3 text-sm leading-[22px] break-words whitespace-pre-wrap">{body}</p>
+      <p data-slot="email-body" className="max-w-[62ch] p-3 font-serif text-[16px] leading-[1.65] break-words whitespace-pre-wrap">
+        {body}
+      </p>
     </div>
   );
 }
@@ -194,9 +197,9 @@ function ReadOnlyDraft({ subject, body }: { subject: string; body: string }) {
 function DetailSkeleton() {
   return (
     <div aria-hidden className="grid gap-4 p-5">
-      <span className="h-10 w-64 animate-pulse rounded bg-muted" />
-      <span className="h-16 w-full animate-pulse rounded bg-muted" />
-      <span className="h-64 w-full animate-pulse rounded bg-muted" />
+      <Skeleton className="h-10 w-64" />
+      <Skeleton className="h-16 w-full" />
+      <Skeleton className="h-64 w-full" />
     </div>
   );
 }

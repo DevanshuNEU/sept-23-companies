@@ -7,35 +7,35 @@
    Status colors are the only hues in the app; each always comes with a word or icon. */
 :root {
   --radius: 0.5rem;
-  --background: #ffffff;
+  --background: #f8f8f9;
   --foreground: #09090b;
   --card: #ffffff;
   --card-foreground: #09090b;
   --popover: #ffffff;
   --popover-foreground: #09090b;
-  --muted: #f4f4f5;
-  --muted-foreground: #6b6b75; /* zinc-500 darkened one step so it passes 4.5:1 on --muted */
-  --subtle: #fafafa;
-  --border: #e4e4e7;
-  --input: #e4e4e7;
-  --ring: #a1a1aa;
+  --muted: #eeeef1;
+  --muted-foreground: #66666f;
+  --subtle: #f3f3f5;
+  --border: #e2e2e7;
+  --input: #c4c4cc;
+  --ring: #5b48d9;
+  --brand: #5b48d9; /* the one restrained accent: focus ring, K tile, sidebar active bar, knock ripple (design 10) */
+  --brand-foreground: #ffffff;
   --primary: #18181b;
   --primary-foreground: #fafafa;
-  --secondary: #f4f4f5;
+  --secondary: #eeeef1;
   --secondary-foreground: #18181b;
-  --accent: #f4f4f5;
+  --accent: #f0f0f3;
   --accent-foreground: #18181b;
   --destructive: #dc2626;
-  --sidebar: #fafafa;
+  --sidebar: #f2f2f4;
   --sidebar-foreground: #09090b;
   --sidebar-primary: #18181b;
   --sidebar-primary-foreground: #fafafa;
-  --sidebar-accent: #f4f4f5;
+  --sidebar-accent: #e6e6ea;
   --sidebar-accent-foreground: #18181b;
-  --sidebar-border: #e4e4e7;
-  --sidebar-ring: #a1a1aa;
-
-  /* status: text, soft background, border, dot */
+  --sidebar-border: #e2e2e7;
+  --sidebar-ring: #5b48d9;
   --ok: #15803d;
   --ok-bg: #f0fdf4;
   --ok-bd: #bbf7d0;
@@ -61,33 +61,35 @@
 }
 
 .dark {
-  --background: #09090b;
+  --background: #0b0b0e;
   --foreground: #fafafa;
-  --card: #0c0c0e;
+  --card: #141418;
   --card-foreground: #fafafa;
-  --popover: #18181b;
+  --popover: #1a1a20;
   --popover-foreground: #fafafa;
-  --muted: #27272a;
+  --muted: #23232a;
   --muted-foreground: #a1a1aa;
-  --subtle: #111113;
-  --border: #27272a;
-  --input: #3f3f46;
-  --ring: #71717a;
+  --subtle: #101013;
+  --border: rgb(255 255 255 / 0.09);
+  --input: #52525b;
+  --ring: #9187f7;
+  --brand: #9187f7;
+  --brand-foreground: #16122e;
   --primary: #fafafa;
   --primary-foreground: #18181b;
-  --secondary: #27272a;
+  --secondary: #23232a;
   --secondary-foreground: #fafafa;
-  --accent: #1f1f23;
+  --accent: #1d1d23;
   --accent-foreground: #fafafa;
   --destructive: #ef4444;
-  --sidebar: #0c0c0e;
+  --sidebar: #09090b;
   --sidebar-foreground: #fafafa;
   --sidebar-primary: #fafafa;
   --sidebar-primary-foreground: #18181b;
-  --sidebar-accent: #27272a;
+  --sidebar-accent: #23232a;
   --sidebar-accent-foreground: #fafafa;
-  --sidebar-border: #1f1f23;
-  --sidebar-ring: #71717a;
+  --sidebar-border: rgb(255 255 255 / 0.09);
+  --sidebar-ring: #9187f7;
 
   --ok: #4ade80;
   --ok-bg: rgb(34 197 94 / 0.12);
@@ -116,6 +118,7 @@
 @theme inline {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --font-serif: ui-serif, "New York", Georgia, serif;
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -134,6 +137,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
@@ -204,6 +209,54 @@
 }
 .win-in .win-draw {
   animation: win-draw 240ms ease-out 120ms both;
+}
+
+/* Brand motion (design 10). Each is a no-op under the reduced-motion rule below. */
+/* The K tile knocks twice, once, on first load. */
+@keyframes knock {
+  0%,
+  40%,
+  100% {
+    transform: scale(1);
+  }
+  20%,
+  60% {
+    transform: scale(0.92);
+  }
+}
+.knock {
+  animation: knock 260ms ease-in-out 1 both;
+}
+/* A live dot sends out a slow ring instead of fading. The ring colour is the dot's own (--ripple, default the ok dot). */
+@keyframes ripple {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ripple, var(--ok-dot)) 55%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--ripple, var(--ok-dot)) 0%, transparent);
+  }
+}
+.ripple {
+  animation: ripple 2.4s ease-out infinite;
+}
+/* Skeletons keep a calm base and a light sweep. With animation off the sweep rests out of view. */
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--foreground) 7%, transparent), transparent);
+  animation: shimmer 1.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

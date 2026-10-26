@@ -3,16 +3,21 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { CircleAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Kbd } from '@/components/ui/kbd';
 import { formatLocalTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-/** Spec section 7: an icon, one bold line, one line on what to do next. */
+/**
+ * Spec section 7, one look everywhere: a 40px icon tile, one bold line, one line on what to do next, and at
+ * most one key hint (`hint`, the key that does that next thing).
+ */
 export function EmptyState({
   icon: Icon,
   title,
   titleAs: Title = 'p',
   children,
   action,
+  hint,
 }: {
   icon: LucideIcon;
   title: string;
@@ -20,13 +25,22 @@ export function EmptyState({
   titleAs?: 'p' | 'h1';
   children?: ReactNode;
   action?: ReactNode;
+  /** The one key that moves on from here, drawn as a key cap after the line. */
+  hint?: string;
 }) {
   return (
     <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
-      <Icon aria-hidden className="size-8 text-muted-foreground" />
+      <span data-slot="empty-icon" className="mb-1 grid size-10 place-items-center rounded-xl bg-muted text-muted-foreground">
+        <Icon aria-hidden className="size-5" />
+      </span>
       <Title className="text-sm font-semibold">{title}</Title>
       {children ? <p className="max-w-sm text-sm text-muted-foreground">{children}</p> : null}
       {action ? <div className="mt-2">{action}</div> : null}
+      {hint ? (
+        <Kbd aria-hidden className="mt-1">
+          {hint}
+        </Kbd>
+      ) : null}
     </div>
   );
 }

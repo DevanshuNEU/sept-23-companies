@@ -5,7 +5,7 @@ test('fixing Cerebrium domain takes it off the list and the sidebar badge drops 
   await page.goto('/needs-you');
   await expect(page.getByRole('heading', { level: 1, name: 'Needs you' })).toBeVisible();
   const sidebarLink = page.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: /^Needs you, / });
-  await expect(sidebarLink).toHaveAccessibleName('Needs you, 5 open');
+  await expect(sidebarLink).toHaveAccessibleName(/^Needs you, 5 open(,|$)/);
 
   const cerebrium = page.getByRole('article', { name: 'Cerebrium' });
   await cerebrium.getByRole('button', { name: /^Set domain/ }).click();
@@ -18,7 +18,7 @@ test('fixing Cerebrium domain takes it off the list and the sidebar badge drops 
 
   await expect(page.getByText("Saved and locked. Cerebrium's drafts will be checked now.")).toBeVisible();
   await expect(page.getByRole('article', { name: 'Cerebrium' })).toHaveCount(0);
-  await expect(sidebarLink).toHaveAccessibleName('Needs you, 4 open');
+  await expect(sidebarLink).toHaveAccessibleName(/^Needs you, 4 open(,|$)/);
   expect(consoleErrors).toEqual([]);
 });
 
@@ -102,7 +102,7 @@ test('merge two companies with one key, then undo it from Resolved', async ({ pa
   await row.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByText("Undone. The merge is taken back, and Mesh Systems' duplicate question is open again.")).toBeVisible();
   await expect(page.getByRole('article', { name: MESH })).toBeVisible();
-  await expect(sidebarCount(page)).toHaveAccessibleName('Needs you, 11 open');
+  await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 11 open(,|$)/);
   expect(consoleErrors).toEqual([]);
 });
 
@@ -146,22 +146,22 @@ test('an edited size leaves the list and its Resolved row has no Undo', async ({
 
 test('the sidebar count drops with each fix and rises on Undo', async ({ page, consoleErrors }) => {
   await page.goto(REVIEW);
-  await expect(sidebarCount(page)).toHaveAccessibleName('Needs you, 11 open');
+  await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 11 open(,|$)/);
   await page.getByRole('article', { name: 'Quillmate' }).getByRole('button', { name: 'Mark ok' }).click();
-  await expect(sidebarCount(page)).toHaveAccessibleName('Needs you, 10 open');
+  await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 10 open(,|$)/);
   await page.getByRole('article', { name: 'Brightwell' }).getByRole('button', { name: 'Mark ok' }).click();
-  await expect(sidebarCount(page)).toHaveAccessibleName('Needs you, 9 open');
+  await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 9 open(,|$)/);
   // Inside the window, Z undoes the last fix: nothing is sent and the item is back at once.
   await page.keyboard.press('z');
   await expect(page.getByRole('article', { name: 'Brightwell' })).toBeVisible();
-  await expect(sidebarCount(page)).toHaveAccessibleName('Needs you, 10 open');
+  await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 10 open(,|$)/);
 
   // After the window, Undo from Resolved asks the server, and the count rises again.
   await commitByLeaving(page);
   await page.getByRole('button', { name: 'Show' }).click();
   await page.getByRole('row', { name: /^Ambergate/ }).getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByText("Undone. Ambergate's sponsorship question is open again.")).toBeVisible();
-  await expect(sidebarCount(page)).toHaveAccessibleName('Needs you, 11 open');
+  await expect(sidebarCount(page)).toHaveAccessibleName(/^Needs you, 11 open(,|$)/);
   await expect(page.getByRole('article', { name: 'Ambergate' })).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });

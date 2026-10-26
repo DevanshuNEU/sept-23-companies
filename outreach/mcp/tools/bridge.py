@@ -344,9 +344,23 @@ def _match_person(rows: Sequence[sqlite3.Row], name: str, linkedin_url: str | No
     return next((r for r in rows if person_name_key(r["name"]) == key), None)
 
 
-def _unknown_facts(name: str, title: str, tenure: int | None, cfg: PlanConfig) -> PersonFacts:
+def _stops_elsewhere(conn: sqlite3.Connection, linkedin_url: str | None, person_id: int | None,
+                     no_go_people: set[int]) -> tuple[bool, bool]:
+    """(no-go, said no) for someone not on record at this company: the stored person with this id, or with this
+    LinkedIn profile anywhere in the store (add_people matches across the store the same way)."""
+    ids = {person_id} if person_id is not None else set()
+    page = linkedin_key(linkedin_url) if linkedin_url else None
+    if page:
+        ids |= {r["person_id"] for r in conn.execute("SELECT person_id, linkedin_url FROM person "
+                                                       "WHERE linkedin_url IS NOT NULL")
+                if linkedin_key(r["linkedin_url"]) == page}
+    return bool(ids & no_go_people), bool(said_no_ids(conn, sorted(ids)))
+
+
+def _unknown_facts(name: str, title: str, tenure: int | None, cfg: PlanConfig, *, no_go: bool = False,
+                   said_no: bool = False) -> PersonFacts:
     return PersonFacts(name=name, title=title, role_kind=classify_role(title, cfg), seniority=seniority(title, cfg),
-                       tenure_months=tenure, no_go=False, said_no=False, asked_on=None, email_code=None,
+                       tenure_months=tenure, no_go=no_go, said_no=said_no, asked_on=None, email_code=None,
                        has_email=False, recruiter_blocked=False)
 
 
@@ -431,7 +445,8 @@ def contact_check(ctx: Ctx, args: ContactCheckInput) -> dict:
             seen.add(row["person_id"])
             listed.append((row, row["name"], facts[row["person_id"]]))
         elif row is None:
-            listed.append((None, p.name, _unknown_facts(p.name, p.title, None, cfg)))
+            no_go, said_no = _stops_elsewhere(conn, p.linkedin_url, None, no_go_people)
+            listed.append((None, p.name, _unknown_facts(p.name, p.title, None, cfg, no_go=no_go, said_no=said_no)))
     for row in rows:
         if row["person_id"] not in seen and len(listed) < ON_RECORD:
             listed.append((row, row["name"], facts[row["person_id"]]))
@@ -443,7 +458,7 @@ def contact_check(ctx: Ctx, args: ContactCheckInput) -> dict:
         f"SELECT review_id, reason FROM review_item WHERE kind = 'merge_candidate' AND state = 'open' AND "
         f"(company_id IN ({marks(members)}) OR evidence_key IN ({marks(members)}))",
         [*members, *[str(m) for m in members]]).fetchall()
-    base["company"].update({"id": c.survivor, "name": c.row["name"], "status": c.row["status"]})
+    base["company"].update({"id": c.survivor, "name": clip(c.row["name"]), "status": c.row["status"]})
     base.update({
         "state": c.state, "verdict": _verdict(c.state), "people": people, "on_record_total": len(rows),
         "legacy": [g for g in legacy.gaps if name_key(g["company"]) in company_names
@@ -541,7 +556,8 @@ def intake(ctx: Ctx, args: IntakeInput) -> dict:
                 continue
             outbound = load_outbound(conn, canon, tz=cfg.get("plan", "timezone"), company_ids=[found.survivor])
             c = _company(conn, family, found.survivor, outbound, queue, no_go_companies, held, ctx.today, cfg)
-            block.update({"id": c.survivor, "name": c.row["name"], "state": c.state, "verdict": _verdict(c.state)})
+            block.update({"id": c.survivor, "name": clip(c.row["name"]), "state": c.state,
+                          "verdict": _verdict(c.state)})
             recorded: dict[int, dict] = {}
             if not (c.facts.no_go or c.row["status"] == "removed"):
                 out = record_people(ctx, c.survivor, [wanted[i] for i in idx])
@@ -557,8 +573,9 @@ def intake(ctx: Ctx, args: IntakeInput) -> dict:
                 if pid is not None and pid in facts:
                     listed.append(facts[pid])
                 else:
+                    no_go, said_no = _stops_elsewhere(conn, args.people[i].linkedin_url, pid, no_go_people)
                     listed.append(_unknown_facts(args.people[i].name, args.people[i].title,
-                                                 args.people[i].tenure_months, cfg))
+                                                 args.people[i].tenure_months, cfg, no_go=no_go, said_no=said_no))
             budget = _budget(week, c.facts.on_queue, used_plan, used_hard)
             for j, r, pref in route_all(listed, c.facts, budget, ctx.today, cfg):
                 i = idx[j]
@@ -704,19 +721,23 @@ def log_sent(ctx: Ctx, args: LogSentInput) -> dict:
                 person = hits[0]
             survivor = family.survivor(person["company_id"])
             main = company_row(conn, survivor)
-            who = {"person": {"id": person["person_id"], "name": person["name"]},
-                   "company": {"id": survivor, "name": main["name"]}}
+            who = {"person": {"id": person["person_id"], "name": clip(person["name"])},
+                   "company": {"id": survivor, "name": clip(main["name"])}}
             if person["person_id"] in no_go_people or survivor in no_go_companies:
                 results.append(_refused(i, "no_go", f"{person['name']} or {main['name']} is on the no-go list, so "
                                                     "nothing is logged. Lift it first if that is wrong.", **who))
                 continue
-            live = conn.execute("SELECT sent_at FROM outreach_touch WHERE person_id = ? AND channel = "
-                                "'linkedin_request' AND undone_at IS NULL ORDER BY sent_at LIMIT 1",
-                                (person["person_id"],)).fetchone()
+            # A live request touch, or a live request_sent log row with no touch (the importer writes those): the
+            # LinkedIn page's own rule (`steps_of`, over the log entries no undo takes back).
+            live = conn.execute(
+                "SELECT min(at) FROM (SELECT sent_at AS at FROM outreach_touch WHERE person_id = ?1 AND channel = "
+                "'linkedin_request' AND undone_at IS NULL UNION ALL SELECT l.at FROM linkedin_log l WHERE "
+                "l.person_id = ?1 AND l.kind = 'request_sent' AND NOT EXISTS (SELECT 1 FROM linkedin_log u "
+                "WHERE u.undoes = l.entry_id))", (person["person_id"],)).fetchone()[0]
             if live is not None:
                 results.append({"index": i, "status": "already_logged", **who,
-                                "message": f"Already logged: a request to {person['name']} on "
-                                           f"{ny_day(live['sent_at'])}. Nothing was written."})
+                                "message": f"Already logged: a request to {clip(person['name'])} on "
+                                           f"{ny_day(live)}. Nothing was written."})
                 continue
             day = ny_day(sent_at)
             key = _bridge_key(conn, person["person_id"], day, req.note_text)
@@ -757,7 +778,7 @@ def log_sent(ctx: Ctx, args: LogSentInput) -> dict:
         outbound = load_outbound(conn, canon, tz=cfg.get("plan", "timezone"), company_ids=sorted(touched))
         queue = _queue(conn, ctx.today, canon)
         held = held_survivors(family.companies)
-        states = [{"company_id": s, "name": company_row(conn, s)["name"],
+        states = [{"company_id": s, "name": clip(company_row(conn, s)["name"]),
                    **_company(conn, family, s, outbound, queue, no_go_companies, held, ctx.today, cfg).state}
                   for s in sorted(touched)]
     return {"results": results, "linkedin_week": week, "companies": states,

@@ -9,7 +9,9 @@ from pathlib import Path
 from unittest import mock
 
 from tests import apiseed as seed
-from tests.mcptest import NOW, McpCase, fingerprint
+from outreach.mcp.server import build_server
+from outreach.outcomes import requests as request_writes
+from tests.mcptest import NOW, McpCase, call, fingerprint
 from tests.test_drafts_checks import FIXTURE_BANNED
 
 TODAY = "2026-11-10"
@@ -292,11 +294,86 @@ class LogSentTest(BridgeCase):
     def test_backdated_within_three_days_and_a_request_taken_back_can_be_logged_again(self):
         first = self.log(person_id=self.lin, note_text=NOTE, at="2026-11-08T14:00:00Z")["results"][0]
         self.assertEqual(first["sent_on"], "2026-11-08")
+        # Taken back on the LinkedIn page: the touch is undone and the log gets an undo row (`undo_step`).
         self.db.execute("UPDATE outreach_touch SET undone_at = ? WHERE touch_id = ?", (NOW, first["touch_id"]))
+        entry = self.db.execute("SELECT max(entry_id) FROM linkedin_log").fetchone()[0]
+        self.db.execute("INSERT INTO linkedin_log(person_id, kind, undoes, at, recorded_at) VALUES (?, 'undo', ?, ?, ?)",
+                        (self.lin, entry, NOW, NOW))
         again = self.log(person_id=self.lin, note_text=NOTE, at="2026-11-08T14:00:00Z")["results"][0]
         self.assertEqual(again["status"], "logged")
         keys = [r[0] for r in self.db.execute("SELECT idempotency_key FROM outreach_touch ORDER BY touch_id")]
         self.assertEqual(keys[1], keys[0] + ":again2")
+
+
+class ReviewFixesTest(BridgeCase):
+    """Review of PR #101: the batch is one transaction, a log-only request counts, a no-go elsewhere still stops,
+    a backdate across the clock change is fine, and company names are clipped."""
+
+    def log(self, *requests):
+        return self.ok("log_sent", {"requests": [{"channel": "linkedin_request", **r} for r in requests]})
+
+    def test_a_three_day_backdate_across_the_clock_change_is_logged(self):
+        server = build_server(path=self.path, clock=lambda: "2026-11-04T04:59:00Z")  # Nov 3, 23:59 in New York
+        is_error, out = call(server, "log_sent", {"requests": [
+            {"channel": "linkedin_request", "person_id": self.lin, "at": "2026-10-31T04:30:00Z"}]})
+        self.assertFalse(is_error, out)
+        self.assertEqual((out["results"][0]["status"], out["results"][0]["sent_on"]), ("logged", "2026-10-31"))
+
+    def test_the_log_row_and_the_touch_land_together_or_not_at_all(self):
+        pat = seed.person(self.db, self.acme, "Pat Two", channel="linkedin")
+        real, calls = request_writes.log_touch, []
+
+        def second_fails(*args, **kwargs):
+            calls.append(kwargs["person_id"])
+            if len(calls) == 2:
+                raise RuntimeError("the store went away")
+            return real(*args, **kwargs)
+
+        before = fingerprint(self.db)
+        with mock.patch.object(request_writes, "log_touch", side_effect=second_fails):
+            err = self.error("log_sent", {"requests": [
+                {"channel": "linkedin_request", "person_id": self.lin},
+                {"channel": "linkedin_request", "person_id": pat}]})
+        self.assertEqual(err["code"], "internal")
+        self.assertEqual(calls, [self.lin, pat])
+        self.assertEqual(fingerprint(self.db), before)  # the first request's rows went back too
+
+    def test_an_imported_request_with_no_touch_counts_as_already_logged(self):
+        self.db.execute("INSERT INTO linkedin_log(person_id, kind, at, recorded_at) VALUES (?, 'request_sent', ?, ?)",
+                        (self.lin, "2026-11-05T15:00:00Z", "2026-11-05T15:00:00Z"))
+        before = fingerprint(self.db)
+        (r,) = self.log({"person_id": self.lin})["results"]
+        self.assertEqual(fingerprint(self.db), before)
+        self.assertEqual(r["status"], "already_logged")
+        self.assertIn("2026-11-05", r["message"])
+        entry = self.db.execute("SELECT max(entry_id) FROM linkedin_log").fetchone()[0]
+        self.db.execute("INSERT INTO linkedin_log(person_id, kind, undoes, at, recorded_at) VALUES (?, 'undo', ?, ?, ?)",
+                        (self.lin, entry, NOW, NOW))
+        self.assertEqual(self.log({"person_id": self.lin})["results"][0]["status"], "logged")
+
+    def test_a_no_go_person_known_at_another_company_still_stops(self):
+        bolt = seed.company(self.db, "Bolt Robotics")
+        url = "https://www.linkedin.com/in/nia-nogo"
+        nia = seed.person(self.db, bolt, "Nia Nogo", channel="linkedin", linkedin_url=url)
+        self.db.execute("INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'said_no', 'reply', ?)",
+                        (nia, NOW))
+        check = self.ok("contact_check", {"company": "Acme Labs", "people": [
+            {"name": "Nia N.", "title": "Software Engineer", "linkedin_url": url}]})
+        self.assertEqual(check["people"][0]["route"]["verdict"], "stop")
+        out = self.ok("intake", {"people": [{"name": "Nia N.", "title": "Software Engineer", "company": "Acme Labs",
+                                             "linkedin_url": url}]})
+        self.assertEqual(out["people"][0]["route"]["verdict"], "stop")
+
+    def test_company_names_are_clipped_like_the_read_tools(self):
+        long = seed.company(self.db, "L" * 260, "working")
+        lee = seed.person(self.db, long, "Lee Long", channel="linkedin")
+        check = self.ok("contact_check", {"company_id": long})
+        self.assertEqual(len(check["company"]["name"]), 200)
+        logged = self.log({"person_id": lee})
+        self.assertEqual(len(logged["results"][0]["company"]["name"]), 200)
+        self.assertEqual(len(logged["companies"][0]["name"]), 200)
+        out = self.ok("intake", {"people": [{"name": "Kim Long", "title": "Software Engineer", "company_id": long}]})
+        self.assertEqual(len(out["companies"][0]["name"]), 200)
 
 
 if __name__ == "__main__":

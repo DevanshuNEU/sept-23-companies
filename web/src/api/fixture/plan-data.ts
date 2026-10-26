@@ -13,7 +13,7 @@
 import type {
   Check, CompanyRef, CompanyStatus, FindingsView, FunnelKey, Id, IsoDate, IsoTime, JobRunSummary, LevelTier, ListGroup, NoteDraft, NoteFact,
   OutcomePromptView, PersonRef, PlanRow, PlanStep, PlanView, ProgressPeriod, ProgressView, RoleKind, RoleToName, SavedBy, ScoreSignal, ScoreView,
-  SourceLink, WatchView, WinsView, Win,
+  SourceLink, TomorrowRow, WatchView, WinsView, Win,
 } from '../types';
 import type { Scenario } from './data';
 
@@ -239,13 +239,26 @@ function wenNote(c: PlanCtx, n: number): NoteDraft {
   };
 }
 
-const TOMORROW_PREVIEW: PlanView['tomorrow']['preview'] = [
-  { companyName: 'Hex', personName: 'Aiden Frost', roleTitle: 'Software Engineer, New Grad' },
-  { companyName: 'Warp', personName: 'Rhea Kapoor', roleTitle: 'Software Engineer I' },
-  { companyName: 'Clerk', personName: null, roleTitle: 'Product Engineer' },
-  { companyName: 'Railway', personName: null, roleTitle: 'Software Engineer, Platform' },
-  { companyName: 'Zed Industries', personName: null, roleTitle: 'Software Engineer, Early Career' },
+/** Tomorrow's draft as the API's dry run of the next plan lists it: people first, then find-someone rows, by score. */
+const tomorrowRow = (companyName: string, personName: string | null, roleTitle: string | null, channel: 'linkedin_request' | 'email' = 'linkedin_request'): TomorrowRow =>
+  ({ companyName, personName, roleTitle, channel, findSomeone: personName === null });
+const TOMORROW_PREVIEW: TomorrowRow[] = [
+  tomorrowRow('Hex', 'Aiden Frost', 'Software Engineer, New Grad'),
+  tomorrowRow('Warp', 'Rhea Kapoor', 'Software Engineer I'),
+  tomorrowRow('Modal', 'Sam Okafor', 'Software Engineer, Early Career'),
+  tomorrowRow('Neon', 'Julia Brandt', null, 'email'),
+  tomorrowRow('Temporal', 'Kofi Mensah', 'Software Engineer II'),
+  tomorrowRow('Render', 'Owen Price', 'Backend Engineer, New Grad'),
+  tomorrowRow('Retool', 'Nadia Haddad', null),
+  tomorrowRow('Clerk', null, 'Product Engineer'),
+  tomorrowRow('Railway', null, 'Software Engineer, Platform'),
+  tomorrowRow('Zed Industries', null, 'Software Engineer, Early Career'),
+  tomorrowRow('Tailscale', null, 'Software Engineer, New Grad'),
+  tomorrowRow('PlanetScale', null, null),
+  tomorrowRow('Convex', null, 'Software Engineer, Product'),
 ];
+/** Room on the next plan: LinkedIn rows plus email slots, as the API's `plan_capacity`. */
+const TOMORROW_ROOM = 25;
 
 /* ------------------------------------------------------------------ progress */
 
@@ -498,10 +511,11 @@ function buildScores(c: PlanCtx, scenario: Scenario): Record<Id, ScoreView> {
 
 /* ------------------------------------------------------------------ the whole fixture */
 
-/** The API's one line about the next plan (outreach/api/queries/plan.py): room, plus the carried list when it has rows. */
-export function tomorrowText(label: string, total: number, carried: number): string {
-  const people = `${total} ${total === 1 ? 'person' : 'people'}`;
-  return carried > 0 ? `${label}: ${people}, ${carried} carried over.` : `${label}'s plan builds at 08:00. Room for ${people}.`;
+/** The API's one line about the next plan (`tomorrow_text` in outreach/api/queries/plan.py): room, and a pointer to
+ * the draft when the dry run named anyone. */
+export function tomorrowText(label: string, total: number, drafted: number): string {
+  const line = `${label}'s plan builds at 08:00. Room for ${total} ${total === 1 ? 'person' : 'people'}.`;
+  return drafted > 0 ? `${line} A draft of who it would propose is below.` : line;
 }
 
 export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
@@ -521,7 +535,7 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
     : null;
   const tomorrow: PlanView['tomorrow'] = scenario === 'empty'
     ? { total: 0, text: 'Nothing is planned yet.', preview: [] }
-    : { total: 7, text: tomorrowText(scenario === 'weekend' ? 'Monday' : 'Tomorrow', 7, TOMORROW_PREVIEW.length), preview: TOMORROW_PREVIEW.map((p) => ({ ...p })) };
+    : { total: TOMORROW_ROOM, text: tomorrowText(scenario === 'weekend' ? 'Monday' : 'Tomorrow', TOMORROW_ROOM, TOMORROW_PREVIEW.length), preview: TOMORROW_PREVIEW.map((p) => ({ ...p })) };
   const [week, month] = [n.week, n.month];
   const [asOfDate, to] = [c.date, c.date];
   const weekFrom = c.addDays(asOfDate, -6);

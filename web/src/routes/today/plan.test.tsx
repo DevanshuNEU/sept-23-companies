@@ -588,13 +588,18 @@ describe('Today as a plan', () => {
     expect(document.body.textContent).not.toMatch(/below|and \d+ more/i);
   });
 
-  it('weekend scenario shows "No plan on weekends." with tomorrow\'s preview', async () => {
+  it('weekend scenario shows "No plan on weekends." with tomorrow\'s draft', async () => {
     await open({ scenario: 'weekend' });
     expect(await screen.findByText(/^No plan on weekends\./)).toBeInTheDocument();
-    expect(screen.getByText('Monday: 7 people, 5 carried over.')).toBeInTheDocument();
-    expect(screen.getByText(/Aiden Frost/)).toBeInTheDocument();
-    expect(screen.getByText('and 4 more')).toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/below/i);
+    const draft = within(screen.getByRole('region', { name: "Tomorrow's draft" }));
+    expect(draft.getByText("Monday's plan builds at 08:00. Room for 25 people. A draft of who it would propose is below.")).toBeInTheDocument();
+    expect(draft.getByText('Rebuilt at 08:00')).toBeInTheDocument();
+    const lines = draft.getAllByRole('listitem');
+    expect(lines).toHaveLength(10);
+    expect(lines[0]).toHaveTextContent(/Aiden Frost at Hex, Software Engineer, New Grad\s*LinkedIn$/);
+    expect(lines[3]).toHaveTextContent(/Julia Brandt at Neon\s*Email$/);
+    expect(lines[9]).toHaveTextContent(/Zed Industries, Software Engineer, Early Career\s*Find someone$/);
+    expect(draft.getByText('and 3 more')).toBeInTheDocument();
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 

@@ -6,9 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDayTime } from '@/lib/format';
 import { jobKindLabel } from '@/lib/status';
-
-/** How many people tomorrow's preview names before "and N more". */
-const PREVIEW = 3;
+import { TomorrowDraft } from './tomorrow-draft';
 
 /**
  * The shared stale banner when the plan's job failed or is late, with the job's own error and name (the plan job on
@@ -34,35 +32,21 @@ export function PlanJobBanner({ job }: { job: JobRunSummary | null }) {
   return null;
 }
 
-/** Who is next: the API's line ("Monday: 7 people"), then up to three people, then how many more. */
-function TomorrowPreview({ tomorrow }: { tomorrow: PlanView['tomorrow'] }) {
-  const shown = tomorrow.preview.slice(0, PREVIEW);
-  const more = tomorrow.total - shown.length;
-  return (
-    <div className="mt-2 grid justify-items-center gap-1 text-[13px]">
-      <span className="font-medium text-foreground">{tomorrow.text}</span>
-      {shown.length > 0 ? (
-        <ul className="grid justify-items-center gap-0.5 text-muted-foreground">
-          {shown.map((p, i) => (
-            <li key={`${i}:${p.companyName}`}>
-              {[p.personName ? `${p.personName} at ${p.companyName}` : `Find someone at ${p.companyName}`, p.roleTitle].filter(Boolean).join(', ')}
-            </li>
-          ))}
-          {more > 0 ? <li>{`and ${more} more`}</li> : null}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
-
-/** The weekend, a plan not built yet, a failed list job: the API's words, and who is next when it knows. */
+/**
+ * The weekend, a plan not built yet, a failed list job: the API's words, then tomorrow's draft (who the next plan
+ * would propose) when the dry run named anyone, else the API's line about the next plan alone.
+ */
 export function PlanNotReady({ plan }: { plan: PlanView }) {
-  const notReady = plan.notReady;
+  const { notReady, tomorrow } = plan;
   if (!notReady) return null;
+  const drafted = tomorrow.preview.length > 0;
   return (
-    <EmptyState icon={CalendarX} title={notReady.text}>
-      {plan.tomorrow.total > 0 ? <TomorrowPreview tomorrow={plan.tomorrow} /> : null}
-    </EmptyState>
+    <div className="grid justify-items-center pb-12">
+      <EmptyState icon={CalendarX} title={notReady.text}>
+        {!drafted && tomorrow.total > 0 ? tomorrow.text : null}
+      </EmptyState>
+      {drafted ? <TomorrowDraft tomorrow={tomorrow} className="-mt-4 w-full max-w-[700px] px-6" /> : null}
+    </div>
   );
 }
 

@@ -86,33 +86,46 @@ describe('FinishPanel', () => {
     expect(document.body.textContent).not.toMatch(/streak|come back|overdue|behind|missed|keep it up/i);
   });
 
-  it('previews tomorrow with at most 3 lines and "and 4 more"', () => {
+  it("lists tomorrow's draft: ten people with their channel, then how many more the draft has", () => {
     const plan = planOf();
-    expect(plan.tomorrow.preview.length).toBeGreaterThan(3);
-    expect(plan.tomorrow.total).toBe(7);
+    expect(plan.tomorrow.preview).toHaveLength(13);
+    expect(plan.tomorrow.total).toBe(25);
     showPanel(plan);
-    const tomorrow = within(section('Tomorrow'));
-    expect(tomorrow.getByText('Tomorrow: 7 people, 5 carried over.')).toBeInTheDocument();
-    const lines = tomorrow.getAllByRole('listitem').map((li) => li.textContent);
-    expect(lines).toEqual(['1Aiden Frost at Hex, Software Engineer, New Grad', '2Rhea Kapoor at Warp, Software Engineer I', '3Find someone at Clerk, Product Engineer']);
-    expect(tomorrow.getByText('and 4 more')).toBeInTheDocument();
+    const draft = within(section("Tomorrow's draft"));
+    expect(draft.getByText('Rebuilt at 08:00')).toBeInTheDocument();
+    expect(draft.getByText("Tomorrow's plan builds at 08:00. Room for 25 people. A draft of who it would propose is below.")).toBeInTheDocument();
+    const lines = draft.getAllByRole('listitem');
+    expect(lines).toHaveLength(10);
+    expect(lines[0]).toHaveTextContent(/^1\s*Aiden Frost at Hex, Software Engineer, New Grad\s*LinkedIn$/);
+    expect(lines[3]).toHaveTextContent(/^4\s*Julia Brandt at Neon\s*Email$/);
+    expect(lines[7]).toHaveTextContent(/^8\s*Clerk, Product Engineer\s*Find someone$/);
+    expect(draft.getByText('and 3 more')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Tomorrow' })).not.toBeInTheDocument();
   });
 
-  it('names no "and more" line when the preview shows everyone', () => {
+  it('counts "and N more" from the draft, never from the room', () => {
     const plan = planOf();
-    plan.tomorrow = { ...plan.tomorrow, total: 2, text: 'Tomorrow: 2 people, 2 carried over.', preview: plan.tomorrow.preview.slice(0, 2) };
+    plan.tomorrow = { ...plan.tomorrow, preview: plan.tomorrow.preview.slice(0, 11) };
     showPanel(plan);
-    expect(within(section('Tomorrow')).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(section("Tomorrow's draft")).getByText('and 1 more')).toBeInTheDocument();
+  });
+
+  it('names no "and more" line when the draft shows everyone', () => {
+    const plan = planOf();
+    plan.tomorrow = { ...plan.tomorrow, preview: plan.tomorrow.preview.slice(0, 2) };
+    showPanel(plan);
+    expect(within(section("Tomorrow's draft")).getAllByRole('listitem')).toHaveLength(2);
     expect(screen.queryByText(/and \d+ more/)).not.toBeInTheDocument();
   });
 
-  it('shows no Tomorrow list when nothing is planned', () => {
+  it('shows the line alone, with no draft, when the dry run named nobody', () => {
     const plan = planOf();
-    plan.tomorrow = { total: 0, text: 'Nothing is planned yet.', preview: [] };
+    plan.tomorrow = { total: 25, text: "Tomorrow's plan builds at 08:00. Room for 25 people.", preview: [] };
     showPanel(plan);
     const tomorrow = within(section('Tomorrow'));
-    expect(tomorrow.getByText('Nothing is planned yet.')).toBeInTheDocument();
+    expect(tomorrow.getByText("Tomorrow's plan builds at 08:00. Room for 25 people.")).toBeInTheDocument();
     expect(tomorrow.queryByRole('listitem')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: "Tomorrow's draft" })).not.toBeInTheDocument();
   });
 
   it('shows no Carried to tomorrow section when nothing is skipped', () => {

@@ -3226,8 +3226,15 @@ export interface components {
         };
         /** TomorrowRow */
         TomorrowRow: {
+            /** Channel */
+            channel: ("linkedin_request" | "email") | null;
             /** Companyname */
             companyName: string;
+            /**
+             * Findsomeone
+             * @default false
+             */
+            findSomeone: boolean;
             /** Personname */
             personName: string | null;
             /** Roletitle */

@@ -310,12 +310,17 @@ export interface PlanRow {
   state: 'todo' | 'done' | 'skipped';                                                // derived
   carriedFrom: IsoDate | null; revision: Revision;
 }
+/** One person the next weekday's plan would propose (a dry run, rebuilt at 08:00): findSomeone when nobody is named yet. */
+export interface TomorrowRow {
+  companyName: string; personName: string | null; roleTitle: string | null;
+  channel: 'linkedin_request' | 'email' | null; findSomeone: boolean;
+}
 export interface PlanView {
   asOf: IsoTime; date: IsoDate; builtAt: IsoTime | null; listJob: JobRunSummary | null;
   notReady: { reason: 'weekend' | 'not_built' | 'job_failed'; text: string } | null;
   rows: PlanRow[]; done: number; total: number;
   linkedinMonth: { used: number; limit: number; hardUsed: number; hardLimit: number };   // plan quota, and every request against the hard total
-  tomorrow: { total: number; text: string; preview: { companyName: string; personName: string | null; roleTitle: string | null }[] };
+  tomorrow: { total: number; text: string; preview: TomorrowRow[] };                     // total is room; preview is a dry run of the next plan
   week: { requests: number; accepts: number; replies: number };
 }
 

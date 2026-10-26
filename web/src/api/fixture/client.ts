@@ -3,7 +3,7 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  FindingsView, FunnelKey, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, WatchView, Win, WinKind, WinsView,
+  FindingsView, FunnelKey, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
@@ -923,9 +923,16 @@ export class FixtureClient implements OutreachClient {
       if (row.state === 'skipped') return row;
       row.state = 'skipped';
       row.revision += 1;
+      // As the API: the skipped row carries, so tomorrow's dry run proposes it again (its person first among the people,
+      // a find-someone row first among those). The room does not change.
       const t = this.db.plan.tomorrow;
-      t.total += 1;
-      t.preview = [{ companyName: row.company.name, personName: row.person?.person.name ?? null, roleTitle: row.role?.title ?? null }, ...t.preview].slice(0, 5);
+      const carried: TomorrowRow = {
+        companyName: row.company.name, personName: row.person?.person.name ?? null, roleTitle: row.role?.title ?? null,
+        channel: row.channel, findSomeone: row.person === null,
+      };
+      const others = t.preview.filter((p) => p.companyName !== carried.companyName);
+      const at = carried.findSomeone ? others.findIndex((p) => p.findSomeone) : 0;
+      t.preview = [...others.slice(0, at < 0 ? others.length : at), carried, ...others.slice(at < 0 ? others.length : at)].slice(0, t.total);
       t.text = tomorrowText(/^\w+/.exec(t.text)?.[0] ?? 'Tomorrow', t.total, t.preview.length);
       return row;
     });

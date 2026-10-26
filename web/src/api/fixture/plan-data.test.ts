@@ -2,7 +2,7 @@ import { safeHref } from '@/lib/safe-href';
 import type { PlanView, ProgressView, ScoreView } from '../types';
 import { FixtureClient } from './client';
 import { buildFixture, SCENARIOS, type Scenario } from './data';
-import { winsOnDay } from './plan-data';
+import { tomorrowText, winsOnDay } from './plan-data';
 
 const client = (scenario: Scenario = 'default') => new FixtureClient(buildFixture(scenario));
 const row = (plan: PlanView, n: number) => {
@@ -12,6 +12,25 @@ const row = (plan: PlanView, n: number) => {
 };
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 const counts = (p: ProgressView['week']) => Object.fromEntries(p.stages.map((s) => [s.stage, s.count]));
+
+describe("plan fixture: tomorrow's draft", () => {
+  it('lists people first, then find-someone rows, more than ten of them and inside the room', async () => {
+    const { tomorrow } = await client().plan();
+    const kinds = tomorrow.preview.map((p) => p.findSomeone);
+    expect(kinds.indexOf(true)).toBeGreaterThan(0);
+    expect(kinds.slice(kinds.indexOf(true)).every(Boolean)).toBe(true);
+    expect(tomorrow.preview.every((p) => p.findSomeone === (p.personName === null))).toBe(true);
+    expect(tomorrow.preview.some((p) => p.channel === 'email')).toBe(true);
+    expect(tomorrow.preview.length).toBeGreaterThan(10);
+    expect(tomorrow.preview.length).toBeLessThanOrEqual(tomorrow.total);
+    expect(tomorrow.text).toBe(tomorrowText('Tomorrow', tomorrow.total, tomorrow.preview.length));
+  });
+
+  it('says "below" only when the draft has rows, as the API does', () => {
+    expect(tomorrowText('Monday', 25, 3)).toBe("Monday's plan builds at 08:00. Room for 25 people. A draft of who it would propose is below.");
+    expect(tomorrowText('Tomorrow', 1, 0)).toBe("Tomorrow's plan builds at 08:00. Room for 1 person.");
+  });
+});
 
 describe('plan fixture: default', () => {
   it('default plan has 7 rows in the listed order, done 2, total 7', async () => {

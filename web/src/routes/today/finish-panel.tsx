@@ -5,9 +5,7 @@ import type { PlanRow, PlanView } from '@/api';
 import { useAnnounce } from '@/keyboard/hotkeys';
 import { formatClockTime } from '@/lib/format';
 import { didToday } from '@/lib/progress';
-
-/** How many people tomorrow's preview names before "and N more". */
-const PREVIEW = 3;
+import { TomorrowDraft } from './tomorrow-draft';
 
 const plural = (n: number, one: string, many: string) => `${n === 1 ? one : many}`;
 const link =
@@ -81,7 +79,7 @@ function Section({ title, children, id, className }: { title: string; children: 
 
 /**
  * The finish line (design 16.2): the plan ends and Today says so. It shows what he did, what carried to
- * tomorrow, tomorrow's preview and the week so far, and nothing that asks for more. The heading takes focus when the
+ * tomorrow, tomorrow's draft and the week so far, and nothing that asks for more. The heading takes focus when the
  * panel appears, and the live region says how the day ended. Every count and line comes from the plan.
  */
 export function FinishPanel({ plan }: { plan: PlanView }) {
@@ -106,8 +104,6 @@ export function FinishPanel({ plan }: { plan: PlanView }) {
   }, [say, spoken]);
 
   const { tomorrow, week } = plan;
-  const shown = tomorrow.preview.slice(0, PREVIEW);
-  const more = tomorrow.total - shown.length;
 
   return (
     <div className="grid max-w-[720px] gap-6">
@@ -166,25 +162,13 @@ export function FinishPanel({ plan }: { plan: PlanView }) {
         </Section>
       ) : null}
 
-      <Section id={`${ids}-tomorrow`} title="Tomorrow">
-        <p className="text-sm text-muted-foreground">{tomorrow.text}</p>
-        {shown.length > 0 ? (
-          <>
-            <ol className="grid gap-1.5 text-sm">
-              {shown.map((p, i) => (
-                <li key={`${i}:${p.companyName}`} className="flex gap-2">
-                  <span className="w-4 flex-none text-muted-foreground tabular-nums">{i + 1}</span>
-                  <span>
-                    <b className="font-medium">{p.personName ?? 'Find someone'}</b> at {p.companyName}
-                    {p.roleTitle ? `, ${p.roleTitle}` : ''}
-                  </span>
-                </li>
-              ))}
-            </ol>
-            {more > 0 ? <p className="pl-6 text-sm text-muted-foreground">{`and ${more} more`}</p> : null}
-          </>
-        ) : null}
-      </Section>
+      {tomorrow.preview.length > 0 ? (
+        <TomorrowDraft tomorrow={tomorrow} />
+      ) : (
+        <Section id={`${ids}-tomorrow`} title="Tomorrow">
+          <p className="text-sm text-muted-foreground">{tomorrow.text}</p>
+        </Section>
+      )}
 
       <Section id={`${ids}-week`} title="This week so far" className="border-t pt-4">
         <p className="text-sm tabular-nums">

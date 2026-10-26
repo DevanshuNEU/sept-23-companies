@@ -22,6 +22,7 @@ double press, and two logs sent out of order when the tab closes must both land)
 """
 import sqlite3
 from collections.abc import Sequence
+from datetime import date
 
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx

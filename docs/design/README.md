@@ -985,6 +985,49 @@ replies count is this month's replies, the same number Progress shows.
 > as built (P2). The person rows, the note block and their keys described after it stay in the code for a plan built
 > with person rows, until the cleanup (P6) deletes them.
 
+#### 16.1b Today as the top picks (2026-10-26, the owner's spec)
+
+Today is the day's picks: about 8 companies Knock chose for him, sized by the weekly capacity as before. There is no
+full company list on the page and no person or CEO name anywhere. The layout is 16.1a's; this section says what
+changed, and wins where the two differ. No mockup was drawn; the sample is `?scenario=queue`.
+
+- **The fresh lane.** Up to `[queue] fresh_slots` (3) picks are kept for a new opening: an early career role (new
+  grad, early career, SWE I, or an open level asking 2 years or fewer) first seen or posted within `fresh_hours` (72)
+  at a company that clears the visa gate (no refusal, and E-Verify enrolled, or the posting sponsors or is silent),
+  not in flight, not held back. They come first, newest opening first; the rest are the normal ranking.
+- **Head.** `8 picks, 2 reached` (`, 1 carried over`, `, 2 passed` when there are any).
+- **Rail ("Today's picks").** Picks with a new opening first, each with a small tag in the info hue, "New opening, 6
+  hours ago", then its one line of why today: a new opening's level and title (`SWE I role: Software Engineer I`), an
+  older role's level and age (`New grad role, posted 4 days ago`), else the top reason it ranks. Under the rail:
+  More options (B), with the bench's count.
+- **Panel.** It leads with **Why today** (a bordered block): the tag, the opening's title as a link, its level and age
+  ("first seen" when the time is our sighting, "posted" for a posted date), "You applied on Oct 20; this is a new
+  role." when he applied there before, then "Why it should answer" (the ranker's reasons, size and stage, recent
+  hiring) and "Visa" (the sponsorship line). Then the three research links: Careers (O), Website (https of the
+  company's domain, when known), LinkedIn page (a LinkedIn company search for the name; the app never fetches it).
+  Then the reach pipeline as 16.1a: Open LinkedIn search (S), Copy for terminal (C), Log applied (A), where it stands,
+  Log people (L), Save this search, and the quiet Carry (X) and Not now (P).
+- **Not now (P, and N).** One action since his ruling: it never removes a company, never closes it and never makes a
+  no-go, and an application never stops it (only a pick he already reached stays). P opens the reason chips under the
+  actions: 1 Visa worry, 2 Too big, 3 Too early, 4 Role not for me, 5 Not into the product, 6 Already know it, 7 Not a
+  fit right now, 8 Other; Enter or Esc pass with no reason; Keep it puts the chips away. The pick leaves the rail at
+  once and the bench's best company slides into its place with "Coming in from the bench", with the toast "Passed.
+  Added Retell AI." and Undo (Z) for the 8 seconds; nothing reaches the API before the window ends, so Undo puts the
+  day back exactly. Keys on the company coming in say it joins once the Not now is saved. The company comes back to the
+  picks after 14 days (`pass_cooldown_days`), or sooner when a new early career opening is first seen after the pass.
+  "Never show this company" (the no-go) lives on the company page and the No-go flow only.
+- **A company he applied to** stays out of the picks until a new early career opening is first seen on a later day;
+  then it is fresh again, with the applied note.
+- **More options (B).** A drawer on the right: the bench, the next 12 companies not on today's list, new early career
+  openings first, then other new openings at his level, then by rank, each in the compact shape of a pick (name, tag,
+  why today, the opening, reasons and size, visa, the applied note, the three links) with **Add to today**, which puts
+  it after the last pick while the 7-day limit has room ("Room to add 17 more companies this week."; with none the
+  button is off and the line says why). A company held back by Not now or an application, or in flight, is not on it.
+- **New opening toast.** When a new early career opening reaches the bench mid-day (the pulse refetches it), a toast
+  says "New opening at Retell AI" with Show, which opens the drawer.
+- **Finish.** "8 of 8 handled: 6 reached, Hex carries to tomorrow. You passed on 2 for now." A pick he passed left
+  the list and the bench filled its place, so the count stays the day's picks.
+
 #### 16.1a Today as a company queue (P2)
 
 No separate mockup file was drawn for the queue: it keeps 16.1's layout (rail, work panel, below the plan), and the
@@ -1019,7 +1062,7 @@ fetches LinkedIn. Under them, on paper: **Log people you asked** (L puts the cur
 note you sent` line per person, up to 10, the terminal's `Company | Name | Title | note` block too; Cmd+Enter or Log
 people) for when the terminal bridge cannot log them. Then **Save this search**: he pastes the address of his LinkedIn
 people search for the company (after setting the company filter and anything else he uses); S opens it from then on,
-and the line says "Your saved search opens with S." Footer: the step marks, Carry to tomorrow (X) and Not a fit (N).
+and the line says "Your saved search opens with S." Footer: the step marks, Carry to tomorrow (X) and Not now (P or N, 16.1b).
 
 **Done.** A row is done once a LinkedIn request or an email at the company is logged on or after the list date (and
 the application, when it has a role), from the terminal (`log_sent`, the normal way) or from Log people. A log from
@@ -1198,11 +1241,14 @@ Single keys work only outside text fields, as in section 3.
 | Today | E | Edit the note (person rows) |
 | Today | Y | Confirm your line (person rows) |
 | Today | X | Carry to tomorrow (K stays the rail's previous row, so carry keeps X) |
-| Today | N | Not a fit (dialog) |
-| Today | 1 / 2 / 3 | Answer the question: Accepted, Replied, Nothing yet |
+| Today | P, N | Not now: opens the reason chips (top picks; never a remove or a no-go) |
+| Today | 1 to 8 | With the chips open: pass with that reason (Visa worry, Too big, Too early, Role not for me, Not into the product, Already know it, Not a fit right now, Other) |
+| Today | Enter, Esc | With the chips open: pass with no reason |
+| Today | B | Open or close More options (the bench) |
+| Today | 1 / 2 / 3 | Answer the question: Accepted, Replied, Nothing yet (while the Not now chips are open, the digits are theirs) |
 | Today | W | Mark wins seen |
 | Today | ⇧C | Copy every company line for the terminal (a plan with person rows: every find-someone handoff) |
-| Today | Z | Undo the last log (8 seconds) |
+| Today | Z | Undo the last log or Not now (8 seconds) |
 | Progress | 1 / 2 | Week, Month |
 | Wins | 1 / 2 | All, Referrals and interviews |
 | Company page | 7 | Score |

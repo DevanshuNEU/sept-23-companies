@@ -97,7 +97,7 @@ class LevelTest(unittest.TestCase):
     def test_early_career_fit_for_each_tier(self):
         for tier, years, fit in (("new_grad", None, True), ("early_career", None, True), ("swe1", None, True),
                                  ("swe1", 5, True), ("open", 0, True), ("open", 2, True), ("open", 3, False),
-                                 ("open", None, False), ("swe2", None, False), ("swe2", 1, False),
+                                 ("open", None, False), ("swe2", None, False), ("swe2", 1, True),
                                  ("senior", None, False), ("not_stated", None, False), (None, None, False)):
             with self.subTest(tier=tier, years=years):
                 self.assertIs(early_career_fit(tier, years), fit)

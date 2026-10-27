@@ -33,6 +33,7 @@ from outreach.plan.dates import ny_date
 from outreach.ranking.common import clean_text, doubtful_board_ids
 from outreach.ranking.hide import posting_visible
 from outreach.rules.rebuild import stored_decision
+from outreach.ranking.roles import EARLY_CAREER_MAX_YEARS, early_career_fit as _shared_fit
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
 __all__ = ["PASSED", "PASS_REASONS", "EARLY_TIERS", "Opening", "early_career_fit", "level_words", "opened",
@@ -43,21 +44,16 @@ PASSED = "pick_passed"  # event kind: Not now on a pick (entity company, actor d
 # The reasons of Not now, in the order of the chips (keys 1 to 8). None of them is a no-go.
 PASS_REASONS = ("visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other")
 EARLY_TIERS = ("new_grad", "early_career", "swe1")
-EARLY_MAX_YEARS = 2
+EARLY_MAX_YEARS = EARLY_CAREER_MAX_YEARS
 _LEVEL_WORDS = {"new_grad": "New grad role", "early_career": "Early career role", "swe1": "SWE I role",
                 "swe2": "SWE II role", "senior": "Senior role"}
 _GATE_SPONSORS = ("yes", "opt_only", "silent")
 
 
 def early_career_fit(level_tier: str | None, years_asked: int | None) -> bool:
-    """New grad, early career or SWE I, or an open level that asks `EARLY_MAX_YEARS` years or fewer. SWE II, senior,
-    not stated and an open level with no years are not.
-
-    TODO(level-priority): switch to the shared `early_career_fit(level_tier, level_basis)` once the
-    DevanshuNEU/level-priority branch merges, so the ranking and the fresh lane read one rule."""
-    if level_tier in EARLY_TIERS:
-        return True
-    return level_tier == "open" and years_asked is not None and years_asked <= EARLY_MAX_YEARS
+    """New grad, early career or SWE I, or an open level that asks `EARLY_CAREER_MAX_YEARS` years or fewer. The rule
+    is the ranking's own (`outreach.ranking.roles.early_career_fit`), so the score and the fresh lane read one rule."""
+    return _shared_fit(level_tier, "", years_asked)
 
 
 def level_words(level_tier: str | None, years_asked: int | None, *, intern: bool = False) -> str | None:

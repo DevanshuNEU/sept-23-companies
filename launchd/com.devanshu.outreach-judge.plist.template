@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The profile judge (Part of #6 and #15): daily at 06:10, before the 08:00 plan, judge up to 15 of the top 40 ranked
+  companies whose judgment is missing or 14 days old: read each one's homepage, about page and best posting politely,
+  ask Devanshu's Claude Code seat once per company what it builds and how well it fits him, check the answer in code
+  and store it as an event. The 08:00 plan re-ranks, so the judgment adds its points there. One summary line per run
+  in the log.
+
+  Shipped off: while [judge] enabled is false in outreach/judge/config.toml the job prints "judge is off" and exits 0,
+  with no fetch, no call and no write. The run command starts /usr/bin/caffeinate -i -w <its pid> when it is on, so
+  the Mac stays awake until it ends. The claude CLI is found on PATH or at ~/.local/bin/claude.
+
+  StartCalendarInterval (not StartInterval), so a run missed while the Mac sleeps fires on wake. A rerun is safe: a
+  company judged inside the 14-day window is not due again.
+
+  It follows the deploy tool's one convention (#17, outreach/deploy/jobs.py): WorkingDirectory is the live checkout,
+  the program is the checkout's venv python run as a module, and both streams go to the log. Placeholders, filled by
+  the deploy tool: {{LIVE_CHECKOUT}} is the live checkout, {{LOG_PATH}} the log file. Nothing else is filled; the
+  store is the default.
+
+  Not installed by the repo, and never loaded from a worktree. Installing it is Devanshu's step, through the deploy
+  tool (python -m outreach.deploy plan, then install). To remove it:
+    launchctl bootout gui/$(id -u)/com.devanshu.outreach-judge
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-judge</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.judge</string>
+    <string>run</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>10</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

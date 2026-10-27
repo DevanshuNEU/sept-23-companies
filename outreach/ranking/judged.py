@@ -53,6 +53,7 @@ class Judgment:
     thin: bool  # the evidence was thin: no page read, or no quote
     version: str
     key: str  # the cache key: version, best posting and page text
+    posting_key: str = ""  # the hash of the best posting it read (title and url)
     reused: bool = False  # stored again with no model call: nothing it read had changed
     pages: tuple[dict, ...] = ()  # only with `with_pages`: what was read, with its text
 
@@ -109,7 +110,8 @@ def judgment_from_detail(detail: object, *, company_id: int, event_id: int, at: 
     return Judgment(company_id=company_id, event_id=event_id, at=at, fit=fit, builds=builds,
                     domains=tuple(domains), why=why, risk=risk, level_ok=level, quotes=tuple(quotes),
                     thin=detail.get("thin") is not False, version=str(detail.get("version", "")),
-                    key=str(detail.get("key", "")), reused=detail.get("reused") is True,
+                    key=str(detail.get("key", "")), posting_key=str(detail.get("posting_key", "")),
+                    reused=detail.get("reused") is True,
                     pages=tuple(p for p in pages if isinstance(p, dict)) if isinstance(pages, list) else ())
 
 

@@ -17,6 +17,7 @@ from outreach.crawl.boardstate import BoardRow
 from outreach.crawl.decisions import reset_provisional
 from outreach.crawl.polite import HostTripped
 from outreach.crawl.postings import native_id_of
+from outreach.rules.text import strip_invisible
 from outreach.store import atomic, body_sha256, utcnow
 
 __all__ = ["stored_sha", "save_body", "missing_body_ids", "refetch_body_ids", "fetch_bodies", "fetch_missing_bodies",
@@ -56,8 +57,10 @@ def save_body(conn: sqlite3.Connection, posting_id: int, text: str) -> str:
     In one unit it compares the stored hash with the new one and, when they differ (or there was no body), first makes
     the posting's current-ruleset decision provisional with no reader version, then upserts the body. A crash can
     therefore never leave a new body under an old final decision: the unit either keeps the old body with its old
-    decision, or has both new. A body that only changes whitespace keeps its decision.
+    decision, or has both new. A body that only changes whitespace keeps its decision. Invisible characters are
+    dropped first (`strip_invisible`, #112), so the reader and the judge read the text the rules read.
     """
+    text = strip_invisible(text)
     sha = body_sha256(text)
     with atomic(conn, "save_body"):
         if stored_sha(conn, posting_id) != sha:

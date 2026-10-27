@@ -10,14 +10,16 @@ from .config import Config, default_config
 from .eligibility import eligibility, starts_2027
 from .location import us_status
 from .sponsorship import citizenship_required, sponsorship_stance
+from .text import strip_invisible
 from .title import classify_title
 from .years import entry_wording, years_asked
 
 
 def _clean(text: str | None) -> str:
-    """The text without NUL bytes. SQLite's length() stops at a NUL, so a quote that holds one fails the decision
-    table's CHECKs; a NUL is never part of a word, so dropping it changes no reading."""
-    return (text or "").replace("\x00", "")
+    """The text without NUL bytes or invisible characters. SQLite's length() stops at a NUL, so a quote that holds one
+    fails the decision table's CHECKs; a NUL is never part of a word, so dropping it changes no reading. An invisible
+    character inside a word hides it from every word list (`strip_invisible`, #112)."""
+    return strip_invisible((text or "").replace("\x00", ""))
 
 
 @dataclass(frozen=True)
@@ -27,7 +29,7 @@ class PostingInput:
     `body` is plain text: the crawler strips HTML (tags, entities, scripts and styles) before a posting is stored, and
     the rules never parse markup, so a tag left in the body is read as ordinary characters. `title` and `location` are
     plain text too, and `country` is the structured country when the source gave one, else None. decide() drops NUL
-    bytes from all four before it reads them.
+    bytes and invisible characters from all four before it reads them.
     """
     title: str
     body: str = ""

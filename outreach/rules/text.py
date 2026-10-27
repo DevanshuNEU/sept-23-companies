@@ -5,6 +5,24 @@
 import functools
 import re
 
+# Characters that render as nothing (#112). One inside a word splits it past every word list: "do n‍ot sponsor"
+# read yes and "spon­sor" read unclear. Zero-width and word joiners, bidi controls, the soft hyphen, the BOM, the
+# Unicode tag characters (an invisible copy of ASCII a model reads as text) and variation selectors are dropped; the
+# line and paragraph separators become line breaks, so they still end a sentence. The lists come from
+# tools/posting_guard.py in ai-job-search-dev/ai-job-search (MIT, Mads Lorentzen).
+_INVISIBLE = {ord(c): None for c in "​‌‍⁠⁡⁢⁣⁤"
+                                    "‎‏‪‫‬‭‮⁦⁧⁨⁩­﻿"}
+_INVISIBLE.update(dict.fromkeys(range(0xE0000, 0xE0080)))
+_INVISIBLE.update(dict.fromkeys(range(0xFE00, 0xFE10)))
+_INVISIBLE.update(dict.fromkeys(range(0xE0100, 0xE01F0)))
+_INVISIBLE.update({0x2028: "\n", 0x2029: "\n"})
+
+
+def strip_invisible(text: str) -> str:
+    """The text without characters that render as nothing; U+2028 and U+2029 become line breaks."""
+    return text.translate(_INVISIBLE)
+
+
 # A stop is a . ! or ? run (with any closing quote or bracket) that is followed by a space or the end, or a
 # semicolon, a line break or a bullet character. Dots inside words and numbers ("3.5", "node.js", "$120.5k") are
 # never followed by a space, so they are never stops. Possessive quantifiers and the lookbehind keep it linear.

@@ -138,6 +138,14 @@ MUTATIONS = [
      'body = path.read_bytes() if path.is_file() else b""',
      'body = path.read_bytes() if path.is_file() and name != "config.toml" else b""',
      "test_version_changes_with_config"),
+    (RULES / "decide.py", "decide() reads invisible characters, so a zero-width joiner in 'not' reads yes (#112)",
+     'return strip_invisible((text or "").replace("\\x00", ""))', 'return (text or "").replace("\\x00", "")',
+     "test_invisible_characters_cannot_flip_a_refusal"),
+    (CRAWL / "text.py", "a hidden element's text reaches the body, so a hidden 'We sponsor' reads yes (#112)",
+     "if self._skipping or self._hidden_at is not None:", "if self._skipping:",
+     "test_hidden_elements_are_left_out"),
+    (CRAWL / "bodies.py", "a stored body keeps its invisible characters, so the reader reads tag characters (#112)",
+     "    text = strip_invisible(text)\n", "", "test_invisible_characters_are_never_stored"),
 
     # ---- store/db.py ------------------------------------------------------------------------------------------
     (STORE / "db.py", "is_live_path always False",

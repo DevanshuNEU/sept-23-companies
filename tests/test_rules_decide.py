@@ -125,6 +125,30 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(r.sponsorship_quote, "We do not sponsor visas.")
         self.assertEqual(r, decide(PostingInput("Software Engineer", "We do not sponsor visas.", "Boston, MA", "United States")))
 
+    def test_invisible_characters_cannot_flip_a_refusal(self):
+        # A zero-width joiner inside "not" used to read yes; a soft hyphen or zero-width space inside "sponsor" read
+        # unclear (#112).
+        for body in ("We do n‍ot sponsor visas.", "We do not spon­sor visas.", "We do not spon​sor visas.",
+                     "We do not spon\U000E0041sor visas.", "﻿We do not sponsor️ visas.",
+                     "We do ‮not‬ sponsor visas."):
+            r = d("Software Engineer", body)
+            self.assertEqual(r.sponsorship, "no", repr(body))
+            self.assertEqual(r.sponsorship_quote, "We do not sponsor visas.", repr(body))
+
+    def test_invisible_characters_cannot_hide_a_citizenship_line(self):
+        r = d("Software Engineer", "Applicants must be U.S. citi​zens.")
+        self.assertTrue(r.citizenship)
+        self.assertEqual(r.citizenship_quote, "Applicants must be U.S. citizens.")
+        self.assertEqual(r, d("Software Engineer", "Applicants must be U.S. citizens."))
+
+    def test_a_title_and_location_drop_invisible_characters_too(self):
+        r = d("Soft​ware Engi­neer, New Grad", "", "Bos⁠ton, MA")
+        self.assertEqual((r.lane, r.level_tier, r.us), ("engineering", "new_grad", "yes"))
+
+    def test_line_and_paragraph_separators_end_a_sentence(self):
+        r = d("Software Engineer", "We sponsor H-1B visas. Relocation is not provided.")
+        self.assertEqual((r.sponsorship, r.sponsorship_quote), ("yes", "We sponsor H-1B visas."))
+
     def test_posting_input_documents_its_plain_text_contract(self):
         doc = PostingInput.__doc__
         self.assertIn("body` is plain text", doc)

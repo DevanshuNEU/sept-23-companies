@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { App } from '@/app/App';
-import { createQueryClient } from '@/app/query-client';
+import { createQueryClient, retryDelay } from '@/app/query-client';
 import { ApiError } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { routes, viewRoutes } from '@/app/routes';
@@ -56,14 +56,14 @@ describe('route table', () => {
 });
 
 describe('createQueryClient', () => {
-  const retry = createQueryClient().getDefaultOptions().queries?.retry;
+  const queries = createQueryClient().getDefaultOptions().queries;
+  const retry = queries?.retry;
   if (typeof retry !== 'function') throw new Error('retry is a function');
 
-  it('retries a network error at most twice', () => {
+  it('retries a read that got no answer once (offline, timed out, server busy)', () => {
     const err = new ApiError('network', 'Cannot reach the Knock server');
     expect(retry(0, err)).toBe(true);
-    expect(retry(1, err)).toBe(true);
-    expect(retry(2, err)).toBe(false);
+    expect(retry(1, err)).toBe(false);
   });
 
   it('never retries an answer from the server', () => {
@@ -74,6 +74,17 @@ describe('createQueryClient', () => {
 
   it('treats an unknown error like a network error', () => {
     expect(retry(0, new TypeError('Failed to fetch'))).toBe(true);
-    expect(retry(2, new TypeError('Failed to fetch'))).toBe(false);
+    expect(retry(1, new TypeError('Failed to fetch'))).toBe(false);
+  });
+
+  it('waits a few seconds before the retry, spread so tabs do not come back together', () => {
+    expect(queries?.retryDelay).toBe(retryDelay);
+    expect(retryDelay(0, new Error('x'), () => 0)).toBe(2000);
+    expect(retryDelay(0, new Error('x'), () => 0.999)).toBeCloseTo(4000, -1);
+    expect(retryDelay(5, new Error('x'), () => 0)).toBe(15000);
+  });
+
+  it('keeps an answer fresh for 10 seconds, so a remount or a refocus inside that reuses it', () => {
+    expect(queries?.staleTime).toBe(10000);
   });
 });

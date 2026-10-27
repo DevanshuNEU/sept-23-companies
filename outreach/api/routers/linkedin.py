@@ -1,7 +1,7 @@
 """The LinkedIn list, logging a step he took by hand there, and taking the newest one back."""
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Request, Response
 
-from outreach.api.clock import Clock, get_clock
+from outreach.api import views
 from outreach.api.db import read_conn
 from outreach.api.idempotency import WriteCtx, run_write
 from outreach.api.models.linkedin import LinkedInPerson, LinkedInView, LogStepBody, UndoStepBody
@@ -12,10 +12,12 @@ router = APIRouter(prefix="/linkedin", tags=["linkedin"])
 
 
 @router.get("", response_model=LinkedInView)
-def linkedin_view(request: Request, clock: Clock = Depends(get_clock)) -> LinkedInView:
-    now = clock()
-    with read_conn(request) as conn:
-        return linkedin.linkedin_view(conn, now)
+async def linkedin_view(request: Request) -> Response:
+    def compute(now: str, _) -> LinkedInView:
+        with read_conn(request) as conn:
+            return linkedin.linkedin_view(conn, now)
+
+    return await views.serve(request, LinkedInView, compute)
 
 
 @router.post("/{person_id}/log", response_model=LinkedInPerson)

@@ -1,7 +1,7 @@
 """The prompt, outcome answers and corrections, a touch's history, and touches he logs himself."""
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Request, Response
 
-from outreach.api.clock import Clock, get_clock
+from outreach.api import views
 from outreach.api.db import read_conn
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx, run_write
@@ -16,10 +16,12 @@ router = APIRouter(tags=["outcomes"])
 
 
 @router.get("/outcomes/prompt", response_model=OutcomePromptView)
-def outcome_prompt(request: Request, clock: Clock = Depends(get_clock)) -> OutcomePromptView:
-    now = clock()
-    with read_conn(request) as conn:
-        return outcomes.prompt_view(conn, now, request.app.state.config)
+async def outcome_prompt(request: Request) -> Response:
+    def compute(now: str, _) -> OutcomePromptView:
+        with read_conn(request) as conn:
+            return outcomes.prompt_view(conn, now, request.app.state.config)
+
+    return await views.serve(request, OutcomePromptView, compute)
 
 
 @router.post("/touches/{touch_id}/outcomes", response_model=TouchRevision)

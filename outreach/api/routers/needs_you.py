@@ -1,9 +1,9 @@
 """Needs you: `GET /api/needs-you`, `POST /api/review/{id}/resolve` (ok, edit, no-go or merge),
 `POST /api/review/{id}/reopen` (take an ok, a no-go or a merge back) and `POST /api/companies/{id}/unmerge`. The writes
 are `outreach.review`'s, inside `run_write`."""
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Request, Response
 
-from outreach.api.clock import Clock, get_clock
+from outreach.api import views
 from outreach.api.db import read_conn
 from outreach.api.idempotency import WriteCtx, run_write
 from outreach.api.models.needs_you import (
@@ -16,10 +16,12 @@ router = APIRouter(tags=["needs-you"])
 
 
 @router.get("/needs-you", response_model=NeedsYouView)
-def needs_you(request: Request, clock: Clock = Depends(get_clock)) -> NeedsYouView:
-    now = clock()
-    with read_conn(request) as conn:
-        return queries.needs_you_view(conn, now)
+async def needs_you(request: Request) -> Response:
+    def compute(now: str, _) -> NeedsYouView:
+        with read_conn(request) as conn:
+            return queries.needs_you_view(conn, now)
+
+    return await views.serve(request, NeedsYouView, compute)
 
 
 @router.post("/review/{review_id}/resolve", response_model=ReviewResolved)

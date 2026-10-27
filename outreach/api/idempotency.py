@@ -137,6 +137,7 @@ def run_write(
     finally:
         if conn is not None:
             conn.close()  # closing also rolls back anything a failed COMMIT left open
+        request.app.state.view_cache.version.bump()  # the heavy views compute afresh on the next read
 
 
 def prune_requests(conn: sqlite3.Connection, days: int = KEEP_DAYS, now: str | None = None) -> int:

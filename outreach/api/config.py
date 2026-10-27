@@ -22,6 +22,9 @@ class ApiConfig:
     linkedin_per_day: int
     proposals_per_slot: int
     lean_build: bool  # the lean Today builds a list on its first weekday read (off: the plan job builds the day)
+    cache_seconds: int  # the heavy views' answer lasts at most this long (`outreach.api.views`)
+    max_heavy: int  # heavy views computed at once
+    queue_wait_seconds: int  # how long a heavy read waits for its turn before it answers busy
 
 
 def load_config(path: Path = DEFAULT_PATH) -> ApiConfig:
@@ -50,6 +53,9 @@ def load_config(path: Path = DEFAULT_PATH) -> ApiConfig:
         linkedin_per_day=number("today", "linkedin_per_day"),
         proposals_per_slot=number("today", "proposals_per_slot"),
         lean_build=switch("today", "lean_build"),
+        cache_seconds=number("api", "cache_seconds"),
+        max_heavy=number("api", "max_heavy"),
+        queue_wait_seconds=number("api", "queue_wait_seconds"),
     )
     if config.quiet_after_days <= config.prompt_after_days:
         raise ConfigError("[outcomes] quiet_after_days must be larger than prompt_after_days")

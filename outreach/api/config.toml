@@ -20,3 +20,12 @@ proposals_per_slot = 2   # the lean Today proposes this many companies for each 
 # Whether the lean Today builds a list on its first weekday read. Off: the plan job (#15, 08:00) builds the day, and a
 # list built here first would make it stop with "already built" and leave no people plan for that date.
 lean_build = false
+
+[api]
+# The heavy read views (shell, plan, bench, needs you, progress, wins, watch, the outcome prompt, the search index,
+# LinkedIn and the Outbox list) keep their answer for one store version, one New York day and one slice of the clock
+# this many seconds long. A write anywhere (this API, the sender, the crawler, the MCP server, a job) makes the next
+# read compute afresh; this is also the oldest an answer can be.
+cache_seconds = 15
+max_heavy = 3            # heavy views computed at the same time; the rest wait their turn
+queue_wait_seconds = 25  # a read that waited this long answers 503 busy (the page's own timeout is longer)

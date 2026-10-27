@@ -1,7 +1,7 @@
 """`GET /api/search/index`, `/api/search/postings?q=` and `/api/search/companies?q=`."""
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request, Response
 
-from outreach.api.clock import Clock, get_clock
+from outreach.api import views
 from outreach.api.db import read_conn
 from outreach.api.models.search import PostingHit, SearchCompany, SearchIndex
 from outreach.api.queries import search
@@ -10,10 +10,12 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 
 @router.get("/index", response_model=SearchIndex)
-def search_index(request: Request, clock: Clock = Depends(get_clock)) -> SearchIndex:
-    now = clock()
-    with read_conn(request) as conn:
-        return search.index(conn, now)
+async def search_index(request: Request) -> Response:
+    def compute(now: str, _) -> SearchIndex:
+        with read_conn(request) as conn:
+            return search.index(conn, now)
+
+    return await views.serve(request, SearchIndex, compute)
 
 
 @router.get("/postings", response_model=list[PostingHit])

@@ -611,6 +611,7 @@ class TomorrowDraftTests(PlanCase):
         for target in ("build_plan", "people_by_ids"):  # the dry run itself, then naming its rows
             with self.subTest(target=target):
                 error = RuntimeError(f"draft broke in {target}")
+                self.app.state.view_cache.clear()  # a patch changes the code, not the store: drop the last answer
                 with mock.patch(f"outreach.api.queries.plan.{target}", side_effect=error):
                     with self.assertLogs("outreach.api", level="WARNING") as logs:
                         first = self.plan()["tomorrow"]

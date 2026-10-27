@@ -10,7 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.routing import APIRoute
 
 import outreach.api.routers
-from outreach.api import errors, openapi, sweeper
+from outreach.api import errors, openapi, sweeper, views
 from outreach.api.config import load_config
 from outreach.api.guards import GuardMiddleware
 from outreach.api.idempotency import prune_at_startup
@@ -49,6 +49,7 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
             for task in app.state.sweeper_tasks:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            app.state.view_cache.close()
 
     app = FastAPI(
         lifespan=lifespan,
@@ -62,8 +63,11 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
     app.state.settings = settings
     app.state.clock = clock or utcnow
     app.state.mx_resolvers = mx_resolvers
-    app.state.old_sender_loaded = old_sender_loaded or sending.old_sender_check()
     app.state.config = load_config()
+    # The real check runs `launchctl`: asked at most once per cache slice, so a burst of reads starts no processes.
+    app.state.old_sender_loaded = old_sender_loaded or views.remember_for(sending.old_sender_check(),
+                                                                          app.state.config.cache_seconds)
+    app.state.view_cache = views.ViewCache(settings.db_path)  # the heavy views' answers (`outreach.api.views`)
     app.state.sweeper_tasks = []
 
     api = APIRouter(prefix="/api")

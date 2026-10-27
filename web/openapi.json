@@ -769,6 +769,22 @@
             "title": "Hiringline",
             "type": "string"
           },
+          "judgeFit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judgefit"
+          },
+          "judgeLine": {
+            "default": "Judge: not judged yet.",
+            "title": "Judgeline",
+            "type": "string"
+          },
           "lastTouch": {
             "anyOf": [
               {
@@ -887,7 +903,9 @@
           "whyToday",
           "opening",
           "websiteUrl",
-          "linkedinCompanyUrl"
+          "linkedinCompanyUrl",
+          "judgeLine",
+          "judgeFit"
         ],
         "title": "CompanyQueue",
         "type": "object"

@@ -11,7 +11,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["CONFIG_PATH", "REQUIRED", "BOTTOM_WEIGHTS", "ZERO_WEIGHT_OK", "TILT_WEIGHT", "RankerConfig",
+__all__ = ["CONFIG_PATH", "REQUIRED", "BOTTOM_WEIGHTS", "ZERO_WEIGHT_OK", "TILT_WEIGHT", "TILT_WEIGHTS", "RankerConfig",
            "load_ranker_config", "default_ranker_config"]
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
@@ -21,7 +21,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "ranker": ("keep_versions", "size_check_top_n", "many_postings", "lca_software_many", "funding_window_months",
                "lca_recent_years", "hn_post_days", "diff_min_rank_move", "diff_top_n", "lca_wage_min_filings"),
     "weights": ("live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
-                "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"),
+                "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like", "profile_fit"),
     "hide": ("size_over", "size_confidences"),
     "live_role": ("intern_junior", "level_role", "any_us_role", "fresh_days", "fresh_bonus",
                   "tier_values", "early_career_max_age_days"),
@@ -37,6 +37,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "reachable_person": ("role_kinds", "person", "hn_post"),
     "staffing_risk": ("high", "medium", "promoted_high"),
     "interview_like": ("min_interview_companies", "min_matches", "confident_at", "max_weight_share"),
+    "profile_fit": ("max_weight_share", "max_age_days"),
     "confidence": ("factor_high", "factor_medium", "factor_low", "evidence_old_days", "lca_pay_medium_filings",
                    "rank_high_share", "rank_low_share", "reason_count"),
 }
@@ -44,9 +45,12 @@ REQUIRED: dict[str, tuple[str, ...]] = {
 # The two weights that push a company to the bottom (see _check_bottom_weights).
 BOTTOM_WEIGHTS = ("staffing_risk", "large_later_stage")
 # Weights that may be exactly 0.0 (switched off). Every other weight must be above 0.
-ZERO_WEIGHT_OK = ("interview_like",)
+ZERO_WEIGHT_OK = ("interview_like", "profile_fit")
 # The one-way interview tilt (#81), capped by _check_tilt.
 TILT_WEIGHT = "interview_like"
+# Every one-way lift, each capped by _check_tilt against the top score without any of them: the interview tilt and
+# the profile judge's fit (Part of #6 and #15).
+TILT_WEIGHTS = ("interview_like", "profile_fit")
 _TILT_MAX_SHARE = 0.25
 # The level tiers [live_role.tier_values] must give, each a value from 0 to 1, and no other.
 LIVE_ROLE_TIERS = ("new_grad", "early_career", "swe1", "swe2", "open")
@@ -99,22 +103,27 @@ def _check_bottom_weights(data: dict) -> None:
 
 
 def _check_tilt(data: dict) -> None:
-    """The interview tilt stays small: its weight is at most `max_weight_share` of the top score, the sum of every
-    other weight except the bottom push, and the share itself is above 0 and at most 0.25. Its counts are whole
-    numbers of at least 1."""
+    """Each one-way lift (`TILT_WEIGHTS`) stays small: its weight is at most its `max_weight_share` of the top score,
+    the sum of every other weight except the bottom push and the lifts, and the share itself is above 0 and at most
+    0.25. The interview tilt's counts are whole numbers of at least 1; the profile fit's `max_age_days` is whole days
+    from 1 to 365."""
     section = data["interview_like"]
     for key in ("min_interview_companies", "min_matches", "confident_at"):
         _whole_at_least_one(section[key], f"[interview_like] {key}")
-    share = section["max_weight_share"]
-    if not _is_number(share) or not math.isfinite(share) or not 0 < share <= _TILT_MAX_SHARE:
-        raise ValueError(f"[interview_like] max_weight_share must be above 0 and at most {_TILT_MAX_SHARE}, "
-                         f"got {share!r}")
+    days = data["profile_fit"]["max_age_days"]
+    if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 365:
+        raise ValueError(f"[profile_fit] max_age_days must be a whole number from 1 to 365, got {days!r}")
     w = data["weights"]
-    top = sum(v for name, v in w.items() if name not in BOTTOM_WEIGHTS and name != TILT_WEIGHT)
-    cap = share * top
-    if w[TILT_WEIGHT] > cap:
-        raise ValueError(f"[weights] {TILT_WEIGHT} is {w[TILT_WEIGHT]:g}, above its cap of {cap:g} "
-                         f"({share:g} of the top score {top:g}), so the tilt would no longer be small")
+    top = sum(v for name, v in w.items() if name not in BOTTOM_WEIGHTS and name not in TILT_WEIGHTS)
+    for tilt in TILT_WEIGHTS:
+        share = data[tilt]["max_weight_share"]
+        if not _is_number(share) or not math.isfinite(share) or not 0 < share <= _TILT_MAX_SHARE:
+            raise ValueError(f"[{tilt}] max_weight_share must be above 0 and at most {_TILT_MAX_SHARE}, "
+                             f"got {share!r}")
+        cap = share * top
+        if w[tilt] > cap:
+            raise ValueError(f"[weights] {tilt} is {w[tilt]:g}, above its cap of {cap:g} "
+                             f"({share:g} of the top score {top:g}), so the tilt would no longer be small")
 
 
 def _check_tier_values(section: dict) -> None:

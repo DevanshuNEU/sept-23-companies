@@ -98,6 +98,23 @@ describe('Today as a company queue', () => {
     expect(within(panel()).queryByRole('button', { name: /Confirm|Edit/ })).not.toBeInTheDocument();
   });
 
+  it('the judge says what the company builds in why today and its fit on the rail, and says when it has not judged', async () => {
+    const { db } = await open();
+    const pylon = rowOf(db, 'Pylon');
+    expect(pylon.queue?.judgeLine).toBe(
+      'Judge: builds a support platform for B2B teams, with AI agents that answer tickets. Fit 82. Risk: no E-Verify statement on its pages.',
+    );
+    const why = within(panel()).getByRole('region', { name: 'Why today' });
+    expect(within(why).getByText(pylon.queue?.judgeLine ?? '')).toBeInTheDocument();
+    expect(option(1)).toHaveTextContent('Judge fit 82');
+    // Inngest has no judgment: the panel says so plainly, and the rail says nothing.
+    expect(option(5)).not.toHaveTextContent('Judge');
+    fireEvent.click(option(5));
+    await screen.findByRole('heading', { level: 2, name: 'Inngest' });
+    const inngest = within(panel()).getByRole('region', { name: 'Why today' });
+    expect(within(inngest).getByText('Judge: not judged yet.')).toBeInTheDocument();
+  });
+
   it('the three research links and S, O open in a new tab; the app never fetches LinkedIn', async () => {
     const { db } = await open();
     const pylon = rowOf(db, 'Pylon');

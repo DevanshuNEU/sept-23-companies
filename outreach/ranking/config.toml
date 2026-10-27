@@ -14,8 +14,8 @@ diff_top_n = 50
 lca_wage_min_filings = 3
 
 # Weights. staffing_risk and large_later_stage are the bottom push: each is larger than every other weight added
-# together (126 with the interview tilt), so a company they hit sorts below all the rest and stays on the list. The
-# loader and a test pin it.
+# together (136 with the interview tilt and the profile fit), so a company they hit sorts below all the rest and stays
+# on the list. The loader and a test pin it.
 [weights]
 live_role = 40.0
 posting_sponsors = 10.0
@@ -27,6 +27,7 @@ small = 12.0
 reachable_person = 8.0
 funding = 6.0
 interview_like = 6.0
+profile_fit = 10.0
 staffing_risk = 200.0
 large_later_stage = 200.0
 
@@ -107,6 +108,15 @@ min_interview_companies = 3
 min_matches = 2
 confident_at = 20
 max_weight_share = 0.1
+
+# The profile judge's fit (Part of #6 and #15). One way, like the interview tilt: its value is the judged fit / 100, 0
+# to 1, so it only adds points; it never lowers a score, never hides a company and never writes a no-go. A company with
+# no judgment newer than max_age_days gets 0 ("Not judged yet"). Its weight may be at most max_weight_share of the top
+# score (every other weight except the bottom push and the two tilts, 120 today, so at most 12); 0.0 switches it off.
+# max_age_days (1 to 365) is twice the judge's 14-day cache, so a missed night never drops a company's points.
+[profile_fit]
+max_weight_share = 0.1
+max_age_days = 30
 
 [staffing_risk]
 high = -1.0

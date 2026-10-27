@@ -17,8 +17,9 @@ OUTCOMES_DIR = RANKING_DIR.parent / "outcomes"
 
 # The files whose bytes decide a score, plus every signals/*.py. Files that do not exist yet hash as empty.
 # job.py is in because compute_rank lives there: how a run builds facts and scores them changes scores.
+# judged.py is in because it reads the profile judge's judgments that profile_fit scores.
 RANKING_FILES = ("config.toml", "wages.toml", "config.py", "types.py", "common.py", "pay.py", "confidence.py",
-                 "roles.py", "facts.py", "hide.py", "score.py", "job.py")
+                 "roles.py", "facts.py", "hide.py", "score.py", "job.py", "judged.py")
 # Files in this folder that cannot change a score. A test fails on any file that is in neither tuple.
 NOT_RANKING = ("__init__.py", "version.py", "scores.py", "review.py", "diff.py", "__main__.py")
 # The insights files the interview tilt (#81) reads: the bands, the outcome rows its profile is built from and the

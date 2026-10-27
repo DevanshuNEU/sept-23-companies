@@ -111,6 +111,9 @@ class CompanyQueue(Wire):
     opening: QueueOpening | None = None
     website_url: str | None = None  # https://<the company's domain>, else None
     linkedin_company_url: str = ""  # a LinkedIn company search for the name
+    # The profile judge (Part of #6 and #15): what the company builds and how well it fits him, from its own pages.
+    judge_line: str = "Judge: not judged yet."  # "Judge: builds X. Fit 72. Risk: Y."
+    judge_fit: int | None = None  # 0 to 100; None with no fresh judgment
 
 
 class InFlightCompany(Wire):

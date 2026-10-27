@@ -19,7 +19,7 @@ from outreach.ranking.scores import latest_version
 # The ranker's own signal order (`build_signals`), which breaks a tie in points. A test pins it to the ranker.
 SIGNAL_ORDER = (
     "live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small", "reachable_person",
-    "funding", "staffing_risk", "large_later_stage", "interview_like",
+    "funding", "staffing_risk", "large_later_stage", "interview_like", "profile_fit",
 )
 LABELS = {
     "everify": "E-Verify",
@@ -29,6 +29,7 @@ LABELS = {
     "staffing_risk": "Staffing agency risk",
     "large_later_stage": "Large, later-stage company",
     "interview_like": "Like your interview companies",
+    "profile_fit": "Fits what you build",
 }
 # Signals that rest on the best posting (its url is the source), and on evidence (the winning row's http link).
 POSTING_SIGNALS = frozenset({"live_role", "posting_sponsors", "pay_level"})

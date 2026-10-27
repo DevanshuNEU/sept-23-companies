@@ -1,0 +1,84 @@
+# The golden set for `python -m outreach.judge eval`: verdicts from a web research pass on 28 companies (2026-10-26,
+# outreach-scratch/design/research-A.md, -B.md and -C.md), each with how sure the verdict is, in percent. yes: a
+# company he should reach; no: one he should not; maybe: not counted in the yes/no agreement, only in the rank
+# correlation (as 0). A company is found by one of its domains first, else by its name.
+
+[[company]]
+name = "Sim"
+domains = ["sim.ai"]
+verdict = "yes"
+confidence = 70
+
+[[company]]
+name = "Metaview"
+domains = ["metaview.ai"]
+verdict = "yes"
+confidence = 65
+
+[[company]]
+name = "Hone"
+domains = ["hone.com"]
+verdict = "yes"
+confidence = 55
+
+[[company]]
+name = "Clark"
+domains = ["getclark.com"]
+verdict = "yes"
+confidence = 55
+
+[[company]]
+name = "Exa"
+domains = ["exa.ai"]
+verdict = "yes"
+confidence = 50
+
+[[company]]
+name = "Roadrunner"
+domains = ["roadrunner.ai"]
+verdict = "yes"
+confidence = 50
+
+[[company]]
+name = "Prophet Security"
+domains = ["prophetsecurity.ai"]
+verdict = "yes"
+confidence = 50
+
+[[company]]
+name = "AgentMail"
+domains = ["agentmail.to"]
+verdict = "yes"
+confidence = 45
+
+[[company]]
+name = "Tessera Labs"
+domains = ["tesseralabs.ai"]
+verdict = "maybe"
+confidence = 45
+
+[[company]]
+name = "matx"
+domains = ["matx.com"]
+verdict = "no"
+confidence = 70
+
+# Laminar the industrial spectral sensor company (formerly H2Ok Innovations), not laminar.sh or laminar.com.
+[[company]]
+name = "Laminar"
+domains = ["runlaminar.com"]
+verdict = "no"
+confidence = 60
+
+[[company]]
+name = "Conversion"
+domains = ["tryconversion.ai", "conversion.ai"]
+verdict = "no"
+confidence = 60
+
+# Bench only: a no for today's list.
+[[company]]
+name = "Clera"
+domains = ["getclera.com"]
+verdict = "no"
+confidence = 55

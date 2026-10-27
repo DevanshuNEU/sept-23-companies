@@ -19,7 +19,9 @@ holds, one query per table however many rows:
 - the careers link (`pick_careers_url`) and the one line he copies to his terminal;
 - top picks (2026-10-26): the opening the row names, with its level and age and whether it is new (`outreach.plan.fresh`:
   opened within `queue.fresh_hours` at his level and clear of the visa gate), the one line of why today, the company's
-  website (https of its domain) and a LinkedIn company search for its name (never fetched).
+  website (https of its domain) and a LinkedIn company search for its name (never fetched);
+- the profile judge (Part of #6 and #15): its one line and fit when a judgment newer than the ranker's
+  `[profile_fit] max_age_days` exists (`outreach.ranking.judged.load_judgments`, one query), else "not judged yet".
 
 `in_flight` lists every company still being worked with a wave out inside `linkedin.rotate_days` (a queued email
 counts) or a reply, replies first, then by the day each is free again. Reads only; the app never fetches LinkedIn.
@@ -45,7 +47,9 @@ from outreach.plan.outbound import Outbound, load_outbound
 from outreach.plan.people import (linkedin_search_url, load_candidates, people_search_url, pick_channel,
                                   rank_people)
 from outreach.plan.route import day_text
+from outreach.ranking.config import default_ranker_config
 from outreach.ranking.confidence import scrub_text
+from outreach.ranking.judged import judge_line, load_judgments
 
 __all__ = ["SAVED_SEARCH", "LINKEDIN_ALIAS", "HIRING_DAYS", "LINKEDIN_COMPANY_SEARCH", "standing", "queue_facts",
            "in_flight", "saved_searches", "linkedin_ids", "website_url", "linkedin_company_url"]
@@ -306,6 +310,8 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
     saved = saved_searches(conn, canon, survivors)
     ids = linkedin_ids(conn, canon, survivors)
     hints = _email_hints(conn, survivors, canon, outbound, states, today, cfg)
+    judged = load_judgments(conn, canon, today=today,
+                            max_age_days=default_ranker_config().section("profile_fit")["max_age_days"])
     by_company: dict[int, list[Outbound]] = {}
     for o in outbound:
         by_company.setdefault(o.company_id, []).append(o)
@@ -339,7 +345,8 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
                                          domain=d.company.domain),
             terminal_line=f"Knock: {d.company.name} (company {cid})" + (f", role: {role.title}" if role else ""),
             why_today=_why_today(opening, reasons), opening=opening, website_url=website_url(d.company.domain),
-            linkedin_company_url=linkedin_company_url(d.company.name))
+            linkedin_company_url=linkedin_company_url(d.company.name), judge_line=judge_line(judged.get(cid)),
+            judge_fit=judged[cid].fit if cid in judged else None)
     return out
 
 

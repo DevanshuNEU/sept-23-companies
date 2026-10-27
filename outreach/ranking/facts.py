@@ -20,6 +20,7 @@ from outreach.ranking.common import age_days, clean_text, fact_order_key, size_o
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import (Confidence, grade_evidence, grade_no_role, grade_pay, grade_reach,
                                          grade_sponsor, weaker)
+from outreach.ranking.judged import Judgment, load_judgments
 from outreach.ranking.pay import Area, lca_pay_level, level_at, matching_areas, pay_level
 from outreach.ranking.roles import Best, Roles, company_board_states
 from outreach.ranking.types import CompanyFacts
@@ -55,6 +56,7 @@ class RankFacts(CompanyFacts):
     stale_postings: tuple[Best, ...] = ()
     grades: Mapping[str, Confidence] = field(default_factory=dict)
     features: Features = Features()      # the four traits the interview tilt compares (#81)
+    judgment: Judgment | None = None     # the profile judge's newest judgment, when fresh (Part of #6 and #15)
 
     def grade(self, name: str) -> Confidence:
         """The stored grade of a signal, else the low default: unknown is never `high`."""
@@ -206,6 +208,8 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
     from outreach.insights.dataset import load_board_systems
     board_systems = load_board_systems(conn, canon)  # the interview tilt's board trait (#81)
     bands = default_bands()
+    # The profile judge's judgments, one query, those newer than [profile_fit] max_age_days.
+    judged = load_judgments(conn, canon, today=today, max_age_days=cfg.section("profile_fit")["max_age_days"])
 
     basis = cfg.section("pay_level")["basis"]
     out: list[RankFacts] = []
@@ -307,7 +311,8 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             features=features_of(size_low=size_low, size_high=size_high, stage=stage,
                                  level_tier=best.level_tier if best else None,
                                  intern=tuple(lanes[:1]) == ("intern_junior",),
-                                 board_system=board_systems.get(cid), bands=bands)))
+                                 board_system=board_systems.get(cid), bands=bands),
+            judgment=judged.get(cid)))
     return out
 
 

@@ -317,6 +317,9 @@ export interface CompanyQueue {
   opening: QueueOpening | null;
   websiteUrl: string | null;                                                         // https of the company's domain
   linkedinCompanyUrl: string;                                                        // a LinkedIn company search for the name
+  // The profile judge (Part of #6 and #15): what the company builds and how well it fits him, read from its own pages.
+  judgeLine: string;                                                                 // "Judge: builds X. Fit 72. Risk: Y." or "Judge: not judged yet."
+  judgeFit: number | null;                                                           // 0 to 100; null with no fresh judgment
 }
 /** The opening a pick names: its level and age in words, and whether it is new (opened within 72 hours, visa gate clear). */
 export interface QueueOpening {

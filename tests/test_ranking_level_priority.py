@@ -247,7 +247,7 @@ class ConfigTests(unittest.TestCase):
         # Only values move: the weights (and so the bottom push and the tilt cap) are the same as before.
         w = CFG.weights
         others = sum(v for k, v in w.items() if k not in ("staffing_risk", "large_later_stage"))
-        self.assertEqual(others, 126.0)
+        self.assertEqual(others, 136.0)  # 120, the interview tilt's 6 and the profile fit's 10
         self.assertEqual(w["live_role"], 40.0)
         self.assertGreater(w["staffing_risk"], others)
         self.assertGreater(w["large_later_stage"], others)

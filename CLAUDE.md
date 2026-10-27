@@ -30,11 +30,14 @@ Live means real contacts and real sends.
 | Crawler (every 30 min) | live checkout, `python -m outreach.crawl tick` | `com.devanshu.outreach-crawl` |
 | Sources (daily 06:30) | live checkout, `python -m outreach.sources run-due` | `com.devanshu.outreach-sources` |
 | Reader night job (daily 02:30) | live checkout, `python -m outreach.reader night` | `com.devanshu.outreach-reader-night` |
+| Profile judge (daily 06:10, off by default) | live checkout, `python -m outreach.judge run` | `com.devanshu.outreach-judge` |
 
 Live checkout: `~/Desktop/Sept 23 Companies`. The deploy tool renders each job from `launchd/<label>.plist.template`.
 The Needs-you, prepare and plan jobs (#16, #15) install when their templates land. The prepare job (05:30) is off by
 config (`[prepare] enabled = false`, company first in #9): it prints one line and exits; the 08:00 plan proposes
-company rows only (`[plan] propose_people = false`). The MCP server has no job: Claude
+company rows only (`[plan] propose_people = false`). The profile judge (06:10, Part of #6 and #15) is off by config too
+(`[judge] enabled = false` in `outreach/judge/config.toml`): it prints "judge is off" and exits 0; on, it makes at most
+15 model calls a night and only ever adds ranking points and a visible line. The MCP server has no job: Claude
 Code starts it from the registration (`python -m outreach.mcp --print-registration`).
 The MCP server's guard refuses every write on `linkedin_log` and `outreach_touch` but one: `log_sent` may insert a
 LinkedIn request Devanshu says he sent (a `request_sent` row and its `linkedin_request` touch under a `bridge:` key,
@@ -54,7 +57,9 @@ email touch or undo, and no update or delete of either table is allowed (#9, com
 
 **Only in the live checkout:** `python -m outreach.sending run` (with or without `--dry-run`: a dry run still reads
 Gmail) and `python -m outreach.sending auth` (writes the real token), `python -m outreach.crawl` (every command sends
-real requests), `python -m outreach.reader night` and `eval --run` (they call a model), `python -m outreach.mcp`
+real requests), `python -m outreach.reader night` and `eval --run` (they call a model), `python -m outreach.judge run`
+(it reads company pages and calls a model; `--dry-run` runs anywhere) and the judging half of `python -m outreach.judge
+eval` (elsewhere it scores only what is stored), `python -m outreach.mcp`
 (the server's tools work only here), `python -m outreach.deploy install`, `retire-old` and `rollback` (they change
 launchd), and `python -m outreach.importer run`, `reconcile` and `rehearse` on real data.
 Claude never runs the new sender in any checkout; launchd does. From a worktree, test against the scratch

@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.drafts.checks import load_banned
-from outreach.sending import claim, queue, tick
+from outreach.sending import claim, proof, queue, tick
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import GmailError, Sent
@@ -376,22 +376,6 @@ class GateTest(Base):
 class ImportProofTest(Base):
     with_import = False
 
-    def test_no_send_before_gmail_is_proven_to_keep_the_message_id(self):
-        mid = self.approve()  # nothing imported, so nothing proves it
-        report = self.tick()
-        self.assertEqual(report.sent, ())
-        self.assertTrue(any("Message-ID" in line for line in report.lines))
-        self.assertEqual(report.waiting, {"message_id_unproven": 1})
-        self.assertEqual(self.message(mid)["state"], "approved")
-        run = self.runs()[-1]
-        self.assertEqual(run["status"], "partial")
-        self.assertIn("Message-ID", run["error"])
-        self.assertEqual(self.notices, [(tick.WAIT_TITLE, "Sending waits: Gmail's Message-ID handling is not proven.")])
-        self.clock.advance(minutes=2)
-        self.tick()
-        self.assertEqual(len(self.notices), 1)  # once a day
-        self.assertIsNone(self.tick(dry_run=True).would_send)
-
     def test_a_send_read_back_under_its_claimed_id_is_proof(self):
         first = self.approve()
         q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == first)
@@ -399,7 +383,9 @@ class ImportProofTest(Base):
                                         rng=self.rng, account=CFG.from_address), "sent")
         second = self.approve()
         self.clock.advance(minutes=10)
-        self.assertEqual(self.tick().sent, (second,))
+        self.assertEqual(self.tick().sent, (second,))  # read back first, then the second goes in the same tick
+        [verified] = self.events("send_verified")
+        self.assertEqual(verified["entity_id"], first)
 
     def test_a_send_gmail_stored_under_another_id_is_not_proof(self):
         self.gmail.rewrite_message_ids = True
@@ -416,23 +402,245 @@ class ImportProofTest(Base):
         report = self.tick()
         self.assertEqual(report.sent, ())
         self.assertEqual(report.waiting, {"message_id_unproven": 1})
+        [mismatch] = self.events("send_id_mismatch")  # read back under Gmail's own id: stopped for good
+        self.assertEqual((mismatch["entity_id"], json.loads(mismatch["detail"])["reason"]),
+                         (first, "other_message_id"))
+        self.assertEqual(len(self.gmail.sent), 1)
 
-    def test_gmail_that_rewrote_the_imported_message_id_blocks_every_send(self):
+    def test_gmail_that_rewrote_the_imported_message_id_is_no_proof_so_one_email_goes_alone(self):
         self.seed_imported("<rewritten@mail.gmail.com>")  # Gmail has it under another Message-ID
-        mid = self.approve()
-        self.tick()
+        first, second = self.approve(), self.approve()
+        report = self.tick()
         self.assertEqual(len(self.events("import_not_in_sent")), 1)
         self.assertEqual(self.events("import_verified"), [])
-        self.clock.advance(minutes=10)
-        self.tick()
-        self.assertEqual(self.gmail.sent, [])
-        self.assertEqual(self.message(mid)["state"], "approved")
+        self.assertEqual(report.sent, (first,))
+        self.assertEqual(report.waiting, {"message_id_unproven": 1})
+        self.assertEqual(self.message(second)["state"], "approved")
 
     def test_one_verified_import_lets_sending_start(self):
         self.seed_imported(IMPORTED_RFC)
         mid = self.approve()
         self.assertEqual(self.tick().sent, (mid,))
         self.assertEqual(len(self.events("import_verified")), 1)
+
+
+class FirstSendTest(Base):
+    """Nothing proves Gmail keeps the Message-ID (no imported email): one email may go out, alone, and the next tick
+    reads it back from Gmail before any other goes."""
+    with_import = False
+
+    def claims(self) -> list[sqlite3.Row]:
+        return self.events("claimed")
+
+    def test_the_first_email_goes_out_alone_and_the_rest_wait(self):
+        first, second, third = self.approve(), self.approve(), self.approve()
+        report = self.tick()
+        self.assertEqual(report.sent, (first,))
+        self.assertEqual(len(self.gmail.sent), 1)
+        self.assertEqual(report.waiting, {"message_id_unproven": 2})
+        self.assertTrue(any("first email goes out alone" in line for line in report.lines))
+        self.assertEqual(self.runs()[-1]["status"], "ok")
+        self.assertEqual(self.notices, [])
+        self.assertEqual((self.message(second)["state"], self.message(third)["state"]), ("approved", "approved"))
+        self.assertEqual(self.problems, [])
+
+    def test_a_verified_first_email_releases_the_rest(self):
+        first, second, third = self.approve(), self.approve(), self.approve()
+        self.tick()
+        sent = self.sent_of(first)
+        self.clock.advance(minutes=10)
+        report = self.tick()
+        [verified] = self.events("send_verified")
+        detail = json.loads(verified["detail"])
+        self.assertEqual((verified["entity_id"], verified["idempotency_key"]), (first, f"send_verified:{first}"))
+        self.assertEqual((detail["gmail_message_id"], detail["thread_id"]), (sent.gmail_message_id, sent.thread_id))
+        self.assertEqual(detail["claimed_rfc_id"], self.message(first)["rfc_message_id"])
+        self.assertEqual(report.sent, (second,))  # proven in step 4, so the second goes in the same tick
+        self.assertEqual(json.loads(self.runs()[-1]["summary"])["verified"], 1)
+        self.clock.advance(minutes=10)
+        self.assertEqual(self.tick().sent, (third,))
+        self.assertEqual(len(self.events("send_verified")), 1)  # proven for good: never read back again
+        self.assertEqual(len(self.gmail.sent), 3)
+
+    def test_the_second_email_waits_while_the_first_is_not_yet_checked(self):
+        first, second = self.approve(), self.approve()
+        self.assertEqual(self.tick().sent, (first,))
+        self.clock.advance(minutes=10)
+        with mock.patch.object(self.gmail, "message", side_effect=GmailError("server", 500, "backend error")):
+            report = self.tick()
+            self.assertEqual(report.sent, ())
+            self.assertEqual(report.waiting, {"message_id_unproven": 1})
+            self.clock.advance(minutes=10)
+            self.assertEqual(self.tick().sent, ())
+        self.assertEqual(self.events("send_verified") + self.events("send_id_mismatch"), [])
+        self.assertEqual(self.runs()[-1]["status"], "partial")
+        self.assertTrue(any("could not be checked" in line for line in report.lines))
+        self.assertEqual(self.notices, [])
+        self.assertEqual((len(self.gmail.sent), len(self.claims())), (1, 1))
+        self.assertEqual(self.message(second)["state"], "approved")
+        self.clock.advance(minutes=2)
+        self.assertEqual(self.tick().sent, (second,))  # Gmail answers again: checked, and the second goes
+
+    def test_a_first_email_gmail_shows_under_another_message_id_stops_sending_for_good(self):
+        first, second = self.approve(), self.approve()
+        self.tick()
+        self.gmail.change_stored(self.sent_of(first).gmail_message_id, message_id="<other@mail.gmail.com>")
+        self.clock.advance(minutes=10)
+        report = self.tick()
+        self.assertEqual(report.sent, ())
+        [mismatch] = self.events("send_id_mismatch")
+        detail = json.loads(mismatch["detail"])
+        self.assertEqual((mismatch["entity_id"], detail["reason"], detail["found_rfc_id"]),
+                         (first, "other_message_id", "<other@mail.gmail.com>"))
+        self.assertEqual(self.notices, [(tick.STOP_TITLE, proof.PHASE_TEXT[proof.MISMATCH])])
+        self.assertIn("Gmail did not keep the Message-ID", self.notices[0][1])
+        self.assertEqual(self.runs()[-1]["status"], "partial")
+        self.seed_imported(IMPORTED_RFC)  # a proof found later does not start it again
+        for _ in range(3):
+            self.clock.advance(minutes=30)
+            report = self.tick()
+            self.assertEqual(report.sent, ())
+        self.assertEqual(len(self.events("import_verified")), 1)
+        self.assertEqual(report.waiting, {"message_id_unproven": 1})
+        self.assertEqual(len(self.notices), 1)  # once a day
+        self.assertEqual((len(self.gmail.sent), self.message(second)["state"]), (1, "approved"))
+        self.clock.advance(days=1)
+        self.tick()
+        self.assertEqual(len(self.notices), 2)  # and again the next day
+        self.assertEqual(len(self.gmail.sent), 1)
+
+    def test_a_first_email_moved_out_of_sent_is_no_proof(self):
+        first, second = self.approve(), self.approve()
+        self.tick()
+        self.gmail.change_stored(self.sent_of(first).gmail_message_id, labels=("TRASH",))
+        self.clock.advance(minutes=10)
+        self.assertEqual(self.tick().sent, ())
+        [mismatch] = self.events("send_id_mismatch")
+        self.assertEqual(json.loads(mismatch["detail"])["reason"], "not_in_sent")
+        self.assertEqual(self.events("send_verified"), [])
+        self.assertEqual(self.message(second)["state"], "approved")
+
+    def test_a_first_email_in_doubt_is_never_retried_and_nothing_else_goes(self):
+        first, second = self.approve(), self.approve()
+        self.gmail.fail_next_send(GmailError("timeout", None, "the call timed out"))  # Gmail never took it
+        self.tick()
+        self.assertEqual(self.message(first)["state"], "send_unknown")
+        self.clock.advance(minutes=4)
+        report = self.tick()
+        self.assertEqual(report.sent, ())
+        self.assertTrue(any("in doubt" in line for line in report.lines))
+        self.assertEqual(self.notices, [])
+        # Sent proves the miss, so the message is failed and put back for its one retry; while Gmail is unproven
+        # a miss proves nothing (Gmail may hold it under another id), so it is never retried and sending stops.
+        self.clock.advance(minutes=10)
+        report = self.tick()
+        self.assertEqual(self.message(first)["state"], "approved")
+        for _ in range(3):
+            self.assertEqual(report.sent, ())
+            self.clock.advance(minutes=10)
+            report = self.tick()
+        self.assertEqual(report.waiting, {"message_id_unproven": 2})
+        self.assertEqual(self.gmail.sent, [])
+        self.assertEqual(len(self.claims()), 1)
+        self.assertEqual(self.notices, [(tick.STOP_TITLE, proof.PHASE_TEXT[proof.STOPPED])])
+        self.assertEqual(self.runs()[-1]["status"], "partial")
+        self.assertEqual(self.message(second)["state"], "approved")
+
+    def test_a_first_email_found_in_sent_after_a_timeout_is_read_back_before_the_rest(self):
+        first, second = self.approve(), self.approve()
+        self.gmail.fail_next_send(GmailError("timeout", None, "the call timed out"), accepted=True)
+        self.tick()
+        self.clock.advance(minutes=11)
+        report = self.tick()
+        self.assertEqual(self.message(first)["state"], "sent")  # settled from Sent by its Message-ID
+        self.assertEqual(report.sent, ())  # but not yet read back by its Gmail id
+        self.assertEqual(self.events("send_verified"), [])
+        self.clock.advance(minutes=2)
+        self.assertEqual(self.tick().sent, (second,))
+        self.assertEqual(self.events("send_verified")[0]["entity_id"], first)
+        self.assertEqual(len(self.gmail.sent), 2)
+
+    def test_an_email_held_back_at_send_time_is_not_the_first_claim(self):
+        first, second = self.approve(), self.approve()
+        company = self.touch_of(first)["person_id"]
+        company = self.db.execute("SELECT company_id FROM person WHERE person_id = ?", (company,)).fetchone()[0]
+        colleague = seed_email_person(self.db, company, "Colleague", "colleague@co1.example")
+        seed_message(self.db, colleague, state="drafted", subject="Something else", body=self.message(first)["body"])
+        report = self.tick()  # the approve checks send the first back to review: nothing was claimed
+        self.assertEqual((report.sent, self.message(first)["state"]), ((), "drafted"))
+        self.assertEqual(self.claims(), [])
+        self.clock.advance(minutes=2)
+        self.assertEqual(self.tick().sent, (second,))
+
+    def test_every_other_gate_still_blocks_the_first_email(self):
+        cases = {
+            "paused": lambda: self.pause(),
+            "hard block": lambda: self.pause("hard_block"),
+            "signed out": lambda: self.gmail.fail_profile(GmailError("auth", 401, "invalid_grant")),
+            "old sender loaded": lambda: setattr(self, "old_loaded", True),
+            "weekend": lambda: self.clock.set(datetime(2026, 11, 7, 15, 0, tzinfo=timezone.utc)),
+            "outside the window": lambda: self.clock.set(datetime(2026, 11, 2, 23, 0, tzinfo=timezone.utc)),
+            "day limit used": self.fill_the_day,
+            "held by a reply": self.hold_company,
+            "the person replied": self.replied,
+        }
+        for name, close in cases.items():
+            with self.subTest(name):
+                self.setUp()
+                mid = self.approve()
+                close()
+                report = self.tick()
+                self.assertEqual(report.sent, ())
+                self.assertEqual(self.gmail.sent, [])
+                self.assertEqual(self.claims(), [])
+                self.assertEqual(proof.phase(self.db), proof.FIRST_SEND)
+                self.assertIn(self.message(mid)["state"], ("approved", "skipped"))
+
+    def fill_the_day(self) -> None:
+        """Today's limit (20 on a fresh store) is used up by emails that went out some other way."""
+        company = seed_company(self.db, "Busy Co")
+        for i in range(CFG.ramp_start):
+            seed_sent(self.db, seed_email_person(self.db, company, f"B{i}", f"b{i}@busy.example"),
+                      at=self.clock() - timedelta(minutes=20))
+
+    def hold_company(self) -> None:
+        mid = max(self.emails)
+        touch = self.touch_of(mid)["touch_id"]
+        company = self.db.execute("SELECT company_id FROM person WHERE person_id = ?",
+                                  (self.touch_of(mid)["person_id"],)).fetchone()[0]
+        self.db.execute("UPDATE company SET held_by_touch = ?, held_at = ? WHERE company_id = ?",
+                        (touch, iso(self.clock()), company))
+
+    def replied(self) -> None:
+        mid = max(self.emails)
+        self.db.execute("UPDATE touch SET state = 'replied', replied_at = ?, reply_kind = 'unsorted' "
+                        "WHERE touch_id = ?", (iso(self.clock()), self.touch_of(mid)["touch_id"]))
+
+    def test_a_dry_run_names_the_first_email_and_writes_nothing(self):
+        first, second = self.approve(), self.approve()
+        before = self.dump()
+        report = self.tick(dry_run=True)
+        self.assertEqual(report.would_send, first)
+        self.assertEqual(self.dump(), before)
+        self.assertEqual(self.gmail.sent, [])
+        self.tick()
+        self.clock.advance(minutes=10)
+        before, calls = self.dump(), len(self.gmail.calls)
+        report = self.tick(dry_run=True)  # a dry run never reads the first email back, so nothing is proven
+        self.assertIsNone(report.would_send)
+        self.assertEqual(self.dump(), before)
+        self.assertNotIn("message", self.gmail.calls[calls:])
+        self.assertEqual((len(self.gmail.sent), self.message(second)["state"]), (1, "approved"))
+        self.assertEqual(self.notices, [])
+
+    def test_an_import_proof_skips_the_first_send_rule(self):
+        self.seed_imported(IMPORTED_RFC)
+        first, second = self.approve(), self.approve()
+        self.assertEqual(self.tick().sent, (first,))
+        self.clock.advance(minutes=10)
+        self.assertEqual(self.tick().sent, (second,))
+        self.assertEqual(self.events("send_verified"), [])  # never read back: the import proved it
+        self.assertEqual(self.gmail.calls.count("message"), 1)  # the imported email's own check
 
 
 class RewrittenTest(Base):

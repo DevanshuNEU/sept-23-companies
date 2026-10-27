@@ -17,7 +17,7 @@ from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import plan_followups, stop_planned
 from outreach.sending.mail import GmailError, MESSAGE_ID, Sent
 from outreach.store import transaction
-from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent, settle_and_send
+from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove
 from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()
@@ -30,6 +30,7 @@ def parse(text: str) -> datetime:
 class Base(unittest.TestCase):
     def setUp(self):
         self.db = fresh_store()
+        prove(self.db)  # these tests claim more than one email; the first-send rule is tested in test_sending_proof
         self.db.execute("PRAGMA fullfsync = ON")  # the sender's connection: send_one refuses any other
         self.path = self.db.execute("PRAGMA database_list").fetchone()["file"]
         self.company = seed_company(self.db)

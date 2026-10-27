@@ -20,7 +20,7 @@ from outreach.sending.ramp import DayState
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "Verdict", "canonical_company",
-           "load_queue", "verdicts", "pick"]
+           "load_queue", "verdicts", "first_only", "pick"]
 
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
@@ -35,8 +35,9 @@ REASON_TEXT = {
     "sender_paused": "Sending is paused.",
     "signed_out": "Gmail is signed out, so nothing can be sent.",
     "old_sender_running": "The old mail sender is still running, so the new one waits.",
-    "message_id_unproven": "Sending waits until Gmail is shown to keep the Message-ID the sender sets, so an email "
-                           "in doubt can always be found in Sent.",
+    # While Gmail is unproven the words depend on where the first email stands (`proof.PHASE_TEXT`); this is the
+    # line for the first of those, when nothing is claimed yet.
+    "message_id_unproven": "The first email goes out alone, then Gmail is checked. The rest follow.",
     "not_business_day": "Not a sending day: emails go out on weekdays, New York time.",
     "daily_limit": "Today's send limit is used up. This goes out on the next sending day.",
     "spacing": "Waiting a few minutes after the last send.",
@@ -248,6 +249,20 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
     if next_send is not None and now < next_send:
         return "spacing", next_send
     return "ready", None
+
+
+def first_only(verdicts: list[Verdict]) -> list[Verdict]:
+    """The verdicts while one first email may go before Gmail is proven to keep the Message-ID (`proof`): the first
+    `ready` message in queue order (else the time wait that ends first) keeps its verdict, and every other message
+    that is `ready` or waits on time waits as `message_id_unproven` instead. Stops and the waits that need an action
+    from him (a paused or held company, no address, no thread, a bad time zone, a recruiter waiting) keep theirs."""
+    movable = [v for v in verdicts if v.reason == "ready" or v.reason in TIME_REASONS]
+    first = next((v for v in movable if v.reason == "ready"), None)
+    if first is None:
+        timed = [(v.earliest_at, i) for i, v in enumerate(movable) if v.earliest_at is not None]
+        first = movable[min(timed)[1]] if timed else None
+    return [v if v is first or not (v.reason == "ready" or v.reason in TIME_REASONS)
+            else Verdict(v.message_id, "message_id_unproven", None) for v in verdicts]
 
 
 def pick(verdicts: list[Verdict], queue: list[Queued]) -> Queued | None:

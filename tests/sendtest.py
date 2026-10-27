@@ -10,7 +10,7 @@ from datetime import date, datetime, timezone
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
 __all__ = ["MON", "UTC", "iso", "seed_email_person", "seed_message", "seed_sent", "bounce", "put_day",
-           "settle_and_send"]
+           "prove", "settle_and_send"]
 
 UTC = timezone.utc
 # Monday 2026-11-02, 09:00 in New York (daylight saving ended on the 1st, so UTC-5).
@@ -108,6 +108,15 @@ def put_day(conn: sqlite3.Connection, day: date | str, limit: int, *, outcome: s
     day = day.isoformat() if isinstance(day, date) else day
     conn.execute("INSERT INTO send_day(day, send_limit, outcome, closed_at, created_at) VALUES (?, ?, ?, ?, ?)",
                  (day, limit, outcome, _NOW_SEED if closed else None, _NOW_SEED))
+
+
+def prove(conn: sqlite3.Connection) -> None:
+    """Gmail is shown to keep the Message-ID the sender sets (one `import_verified` event), so any number of emails
+    may be claimed. For tests of the claim, the record and the reconcile; the one first email sent before that proof
+    (`outreach.sending.proof`) has tests of its own."""
+    from outreach.store.writes import append_event
+    append_event(conn, entity="message", entity_id=None, kind="import_verified", actor="sender",
+                 at=_NOW_SEED, idempotency_key="sendtest:proven")
 
 
 def settle_and_send(conn: sqlite3.Connection, client, clock, rng, cfg) -> str | None:

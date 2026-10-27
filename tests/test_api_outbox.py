@@ -169,12 +169,30 @@ class ViewTest(OutboxBase):
 
     def test_an_approved_row_waits_with_the_senders_own_reason(self):
         cid = seed.company(self.conn, "Acme", status="working")
-        t = self.thread(cid, "Una Unproven")
+        first, second = self.thread(cid, "Una Unproven"), self.thread(cid, "Otto Other")
+        seed.message(self.conn, first, 0, "approved")
+        seed.message(self.conn, second, 0, "approved")
+        rows = self.by_touch(self.outbox())
+        # No proof event yet: the first email goes alone, and the other waits for its check.
+        self.assertEqual(rows[first]["schedule"]["reason"], "ready")
+        waiting = rows[second]["schedule"]
+        self.assertEqual(waiting["reason"], "message_id_unproven")
+        self.assertIsNone(waiting["earliestAt"])
+        self.assertEqual(waiting["text"], "The first email goes out alone, then Gmail is checked. The rest follow.")
+
+    def test_a_row_waiting_on_the_first_emails_check_says_so(self):
+        cid = seed.company(self.conn, "Acme", status="working")
+        sent = self.claimed(self.thread(cid, "Fay First"), "sending")
+        append_event(self.conn, entity="message", entity_id=sent, kind="claimed", actor="sender",
+                     at="2026-11-10T15:00:00Z", idempotency_key="claimed:first")
+        self.conn.execute("UPDATE message SET state = 'sent', sent_at = '2026-11-10T15:00:00Z', "
+                          "rfc_message_id = '<pending1@x>', gmail_message_id = 'g1', pending_rfc_id = NULL, "
+                          "claimed_at = NULL WHERE message_id = ?", (sent,))
+        t = self.thread(cid, "Nell Next")
         seed.message(self.conn, t, 0, "approved")
-        [item] = self.outbox()["items"]
-        self.assertEqual(item["schedule"]["reason"], "message_id_unproven")  # no proof event yet
-        self.assertIsNone(item["schedule"]["earliestAt"])
-        self.assertIn("Message-ID", item["schedule"]["text"])
+        schedule = self.by_touch(self.outbox())[t]["schedule"]
+        self.assertEqual((schedule["reason"], schedule["text"]),
+                         ("message_id_unproven", "First email sent, checking it in Sent. The rest follow."))
 
     def test_a_drafted_row_has_no_schedule(self):
         cid = seed.company(self.conn, "Acme", status="working")

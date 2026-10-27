@@ -161,7 +161,7 @@ class Build(TodayCase):
         return snap.limit_today
 
     def prove(self):
-        """The sender waits for every message until Gmail is shown to keep the Message-ID it sets."""
+        """Gmail is shown to keep the Message-ID the sender sets, so every message goes, not just the first."""
         append_event(self.conn, entity="message", entity_id=1, kind="import_verified", actor="sender",
                      at="2026-11-01T12:00:00Z", idempotency_key="proof")
 
@@ -181,7 +181,6 @@ class Build(TodayCase):
 
     def test_no_email_slots_while_the_sender_is_paused_signed_out_or_unproven(self):
         self.ranked("A")
-        self.assertEqual(self.view()["capacity"], 7)  # nothing proves the Message-ID yet: the sender waits
         self.prove()
         revision = self.get("/api/sending").json()["revision"]
         self.assertEqual(self.post("/api/sending/pause", {"revision": revision}).status_code, 200)
@@ -194,11 +193,23 @@ class Build(TodayCase):
         self.conn.execute("DELETE FROM daily_list_entry")
         self.conn.execute("DELETE FROM daily_list")
         self.assertEqual(self.view()["capacity"], 7)
+        self.conn.execute("UPDATE sender SET auth_state = 'ok'")
+        append_event(self.conn, entity="message", entity_id=2, kind="send_id_mismatch", actor="sender",
+                     at="2026-11-01T12:00:00Z", idempotency_key="mismatch")  # Gmail rewrote the first email's id
+        self.conn.execute("DELETE FROM daily_list_entry")
+        self.conn.execute("DELETE FROM daily_list")
+        self.assertEqual(self.view()["capacity"], 7)
+
+    def test_the_first_email_before_any_proof_counts_the_days_slots(self):
+        self.ranked("A")  # nothing proves the Message-ID yet, but the one first email may go today
+        self.assertEqual(self.view()["capacity"], 7 + self.send_limit())
 
     def test_a_broken_sending_config_adds_no_slots_and_does_not_break_the_page(self):
         from unittest import mock
         self.ranked("A")
-        with mock.patch("outreach.api.queries.today.load_send_config", side_effect=ValueError("ramp_step is wrong")):
+        broken = ValueError("ramp_step is wrong")
+        with mock.patch("outreach.api.queries.today.load_send_config", side_effect=broken), \
+                mock.patch("outreach.api.queries.sending.load_config", side_effect=broken):
             res = self.get("/api/today")
         self.assertEqual((res.status_code, res.json()["capacity"]), (200, 7))
 

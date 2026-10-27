@@ -27,6 +27,7 @@ from outreach.drafts.followups import (canonical_company, company_map, held_surv
                                        resolve_company)
 from outreach.outcomes.context import build_context
 from outreach.sending import calendar as cal
+from outreach.sending import proof
 from outreach.sending.config import SendConfig
 from outreach.sending.followups import plan_followups
 from outreach.sending.gmail import new_message_id
@@ -39,7 +40,7 @@ from outreach.store.db import transaction
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event, log_touch
 
-__all__ = ["AnotherSendInFlight", "claim", "outgoing_for", "email_context", "record_sent", "record_unclear",
+__all__ = ["AnotherSendInFlight", "Unproven", "claim", "outgoing_for", "email_context", "record_sent", "record_unclear",
            "send_one", "PLACEHOLDER_DOMAIN", "LEFTOVER_ERROR", "Unclear", "leftover_claims", "unclear", "reconcile",
            "requeue_failed"]
 
@@ -62,6 +63,11 @@ REWRITTEN_REASON = ("Sending is paused because Gmail stored a sent email under a
 
 class AnotherSendInFlight(RuntimeError):
     """Another message is `sending`: only one send is in flight across the whole store."""
+
+
+class Unproven(RuntimeError):
+    """Gmail is not yet shown to keep the Message-ID and an email was already claimed (or a mismatch was found):
+    no second email is claimed (`proof.may_claim`)."""
 
 
 def _stamp(at: datetime | str) -> str:
@@ -103,12 +109,17 @@ def claim(conn: sqlite3.Connection, q: Queued, *, rfc_id: str, now: str) -> bool
     """Commit `approved -> sending` with `rfc_id` as `pending_rfc_id`, in one transaction, and append `claimed`.
     False when nothing changed: the message moved on or was edited since `q` was read (its revision), a stop,
     hold or pause landed since the pick, or it is a follow-up whose touch has no Gmail thread. Raises
-    AnotherSendInFlight when another message is `sending`, and ValueError when `rfc_id` is not one Message-ID."""
+    AnotherSendInFlight when another message is `sending`, Unproven when Gmail is not shown to keep the Message-ID
+    and some email was already claimed (read in this transaction, so at most one email is ever claimed before the
+    proof), and ValueError when `rfc_id` is not one Message-ID."""
     if not MESSAGE_ID.fullmatch(rfc_id or ""):
         raise ValueError("a claim needs exactly one Message-ID")
     stamp = _stamp(now)
     try:
         with transaction(conn):
+            if not proof.may_claim(conn):
+                raise Unproven("Gmail is not shown to keep the Message-ID yet and an email was already claimed, "
+                               "so no other email is claimed")
             if not _still_sendable(conn, q.message_id):
                 return False
             cur = conn.execute(

@@ -45,8 +45,8 @@ from outreach.store import append_event, describe_error
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import name_key
 
-__all__ = ["REFUSED_KIND", "OFF_LINE", "Target", "JudgeSummary", "select_targets", "gather", "run_judge",
-           "judge_runner"]
+__all__ = ["REFUSED_KIND", "OFF_LINE", "Target", "JudgeSummary", "Judging", "select_targets", "targets_for", "gather",
+           "run_judge", "judge_runner"]
 
 REFUSED_KIND = "judge_refused"
 OFF_LINE = ("judge is off; set [judge] enabled = true in outreach/judge/config.toml to turn it on "
@@ -151,35 +151,18 @@ def _refused(conn: sqlite3.Connection, canon: dict[int, int], version: str, now:
     return out
 
 
-def select_targets(conn: sqlite3.Connection, canon: dict[int, int], cfg: JudgeConfig, *, now: datetime,
-                   version: str, names: Sequence[str] | None = None) -> tuple[list[Target], list[Target]]:
-    """(due, not due), each in ranked order. Without `names` only the top `top_n` are looked at; with them, the
-    listed companies of those names at any rank."""
-    listed = {r[0] for r in conn.execute(
-        f"SELECT company_id FROM company WHERE merged_into IS NULL AND status IN ({', '.join('?' for _ in _LISTED)})",
-        _LISTED)}
+def _build(conn: sqlite3.Connection, canon: dict[int, int], cfg: JudgeConfig, entries: list[tuple[int, int, dict]],
+           *, now: datetime, version: str) -> list[tuple[Target, bool]]:
+    """A Target for each (rank, company, stored signals) entry, and whether it is due."""
     names_of = {r[0]: r[1] for r in conn.execute("SELECT company_id, name FROM company")}
-    ranked: list[tuple[int, int, dict]] = []
-    seen: set[int] = set()
-    for s in ranked_list(conn):
-        cid = canon.get(s.company_id, s.company_id)
-        if cid in seen or cid not in listed:
-            continue
-        seen.add(cid)
-        ranked.append((len(ranked) + 1, cid, s.signals))
-    if names is not None:
-        wanted = {name_key(n) for n in names}
-        ranked = [r for r in ranked if name_key(names_of.get(r[1], "")) in wanted]
-    else:
-        ranked = ranked[:cfg.top_n]
-    ids = {cid for _rank, cid, _s in ranked}
+    ids = {cid for _rank, cid, _s in entries}
     domains = _domains(conn, canon, ids)
-    postings = _postings(conn, {s["best_posting_id"] for _r, _c, s in ranked
+    postings = _postings(conn, {s["best_posting_id"] for _r, _c, s in entries
                                 if isinstance(s.get("best_posting_id"), int)})
     latest = load_judgments(conn, canon, with_pages=True)
     refused = _refused(conn, canon, version, now, cfg.cache_days)
-    due, fresh = [], []
-    for rank, cid, signals in ranked:
+    out = []
+    for rank, cid, signals in entries:
         row = postings.get(signals.get("best_posting_id"))
         posting = None if row is None else {"posting_id": row["posting_id"], "title": scrub_text(row["title"]),
                                             "url": row["url"] or "", "location": row["location"] or ""}
@@ -201,8 +184,51 @@ def select_targets(conn: sqlite3.Connection, canon: dict[int, int], cfg: JudgeCo
         target = Target(company_id=cid, name=names_of.get(cid, ""), rank=rank, domain=domains.get(cid),
                         posting=posting, body=(row["body"] if row is not None and row["body"] else None), latest=j,
                         why=why or f"judged {int(_age_days(j.at, now))} days ago, still fresh")
-        (due if is_due else fresh).append(target)
-    return due, fresh
+        out.append((target, is_due))
+    return out
+
+
+def select_targets(conn: sqlite3.Connection, canon: dict[int, int], cfg: JudgeConfig, *, now: datetime,
+                   version: str, names: Sequence[str] | None = None) -> tuple[list[Target], list[Target]]:
+    """(due, not due), each in ranked order. Without `names` only the top `top_n` are looked at; with them, the
+    listed companies of those names at any rank."""
+    listed = {r[0] for r in conn.execute(
+        f"SELECT company_id FROM company WHERE merged_into IS NULL AND status IN ({', '.join('?' for _ in _LISTED)})",
+        _LISTED)}
+    names_of = {r[0]: r[1] for r in conn.execute("SELECT company_id, name FROM company")}
+    ranked: list[tuple[int, int, dict]] = []
+    seen: set[int] = set()
+    for s in ranked_list(conn):
+        cid = canon.get(s.company_id, s.company_id)
+        if cid in seen or cid not in listed:
+            continue
+        seen.add(cid)
+        ranked.append((len(ranked) + 1, cid, s.signals))
+    if names is not None:
+        wanted = {name_key(n) for n in names}
+        ranked = [r for r in ranked if name_key(names_of.get(r[1], "")) in wanted]
+    else:
+        ranked = ranked[:cfg.top_n]
+    built = _build(conn, canon, cfg, ranked, now=now, version=version)
+    return [t for t, due in built if due], [t for t, due in built if not due]
+
+
+def targets_for(conn: sqlite3.Connection, canon: dict[int, int], cfg: JudgeConfig, ids: Sequence[int], *,
+                now: datetime, version: str) -> list[Target]:
+    """A Target for each company id whatever its rank (the eval's golden companies): its place in the ranked list,
+    else 0, and its best posting from the newest stored score, hidden or not."""
+    ranks = {}
+    for i, s in enumerate(ranked_list(conn), start=1):
+        ranks.setdefault(canon.get(s.company_id, s.company_id), i)
+    version_row = conn.execute("SELECT ranker_version FROM company_score GROUP BY ranker_version "
+                               "ORDER BY MAX(scored_at) DESC, ranker_version DESC LIMIT 1").fetchone()
+    signals: dict[int, dict] = {}
+    if version_row is not None:
+        for r in conn.execute("SELECT company_id, signals FROM company_score WHERE ranker_version = ?",
+                              (version_row[0],)):
+            signals.setdefault(canon.get(r["company_id"], r["company_id"]), json.loads(r["signals"]))
+    entries = [(ranks.get(cid, 0), cid, signals.get(cid, {})) for cid in ids]
+    return [t for t, _due in _build(conn, canon, cfg, entries, now=now, version=version)]
 
 
 def _fresh_page(page: dict | None, now: datetime, cfg: JudgeConfig) -> bool:
@@ -245,7 +271,7 @@ def _for_model(pages: list[dict]) -> list[dict]:
     return [{k: p.get(k, "") for k in ("kind", "url", "status", "why", "text")} for p in pages]
 
 
-class _Run:
+class Judging:
     def __init__(self, conn, runner: Runner, reader, cfg: JudgeConfig, me_text: str, now: datetime):
         self.conn, self.runner, self.reader, self.cfg, self.now = conn, runner, reader, cfg, now
         self.prompt = render_prompt(me_text, cfg)
@@ -326,7 +352,7 @@ def run_judge(conn: sqlite3.Connection, runner: Runner, reader, *, cfg: JudgeCon
     if not dry_run and cfg.enabled is not True:
         return JudgeSummary("off")
     now = now or datetime.now(timezone.utc)
-    work = _Run(conn, runner, reader, cfg, me_text, now)
+    work = Judging(conn, runner, reader, cfg, me_text, now)
     canon = canonical_ids(conn)
     due, _fresh = select_targets(conn, canon, cfg, now=now, version=work.version, names=names)
     if names is not None:

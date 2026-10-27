@@ -226,14 +226,16 @@ class StatusTest(unittest.TestCase):
 
     def test_status_on_a_scratch_store_prints_the_state(self):
         company = seed_company(self.db, "Acme")
-        seed_message(self.db, seed_email_person(self.db, company, "Ann", "ann@acme.co"))
+        first = seed_message(self.db, seed_email_person(self.db, company, "Ann", "ann@acme.co"))
+        seed_message(self.db, seed_email_person(self.db, seed_company(self.db, "Beta"), "Bo", "bo@beta.co"))
         code, out, _ = run(["status"], now=MON, old_sender_loaded=lambda: False)
         self.assertEqual(code, 0)
         self.assertIn("state: running", out)
         self.assertIn("sent today: 0 of 20", out)
         self.assertIn("ramp: starts at 20", out)
-        self.assertIn("1 message_id_unproven", out)
-        self.assertIn("next send: none", out)
+        # Gmail is not proven to keep the Message-ID: the first email goes alone and the other waits for its check.
+        self.assertIn("queue: 1 message_id_unproven, 1 ready", out)
+        self.assertIn(f"next send: message {first} at", out)
 
     def test_status_shows_a_loaded_old_sender(self):
         _, out, _ = run(["status"], now=MON, old_sender_loaded=lambda: True)

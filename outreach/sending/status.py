@@ -2,8 +2,9 @@
 
 Read only: nothing here writes, opens a transaction or calls Gmail. The snapshot is what the Outbox's sending strip
 shows; `queue_schedule` is the same `verdicts` the tick uses, with the same gate (paused, signed out, old sender
-loaded, Message-ID not proven), so "when it will go" on the Outbox is the sender's own answer and never a second
-copy of the rules.
+loaded, Message-ID not proven) and the same one first email while it is not proven (`queue.first_only`), so "when
+it will go" on the Outbox is the sender's own answer and never a second copy of the rules. A message waiting on the
+proof reads the line for where the first email stands (`reason_text`).
 
 The store cannot say whether the old mailer's launchd job is loaded (only a `launchctl` call can), so a caller that
 knows passes `old_sender_loaded=True`; the snapshot then shows `paused_by_you` with a reason, and every message
@@ -15,13 +16,13 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.sending import calendar as cal
-from outreach.sending import queue, ramp, signals
+from outreach.sending import proof, queue, ramp, signals
 from outreach.sending.config import SendConfig
 from outreach.sending.queue import REASON_TEXT, STOP_REASONS, Verdict
-from outreach.sending.tick import PROOF_SQL
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["SendingSnapshot", "sending_snapshot", "queue_schedule", "OLD_SENDER_TEXT", "NOTHING_APPROVED"]
+__all__ = ["SendingSnapshot", "sending_snapshot", "queue_schedule", "reason_text", "OLD_SENDER_TEXT",
+           "NOTHING_APPROVED"]
 
 OLD_SENDER_TEXT = "The old mail sender is still running, so the new one waits until it is stopped."
 NOTHING_APPROVED = "Nothing is approved and waiting to send."
@@ -66,17 +67,29 @@ def _gate(conn: sqlite3.Connection, old_sender_loaded: bool) -> str | None:
         return "signed_out"
     if old_sender_loaded:
         return "old_sender_running"
-    if conn.execute(PROOF_SQL).fetchone() is None:
+    if proof.phase(conn) not in proof.OPEN:
         return "message_id_unproven"
     return None
+
+
+def reason_text(reason: str, stage: str) -> str:
+    """The sentence for a queue reason; `message_id_unproven` says where the first email stands (`stage`, a
+    `proof` phase)."""
+    if reason == "message_id_unproven":
+        return proof.PHASE_TEXT.get(stage, REASON_TEXT[reason])
+    return REASON_TEXT[reason]
 
 
 def queue_schedule(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *,
                    old_sender_loaded: bool = False) -> dict[int, Verdict]:
     """The tick's verdict for every approved message, by message id, in queue order: the reason it waits (or
-    `ready`) and, for a wait that ends by itself, when."""
+    `ready`) and, for a wait that ends by itself, when. While Gmail is unproven and no email is claimed yet, only
+    the first email keeps its own verdict, as in the tick."""
     day = ramp.today_state(conn, now, cfg)
-    found = queue.verdicts(conn, now, cfg, day=day, gate=_gate(conn, old_sender_loaded))
+    gate = _gate(conn, old_sender_loaded)
+    found = queue.verdicts(conn, now, cfg, day=day, gate=gate)
+    if gate is None and proof.phase(conn) == proof.FIRST_SEND:
+        found = queue.first_only(found)
     return {v.message_id: v for v in found}
 
 
@@ -145,7 +158,7 @@ def _stop_replies(conn: sqlite3.Connection, today, cfg: SendConfig) -> int:
         (start, end, start, end)).fetchone()[0]
 
 
-def _next_send(schedule: dict[int, Verdict], queued: dict[int, queue.Queued], now: datetime):
+def _next_send(schedule: dict[int, Verdict], queued: dict[int, queue.Queued], now: datetime, stage: str):
     """The message that goes first and when (`ready` is now), else why none does."""
     best = None
     for index, verdict in enumerate(schedule.values()):
@@ -158,7 +171,7 @@ def _next_send(schedule: dict[int, Verdict], queued: dict[int, queue.Queued], no
     if not schedule:
         return None, NOTHING_APPROVED
     waiting = next((v for v in schedule.values() if v.reason not in STOP_REASONS), None)
-    return None, REASON_TEXT[waiting.reason] if waiting is not None else ALL_STOPPED
+    return None, reason_text(waiting.reason, stage) if waiting is not None else ALL_STOPPED
 
 
 def sending_snapshot(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *,
@@ -175,7 +188,7 @@ def sending_snapshot(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *
     errors, gmail_message = _gmail_message(conn, today.isoformat())
     schedule = queue_schedule(conn, now, cfg, old_sender_loaded=old_sender_loaded)
     queued = {q.message_id: q for q in queue.load_queue(conn, cfg)}
-    next_send, none_reason = _next_send(schedule, queued, now)
+    next_send, none_reason = _next_send(schedule, queued, now, proof.phase(conn))
     return SendingSnapshot(
         state=state, paused_reason=reason, paused_at=sender["paused_at"] if sender["paused"] else None,
         gmail_message=gmail_message, sent_today=signals.sends_on(conn, today, cfg),

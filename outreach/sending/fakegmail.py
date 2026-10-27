@@ -11,6 +11,7 @@ Gmail behaviour copied on purpose:
   `Delivery Status Notification (Failure)` or `(Delay)`, `X-Failed-Recipients` on failures only.
 """
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import datetime, timedelta
 from email.utils import formataddr, parseaddr
 from typing import Literal
@@ -113,6 +114,19 @@ class FakeGmail(MailClient):
     def expire_history(self) -> None:
         """The next history call raises HistoryExpired, as Gmail's 404 for a cursor that is too old."""
         self._expire_next_history = True
+
+    def change_stored(self, gmail_message_id: str, *, message_id: str | None = None,
+                      labels: tuple[str, ...] | None = None) -> None:
+        """Gmail now shows a stored message with another Message-ID header or labels: a rewrite the send itself did
+        not report (the real client's read back can fail and still report the send), or a message moved out of
+        Sent. Sent scans and `message` see the change."""
+        old = self._messages[gmail_message_id]
+        headers = dict(old.headers)
+        if message_id is not None:
+            headers["message-id"] = message_id
+        new = replace(old, headers=headers, labels=old.labels if labels is None else labels)
+        self._messages[gmail_message_id] = new
+        self.sent_box = [new if m.gmail_message_id == gmail_message_id else m for m in self.sent_box]
 
     def add_to_sent(self, to: str, subject: str, *, message_id: str, at: datetime | None = None,
                     thread_id: str | None = None) -> MessageMeta:

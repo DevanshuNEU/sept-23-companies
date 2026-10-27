@@ -32,8 +32,9 @@ from outreach.drafts.checks import HOOK_DATE
 from outreach.drafts.followups import company_map, resolve_company
 from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
-from outreach.sending.queue import REASON_TEXT, TIME_REASONS, load_queue
-from outreach.sending.status import queue_schedule
+from outreach.sending import proof
+from outreach.sending.queue import TIME_REASONS, load_queue
+from outreach.sending.status import queue_schedule, reason_text
 from outreach.store.timefmt import ISO_FMT
 
 GROUPS = ("replied", "review", "approved", "sending", "checking", "sent", "paused", "closed")
@@ -80,11 +81,12 @@ def _ny(iso: str, cfg: SendConfig) -> datetime:
     return moment(iso).astimezone(ZoneInfo(cfg.day_tz))
 
 
-def schedule_text(reason: str, when: str | None, now: str, cfg: SendConfig) -> str:
+def schedule_text(reason: str, when: str | None, now: str, cfg: SendConfig, stage: str = proof.PROVEN) -> str:
     """`Sends 10:42 ET` when it is ready, `Sends after 11:05 ET` later today, `Sends tomorrow`, `Sends Wed Nov 11`;
-    a wait with no time (and every stop) is the queue's own sentence."""
+    a wait with no time (and every stop) is the queue's own sentence (`status.reason_text`: a wait on the
+    Message-ID proof says where the first email stands, `stage`)."""
     if when is None or (reason != "ready" and reason not in TIME_REASONS):
-        return REASON_TEXT[reason]
+        return reason_text(reason, stage)
     at, today = _ny(when, cfg), _ny(now, cfg).date()
     if at.date() == today:
         clock = f"{at.hour}:{at.minute:02d} ET"
@@ -141,6 +143,7 @@ class _Outbox:
         self.refs = company_refs(conn, set(self.survivor.values()), holds=self.holds)
         self.people = people_by_ids(conn, {t["person_id"] for t in self.touches})
         self.schedule = queue_schedule(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded)
+        self.proof_stage = proof.phase(conn)
         self.queue_order = {mid: n for n, mid in enumerate(self.schedule)}
         self.tz = {q.message_id: q.tz for q in load_queue(conn, cfg)}
         self.sends_today = _company_sends_today(conn, self.companies, now, cfg)
@@ -168,7 +171,8 @@ class _Outbox:
             verdict.earliest_at.strftime(ISO_FMT) if verdict.earliest_at is not None else None)
         sent = self.sends_today.get(survivor, 0)
         return Schedule(earliest_at=when, tz=self.tz.get(m["message_id"], self.cfg.day_tz), reason=verdict.reason,
-                        text=schedule_text(verdict.reason, when, self.now, self.cfg), company_sent_today=sent,
+                        text=schedule_text(verdict.reason, when, self.now, self.cfg, self.proof_stage),
+                        company_sent_today=sent,
                         company_slots_left=max(0, self.cfg.per_company_daily - sent))
 
     def _summary(self, group: str, touch, m, company: CompanyRef, checks: list[Check], schedule, next_due) -> str:

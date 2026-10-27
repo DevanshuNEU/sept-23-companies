@@ -92,7 +92,10 @@ class Shell(ApiCase):
             self.assertEqual(body[key], 0, key)
         self.assertEqual([j["job"] for j in body["jobs"]], ["rebuild"])  # the store's own install run
         self.assertEqual(body["plan"], {"done": 0, "total": 0})
-        self.assertEqual(body["capacityToday"], 7)  # no list yet: the one capacity rule, LinkedIn alone while the sender waits
+        # No list yet: the one capacity rule. Nothing proves the Message-ID, but the first email may go today, so
+        # the sender's day counts.
+        self.assertEqual(body["capacityToday"], 7 + body["sending"]["limitToday"])
+        self.assertGreater(body["sending"]["limitToday"], 0)
         self.assertEqual(body["sending"]["sentToday"], 0)
         health = self.get("/api/health").json()["sender"]
         self.assertEqual(body["sending"], health)

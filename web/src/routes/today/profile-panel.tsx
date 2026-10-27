@@ -23,16 +23,29 @@ function Section({ icon: Icon, title, children }: { icon: typeof Boxes; title: s
 }
 
 /**
- * One fact: its label, its words (or a muted "Not known"), and in small muted text how sure it is and where it comes
- * from. The last column is kept for a future pencil beside an unknown value (editing is not built yet).
+ * One fact: its label, its words (or a muted "Not known", or the `unknown` words given), and in small muted text how
+ * sure it is and where it comes from. The last column is kept for a future pencil beside an unknown value (editing is
+ * not built yet).
  */
-function Fact({ id, label, v, children }: { id: string; label: string; v?: ProfileValue; children?: ReactNode }) {
+function Fact({
+  id,
+  label,
+  v,
+  unknown = 'Not known',
+  children,
+}: {
+  id: string;
+  label: string;
+  v?: ProfileValue;
+  unknown?: string;
+  children?: ReactNode;
+}) {
   const known = v ? v.text !== null : true;
   return (
     <div data-fact={id} className="grid grid-cols-[76px_minmax(0,1fr)_auto] items-baseline gap-x-3 text-sm leading-[1.55]">
       <span className="text-[13px] text-muted-foreground">{label}</span>
       <div className="grid min-w-0">
-        <span className={cn('min-w-0 break-words', !known && 'text-muted-foreground')}>{children ?? (known ? v?.text : 'Not known')}</span>
+        <span className={cn('min-w-0 break-words', !known && 'text-muted-foreground')}>{children ?? (known ? v?.text : unknown)}</span>
         {known && v?.note ? <span className="text-xs leading-5 text-muted-foreground">{v.note}</span> : null}
       </div>
       <span data-slot="edit" />
@@ -117,7 +130,8 @@ export function ProfilePanel({ row, className }: { row: PlanRow; className?: str
       </Section>
 
       <Section icon={Users} title="Headcount">
-        <Fact id="headcount" label="People" v={p.headcount} />
+        {/* The size gate keeps a giant or a likely large company off Today, so an unknown size here was never looked up. */}
+        <Fact id="headcount" label="People" v={p.headcount} unknown="Not checked" />
       </Section>
 
       <Section icon={MapPin} title="Where">

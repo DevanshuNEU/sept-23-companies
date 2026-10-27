@@ -31,9 +31,20 @@ profile_fit = 10.0
 staffing_risk = 200.0
 large_later_stage = 200.0
 
+# The size gate (2026-10-27). Over size_over people on evidence of a trusted confidence hides a company. So does the
+# giants list (giants.toml), unless he set its size by hand at or under size_over. With no size on file at all, more
+# open roles than likely_large_open_roles, or more software H-1B filings in one fiscal year than
+# likely_large_lca_software, hides it too ("likely over 300"). A hide keeps a company off the ranked list, so it is
+# never a pick, a fresh lane pick or a bench entry; it shows on the No-go page and changes no status.
+# Calibrated on the live store (2026-10-27): of 360 companies with a size of 300 or less on file, 4 have more than
+# 100 open roles (1.1%), and 84 of 242 known over 300 do (precision 95%). At 40 it would be 26 small ones (7.2%).
+# The LCA bar is the research's large-filer edge (101 or more filings a year); the store had no lca rows to check.
+# Each is a whole number of at least 25.
 [hide]
 size_over = 300
 size_confidences = ["confirmed", "estimate"]
+likely_large_open_roles = 100
+likely_large_lca_software = 100
 
 [live_role]
 intern_junior = 0.4

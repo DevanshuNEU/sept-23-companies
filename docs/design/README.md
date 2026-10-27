@@ -504,7 +504,8 @@ reason.
 
 **Companies columns.** Company, reason badge, evidence (quote or value), source (link to the posting, the reply,
 "You, from Today", or an Imported tag with the import source), added date, a row menu. Reasons: Does not sponsor,
-Citizenship or clearance, Over 300 people (with evidence), Removed by you, Marked no-go by you. Posting-level hides
+Citizenship or clearance, Over 300 people (with evidence, the giants list in `outreach/ranking/giants.toml`, or likely
+over 300 with no size on file: the ranker's hidden list), Removed by you, Marked no-go by you. Posting-level hides
 (2027 graduation or current students only) are not listed here because the company stays eligible; a note under
 the table says so.
 

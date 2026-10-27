@@ -176,6 +176,13 @@ None of the day-one sources gives headcount, and Form D gives money raised but n
   needs evidence, as in #9.
 - **Weak "not small" flags** (a known large parent, many board postings, a domain shared with a large filer) flag
   the company for a size check. They never hide it.
+- **Size gate (2026-10-27, replaces the two lines above where they disagree):** a giant must never be a pick. A
+  company on the giants list (`outreach/ranking/giants.toml`, each name under its parent) is hidden as over size
+  even with no size fact, unless he set its size by hand at or under 300. With no size on file at all, more than
+  `[hide] likely_large_open_roles` (100) open roles or more than `[hide] likely_large_lca_software` (100) software
+  H-1B filings in one fiscal year hides it as "likely over 300". Unknown size with no such sign stays shown and
+  neutral. The hide keeps it off the ranked list (so off Today, the fresh lane and the bench) and on the No-go page;
+  it never deletes anything or changes a status.
 - **Size is filled where it matters:** for companies that reach the top of the ranking, the side session looks for
   size and stage on public pages and records them as evidence with a source. Devanshu can enter the headcount
   from a LinkedIn company page with one field. Both are evidence rows like any other.
@@ -293,7 +300,8 @@ current.
 - the posting says the company won't sponsor;
 - US citizenship or clearance required;
 - requires being a current student or graduating in 2027 or later;
-- the company has over 300 people **with evidence**.
+- the company has over 300 people **with evidence**, is on the giants list, or has no size on file and more open
+  roles or software H-1B filings than the likely-large bars (the size gate, 2026-10-27; section 5.4).
 
 **Shown and flagged, never hidden:**
 - size unknown or a guess; sponsorship silent or unclear; reader and rules disagree;

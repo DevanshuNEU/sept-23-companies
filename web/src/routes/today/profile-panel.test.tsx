@@ -74,12 +74,16 @@ describe('the profile panel: a company that is well known', () => {
 describe('the profile panel: a company with unknown values', () => {
   it('says Not known, muted and never red, where nothing is known', () => {
     render(<ProfilePanel row={rowOf('Trigger.dev')} />);
-    for (const id of ['stage', 'headcount', 'hq', 'everify', 'sponsorship', 'lca', 'roleplaces']) {
+    for (const id of ['stage', 'hq', 'everify', 'sponsorship', 'lca', 'roleplaces']) {
       expect(fact(id), id).toHaveTextContent('Not known');
       const word = within(fact(id)).getByText('Not known');
       expect(word.className).toContain('text-muted-foreground');
       expect(word.className).not.toMatch(/bad|destructive|red/);
     }
+    // The size gate keeps a likely large company off Today, so a headcount nobody looked up is "Not checked".
+    expect(fact('headcount')).toHaveTextContent('Not checked');
+    expect(fact('headcount')).not.toHaveTextContent('Not known');
+    expect(within(fact('headcount')).getByText('Not checked').className).toContain('text-muted-foreground');
     expect(fact('funding')).toHaveTextContent('$5,500,000 raised');
     expect(screen.getByText('Not judged yet')).toBeInTheDocument();
     expect(screen.getByText('None open at your level')).toBeInTheDocument();

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { ArrowRightLeft } from 'lucide-react';
-import { queryKeys, usePageClient, type BrowseCompany, type BrowseParams, type PlanRow } from '@/api';
+import { pollMs, queryKeys, usePageClient, type BrowseCompany, type BrowseParams, type PlanRow } from '@/api';
 import { Monogram } from '@/components/monogram';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -103,6 +103,8 @@ export function BrowseDrawer({ open, onOpenChange, rows, onSwap }: { open: boole
     initialPageParam: 0,
     getNextPageParam: (last) => last.nextAfter ?? undefined,
     enabled: open,
+    // Like the bench: the pulse refetches it when anything is written, and this keeps ages and cooldowns fresh while it is open.
+    refetchInterval: open ? pollMs.default : false,
   });
 
   const onToday = useMemo(() => new Set(rows.map((r) => r.company.id)), [rows]);

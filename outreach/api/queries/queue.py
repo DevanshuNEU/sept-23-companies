@@ -37,6 +37,8 @@ from outreach.api.models.plan import CompanyQueue, InFlightCompany, QueueOpening
 from outreach.api.models.today import DailyEntry
 from outreach.api.queries.company import Holds
 from outreach.api.queries.outcomes import by_ids, company_refs, people_by_ids
+from outreach.api.queries.profile import (EVERIFY, SPONSORSHIP, STAGES, company_profile, count_words, load_profile_data,
+                                          plain_url)
 from outreach.plan.careers import pick_careers_url
 from outreach.plan.config import PlanConfig
 from outreach.plan.contact import ContactState, contact_states
@@ -60,12 +62,6 @@ HIRING_DAYS = 30
 LINKEDIN_COMPANY_SEARCH = "https://www.linkedin.com/search/results/companies/?keywords="
 REASONS = 3
 CONFIDENCE = {"confirmed": None, "estimate": "estimate", "guess": "guess"}
-STAGES = {"pre_seed": "pre-seed", "seed": "seed", "series_a": "Series A", "series_b": "Series B",
-          "series_c": "Series C", "series_d": "Series D", "series_e_plus": "Series E or later",
-          "late_private": "late stage private", "public": "public", "yc": "YC", "early": "early stage"}
-SPONSORSHIP = {"has_sponsored": "Has sponsored before", "says_yes": "Says it sponsors", "says_no": "Does not sponsor",
-               "opt_only": "OPT only", "unclear": "Unclear on sponsorship", "not_stated": "Sponsorship not stated"}
-EVERIFY = {"enrolled": "E-Verify enrolled", "not_enrolled": "Not in E-Verify"}
 ROLE_WORDS = {"engineer": "Engineer", "manager": "Manager", "founder": "Founder", "recruiter": "Recruiter",
               "alum": "Alum", "other": "Other"}
 TOUCH_WORDS = {"linkedin_request": "Request to", "linkedin_message": "Message to", "email": "Email to"}
@@ -122,13 +118,7 @@ def size_line(size, stage) -> str | None:
     """"40 to 60 people (estimate), seed (guess)", from the best size and stage facts; None when neither is known."""
     parts = []
     if size is not None and size.low is not None:
-        if size.high is None:
-            count = f"{size.low} or more people"
-        elif size.high == size.low:
-            count = _plural(size.low, "person", "people")
-        else:
-            count = f"{size.low} to {size.high} people"
-        parts.append(_fact_words(size, count))
+        parts.append(_fact_words(size, count_words(size.low, size.high)))
     if stage is not None and stage.value in STAGES:
         parts.append(_fact_words(stage, STAGES[stage.value]))
     return ", ".join(parts) if parts else None
@@ -195,14 +185,6 @@ def website_url(domain: str | None) -> str | None:
 def linkedin_company_url(name: str) -> str:
     """A LinkedIn company search for the name: the app never fetches linkedin.com, he opens it."""
     return LINKEDIN_COMPANY_SEARCH + quote(" ".join(name.split()), safe="")
-
-
-def _plain_url(url: str | None) -> str | None:
-    try:
-        parts = urlsplit(url or "")
-    except ValueError:
-        return None
-    return url if parts.scheme in ("http", "https") and parts.hostname else None
 
 
 # ---------------------------------------------------------------------------------------------- bulk reads
@@ -312,6 +294,7 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
     hints = _email_hints(conn, survivors, canon, outbound, states, today, cfg)
     judged = load_judgments(conn, canon, today=today,
                             max_age_days=default_ranker_config().section("profile_fit")["max_age_days"])
+    profiles = load_profile_data(conn, canon, survivors, family, owner, now, cfg)
     by_company: dict[int, list[Outbound]] = {}
     for o in outbound:
         by_company.setdefault(o.company_id, []).append(o)
@@ -328,13 +311,14 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
         reasons = _reasons(e["why"], fallback.get(e["rowid"], "Ranked for today."))
         opening = _opening(role, posted, fresh_ids, visa.get(cid, (None, None)), applied.get(cid),
                            e["list_group"] == "intern_junior", now, tz)
+        standing_row = standing(st, today, cfg, held=d.company.held)
         out[e["rowid"]] = CompanyQueue(
             size_line=size_line(d.size, d.stage),
             role_line=f"{role.title}, {_posted_age(posted, today, tz)}" if role is not None and posted is not None
             else None,
             hiring=n, hiring_line=_hiring_line(n), sponsorship_line=sponsorship,
             reasons=reasons,
-            standing=standing(st, today, cfg, held=d.company.held),
+            standing=standing_row,
             last_touch=_last_touch(by_company.get(cid, ()), people),
             email_hint=hints.get(cid),
             people_on_record=d.people_count, people_line=_people_line(d.people_count, st.people_contacted),
@@ -344,6 +328,8 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
                                          boards=boards.get(cid, ()), watched_url=watched.get(cid),
                                          domain=d.company.domain),
             terminal_line=f"Knock: {d.company.name} (company {cid})" + (f", role: {role.title}" if role else ""),
+            profile=company_profile(profiles, cid, d, judged.get(cid), standing_row, st.people_contacted, word, opening,
+                                    applied.get(cid)),
             why_today=_why_today(opening, reasons), opening=opening, website_url=website_url(d.company.domain),
             linkedin_company_url=linkedin_company_url(d.company.name), judge_line=judge_line(judged.get(cid)),
             judge_fit=judged[cid].fit if cid in judged else None)
@@ -373,7 +359,7 @@ def _opening(role, posted: sqlite3.Row | None, fresh_ids: dict, visa: tuple, app
         age, tag, early, seen_on = age_words(o, now, tz), None, o.early_fit, o.first_seen_on
     note = (f"You applied on {day_text(applied_on)}; this is a new role."
             if applied_on is not None and seen_on > applied_on else None)
-    return QueueOpening(posting_id=role.posting_id, title=scrub_text(role.title), url=_plain_url(role.url),
+    return QueueOpening(posting_id=role.posting_id, title=scrub_text(role.title), url=plain_url(role.url),
                         level=level_words(role.level_tier, role.years_asked, intern=intern), age=age,
                         opened_at=at.strftime("%Y-%m-%dT%H:%M:%SZ"),
                         fresh=fresh is not None, early_fit=early, fresh_tag=tag, applied_note=note)

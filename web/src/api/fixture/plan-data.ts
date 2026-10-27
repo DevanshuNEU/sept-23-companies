@@ -16,6 +16,7 @@ import type {
   SourceLink, TomorrowRow, WatchView, WinsView, Win,
 } from '../types';
 import type { Scenario } from './data';
+import { buildProfile } from './profile-data';
 import { benchRoom, buildBench, buildInFlight, buildQueueRows, companySearch, judgeOf, keywordSearch, openingOf, terminalLine, whyTodayOf } from './queue-data';
 
 /** What data.ts hands over: the clock, the company registry and the people and roles it already made. */
@@ -245,6 +246,11 @@ function companyQueue(c: PlanCtx, company: string, role: RoleToName | null): Pla
     reasons, standing: { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null },
     lastTouch: null, emailHint: null, peopleOnRecord: 0, peopleLine: 'Nobody on record yet',
     peopleSearchUrl: keywordSearch(company), searchSaved: false, careersUrl: 'https://cerebrium.example/careers/mts', terminalLine: terminalLine(company, id, role?.title ?? null),
+    profile: buildProfile({
+      company, size: '18 people (estimate), seed (guess)', domain: ref?.domain ?? null, standing: { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null },
+      onRecord: 0, contacted: 0, sponsorshipWord: null, opening,
+      role: role && opening ? { title: role.title, url: role.url, level: opening.level, age: 'posted 3 days ago', location: role.location, early: opening.earlyFit } : null,
+    }),
   };
 }
 

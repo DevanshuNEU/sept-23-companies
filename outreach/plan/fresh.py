@@ -38,7 +38,7 @@ from outreach.store.timefmt import ISO_FMT, iso_utc
 
 __all__ = ["PASSED", "PASS_REASONS", "EARLY_TIERS", "Opening", "early_career_fit", "level_words", "opened",
            "hours_old", "is_fresh", "visa_clear", "age_words", "fresh_tag", "plan_moment", "as_utc", "load_openings",
-           "load_visa_facts", "load_passes", "load_applied"]
+           "load_level_roles", "load_visa_facts", "load_passes", "load_applied"]
 
 PASSED = "pick_passed"  # event kind: Not now on a pick (entity company, actor devanshu)
 # The reasons of Not now, in the order of the chips (keys 1 to 8). None of them is a no-go.
@@ -181,7 +181,7 @@ _OPENINGS = (
     "SELECT p.posting_id, p.company_id, p.board_id, p.title, p.url, p.location, p.posted_on, p.first_seen_at, d.* "
     "FROM posting p JOIN decision d ON d.posting_id = p.posting_id "
     "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
-    "WHERE p.closed_at IS NULL AND p.first_seen_at >= ? ORDER BY p.posting_id")
+    "WHERE p.closed_at IS NULL AND {where} ORDER BY p.posting_id")
 
 
 def _lane(d) -> str:
@@ -191,18 +191,15 @@ def _lane(d) -> str:
     return "level_role" if d.level_ok else "any_us_role"
 
 
-def load_openings(conn: sqlite3.Connection, canon: dict[int, int], now: datetime,
-                  cfg: PlanConfig) -> dict[int, tuple[Opening, ...]]:
-    """Every surviving company's openings that opened within `queue.fresh_hours` of `now`, at his level, visible
-    (`posting_visible` under the current ruleset), on a trusted board and not stale, by company: early career fits
-    first, then the newest. The SQL keeps postings first seen inside the window (an opening never opens after its
-    first sighting); `opened` and `is_fresh` decide."""
-    tz = cfg.get("plan", "timezone")
-    role_lanes = set(cfg.get("lanes", "role"))
-    since = now - timedelta(hours=cfg.get("queue", "fresh_hours"))
-    rows = conn.execute(_OPENINGS, (_iso(since),)).fetchall()
+def _build(conn: sqlite3.Connection, rows: list[sqlite3.Row], canon: dict[int, int], now: datetime, cfg: PlanConfig,
+           *, only_fresh: bool) -> dict[int, tuple[Opening, ...]]:
+    """The openings among these posting rows: visible (`posting_visible` under the current ruleset), on a trusted
+    board, not stale, in a role lane, and (with `only_fresh`) opened within `queue.fresh_hours` of `now`. By company:
+    early career fits first, then the newest."""
     if not rows:
         return {}
+    tz = cfg.get("plan", "timezone")
+    role_lanes = set(cfg.get("lanes", "role"))
     doubtful = doubtful_board_ids(conn)
     stale = load_stale(conn, now.astimezone(ZoneInfo(tz)).date(), posting_ids=[r["posting_id"] for r in rows])
     out: dict[int, list[Opening]] = {}
@@ -218,7 +215,7 @@ def load_openings(conn: sqlite3.Connection, canon: dict[int, int], now: datetime
         seen = as_utc(r["first_seen_at"])
         posted = date.fromisoformat(r["posted_on"]) if r["posted_on"] else None
         at, timed = opened(posted, seen, tz)
-        if not is_fresh(at, now, cfg):
+        if only_fresh and not is_fresh(at, now, cfg):
             continue
         cid = canon.get(r["company_id"], r["company_id"])
         out.setdefault(cid, []).append(Opening(
@@ -228,6 +225,28 @@ def load_openings(conn: sqlite3.Connection, canon: dict[int, int], now: datetime
             opened_at=at, timed=timed))
     return {c: tuple(sorted(os, key=lambda o: (not o.early_fit, -o.opened_at.timestamp(), -o.posting_id)))
             for c, os in out.items()}
+
+
+def load_openings(conn: sqlite3.Connection, canon: dict[int, int], now: datetime,
+                  cfg: PlanConfig) -> dict[int, tuple[Opening, ...]]:
+    """Every surviving company's openings that opened within `queue.fresh_hours` of `now`, at his level, visible
+    (`posting_visible` under the current ruleset), on a trusted board and not stale, by company: early career fits
+    first, then the newest. The SQL keeps postings first seen inside the window (an opening never opens after its
+    first sighting); `opened` and `is_fresh` decide."""
+    since = now - timedelta(hours=cfg.get("queue", "fresh_hours"))
+    rows = conn.execute(_OPENINGS.format(where="p.first_seen_at >= ?"), (_iso(since),)).fetchall()
+    return _build(conn, rows, canon, now, cfg, only_fresh=True)
+
+
+def load_level_roles(conn: sqlite3.Connection, canon: dict[int, int], company_ids: Collection[int], now: datetime,
+                     cfg: PlanConfig) -> dict[int, tuple[Opening, ...]]:
+    """Every open role at his level of these surviving companies (and their merged duplicates), new or old, by
+    company: the same rules as `load_openings` without the freshness window. One query for the whole set."""
+    wanted = set(company_ids)
+    family = wanted | {c for c, s in canon.items() if s in wanted}
+    rows = conn.execute(_OPENINGS.format(where="p.company_id IN (SELECT value FROM json_each(?))"),
+                        (_ids(family),)).fetchall()
+    return _build(conn, rows, canon, now, cfg, only_fresh=False)
 
 
 def load_visa_facts(conn: sqlite3.Connection, canon: dict[int, int],

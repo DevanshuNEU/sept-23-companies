@@ -306,12 +306,34 @@ export interface QueueStanding {
   status: 'new' | 'in_flight' | 'asked_before' | 'replied'; text: string; reason: string; // text: "4 asked 6 days ago, free again Nov 18"
   asked: number; room: number; freeOn: IsoDate | null;                               // the wave: people asked, room left (of 4), the day it is free again
 }
+/** One fact of a company's profile in the words the page shows: `text` null is "Not known"; `note` is how sure and from where. */
+export interface ProfileValue { text: string | null; note: string | null }
+export interface ProfileRole {
+  postingId: Id; title: string; url: string | null; level: string | null;           // level: "New grad role", "SWE II role"
+  age: string; location: string; earlyFit: boolean;                                  // age: "first seen 6 hours ago", "posted 4 days ago"
+}
+export interface ProfileHistory {
+  applied: string | null;                                                            // "You applied on Oct 20; this is a new role."
+  passes: string[];                                                                  // "Not now on Nov 7: too big", newest first, up to 3
+}
+/** What does not change about a company (the Today redesign), every line the API's. */
+export interface CompanyProfile {
+  builds: ProfileValue; domains: string[];                                           // the judge's sentence and its domains in words
+  verdict: ProfileValue; risk: string | null;                                        // the judge's reason for its fit, and its risk line
+  stage: ProfileValue; funding: ProfileValue; headcount: ProfileValue;
+  hq: ProfileValue; rolePlaces: ProfileValue;                                        // where the open roles at his level are
+  everify: ProfileValue; sponsorship: ProfileValue; lca: ProfileValue;               // lca: "6 software LCA filings in FY2024 and FY2025"
+  roles: ProfileRole[];                                                              // open roles at his level, early career fits first, up to 5
+  people: ProfileValue;                                                              // "2 on record, none asked yet"
+  history: ProfileHistory;
+}
 export interface CompanyQueue {
   sizeLine: string | null; roleLine: string | null; hiring: number; hiringLine: string; sponsorshipLine: string;
   reasons: string[]; standing: QueueStanding; lastTouch: string | null; emailHint: string | null;
   peopleOnRecord: number; peopleLine: string;
   peopleSearchUrl: string; searchSaved: boolean; careersUrl: string | null;          // opened in his browser, never fetched
   terminalLine: string;                                                              // "Knock: Tessera Labs (company 1304), role: Forward Deployed Engineer"
+  profile: CompanyProfile;                                                           // what does not change about the company, on every company row
   // Top picks (2026-10-26): why today first, then the three research links. The app never fetches linkedin.com.
   whyToday: string;                                                                  // "New grad role, first seen 6 hours ago"
   opening: QueueOpening | null;

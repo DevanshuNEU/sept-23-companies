@@ -255,3 +255,116 @@ class JudgeLineTest(QueueCase):
         self.judge(self.tessera, "2026-09-01T11:10:00Z")
         q = self.row(self.tessera_entry)["queue"]
         self.assertEqual(("Judge: not judged yet.", None), (q["judgeLine"], q["judgeFit"]))
+
+
+class ProfileTest(QueueCase):
+    """The profile of a company row (the Today redesign): the facts that do not change, each with where it comes from,
+    and None where nothing is known. One set-based read, so the page shows them as given."""
+
+    def judge(self, company_id, at="2026-11-09T11:10:00Z", **over):
+        from outreach.judge.store import record_judgment
+        fields = {"fit": 72, "builds": "Builds AI agents for ERP migrations.", "domains": ["ai_agents", "devtools"],
+                  "why": "Agent work is his work.", "risk": "The role asks for two years.", "level_ok": "unknown",
+                  "quotes": [], "evidence": [], "thin": True, **over}
+        record_judgment(self.conn, company_id, fields, version="jv-1", key="k", posting="p", pages=[], at=at)
+
+    def profile(self, entry_id):
+        return self.row(entry_id)["queue"]["profile"]
+
+    def test_every_fact_is_shown_with_its_confidence_and_source(self):
+        c, t = self.conn, self.tessera
+        s.evidence(c, t, "hq", "San Francisco, CA", confidence="estimate", source_kind="linkedin")
+        s.evidence(c, t, "funding", {"filed_on": "2026-09-12", "amount_usd": 4000000, "kind": "form_d"},
+                   source_kind="formd")
+        s.evidence(c, t, "sponsorship", "yes", locked=True)
+        self.judge(t)
+        p = self.profile(self.tessera_entry)
+        self.assertEqual({"text": "Builds AI agents for ERP migrations.", "note": "Judged Nov 9, thin evidence"}, p["builds"])
+        self.assertEqual(["AI agents", "Dev tools"], p["domains"])
+        self.assertEqual({"text": "Agent work is his work.", "note": None}, p["verdict"])
+        self.assertEqual("The role asks for two years.", p["risk"])
+        self.assertEqual({"text": "Seed", "note": "guess, its website"}, p["stage"])
+        self.assertEqual({"text": "$4,000,000 raised, Form D filed Sep 12, 2026", "note": "confirmed, SEC Form D"},
+                         p["funding"])
+        self.assertEqual({"text": "40 to 60 people", "note": "estimate, its website"}, p["headcount"])
+        self.assertEqual({"text": "San Francisco, CA", "note": "estimate, LinkedIn"}, p["hq"])
+        self.assertEqual({"text": "E-Verify enrolled", "note": "confirmed, its website, checked Oct 21"}, p["everify"])
+        self.assertEqual({"text": "Says it sponsors", "note": "set by you"}, p["sponsorship"])
+
+    def test_a_posting_that_says_it_sponsors_and_filings_say_it_has(self):
+        self.conn.execute("UPDATE decision SET sponsorship = 'yes', sponsorship_quote = 'We sponsor visas.' "
+                          "WHERE posting_id = ?", (self.role,))
+        s.evidence(self.conn, self.avante, "lca", s.lca(2025, 3), source_kind="lca")
+        self.assertEqual({"text": "Says it sponsors", "note": "from a posting"},
+                         self.profile(self.tessera_entry)["sponsorship"])
+        self.assertEqual({"text": "Has sponsored before", "note": "from its LCA filings"},
+                         self.profile(self.avante_entry)["sponsorship"])
+
+    def test_a_company_nothing_is_known_about_has_no_text_and_never_an_error(self):
+        p = self.profile(self.avante_entry)
+        for key in ("builds", "stage", "funding", "headcount", "hq", "everify", "sponsorship", "lca", "rolePlaces"):
+            self.assertIsNone(p[key]["text"], key)
+        self.assertEqual([], p["domains"])
+        self.assertIsNone(p["verdict"]["text"])
+        self.assertIsNone(p["risk"])
+        self.assertEqual([], p["roles"])
+
+    def test_lca_filings_of_the_last_two_fiscal_years_are_added_up(self):
+        c, t = self.conn, self.tessera
+        for fy, n in ((2023, 9), (2024, 2), (2025, 4)):
+            s.evidence(c, t, "lca", s.lca(fy, n), source_kind="lca", source_ref=f"fy{fy}")
+        self.assertEqual({"text": "6 software LCA filings in FY2024 and FY2025", "note": "DOL disclosure data"},
+                         self.profile(self.tessera_entry)["lca"])
+
+    def test_one_fiscal_year_of_lca_filings_and_a_year_with_none(self):
+        s.evidence(self.conn, self.tessera, "lca", s.lca(2025, 1), source_kind="lca")
+        s.evidence(self.conn, self.avante, "lca", s.lca(2025, 0), source_kind="lca")
+        self.assertEqual("1 software LCA filing in FY2025", self.profile(self.tessera_entry)["lca"]["text"])
+        self.assertEqual("No software LCA filings in FY2025", self.profile(self.avante_entry)["lca"]["text"])
+
+    def test_the_open_roles_at_his_level_newest_first_and_never_more_than_five(self):
+        c, t = self.conn, self.tessera
+        for i in range(5):
+            p = s.posting(c, t, f"Software Engineer {i}", first_seen_at=f"2026-11-0{i + 2}T12:00:00Z",
+                          url=f"https://jobs.example/x{i}", location="Remote US")
+            s.decision(c, p, level_tier="swe2")
+        roles = self.profile(self.tessera_entry)["roles"]
+        self.assertEqual(5, len(roles))
+        # Early career fits first (new grad), then the newest of the rest.
+        self.assertEqual(["Forward Deployed Engineer", "Backend Engineer", "Platform Engineer", "Software Engineer 4",
+                          "Software Engineer 3"], [r["title"] for r in roles])
+        self.assertEqual(("https://jobs.example/x4", "SWE II role"), (roles[3]["url"], roles[3]["level"]))
+        self.assertRegex(roles[3]["age"], r"^first seen \d+ days ago$")
+        self.assertNotIn("Account Executive", [r["title"] for r in roles])
+        self.assertNotIn("Old Engineer", [r["title"] for r in roles])
+
+    def test_roles_that_are_not_engineering_or_are_closed_are_left_out(self):
+        titles = [r["title"] for r in self.profile(self.tessera_entry)["roles"]]
+        self.assertEqual({"Forward Deployed Engineer", "Backend Engineer", "Platform Engineer"}, set(titles))
+        self.assertEqual("Forward Deployed Engineer", titles[0])  # the newest first
+        self.assertEqual({"text": "San Francisco, CA", "note": None}, self.profile(self.tessera_entry)["rolePlaces"])
+
+    def test_people_on_record_and_when_the_company_is_free_again(self):
+        self.assertEqual("2 on record, none asked yet", self.profile(self.tessera_entry)["people"]["text"])
+        self.assertEqual("4 on record, 4 asked, free again Nov 18", self.profile(self.avante_entry)["people"]["text"])
+
+    def test_an_application_before_a_new_role_says_so_and_one_with_no_role_still_says_it(self):
+        self.conn.execute("INSERT INTO application(company_id, applied_on) VALUES (?, '2026-10-20')", (self.tessera,))
+        self.conn.execute("INSERT INTO application(company_id, applied_on) VALUES (?, '2026-10-20')", (self.avante,))
+        self.assertEqual("You applied on Oct 20; this is a new role.",
+                         self.profile(self.tessera_entry)["history"]["applied"])
+        self.assertEqual("You applied on Oct 20.", self.profile(self.avante_entry)["history"]["applied"])
+        self.assertIsNone(self.profile(self.quill_entry)["history"]["applied"])
+
+    def test_a_not_now_is_listed_with_its_reason_newest_first(self):
+        s.event(self.conn, self.quill, "pick_passed", "2026-10-02T15:00:00Z", actor="devanshu", detail={"reason": "role"})
+        s.event(self.conn, self.quill, "pick_passed", "2026-11-07T15:00:00Z", actor="devanshu",
+                detail={"reason": "too_big"})
+        s.event(self.conn, self.quill, "pick_passed", "2026-11-01T15:00:00Z", actor="devanshu", detail={"reason": None})
+        self.assertEqual(["Not now on Nov 7: too big", "Not now on Nov 1", "Not now on Oct 2: role not for me"],
+                         self.profile(self.quill_entry)["history"]["passes"])
+
+    def test_a_merged_duplicate_counts_for_its_survivor(self):
+        dup = s.company(self.conn, "Tessera", status="removed", merged_into=self.tessera)
+        s.evidence(self.conn, dup, "hq", "Austin, TX", confidence="guess", source_kind="hn")
+        self.assertEqual({"text": "Austin, TX", "note": "guess, Hacker News"}, self.profile(self.tessera_entry)["hq"])

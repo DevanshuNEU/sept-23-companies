@@ -736,6 +736,91 @@
         "title": "CompanyPerson",
         "type": "object"
       },
+      "CompanyProfile": {
+        "description": "What does not change about a company (the Today redesign): what it builds, how big and where, its visa position,\nits open roles at his level, the people on record and his own history with it. Every line is the API's.",
+        "properties": {
+          "builds": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Domains",
+            "type": "array"
+          },
+          "everify": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "funding": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "headcount": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "history": {
+            "$ref": "#/components/schemas/ProfileHistory"
+          },
+          "hq": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "lca": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "people": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "risk": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk"
+          },
+          "rolePlaces": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileRole"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "sponsorship": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/ProfileValue"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ProfileValue"
+          }
+        },
+        "required": [
+          "builds",
+          "domains",
+          "verdict",
+          "risk",
+          "stage",
+          "funding",
+          "headcount",
+          "hq",
+          "rolePlaces",
+          "everify",
+          "sponsorship",
+          "lca",
+          "roles",
+          "people",
+          "history"
+        ],
+        "title": "CompanyProfile",
+        "type": "object"
+      },
       "CompanyQueue": {
         "description": "A company row's lines (company first, #9 2026-10-26). Every line is the API's; the page shows them as given.",
         "properties": {
@@ -823,6 +908,9 @@
             "title": "Peoplesearchurl",
             "type": "string"
           },
+          "profile": {
+            "$ref": "#/components/schemas/CompanyProfile"
+          },
           "reasons": {
             "items": {
               "type": "string"
@@ -900,6 +988,7 @@
           "searchSaved",
           "careersUrl",
           "terminalLine",
+          "profile",
           "whyToday",
           "opening",
           "websiteUrl",
@@ -5087,6 +5176,125 @@
           "score"
         ],
         "title": "PreviousScore",
+        "type": "object"
+      },
+      "ProfileHistory": {
+        "properties": {
+          "applied": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied"
+          },
+          "passes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Passes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "applied",
+          "passes"
+        ],
+        "title": "ProfileHistory",
+        "type": "object"
+      },
+      "ProfileRole": {
+        "description": "An open engineering role at his level: what the profile's roles list shows.",
+        "properties": {
+          "age": {
+            "title": "Age",
+            "type": "string"
+          },
+          "earlyFit": {
+            "title": "Earlyfit",
+            "type": "boolean"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "postingId",
+          "title",
+          "url",
+          "level",
+          "age",
+          "location",
+          "earlyFit"
+        ],
+        "title": "ProfileRole",
+        "type": "object"
+      },
+      "ProfileValue": {
+        "description": "One fact of a company's profile in the words the page shows. `text` is None when nothing is known (the page says\n\"Not known\", never an error); `note` says how sure it is and where it comes from (\"estimate, LinkedIn\").",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "text",
+          "note"
+        ],
+        "title": "ProfileValue",
         "type": "object"
       },
       "ProgressPeriod": {

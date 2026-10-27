@@ -1371,6 +1371,31 @@ export interface components {
             tone: "ok" | "info" | "warn" | "bad" | "idle";
         };
         /**
+         * CompanyProfile
+         * @description What does not change about a company (the Today redesign): what it builds, how big and where, its visa position,
+         *     its open roles at his level, the people on record and his own history with it. Every line is the API's.
+         */
+        CompanyProfile: {
+            builds: components["schemas"]["ProfileValue"];
+            /** Domains */
+            domains: string[];
+            everify: components["schemas"]["ProfileValue"];
+            funding: components["schemas"]["ProfileValue"];
+            headcount: components["schemas"]["ProfileValue"];
+            history: components["schemas"]["ProfileHistory"];
+            hq: components["schemas"]["ProfileValue"];
+            lca: components["schemas"]["ProfileValue"];
+            people: components["schemas"]["ProfileValue"];
+            /** Risk */
+            risk: string | null;
+            rolePlaces: components["schemas"]["ProfileValue"];
+            /** Roles */
+            roles: components["schemas"]["ProfileRole"][];
+            sponsorship: components["schemas"]["ProfileValue"];
+            stage: components["schemas"]["ProfileValue"];
+            verdict: components["schemas"]["ProfileValue"];
+        };
+        /**
          * CompanyQueue
          * @description A company row's lines (company first, #9 2026-10-26). Every line is the API's; the page shows them as given.
          */
@@ -1404,6 +1429,7 @@ export interface components {
             peopleOnRecord: number;
             /** Peoplesearchurl */
             peopleSearchUrl: string;
+            profile: components["schemas"]["CompanyProfile"];
             /** Reasons */
             reasons: string[];
             /** Roleline */
@@ -2803,6 +2829,44 @@ export interface components {
             rankerVersion: string;
             /** Score */
             score: number;
+        };
+        /** ProfileHistory */
+        ProfileHistory: {
+            /** Applied */
+            applied: string | null;
+            /** Passes */
+            passes: string[];
+        };
+        /**
+         * ProfileRole
+         * @description An open engineering role at his level: what the profile's roles list shows.
+         */
+        ProfileRole: {
+            /** Age */
+            age: string;
+            /** Earlyfit */
+            earlyFit: boolean;
+            /** Level */
+            level: string | null;
+            /** Location */
+            location: string;
+            /** Postingid */
+            postingId: number;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string | null;
+        };
+        /**
+         * ProfileValue
+         * @description One fact of a company's profile in the words the page shows. `text` is None when nothing is known (the page says
+         *     "Not known", never an error); `note` says how sure it is and where it comes from ("estimate, LinkedIn").
+         */
+        ProfileValue: {
+            /** Note */
+            note: string | null;
+            /** Text */
+            text: string | null;
         };
         /** ProgressPeriod */
         ProgressPeriod: {

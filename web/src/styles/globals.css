@@ -57,6 +57,24 @@
   --idle-bd: #e4e4e7;
   --idle-dot: #a1a1aa;
 
+  /* Monogram tiles on Today's rail (one calm hue per company name, never the brand violet): text on tile at 6:1 or more. */
+  --mono-teal-bg: #d3eeea;
+  --mono-teal-fg: #0b5650;
+  --mono-cyan-bg: #d2ebf6;
+  --mono-cyan-fg: #0b5372;
+  --mono-green-bg: #d6efda;
+  --mono-green-fg: #165f2b;
+  --mono-amber-bg: #f5e5bf;
+  --mono-amber-fg: #764606;
+  --mono-orange-bg: #f9dac7;
+  --mono-orange-fg: #85380b;
+  --mono-rose-bg: #f8d7df;
+  --mono-rose-fg: #99193b;
+  --mono-slate-bg: #dce2ee;
+  --mono-slate-fg: #2d4266;
+  --mono-olive-bg: #e4ecc2;
+  --mono-olive-fg: #4a5809;
+
   color-scheme: light;
 }
 
@@ -111,6 +129,23 @@
   --idle-bg: #27272a;
   --idle-bd: #3f3f46;
   --idle-dot: #71717a;
+
+  --mono-teal-bg: #133632;
+  --mono-teal-fg: #86ddd3;
+  --mono-cyan-bg: #12344a;
+  --mono-cyan-fg: #92d4f2;
+  --mono-green-bg: #143821;
+  --mono-green-fg: #8ddfa0;
+  --mono-amber-bg: #3d2c0d;
+  --mono-amber-fg: #f2c870;
+  --mono-orange-bg: #40240f;
+  --mono-orange-fg: #f6ad82;
+  --mono-rose-bg: #42192a;
+  --mono-rose-fg: #f59fb5;
+  --mono-slate-bg: #212a3d;
+  --mono-slate-fg: #aebfe0;
+  --mono-olive-bg: #2c3310;
+  --mono-olive-fg: #cbdb78;
 
   color-scheme: dark;
 }

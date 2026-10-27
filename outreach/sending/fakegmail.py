@@ -8,7 +8,9 @@ Gmail behaviour copied on purpose:
   Gmail API's threading rule says; an unknown threadId is a 404;
 - `history` returns messages added after the cursor (exclusive) and the mailbox's newest history id;
 - Gmail's own bounce (DSN) shape: `Mail Delivery Subsystem <mailer-daemon@googlemail.com>`,
-  `Delivery Status Notification (Failure)` or `(Delay)`, `X-Failed-Recipients` on failures only.
+  `Delivery Status Notification (Failure)` or `(Delay)`, `X-Failed-Recipients` on failures only;
+- Gmail's API storing a sent email under a Message-ID of its own (`rewrite_message_ids`, on by default: what the
+  real Gmail did on the first live send) and keeping the sender's `X-Outreach-Id` marker (unless `drop_markers`).
 """
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -86,7 +88,11 @@ class FakeGmail(MailClient):
         self.calls: list[str] = []
         self.find_sent_page_cap: int | None = 10     # pages find_sent may read, as the real client; None unlimited
         self.find_sent_page_size = 50
-        self.rewrite_message_ids = False             # Gmail stores sends under its own Message-ID
+        self.rewrite_message_ids = True              # Gmail stores sends under its own Message-ID (as the real one)
+        self.keep_original_id = False                # ... and keeps the one set as X-Google-Original-Message-ID
+        self.drop_markers = False                    # Gmail does not keep the X-Outreach-Id header
+        self.readback_fails = False                  # the client's read back after a send fails (marker unread)
+        self.fail_reads: BaseException | None = None  # every message read (`message`, each in a Sent scan) raises
         self._lands_at: dict[str, datetime] = {}     # a Sent entry find_sent cannot see before this time
         self._messages: dict[str, MessageMeta] = {}
         self._threads: dict[str, list[str]] = {}
@@ -115,25 +121,31 @@ class FakeGmail(MailClient):
         """The next history call raises HistoryExpired, as Gmail's 404 for a cursor that is too old."""
         self._expire_next_history = True
 
-    def change_stored(self, gmail_message_id: str, *, message_id: str | None = None,
+    def change_stored(self, gmail_message_id: str, *, message_id: str | None = None, marker: str | None = None,
                       labels: tuple[str, ...] | None = None) -> None:
-        """Gmail now shows a stored message with another Message-ID header or labels: a rewrite the send itself did
-        not report (the real client's read back can fail and still report the send), or a message moved out of
-        Sent. Sent scans and `message` see the change."""
+        """Gmail now shows a stored message with another Message-ID header, marker (`''` removes it) or labels: a
+        change the send itself did not report, or a message moved out of Sent. Sent scans and `message` see it."""
         old = self._messages[gmail_message_id]
         headers = dict(old.headers)
         if message_id is not None:
             headers["message-id"] = message_id
+        if marker == "":
+            headers.pop("x-outreach-id", None)
+        elif marker is not None:
+            headers["x-outreach-id"] = marker
         new = replace(old, headers=headers, labels=old.labels if labels is None else labels)
         self._messages[gmail_message_id] = new
         self.sent_box = [new if m.gmail_message_id == gmail_message_id else m for m in self.sent_box]
 
     def add_to_sent(self, to: str, subject: str, *, message_id: str, at: datetime | None = None,
-                    thread_id: str | None = None) -> MessageMeta:
-        """Put a message in Sent that this fake did not send (his own mail, or a decoy). Not counted in `sent`."""
+                    thread_id: str | None = None, marker: str | None = None) -> MessageMeta:
+        """Put a message in Sent that this fake did not send (his own mail, or a decoy), with `marker` as its
+        `X-Outreach-Id` when given. Not counted in `sent`."""
+        headers = {"message-id": message_id, "content-type": 'text/plain; charset="utf-8"'}
+        if marker is not None:
+            headers["x-outreach-id"] = marker
         meta = self._store(thread_id or self._new_thread(), formataddr(("Devanshu", self.account)), to, subject,
-                           ("SENT",), {"message-id": message_id, "content-type": 'text/plain; charset="utf-8"'},
-                           "", at)
+                           ("SENT",), headers, "", at)
         self.sent_box.append(meta)
         return meta
 
@@ -199,10 +211,15 @@ class FakeGmail(MailClient):
             if _subject_key(first.subject) != _subject_key(m.subject):
                 thread_id = None                       # Gmail threads only when the subjects match
         stored_id = m.message_id
+        headers = {"content-type": 'text/plain; charset="utf-8"'}
         if self.rewrite_message_ids:
             self._next_rfc += 1
             stored_id = f"<rewritten{self._next_rfc}@mail.gmail.com>"
-        headers = {"message-id": stored_id, "content-type": 'text/plain; charset="utf-8"'}
+            if self.keep_original_id:
+                headers["x-google-original-message-id"] = m.message_id
+        headers["message-id"] = stored_id
+        if not self.drop_markers:
+            headers["x-outreach-id"] = m.marker
         if m.in_reply_to:
             headers["in-reply-to"] = m.in_reply_to
         refs = m.references or ((m.in_reply_to,) if m.in_reply_to else ())
@@ -210,7 +227,8 @@ class FakeGmail(MailClient):
             headers["references"] = " ".join(refs)
         meta = self._store(thread_id or self._new_thread(), formataddr((m.from_name, m.from_addr)), m.to,
                            m.subject, ("SENT",), headers, " ".join(m.body.split())[:100], None)
-        sent = Sent(gmail_message_id=meta.gmail_message_id, thread_id=meta.thread_id, rfc_message_id=stored_id)
+        sent = Sent(gmail_message_id=meta.gmail_message_id, thread_id=meta.thread_id, rfc_message_id=stored_id,
+                    marker=headers.get("x-outreach-id", ""))
         self.sent.append((m, sent, self.clock()))
         if failure is None or failure[2]:
             self.sent_box.append(meta)
@@ -218,9 +236,9 @@ class FakeGmail(MailClient):
                 self._lands_at[meta.gmail_message_id] = self.clock() + failure[3]
         if failure is not None:
             raise failure[0]
-        if stored_id != m.message_id:
-            raise GmailError("message_id_rewritten", None, "Gmail stored the email under another Message-ID",
-                             sent=sent)
+        if self.readback_fails:
+            # As the real client when its read back fails: the claimed id, the marker unread.
+            return Sent(gmail_message_id=meta.gmail_message_id, thread_id=meta.thread_id, rfc_message_id=m.message_id)
         return sent
 
     def history(self, start_history_id: str) -> HistoryPage:
@@ -240,6 +258,12 @@ class FakeGmail(MailClient):
 
     def message(self, gmail_message_id: str) -> MessageMeta:
         self._enter("message")
+        return self._read(gmail_message_id)
+
+    def _read(self, gmail_message_id: str) -> MessageMeta:
+        """One message's metadata, as the real client's GET: `fail_reads` makes every such read fail."""
+        if self.fail_reads is not None:
+            raise self.fail_reads
         try:
             return self._messages[gmail_message_id]
         except KeyError:
@@ -251,15 +275,17 @@ class FakeGmail(MailClient):
             raise GmailError("bad_request", 404, "Requested entity was not found.")
         return [self._messages[mid] for mid in self._threads[thread_id]]
 
-    def find_sent(self, rfc_message_id: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
-        """Newest first, a page at a time, by the same rules as the real client (see MailClient.find_sent)."""
+    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+        """Newest first, a page at a time, by the same rules as the real client (see MailClient.find_sent): the
+        marker matches, never the Message-ID. Like the real client it reads each listed message's headers in turn,
+        and a failed read fails the scan."""
         self._enter("find_sent")
         now = self.clock()
         visible = [(i, meta) for i, meta in enumerate(self.sent_box)
                    if self._lands_at.get(meta.gmail_message_id, now) <= now]
         newest_first = sorted(visible, key=lambda p: (p[1].internal_ms, p[0]), reverse=True)
         box = [meta for _, meta in newest_first]
-        wanted = normalise_message_id(rfc_message_id)
+        wanted = normalise_message_id(marker)
         size, pages, complete = self.find_sent_page_size, 0, True
         for start in range(0, len(box), size):
             if self.find_sent_page_cap is not None and pages >= self.find_sent_page_cap:
@@ -267,9 +293,12 @@ class FakeGmail(MailClient):
                 break
             pages += 1
             page = box[start:start + size]
-            for meta in page:
-                if normalise_message_id(meta.headers.get("message-id")) == wanted:
-                    return Sent(meta.gmail_message_id, meta.thread_id, rfc_message_id), True
+            for listed in page:
+                meta = self._read(listed.gmail_message_id)
+                if wanted and wanted in (normalise_message_id(meta.headers.get("x-outreach-id")),
+                                         normalise_message_id(meta.headers.get("x-google-original-message-id"))):
+                    return Sent(meta.gmail_message_id, meta.thread_id,
+                                normalise_message_id(meta.headers.get("message-id")) or marker, wanted), True
             if page_reaches([meta.internal_ms for meta in page], not_before_ms):
                 break
         now_ms = int(now.timestamp() * 1000)

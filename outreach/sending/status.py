@@ -2,9 +2,9 @@
 
 Read only: nothing here writes, opens a transaction or calls Gmail. The snapshot is what the Outbox's sending strip
 shows; `queue_schedule` is the same `verdicts` the tick uses, with the same gate (paused, signed out, old sender
-loaded, Message-ID not proven) and the same one first email while it is not proven (`queue.first_only`), so "when
-it will go" on the Outbox is the sender's own answer and never a second copy of the rules. A message waiting on the
-proof reads the line for where the first email stands (`reason_text`).
+loaded, the sender's marker not proven) and the same one first email while it is not proven (`queue.first_only`),
+so "when it will go" on the Outbox is the sender's own answer and never a second copy of the rules. A message
+waiting on the proof reads the line for where the first email stands (`reason_text`).
 
 The store cannot say whether the old mailer's launchd job is loaded (only a `launchctl` call can), so a caller that
 knows passes `old_sender_loaded=True`; the snapshot then shows `paused_by_you` with a reason, and every message
@@ -84,7 +84,7 @@ def queue_schedule(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *,
                    old_sender_loaded: bool = False) -> dict[int, Verdict]:
     """The tick's verdict for every approved message, by message id, in queue order: the reason it waits (or
     `ready`) and, for a wait that ends by itself, when. While Gmail is unproven and no email is claimed yet, only
-    the first email keeps its own verdict, as in the tick."""
+    the first email keeps its own verdict, as in the tick (the marker proof, `proof`)."""
     day = ramp.today_state(conn, now, cfg)
     gate = _gate(conn, old_sender_loaded)
     found = queue.verdicts(conn, now, cfg, day=day, gate=gate)

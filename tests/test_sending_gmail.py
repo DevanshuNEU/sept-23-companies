@@ -34,10 +34,11 @@ from tests.test_sending_fakegmail import BAD_IDS, GOOD_IDS  # noqa: E402  one li
 
 
 def outgoing(to="founder@sendwell.example", subject="Backend role at Sendwell", *, message_id="<a1@gmail.com>",
-             thread_id=None, in_reply_to=None, references=(), body="Hi Sam,\n\nShort note.\n\nDevanshu"):
+             thread_id=None, in_reply_to=None, references=(), body="Hi Sam,\n\nShort note.\n\nDevanshu", marker=None):
+    """An email as `claim.outgoing_for` builds it: the marker is the claimed token, the Message-ID's value."""
     return Outgoing(to=to, subject=subject, body=body, from_name="Devanshu C", from_addr=ACCOUNT,
                     message_id=message_id, thread_id=thread_id, in_reply_to=in_reply_to,
-                    references=tuple(references))
+                    references=tuple(references), marker=message_id if marker is None else marker)
 
 
 def http_error(code: int, body: str) -> urllib.error.HTTPError:
@@ -58,11 +59,14 @@ class Transport:
 
 
 class SentFolder:
-    """Answers the Sent listing and metadata reads. `entries` is newest first: (gmail id, Message-ID, ms)."""
+    """Answers the Sent listing and metadata reads. `entries` is newest first: (gmail id, marker, ms); a marker of
+    None is a message without one. Every message has a Message-ID of Gmail's own (`<gm-<gmail id>@mail.gmail.com>`)
+    unless `message_ids` names another."""
 
-    def __init__(self, entries, page=50):
+    def __init__(self, entries, page=50, message_ids=None):
         self.entries = entries
         self.page = page
+        self.message_ids = message_ids or {}
         self.list_calls = 0
         self.reads = []
 
@@ -78,13 +82,15 @@ class SentFolder:
                 res["nextPageToken"] = str(start + size)
             return res
         gid = path.rsplit("/", 1)[1]
-        assert query["format"] == "metadata" and query["metadataHeaders"] == ["Message-ID"], query
+        assert query["format"] == "metadata" and query["metadataHeaders"] == gmail.ID_HEADERS, query
         self.reads.append(gid)
-        _, rfc, at = next(e for e in self.entries if e[0] == gid)
-        res = {"id": gid, "threadId": "th-" + gid,
-               "payload": {"headers": [{"name": "Message-Id", "value": rfc},
-                                        {"name": "To", "value": "founder@sendwell.example"},
-                                        {"name": "Subject", "value": "Backend role at Sendwell"}]}}
+        _, marker, at = next(e for e in self.entries if e[0] == gid)
+        headers = [{"name": "Message-Id", "value": self.message_ids.get(gid, f"<gm-{gid}@mail.gmail.com>")},
+                   {"name": "To", "value": "founder@sendwell.example"},
+                   {"name": "Subject", "value": "Backend role at Sendwell"}]
+        if marker is not None:
+            headers.append({"name": "x-outreach-id", "value": marker})
+        res = {"id": gid, "threadId": "th-" + gid, "payload": {"headers": headers}}
         if at is not None:
             res["internalDate"] = str(at)
         return res
@@ -305,13 +311,20 @@ class MimeTest(unittest.TestCase):
         self.assertEqual(msg["From"], "Devanshu C <devanshurajesh@gmail.com>")
         self.assertEqual(msg["Subject"], "Backend role at Sendwell")
         self.assertEqual(msg["Message-ID"], "<a1@gmail.com>")
+        self.assertEqual(msg["X-Outreach-Id"], "<a1@gmail.com>")
         self.assertFalse(msg.is_multipart())
         self.assertEqual(msg.get_content_type(), "text/plain")
         self.assertEqual(msg.get_content_charset(), "utf-8")
         self.assertEqual(msg.get_content().rstrip("\n"), "Hi Sam,\n\nCafé at 5?\n\nDevanshu")
         names = {k.lower() for k in msg.keys()}
-        self.assertEqual(names, {"to", "from", "subject", "message-id", "mime-version", "content-type",
-                                 "content-transfer-encoding"})
+        self.assertEqual(names, {"to", "from", "subject", "message-id", "x-outreach-id", "mime-version",
+                                 "content-type", "content-transfer-encoding"})
+
+    def test_every_email_carries_its_marker(self):
+        for m in (outgoing(), outgoing(subject="Re: Backend role at Sendwell", message_id="<a3@gmail.com>",
+                                       thread_id="th1", in_reply_to="<CAgm@mail.gmail.com>")):
+            with self.subTest(m=m):
+                self.assertEqual(self.parse(m)["X-Outreach-Id"], m.marker)
 
     def test_follow_up_mime_has_in_reply_to_and_references(self):
         msg = self.parse(outgoing(subject="Re: Backend role at Sendwell", message_id="<a3@gmail.com>",
@@ -331,7 +344,8 @@ class MimeTest(unittest.TestCase):
     def test_malformed_message_ids_are_refused_in_every_header(self):
         for bad in BAD_IDS:
             for m in (outgoing(message_id=bad), outgoing(in_reply_to=bad, references=("<a0@gmail.com>",)),
-                      outgoing(in_reply_to="<a0@gmail.com>", references=("<a0@gmail.com>", bad))):
+                      outgoing(in_reply_to="<a0@gmail.com>", references=("<a0@gmail.com>", bad)),
+                      outgoing(marker=bad)):
                 with self.subTest(bad=bad, m=m), self.assertRaises(ValueError):
                     gmail.build_mime(m)
 
@@ -344,19 +358,20 @@ class MimeTest(unittest.TestCase):
         msg = self.parse(outgoing(subject="Re: x", in_reply_to="<a1@gmail.com>", references=()))
         self.assertEqual((msg["In-Reply-To"], msg["References"]), ("<a1@gmail.com>", "<a1@gmail.com>"))
 
-    def test_the_message_id_written_is_the_one_claimed(self):
+    def test_the_message_id_and_marker_written_are_the_ones_claimed(self):
         real = gmail.EmailMessage.as_bytes
-
-        def mangled(self, *a, **k):
-            return real(self, *a, **k).replace(b"<a1@gmail.com>", b"<zz@gmail.com>")
-        with mock.patch.object(gmail.EmailMessage, "as_bytes", mangled), self.assertRaises(ValueError):
-            gmail.build_mime(outgoing())
+        for header in (b"Message-ID: ", b"X-Outreach-Id: "):
+            def mangled(self, *a, header=header, **k):
+                return real(self, *a, **k).replace(header + b"<a1@gmail.com>", header + b"<zz@gmail.com>")
+            with self.subTest(header=header), mock.patch.object(gmail.EmailMessage, "as_bytes", mangled), \
+                    self.assertRaises(ValueError):
+                gmail.build_mime(outgoing())
 
     def test_empty_message_id_and_header_injection_are_refused(self):
-        with self.assertRaises(ValueError):
-            gmail.build_mime(outgoing(message_id=""))
-        with self.assertRaises(ValueError):
-            gmail.build_mime(outgoing(subject="Hi\nBcc: x@y.example"))
+        for m in (outgoing(message_id=""), outgoing(marker=""), outgoing(subject="Hi\nBcc: x@y.example"),
+                  outgoing(marker="<a1@gmail.com>\r\nBcc: x@y.example")):
+            with self.subTest(m=m), self.assertRaises(ValueError):
+                gmail.build_mime(m)
 
     def test_new_message_id_uses_the_sender_domain(self):
         mid = gmail.new_message_id(ACCOUNT)
@@ -372,36 +387,43 @@ class ClientCallsTest(NoNetwork):
         self.assertEqual(t.requests[0][:2], ("GET", "/profile"))
 
     @staticmethod
-    def gmail_that_keeps(rewrite=None, readback_error=None):
-        """POST /messages/send answers ids; the readback GET returns the Message-ID Gmail stored."""
+    def gmail_that_keeps(rewrite=None, readback_error=None, keep_marker=True):
+        """POST /messages/send answers ids; the readback GET returns the Message-ID Gmail stored and the marker."""
         stored = {}
 
         def handler(method, path, body, query):
             if method == "POST":
                 raw = email.message_from_bytes(base64.urlsafe_b64decode(body["raw"]), policy=email.policy.default)
                 gid = f"g{len(stored) + 1}"
-                stored[gid] = rewrite or raw["Message-ID"]
+                stored[gid] = (rewrite or raw["Message-ID"], raw["X-Outreach-Id"] if keep_marker else None)
                 return {"id": gid, "threadId": "th1"}
-            assert query == {"format": "metadata", "metadataHeaders": ["Message-ID"]}, query
+            assert query == {"format": "metadata", "metadataHeaders": gmail.ID_HEADERS}, query
             if readback_error is not None:
                 raise readback_error
             gid = path.rsplit("/", 1)[1]
-            return {"id": gid, "threadId": "th1", "internalDate": "1",
-                    "payload": {"headers": [{"name": "Message-Id", "value": " " + stored[gid] + " "}]}}
+            rfc, marker = stored[gid]
+            headers = [{"name": "Message-Id", "value": " " + rfc + " "}]
+            if marker is not None:
+                headers.append({"name": "X-Outreach-Id", "value": marker})
+            return {"id": gid, "threadId": "th1", "internalDate": "1", "payload": {"headers": headers}}
         return handler
 
-    def test_send_reads_the_stored_message_id_back(self):
+    def test_the_id_reads_ask_for_the_marker_and_both_message_ids(self):
+        self.assertEqual(gmail.ID_HEADERS, ["X-Outreach-Id", "Message-ID", "X-Google-Original-Message-ID"])
+
+    def test_send_reads_the_stored_message_id_and_marker_back(self):
         client, t = self.client(self.gmail_that_keeps())
-        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<a1@gmail.com>"))
+        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<a1@gmail.com>", "<a1@gmail.com>"))
         self.assertEqual([r[:2] for r in t.requests], [("POST", "/messages/send"), ("GET", "/messages/g1")])
 
-    def test_a_rewritten_message_id_is_its_own_error_with_the_sent_ids(self):
+    def test_a_rewritten_message_id_is_recorded_not_raised(self):
+        # What Gmail did on the first live send: the email is sent, under a Message-ID of Gmail's own.
         client, _ = self.client(self.gmail_that_keeps(rewrite="<CAgmail123@mail.gmail.com>"))
-        with self.assertRaises(GmailError) as cm:
-            client.send(outgoing())
-        self.assertEqual(cm.exception.kind, "message_id_rewritten")
-        self.assertFalse(cm.exception.retryable)
-        self.assertEqual(cm.exception.sent, Sent("g1", "th1", "<CAgmail123@mail.gmail.com>"))
+        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<CAgmail123@mail.gmail.com>", "<a1@gmail.com>"))
+
+    def test_a_dropped_marker_reads_back_empty(self):
+        client, _ = self.client(self.gmail_that_keeps(keep_marker=False))
+        self.assertEqual(client.send(outgoing()).marker, "")
 
     def test_the_client_refuses_the_same_ids_as_the_fake(self):
         client, t = self.client(self.gmail_that_keeps())
@@ -411,28 +433,31 @@ class ClientCallsTest(NoNetwork):
             self.assertEqual(cm.exception.kind, "bad_request")
         self.assertEqual(t.requests, [])
 
-    def test_a_readback_without_a_message_id_still_reports_the_send(self):
-        # No header is no evidence of a rewrite: like a failed check, the send is reported as sent.
+    def test_a_readback_without_a_message_id_confirms_nothing(self):
+        # No Message-ID read: the claimed one stands, unconfirmed (marker None), until the next tick's read back.
         def handler(method, path, body, query):
             if method == "POST":
                 return {"id": "g1", "threadId": "th1"}
-            return {"id": "g1", "threadId": "th1", "internalDate": "1", "payload": {"headers": []}}
+            return {"id": "g1", "threadId": "th1", "internalDate": "1",
+                    "payload": {"headers": [{"name": "X-Outreach-Id", "value": "<a1@gmail.com>"}]}}
         client, _ = self.client(handler)
-        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<a1@gmail.com>"))
+        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<a1@gmail.com>", None))
 
     def test_a_failed_readback_still_reports_the_send(self):
-        # The send succeeded; only the check failed. Raising would make it look unclear for no reason.
+        # The send succeeded; only the check failed. Raising would make it look unclear for no reason. The
+        # marker is unread (None), so the next tick reads it back by Gmail id.
         client, _ = self.client(self.gmail_that_keeps(readback_error=TimeoutError()))
-        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<a1@gmail.com>"))
+        self.assertEqual(client.send(outgoing()), Sent("g1", "th1", "<a1@gmail.com>", None))
 
     def test_send_posts_raw_and_thread_id(self):
         client, t = self.client(self.gmail_that_keeps())
         sent = client.send(outgoing())
-        self.assertEqual(sent, Sent(gmail_message_id="g1", thread_id="th1", rfc_message_id="<a1@gmail.com>"))
+        self.assertEqual(sent, Sent(gmail_message_id="g1", thread_id="th1", rfc_message_id="<a1@gmail.com>",
+                                    marker="<a1@gmail.com>"))
         method, path, body, _ = t.requests[0]
         self.assertEqual((method, path, set(body)), ("POST", "/messages/send", {"raw"}))
         raw = email.message_from_bytes(base64.urlsafe_b64decode(body["raw"]), policy=email.policy.default)
-        self.assertEqual(raw["Message-ID"], "<a1@gmail.com>")
+        self.assertEqual((raw["Message-ID"], raw["X-Outreach-Id"]), ("<a1@gmail.com>", "<a1@gmail.com>"))
         client.send(outgoing(subject="Re: Backend role at Sendwell", message_id="<a2@gmail.com>", thread_id="th1",
                              in_reply_to="<a1@gmail.com>", references=("<a1@gmail.com>",)))
         self.assertEqual(set(t.requests[2][2]), {"raw", "threadId"})
@@ -499,7 +524,8 @@ class ClientCallsTest(NoNetwork):
     def test_message_reads_metadata_and_keeps_only_the_listed_headers(self):
         def answer(method, path, body, query):
             self.assertEqual(query["format"], "metadata")
-            for name in ("From", "To", "Subject", "Auto-Submitted", "X-Failed-Recipients", "Message-ID"):
+            for name in ("From", "To", "Subject", "Auto-Submitted", "X-Failed-Recipients", "Message-ID",
+                         "X-Outreach-Id"):
                 self.assertIn(name, query["metadataHeaders"])
             return {"id": "g9", "threadId": "th9", "internalDate": "1762786800000", "labelIds": ["INBOX"],
                     "snippet": "Happy to chat",
@@ -553,15 +579,33 @@ class FindSentTest(NoNetwork):
     def find(self, client, rfc="<a1@gmail.com>"):
         return client.find_sent(rfc, self.CLAIM, send_returned_ms=self.CLAIM)
 
-    def test_find_sent_returns_the_exact_message_id(self):
+    def test_find_sent_returns_the_exact_marker_with_gmails_message_id(self):
         folder = SentFolder([("g3", "<n2@gmail.com>", self.CLAIM + 3), ("g2", "<a1@gmail.com>", self.CLAIM + 1),
                              ("g1", "<old@gmail.com>", self.CLAIM - 5)])
         client, _ = self.client(folder)
-        self.assertEqual(self.find(client), (Sent("g2", "th-g2", "<a1@gmail.com>"), True))
+        self.assertEqual(self.find(client),
+                         (Sent("g2", "th-g2", "<gm-g2@mail.gmail.com>", "<a1@gmail.com>"), True))
 
-    def test_find_sent_matches_by_message_id_only(self):
-        # Same To and Subject, another Message-ID: not a hit (follow-ups share a subject).
-        folder = SentFolder([("g2", "<other@gmail.com>", self.CLAIM + 1), ("g1", "<old@gmail.com>", self.CLAIM - 5)])
+    def test_find_sent_also_takes_the_original_id_gmail_kept_as_a_hit(self):
+        # Gmail may keep the Message-ID it replaced in X-Google-Original-Message-ID; the marker is that same token,
+        # so a match there is the email (a hit only ever records an email as sent, never resends one).
+        folder = SentFolder([("g2", None, self.CLAIM + 1), ("g1", "<old@gmail.com>", self.CLAIM - 5)])
+        real = folder.__call__
+
+        def with_original(method, path, body, query):
+            res = real(method, path, body, query)
+            if path == "/messages/g2":
+                res["payload"]["headers"].append({"name": "X-Google-Original-Message-ID", "value": "<a1@gmail.com>"})
+            return res
+        client, _ = self.client(with_original)
+        self.assertEqual(self.find(client),
+                         (Sent("g2", "th-g2", "<gm-g2@mail.gmail.com>", "<a1@gmail.com>"), True))
+
+    def test_find_sent_matches_by_marker_only(self):
+        # Same To and Subject, another marker, and one with no marker whose Message-ID is the very value looked
+        # for: neither is a hit (follow-ups share a subject, and Gmail sets its own Message-IDs).
+        folder = SentFolder([("g3", None, self.CLAIM + 2), ("g2", "<other@gmail.com>", self.CLAIM + 1),
+                             ("g1", "<old@gmail.com>", self.CLAIM - 5)], message_ids={"g3": "<a1@gmail.com>"})
         client, _ = self.client(folder)
         self.assertEqual(self.find(client), (None, True))
 
@@ -598,14 +642,15 @@ class FindSentTest(NoNetwork):
         settled, _ = self.client(folder, now_ms=self.CLAIM + 10 * self.MIN)
         self.assertEqual(self.find(settled), (None, True))
         # A hit is a hit at any time.
-        self.assertEqual(self.find(early, "<n1@gmail.com>"), (Sent("g1", "th-g1", "<n1@gmail.com>"), True))
+        self.assertEqual(self.find(early, "<n1@gmail.com>"),
+                         (Sent("g1", "th-g1", "<gm-g1@mail.gmail.com>", "<n1@gmail.com>"), True))
 
     def test_the_scan_allows_for_the_mac_clock_running_ahead(self):
         # Gmail took it a minute before the Mac's claim time; a full page of later mail sits in front of it.
         entries = [(f"n{i}", f"<n{i}@gmail.com>", self.CLAIM - 1000 - i) for i in range(50)]
         entries += [("g1", "<a1@gmail.com>", self.CLAIM - self.MIN)]
         client, _ = self.client(SentFolder(entries))
-        self.assertEqual(self.find(client), (Sent("g1", "th-g1", "<a1@gmail.com>"), True))
+        self.assertEqual(self.find(client), (Sent("g1", "th-g1", "<gm-g1@mail.gmail.com>", "<a1@gmail.com>"), True))
 
     def test_a_stray_old_message_on_page_one_does_not_end_the_scan(self):
         entries = [(f"n{i}", f"<n{i}@gmail.com>", self.CLAIM + 10_000 - i) for i in range(50)]
@@ -613,7 +658,7 @@ class FindSentTest(NoNetwork):
         entries += [("g1", "<a1@gmail.com>", self.CLAIM + 1)]
         folder = SentFolder(entries)
         client, _ = self.client(folder)
-        self.assertEqual(self.find(client), (Sent("g1", "th-g1", "<a1@gmail.com>"), True))
+        self.assertEqual(self.find(client), (Sent("g1", "th-g1", "<gm-g1@mail.gmail.com>", "<a1@gmail.com>"), True))
         self.assertEqual(folder.list_calls, 2)
 
     def test_a_listing_without_ids_or_a_bad_date_is_a_gmail_error(self):

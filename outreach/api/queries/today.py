@@ -14,7 +14,7 @@ transaction, so the same people stay in the same places all day and a pick stick
   Only a candidate or backlog company is proposed (a working one is already picked; closed and removed are done);
 - how many: `proposals_per_slot` times the day's capacity, best score first, ranks 1 up;
 - capacity: `linkedin_per_day` (7, #9) plus the sender's effective limit for the day (`outreach.sending.status`; not
-  reduced by what went out), none while it is paused, signed out or gated (Message-ID unproven), at most 60 (the
+  reduced by what went out), none while it is paused, signed out or gated (marker unproven), at most 60 (the
   table's CHECK). The shell uses the same rule (`capacity_from`);
 - the backlog: a company whose newest earlier row is `backlog` and whose status is still `backlog` comes back as a
   backlog row. An unpicked proposal does not carry: the ranking proposes it again if it still ranks.
@@ -71,7 +71,7 @@ def capacity_from(read: SenderRead, cfg: ApiConfig) -> int:
     """The one capacity rule, for Today and the shell: LinkedIn per day plus the sender's effective limit for the day
     (not what it has sent so far, so the number never depends on when Today is first opened). The sender adds no
     email slots when it is paused or signed out, when the tick's gate is shut (an old sender still running, a
-    Message-ID not yet proven), or when its config cannot be loaded."""
+    sender's marker not yet proven), or when its config cannot be loaded."""
     snap = read.snapshot
     email = 0 if snap is None or read.gate is not None or snap.state in STOPPED_STATES else snap.limit_today
     return min(MAX_CAPACITY, cfg.linkedin_per_day + email)

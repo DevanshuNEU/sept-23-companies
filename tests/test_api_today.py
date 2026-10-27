@@ -161,8 +161,8 @@ class Build(TodayCase):
         return snap.limit_today
 
     def prove(self):
-        """Gmail is shown to keep the Message-ID the sender sets, so every message goes, not just the first."""
-        append_event(self.conn, entity="message", entity_id=1, kind="import_verified", actor="sender",
+        """Gmail is shown to keep the sender's marker, so every message goes, not just the first."""
+        append_event(self.conn, entity="message", entity_id=1, kind="marker_verified", actor="sender",
                      at="2026-11-01T12:00:00Z", idempotency_key="proof")
 
     def test_capacity_is_seven_linkedin_plus_the_senders_effective_limit(self):
@@ -194,14 +194,14 @@ class Build(TodayCase):
         self.conn.execute("DELETE FROM daily_list")
         self.assertEqual(self.view()["capacity"], 7)
         self.conn.execute("UPDATE sender SET auth_state = 'ok'")
-        append_event(self.conn, entity="message", entity_id=2, kind="send_id_mismatch", actor="sender",
-                     at="2026-11-01T12:00:00Z", idempotency_key="mismatch")  # Gmail rewrote the first email's id
+        append_event(self.conn, entity="message", entity_id=2, kind="marker_missing", actor="sender",
+                     at="2026-11-01T12:00:00Z", idempotency_key="missing")  # Gmail dropped a sent email's marker
         self.conn.execute("DELETE FROM daily_list_entry")
         self.conn.execute("DELETE FROM daily_list")
         self.assertEqual(self.view()["capacity"], 7)
 
     def test_the_first_email_before_any_proof_counts_the_days_slots(self):
-        self.ranked("A")  # nothing proves the Message-ID yet, but the one first email may go today
+        self.ranked("A")  # nothing proves the marker yet, but the one first email may go today
         self.assertEqual(self.view()["capacity"], 7 + self.send_limit())
 
     def test_a_broken_sending_config_adds_no_slots_and_does_not_break_the_page(self):

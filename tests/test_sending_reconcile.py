@@ -1,7 +1,8 @@
-"""Task 9: settle unclear sends by Message-ID, and retry a send proven not to have gone out, once.
+"""Task 9: settle unclear sends by the sender's marker, and retry a send proven not to have gone out, once.
 
 The only path to a second attempt is send_unknown -> failed -> approved, and only after a complete Sent scan begun
-10 minutes after the send returned misses the Message-ID. Every test counts the emails in FakeGmail.sent.
+10 minutes after the send returned misses the marker (`X-Outreach-Id`, the claimed token). Every test counts the
+emails in FakeGmail.sent.
 """
 import json
 import random
@@ -15,6 +16,7 @@ from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import GmailError, Sent
 from outreach.store import transaction
+from outreach.store.writes import append_event
 from tests.sendtest import MON, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove
 from tests.storetest import fresh_store, seed_company
 
@@ -92,7 +94,7 @@ class FoundInSentTest(Base):
         self.tick(minutes=2)
         row = self.message(mid)
         self.assertEqual(row["state"], "sent")
-        self.assertEqual(row["rfc_message_id"], pending)
+        self.assertEqual(row["rfc_message_id"], self.gmail.sent[0][1].rfc_message_id)  # Gmail's, found by marker
         self.assertEqual(row["gmail_message_id"], self.gmail.sent[0][1].gmail_message_id)
         self.assertEqual(row["sent_at"], iso(MON))  # dated to the claim
         self.assertEqual(row["reconciled_at"], iso(self.clock()))
@@ -100,7 +102,8 @@ class FoundInSentTest(Base):
         self.assertEqual(len(self.events(mid, "reconciled_sent")), 1)
         self.assertEqual(self.events(mid, "sent"), [])
         touch = self.db.execute("SELECT * FROM touch WHERE person_id = ?", (person,)).fetchone()
-        self.assertEqual((touch["first_rfc_id"], touch["gmail_thread_id"]), (pending, self.gmail.sent[0][1].thread_id))
+        self.assertEqual((touch["first_rfc_id"], touch["gmail_thread_id"]),
+                         (self.gmail.sent[0][1].rfc_message_id, self.gmail.sent[0][1].thread_id))
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM outreach_touch").fetchone()[0], 1)
         for _ in range(3):
             self.tick(minutes=10)
@@ -127,7 +130,7 @@ class FoundInSentTest(Base):
         self.tick(minutes=2)
         row = self.message(mid)
         self.assertEqual(row["state"], "sent")
-        self.assertEqual(row["rfc_message_id"], self.gmail.sent[0][0].message_id)
+        self.assertEqual(row["rfc_message_id"], self.gmail.sent[0][1].rfc_message_id)  # the id Gmail stored
         unknown = self.events(mid, "send_unknown")
         self.assertEqual([(u["error"], u["error_kind"], u["retryable"]) for u in unknown],
                          [("the sender stopped mid-send", "interrupted", True)])
@@ -135,13 +138,13 @@ class FoundInSentTest(Base):
             self.tick(minutes=10)
         self.assertEqual(len(self.gmail.sent), 1)
 
-    def test_reconcile_matches_by_message_id_only(self):
+    def test_reconcile_matches_by_marker_only(self):
         _, mid = self.approve()
         self.gmail.fail_next_send(GmailError("network", None, "reset"))
         self.send(mid)
-        # Same recipient and subject, another Message-ID: not this email.
-        decoy = self.gmail.add_to_sent(f"p{self.n}@acme.co", f"Hello {self.n}", message_id="<other.1@gmail.com>",
-                                       at=MON)
+        pending = self.message(mid)["pending_rfc_id"]
+        # Same recipient and subject, even the Message-ID it was sent with, but without its marker: not this email.
+        decoy = self.gmail.add_to_sent(f"p{self.n}@acme.co", f"Hello {self.n}", message_id=pending, at=MON)
         self.clock.advance(minutes=11)
         found = self.scan()
         self.assertEqual(found[mid][:2], (None, True))
@@ -151,14 +154,82 @@ class FoundInSentTest(Base):
         self.assertIsNone(row["gmail_message_id"])
         self.assertNotIn(decoy.gmail_message_id, json.dumps(self.events(mid, "claim_failed")))
 
-    def test_a_hit_for_another_message_id_is_not_taken(self):
+    def test_a_hit_for_another_marker_or_none_is_not_taken(self):
         _, mid = self.approve()
         self.gmail.fail_next_send(GmailError("network", None, "reset"))
         self.send(mid)
         pending = self.message(mid)["pending_rfc_id"]
-        counts = self.reconcile({mid: (Sent("m-9", "t-9", "<someone.else@gmail.com>"), True, pending)})
-        self.assertEqual(counts["sent"], 0)
+        for hit in (Sent("m-9", "t-9", "<gm.9@mail.gmail.com>", "<someone.else@gmail.com>"),
+                    Sent("m-9", "t-9", pending)):  # its Message-ID, but no marker: proves nothing
+            with self.subTest(hit=hit):
+                counts = self.reconcile({mid: (hit, True, pending)})
+                self.assertEqual(counts["sent"], 0)
+                self.assertEqual(self.message(mid)["state"], "send_unknown")
+
+    def test_a_lost_answer_after_gmail_took_it_is_found_by_its_marker_under_gmails_message_id(self):
+        person, mid = self.approve()
+        self.gmail.rewrite_message_ids = True  # as the real Gmail: the Message-ID set is never the one kept
+        self.gmail.fail_next_send(TimeoutError("read timed out"), accepted=True)
+        self.assertEqual(self.send(mid), "timeout")
+        stored = self.gmail.sent[0][1]
+        for _ in range(4):
+            self.tick(minutes=11)
+        self.assertEqual(len(self.gmail.sent), 1)
+        row = self.message(mid)
+        self.assertEqual((row["state"], row["rfc_message_id"], row["gmail_message_id"]),
+                         ("sent", stored.rfc_message_id, stored.gmail_message_id))
+        touch = self.db.execute("SELECT * FROM touch WHERE person_id = ?", (person,)).fetchone()
+        self.assertEqual(touch["first_rfc_id"], stored.rfc_message_id)
+        self.assertEqual(self.events(mid, "claim_failed"), [])
+
+    def test_a_rewritten_send_left_by_the_sender_before_the_marker_threads_on_gmails_id(self):
+        """The old code left a send `send_unknown` with the ids Gmail kept (error kind `message_id_rewritten`).
+        Reconcile records it from those ids; they came from Gmail, so a follow-up's In-Reply-To names them."""
+        person, mid = self.approve()
+        meta = self.gmail.add_to_sent(f"p{self.n}@acme.co", f"Hello {self.n}", message_id="<CAold.1@mail.gmail.com>",
+                                      at=MON)
+        rfc, at = "<old.rewritten@gmail.com>", iso(MON)
+        with transaction(self.db):
+            self.db.execute("UPDATE message SET state = 'sending', pending_rfc_id = ?, claimed_at = ? "
+                            "WHERE message_id = ?", (rfc, at, mid))
+            append_event(self.db, entity="message", entity_id=mid, kind="claimed", actor="sender", at=at,
+                         idempotency_key=f"claimed:{rfc}", detail={"pending_rfc_id": rfc, "attempt": 1, "seq": 0})
+            self.db.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (mid,))
+            append_event(self.db, entity="message", entity_id=mid, kind="send_unknown", actor="sender", at=at,
+                         idempotency_key=f"send_unknown:{rfc}",
+                         detail={"pending_rfc_id": rfc, "error_kind": "message_id_rewritten", "retryable": False,
+                                 "stored_rfc_id": "<CAold.1@mail.gmail.com>", "gmail_message_id": meta.gmail_message_id,
+                                 "thread_id": meta.thread_id})
+        self.tick(minutes=2)
+        self.assertEqual((self.message(mid)["state"], self.message(mid)["rfc_message_id"]),
+                         ("sent", "<CAold.1@mail.gmail.com>"))
+        follow = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1",
+                                 (self.message(mid)["touch_id"],)).fetchone()[0]
+        self.db.execute("UPDATE message SET state = 'drafted', subject = ?, body = 'Following up.' "
+                        "WHERE message_id = ?", (f"Re: Hello {self.n}", follow))
+        self.db.execute("UPDATE message SET state = 'approved', approved_at = ?, due_on = ? WHERE message_id = ?",
+                        (iso(self.clock()), iso(self.clock())[:10], follow))
+        out = claim.outgoing_for(self.db, self.queued(follow), CFG, "<follow.1@gmail.com>")
+        self.assertEqual(out.in_reply_to, "<CAold.1@mail.gmail.com>")
+        self.assertEqual(len(self.gmail.sent), 0)
+
+    def test_a_send_in_doubt_claimed_before_the_marker_is_never_failed(self):
+        """A claim the sender made before it set the marker (no `marker` on its `claimed` event): no scan by marker
+        can find that email, so a miss never proves it did not go out."""
+        _, mid = self.approve()
+        rfc, at = "<old.claim@gmail.com>", iso(MON)
+        with transaction(self.db):
+            self.db.execute("UPDATE message SET state = 'sending', pending_rfc_id = ?, claimed_at = ? "
+                            "WHERE message_id = ?", (rfc, at, mid))
+            append_event(self.db, entity="message", entity_id=mid, kind="claimed", actor="sender", at=at,
+                         idempotency_key=f"claimed:{rfc}", detail={"pending_rfc_id": rfc, "attempt": 1, "seq": 0})
+            claim.leftover_claims(self.db, at)
+        [u] = claim.unclear(self.db)
+        self.assertFalse(u.marked)
+        self.clock.advance(minutes=60)
+        self.reconcile({mid: (None, True, rfc)})
         self.assertEqual(self.message(mid)["state"], "send_unknown")
+        self.assertEqual(self.events(mid, "claim_failed"), [])
 
     def test_follow_up_reconcile_does_not_take_another_follow_ups_id(self):
         followups = []
@@ -282,7 +353,8 @@ class MissingFromSentTest(Base):
         self.assertNotEqual(row["rfc_message_id"], first)
         self.assertEqual(self.events(mid, "claim_failed")[0]["pending_rfc_id"], first)
         self.assertEqual(self.events(mid, "send_unknown")[0]["pending_rfc_id"], first)
-        self.assertEqual([c["pending_rfc_id"] for c in self.events(mid, "claimed")], [first, row["rfc_message_id"]])
+        self.assertEqual([c["pending_rfc_id"] for c in self.events(mid, "claimed")],
+                         [first, self.gmail.sent[-1][0].message_id])
         self.assertEqual([c["attempt"] for c in self.events(mid, "claimed")], [1, 2])
 
 
@@ -349,7 +421,7 @@ class RequeueTest(Base):
         self.assertEqual(len(self.gmail.sent), 1)
         row = self.message(mid)
         self.assertEqual(row["state"], "sent")
-        self.assertEqual(row["rfc_message_id"], self.gmail.sent[0][0].message_id)
+        self.assertEqual(row["rfc_message_id"], self.gmail.sent[0][1].rfc_message_id)  # the id Gmail stored
         self.assertNotEqual(row["rfc_message_id"], first)
 
 

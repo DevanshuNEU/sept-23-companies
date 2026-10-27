@@ -5,37 +5,43 @@ The steps, in order. Gmail is called only in steps 2, 4 and 7, and never inside 
 2. Gmail: `profile`. A dead token is `signed_out`, another account is `wrong_account`; either ends the tick, with
    one notice a day. Else the state is `ok`. Its write shares one transaction with step 3.
 3. Leftover claims: a `sending` row is a tick that died mid-send, so it becomes `send_unknown`.
-4. Gmail reads: a Sent scan for each unclear send, new inbound mail, the check of imported mail and, while
-   Gmail is unproven, the read back of the first email (each check ends in its own short transaction).
+4. Gmail reads: a Sent scan by marker for each unclear send, new inbound mail, the check of imported mail and the
+   read back of each marked email sent since the last tick, the first one for the proof (each check ends in its
+   own short transaction).
 5. One transaction: reconcile, requeue proven failures (before quiet touches close, so a touch never closes on a
    message waiting for its one retry), apply inbound mail, stop tags, open the day, the bounce rules, lapse
    follow-ups, close quiet touches, sweep stopped messages, and once a New York day prune old quiet runs.
-6. The clock is read again, then the gate (paused, signed out, old sender loaded, Message-ID not proven, with
+6. The clock is read again, then the gate (paused, signed out, old sender loaded, the marker not proven, with
    the one first send below), the verdicts and the pick.
 7. At most one message: the approve checks again (`precheck`), then `send_one`. A Gmail error from the send is
    applied in one short transaction after the call.
 8. The `job_run` finishes with integer counts and `noop`.
 
 Nothing is sent in a tick whose inbound mail was not fully read or failed to apply (a missed reply could mean
-mail to someone who already answered). Nothing goes out freely before Gmail is proven to keep the Message-ID the
-sender sets (otherwise a send in doubt could never be found in Sent, and would go out twice): proof is an imported
-email found in Sent under its own id (`verify_imported`) or this sender's first email read back from Gmail
-(`proof.verify_sent`). Until then exactly one email may be claimed, ever, and only through every other gate
-unchanged: the queue's first ready message goes alone, and every other one waits as `message_id_unproven`. The
-next tick reads it back by its Gmail id (step 4): the `SENT` label and the claimed Message-ID append
-`send_verified` and the rest follow; anything else appends `send_id_mismatch`, which stops sending for good with a
-notice once a day. A first email in doubt is never retried while unproven; reconcile may settle it from Sent, and
-then it is read back like any other. A first email that cannot be accounted for stops sending, with a notice.
-`claim.claim` checks the same rule inside its own transaction (`proof.may_claim`).
+mail to someone who already answered). Every email carries the sender's marker, `X-Outreach-Id`, the token it
+claimed before the call; a send in doubt is found in Sent by that marker, never by its Message-ID (Gmail's API
+replaces the Message-ID the sender sets with one of its own, and that is normal: the one Gmail stored is recorded
+and follow-ups thread on it). Nothing goes out freely before Gmail is proven to keep the marker (otherwise a send
+in doubt could never be found in Sent, and would go out twice): the proof is this sender's first marked email read
+back from Gmail by its Gmail id (`proof.verify_marker`). Nothing older counts, neither an imported email's check
+(`verify_imported`) nor an email sent before the marker. Until then exactly one marked email may be claimed, ever,
+and only through every other gate unchanged: the queue's first ready message goes alone, and every other one waits
+as `message_id_unproven` ("The first email goes out alone, then Gmail is checked. The rest follow."). The next
+tick reads it back (step 4): the `SENT` label and its own marker append `marker_verified` and the rest follow;
+anything else appends `marker_missing`, which stops sending for good with a notice once a day. Every later marked
+email is read back the same way once, and one without its marker stops sending the same way. A first email in
+doubt is never retried while unproven; reconcile may settle it from Sent by its marker, and then it is read back
+like any other. A first email that cannot be accounted for stops sending, with a notice. `claim.claim` checks the
+same rule inside its own transaction (`proof.may_claim`).
 
-A dry run does steps 2 and 4 (but not the imported-mail check or the first email's read back, which write), runs
-5, 6 and the pre-claim check inside one transaction that is rolled back, never sends, and writes nothing, `job_run`
-included; its notices go nowhere.
+A dry run does steps 2 and 4 (but not the imported-mail check or the read back, which write), runs 5, 6 and the
+pre-claim check inside one transaction that is rolled back, never sends, and writes nothing, `job_run` included;
+its notices go nowhere.
 
 `fcntl.flock` on `.sender.lock` beside the store keeps two ticks from overlapping; the second one returns at once
 having written nothing. The lock goes with the file descriptor, so a killed tick never leaves it held. Every step
 is safe to cut short: a transaction either committed or did not, and the next tick settles any send in doubt by
-Message-ID. Report lines are one line each, scrubbed, and never carry a traceback. A notice raised inside a
+its marker. Report lines are one line each, scrubbed, and never carry a traceback. A notice raised inside a
 transaction is shown only after that transaction commits, so a rolled-back step never shows one.
 """
 import contextlib
@@ -76,14 +82,14 @@ STOP_TITLE = "Outreach sending stopped"
 BANNED_TEXT = "Sending waits: the banned phrases list could not be read. Fix it to resume."
 # What each phase of the first-send proof adds to the tick's report (see `proof`).
 _PHASE_LINE = {
-    proof.FIRST_SEND: "Gmail is not yet shown to keep the Message-ID, so the first email goes out alone and is "
+    proof.FIRST_SEND: "Gmail is not yet shown to keep the sender's marker, so the first email goes out alone and is "
                       "checked in Sent before any other",
     proof.CHECKING: "the first email was sent; nothing else goes out until it is checked in Sent",
     proof.IN_DOUBT: "the first email's send is in doubt; it is not retried and nothing else goes out until it is "
                     "found in Sent",
     proof.STOPPED: "sending is stopped: the first email could not be found in Sent, so Gmail is not shown to keep "
-                   "the Message-ID",
-    proof.MISMATCH: "sending is stopped for good: Gmail did not keep the Message-ID on the first email",
+                   "the sender's marker",
+    proof.MISSING: "sending is stopped for good: Gmail did not keep the sender's marker on a sent email",
 }
 
 _log = logging.getLogger(__name__)
@@ -161,17 +167,6 @@ def _stamp(at: datetime) -> str:
 def _text(err: BaseException) -> str:
     """One scrubbed line for an error: a GmailError's own words, else `Type: text`. Never a traceback."""
     return scrub(str(err) if isinstance(err, GmailError) else describe_error(err))
-
-
-def _rewritten(err: BaseException) -> GmailError | None:
-    """The `message_id_rewritten` GmailError in `err` or anything it was raised from or during, if any."""
-    seen = set()
-    while err is not None and id(err) not in seen:
-        seen.add(id(err))
-        if isinstance(err, GmailError) and err.kind == "message_id_rewritten":
-            return err
-        err = err.__cause__ or err.__context__
-    return None
 
 
 def run_tick(conn: sqlite3.Connection, deps: TickDeps, cfg: SendConfig, *, dry_run: bool = False) -> TickReport:
@@ -435,6 +430,10 @@ class _Tick:
         for u in claim.unclear(self.conn):
             if u.stored is not None:
                 continue  # settled from the ids Gmail kept, no scan needed
+            if not u.marked:
+                self._partial(f"message {u.message_id} was claimed before the sender set its marker, so Sent cannot "
+                              "show whether it went out; it stays in doubt and is never sent again")
+                continue
             try:
                 hit, complete = self.client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms)
             except GmailError as err:
@@ -454,15 +453,16 @@ class _Tick:
                 self._line(f"{verified['not_in_sent']} imported email(s) are not in Sent under their Message-ID")
             if verified["errors"]:
                 self._partial("imported mail could not be checked against Gmail; tried again next tick")
-            first = proof.verify_sent(self.conn, self.client, now=self.now)
-            self.counts["verified"] += first["verified"]
-            if first["verified"]:
-                self._line("the first email is in Sent under the Message-ID the sender set, so the rest may follow")
-            if first["mismatch"]:
-                self._line("the first email is not in Sent under the Message-ID the sender set")
-            if first["errors"]:
-                self._partial("the first email could not be checked in Gmail; tried again next tick, and nothing "
-                              "else goes out until then")
+            before = proof.phase(self.conn)
+            checked = proof.verify_marker(self.conn, self.client, now=self.now)
+            self.counts["verified"] += checked["verified"]
+            if before == proof.CHECKING and proof.phase(self.conn) == proof.PROVEN:
+                self._line("the first email is in Sent with the sender's marker, so the rest may follow")
+            if checked["missing"]:
+                self._line(f"{checked['missing']} sent email(s) are not in Sent with the sender's marker")
+            if checked["errors"]:
+                self._partial("sent email could not be read back from Gmail; tried again next tick" +
+                              (", and nothing else goes out until then" if before == proof.CHECKING else ""))
         return found, read
 
     def _old_sender_loaded(self) -> bool:
@@ -557,7 +557,7 @@ class _Tick:
             verdicts = queue.first_only(verdicts)  # one email goes alone; every other waits for its check
         self.waiting = dict(Counter(v.reason for v in verdicts if v.reason != "ready"))
         picked = queue.pick(verdicts, queue.load_queue(self.conn, self.cfg))
-        if stage in (proof.STOPPED, proof.MISMATCH, proof.IN_DOUBT):
+        if stage in (proof.STOPPED, proof.MISSING, proof.IN_DOUBT):
             self._partial(_PHASE_LINE[stage])
             if stage != proof.IN_DOUBT:
                 self._notice(f"first_send_{stage}", STOP_TITLE, proof.PHASE_TEXT[stage])
@@ -602,21 +602,19 @@ class _Tick:
             self._line("another message is being sent, so this tick sends nothing")
             return
         except claim.Unproven:
-            self._partial("an email was already claimed while Gmail is not shown to keep the Message-ID, so this "
-                          "tick sends nothing")
+            self._partial("an email was already claimed while Gmail is not shown to keep the sender's marker, so "
+                          "this tick sends nothing")
             return
         except GmailError as err:
             self._send_failed(picked, err)
             return
-        except Exception as err:
-            gone = _rewritten(err)
-            if gone is not None:
-                self._pause_rewritten(picked, gone)
-            raise
         if result == "sent":
             self.sent.append(picked.message_id)
             self.counts["sent"] += 1
             self._line(f"sent message {picked.message_id}")
+            if proof.phase(self.conn) == proof.MISSING:  # its own read back showed the marker dropped
+                self._partial(_PHASE_LINE[proof.MISSING])
+                self._notice(f"first_send_{proof.MISSING}", STOP_TITLE, proof.PHASE_TEXT[proof.MISSING])
         else:
             self._line(f"message {picked.message_id} changed before it could be claimed; nothing was sent")
 
@@ -628,15 +626,6 @@ class _Tick:
         rfc = rfc[0] if rfc is not None else f"message-{picked.message_id}"
         detail = {"message_id": picked.message_id, "error_kind": err.kind, "status": err.status, "source": "send"}
         signal = {"at": self.stamp, "cfg": self.cfg, "notify": self.notify, "now": self.now}
-        if err.kind == "message_id_rewritten":
-            self._pause_rewritten(picked, err)
-            if self.conn.execute("SELECT state FROM message WHERE message_id = ?",
-                                 (picked.message_id,)).fetchone()[0] == "sent":
-                self.sent.append(picked.message_id)
-                self.counts["sent"] += 1
-            self._partial(f"message {picked.message_id} went out, but Gmail stored it under another Message-ID; "
-                          "sending is paused")
-            return
         self._partial(f"the send of message {picked.message_id} failed ({text}); it is checked against Sent "
                       "before any retry")
         with self._tx():
@@ -647,23 +636,3 @@ class _Tick:
             elif err.kind == "auth":
                 self.auth = "signed_out"
                 self._signed_out(text)
-
-    def _pause_rewritten(self, picked: queue.Queued, err: GmailError) -> None:
-        """Gmail kept the email under another Message-ID: pause (a hard block, over his own pause too) and tell
-        him. `send_one` pauses first; this makes sure of it, since a send in doubt could otherwise go twice."""
-        try:
-            with self._tx():
-                row = self.conn.execute("SELECT paused, pause_kind FROM sender WHERE sender_id = 1").fetchone()
-                if not (row["paused"] and row["pause_kind"] == "hard_block"):
-                    self.conn.execute(
-                        "UPDATE sender SET paused = 1, pause_kind = 'hard_block', paused_reason = ?, paused_at = ?, "
-                        "updated_at = ?, revision = revision + 1 WHERE sender_id = 1",
-                        (claim.REWRITTEN_REASON, self.stamp, self.stamp))
-                append_event(self.conn, entity="sender", entity_id=1, kind="hard_block", actor="sender",
-                             at=self.stamp, idempotency_key=f"hard_block:message_id_rewritten:{picked.message_id}",
-                             detail={"kind": "message_id_rewritten", "message_id": picked.message_id,
-                                     "stored_rfc_id": err.sent.rfc_message_id, "reason": claim.REWRITTEN_REASON})
-                notify_once(self.conn, self.notify, "message_id_rewritten", self.today, "Outreach sending paused",
-                            claim.REWRITTEN_REASON, at=self.stamp)
-        except sqlite3.Error as again:
-            self._line(f"the pause after a rewritten Message-ID could not be written: {_text(again)}")

@@ -84,7 +84,7 @@ def _ny(iso: str, cfg: SendConfig) -> datetime:
 def schedule_text(reason: str, when: str | None, now: str, cfg: SendConfig, stage: str = proof.PROVEN) -> str:
     """`Sends 10:42 ET` when it is ready, `Sends after 11:05 ET` later today, `Sends tomorrow`, `Sends Wed Nov 11`;
     a wait with no time (and every stop) is the queue's own sentence (`status.reason_text`: a wait on the
-    Message-ID proof says where the first email stands, `stage`)."""
+    marker proof says where the first email stands, `stage`)."""
     if when is None or (reason != "ready" and reason not in TIME_REASONS):
         return reason_text(reason, stage)
     at, today = _ny(when, cfg), _ny(now, cfg).date()

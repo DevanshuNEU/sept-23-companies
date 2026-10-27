@@ -29,7 +29,7 @@ class OutboxBase(ApiCase):
         return res.json()
 
     def prove(self):
-        append_event(self.conn, entity="message", entity_id=1, kind="import_verified", actor="sender",
+        append_event(self.conn, entity="message", entity_id=1, kind="marker_verified", actor="sender",
                      at="2026-11-01T12:00:00Z", idempotency_key="proof")
 
     def thread(self, company: int, name: str, *, tz: str = "America/New_York", **touch) -> int:
@@ -173,7 +173,7 @@ class ViewTest(OutboxBase):
         seed.message(self.conn, first, 0, "approved")
         seed.message(self.conn, second, 0, "approved")
         rows = self.by_touch(self.outbox())
-        # No proof event yet: the first email goes alone, and the other waits for its check.
+        # No marker proof yet: the first email goes alone, and the other waits for its check.
         self.assertEqual(rows[first]["schedule"]["reason"], "ready")
         waiting = rows[second]["schedule"]
         self.assertEqual(waiting["reason"], "message_id_unproven")
@@ -184,7 +184,8 @@ class ViewTest(OutboxBase):
         cid = seed.company(self.conn, "Acme", status="working")
         sent = self.claimed(self.thread(cid, "Fay First"), "sending")
         append_event(self.conn, entity="message", entity_id=sent, kind="claimed", actor="sender",
-                     at="2026-11-10T15:00:00Z", idempotency_key="claimed:first")
+                     at="2026-11-10T15:00:00Z", idempotency_key="claimed:first",
+                     detail={"pending_rfc_id": "<first@x>", "marker": "<first@x>"})
         self.conn.execute("UPDATE message SET state = 'sent', sent_at = '2026-11-10T15:00:00Z', "
                           "rfc_message_id = '<pending1@x>', gmail_message_id = 'g1', pending_rfc_id = NULL, "
                           "claimed_at = NULL WHERE message_id = ?", (sent,))

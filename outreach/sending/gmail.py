@@ -40,9 +40,10 @@ from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 
 import live_checkout
-from outreach.sending.mail import (META_HEADERS, Added, GmailError, HistoryExpired, HistoryPage, MailClient,
-                                   MessageMeta, Outgoing, Profile, Sent, check_outgoing, classify_http, miss_is_proof,
-                                   normalise_message_id, page_reaches, scrub, settle_minutes)
+from outreach.sending.mail import (MARKER_HEADER, META_HEADERS, ORIGINAL_ID_HEADER, Added, GmailError,
+                                   HistoryExpired, HistoryPage, MailClient, MessageMeta, Outgoing, Profile, Sent,
+                                   check_outgoing, classify_http, miss_is_proof, normalise_message_id, page_reaches,
+                                   scrub, settle_minutes)
 
 __all__ = ["DEFAULT_DIR", "SCOPES", "gmail_dir", "is_default_dir", "build_mime", "new_message_id", "GmailClient",
            "check_auth_location", "authorize", "main"]
@@ -61,7 +62,10 @@ HISTORY_PAGES, HISTORY_PAGE_SIZE = 50, 500
 # Header names asked for on every metadata read: who, what, and the META_HEADERS the classifier needs.
 READ_HEADERS = ["From", "To", "Subject", "Auto-Submitted", "X-Autoreply", "X-Autorespond", "Precedence",
                 "X-Auto-Response-Suppress", "Message-ID", "In-Reply-To", "References", "X-Failed-Recipients",
-                "Content-Type"]
+                "Content-Type", MARKER_HEADER, ORIGINAL_ID_HEADER]
+# What a read back after a send and a Sent scan ask for: the sender's marker, the Message-ID Gmail stored, and
+# where Gmail may keep the one it replaced.
+ID_HEADERS = [MARKER_HEADER, "Message-ID", ORIGINAL_ID_HEADER]
 assert {h.lower() for h in READ_HEADERS} == set(META_HEADERS) | {"from", "to", "subject"}
 
 Transport = Callable[[str, str, dict | None, dict | None], dict]
@@ -109,14 +113,16 @@ def check_auth_location(directory: str | None = None) -> None:
 # -- the message ------------------------------------------------------------------------------------------------
 
 def build_mime(m: Outgoing) -> bytes:
-    """One plain-text UTF-8 email: To, From, Subject, Message-ID, and In-Reply-To and References only for a reply.
-    No Cc, Bcc, attachment or HTML part. ValueError for anything but one address or for a missing Message-ID."""
+    """One plain-text UTF-8 email: To, From, Subject, Message-ID, the sender's marker (`X-Outreach-Id`), and
+    In-Reply-To and References only for a reply. No Cc, Bcc, attachment or HTML part. ValueError for anything but
+    one address or for a missing Message-ID or marker."""
     check_outgoing(m)
     msg = EmailMessage()
     msg["To"] = m.to.strip()
     msg["From"] = formataddr((m.from_name, m.from_addr))
     msg["Subject"] = m.subject
     msg["Message-ID"] = m.message_id
+    msg[MARKER_HEADER] = m.marker
     if m.in_reply_to:
         msg["In-Reply-To"] = m.in_reply_to
     refs = m.references or ((m.in_reply_to,) if m.in_reply_to else ())
@@ -124,9 +130,11 @@ def build_mime(m: Outgoing) -> bytes:
         msg["References"] = " ".join(refs)
     msg.set_content(m.body, charset="utf-8")
     raw = msg.as_bytes()
-    # The id in the bytes is the id the claim saved: a Sent scan looks for exactly this one.
-    written = message_from_bytes(raw, policy=email_policy.default)["Message-ID"]
-    if normalise_message_id(str(written or "")) != normalise_message_id(m.message_id):
+    # The marker in the bytes is the token the claim saved: a Sent scan looks for exactly this one.
+    parsed = message_from_bytes(raw, policy=email_policy.default)
+    if normalise_message_id(str(parsed[MARKER_HEADER] or "")) != normalise_message_id(m.marker):
+        raise ValueError("the marker written is not the one claimed")
+    if normalise_message_id(str(parsed["Message-ID"] or "")) != normalise_message_id(m.message_id):
         raise ValueError("the Message-ID written is not the one claimed")
     return raw
 
@@ -347,21 +355,24 @@ class GmailClient(MailClient):
         res = self._call("POST", "/messages/send", body)
         if not res.get("id") or not res.get("threadId"):
             raise GmailError("server", None, "Gmail answered the send without message and thread ids")
-        sent = Sent(gmail_message_id=str(res["id"]), thread_id=str(res["threadId"]), rfc_message_id=m.message_id)
-        # Settling an unclear send looks for this Message-ID in Sent, so check Gmail kept it. If the check itself
-        # fails, the send still succeeded: report it as sent (raising would make a sent email look unclear).
+        gid, thread = str(res["id"]), str(res["threadId"])
+        # Gmail stores the email under a Message-ID of its own, and follow-ups and replies are matched on that one,
+        # so read back what it kept, and its marker. If the read itself fails, the send still succeeded: report it
+        # under the claimed id with the marker unread (raising would make a sent email look unclear); the claimed id
+        # then counts as unconfirmed (no follow-up header uses it) until the next tick's read back by Gmail id
+        # (`proof.verify_marker`) fills in both. A read back without a Message-ID is the same: nothing confirmed.
+        # Gmail's 200 says it took the email, not that it was delivered: a bounce says that, later.
+        unread = Sent(gmail_message_id=gid, thread_id=thread, rfc_message_id=m.message_id)
         try:
-            stored = _headers(self._call("GET", f"/messages/{_quote(sent.gmail_message_id)}",
-                                         query={"format": "metadata", "metadataHeaders": ["Message-ID"]}))
+            stored = _headers(self._call("GET", f"/messages/{_quote(gid)}",
+                                         query={"format": "metadata", "metadataHeaders": ID_HEADERS}))
         except GmailError:
-            return sent
-        actual = normalise_message_id(stored.get("message-id"))
-        if not actual:
-            return sent                     # no header is no evidence of a rewrite: the same as a failed check
-        if actual != normalise_message_id(m.message_id):
-            raise GmailError("message_id_rewritten", None, "Gmail stored the email under another Message-ID",
-                             sent=Sent(sent.gmail_message_id, sent.thread_id, actual))
-        return sent
+            return unread
+        kept = normalise_message_id(stored.get("message-id"))
+        if not kept:
+            return unread
+        return Sent(gmail_message_id=gid, thread_id=thread, rfc_message_id=kept,
+                    marker=normalise_message_id(stored.get(MARKER_HEADER.lower())))
 
     def history(self, start_history_id: str) -> HistoryPage:
         if not start_history_id:
@@ -406,13 +417,14 @@ class GmailClient(MailClient):
                          query={"format": "metadata", "metadataHeaders": READ_HEADERS})
         return [_meta(m) for m in res.get("messages", []) or []]
 
-    def find_sent(self, rfc_message_id: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
-        """Page Sent (Trash and Spam included) newest first and read each Message-ID; match it exactly, never by
-        To or Subject. The rules for when a miss is proof are MailClient.find_sent's. Gmail does not promise the
-        listing order, so a page is read to its end and judged by its last dated message. Ten pages of 50 that
-        never reach the claim time make an incomplete scan.
+    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+        """Page Sent (Trash and Spam included) newest first and read each message's marker (`X-Outreach-Id`); match
+        it exactly, never by Message-ID (Gmail replaces the one the sender sets), To or Subject. The rules for when
+        a miss is proof are MailClient.find_sent's. Gmail does not promise the listing order, so a page is read to
+        its end and judged by its last dated message. Ten pages of 50 that never reach the claim time make an
+        incomplete scan.
         """
-        wanted = normalise_message_id(rfc_message_id)
+        wanted = normalise_message_id(marker)
         started_ms = int(self._clock().timestamp() * 1000)
         page_token, complete = None, False
         for _ in range(FIND_SENT_PAGES):
@@ -424,10 +436,13 @@ class GmailClient(MailClient):
             for ref in res.get("messages", []) or []:
                 gid = _id(ref)
                 msg = self._call("GET", f"/messages/{_quote(gid)}",
-                                 query={"format": "metadata", "metadataHeaders": ["Message-ID"]})
-                if normalise_message_id(_headers(msg).get("message-id")) == wanted:
+                                 query={"format": "metadata", "metadataHeaders": ID_HEADERS})
+                headers = _headers(msg)
+                if wanted and wanted in (normalise_message_id(headers.get(MARKER_HEADER.lower())),
+                                         normalise_message_id(headers.get(ORIGINAL_ID_HEADER.lower()))):
                     return Sent(gmail_message_id=gid, thread_id=str(msg.get("threadId") or ref.get("threadId", "")),
-                                rfc_message_id=rfc_message_id), True
+                                rfc_message_id=normalise_message_id(headers.get("message-id")) or marker,
+                                marker=wanted), True
                 when = msg.get("internalDate")
                 dates.append(None if when in (None, "") else _date(when))
             page_token = res.get("nextPageToken")

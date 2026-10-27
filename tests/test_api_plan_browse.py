@@ -43,7 +43,9 @@ class ListTest(BrowseCase):
         self.assertEqual((b["total"], b["nextAfter"], b["date"]), (5, None, DAY))
 
     def test_a_no_go_company_is_never_listed(self):
-        self.assertNotIn("Jolt", self.listed())
+        b = self.browse()
+        self.assertNotIn("Jolt", self.names(b["companies"]))
+        self.assertEqual(b["total"], 5)  # never counted either
         self.assertNotIn("Jolt", self.listed(q="jolt"))
 
     def test_a_lifted_no_go_company_is_listed_again(self):
@@ -54,6 +56,7 @@ class ListTest(BrowseCase):
         got = self.listed()
         for name in ("Beacon", "Corvid", "Aster", "Iris"):
             self.assertNotIn(name, got)
+        self.assertEqual(self.browse()["total"], 5)
 
     def test_a_company_with_a_removed_row_today_is_not_listed_either(self):
         self.pass_("Beacon")

@@ -120,6 +120,22 @@ describe('the Browse companies drawer', () => {
     expect(swapped.mock.calls[0]?.[1]).toMatchObject({ idempotencyKey: expect.stringMatching(/^pick-swap:\d+:\d+$/) });
   });
 
+  it('from the search box: type a name, Enter, then a digit swaps (focus moves to the chooser)', async () => {
+    const user = userEvent.setup();
+    const { client } = await open();
+    const swapped = vi.spyOn(client, 'swapPick');
+    await browse();
+    await user.type(within(drawer()).getByRole('searchbox'), 'railway');
+    await waitFor(() => expect(names()).toEqual(['Railway']));
+    await user.keyboard('{Enter}');
+    const chooser = await within(drawer()).findByRole('group', { name: 'Use Railway instead of' });
+    await waitFor(() => expect(chooser).toHaveFocus());
+    await user.keyboard('2');
+    expect(await screen.findByText(/^Swapped in Railway for /)).toBeInTheDocument();
+    await leavePage();
+    await waitFor(() => expect(swapped).toHaveBeenCalledTimes(1));
+  });
+
   it('Escape closes the chooser first and the drawer second', async () => {
     await open();
     await browse();

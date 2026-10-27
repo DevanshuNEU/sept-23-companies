@@ -28,8 +28,11 @@ type FilterKey = (typeof FILTERS)[number]['key'];
  * and Enter work too). Nothing here is a Not now: the pick goes back to More options with no cooldown.
  */
 function Chooser({ company, picks, at, onAt, onChoose }: { company: BrowseCompany; picks: PlanRow[]; at: number; onAt: (i: number) => void; onChoose: (row: PlanRow) => void }) {
+  // Focus moves here, so keys typed after Enter reach the chooser and not the search box.
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => box.current?.focus(), []);
   return (
-    <div role="group" aria-label={`Use ${company.company.name} instead of`} className="grid gap-2 rounded-lg border bg-subtle px-3 py-3">
+    <div ref={box} tabIndex={-1} role="group" aria-label={`Use ${company.company.name} instead of`} className="grid gap-2 rounded-lg border bg-subtle px-3 py-3 outline-none">
       <p className="text-[13px]">
         <b className="font-medium">{`Use ${company.company.name} instead of...`}</b>{' '}
         <span className="text-muted-foreground">The pick goes back to More options. It is not a Not now, and it uses no room.</span>
@@ -86,6 +89,7 @@ export function BrowseDrawer({ open, onOpenChange, rows, onSwap }: { open: boole
   const [choosing, setChoosing] = useState<number | null>(null);
   const [at, setAt] = useState(0);
   const list = useRef<HTMLUListElement>(null);
+  const searchBox = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const id = setTimeout(() => setQ(text.trim()), TYPING_MS);
@@ -156,10 +160,10 @@ export function BrowseDrawer({ open, onOpenChange, rows, onSwap }: { open: boole
     { keys: 'arrowdown', label: 'Next company', group: GROUP, inDialogs: true, inInputs: true, enabled: open && !inChooser, run: () => move(1) },
     { keys: 'arrowup', label: 'Previous company', group: GROUP, inDialogs: true, inInputs: true, enabled: open && !inChooser, run: () => move(-1) },
     { keys: 'enter', label: 'Use instead of...', group: GROUP, inDialogs: true, inInputs: true, enabled: open && !inChooser && current !== null, run: () => current && askFor(current) },
-    { keys: 'arrowdown', label: 'Next pick', group: GROUP, inDialogs: true, enabled: open && inChooser, run: () => setAt((i) => Math.min(i + 1, Math.min(picks.length, 9) - 1)) },
-    { keys: 'arrowup', label: 'Previous pick', group: GROUP, inDialogs: true, enabled: open && inChooser, run: () => setAt((i) => Math.max(i - 1, 0)) },
-    { keys: 'enter', label: 'Use instead of this pick', group: GROUP, inDialogs: true, enabled: open && inChooser, run: () => choose(picks[at]) },
-    ...Array.from({ length: 9 }, (_, i): Binding => ({ keys: String(i + 1), label: `Use instead of pick ${i + 1}`, group: GROUP, inDialogs: true, enabled: open && inChooser && i < picks.length, run: () => choose(picks[i]) })),
+    { keys: 'arrowdown', label: 'Next pick', group: GROUP, inDialogs: true, inInputs: true, enabled: open && inChooser, run: () => setAt((i) => Math.min(i + 1, Math.min(picks.length, 9) - 1)) },
+    { keys: 'arrowup', label: 'Previous pick', group: GROUP, inDialogs: true, inInputs: true, enabled: open && inChooser, run: () => setAt((i) => Math.max(i - 1, 0)) },
+    { keys: 'enter', label: 'Use instead of this pick', group: GROUP, inDialogs: true, inInputs: true, enabled: open && inChooser, run: () => choose(picks[at]) },
+    ...Array.from({ length: 9 }, (_, i): Binding => ({ keys: String(i + 1), label: `Use instead of pick ${i + 1}`, group: GROUP, inDialogs: true, inInputs: true, enabled: open && inChooser && i < picks.length, run: () => choose(picks[i]) })),
   ];
   useHotkeys(bindings);
 
@@ -177,6 +181,7 @@ export function BrowseDrawer({ open, onOpenChange, rows, onSwap }: { open: boole
           if (inChooser) {
             e.preventDefault();
             setChoosing(null);
+            searchBox.current?.focus();
           }
         }}
       >
@@ -189,6 +194,7 @@ export function BrowseDrawer({ open, onOpenChange, rows, onSwap }: { open: boole
             <SheetDescription>{description}</SheetDescription>
           </div>
           <Input
+            ref={searchBox}
             type="search"
             value={text}
             onChange={(e) => setText(e.target.value)}

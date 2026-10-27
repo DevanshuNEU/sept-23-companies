@@ -1009,6 +1009,10 @@ changed, and wins where the two differ. No mockup was drawn; the sample is `?sce
   company's domain, when known), LinkedIn page (a LinkedIn company search for the name; the app never fetches it).
   Then the reach pipeline as 16.1a: Open LinkedIn search (S), Copy for terminal (C), Log applied (A), where it stands,
   Log people (L), Save this search, and the quiet Carry (X) and Not now (P).
+- **The judge's line (Part of #6 and #15, 2026-10-27).** Under Visa, Why today ends with the profile judge's one line,
+  as the API words it: "Judge: builds X. Fit 72. Risk: Y." when a fresh judgment exists, else "Judge: not judged yet."
+  in the muted text. The rail adds a small muted "Judge fit 72" under the why line only when the company is judged, so
+  a day with the judge off reads as before. The judge only adds ranking points; nothing here is a hide or a no-go.
 - **Not now (P, and N).** One action since his ruling: it never removes a company, never closes it and never makes a
   no-go, and an application never stops it (only a pick he already reached stays). P opens the reason chips under the
   actions: 1 Visa worry, 2 Too big, 3 Too early, 4 Role not for me, 5 Not into the product, 6 Already know it, 7 Not a

@@ -1,0 +1,117 @@
+# The giants list (size gate, 2026-10-27): companies far over the 300 people cap, each under its parent. A company
+# on it is hidden as over size (`over_size`, the No-go page's "hidden by the ranker" list) even with no size fact,
+# so it is never a Today pick, a fresh lane pick or a bench entry. Nothing is deleted and no status changes.
+#
+# Matching: each name goes through `outreach.store.writes.name_key` (case, spaces, punctuation and a trailing Inc,
+# LLC, Ltd, Corp, Co or GmbH do not matter) and must equal the key of the company's name, one of its name aliases
+# or one of its name keys, across its merged family. Only whole names match: "Lucid Motors" never matches
+# "Lucid Computing".
+#
+# To put a company back: set its size by hand (a locked size at or under 300 wins over this list), or take its name
+# out of this file. A change here is a new ranker version, so the next rank run applies it.
+#
+# Only list a name that is clearly over 300 people and cannot be mistaken for a small company of the same name.
+# Staffing firms are left to the staffing_risk signal unless they are giants in their own right (ALTEN).
+
+[[group]]
+parent = "Amazon"
+names = ["Amazon", "Amazon Web Services", "AWS", "Twitch", "Whole Foods Market", "Zoox", "Audible", "Zappos",
+         "IMDb", "One Medical"]
+
+[[group]]
+parent = "Alphabet"
+names = ["Alphabet", "Google", "YouTube", "DeepMind", "Google DeepMind", "Waymo", "Verily", "Fitbit", "Mandiant"]
+
+[[group]]
+parent = "Meta"
+names = ["Meta", "Meta Platforms", "Facebook", "Instagram", "WhatsApp", "Oculus"]
+
+[[group]]
+parent = "Microsoft"
+names = ["Microsoft", "LinkedIn", "GitHub", "Activision Blizzard", "Nuance Communications"]
+
+[[group]]
+parent = "Salesforce"
+names = ["Salesforce", "Slack", "Tableau", "MuleSoft"]
+
+[[group]]
+parent = "IBM"
+names = ["IBM", "Red Hat", "HashiCorp"]
+
+[[group]]
+parent = "Broadcom"
+names = ["Broadcom", "VMware"]
+
+[[group]]
+parent = "Cisco"
+names = ["Cisco", "Splunk"]
+
+[[group]]
+parent = "Hewlett Packard Enterprise"
+names = ["HPE", "Hewlett Packard Enterprise", "Juniper Networks"]
+
+[[group]]
+parent = "AMD"
+names = ["AMD", "Advanced Micro Devices", "Xilinx"]
+
+[[group]]
+parent = "Mastercard"
+names = ["Mastercard", "Recorded Future"]
+
+[[group]]
+parent = "PayPal"
+names = ["PayPal", "Venmo"]
+
+[[group]]
+parent = "Bloomberg"
+names = ["Bloomberg", "Bloomberg LP", "Bloomberg Industry Group"]
+
+[[group]]
+parent = "Gerson Lehrman Group"
+names = ["GLG", "Gerson Lehrman Group"]
+
+[[group]]
+parent = "ALTEN"
+names = ["ALTEN", "ALTEN Technology USA"]
+
+[[group]]
+parent = "Octopus Energy"
+names = ["Kraken Tech", "Kraken Technologies"]
+
+[[group]]
+parent = "Madison Square Garden Entertainment"
+names = ["MSG Entertainment", "MSG Entertainment Holdings", "Madison Square Garden Entertainment"]
+
+[[group]]
+parent = "JPMorgan Chase"
+names = ["JPMorgan Chase", "JPMorgan"]  # "J.P. Morgan" has the same key as JPMorgan
+
+[[group]]
+parent = "Lucid Group"
+names = ["Lucid Motors", "Lucid Group"]
+
+# Large on their own (the parent is the company itself).
+[[group]]
+parent = ""
+names = [
+  # big tech and chips
+  "Apple", "Netflix", "NVIDIA", "Oracle", "Intel", "Qualcomm", "Adobe", "Dell", "Dell Technologies", "HP Inc",
+  "Micron", "Micron Technology", "NetApp", "Workday", "Autodesk", "ServiceNow", "Intuit", "Equinix", "Atlassian",
+  "HubSpot", "Twilio", "Okta", "CrowdStrike", "Palo Alto Networks", "Zoom Video Communications", "Dropbox",
+  # consumer internet and fintech
+  "Uber", "Lyft", "Airbnb", "DoorDash", "Instacart", "Pinterest", "Snap", "Reddit", "Spotify", "Roblox",
+  "Electronic Arts", "Epic Games", "Riot Games", "Discord", "Duolingo", "Grammarly", "Canva", "Shopify", "Stripe",
+  "Coinbase", "Robinhood", "Chime", "SoFi", "Affirm", "Plaid", "Brex", "Ramp", "Toast", "Adyen", "Capital One",
+  "Morgan Stanley", "Goldman Sachs",
+  # data, cloud and developer platforms
+  "Databricks", "Snowflake", "Datadog", "MongoDB", "GitLab", "Cloudflare", "Fastly", "DigitalOcean", "Fivetran",
+  "Figma", "Notion", "Vercel", "Vanta", "Docker", "Glean", "Checkr", "Rippling", "Gusto", "Deel", "Socure",
+  "Mixpanel", "Sentry", "Handshake", "Geotab", "Palantir", "Palantir Technologies",
+  # AI labs
+  "OpenAI", "Anthropic", "Scale AI", "xAI",
+  # hardware, space, cars and defense
+  "Tesla", "SpaceX", "Relativity Space", "Shield AI", "Anduril", "Axon", "Motional", "Faraday Future",
+  "Agile Defense",
+  # other large employers seen in the ranking
+  "SharkNinja", "ShipBob", "Atlas Air", "Clear Street", "Jain Global",
+]

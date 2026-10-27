@@ -22,7 +22,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
                "lca_recent_years", "hn_post_days", "diff_min_rank_move", "diff_top_n", "lca_wage_min_filings"),
     "weights": ("live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
                 "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like", "profile_fit"),
-    "hide": ("size_over", "size_confidences"),
+    "hide": ("size_over", "size_confidences", "likely_large_open_roles", "likely_large_lca_software"),
     "live_role": ("intern_junior", "level_role", "any_us_role", "fresh_days", "fresh_bonus",
                   "tier_values", "early_career_max_age_days"),
     "posting_sponsors": ("yes", "opt_only"),
@@ -180,16 +180,25 @@ def _check_ranker(data: dict) -> None:
 
 
 _HIDE_CONFIDENCES = ("confirmed", "estimate")
+# The lowest bar the likely-large proxies may use: the LCA research's small employer files 1 to 25 a year.
+_LIKELY_LARGE_MIN = 25
 
 
 def _check_hide(h: dict) -> None:
-    """The size hide may never hide more than #9 allows: over 300 people, on confirmed or estimated evidence."""
+    """The size hide may never hide more than #9 and the size gate (2026-10-27) allow: over 300 people, on confirmed
+    or estimated evidence; with no size on file, only past a likely-large bar of at least 25 open roles or software
+    H-1B filings in a year. The giants list is checked by its own loader (giants.py)."""
     over = h["size_over"]
     if not isinstance(over, int) or isinstance(over, bool) or over < 300:
         raise ValueError(f"[hide] size_over must be a whole number of at least 300, got {over!r}")
     conf = h["size_confidences"]
     if not isinstance(conf, list) or not all(isinstance(c, str) and c in _HIDE_CONFIDENCES for c in conf):
         raise ValueError(f"[hide] size_confidences must be a list of {_HIDE_CONFIDENCES}, got {conf!r}")
+    for key in ("likely_large_open_roles", "likely_large_lca_software"):
+        bar = h[key]
+        if not isinstance(bar, int) or isinstance(bar, bool) or bar < _LIKELY_LARGE_MIN:
+            raise ValueError(f"[hide] {key} must be a whole number of at least {_LIKELY_LARGE_MIN} (a lower bar "
+                             f"would hide small companies), got {bar!r}")
 
 
 def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:

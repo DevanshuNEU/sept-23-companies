@@ -8,17 +8,25 @@ module adds the company level, in the order of the plan's Decisions:
    stays shown and ranked, and only a new active row he set, or one from the company's reply, hides it again; a
    `rules`, `claude` or `import` row never does);
 2. size over `hide.size_over` with evidence of a trusted confidence (`size`, else `headcount`);
-3. a sponsorship refusal: an open, live (not stale) engineering posting on a trusted board, not outside the US,
+3. the giants list (`giants.toml`, size gate 2026-10-27): a company whose name, name alias or name key is on it, unless
+   he set its size by hand at or under `hide.size_over`;
+4. likely over the cap with no size on file (no `size` or `headcount` row at all): more open roles than
+   `hide.likely_large_open_roles` (trusted, live, not stale: `Roles.open_count`), or more software H-1B filings in one
+   fiscal year than `hide.likely_large_lca_software`;
+5. a sponsorship refusal: an open, live (not stale) engineering posting on a trusted board, not outside the US,
    whose decision says `sponsorship = 'no'`. It hides nothing when another open live trusted posting says `yes`
    or `opt_only` (ruling 9: the postings disagree). It is final when a refusal's decision is final
    (`provisional = 0`); else the company is "hidden, pending reader" and nothing is written.
 
 A stale posting neither refuses nor sponsors (ruling 2026-10-22), and a posting on a doubtful board counts for
-nothing (ruling 7). Unknown size is neutral: no evidence never hides.
+nothing (ruling 7). Unknown size with no sign of being large is neutral: most startups have no size on file. Every
+size hide is `over_size`: it keeps the company off the ranked list (so off the plan, the fresh lane and the bench) and
+on the No-go page's hidden list, and writes nothing.
 """
 from __future__ import annotations
 
 import dataclasses
+import json
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -26,8 +34,10 @@ from dataclasses import dataclass
 from outreach.crawl.stale import Stale
 from outreach.ranking.common import clean_text, size_order_key
 from outreach.ranking.config import RankerConfig
+from outreach.ranking.giants import Giant, Giants, default_giants
 from outreach.rules import Decision, passes
 from outreach.store import append_event, atomic, utcnow
+from outreach.store.writes import NAME_ALIAS_SOURCES, name_key
 
 __all__ = ["HIDE_KINDS", "posting_visible", "Refusal", "SizeEvidence", "HideInputs", "Hide", "load_hide_inputs",
            "decide_hide", "write_no_go"]
@@ -81,6 +91,9 @@ class HideInputs:
     refusals: tuple[Refusal, ...]
     sponsors: tuple[int, ...]  # open, live, trusted postings whose decision says yes or opt_only
     size: SizeEvidence | None
+    giant: Giant | None = None  # its entry on the giants list, matched by any name key of its family
+    open_roles: int = 0         # trusted open postings that are not stale (`Roles.open_count`)
+    lca_software: int = 0       # the most software H-1B filings in one fiscal year on record
 
     @property
     def conflict(self) -> bool:
@@ -110,8 +123,11 @@ def _one_line(text: str) -> str:
 
 
 def load_hide_inputs(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozenset[int],
-                     stale: Mapping[int, Stale]) -> dict[int, HideInputs]:
-    """The hide inputs of every surviving company, in three queries. Everything counts for `canon[company_id]`."""
+                     stale: Mapping[int, Stale], open_roles: Mapping[int, int] | None = None,
+                     giants: Giants | None = None) -> dict[int, HideInputs]:
+    """The hide inputs of every surviving company, one query per table. Everything counts for `canon[company_id]`.
+    `open_roles` is each survivor's `Roles.open_count` (the caller has the roles); `giants` defaults to the shipped
+    list."""
     def owner(cid: int) -> int:
         return canon.get(cid, cid)
 
@@ -157,13 +173,56 @@ def load_hide_inputs(conn: sqlite3.Connection, canon: dict[int, int], doubtful: 
             size[cid] = (key, SizeEvidence(r["num_low"], r["num_high"], r["confidence"], r["source_ref"],
                                            r["evidence_id"], bool(r["locked"])))
 
+    lca: dict[int, int] = {}
+    for r in conn.execute("SELECT company_id, value FROM evidence WHERE fact = 'lca'"):
+        cid = owner(r["company_id"])
+        lca[cid] = max(lca.get(cid, 0), int(json.loads(r["value"]).get("software", 0)))
+
+    found = _giants_by_company(conn, owner, giants if giants is not None else default_giants())
+    counts = open_roles or {}
     ids = set(canon.values()) | set(refusals) | set(sponsors) | set(no_go) | set(size)
     out: dict[int, HideInputs] = {}
     for cid in sorted(ids):
         state, reason = no_go.get(cid, (None, ""))
         out[cid] = HideInputs(cid, state, reason, tuple(refusals.get(cid, ())), tuple(sponsors.get(cid, ())),
-                              size[cid][1] if cid in size else None)
+                              size[cid][1] if cid in size else None, giant=found.get(cid),
+                              open_roles=counts.get(cid, 0), lca_software=lca.get(cid, 0))
     return out
+
+
+def _giants_by_company(conn: sqlite3.Connection, owner, giants: Giants) -> dict[int, Giant]:
+    """The giants-list entry of each survivor whose family is known by a listed name: its stored name, a name alias
+    (never a board, FEIN or LinkedIn key) or a `company_name_key` row."""
+    keys: dict[int, set[str]] = {}
+    for r in conn.execute("SELECT company_id, name FROM company"):
+        keys.setdefault(owner(r["company_id"]), set()).add(name_key(r["name"]))
+    marks = ", ".join("?" for _ in NAME_ALIAS_SOURCES)
+    for r in conn.execute(f"SELECT company_id, alias FROM company_alias WHERE source IN ({marks})",
+                          NAME_ALIAS_SOURCES):
+        keys.setdefault(owner(r["company_id"]), set()).add(name_key(r["alias"]))
+    for r in conn.execute("SELECT company_id, name_key FROM company_name_key"):
+        keys.setdefault(owner(r["company_id"]), set()).add(r["name_key"])
+    out: dict[int, Giant] = {}
+    for cid, names in keys.items():
+        hit = giants.match(names - {""})
+        if hit is not None:
+            out[cid] = hit
+    return out
+
+
+def _set_small_by_hand(s: SizeEvidence | None, over: int) -> bool:
+    """He set the size himself (a locked row) at or under the cap: his call beats the giants list."""
+    return s is not None and s.locked and (s.high if s.high is not None else s.low) <= over
+
+
+def _likely_large(inputs: HideInputs, cfg: RankerConfig) -> list[str]:
+    """The signs that a company with no size on file is over the cap, in words; empty when there are none."""
+    signs = []
+    if inputs.open_roles > cfg.hide["likely_large_open_roles"]:
+        signs.append(f"{inputs.open_roles} open roles")
+    if inputs.lca_software > cfg.hide["likely_large_lca_software"]:
+        signs.append(f"{inputs.lca_software} software H-1B filings in one fiscal year")
+    return signs
 
 
 def decide_hide(inputs: HideInputs, cfg: RankerConfig) -> Hide | None:
@@ -178,6 +237,11 @@ def decide_hide(inputs: HideInputs, cfg: RankerConfig) -> Hide | None:
         span = f"{s.low} to {s.high}" if s.high is not None else f"{s.low} or more"
         source = f", {s.source_ref}" if s.source_ref else ""
         return Hide("over_size", _one_line(f"Over {over} people: {span} ({s.confidence} evidence{source})"), False)
+    if inputs.giant is not None and not _set_small_by_hand(s, over):
+        return Hide("over_size", _one_line(inputs.giant.reason(over)), False)
+    signs = _likely_large(inputs, cfg) if s is None else []
+    if signs:
+        return Hide("over_size", _one_line(f"Likely over {over} people, size not on file: {'; '.join(signs)}"), False)
     if not inputs.refusals or inputs.sponsors:
         return None
     final = [r for r in inputs.refusals if not r.provisional]

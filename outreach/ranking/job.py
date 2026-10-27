@@ -106,7 +106,8 @@ def compute_rank(conn: sqlite3.Connection, *, today: date, cfg: RankerConfig | N
         roles = load_roles(conn, canon, doubtful, today, stale,
                            early_max_age_days=cfg.section("live_role")["early_career_max_age_days"])
         facts = load_facts(conn, canon, doubtful, roles, today, cfg, wages)
-        all_inputs = load_hide_inputs(conn, canon, doubtful, stale)
+        all_inputs = load_hide_inputs(conn, canon, doubtful, stale,
+                                      open_roles={cid: rl.open_count for cid, rl in roles.items()})
     finally:
         if own and conn.in_transaction:
             conn.execute("COMMIT")  # a read transaction: nothing to keep or undo

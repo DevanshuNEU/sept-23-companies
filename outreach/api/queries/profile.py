@@ -10,7 +10,9 @@ however many rows:
 - open roles at his level: `outreach.plan.fresh.load_level_roles`, up to five;
 - people on record, and when the company is free again; his application and his Not nows.
 
-A fact nothing is known about has `text` None: the page says "Not known". Nothing here writes, and no line is guessed.
+A fact nothing is known about has `text` None: the page says "Not known" (the headcount says "Not checked": the size
+gate keeps a giant or a likely large company off the list, so an unknown size here was never looked up). Nothing here
+writes, and no line is guessed.
 """
 import json
 import sqlite3

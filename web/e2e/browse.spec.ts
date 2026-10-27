@@ -8,6 +8,14 @@ test('Browse companies: search, filters, paging, a refused company and a swap by
   const rail = page.getByRole('listbox', { name: "Today's picks" });
   await expect(rail.getByRole('option')).toHaveCount(8);
 
+  // The sidebar's link opens Today with the drawer; Escape closes it, and F opens it again.
+  await page.getByRole('link', { name: 'Browse companies' }).click();
+  await expect(page).toHaveURL(/browse=1/);
+  await expect(page.getByRole('dialog', { name: /Browse companies/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: /Browse companies/ })).toHaveCount(0);
+  await expect(page).not.toHaveURL(/browse=1/);
+  await expect(page.getByRole('button', { name: /^Browse companies/ })).toHaveCount(0); // no button in the rail
   await page.locator('body').press('f');
   const drawer = page.getByRole('dialog', { name: /Browse companies/ });
   const rows = drawer.getByRole('list', { name: 'Companies' }).getByRole('listitem');

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
-import { HelpCircle, Layers, Search, Terminal } from 'lucide-react';
+import { HelpCircle, Layers, Terminal } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
@@ -38,6 +38,7 @@ import { OutcomePrompt } from './outcome-prompt';
 import { PassChips } from './pass-chips';
 import { ProfileFold, ProfilePanel } from './profile-panel';
 import { canLogPeople, isCompanyRow, nextTodoAfter, peopleFieldId } from './plan-steps';
+import { useUrlState } from '@/lib/url-state';
 import { usePlanActions } from './use-plan-actions';
 import { WatchList } from './watch-list';
 import { WinStrip } from './win-strip';
@@ -146,7 +147,6 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
   // Not now's reason chips are open on this row; the bench drawer (B) is open.
   const [passing, setPassing] = useState<Id | null>(null);
   const [benchOpen, setBenchOpen] = useState(false);
-  const [browseOpen, setBrowseOpen] = useState(false);
   // The company whose Log people box is open: it starts closed on every row, and closes when he moves to another.
   const [peopleOpen, setPeopleOpen] = useState<Id | null>(null);
   const showBench = useCallback(() => setBenchOpen(true), []);
@@ -396,7 +396,6 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
   useHotkeys([
     { keys: 'shift+c', label: isQueue(plan) ? 'Copy every company line for the terminal' : 'Copy every find-someone handoff', group, run: copyAllHandoffs },
     { keys: 'b', label: 'More options (the bench)', group, inDialogs: true, run: () => setBenchOpen((o) => !o) },
-    { keys: 'f', label: 'Browse companies', group, inDialogs: true, run: () => setBrowseOpen((o) => !o) },
   ]);
 
   /* ------------------------------------------------------------------ layout */
@@ -479,11 +478,6 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
             {`More options${bench && bench.companies.length > 0 ? ` (${bench.companies.length})` : ''}`}
             <KeyHint k="B" />
           </Button>
-          <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="f" onClick={() => setBrowseOpen(true)}>
-            <Search aria-hidden />
-            Browse companies
-            <KeyHint k="F" />
-          </Button>
           <Link
             to="/proposals"
             className="ml-2.5 rounded-sm text-xs text-muted-foreground underline decoration-foreground/30 underline-offset-3 transition-colors outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70"
@@ -521,7 +515,6 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
         </aside>
       ) : null}
 
-      <BrowseDrawer open={browseOpen} onOpenChange={setBrowseOpen} rows={plan.rows} onSwap={actions.swapPick} />
       <BenchDrawer
         open={benchOpen}
         onOpenChange={setBenchOpen}
@@ -585,6 +578,20 @@ function useNewOpeningToast(bench: BenchView | undefined, show: () => void) {
   }, [bench, show]);
 }
 
+/**
+ * Browse companies (the sidebar's entry, or F): a drawer over Today, open while the URL has `?browse=1`, so the sidebar
+ * link opens it and a reload keeps it. It is here, not in the plan's work area, so it opens even before today's plan is
+ * built; with no plan there are no picks to swap, and the list is for looking.
+ */
+function BrowseOnToday({ rows }: { rows: PlanRow[] }) {
+  const actions = usePlanActions();
+  const [flag, setFlag] = useUrlState('browse', '');
+  const open = flag === '1';
+  const setOpen = (o: boolean) => setFlag(o ? '1' : '');
+  useHotkeys([{ keys: 'f', label: 'Browse companies', group: 'Today', inDialogs: true, run: () => setOpen(!open) }]);
+  return <BrowseDrawer open={open} onOpenChange={setOpen} rows={rows} onSwap={actions.swapPick} />;
+}
+
 export default function TodayPage() {
   const client = usePageClient('plan');
   const plan = useViewQuery(queryKeys.plan, () => client.plan(), { pollMs: pollMs.default });
@@ -594,6 +601,7 @@ export default function TodayPage() {
       {/* The view's name for the outline; the visible heading is the date. */}
       <h1 className="sr-only">Today</h1>
       <WinStrip />
+      <BrowseOnToday rows={plan.data?.rows ?? []} />
       <div className="min-h-0 flex-1">
         <QueryState query={plan} skeleton={<PlanSkeleton />} empty={null}>
           {(p) => <PlanContent plan={p} bench={bench.data} />}

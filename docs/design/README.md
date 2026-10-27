@@ -1030,7 +1030,7 @@ changed, and wins where the two differ. No mockup was drawn; the sample is `?sce
   why today, the opening, reasons and size, visa, the applied note, the three links) with **Add to today**, which puts
   it after the last pick while the 7-day limit has room ("Room to add 17 more companies this week."; with none the
   button is off and the line says why). A company held back by Not now or an application, or in flight, is not on it.
-- **Browse companies (F, #120).** A second drawer on the right, 480 px, from the button under More options or the key F.
+- **Browse companies (F, #120).** A second drawer on the right, 480 px, from **Browse companies** in the sidebar's Lists (it opens Today with `?browse=1`, so a reload keeps it open and it opens even before the plan is built) or the key F. There is no button in the rail.
   It lists every company the plan could pick, best ranked first, 25 at a time (Show more loads the next page by a
   cursor), each in the same compact row as the bench (monogram, name, Fit chip, new tag, why today, the opening, reasons
   and size, visa, the three links). Under the title: a search box (a name, as the store keys names, so "retell inc" finds

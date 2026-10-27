@@ -76,7 +76,7 @@ export interface HealthView {
 export interface Pulse { revision: number }
 export interface ShellSummary {
   asOf: IsoTime; pickedToday: number; capacityToday: number; unhandledReplies: number; draftsToReview: number;
-  linkedinToReach: number; openReviewItems: number; noGoCount: number; doneCount: number;
+  linkedinReplied: number; openReviewItems: number; noGoCount: number; doneCount: number;
   sending: { state: SenderState; sentToday: number; limitToday: number };
   repliesThisMonth: number; jobs: JobRunSummary[];
   plan: { done: number; total: number }; winsUnseen: number; // today's plan rows done of planned, and wins not yet seen (#33)
@@ -169,7 +169,14 @@ export interface LinkedInGroup {
   company: CompanyRef; role: RoleToName | null; emailed: number; onLinkedIn: number;
   heldBy: { touchId: Id; personName: string } | null; people: LinkedInPerson[];
 }
-export interface LinkedInView { asOf: IsoTime; groups: LinkedInGroup[]; counts: { toReach: number; waiting: number; replied: number; all: number }; requestsThisWeek: number }
+// Counts only, never a rate (a reply in the 7 days may answer an older request): people with a live LinkedIn request,
+// and people with a live reply step, over the last 7 New York days and in all.
+export interface LinkedInActivity { messagedWeek: number; repliedWeek: number; messagedTotal: number; repliedTotal: number }
+// `groups` holds everyone recorded; the page lists only the people who replied unless he turns on All recorded.
+export interface LinkedInView {
+  asOf: IsoTime; groups: LinkedInGroup[]; counts: { toReach: number; waiting: number; replied: number; all: number };
+  activity: LinkedInActivity; requestsThisWeek: number;
+}
 
 // Needs you (spec 13.5)
 export interface ReviewItem {

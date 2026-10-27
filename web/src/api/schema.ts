@@ -1964,6 +1964,22 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /**
+         * LinkedInActivity
+         * @description Counts only, no rate: people with a live LinkedIn request (messaged) and people with a live reply step
+         *     (replied), over the last 7 New York days (today and the 6 before) and in all. A reply in the window may answer a
+         *     request from before it, so the two are never divided.
+         */
+        LinkedInActivity: {
+            /** Messagedtotal */
+            messagedTotal: number;
+            /** Messagedweek */
+            messagedWeek: number;
+            /** Repliedtotal */
+            repliedTotal: number;
+            /** Repliedweek */
+            repliedWeek: number;
+        };
         /** LinkedInCounts */
         LinkedInCounts: {
             /** All */
@@ -2007,6 +2023,7 @@ export interface components {
         };
         /** LinkedInView */
         LinkedInView: {
+            activity: components["schemas"]["LinkedInActivity"];
             /** Asof */
             asOf: string;
             counts: components["schemas"]["LinkedInCounts"];
@@ -3542,8 +3559,8 @@ export interface components {
             draftsToReview: number;
             /** Jobs */
             jobs: components["schemas"]["JobRunSummary"][];
-            /** Linkedintoreach */
-            linkedinToReach: number;
+            /** Linkedinreplied */
+            linkedinReplied: number;
             /** Nogocount */
             noGoCount: number;
             /** Openreviewitems */

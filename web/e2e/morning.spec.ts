@@ -111,19 +111,18 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await expect(approved.getByRole('option').filter({ hasText: 'Omar Haddad' })).toBeVisible();
   await expectCleanPage(page, consoleErrors, foreign);
 
-  // 6. LinkedIn: log a request to Hannah Cole.
+  // 6. LinkedIn: Luis Romero answered his request; mark him as replied.
   await page.keyboard.press('g');
   await page.keyboard.press('l');
   await expect(page).toHaveURL(/\/linkedin/);
-  const hannah = page.getByRole('row').filter({ hasText: 'Hannah Cole' });
-  await expect(hannah).toContainText('Not started');
-  await hannah.click();
-  await expect(hannah).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('r');
-  await expect(page.getByText('Logged: request sent to Hannah Cole.')).toBeVisible();
-  // She leaves To reach and the next person is selected.
-  await expect(hannah).toHaveCount(0);
-  await expect(page.getByRole('row').filter({ hasText: 'Owen Clarke' })).toHaveAttribute('aria-selected', 'true');
+  const luis = page.getByRole('row').filter({ hasText: 'Luis Romero' });
+  await expect(page.getByRole('row').filter({ hasText: 'Anneke Visser' })).toBeVisible();
+  await expect(luis).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Mark someone as replied' }).fill('luis');
+  await page.getByRole('button', { name: /^Luis Romero at Mintlify/ }).click();
+  await page.getByRole('dialog', { name: 'What kind of reply?' }).getByRole('button', { name: 'Interested' }).click();
+  await expect(page.getByText('Logged: reply from Luis Romero (Interested).')).toBeVisible();
+  await expect(luis).toContainText('Replied today');
   await expectCleanPage(page, consoleErrors, foreign);
 
   // 7. Done.
@@ -141,7 +140,7 @@ test('every view loads clean: no foreign host, no console error, no Send button'
     ['/today', 'Today'],
     ['/proposals', 'All proposed companies'],
     ['/outbox', 'Outbox'],
-    ['/linkedin', 'LinkedIn list'],
+    ['/linkedin', 'LinkedIn replies'],
     ['/needs-you', 'Needs you'],
     ['/no-go', 'No-go list'],
     ['/done', 'Done companies'],

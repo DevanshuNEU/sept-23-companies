@@ -45,10 +45,22 @@ class LinkedInCounts(Wire):
     all: int
 
 
+class LinkedInActivity(Wire):
+    """Counts only, no rate: people with a live LinkedIn request (messaged) and people with a live reply step
+    (replied), over the last 7 New York days (today and the 6 before) and in all. A reply in the window may answer a
+    request from before it, so the two are never divided."""
+
+    messaged_week: int
+    replied_week: int
+    messaged_total: int
+    replied_total: int
+
+
 class LinkedInView(Wire):
     as_of: str
-    groups: list[LinkedInGroup]
+    groups: list[LinkedInGroup]  # everyone recorded; the page lists only `tab == 'replied'` unless he asks for all
     counts: LinkedInCounts
+    activity: LinkedInActivity
     requests_this_week: int  # New York week, not counting a request he took back
 
 

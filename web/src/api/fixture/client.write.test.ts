@@ -499,6 +499,20 @@ describe('sending writes', () => {
 });
 
 describe('LinkedIn, Needs you', () => {
+  it('a reply logged after only the request logs the accept first, and the reply counts', async () => {
+    const c = client();
+    const luis = (await c.linkedin()).groups.flatMap((g) => g.people).find((p) => p.person.name === 'Luis Romero');
+    if (!luis) throw new Error('no Luis');
+    expect(luis.steps.map((s) => s.step)).toEqual(['request_sent']);
+    const before = (await c.linkedin()).activity;
+    const logged = await c.logLinkedIn(luis.person.id, 'replied', opt(), 'interested');
+    expect(logged.steps.map((s) => s.step)).toEqual(['request_sent', 'accepted', 'replied']);
+    expect(logged).toMatchObject({ tab: 'replied', replyKind: 'interested' });
+    const after = (await c.linkedin()).activity;
+    expect(after).toEqual({ ...before, repliedWeek: before.repliedWeek + 1, repliedTotal: before.repliedTotal + 1 });
+    expect((await c.shell()).linkedinReplied).toBe(3);
+  });
+
   it('logLinkedIn moves Hannah Cole from to_reach to waiting', async () => {
     const c = client();
     const find = async () => (await c.linkedin()).groups.flatMap((g) => g.people).find((p) => p.person.name === 'Hannah Cole');
@@ -509,7 +523,7 @@ describe('LinkedIn, Needs you', () => {
     expect(logged).toMatchObject({ tab: 'waiting', steps: [{ step: 'request_sent', at: '2026-11-10T15:14:00Z' }] });
     const view = await c.linkedin();
     expect(view.counts).toMatchObject({ toReach: 11, waiting: 10, replied: 2 });
-    expect((await c.shell()).linkedinToReach).toBe(11);
+    expect((await c.shell()).linkedinReplied).toBe(2);
     expect((await find())?.tab).toBe('waiting');
     expect((await c.logLinkedIn(hannah.person.id, 'request_sent', opt())).steps).toHaveLength(1);
     expect((await rejection(c.logLinkedIn(1, 'request_sent', opt()))).code).toBe('not_found');

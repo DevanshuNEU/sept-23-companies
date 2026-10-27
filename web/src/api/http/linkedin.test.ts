@@ -6,7 +6,9 @@ const PERSON: LinkedInPerson = {
   person: { id: 4, name: 'Lena Ortiz', title: 'Software Engineer', roleKind: 'engineer', email: null, linkedinUrl: 'https://www.linkedin.com/in/lena', revision: 1 },
   reason: 'no_email', steps: [{ step: 'request_sent', at: '2026-11-10T15:14:00Z' }], replyKind: null, tab: 'waiting',
 };
-const VIEW: LinkedInView = { asOf: '2026-11-10T15:14:00Z', groups: [], counts: { toReach: 0, waiting: 0, replied: 0, all: 0 }, requestsThisWeek: 0 };
+const VIEW: LinkedInView = { asOf: '2026-11-10T15:14:00Z', groups: [], counts: { toReach: 0, waiting: 0, replied: 0, all: 0 },
+  activity: { messagedWeek: 0, repliedWeek: 0, messagedTotal: 0, repliedTotal: 0 }, requestsThisWeek: 0,
+};
 const o = { requestId: 'req-12345678' };
 
 describe('linkedinMethods', () => {

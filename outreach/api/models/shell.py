@@ -14,7 +14,7 @@ class ShellSummary(Wire):
     capacity_today: int
     unhandled_replies: int  # email threads whose reply he has not sorted
     drafts_to_review: int  # the Outbox's review rows
-    linkedin_to_reach: int
+    linkedin_replied: int  # people the LinkedIn page lists: those who replied
     open_review_items: int
     no_go_count: int
     done_count: int

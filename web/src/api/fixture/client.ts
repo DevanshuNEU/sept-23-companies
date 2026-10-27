@@ -5,7 +5,7 @@ import type {
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
   BenchView, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult,
 } from '../types';
-import { buildFixture, computeShell, countGroups, GROUP_INDEX, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
+import { buildFixture, computeShell, countGroups, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
 import { askedToday, benchRoom, benchRoomText, benchToRow, pickOrder } from './queue-data';
 
@@ -710,6 +710,10 @@ export class FixtureClient implements OutreachClient {
       const group = view.groups.find((g) => g.people.some((p) => p.person.id === personId));
       const p = group?.people.find((x) => x.person.id === personId);
       if (!group || !p) throw new ApiError('not_found', `No LinkedIn row for person ${personId}`);
+      // As the API: a reply after only the request logs the accept first (an answer means they accepted).
+      if (step === 'replied' && p.steps.some((s) => s.step === 'request_sent') && !p.steps.some((s) => s.step === 'accepted' || s.step === 'message_sent')) {
+        p.steps.push({ step: 'accepted', at: this.now });
+      }
       if (!p.steps.some((s) => s.step === step)) p.steps.push({ step, at: this.now });
       p.tab = p.steps.some((s) => s.step === 'replied') ? 'replied' : p.steps.length > 0 ? 'waiting' : 'to_reach';
       if (replyKind) p.replyKind = replyKind;
@@ -717,6 +721,7 @@ export class FixtureClient implements OutreachClient {
       if (replyKind === 'said_no' || replyKind === 'asked_to_stop') this.noGoReply(p.person, group.company.name, replyKind, '', null);
       const all = view.groups.flatMap((g) => g.people);
       view.counts = { ...view.counts, toReach: all.filter((x) => x.tab === 'to_reach').length, waiting: all.filter((x) => x.tab === 'waiting').length, replied: all.filter((x) => x.tab === 'replied').length };
+      view.activity = linkedinActivity(view.groups, this.now);
       const line = `LinkedIn: ${STEP_LINE[p.tab].toLowerCase()}`;
       const found = this.db.searchIndex.people.find((x) => x.id === personId);
       if (found && !found.statusLine.startsWith('No-go')) found.statusLine = line;

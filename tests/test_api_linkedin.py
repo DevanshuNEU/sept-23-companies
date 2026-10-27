@@ -219,9 +219,8 @@ class Order(LinkedInCase):
             self.refused(self.log(self.lena, step, "interested" if step == "replied" else None))
         self.assertEqual(self.counts(), (0, 0, 0))
         self.ok(self.log(self.lena, "request_sent"))
-        # A message needs the accept first, and a reply needs a message or an accept.
+        # A message needs the accept first.
         self.refused(self.log(self.lena, "message_sent"))
-        self.refused(self.log(self.lena, "replied", "interested"))
         self.assertEqual(self.counts(), (1, 1, 1))
         self.set_now(T1)
         self.ok(self.log(self.lena, "accepted"))
@@ -235,6 +234,26 @@ class Order(LinkedInCase):
             self.assertIn("Already logged", error["message"])
         self.assertEqual([r["kind"] for r in self.log_rows()], ["request_sent", "accepted", "message_sent", "replied"])
         self.assertEqual([t["channel"] for t in self.touches()], ["linkedin_request", "linkedin_message"])
+
+    def test_a_reply_after_only_a_request_logs_the_accept_with_it(self):
+        # On LinkedIn a reply to a request means they accepted it. "Mark someone as replied" logs both in one write,
+        # the accept first, so the steps stay in order and the newest one (the reply) is what an undo takes back.
+        self.walk(self.lena, "request_sent")
+        self.set_now(T2)
+        body = self.ok(self.log(self.lena, "replied", "interested"))
+        self.assertEqual([x["step"] for x in body["steps"]], ["request_sent", "accepted", "replied"])
+        self.assertEqual((body["tab"], body["replyKind"]), ("replied", "interested"))
+        request, = self.touches()
+        self.assertEqual((request["accepted_at"], request["replied_at"], request["reply_kind"]), (T2, T2, "interested"))
+        self.assertEqual([r["kind"] for r in self.log_rows()], ["request_sent", "accepted", "replied"])
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM api_request").fetchone()[0], 2)
+        self.ok(self.undo(self.lena, "replied"))
+        self.assertEqual([x["step"] for x in self.people()["Lena Ortiz"]["steps"]], ["request_sent", "accepted"])
+
+    def test_a_reply_with_no_request_is_still_refused(self):
+        error = self.refused(self.log(self.lena, "replied", "interested"))
+        self.assertIn("request first", error["message"])
+        self.assertEqual(self.counts(), (0, 0, 0))
 
     def test_a_reply_after_only_an_accept_is_allowed(self):
         self.walk(self.lena, "request_sent", "accepted", "replied")
@@ -529,6 +548,8 @@ class Reads(LinkedInCase):
         self.conn.execute("DELETE FROM person")
         self.assertEqual(self.view(), {"asOf": NOW, "groups": [],
                                        "counts": {"toReach": 0, "waiting": 0, "replied": 0, "all": 0},
+                                       "activity": {"messagedWeek": 0, "repliedWeek": 0, "messagedTotal": 0,
+                                                    "repliedTotal": 0},
                                        "requestsThisWeek": 0})
 
     def test_a_store_with_only_email_people_is_an_empty_view(self):
@@ -628,14 +649,51 @@ class Reads(LinkedInCase):
         self.assertEqual(week["count"], 2)
 
 
-class ToReachCountUsesTheSendersNoGoSets(ApiCase):
-    def test_to_reach_count_reads_the_no_go_sets_the_sender_reads(self):
+class RepliedCountUsesTheSendersNoGoSets(ApiCase):
+    def test_replied_count_reads_the_no_go_sets_the_sender_reads(self):
         from unittest import mock
         from outreach.api.queries import linkedin as queries
         company = s.company(self.conn, "Acme", "candidate")
-        s.person(self.conn, company, "Pat", channel="linkedin")
-        self.assertEqual(queries.to_reach_count(self.conn), 1)
+        pat = s.person(self.conn, company, "Pat", channel="linkedin")
+        s.person(self.conn, company, "Quiet", channel="linkedin")
+        s.linkedin(self.conn, pat, "request_sent", "2026-11-03T12:00:00Z")
+        s.linkedin(self.conn, pat, "replied", "2026-11-04T12:00:00Z", reply_kind="interested")
+        self.assertEqual(queries.replied_count(self.conn), 1)
         with mock.patch.object(queries, "no_go_sets", return_value=(set(), {company})):
-            self.assertEqual(queries.to_reach_count(self.conn), 0)
-        with mock.patch.object(queries, "no_go_sets", return_value=({1}, set())):
-            self.assertEqual(queries.to_reach_count(self.conn), 0)
+            self.assertEqual(queries.replied_count(self.conn), 0)
+        with mock.patch.object(queries, "no_go_sets", return_value=({pat}, set())):
+            self.assertEqual(queries.replied_count(self.conn), 0)
+
+
+class Activity(LinkedInCase):
+    """The counts line: people messaged (a live LinkedIn request) and people who replied, the last 7 days and in all."""
+
+    def request(self, person_id: int, sent_at: str, **cols) -> None:
+        context = json.dumps(build_context(source="own", lane="own", role_kind="engineer", role_age_days=0,
+                                           ranker_version="r1", signals={}, role_named=False))
+        s._insert(self.conn, "outreach_touch", {"person_id": person_id, "company_id": self.acme,
+                                                "channel": "linkedin_request", "sent_at": sent_at,
+                                                "context": context, "created_at": sent_at, **cols})
+
+    def test_messaged_counts_people_with_a_live_request_and_replied_counts_a_live_reply_step(self):
+        old, recent, twice, undone, emailer = (self.person(n) for n in ("Old A", "New B", "Two C", "Undo D", "Mail E"))
+        self.request(old, "2026-10-01T12:00:00Z")
+        self.request(recent, "2026-11-04T05:00:00Z")    # Nov 4 00:00 New York: the first of the 7 days
+        self.request(twice, "2026-11-03T12:00:00Z")     # Nov 3: before the 7 days
+        self.request(twice, "2026-11-10T12:00:00Z")     # and again today: one person, in both counts once
+        self.request(undone, "2026-11-09T12:00:00Z", undone_at="2026-11-09T13:00:00Z")
+        context = json.dumps(build_context(source="own", lane="own", role_kind="engineer", role_age_days=0,
+                                           ranker_version="r1", signals={}, role_named=False))
+        s._insert(self.conn, "outreach_touch", {"person_id": emailer, "company_id": self.acme, "channel": "email",
+                                                "sent_at": NOW, "context": context, "created_at": NOW})
+        s.linkedin(self.conn, old, "replied", "2026-10-02T12:00:00Z", reply_kind="not_now")
+        s.linkedin(self.conn, recent, "replied", "2026-11-05T12:00:00Z", reply_kind="interested")
+        taken = s.linkedin(self.conn, twice, "replied", "2026-11-10T12:30:00Z", reply_kind="interested")
+        s.linkedin(self.conn, twice, "undo", "2026-11-10T12:40:00Z", undoes=taken)
+        self.assertEqual(self.view()["activity"], {"messagedWeek": 2, "repliedWeek": 1, "messagedTotal": 3,
+                                                   "repliedTotal": 2})
+
+    def test_a_reply_logged_through_the_list_counts(self):
+        self.walk(self.lena, "request_sent", "replied")
+        self.assertEqual(self.view()["activity"], {"messagedWeek": 1, "repliedWeek": 1, "messagedTotal": 1,
+                                                   "repliedTotal": 1})

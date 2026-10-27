@@ -13,7 +13,9 @@ together in the caller's transaction (`run_write`):
   `undone_at` and counts nowhere. An accept or a reply is cleared through Task 12's `correct`.
 
 Every step follows the one before: `accepted` needs a request, `message_sent` needs the accept, and `replied` needs
-a message or the accept. Only the newest step can be taken back. A live request touch with no log row (the plan
+a request. A reply logged after only the request also logs the accept, first and in the same write: on LinkedIn an
+answer to a request means they accepted it ("Mark someone as replied" on the page). Only the newest step can be taken
+back. A live request touch with no log row (the plan
 logged it, or an import) counts as the request step, so that person is waiting and never stuck in to_reach.
 
 A person on the no-go list, at a company on it (a no-go on a duplicate merged away counts for the survivor), or at a
@@ -29,7 +31,8 @@ from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
 from outreach.api.models.company import RoleToName
 from outreach.api.models.linkedin import (
-    HeldBy, LinkedInCounts, LinkedInGroup, LinkedInPerson, LinkedInView, LoggedStep, LogStepBody, UndoStepBody,
+    HeldBy, LinkedInActivity, LinkedInCounts, LinkedInGroup, LinkedInPerson, LinkedInView, LoggedStep, LogStepBody,
+    UndoStepBody,
 )
 from outreach.api.models.outcomes import CorrectionBody, OutcomeBody
 from outreach.api.queries import outcomes
@@ -41,6 +44,7 @@ from outreach.api.queries.people import day, live_steps
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 from outreach.outcomes.requests import record_request
 from outreach.outcomes.windows import day_bounds_utc, week_bounds
+from outreach.plan.dates import last_seven_days, today_ny, utc_window
 from outreach.store import log_touch, undo_touch
 
 TOUCH_OF_STEP = {"request_sent": "linkedin_request", "message_sent": "linkedin_message"}
@@ -135,12 +139,31 @@ def requests_this_week(conn: sqlite3.Connection, now: str) -> int:
         "AND sent_at >= ? AND sent_at < ?", (day_bounds_utc(monday)[0], day_bounds_utc(sunday)[1])).fetchone()[0]
 
 
+def activity(conn: sqlite3.Connection, now: str) -> LinkedInActivity:
+    """The page's counts line: people messaged and people who replied, the last 7 New York days and in all."""
+    start, end = utc_window(*last_seven_days(today_ny(now, "America/New_York")), "America/New_York")
+    requests = conn.execute("SELECT person_id, sent_at FROM outreach_touch WHERE channel = 'linkedin_request' "
+                            "AND undone_at IS NULL AND person_id IS NOT NULL").fetchall()
+    rows = conn.execute("SELECT * FROM linkedin_log ORDER BY at, entry_id").fetchall()
+    by_person: dict[int, list[sqlite3.Row]] = defaultdict(list)
+    for r in rows:
+        by_person[r["person_id"]].append(r)
+    replies = {pid: [e["at"] for e in live_steps(entries) if e["kind"] == "replied"]
+               for pid, entries in by_person.items()}
+    return LinkedInActivity(
+        messaged_week=len({r["person_id"] for r in requests if start <= r["sent_at"] < end}),
+        replied_week=sum(1 for ats in replies.values() if any(start <= at < end for at in ats)),
+        messaged_total=len({r["person_id"] for r in requests}),
+        replied_total=sum(1 for ats in replies.values() if ats),
+    )
+
+
 def linkedin_view(conn: sqlite3.Connection, now: str) -> LinkedInView:
     """Every LinkedIn person worth showing, by company, with the tab each is on."""
     rows = conn.execute("SELECT * FROM person WHERE channel = 'linkedin' ORDER BY person_id").fetchall()
     if not rows:
         return LinkedInView(as_of=now, groups=[], counts=LinkedInCounts(to_reach=0, waiting=0, replied=0, all=0),
-                            requests_this_week=requests_this_week(conn, now))
+                            activity=activity(conn, now), requests_this_week=requests_this_week(conn, now))
     parents = merge_parents(conn)
     companies = company_map(conn)
     no_go_people, no_go_companies = no_go_sets(conn, companies)
@@ -176,16 +199,16 @@ def linkedin_view(conn: sqlite3.Connection, now: str) -> LinkedInView:
     everyone = [p for g in groups for p in g.people]
     tab = [p.tab for p in everyone]
     return LinkedInView(
-        as_of=now, groups=groups, requests_this_week=requests_this_week(conn, now),
+        as_of=now, groups=groups, requests_this_week=requests_this_week(conn, now), activity=activity(conn, now),
         counts=LinkedInCounts(to_reach=tab.count("to_reach"), waiting=tab.count("waiting"),
                               replied=tab.count("replied"), all=len(everyone)),
     )
 
 
-def to_reach_count(conn: sqlite3.Connection) -> int:
-    """How many people the list shows on the `to_reach` tab: `linkedin_view`'s own filters, counted with no groups,
-    roles or company refs built (the shell polls this). The no-go sets and the merged-company walk are the sender's
-    own (`no_go_sets`, `company_map`), as in the view."""
+def replied_count(conn: sqlite3.Connection) -> int:
+    """How many people the list shows on the `replied` tab (the page's default list): `linkedin_view`'s own filters,
+    counted with no groups, roles or company refs built (the shell polls this). The no-go sets and the merged-company
+    walk are the sender's own (`no_go_sets`, `company_map`), as in the view."""
     rows = conn.execute("SELECT * FROM person WHERE channel = 'linkedin' ORDER BY person_id").fetchall()
     if not rows:
         return 0
@@ -196,10 +219,10 @@ def to_reach_count(conn: sqlite3.Connection) -> int:
     for row in rows:
         survivor = resolve_company(companies, row["company_id"])[-1]
         company = companies.get(survivor)
-        if company is None or company["status"] in ("removed", "closed") or row["person_id"] in no_go_people \
+        if company is None or company["status"] == "removed" or row["person_id"] in no_go_people \
                 or survivor in no_go_companies:
-            continue  # a closed company's people are listed only once they have a step, never as to reach
-        if _person(row, logs.get(row["person_id"], []), requested.get(row["person_id"])).tab == "to_reach":
+            continue  # a closed company still lists who replied there
+        if _person(row, logs.get(row["person_id"], []), requested.get(row["person_id"])).tab == "replied":
             count += 1
     return count
 
@@ -240,8 +263,6 @@ def _needs(step: str, have: set[str]) -> str | None:
         return "Log the request first."
     if step == "message_sent" and "accepted" not in have:
         return "Log that they accepted first."
-    if step == "replied" and not have & {"message_sent", "accepted"}:
-        return "Log that they accepted, or your message, first."
     return None
 
 
@@ -268,7 +289,12 @@ def log_step(ctx: WriteCtx, person_id: int, body: LogStepBody, cfg: ApiConfig) -
         raise _refuse(f"There is no request touch for {row['name']} to record that on: their request was logged "
                       "without one.")
     target = request
-    if step == "replied":
+    if step == "replied" and not set(have) & {"accepted", "message_sent"}:
+        # A reply to a request means they accepted it: the accept goes first, in this write, at the same time.
+        outcomes.answer(ctx, request["touch_id"], OutcomeBody(kind="accepted", reply_kind=None,
+                                                              revision=request["revision"]), cfg)
+        target = _live_touch(conn, person_id, "linkedin_request")
+    elif step == "replied":
         target = _live_touch(conn, person_id, "linkedin_message") or request
     outcomes.answer(ctx, target["touch_id"],
                     OutcomeBody(kind=step, reply_kind=body.reply_kind,

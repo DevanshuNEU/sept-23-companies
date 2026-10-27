@@ -141,8 +141,8 @@ function ViewItems({ s }: { s: ShellSummary | undefined }) {
             {s && s.unhandledReplies > 0 ? <CountBadge value={s.unhandledReplies} tone="ok" dot /> : null}
             {s && s.draftsToReview > 0 ? <Count value={s.draftsToReview} after={s.unhandledReplies > 0} /> : null}
           </NavItem>
-          <NavItem to="/linkedin" icon={LinkedInIcon} label="LinkedIn" described={s && s.linkedinToReach > 0 ? `${s.linkedinToReach} to reach` : undefined}>
-            {s && s.linkedinToReach > 0 ? <Count value={s.linkedinToReach} /> : null}
+          <NavItem to="/linkedin" icon={LinkedInIcon} label="LinkedIn" described={s && s.linkedinReplied > 0 ? plural(s.linkedinReplied, 'reply', 'replies') : undefined}>
+            {s && s.linkedinReplied > 0 ? <Count value={s.linkedinReplied} /> : null}
           </NavItem>
           <NavItem to="/needs-you" icon={CircleAlert} label="Needs you" described={s && s.openReviewItems > 0 ? `${s.openReviewItems} open${holding > 0 ? `, ${holding} hold up email` : ''}` : undefined}>
             {s && s.openReviewItems > 0 ? <ReviewCount value={s.openReviewItems} holdsEmail={holding > 0} /> : null}

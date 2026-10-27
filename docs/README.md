@@ -233,6 +233,38 @@ people, notes, touches, logs, applications and review items are never touched), 
 the same way (the carry reads the earlier plans again, with their dates). New rows get new ids, never an old one: an
 open Today tab refetches on the new event (`GET /api/pulse`), and a write sent with an old row id finds no row. `--replace` names only today (New York); a weekend still needs `--force-weekend`.
 
+### Clear-reach runbook: emptying the old LinkedIn list (Devanshu runs it once)
+
+The new system starts LinkedIn outreach from nobody, so `uv run python -m outreach.people clear-reach` in the live
+checkout removes the LinkedIn people nobody ever contacted: the person, the prepare step's draft for them (saved by
+`claude`), their `person_source` rows, and their name on past undecided plan rows. Run it first as is: it is a dry run
+that prints who would go, who stays and why, and the row counts, and writes nothing. Then run it with `--apply`: it
+writes a full copy of the store to `backups/clear-reach-<UTC time>.db` next to the store
+(`~/Library/Application Support/outreach/backups/`), prints the path, and stops with exit 1 if the copy fails; then
+one `BEGIN IMMEDIATE` transaction decides again (a person added, touched or changed meanwhile stays), deletes, writes
+one `people_cleared` event (actor `system`, every id, name and company in its detail) and prints the counts before
+and after. A second run removes nothing. It never removes anyone with history: a touch of any kind (an undone one
+too), a LinkedIn log row, an email thread, a no-go, a Needs-you item, a person he added, changed or wrote a note for,
+or a plan row of today or one he decided. They stay in the store and simply stop showing, since the LinkedIn page
+lists only people who replied. To undo, open the backup read-only and insert the rows the event lists back into
+`person`, `person_source` and `linkedin_draft`, and set `daily_list_entry.person_id` again; nothing else changed.
+`--apply` runs only in the live checkout, or anywhere with `OUTREACH_DB` naming a scratch store.
+
+What it does with each table that has a `person_id` column:
+
+| Table | For a removed person | Why |
+|---|---|---|
+| `person` | deleted, last | the row being cleared |
+| `linkedin_draft` | deleted when saved by `claude` and still `proposed`; his note keeps the person | the prepare step's draft exists only for that person |
+| `person_source` | deleted | the found pages exist only for that person |
+| `daily_list_entry` | past `proposed` or `backlog` rows: `person_id` set to NULL (the column allows it), the row stays; a row of today or later, or one he picked or removed, keeps the person | plan history stays, without a person who is gone |
+| `outreach_touch` | never touched; a touch keeps the person | a trigger forbids deleting a touch, and the touch feeds dedup and the weekly count |
+| `linkedin_log` | never touched; a row keeps the person | append-only (a trigger) |
+| `touch` | never touched; an email thread keeps the person | the sender's history |
+| `no_go` | never touched; a no-go keeps the person | the row stops anyone adding them again |
+| `review_item` | never touched; any item, open or settled, keeps the person | his decision or a pending one |
+| `event` | never touched | append-only history |
+
 ### Prepare runbook (Devanshu runs it once)
 
 **The prepare step is off (company first, #9, 2026-10-26).** Devanshu finds the people on LinkedIn himself and writes

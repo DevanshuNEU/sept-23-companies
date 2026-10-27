@@ -10,7 +10,7 @@ from tests.apitest import NOW, ApiCase
 TODAY = "2026-11-10"
 CONTEXT = json.dumps({"source": "own", "lane": "own", "roleKind": "engineer", "roleAgeDays": 0, "rankerVersion": "r1",
                       "signals": {}, "roleNamed": False})
-FIELDS = {"asOf", "pickedToday", "capacityToday", "unhandledReplies", "draftsToReview", "linkedinToReach",
+FIELDS = {"asOf", "pickedToday", "capacityToday", "unhandledReplies", "draftsToReview", "linkedinReplied",
           "openReviewItems", "noGoCount", "doneCount", "sending", "repliesThisMonth", "jobs", "plan", "winsUnseen"}
 
 
@@ -51,11 +51,14 @@ class Shell(ApiCase):
         # Replies: two unsorted, one sorted, all this month.
         for name, kind in (("R1", "unsorted"), ("R2", "unsorted"), ("R3", "interested")):
             s.send_first(conn, s.touch(conn, s.person(conn, work, name), "replied", reply_kind=kind), "2026-11-05T15:00:00Z")
-        # LinkedIn: three to reach; one waiting (a request), one with a no-go, one at a removed company.
+        # LinkedIn: three to reach; one waiting (a request), one replied, one with a no-go, one at a removed company.
         li = s.company(conn, "Li", "candidate")
         for name in ("L1", "L2", "L3"):
             s.person(conn, li, name, channel="linkedin")
         outreach_touch(conn, li, s.person(conn, li, "Waiting", channel="linkedin"))
+        answered = s.person(conn, li, "Answered", channel="linkedin")
+        s.linkedin(conn, answered, "request_sent", "2026-11-03T12:00:00Z")
+        s.linkedin(conn, answered, "replied", "2026-11-04T12:00:00Z", reply_kind="interested")
         nogo = s.person(conn, li, "Blocked", channel="linkedin")
         conn.execute("INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'other', 'devanshu', ?)", (nogo, s.T0))
         gone = s.company(conn, "Gone", "removed", remove_reason="not_a_fit")
@@ -84,7 +87,7 @@ class Shell(ApiCase):
         body = self.shell()
         self.assertEqual(set(body), FIELDS)
         self.assertEqual(body["asOf"], NOW)
-        for key in ("pickedToday", "unhandledReplies", "draftsToReview", "linkedinToReach",
+        for key in ("pickedToday", "unhandledReplies", "draftsToReview", "linkedinReplied",
                     "openReviewItems", "noGoCount", "doneCount", "repliesThisMonth", "winsUnseen"):
             self.assertEqual(body[key], 0, key)
         self.assertEqual([j["job"] for j in body["jobs"]], ["rebuild"])  # the store's own install run
@@ -101,7 +104,7 @@ class Shell(ApiCase):
         self.assertEqual(body["capacityToday"], 9)
         self.assertEqual(body["unhandledReplies"], 2)
         self.assertEqual(body["draftsToReview"], 2)
-        self.assertEqual(body["linkedinToReach"], 3)  # L1 to L3; the rest have a request, a no-go or a removed company
+        self.assertEqual(body["linkedinReplied"], 1)  # Answered; the LinkedIn page shows only people who replied
         self.assertEqual(body["openReviewItems"], 1)  # Work holds replies; Li's item is a data gap (#9)
         self.assertEqual(body["noGoCount"], 3)  # company, person and the removed company
         self.assertEqual(body["doneCount"], 2)
@@ -122,7 +125,7 @@ class Shell(ApiCase):
         self.assertEqual(body["unhandledReplies"], outbox["counts"]["replied"] - 1)  # one reply is already sorted
         self.assertEqual(body["sending"], {"state": outbox["sending"]["state"], "sentToday": outbox["sending"]["sentToday"],
                                            "limitToday": outbox["sending"]["limitToday"]})
-        self.assertEqual(body["linkedinToReach"], self.get("/api/linkedin").json()["counts"]["toReach"])
+        self.assertEqual(body["linkedinReplied"], self.get("/api/linkedin").json()["counts"]["replied"])
         self.assertEqual(body["openReviewItems"], len(self.get("/api/needs-you").json()["open"]))
         no_go = self.get("/api/no-go").json()
         self.assertEqual(body["noGoCount"], len(no_go["companies"]) + len(no_go["people"]))
@@ -149,6 +152,10 @@ class Shell(ApiCase):
         closed = s.company(conn, "Closed", "closed", close_reason="not_now")
         s.person(conn, closed, "AtClosed", channel="linkedin")
         s.person(conn, closed, "Started", channel="linkedin")
+        for company, name in ((closed, "RepliedAtClosed"), (blocked, "RepliedAtNoGo"), (dup, "RepliedOnDuplicate")):
+            replier = s.person(conn, company, name, channel="linkedin")
+            s.linkedin(conn, replier, "request_sent", "2026-11-03T12:00:00Z")
+            s.linkedin(conn, replier, "replied", "2026-11-04T12:00:00Z", reply_kind="not_now")
         outreach_touch(conn, closed, conn.execute("SELECT person_id FROM person WHERE name = 'Started'").fetchone()[0])
         other = s.company(conn, "Other", "candidate")
         s.review(conn, keep, "merge_candidate", evidence_key=str(dup))  # one company now: nothing to decide
@@ -158,8 +165,8 @@ class Shell(ApiCase):
             s.message(conn, s.touch(conn, s.person(conn, dup, name)), 0, "drafted")
         s.message(conn, s.touch(conn, s.person(conn, closed, "D3")), 0, "drafted")
         body = self.shell()
-        self.assertEqual(body["linkedinToReach"], self.get("/api/linkedin").json()["counts"]["toReach"])
-        self.assertEqual(body["linkedinToReach"], 1)
+        self.assertEqual(body["linkedinReplied"], self.get("/api/linkedin").json()["counts"]["replied"])
+        self.assertEqual(body["linkedinReplied"], 2)  # at the closed company and on the duplicate; not at the no-go
         self.assertEqual(body["openReviewItems"], len(self.get("/api/needs-you").json()["open"]))
         self.assertEqual(body["draftsToReview"], self.get("/api/outbox").json()["counts"]["review"])
         self.assertEqual(body["draftsToReview"], 2)

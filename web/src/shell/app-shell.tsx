@@ -26,7 +26,7 @@ const VIEW_TITLE: Record<string, string> = {
   today: 'Today',
   proposals: 'All proposed companies',
   outbox: 'Outbox',
-  linkedin: 'LinkedIn list',
+  linkedin: 'LinkedIn replies',
   'needs-you': 'Needs you',
   'no-go': 'No-go list',
   progress: 'Progress',

@@ -2592,6 +2592,35 @@
         "title": "LiftNoGoBody",
         "type": "object"
       },
+      "LinkedInActivity": {
+        "description": "Counts only, no rate: people with a live LinkedIn request (messaged) and people with a live reply step\n(replied), over the last 7 New York days (today and the 6 before) and in all. A reply in the window may answer a\nrequest from before it, so the two are never divided.",
+        "properties": {
+          "messagedTotal": {
+            "title": "Messagedtotal",
+            "type": "integer"
+          },
+          "messagedWeek": {
+            "title": "Messagedweek",
+            "type": "integer"
+          },
+          "repliedTotal": {
+            "title": "Repliedtotal",
+            "type": "integer"
+          },
+          "repliedWeek": {
+            "title": "Repliedweek",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "messagedWeek",
+          "repliedWeek",
+          "messagedTotal",
+          "repliedTotal"
+        ],
+        "title": "LinkedInActivity",
+        "type": "object"
+      },
       "LinkedInCounts": {
         "properties": {
           "all": {
@@ -2733,6 +2762,9 @@
       },
       "LinkedInView": {
         "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/LinkedInActivity"
+          },
           "asOf": {
             "title": "Asof",
             "type": "string"
@@ -2756,6 +2788,7 @@
           "asOf",
           "groups",
           "counts",
+          "activity",
           "requestsThisWeek"
         ],
         "title": "LinkedInView",
@@ -7286,8 +7319,8 @@
             "title": "Jobs",
             "type": "array"
           },
-          "linkedinToReach": {
-            "title": "Linkedintoreach",
+          "linkedinReplied": {
+            "title": "Linkedinreplied",
             "type": "integer"
           },
           "noGoCount": {
@@ -7327,7 +7360,7 @@
           "capacityToday",
           "unhandledReplies",
           "draftsToReview",
-          "linkedinToReach",
+          "linkedinReplied",
           "openReviewItems",
           "noGoCount",
           "doneCount",

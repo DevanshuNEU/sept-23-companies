@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
-import { Search, Users } from 'lucide-react';
+import { MessageSquareReply, Search } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
   usePageClient,
   type Id,
+  type LinkedInActivity,
   type LinkedInGroup,
   type LinkedInPerson,
   type LinkedInStep,
@@ -17,7 +18,7 @@ import { ReplyKindDialog, type LoggedReply } from '@/components/reply-kind-dialo
 import { EmptyState, QueryState } from '@/components/state-views';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Toggle } from '@/components/ui/toggle';
 import { useHotkeys, type Binding } from '@/keyboard/hotkeys';
 import { useListNav } from '@/keyboard/list-nav';
 import { replyKindStatus } from '@/lib/status';
@@ -27,26 +28,30 @@ import { openExternal } from '@/lib/safe-href';
 import { clampPage, pageGroups, pageOfPerson, peopleRange } from './linkedin-pages';
 import { NEXT, nextStep, ORDER, STEP_WORD } from './linkedin-steps';
 import { LinkedInTable, type ShownGroup } from './linkedin-table';
+import { MarkReplied } from './mark-replied';
+import { recordedWithoutReply, type Recorded } from './recorded';
 
 type PersonTab = LinkedInPerson['tab'];
-type Tab = PersonTab | 'all';
-
-const TABS: { value: Tab; label: string; count: (c: LinkedInView['counts']) => number }[] = [
-  { value: 'to_reach', label: 'To reach', count: (c) => c.toReach },
-  { value: 'waiting', label: 'Waiting', count: (c) => c.waiting },
-  { value: 'replied', label: 'Replied', count: (c) => c.replied },
-  { value: 'all', label: 'All', count: (c) => c.all },
-];
-const isTab = (v: string): v is Tab => TABS.some((t) => t.value === v);
+/** What the list shows: the people who replied (the default), or everyone recorded. */
+type Tab = 'replied' | 'all';
 
 const COUNT_FIELD = { to_reach: 'toReach', waiting: 'waiting', replied: 'replied' } as const satisfies Record<PersonTab, keyof LinkedInView['counts']>;
 
 const EMPTY: Record<Tab, { title: string; text: string }> = {
-  to_reach: { title: 'Nobody to reach.', text: 'People past the email budget land here when Claude adds them.' },
-  waiting: { title: 'Nobody waiting.', text: 'People you requested or messaged wait here until they answer.' },
-  replied: { title: 'No replies yet.', text: 'People who answer on LinkedIn land here.' },
-  all: { title: 'Nobody on the LinkedIn list.', text: 'People past the email budget land here when Claude adds them.' },
+  replied: {
+    title: 'No replies yet.',
+    text: 'When someone you messaged answers, mark them as replied above. Everyone you message stays recorded.',
+  },
+  all: { title: 'Nobody recorded on LinkedIn.', text: 'People you message on LinkedIn are recorded here.' },
 };
+
+const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
+
+/** The counts line: counts only, never a rate (a reply in the last 7 days may answer an older request). */
+function activityLine(a: LinkedInActivity): string {
+  return `Last 7 days: ${people(a.messagedWeek)} messaged, ${a.repliedWeek} replied. ` +
+    `In total: ${people(a.messagedTotal)} messaged, ${a.repliedTotal} replied.`;
+}
 
 // Said no and Asked to stop commit at once (they add a no-go).
 const AT_ONCE = new Set<LoggedReply>(['said_no', 'asked_to_stop']);
@@ -60,11 +65,15 @@ function loggedText(name: string, step: LinkedInStep, kind?: LoggedReply): strin
 
 /**
  * The tab a person shows under while a logged step waits to commit. It mirrors what the server will
- * store, so the row and the counts move with the action (a reply moves them to Replied, a first step
- * moves them out of To reach); the refetch after the commit replaces it with the stored value.
+ * store, so the row and the counts move with the action (a reply puts them on the list); the refetch
+ * after the commit replaces it with the stored value.
  */
 const tabAfter = (from: PersonTab, step: LinkedInStep): PersonTab =>
   step === 'replied' ? 'replied' : from === 'to_reach' ? 'waiting' : from;
+
+/** A reply after only the request also logs the accept, as the server does (an answer means they accepted). */
+const withAccept = (p: LinkedInPerson, step: LinkedInStep): LinkedInStep[] =>
+  step === 'replied' && !p.steps.some((s) => s.step === 'accepted' || s.step === 'message_sent') ? ['accepted', step] : [step];
 
 /** Lays one logged step over the view. A step already there (the commit has landed) changes nothing. */
 function withStep(v: LinkedInView, personId: Id, step: LinkedInStep, kind: LoggedReply | undefined): LinkedInView {
@@ -77,15 +86,17 @@ function withStep(v: LinkedInView, personId: Id, step: LinkedInStep, kind: Logge
     counts[COUNT_FIELD[from]] -= 1;
     counts[COUNT_FIELD[to]] += 1;
   }
+  const replied = step === 'replied' ? 1 : 0;
+  const activity = { ...v.activity, repliedWeek: v.activity.repliedWeek + replied, repliedTotal: v.activity.repliedTotal + replied };
+  const added = withAccept(p, step).map((s) => ({ step: s, at: v.asOf }));
   return {
     ...v,
     counts,
+    activity,
     groups: v.groups.map((g) => ({
       ...g,
       people: g.people.map((x) =>
-        x.person.id === personId
-          ? { ...x, tab: to, steps: [...x.steps, { step, at: v.asOf }], replyKind: kind ?? x.replyKind }
-          : x,
+        x.person.id === personId ? { ...x, tab: to, steps: [...x.steps, ...added], replyKind: kind ?? x.replyKind } : x,
       ),
     })),
   };
@@ -119,7 +130,10 @@ function TableSkeleton() {
   );
 }
 
-/** LinkedIn list (design 5.2): who to reach per company, which role to name, and a log of what happened. */
+/**
+ * LinkedIn replies: only the people who replied, by company (his ruling: "only show me who replied"). Everyone he
+ * messages stays recorded; All recorded shows them, and Mark someone as replied logs a reply for one of them.
+ */
 export default function LinkedInPage() {
   const client = usePageClient('linkedin');
   const navigate = useNavigate();
@@ -127,17 +141,17 @@ export default function LinkedInPage() {
   const query = useViewQuery(queryKeys.linkedin, () => client.linkedin(), { pollMs: pollMs.default });
   const view = query.data;
 
-  const [tabRaw] = useUrlState('tab', 'to_reach');
-  const tab: Tab = isTab(tabRaw) ? tabRaw : 'to_reach';
+  const [allRaw] = useUrlState('all', '');
+  const tab: Tab = allRaw === '1' ? 'all' : 'replied';
   const [filter] = useUrlState('q', '');
   const [sel] = useUrlState('sel', '');
   const [pageRaw, setPage] = useUrlState('page', '1');
   const [replyFor, setReplyFor] = useState<Id | null>(null);
 
-  // A new tab or filter starts at page 1 with nothing selected. One write for all of it: two `useUrlState` writes in
+  // A new view or filter starts at page 1 with nothing selected. One write for all of it: two `useUrlState` writes in
   // one tick would each start from the same URL, and the second would drop the first.
   const [, setParams] = useSearchParams();
-  const restart = (key: 'tab' | 'q', value: string, initial: string) =>
+  const restart = (key: 'all' | 'q', value: string, initial: string) =>
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -149,8 +163,8 @@ export default function LinkedInPage() {
       },
       { replace: true },
     );
-  const setTab = (v: string) => {
-    if (v !== tab) restart('tab', v, 'to_reach');
+  const setShowAll = (on: boolean) => {
+    if (on !== (tab === 'all')) restart('all', on ? '1' : '', '');
   };
   const setFilter = (v: string) => restart('q', v, '');
 
@@ -214,12 +228,14 @@ export default function LinkedInPage() {
   }, [page]);
 
   /**
-   * Only the person's next step can be logged. An earlier or the same step is already there; a later one would
-   * skip a step, so it says what comes next. False means nothing is logged and a toast said why.
+   * Only the person's next step can be logged, or a reply once the request is logged (it logs the accept with it).
+   * An earlier or the same step is already there; a later one would skip a step, so it says what comes next. False
+   * means nothing is logged and a toast said why.
    */
   const canLog = (p: LinkedInPerson, step: LinkedInStep): boolean => {
     const next = nextStep(p);
     if (next === step) return true;
+    if (step === 'replied' && next !== null && p.steps.some((s) => s.step === 'request_sent')) return true;
     if (next === null || p.steps.some((s) => s.step === step) || ORDER.indexOf(step) < ORDER.indexOf(next)) {
       toast(`Already logged: ${STEP_WORD[step]}`);
     } else {
@@ -231,12 +247,12 @@ export default function LinkedInPage() {
   const log = (p: LinkedInPerson, step: LinkedInStep, kind?: LoggedReply) => {
     if (!canLog(p, step)) return;
     const name = p.person.name;
-    const toReachDelta = p.tab === 'to_reach' && tabAfter(p.tab, step) !== 'to_reach' ? -1 : 0;
+    const repliedDelta = p.tab !== 'replied' && tabAfter(p.tab, step) === 'replied' ? 1 : 0;
     const viewPatch: Patch<LinkedInView> = { key: queryKeys.linkedin, apply: (v) => withStep(v, p.person.id, step, kind) };
     // Also refetches the shell after the commit, so the sidebar and the no-go count catch up.
     const shellPatch: Patch<ShellSummary> = {
       key: queryKeys.shell,
-      apply: (s) => ({ ...s, linkedinToReach: s.linkedinToReach + toReachDelta }),
+      apply: (s) => ({ ...s, linkedinReplied: s.linkedinReplied + repliedDelta }),
     };
     const text = loggedText(name, step, kind);
     write({
@@ -247,14 +263,6 @@ export default function LinkedInPage() {
       patches: [viewPatch, shellPatch],
       commit: (o) => (kind ? client.logLinkedIn(p.person.id, step, o, kind) : client.logLinkedIn(p.person.id, step, o)),
     });
-    // A step that takes the person out of the tab he is working in (request sent leaves To reach, a reply leaves
-    // Waiting) moves the selection to the next person, so the next key acts on someone still to do. The last one
-    // looks back to the one before. Undo brings the person back; the selection stays where it moved.
-    if (tab !== 'all' && p.tab === tab && tabAfter(p.tab, step) !== tab) {
-      const at = ids.indexOf(p.person.id);
-      const next = ids[at + 1] ?? ids[at - 1];
-      if (next !== undefined) select(next);
-    }
   };
 
   const askReply = (p: LinkedInPerson) => {
@@ -278,7 +286,7 @@ export default function LinkedInPage() {
     if (!openExternal(p.person.linkedinUrl)) toast(`No LinkedIn profile saved for ${p.person.name}.`);
   };
 
-  const group = 'LinkedIn list';
+  const group = 'LinkedIn replies';
   const on = current !== undefined;
   const onSelected = (fn: (hit: { group: LinkedInGroup; person: LinkedInPerson }) => void) => () => {
     if (current) fn(current);
@@ -294,20 +302,23 @@ export default function LinkedInPage() {
   // These act on the selected person, so a key right after j, k or a click waits for that move to render.
   useHotkeys(onRow, { selection: selected });
   useHotkeys([
-    ...TABS.map((t, i): Binding => ({ keys: String(i + 1), label: `${t.label} tab`, group, run: () => setTab(t.value) })),
+    { keys: 'v', label: tab === 'all' ? 'Show only replies' : 'Show all recorded', group, run: () => setShowAll(tab !== 'all') },
     { keys: '[', label: 'Previous page', group, enabled: page > 1, run: () => turnTo(page - 1) },
     { keys: ']', label: 'Next page', group, enabled: page < pages.length, run: () => turnTo(page + 1) },
   ]);
 
   const replyPerson = find(replyFor)?.person ?? null;
+  const recorded = recordedWithoutReply(view?.groups ?? []);
+  const markReplied = (r: Recorded) => askReply(r.person);
 
   return (
     <div ref={topRef} className="max-w-[1360px] px-6 pt-5 pb-12">
       <div className="mb-4 flex items-end gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">LinkedIn list</h1>
+          <h1 className="text-xl font-semibold tracking-tight">LinkedIn replies</h1>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
-            People past the email budget for their company, or with no email. Name the role, then log what happened.
+            The people who answered on LinkedIn. Everyone you message stays recorded, for the weekly limit and so nobody
+            is asked twice.
           </p>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
             Who to reach first each day is on{' '}
@@ -320,23 +331,17 @@ export default function LinkedInPage() {
             .
           </p>
         </div>
-        {view ? (
-          <p className="ml-auto text-sm text-muted-foreground">
-            <b className="font-semibold text-foreground tabular-nums">{view.requestsThisWeek}</b> requests this week
-          </p>
-        ) : null}
       </div>
+      {view ? <p className="mb-4 text-sm text-muted-foreground tabular-nums">{activityLine(view.activity)}</p> : null}
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v)} className="gap-3">
+      <MarkReplied recorded={recorded} onPick={markReplied} />
+
+      <div className="flex flex-col gap-3">
         <div className="flex items-center gap-3">
-          <TabsList aria-label="LinkedIn status">
-            {TABS.map((t) => (
-              <TabsTrigger key={t.value} value={t.value} className="px-2.5">
-                {t.label}
-                {view ? <span className="text-xs text-muted-foreground tabular-nums">{t.count(view.counts)}</span> : null}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          <Toggle variant="outline" size="sm" pressed={tab === 'all'} onPressedChange={setShowAll} className="px-2.5">
+            All recorded
+            {view ? <span className="text-xs text-muted-foreground tabular-nums">{view.counts.all}</span> : null}
+          </Toggle>
           <div className="relative ml-auto w-[280px]">
             <Search aria-hidden className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
             <Input
@@ -349,7 +354,7 @@ export default function LinkedInPage() {
           </div>
         </div>
 
-        <TabsContent value={tab}>
+        <div>
           <QueryState
             query={query}
             skeleton={<TableSkeleton />}
@@ -358,10 +363,10 @@ export default function LinkedInPage() {
               <div className="rounded-lg border bg-card">
                 {q !== '' && (view?.groups.length ?? 0) > 0 ? (
                   <EmptyState icon={Search} title={`Nobody matches "${filter.trim()}".`}>
-                    Clear the filter to see everyone in this tab.
+                    Clear the filter to see everyone listed.
                   </EmptyState>
                 ) : (
-                  <EmptyState icon={Users} title={EMPTY[tab].title}>
+                  <EmptyState icon={MessageSquareReply} title={EMPTY[tab].title}>
                     {EMPTY[tab].text}
                   </EmptyState>
                 )}
@@ -385,8 +390,8 @@ export default function LinkedInPage() {
               />
             )}
           </QueryState>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
 
       <p className="mt-3 text-xs text-muted-foreground">
         Logging only records what you did, so the company page shows the whole story. Nothing here touches LinkedIn.

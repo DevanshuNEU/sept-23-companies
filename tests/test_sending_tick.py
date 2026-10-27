@@ -462,6 +462,8 @@ class FirstSendTest(Base):
 
     def test_a_first_email_gmail_kept_without_its_marker_stops_sending_for_good(self):
         self.gmail.drop_markers = True
+        self.gmail.readback_fails = True  # the send cannot see it, so the next tick's read back does (see
+        # DroppedAtSendTest for the send's own read back)
         first, second = self.approve(), self.approve()
         self.assertEqual(self.tick().sent, (first,))
         self.clock.advance(minutes=10)
@@ -677,6 +679,35 @@ class FirstSendTest(Base):
                          (1, "approved", 1))
 
 
+class DroppedAtSendTest(Base):
+    """The reviewer's case: proven, then Gmail drops the marker. Email A goes out and its own read back shows no
+    marker; the next tick's read back of A fails; email B's answer would be lost. B must never be claimed, so it can
+    never be resent."""
+
+    def test_a_marker_dropped_at_send_stops_the_next_email_even_when_the_read_back_fails(self):
+        a, b = self.approve(), self.approve()
+        self.gmail.drop_markers = True
+        report = self.tick()
+        self.assertEqual(report.sent, (a,))
+        [missing] = self.events("marker_missing")
+        self.assertEqual((missing["entity_id"], json.loads(missing["detail"])["reason"]), (a, "dropped_on_send"))
+        self.assertEqual(self.notices, [(tick.STOP_TITLE, proof.PHASE_TEXT[proof.MISSING])])  # at once
+        self.assertEqual(self.runs()[-1]["status"], "partial")
+        self.gmail.fail_reads = GmailError("server", 500, "backend error")  # every later read of A fails
+        self.gmail.fail_next_send(TimeoutError("read timed out"), accepted=True)  # B's answer would be lost
+        for _ in range(6):
+            self.clock.advance(minutes=11)
+            self.assertEqual(self.tick().sent, ())
+        self.gmail.fail_reads = None
+        for _ in range(3):
+            self.clock.advance(minutes=11)
+            self.assertEqual(self.tick().sent, ())
+        self.assertEqual([out.to for out, _, _ in self.gmail.sent], [self.emails[a]])
+        self.assertEqual(self.message(b)["state"], "approved")
+        self.assertEqual([e["entity_id"] for e in self.events("claimed")], [a])
+        self.assertEqual(len(self.notices), 1)  # once a day
+
+
 class LiveShapeTest(Base):
     """The live store as #118 left it: message 5 went out alone before the marker existed (claimed with no marker),
     Gmail stored it under its own Message-ID, the sender recorded it sent under that id, raised the hard block pause
@@ -710,8 +741,19 @@ class LiveShapeTest(Base):
                              "thread_id": meta.thread_id, "pending_rfc_id": self.CLAIMED,
                              "error": "Gmail message_id_rewritten", "error_kind": "message_id_rewritten",
                              "retryable": False}, **old)
-        claim.record_sent(self.db, self.five, Sent(meta.gmail_message_id, meta.thread_id, self.STORED), at=at,
-                          cfg=CFG, rng=self.rng)
+        real_append = claim.append_event
+
+        def old_format(conn, **kw):
+            """The sender before the marker wrote no `marker` key on its `sent` event."""
+            if kw.get("kind") == "sent" and kw.get("entity") == "message":
+                kw["detail"] = {k: v for k, v in kw["detail"].items() if k != "marker"}
+            return real_append(conn, **kw)
+        with mock.patch.object(claim, "append_event", side_effect=old_format):
+            claim.record_sent(self.db, self.five, Sent(meta.gmail_message_id, meta.thread_id, self.STORED), at=at,
+                              cfg=CFG, rng=self.rng)
+        sent = json.loads(self.db.execute("SELECT detail FROM event WHERE kind = 'sent' AND entity = 'message' "
+                                          "AND entity_id = ?", (self.five,)).fetchone()[0])
+        assert "marker" not in sent
         append_event(self.db, kind="send_id_mismatch", idempotency_key=f"send_id_mismatch:{self.five}",
                      detail={"reason": "other_message_id", "found_rfc_id": self.STORED}, **old)
         append_event(self.db, entity="sender", entity_id=1, kind="hard_block", actor="sender", at=at,
@@ -720,6 +762,19 @@ class LiveShapeTest(Base):
         self.db.execute("UPDATE sender SET paused = 1, pause_kind = 'hard_block', paused_reason = ?, paused_at = ? "
                         "WHERE sender_id = 1", (self.REASON, at))
         self.waiting = [self.approve() for _ in range(4)]
+
+    def test_message_fives_follow_up_threads_on_the_message_id_gmail_stored(self):
+        """Its id came from Gmail (the old read back), so it counts as confirmed: In-Reply-To names it."""
+        row = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1",
+                              (self.message(self.five)["touch_id"],)).fetchone()
+        subject = "Re: " + self.message(self.five)["subject"]
+        self.db.execute("UPDATE message SET state = 'drafted', subject = ?, body = 'Following up.' "
+                        "WHERE message_id = ?", (subject, row[0]))
+        self.db.execute("UPDATE message SET state = 'approved', approved_at = ?, due_on = ? WHERE message_id = ?",
+                        (iso(self.clock()), iso(self.clock())[:10], row[0]))
+        q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == row[0])
+        out = claim.outgoing_for(self.db, q, CFG, "<follow.5@gmail.com>")
+        self.assertEqual((out.in_reply_to, out.references), (self.STORED, (self.STORED,)))
 
     def test_the_shape_reads_as_the_first_send_and_nothing_goes_before_resume(self):
         self.assertEqual(proof.phase(self.db), proof.FIRST_SEND)

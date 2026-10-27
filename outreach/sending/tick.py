@@ -612,6 +612,9 @@ class _Tick:
             self.sent.append(picked.message_id)
             self.counts["sent"] += 1
             self._line(f"sent message {picked.message_id}")
+            if proof.phase(self.conn) == proof.MISSING:  # its own read back showed the marker dropped
+                self._partial(_PHASE_LINE[proof.MISSING])
+                self._notice(f"first_send_{proof.MISSING}", STOP_TITLE, proof.PHASE_TEXT[proof.MISSING])
         else:
             self._line(f"message {picked.message_id} changed before it could be claimed; nothing was sent")
 

@@ -92,6 +92,7 @@ class FakeGmail(MailClient):
         self.keep_original_id = False                # ... and keeps the one set as X-Google-Original-Message-ID
         self.drop_markers = False                    # Gmail does not keep the X-Outreach-Id header
         self.readback_fails = False                  # the client's read back after a send fails (marker unread)
+        self.fail_reads: BaseException | None = None  # every message read (`message`, each in a Sent scan) raises
         self._lands_at: dict[str, datetime] = {}     # a Sent entry find_sent cannot see before this time
         self._messages: dict[str, MessageMeta] = {}
         self._threads: dict[str, list[str]] = {}
@@ -257,6 +258,12 @@ class FakeGmail(MailClient):
 
     def message(self, gmail_message_id: str) -> MessageMeta:
         self._enter("message")
+        return self._read(gmail_message_id)
+
+    def _read(self, gmail_message_id: str) -> MessageMeta:
+        """One message's metadata, as the real client's GET: `fail_reads` makes every such read fail."""
+        if self.fail_reads is not None:
+            raise self.fail_reads
         try:
             return self._messages[gmail_message_id]
         except KeyError:
@@ -270,7 +277,8 @@ class FakeGmail(MailClient):
 
     def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
         """Newest first, a page at a time, by the same rules as the real client (see MailClient.find_sent): the
-        marker matches, never the Message-ID."""
+        marker matches, never the Message-ID. Like the real client it reads each listed message's headers in turn,
+        and a failed read fails the scan."""
         self._enter("find_sent")
         now = self.clock()
         visible = [(i, meta) for i, meta in enumerate(self.sent_box)
@@ -285,7 +293,8 @@ class FakeGmail(MailClient):
                 break
             pages += 1
             page = box[start:start + size]
-            for meta in page:
+            for listed in page:
+                meta = self._read(listed.gmail_message_id)
                 if wanted and wanted in (normalise_message_id(meta.headers.get("x-outreach-id")),
                                          normalise_message_id(meta.headers.get("x-google-original-message-id"))):
                     return Sent(meta.gmail_message_id, meta.thread_id,

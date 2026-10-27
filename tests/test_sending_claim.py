@@ -18,6 +18,7 @@ from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import plan_followups, stop_planned
 from outreach.sending.mail import GmailError, MESSAGE_ID, Sent
 from outreach.store import transaction
+from outreach.store.writes import append_event
 from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove
 from tests.storetest import fresh_store, seed_company
 
@@ -127,6 +128,20 @@ class ClaimBeforeTheCallTest(Base):
         self.addCleanup(other.close)
         self.assertEqual(other.execute("SELECT state, pending_rfc_id, claimed_at FROM message WHERE message_id = ?",
                                        (mid,)).fetchone(), ("sending", "<a.1@gmail.com>", iso(MON)))
+
+    def test_a_claim_whose_event_was_not_written_is_refused(self):
+        """A token used before (its `claimed:<token>` key taken) would leave a claim the proof cannot see: refused,
+        and nothing changes."""
+        _, mid = self.approve()
+        append_event(self.db, entity="message", entity_id=None, kind="claimed", actor="sender", at=iso(MON),
+                     idempotency_key="claimed:<reused.1@gmail.com>", detail={"pending_rfc_id": "<reused.1@gmail.com>"})
+        with self.assertRaises(claim.ClaimNotRecorded):
+            claim.claim(self.db, self.queued(mid), rfc_id="<reused.1@gmail.com>", now=iso(MON))
+        self.assertFalse(self.db.in_transaction)
+        row = self.message(mid)
+        self.assertEqual((row["state"], row["pending_rfc_id"]), ("approved", None))
+        self.assertEqual(self.events(mid, "claimed"), [])
+        self.assertEqual(self.gmail.sent, [])
 
     def test_claim_refuses_an_id_that_is_not_one_message_id(self):
         _, mid = self.approve()

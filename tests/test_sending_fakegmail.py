@@ -266,6 +266,17 @@ class FakeGmailTest(unittest.TestCase):
         self.assertEqual(found, sent)  # with the Message-ID Gmail stored, not the one set
         self.assertNotEqual(found.rfc_message_id, "<a1@gmail.com>")
 
+    def test_find_sent_reads_each_message_and_fails_like_the_real_client(self):
+        self.gmail.send(outgoing())
+        self.gmail.fail_reads = GmailError("server", 500, "backend error")
+        for call in (lambda: self.gmail.find_sent("<a1@gmail.com>", 0, send_returned_ms=ms(START)),
+                     lambda: self.gmail.message("m1")):
+            with self.assertRaises(GmailError) as cm:
+                call()
+            self.assertEqual(cm.exception.status, 500)
+        self.gmail.fail_reads = None
+        self.assertIsNotNone(self.gmail.find_sent("<a1@gmail.com>", 0, send_returned_ms=ms(START))[0])
+
     def test_find_sent_with_a_page_cap_reports_incomplete(self):
         self.gmail.send(outgoing())
         for i in range(60):

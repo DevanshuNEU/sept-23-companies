@@ -182,6 +182,37 @@ class FoundInSentTest(Base):
         self.assertEqual(touch["first_rfc_id"], stored.rfc_message_id)
         self.assertEqual(self.events(mid, "claim_failed"), [])
 
+    def test_a_rewritten_send_left_by_the_sender_before_the_marker_threads_on_gmails_id(self):
+        """The old code left a send `send_unknown` with the ids Gmail kept (error kind `message_id_rewritten`).
+        Reconcile records it from those ids; they came from Gmail, so a follow-up's In-Reply-To names them."""
+        person, mid = self.approve()
+        meta = self.gmail.add_to_sent(f"p{self.n}@acme.co", f"Hello {self.n}", message_id="<CAold.1@mail.gmail.com>",
+                                      at=MON)
+        rfc, at = "<old.rewritten@gmail.com>", iso(MON)
+        with transaction(self.db):
+            self.db.execute("UPDATE message SET state = 'sending', pending_rfc_id = ?, claimed_at = ? "
+                            "WHERE message_id = ?", (rfc, at, mid))
+            append_event(self.db, entity="message", entity_id=mid, kind="claimed", actor="sender", at=at,
+                         idempotency_key=f"claimed:{rfc}", detail={"pending_rfc_id": rfc, "attempt": 1, "seq": 0})
+            self.db.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (mid,))
+            append_event(self.db, entity="message", entity_id=mid, kind="send_unknown", actor="sender", at=at,
+                         idempotency_key=f"send_unknown:{rfc}",
+                         detail={"pending_rfc_id": rfc, "error_kind": "message_id_rewritten", "retryable": False,
+                                 "stored_rfc_id": "<CAold.1@mail.gmail.com>", "gmail_message_id": meta.gmail_message_id,
+                                 "thread_id": meta.thread_id})
+        self.tick(minutes=2)
+        self.assertEqual((self.message(mid)["state"], self.message(mid)["rfc_message_id"]),
+                         ("sent", "<CAold.1@mail.gmail.com>"))
+        follow = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1",
+                                 (self.message(mid)["touch_id"],)).fetchone()[0]
+        self.db.execute("UPDATE message SET state = 'drafted', subject = ?, body = 'Following up.' "
+                        "WHERE message_id = ?", (f"Re: Hello {self.n}", follow))
+        self.db.execute("UPDATE message SET state = 'approved', approved_at = ?, due_on = ? WHERE message_id = ?",
+                        (iso(self.clock()), iso(self.clock())[:10], follow))
+        out = claim.outgoing_for(self.db, self.queued(follow), CFG, "<follow.1@gmail.com>")
+        self.assertEqual(out.in_reply_to, "<CAold.1@mail.gmail.com>")
+        self.assertEqual(len(self.gmail.sent), 0)
+
     def test_a_send_in_doubt_claimed_before_the_marker_is_never_failed(self):
         """A claim the sender made before it set the marker (no `marker` on its `claimed` event): no scan by marker
         can find that email, so a miss never proves it did not go out."""

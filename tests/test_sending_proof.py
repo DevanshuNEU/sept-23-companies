@@ -7,6 +7,7 @@ whole path; these pin the pieces: the phases, the claim's own check, the read ba
 import json
 import random
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 from unittest import mock
 
@@ -276,12 +277,14 @@ class VerifyMarkerTest(Base):
         with self.subTest("the replaced id kept, the marker dropped: never proof"):
             self.setUp()
             self.gmail.drop_markers, self.gmail.keep_original_id = True, True
+            self.gmail.readback_fails = True  # so the send itself cannot see it (that path has its own test)
             self.sent_first()
             self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["missing"], 1)
             self.assertEqual(proof.phase(self.db), proof.MISSING)
         with self.subTest("dropped by Gmail"):
             self.setUp()
             self.gmail.drop_markers = True
+            self.gmail.readback_fails = True  # so the send itself cannot see it (that path has its own test)
             self.sent_first()
             self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["missing"], 1)
             self.assertEqual(json.loads(self.events("marker_missing")[0]["detail"])["reason"], "no_marker")
@@ -328,12 +331,48 @@ class VerifyMarkerTest(Base):
         self.assertEqual(self.db.execute("SELECT first_rfc_id FROM touch WHERE touch_id = ?",
                                          (row["touch_id"],)).fetchone()[0], stored)
 
+    def test_a_marker_the_sends_own_read_back_shows_dropped_stops_sending_at_once(self):
+        """The send's read back already shows Gmail dropped (or changed) the marker: `marker_missing` is written
+        with the send, so no second email is claimed even if the next tick's read back fails."""
+        for name, change in (("dropped", {"drop_markers": True}), ("changed", None)):
+            with self.subTest(name):
+                self.setUp()
+                self.event("marker_verified")
+                first, second = self.approve(), self.approve()
+                if change:
+                    self.gmail.drop_markers = True
+                    self.assertEqual(self.send(first), "sent")
+                else:
+                    real = self.gmail.send
+                    self.gmail.send = lambda m: replace(real(m), marker="<other@gmail.com>")
+                    self.assertEqual(self.send(first), "sent")
+                    self.gmail.send = real
+                [missing] = self.events("marker_missing")
+                detail = json.loads(missing["detail"])
+                self.assertEqual((missing["entity_id"], detail["reason"]), (first.message_id, "dropped_on_send"))
+                self.assertEqual(proof.phase(self.db), proof.MISSING)
+                self.clock.advance(minutes=10)
+                with self.assertRaises(claim.Unproven):
+                    self.send(second)
+                self.assertEqual(len(self.gmail.sent), 1)
+
+    def test_an_unread_or_kept_marker_writes_nothing_at_send_time(self):
+        self.event("marker_verified")
+        first, second = self.approve(), self.approve()
+        self.assertEqual(self.send(first), "sent")          # kept
+        self.gmail.readback_fails = True
+        self.clock.advance(minutes=10)
+        self.assertEqual(self.send(second), "sent")         # not read: the next tick reads it
+        self.assertEqual(self.events("marker_missing"), [])
+        self.assertEqual(proof.phase(self.db), proof.PROVEN)
+
     def test_once_proven_every_later_email_is_read_back_and_one_without_its_marker_stops_sending(self):
         first, second, third = self.approve(), self.approve(), self.approve()
         self.assertEqual(self.send(first), "sent")
         proof.verify_marker(self.db, self.gmail, now=self.clock())
         self.clock.advance(minutes=10)
-        self.gmail.drop_markers = True  # Gmail stops keeping it later on
+        self.gmail.drop_markers = True  # Gmail stops keeping it later on, and the send cannot read it back
+        self.gmail.readback_fails = True
         self.assertEqual(self.send(second), "sent")
         self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock()),
                          {"verified": 0, "missing": 1, "errors": 0})

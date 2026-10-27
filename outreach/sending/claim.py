@@ -43,8 +43,8 @@ from outreach.store.db import transaction
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event, log_touch
 
-__all__ = ["AnotherSendInFlight", "Unproven", "claim", "outgoing_for", "email_context", "record_sent", "record_unclear",
-           "send_one", "PLACEHOLDER_DOMAIN", "LEFTOVER_ERROR", "Unclear", "leftover_claims", "unclear", "reconcile",
+__all__ = ["AnotherSendInFlight", "Unproven", "ClaimNotRecorded", "claim", "outgoing_for", "email_context",
+           "record_sent", "record_unclear", "send_one", "PLACEHOLDER_DOMAIN", "LEFTOVER_ERROR", "Unclear", "leftover_claims", "unclear", "reconcile",
            "requeue_failed"]
 
 # #17 writes Message-IDs on this domain for imported mail whose real id is unknown; they are never put in a header.
@@ -68,6 +68,11 @@ class AnotherSendInFlight(RuntimeError):
 class Unproven(RuntimeError):
     """Gmail is not yet shown to keep the marker and a marked email was already claimed (or a marker was found
     missing): no second email is claimed (`proof.may_claim`)."""
+
+
+class ClaimNotRecorded(RuntimeError):
+    """The `claimed` event was not written (its token's key was already taken), so the proof could not see this
+    claim: it is refused and nothing changes."""
 
 
 def _stamp(at: datetime | str) -> str:
@@ -111,7 +116,8 @@ def claim(conn: sqlite3.Connection, q: Queued, *, rfc_id: str, now: str) -> bool
     changed: the message moved on or was edited since `q` was read (its revision), a stop, hold or pause landed
     since the pick, or it is a follow-up whose touch has no Gmail thread. Raises AnotherSendInFlight when another
     message is `sending`, Unproven when Gmail is not shown to keep the marker and a marked email was already
-    claimed (read in this transaction, so at most one marked email is ever claimed before the proof), and
+    claimed (read in this transaction, so at most one marked email is ever claimed before the proof),
+    ClaimNotRecorded when the `claimed` event did not write (a reused token: the proof must see every claim), and
     ValueError when `rfc_id` is not one Message-ID."""
     if not MESSAGE_ID.fullmatch(rfc_id or ""):
         raise ValueError("a claim needs exactly one Message-ID")
@@ -129,11 +135,13 @@ def claim(conn: sqlite3.Connection, q: Queued, *, rfc_id: str, now: str) -> bool
                 (rfc_id, stamp, stamp, q.message_id, q.revision))
             if cur.rowcount == 0:
                 return False
-            append_event(conn, entity="message", entity_id=q.message_id, company_id=q.company_id, kind="claimed",
-                         actor="sender", at=stamp,
-                         detail={"pending_rfc_id": rfc_id, "marker": rfc_id,
-                                 "attempt": _attempts(conn, q.message_id) + 1, "seq": q.seq},
-                         idempotency_key=f"claimed:{rfc_id}")
+            written = append_event(conn, entity="message", entity_id=q.message_id, company_id=q.company_id,
+                                   kind="claimed", actor="sender", at=stamp,
+                                   detail={"pending_rfc_id": rfc_id, "marker": rfc_id,
+                                           "attempt": _attempts(conn, q.message_id) + 1, "seq": q.seq},
+                                   idempotency_key=f"claimed:{rfc_id}")
+            if written is None:
+                raise ClaimNotRecorded(f"the token {rfc_id} was claimed before, so this claim is refused")
     except sqlite3.IntegrityError as err:
         if conn.execute("SELECT 1 FROM message WHERE state = 'sending' AND message_id <> ?",
                         (q.message_id,)).fetchone():
@@ -156,9 +164,12 @@ def _header_id(value: str | None) -> str | None:
 # True for a sent message `m` whose recorded Message-ID is the claimed one, not Gmail's: its `sent` or
 # `reconciled_sent` event says the marker was not read (JSON null, so the read back after the send failed), and no
 # read back by Gmail id (`marker_verified` or `marker_missing` with the id Gmail stored) has filled it in since.
-# Mail sent before the marker (no such key) and imported mail count as confirmed, as before.
+# Only a marked claim can be unconfirmed: mail sent before the marker (its ids came from Gmail's own read back, or
+# its event has no such key) and imported mail count as confirmed, as before.
 _UNCONFIRMED = (
-    "(ifnull((SELECT json_type(e.detail, '$.marker') FROM event e WHERE e.entity = 'message' "
+    "(EXISTS (SELECT 1 FROM event e WHERE e.entity = 'message' AND e.entity_id = m.message_id AND e.kind = 'claimed' "
+    "AND json_extract(e.detail, '$.marker') IS NOT NULL) "
+    "AND ifnull((SELECT json_type(e.detail, '$.marker') FROM event e WHERE e.entity = 'message' "
     "AND e.entity_id = m.message_id AND e.kind IN ('sent', 'reconciled_sent') ORDER BY e.event_id DESC LIMIT 1), "
     "'') = 'null' AND NOT EXISTS (SELECT 1 FROM event e WHERE e.entity = 'message' AND e.entity_id = m.message_id "
     "AND e.kind IN ('marker_verified', 'marker_missing') AND ifnull(json_extract(e.detail, '$.stored_rfc_id'), '') "
@@ -261,9 +272,11 @@ def record_sent(conn: sqlite3.Connection, message_id: int, sent: Sent, *, at: st
     also fills the touch's first send, Message-ID and thread, logs its one outreach touch (`email:<touch_id>`, actor
     `sender`; none when one is already logged for this email touch) and plans its follow-ups while the touch is
     open. Event `sent`, or `reconciled_sent` with `reconciled_at` (`now`, default `at`); its detail keeps the
-    claimed token and the marker Gmail showed (None when not read). `at` is when it went out (a reconcile passes
-    the claim time). `next_send_at` moves to `at` plus a gap, never earlier than it was. LookupError when the
-    message is not `sending` or `send_unknown`."""
+    claimed token and the marker Gmail showed (None when not read). When a marked claim's marker was read and is not
+    the claimed one (Gmail dropped or changed it), `marker_missing` is appended in the same write: sending stops at
+    once, before any later email could be claimed, whatever the next tick's read back does. `at` is when it went
+    out (a reconcile passes the claim time). `next_send_at` moves to `at` plus a gap, never earlier than it was.
+    LookupError when the message is not `sending` or `send_unknown`."""
     stamp = _stamp(at)
     recorded = _stamp(now) if now else stamp
     with atomic(conn, "record_sent"):
@@ -302,6 +315,15 @@ def record_sent(conn: sqlite3.Connection, message_id: int, sent: Sent, *, at: st
                      detail={"rfc_message_id": sent.rfc_message_id, "claimed_rfc_id": row["pending_rfc_id"],
                              "gmail_message_id": sent.gmail_message_id, "thread_id": sent.thread_id,
                              "marker": sent.marker, "seq": row["seq"]})
+        claimed = row["pending_rfc_id"]
+        if sent.marker is not None and claimed and _marked(conn, claimed) \
+                and normalise_message_id(sent.marker) != normalise_message_id(claimed):
+            append_event(conn, entity="message", entity_id=message_id, company_id=company_id, kind="marker_missing",
+                         actor="sender", at=recorded, idempotency_key=f"marker_missing:{message_id}",
+                         detail={"reason": "dropped_on_send", "marker": claimed,
+                                 "found_marker": normalise_message_id(sent.marker),
+                                 "gmail_message_id": sent.gmail_message_id, "stored_rfc_id": sent.rfc_message_id,
+                                 "thread_id": sent.thread_id})
         _push_gap(conn, stamp, cfg, rng)
 
 

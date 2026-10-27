@@ -66,8 +66,9 @@ describe('Today with the email flag', () => {
     expect(pylon).toHaveAccessibleName('1. Pylon, To do, new opening, 6 hours ago');
     expect(pylon).toHaveAccessibleDescription('Email');
     expect(cerebrium).toHaveAccessibleDescription('LinkedIn only');
-    expect(options().map((o) => o.querySelector('[data-email-fit]')?.getAttribute('data-email-fit'))).toEqual(
-      ['email', 'linkedin_only', 'email', 'email', 'email', 'email', 'email', 'linkedin_only'],
+    // Only Email shows on the rail; LinkedIn only is for a screen reader there, and the panel says it.
+    expect(options().map((o) => o.querySelector('[data-email-fit]')?.getAttribute('data-email-fit') ?? null)).toEqual(
+      ['email', null, 'email', 'email', 'email', 'email', 'email', null],
     );
   });
 

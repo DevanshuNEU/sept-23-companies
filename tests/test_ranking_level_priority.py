@@ -10,12 +10,13 @@ from pathlib import Path
 
 from outreach.ranking.config import CONFIG_PATH, default_ranker_config, load_ranker_config
 from outreach.ranking.job import compute_rank, run_rank
-from outreach.ranking.roles import EARLY_CAREER_TIERS, early_career_fit, rank_tier
+from outreach.ranking.roles import Best, EARLY_CAREER_TIERS, early_career_fit, rank_tier, role_sort_key
 from outreach.ranking.signals.live_role import LiveRole
 from tests import ranking_store as rs
 from tests.ranking_helpers import check_assessment, neutral_facts
 from tests.storetest import fresh_store
 from tests.test_ranking_job import TODAY, Base
+from tests.test_ranking_roles import Store, ago
 
 CFG = default_ranker_config()
 TIERS = ("new_grad", "early_career", "swe1", "swe2", "open")
@@ -352,6 +353,76 @@ class GoldenTests(Base):
             self.conn = mine
         self.assertEqual(with_tiers, with_flat)
         self.assertEqual(sorted([ids["Refuses"], ids["Banned"]]), sorted({r[0] for r in with_tiers}))
+
+
+def best(pid, tier, *, lane="level_role", age=5, basis="", years=None, sponsorship="silent"):
+    return Best(pid, lane, "t", tier, sponsorship, age, "", "", None, "2026-10-21", "read_ok", True,
+                level_basis=basis, years_asked=years)
+
+
+class BestPostingTests(unittest.TestCase):
+    """Inside a lane an early career fit is the best posting before a fresher role that does not fit; then
+    freshness and the old tie-breaks."""
+
+    def order(self, *postings):
+        return [b.posting_id for b in sorted(postings, key=role_sort_key)]
+
+    def test_an_older_early_career_fit_beats_a_fresher_swe2_or_open_role(self):
+        self.assertEqual(self.order(best(1, "swe2", age=0, basis="Title says II"), best(2, "new_grad", age=40)), [2, 1])
+        self.assertEqual(self.order(best(1, "open", age=1), best(2, "swe1", age=50)), [2, 1])
+        self.assertEqual(self.order(best(1, "swe2", age=1, basis="Asks 3 years", years=3),
+                                    best(2, "swe2", age=30, basis="Asks 2 years", years=2)), [2, 1])
+        self.assertEqual(self.order(best(1, "swe2", age=1), best(2, "early_career", age=None)), [2, 1])
+
+    def test_freshness_and_the_old_tie_breaks_hold_inside_the_fit_group(self):
+        self.assertEqual(self.order(best(1, "new_grad", age=20), best(2, "swe1", age=3)), [2, 1])
+        self.assertEqual(self.order(best(1, "new_grad", age=7), best(2, "new_grad", age=7, sponsorship="yes"),
+                                    best(3, "new_grad", age=7)), [2, 3, 1])
+        self.assertEqual(self.order(best(1, "swe2", age=20), best(2, "open", age=3)), [2, 1])  # neither fits
+
+    def test_the_lane_still_comes_first(self):
+        self.assertEqual(self.order(best(1, "new_grad", lane="intern_junior", age=0), best(2, "swe2", age=60)),
+                         [2, 1])
+        # any_us_role: the fit key reads only the level_role lane, so the old order (freshest) stands there
+        self.assertEqual(self.order(best(1, "new_grad", lane="any_us_role", age=30),
+                                    best(2, "senior", lane="any_us_role", age=3)), [2, 1])
+
+
+class BestPostingStoreTests(Store):
+    def test_load_roles_picks_the_older_new_grad_role_over_a_fresher_swe2_one(self):
+        ng = self.add("ng", posted_on=ago(40))
+        swe2 = self.add("ng", posted_on=ago(1), level_tier="swe2", level_basis="Title says Engineer II")
+        r = self.role()
+        self.assertEqual(r.best.posting_id, ng)
+        self.assertEqual([b.posting_id for b in r.visible], [ng, swe2])
+        self.assertEqual(r.lanes, ("level_role",))
+
+    def test_asks_two_years_counts_as_a_fit_through_the_stored_years(self):
+        three = self.add("ng", posted_on=ago(1), level_tier="swe2", level_basis="Asks 3 years", years_asked=3,
+                         years_quote="3 years")
+        two = self.add("ng", posted_on=ago(30), level_tier="swe2", level_basis="Asks 2 years", years_asked=2,
+                       years_quote="2 years")
+        r = self.role()
+        self.assertEqual((r.best.posting_id, r.best.years_asked), (two, 2))
+        self.assertEqual([b.posting_id for b in r.visible], [two, three])
+
+
+class BestPostingRankTests(Base):
+    def test_the_score_and_reason_follow_the_early_career_role(self):
+        cid, board = self.company("Mixed")
+        ng = self.role(cid, board, "Software Engineer, New Grad", posted_on="2026-07-01")
+        self.role(cid, board, "Software Engineer II", posted_on="2026-10-21", level_tier="swe2",
+                  level_basis="Title says Engineer II")
+        flat = config_with_tiers(FLAT_TIERS)
+        shipped, _ = compute_rank(self.conn, today=TODAY)
+        before, _ = compute_rank(self.conn, today=TODAY, cfg=flat)
+        now, then = shipped[0], before[0]
+        self.assertEqual(now.best_posting_id, ng)
+        self.assertEqual(now.values["live_role"].value, 0.8)  # 113 days old: no bonus
+        self.assertEqual(now.values["live_role"].reason,
+                         "Open new grad role: Software Engineer, New Grad, posted 113 days ago")
+        self.assertIsNone(now.hide)
+        self.assertEqual(now.hide, then.hide)
 
 
 if __name__ == "__main__":

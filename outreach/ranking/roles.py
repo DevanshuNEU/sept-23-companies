@@ -88,8 +88,11 @@ class Roles:
 
 
 def role_sort_key(b: Best) -> tuple:
-    """Lane, then freshest (unknown age last), then a sponsorship of yes, opt_only, the rest, then the newest id."""
-    return (_LANE_RANK[b.lane], b.age_days is None, b.age_days or 0, _SPONSOR_RANK.get(b.sponsorship, 2),
+    """Lane, then in the level_role lane an early career fit first (level priority: an older new grad role beats a
+    fresher SWE II one), then freshest (unknown age last), then a sponsorship of yes, opt_only, the rest, then the
+    newest id."""
+    fit = b.lane == "level_role" and early_career_fit(b.level_tier, b.level_basis, b.years_asked)
+    return (_LANE_RANK[b.lane], not fit, b.age_days is None, b.age_days or 0, _SPONSOR_RANK.get(b.sponsorship, 2),
             -b.posting_id)
 
 

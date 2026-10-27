@@ -225,3 +225,33 @@ class InFlightTest(QueueCase):
     def test_tomorrow_counts_companies(self):
         text = self.view()["tomorrow"]["text"]
         self.assertRegex(text, r"Room for \d+ compan(y|ies)\.")
+
+
+class JudgeLineTest(QueueCase):
+    """The profile judge's line on a pick (Part of #6 and #15): its own words when a fresh judgment exists, honest
+    when there is none."""
+
+    FIELDS = {"fit": 72, "builds": "Builds AI agents for ERP migrations.", "domains": ["ai_agents"],
+              "why": "Agent work is his work.", "risk": "The role asks for two years.", "level_ok": "unknown",
+              "quotes": [], "evidence": [], "thin": True}
+
+    def judge(self, company_id, at, **over):
+        from outreach.judge.store import record_judgment
+        record_judgment(self.conn, company_id, {**self.FIELDS, **over}, version="jv-1", key="k", posting="p",
+                        pages=[], at=at)
+
+    def test_a_judged_pick_shows_the_judge_line_and_the_fit(self):
+        self.judge(self.tessera, "2026-11-09T11:10:00Z")
+        q = self.row(self.tessera_entry)["queue"]
+        self.assertEqual("Judge: builds AI agents for ERP migrations. Fit 72. Risk: the role asks for two years.",
+                         q["judgeLine"])
+        self.assertEqual(72, q["judgeFit"])
+
+    def test_a_pick_with_no_judgment_says_not_judged_yet(self):
+        q = self.row(self.avante_entry)["queue"]
+        self.assertEqual(("Judge: not judged yet.", None), (q["judgeLine"], q["judgeFit"]))
+
+    def test_an_old_judgment_is_not_shown(self):
+        self.judge(self.tessera, "2026-09-01T11:10:00Z")
+        q = self.row(self.tessera_entry)["queue"]
+        self.assertEqual(("Judge: not judged yet.", None), (q["judgeLine"], q["judgeFit"]))

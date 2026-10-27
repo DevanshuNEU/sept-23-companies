@@ -74,6 +74,8 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
   const carried = row.carriedFrom !== null && row.state === 'todo' ? `Carried over from ${formatCarriedDay(row.carriedFrom, asOf)}` : null;
   const ask = row.state === 'todo' && row.note?.needsYourLine === true ? 'Your line to confirm' : null;
   const fresh = row.queue?.opening?.fresh ? row.queue.opening.freshTag : null;
+  // The profile judge's fit, only when it has judged the company (the panel says when it has not).
+  const judged = row.queue?.judgeFit ?? null;
   const where = row.channel === 'email' ? `${title(row)} by email` : companyRow(row) ? title(row) : `${title(row)} at ${row.company.name}`;
   const label = [`${row.position}. ${where}`, word, ...[fresh, carried, ask].flatMap((p) => (p ? [lowerFirst(p)] : []))].join(', ');
 
@@ -104,6 +106,7 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
           </span>
         ) : null}
         <span className="truncate text-[13px] text-muted-foreground">{sub(row)}</span>
+        {judged !== null ? <span data-judge className="truncate text-xs leading-4 text-muted-foreground">Judge fit {judged}</span> : null}
         {carried ? <span className="truncate text-xs leading-4 text-muted-foreground">{carried}</span> : null}
         {ask ? <span className="truncate text-xs leading-4 text-muted-foreground">{ask}</span> : null}
       </span>

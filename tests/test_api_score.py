@@ -82,6 +82,11 @@ class Score(ApiCase):
         self.assertEqual(by["mystery_new_signal"]["label"], "Mystery new signal")  # an unknown name still reads well
         self.assertEqual([x["name"] for x in self.score(cid)["signals"]][-1], "mystery_new_signal")  # last on a tie
 
+    def test_the_profile_fit_row_is_labelled_for_people(self):
+        cid = s.company(self.conn, "Acme")
+        s.score(self.conn, cid, {"live_role": 1.0, "profile_fit": 6.12})
+        self.assertEqual(self.signals(cid)["profile_fit"]["label"], "Fits what you build")
+
     def test_score_rank_ignores_hidden_companies(self):
         a = s.company(self.conn, "A")
         hidden = s.company(self.conn, "Hidden")

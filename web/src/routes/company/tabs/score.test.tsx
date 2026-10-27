@@ -70,6 +70,15 @@ describe('Score tab', () => {
     expect(within(level[3] as HTMLElement).getByRole('link', { name: 'Pylon careers page' })).toHaveAttribute('href', expect.stringContaining('pylon'));
   });
 
+  it("the profile judge's row says what the company builds, or that it is not judged yet", async () => {
+    const view = await openScore(MINTLIFY);
+    const s = await view.client.score(MINTLIFY);
+    const fit = s.signals.find((x) => x.name === 'profile_fit');
+    expect(fit?.label).toBe('Fits what you build');
+    expect(fit?.value).toBeGreaterThanOrEqual(0);
+    expect(rowOf('Fits what you build')).toHaveTextContent(fit?.value ? /Judge, fit \d+: Builds/ : /Not judged yet/);
+  });
+
   it('the shares printed add to 100 percent of the absolute total', async () => {
     await openScore();
     const shares = within(screen.getByRole('table', { name: 'Score by signal' }))

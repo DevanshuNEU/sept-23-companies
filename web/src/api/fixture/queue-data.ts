@@ -37,6 +37,12 @@ export function openingOf(role: { postingId: Id; title: string; url: string }, t
 export const whyTodayOf = (o: QueueOpening | null, reasons: string[]) =>
   o?.fresh ? `${o.level ?? 'Open role'}: ${o.title}` : o ? `${o.level ?? 'Open role'}, ${o.age}` : (reasons[0] ?? 'Ranked for today.');
 
+/** The profile judge's two fields, as the API writes them: its line and fit, or "not judged yet". */
+export interface JudgeSpec { fit: number; builds: string; risk: string }
+const lowerFirst = (s: string) => (s.length > 1 && /[A-Z]/.test(s[0] ?? '') && /[a-z]/.test(s[1] ?? '') ? s[0]!.toLowerCase() + s.slice(1) : s);
+export const judgeOf = (j?: JudgeSpec): Pick<CompanyQueue, 'judgeLine' | 'judgeFit'> =>
+  j ? { judgeLine: `Judge: ${lowerFirst(j.builds)} Fit ${j.fit}. Risk: ${lowerFirst(j.risk)}`, judgeFit: j.fit } : { judgeLine: 'Judge: not judged yet.', judgeFit: null };
+
 const NEW: QueueStanding = { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null };
 /** A wave he sent today: n asked, room for the rest, free again in 14 days. */
 export function askedToday(n: number, freeOn: IsoDate): QueueStanding {
@@ -54,6 +60,7 @@ interface Spec {
   standing?: QueueStanding; lastTouch?: string; emailHint?: string; people: [onRecord: number, asked: number];
   saved?: string; careers: string | null; carriedFrom?: IsoDate;
   done?: [asked: number, last: string]; // asked today, and the newest person asked ("Ana Ruiz (Engineer)")
+  judge?: JudgeSpec; // the profile judge's judgment; none is "not judged yet"
 }
 
 const ROWS: Spec[] = [
@@ -61,6 +68,7 @@ const ROWS: Spec[] = [
     company: 'Resend', lane: 'level_role', role: { title: 'Software Engineer, New Grad', tier: 'new_grad', loc: 'San Francisco or remote US', age: 4, line: 'Software Engineer, New Grad, posted 4 days ago', words: 'posted 4 days ago', opened: '2026-11-06T05:00:00Z' },
     reason: 'Resend has a new grad role open and has sponsored H-1B before.', reasons: ['Open role at your level', 'Has sponsored before', 'Small company'],
     size: '38 people, Series A', hiring: 3, sponsorship: 'Has sponsored before, E-Verify enrolled', people: [4, 3], careers: 'https://resend.example/careers/new-grad', done: [3, 'Ana Ruiz (Engineer)'],
+    judge: { fit: 64, builds: 'Builds an email API for developers.', risk: 'Little agent or AI work on its pages.' },
   },
   {
     company: 'Baseten', lane: 'level_role', role: { title: 'Forward Deployed Engineer, New Grad', tier: 'new_grad', loc: 'San Francisco', age: 5, line: 'Forward Deployed Engineer, New Grad, posted 5 days ago', words: 'posted 5 days ago', opened: '2026-11-05T05:00:00Z' },
@@ -71,6 +79,7 @@ const ROWS: Spec[] = [
     company: 'Pylon', lane: 'level_role', role: { title: 'Software Engineer I', tier: 'swe1', loc: 'San Francisco', age: 0, line: 'Software Engineer I, first seen today', words: 'first seen 6 hours ago', opened: '2026-11-10T09:14:00Z', fresh: '6 hours ago' },
     reason: 'Pylon opened a Software Engineer I role this morning and says it sponsors visas.', reasons: ['Open role at your level', 'New opening today', 'Says it sponsors'],
     size: '30 people (estimate), Series A', hiring: 3, sponsorship: 'Says it sponsors, E-Verify enrolled', people: [1, 0],
+    judge: { fit: 82, builds: 'Builds a support platform for B2B teams, with AI agents that answer tickets.', risk: 'No E-Verify statement on its pages.' },
     saved: `${SEARCH}?currentCompany=%5B%2281234%22%5D&geoUrn=%5B%22103644278%22%5D&titleFreeText=engineer&origin=FACETED_SEARCH`,
     careers: 'https://pylon.example/careers/swe-1',
   },
@@ -85,6 +94,7 @@ const ROWS: Spec[] = [
     company: 'Cerebrium', lane: 'level_role', role: { title: 'Member of Technical Staff', tier: 'swe1', loc: 'New York', age: 1, line: 'Member of Technical Staff, posted 1 day ago', words: 'posted yesterday', opened: '2026-11-09T05:00:00Z', fresh: 'yesterday' },
     reason: 'Cerebrium has a Member of Technical Staff role open and no one on the team is saved yet.', reasons: ['Open role at your level', 'Small company', 'E-Verify enrolled'],
     size: '18 people (estimate), seed (guess)', hiring: 1, sponsorship: 'Sponsorship not stated, E-Verify enrolled', people: [0, 0], careers: 'https://cerebrium.example/careers/mts',
+    judge: { fit: 74, builds: 'Builds serverless GPU infrastructure for AI apps.', risk: 'Unknown: its pages say nothing about the level.' },
   },
   {
     company: 'Turso', lane: 'intern_junior', role: { title: 'Software Engineering Intern', tier: 'not_stated', loc: 'Remote US', age: 4, line: 'Software Engineering Intern, posted 4 days ago', words: 'posted 4 days ago', opened: '2026-11-06T05:00:00Z' },
@@ -138,7 +148,7 @@ export function buildQueueRows(c: PlanCtx, mode: 'default' | 'fresh'): QueueBuil
       peopleSearchUrl: search, searchSaved: spec.saved !== undefined, careersUrl: spec.careers,
       terminalLine: terminalLine(spec.company, ref.id, role?.title ?? null),
       whyToday: whyTodayOf(opening, spec.reasons), opening, websiteUrl: ref.domain ? `https://${ref.domain}` : null,
-      linkedinCompanyUrl: companySearch(spec.company),
+      linkedinCompanyUrl: companySearch(spec.company), ...judgeOf(spec.judge),
     };
     return {
       entryId: 6500 + n, position: n, channel: 'linkedin_request', lane: spec.lane,
@@ -167,12 +177,13 @@ export function pickOrder(rows: PlanRow[]): PlanRow[] {
 interface BenchSpec {
   company: string; score: number;
   role?: { title: string; tier: LevelTier; age: number; words: string; opened: string; fresh?: string };
-  reasons: string[]; size: string | null; hiring: number; sponsorship: string; applied?: string;
+  reasons: string[]; size: string | null; hiring: number; sponsorship: string; applied?: string; judge?: JudgeSpec;
 }
 
 const BENCH: BenchSpec[] = [
   { company: 'Retell AI', score: 61, role: { title: 'Software Engineer, New Grad', tier: 'new_grad', age: 0, words: 'first seen 3 hours ago', opened: '2026-11-10T12:14:00Z', fresh: '3 hours ago' },
-    reasons: ['Open role at your level', 'New opening today', 'Small company'], size: '40 people (estimate), Series A', hiring: 2, sponsorship: 'Sponsorship not stated, E-Verify enrolled' },
+    reasons: ['Open role at your level', 'New opening today', 'Small company'], size: '40 people (estimate), Series A', hiring: 2, sponsorship: 'Sponsorship not stated, E-Verify enrolled',
+    judge: { fit: 88, builds: 'Builds voice AI agents that answer phone calls for businesses.', risk: 'A small team that may hire senior first.' } },
   { company: 'Railway', score: 58, role: { title: 'Software Engineer, Early Career', tier: 'early_career', age: 1, words: 'posted yesterday', opened: '2026-11-09T05:00:00Z', fresh: 'yesterday' },
     reasons: ['Open role at your level', 'Has sponsored before'], size: '60 people, Series B', hiring: 3, sponsorship: 'Has sponsored before', applied: 'You applied on Oct 20; this is a new role.' },
   { company: 'Temporal', score: 55, role: { title: 'Software Engineer II', tier: 'swe2', age: 0, words: 'first seen 10 hours ago', opened: '2026-11-10T05:14:00Z', fresh: '10 hours ago' },
@@ -217,6 +228,7 @@ export function buildBench(c: PlanCtx, room: number): BenchView {
       peopleOnRecord: 0, peopleLine: 'Nobody on record yet', peopleSearchUrl: keywordSearch(spec.company), searchSaved: false,
       careersUrl: role?.url ?? (ref.domain ? `https://${ref.domain}` : null), terminalLine: terminalLine(spec.company, ref.id, role?.title ?? null),
       whyToday: whyTodayOf(opening, spec.reasons), opening, websiteUrl: ref.domain ? `https://${ref.domain}` : null, linkedinCompanyUrl: companySearch(spec.company),
+      ...judgeOf(spec.judge),
     };
     return {
       company: { ...c.co(spec.company), domain: ref.domain, hq: ref.hq, revision: 1 }, position: i + 1,

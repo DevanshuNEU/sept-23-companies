@@ -1383,6 +1383,13 @@ export interface components {
             hiring: number;
             /** Hiringline */
             hiringLine: string;
+            /** Judgefit */
+            judgeFit: number | null;
+            /**
+             * Judgeline
+             * @default Judge: not judged yet.
+             */
+            judgeLine: string;
             /** Lasttouch */
             lastTouch: string | null;
             /**

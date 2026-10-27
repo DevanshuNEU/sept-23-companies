@@ -16,7 +16,7 @@ import type {
   SourceLink, TomorrowRow, WatchView, WinsView, Win,
 } from '../types';
 import type { Scenario } from './data';
-import { benchRoom, buildBench, buildInFlight, buildQueueRows, companySearch, keywordSearch, openingOf, terminalLine, whyTodayOf } from './queue-data';
+import { benchRoom, buildBench, buildInFlight, buildQueueRows, companySearch, judgeOf, keywordSearch, openingOf, terminalLine, whyTodayOf } from './queue-data';
 
 /** What data.ts hands over: the clock, the company registry and the people and roles it already made. */
 export interface PlanCtx {
@@ -239,6 +239,7 @@ function companyQueue(c: PlanCtx, company: string, role: RoleToName | null): Pla
   const reasons = ['Open role at your level', 'Small company'];
   return {
     whyToday: whyTodayOf(opening, reasons), opening, websiteUrl: ref?.domain ? `https://${ref.domain}` : null, linkedinCompanyUrl: companySearch(company),
+    ...judgeOf(),
     sizeLine: '18 people (estimate), seed (guess)', roleLine: role ? `${role.title}, posted 3 days ago` : null, hiring: 1,
     hiringLine: '1 new engineering role in the last 30 days', sponsorshipLine: 'Sponsorship not stated, E-Verify enrolled',
     reasons, standing: { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null },
@@ -480,6 +481,7 @@ function genericSignals(name: string, hq: string): Sig[] {
   const fresh = v(3);
   const people = v(4);
   const sponsor = v(5);
+  const fit = Math.max(0, v(6)); // the profile judge's fit is one way: it only ever adds
   return [
     { name: 'level_match', label: 'Level match', value: level, weight: 2, reason: `A role at ${name} is close to your level.`, source: careers },
     { name: 'sponsorship', label: 'Sponsorship', value: sponsor, weight: 1.5, reason: word(sponsor, 'Filings show it has sponsored before.', 'The posting leans against sponsorship.', 'Nothing is stated about sponsorship.'),
@@ -489,6 +491,9 @@ function genericSignals(name: string, hq: string): Sig[] {
     { name: 'size', label: 'Company size', value: size, weight: 1, reason: word(size, `A small team in ${hq}.`, 'Close to the size cap.', 'No size is confirmed yet, so size adds nothing either way.'), source: null },
     { name: 'people_to_ask', label: 'People to ask', value: people, weight: 1, reason: word(people, 'Several engineers are public on the team page.', 'Few engineers are public on the team page.', 'The team page does not say.'),
       source: people !== 0 ? link(`${name} team page`, slug(name), 'team') : null },
+    { name: 'profile_fit', label: 'Fits what you build', value: fit, weight: 1,
+      reason: fit > 0 ? `Judge, fit ${Math.round(fit * 100)}: Builds developer tools with AI agents. Its pages describe agent and retrieval work like yours.` : 'Not judged yet',
+      source: null },
   ];
 }
 

@@ -41,7 +41,8 @@ export function OpeningLine({ opening }: { opening: QueueOpening }) {
 
 /**
  * Why today, first in the panel (top picks): the opening and its age, why the company should answer (the ranker's
- * reasons, its size and stage, recent hiring), and where it stands on a visa. Every line is the API's.
+ * reasons, its size and stage, recent hiring), where it stands on a visa, and the profile judge's one line (what the
+ * company builds, its fit and the risk, or "not judged yet"). Every line is the API's.
  */
 export function WhyToday({ q, compact = false }: { q: CompanyQueue; compact?: boolean }) {
   const answer = [...q.reasons, ...(q.sizeLine ? [q.sizeLine] : []), ...(q.hiring > 0 ? [q.hiringLine] : [])];
@@ -68,6 +69,9 @@ export function WhyToday({ q, compact = false }: { q: CompanyQueue; compact?: bo
           <dd>{q.sponsorshipLine}</dd>
         </div>
       </dl>
+      <p data-judge className={cn('text-[13px]', q.judgeFit === null && 'text-muted-foreground')}>
+        {q.judgeLine}
+      </p>
     </section>
   );
 }

@@ -33,7 +33,8 @@ from outreach.sources.tiers import effective_tier, register_source, set_work_tie
 from outreach.store import (append_event, describe_error, finish_job, is_shared_key, iso_utc, mark_shared_key,
                             start_job, transaction, utcnow)
 
-__all__ = ["SourceReport", "run_discover", "run_resolve", "store_name_lookup", "POST_TEXT_CAP", "FindBoardsReport",
+__all__ = ["SourceReport", "run_discover", "run_resolve", "store_name_lookup", "store_board_known", "POST_TEXT_CAP",
+           "FindBoardsReport",
            "run_find_boards", "register_source"]
 
 MIN_LOOKUPS_FOR_ALL_FAILED = 3  # one or two failed lookups prove nothing; three of three is a pattern
@@ -85,6 +86,20 @@ def store_name_lookup(conn: sqlite3.Connection) -> Callable[[str], bool]:
     return lookup
 
 
+def store_board_known(conn: sqlite3.Connection) -> Callable[[str, str], bool]:
+    """A `board_known(ats, token)` for sources that lead to boards (freehire, #115): True when a board row or an `ats`
+    alias already names the board, whichever company holds it. Identity never matches on a board, so a lead for a
+    company Knock already crawls would make a duplicate company; the source skips it instead. The token is compared
+    as `normalize_token` stores it. It reads the store at each call."""
+    def known(ats: str, token: str) -> bool:
+        return conn.execute(
+            "SELECT 1 FROM board WHERE ats = ? AND token = ? "
+            "UNION ALL SELECT 1 FROM company_alias WHERE source = 'ats' AND alias_key = ? LIMIT 1",
+            (ats, token, f"{ats}:{token}".lower())).fetchone() is not None
+
+    return known
+
+
 def _store_fein_check(conn: sqlite3.Connection, source_name: str) -> Callable[[str], bool]:
     """Whether the source's record is linked to a company that already holds a fein alias (from any source): there is
     nothing more to look up about it. A linked company with no fein alias is not known, so a FEIN missed once (a
@@ -116,6 +131,9 @@ def _discover_one(conn: sqlite3.Connection, source: Source, run_id: int, creates
     bind_fein = getattr(source, "bind_fein_known", None)
     if bind_fein is not None:
         bind_fein(_store_fein_check(conn, source.name))
+    bind_board = getattr(source, "bind_board_known", None)
+    if bind_board is not None:
+        bind_board(store_board_known(conn))
     shared = getattr(source, "shared_keys", None)
     if shared is not None:
         keys = shared()

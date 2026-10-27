@@ -24,6 +24,7 @@ from outreach.sources.base import describe_error
 from outreach.sources.byhand import add_by_hand
 from outreach.sources.careers import CareersChecker
 from outreach.sources.formd import FormDSource, sec_headers
+from outreach.sources.freehire import FreehireSource, load_freehire_config
 from outreach.sources.hn import HnSource
 from outreach.sources.jobs import run_discover, run_find_boards, run_resolve
 from outreach.sources.lca import LcaSource
@@ -214,8 +215,9 @@ def _fetch_formd(root: Path, factory: ClientFactory, *, only_if_newer: bool = Fa
 # --- run-due ----------------------------------------------------------------------------------------------------
 
 def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict]:
-    """Everything that is due: HN's thread for this month (read again on each run, once it is out), Form D when SEC
-    has a newer data set, the stapply lists weekly, then resolve and find-boards.
+    """Everything that is due: HN's thread for this month (read again on each run, once it is out), freehire's last
+    few days (#115; skipped when `enabled = false` in freehire.toml), Form D when SEC has a newer data set, the stapply
+    lists weekly, then resolve and find-boards.
 
     Every step runs even when an earlier one failed. The exit code is 1 when any step is `partial` or `failed`. LCA is
     not here: it is a by-hand quarterly `fetch lca` and `discover lca`.
@@ -235,6 +237,13 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
         if not source.thread_out(month):
             return {"status": "skipped", "reason": f"the {month} thread is not out yet"}
         status, payload = _discover(conn, source, since=month)  # a later run the same month reads it again: no new rows
+        return {"status": status, "run_id": payload["run_id"]}
+
+    def freehire() -> dict:
+        source = FreehireSource(factory("declared"))
+        if not source.config.enabled:
+            return {"status": "skipped", "reason": "freehire is off (enabled = false in freehire.toml)"}
+        status, payload = _discover(conn, source)
         return {"status": status, "run_id": payload["run_id"]}
 
     def formd() -> dict:
@@ -265,8 +274,8 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
         status, payload = _find_boards(conn, factory, RUN_DUE_MAX_CAREERS)
         return {"status": status, "run_id": payload["run_id"]}
 
-    for name, work in (("hn", hn), ("formd", formd), ("stapply", stapply), ("resolve", resolve),
-                       ("find_boards", find_boards)):
+    for name, work in (("hn", hn), ("freehire", freehire), ("formd", formd), ("stapply", stapply),
+                       ("resolve", resolve), ("find_boards", find_boards)):
         step(name, work)
     states = {s["status"] for s in steps.values()}
     status = "failed" if "failed" in states else "partial" if "partial" in states else "ok"
@@ -281,12 +290,14 @@ Commands:
   discover lca [--files F...]                read LCA files (default: the ones `fetch lca` saved)
   discover formd --dataset PATH              read one Form D quarterly data set (the zip or its folder)
   discover hn [--since YYYY-MM]              read the Who is hiring threads (default: the latest)
+  discover freehire [--days N]               read freehire's US junior and intern engineering postings of the last
+                                             N days (default: freehire.toml's days)
   resolve                                    the identity pass: merge candidates and size checks
   find-boards [--max-careers N]              give companies their ATS boards (N careers pages at most)
   add --name N --reason R [--domain D] [--state ST] [--ats A:T]
-  run-due                                    what launchd runs daily: this month's HN thread (once it is out), Form D
-                                             (when SEC has a newer quarterly set), the stapply lists (weekly),
-                                             resolve, then find-boards --max-careers 100
+  run-due                                    what launchd runs daily: this month's HN thread (once it is out),
+                                             freehire, Form D (when SEC has a newer quarterly set), the stapply lists
+                                             (weekly), resolve, then find-boards --max-careers 100
 
 LCA is by hand, once a quarter when DOL posts a file: `fetch lca`, then `discover lca`, then `resolve` and
 `find-boards`. run-due never runs it. `fetch stapply` refreshes the stapply lists by hand; run-due does it when the last refresh is 7 days old.
@@ -313,6 +324,8 @@ def _parser() -> argparse.ArgumentParser:
     formd.add_argument("--dataset", type=Path, required=True)
     hn = kinds.add_parser("hn", help="Hacker News Who is hiring")
     hn.add_argument("--since", help="YYYY-MM: every thread from that month on")
+    freehire = kinds.add_parser("freehire", help="freehire.me's US early-career postings")
+    freehire.add_argument("--days", type=int, help="postings of the last N days (default: freehire.toml's days)")
 
     sub.add_parser("resolve", help="the identity pass")
     boards = sub.add_parser("find-boards", help="find ATS boards")
@@ -354,6 +367,8 @@ def _run(args: argparse.Namespace, factory: ClientFactory) -> int:
                 match = _FORMD_NAME.match(args.dataset.stem)
                 if status == "ok" and match:
                     _mark_formd_read(sources_dir(), match.group(1))
+            elif args.source == "freehire":
+                status, payload = _discover(conn, FreehireSource(factory("declared"), days=args.days))
             else:
                 status, payload = _discover(conn, HnSource(factory("declared")), since=args.since)
         elif args.command == "resolve":

@@ -1,0 +1,39 @@
+# freehire.me as a lead to US early-career boards (#115). Read by outreach/sources/freehire.py; any change here
+# changes the source version.
+#
+# freehire's terms allow the API without a plan "for personal and non-commercial use: your own job search, research,
+# or a tool you run for yourself" (checked 2026-10-27). Stay inside the documented API and never work around a rate
+# limit.
+
+enabled = true
+search_url = "https://freehire.me/api/v1/jobs/search"  # the lean search: no posting bodies, Knock reads the board
+page_size = 100  # the API's cap
+max_pages = 20  # at most 2,000 postings a run; hitting it is counted in the summary
+days = 3  # posted_within_days on the daily run; a backfill passes --days
+
+countries = ["us"]
+seniority = ["junior", "intern"]
+# freehire's engineering categories. Design, hardware, embedded, IT support and the rest are left out.
+categories = ["software_engineering", "fullstack", "backend", "frontend", "mobile", "devops", "sre", "qa", "security",
+              "data_engineering", "data_science", "ml_ai", "ai_engineering"]
+
+# freehire's company types for staffing and outsourcing firms: work tier 3, like the LCA staffing rule.
+staffing_types = ["agency", "outstaff", "outsource"]
+
+# freehire platform name -> board.ats. Only platforms with a crawler adapter; a platform whose reader is switched off
+# in crawl/config.toml [ats_off] is not asked for. wellfound and ycombinator are never here (#46).
+[platforms]
+ashby = "ashby"
+bamboohr = "bamboohr"
+breezy = "breezy"
+greenhouse = "greenhouse"
+jazzhr = "jazzhr"
+lever = "lever"
+oracle = "oracle_orc"
+pinpoint = "pinpoint"
+recruitee = "recruitee"
+rippling = "rippling"
+smartrecruiters = "smartrecruiters"
+teamtailor = "teamtailor"
+workable = "workable"
+workday = "workday"

@@ -16,21 +16,33 @@ from typing import Literal, Protocol, runtime_checkable
 
 __all__ = [
     "Outgoing", "Sent", "Profile", "MessageMeta", "Added", "HistoryPage", "HistoryExpired", "GmailError", "KINDS",
-    "classify_http", "RETRYABLE", "MailClient", "META_HEADERS", "check_outgoing", "normalise_message_id",
-    "MESSAGE_ID", "CLOCK_SKEW_MS", "settle_minutes", "page_reaches", "miss_is_proof",
+    "classify_http", "RETRYABLE", "MailClient", "META_HEADERS", "MARKER_HEADER", "ORIGINAL_ID_HEADER",
+    "check_outgoing", "normalise_message_id", "MESSAGE_ID", "CLOCK_SKEW_MS", "settle_minutes", "page_reaches",
+    "miss_is_proof",
 ]
 
+# The header the sender puts on every email it sends, holding the token it claimed before the call (the claim's
+# `pending_rfc_id`). Gmail's API replaces the Message-ID the sender sets with one of its own, so a send in doubt is
+# found in Sent by this header instead. That Gmail keeps it is proven by the first marked email (`proof`).
+MARKER_HEADER = "X-Outreach-Id"
+
 # The only header names a MessageMeta carries (lower case). The metadata scope cannot read bodies; these are
-# what classify (Task 5) needs to tell a person from an out-of-office or a bounce.
+# what classify (Task 5) needs to tell a person from an out-of-office or a bounce, and the sender's own marker.
 META_HEADERS = (
     "auto-submitted", "x-autoreply", "x-autorespond", "precedence", "x-auto-response-suppress",
-    "message-id", "in-reply-to", "references", "x-failed-recipients", "content-type",
+    "message-id", "in-reply-to", "references", "x-failed-recipients", "content-type", "x-outreach-id",
+    "x-google-original-message-id",
 )
+# Where Gmail is reported to keep, sometimes, the Message-ID it replaced (unproven). The claimed token is the
+# Message-ID the sender set, so a Sent scan also takes a match here as a hit (a hit only ever records an email as
+# sent); it is never proof that Gmail keeps the marker.
+ORIGINAL_ID_HEADER = "X-Google-Original-Message-ID"
 
 
 @dataclass(frozen=True)
 class Outgoing:
-    """One plain-text email to one person. `message_id` is the Message-ID claimed in the store before the call."""
+    """One plain-text email to one person. `message_id` is the Message-ID claimed in the store before the call, and
+    `marker` the token claimed with it (the same value), written as the `X-Outreach-Id` header."""
     to: str
     subject: str
     body: str
@@ -40,13 +52,18 @@ class Outgoing:
     thread_id: str | None
     in_reply_to: str | None
     references: tuple[str, ...]
+    marker: str
 
 
 @dataclass(frozen=True)
 class Sent:
+    """An email Gmail holds. `rfc_message_id` is the Message-ID Gmail stored it under when that was read, else the
+    one claimed. `marker` is its `X-Outreach-Id` header as Gmail holds it ('' when it has none), or None when it was
+    not read (a read back after the send failed)."""
     gmail_message_id: str
     thread_id: str
     rfc_message_id: str
+    marker: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,12 +107,11 @@ class HistoryExpired(Exception):
 
 
 KINDS = frozenset({"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
-                   "timeout", "message_id_rewritten"})
+                   "timeout"})
 
 # A failure of these kinds says nothing about the message itself (it never went out because of the account, the
 # token, Gmail or the network), so a send proven missing from Sent may be tried again. Not retryable: a bad request
-# (a bad address or header would fail the same way again) and message_id_rewritten (the email went out; Gmail
-# stored it under another Message-ID, so a Sent scan by the claimed id would never find it).
+# (a bad address or header would fail the same way again).
 RETRYABLE = frozenset({"rate_limit", "daily_limit", "account_blocked", "auth", "server", "network", "timeout"})
 
 DETAIL_LIMIT = 300
@@ -125,16 +141,13 @@ class GmailError(Exception):
     """A Gmail call failed. `kind` is one of KINDS; `status` the HTTP status when there was one."""
 
     def __init__(self, kind: Literal["auth", "rate_limit", "daily_limit", "account_blocked", "bad_request",
-                                     "server", "network", "timeout", "message_id_rewritten"],
-                 status: int | None = None, detail: str = "", *, sent: "Sent | None" = None):
+                                     "server", "network", "timeout"],
+                 status: int | None = None, detail: str = ""):
         if kind not in KINDS:
             raise ValueError(f"unknown Gmail error kind {kind!r}")
-        if (kind == "message_id_rewritten") != (sent is not None):
-            raise ValueError("message_id_rewritten, and only it, carries the Sent ids of the email that went out")
         self.kind = kind
         self.status = status
         self.detail = scrub(detail)
-        self.sent = sent
         super().__init__(f"Gmail {kind}" + (f" {status}" if status is not None else "") +
                          (f": {self.detail}" if self.detail else ""))
 
@@ -207,13 +220,13 @@ def miss_is_proof(complete: bool, now_ms: int, send_returned_ms: int, settle: in
 
 
 def check_outgoing(m: Outgoing) -> None:
-    """Refuse anything but one plain email to one person with a claimed Message-ID. Raises ValueError.
+    """Refuse anything but one plain email to one person with a claimed Message-ID and marker. Raises ValueError.
 
     Both clients run this before anything leaves, so the fake refuses exactly what the real client refuses.
     """
     fields = {"to": m.to, "subject": m.subject, "from_name": m.from_name, "from_addr": m.from_addr,
               "message_id": m.message_id, "thread_id": m.thread_id or "", "in_reply_to": m.in_reply_to or "",
-              "references": " ".join(m.references)}
+              "references": " ".join(m.references), "marker": m.marker or ""}
     for name, value in fields.items():
         if "\r" in value or "\n" in value:
             raise ValueError(f"{name} holds a line break")
@@ -227,6 +240,8 @@ def check_outgoing(m: Outgoing) -> None:
         raise ValueError("from_addr is not an address")
     if not MESSAGE_ID.fullmatch(m.message_id or ""):
         raise ValueError("message_id is empty or not one Message-ID")
+    if not MESSAGE_ID.fullmatch(m.marker or ""):
+        raise ValueError("marker is empty or not one claimed token")
     if m.in_reply_to is not None and not MESSAGE_ID.fullmatch(m.in_reply_to):
         raise ValueError("in_reply_to is not one Message-ID")
     for ref in m.references:
@@ -245,9 +260,9 @@ class MailClient(Protocol):
         ...
 
     def send(self, m: Outgoing) -> Sent:
-        """Send one email. An exception means the outcome is unclear: settle it with find_sent. The one exception
-        that is not unclear is GmailError kind message_id_rewritten: the email went out, and `err.sent` holds the
-        ids Gmail stored it under (record it as sent, never retry it)."""
+        """Send one email with its marker. An exception means the outcome is unclear: settle it with find_sent.
+        The Sent returned carries the Message-ID and marker Gmail stored it with, when the client could read them
+        back; Gmail storing another Message-ID than the one set is normal and is not an error."""
         ...
 
     def history(self, start_history_id: str) -> HistoryPage:
@@ -261,8 +276,10 @@ class MailClient(Protocol):
         """Every message in the thread, oldest first."""
         ...
 
-    def find_sent(self, rfc_message_id: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
-        """Look in Sent for the message with exactly this Message-ID (never by To or Subject).
+    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+        """Look in Sent for the message whose `X-Outreach-Id` is exactly `marker` (or, failing that, whose
+        `X-Google-Original-Message-ID` is: the marker is the Message-ID the sender set), never by Message-ID, To or
+        Subject. A hit carries that marker and the Message-ID Gmail stored the message under.
 
         `not_before_ms` is the claim time; `send_returned_ms` is when the failed send call returned. After a crash
         with no record of that, pass the time the stale `sending` row was first found (recorded when it moves to

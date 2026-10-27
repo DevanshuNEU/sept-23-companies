@@ -5,7 +5,7 @@ rules; health's one-line sender summary reads the same snapshot. The one thing t
 old mailer's launchd job is still loaded, so the app passes that in (`old_sender_check`).
 
 A pause is his (`pause_kind 'by_you'`). A plain resume clears only his pause: a hard block (a Gmail limit, a hard
-bounce rate, a rewritten Message-ID) stays until a resume says `acknowledgeBlock`, and the refusal shows its reason.
+bounce rate) stays until a resume says `acknowledgeBlock`, and the refusal shows its reason.
 A pause never overwrites a hard block, so a plain resume can never clear one.
 """
 import logging

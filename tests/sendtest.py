@@ -111,11 +111,11 @@ def put_day(conn: sqlite3.Connection, day: date | str, limit: int, *, outcome: s
 
 
 def prove(conn: sqlite3.Connection) -> None:
-    """Gmail is shown to keep the Message-ID the sender sets (one `import_verified` event), so any number of emails
-    may be claimed. For tests of the claim, the record and the reconcile; the one first email sent before that proof
+    """Gmail is shown to keep the sender's marker (one `marker_verified` event), so any number of emails may be
+    claimed. For tests of the claim, the record and the reconcile; the one first email sent before that proof
     (`outreach.sending.proof`) has tests of its own."""
     from outreach.store.writes import append_event
-    append_event(conn, entity="message", entity_id=None, kind="import_verified", actor="sender",
+    append_event(conn, entity="message", entity_id=None, kind="marker_verified", actor="sender",
                  at=_NOW_SEED, idempotency_key="sendtest:proven")
 
 

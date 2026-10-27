@@ -1,6 +1,6 @@
 """Task 16: the snapshot and the queue schedule the API and the daily plan read.
 
-Read only: every test that reads also checks that nothing was written. A store has no import_verified event by
+Read only: every test that reads also checks that nothing was written. A store has no marker_verified event by
 default here, so only the first email may go and every other one waits (`message_id_unproven`); each test that
 wants the whole queue's time-based waits seeds a proof first (`Base.prove`).
 """
@@ -33,16 +33,17 @@ class Base(unittest.TestCase):
         self.keys = 0
 
     def prove(self) -> None:
-        """What `verify_imported` leaves once Gmail has been shown to keep the Message-ID the sender sets."""
-        append_event(self.db, entity="message", entity_id=1, kind="import_verified", actor="sender",
+        """What `proof.verify_marker` leaves once Gmail has been shown to keep the sender's marker."""
+        append_event(self.db, entity="message", entity_id=1, kind="marker_verified", actor="sender",
                      at="2026-11-01T12:00:00Z", idempotency_key="proof")
 
     def first_claimed(self, kind: str | None = None) -> int:
-        """The one first email the sender claimed and sent before any proof, with `kind` (`send_verified` or
-        `send_id_mismatch`) when it was read back from Gmail."""
+        """The one first marked email the sender claimed and sent before any proof, with `kind`
+        (`marker_verified` or `marker_missing`) when it was read back from Gmail."""
         message = seed_sent(self.db, self.person(), at=MON - timedelta(hours=1))
         append_event(self.db, entity="message", entity_id=message, kind="claimed", actor="sender",
-                     at=iso(MON - timedelta(hours=1)), idempotency_key=f"claimed:{message}")
+                     at=iso(MON - timedelta(hours=1)), idempotency_key=f"claimed:{message}",
+                     detail={"pending_rfc_id": f"<c{message}@gmail.com>", "marker": f"<c{message}@gmail.com>"})
         if kind is not None:
             append_event(self.db, entity="message", entity_id=message, kind=kind, actor="sender", at=iso(MON),
                          idempotency_key=f"{kind}:{message}")
@@ -252,17 +253,33 @@ class NextSendTest(Base):
         self.assertIsNone(s.next_send)
         self.assertEqual(s.none_reason, "First email sent, checking it in Sent. The rest follow.")
 
-    def test_a_first_email_gmail_stored_under_another_id_stops_sending_for_good(self):
-        self.first_claimed("send_id_mismatch")
+    def test_a_first_email_gmail_kept_without_its_marker_stops_sending_for_good(self):
+        self.first_claimed("marker_missing")
         self.approve()
         self.prove()  # even a later proof does not start it again
         s = self.snap()
         self.assertIsNone(s.next_send)
-        self.assertEqual(s.none_reason, proof.PHASE_TEXT[proof.MISMATCH])
-        self.assertIn("Gmail did not keep the Message-ID", s.none_reason)
+        self.assertEqual(s.none_reason, proof.PHASE_TEXT[proof.MISSING])
+        self.assertIn("Gmail did not keep the sender's marker", s.none_reason)
+
+    def test_the_old_message_id_events_neither_prove_nor_stop(self):
+        """The live store before the marker: a sent email claimed without one, read back under another Message-ID
+        (`send_id_mismatch`), and older `import_verified` and `send_verified` events. None of them is about the
+        marker, so the first marked email goes alone."""
+        old = seed_sent(self.db, self.person(), at=MON - timedelta(hours=1))
+        append_event(self.db, entity="message", entity_id=old, kind="claimed", actor="sender",
+                     at=iso(MON - timedelta(hours=1)), idempotency_key=f"claimed:{old}",
+                     detail={"pending_rfc_id": "<old@gmail.com>", "attempt": 1, "seq": 0})
+        for kind in ("send_id_mismatch", "import_verified", "send_verified"):
+            append_event(self.db, entity="message", entity_id=old, kind=kind, actor="sender", at=iso(MON),
+                         idempotency_key=f"{kind}:{old}")
+        first, second = self.approve(), self.approve()
+        self.assertEqual(self.snap().next_send, (first, iso(MON), "America/New_York"))
+        self.assertEqual({m: v.reason for m, v in self.schedule().items()},
+                         {first: "ready", second: "message_id_unproven"})
 
     def test_a_verified_first_email_opens_the_queue(self):
-        self.first_claimed("send_verified")
+        self.first_claimed("marker_verified")
         first, second = self.approve(), self.approve()
         self.assertEqual({m: v.reason for m, v in self.schedule().items()}, {first: "ready", second: "ready"})
 

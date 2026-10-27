@@ -3,9 +3,10 @@
 The stage seeds its own fixture company, "Sendwell Labs", with a founder whose first email is approved (test seed
 SQL standing in for his click in the app) and a second person whose draft is never approved, and puts the founder on
 the 2026-11-10 daily list with channel `email`, so the touch the sender logs says its source is the plan. It also
-seeds one email the old mailer sent, found in Gmail's Sent under its own Message-ID: the proof the sender needs
-before its first send. Then it runs the real `run_tick` on a `FakeGmail` and the fake clock, six ticks two minutes
-apart from 09:00 New York on 2026-11-10. Nothing here reaches Gmail or the real clock.
+seeds one email the old mailer sent, found in Gmail's Sent under its own Message-ID (imported history; it proves
+nothing about the sender's marker, so the founder's email is the one first email that goes out alone). Then it
+runs the real `run_tick` on a `FakeGmail` and the fake clock, six ticks two minutes apart from 09:00 New York on
+2026-11-10. Nothing here reaches Gmail or the real clock.
 
 `register` leaves the ids on the harness as `harness.sending_ids` (a `SendingIds`): the company, the people, their
 messages, the founder's touch, and the `FakeGmail` that took the email.

@@ -354,7 +354,8 @@ def send_sends_only_what_was_approved_once(h):
     sent = [m for m, _, _ in ids.gmail.sent]
     assert [m.to for m in sent] == [stages_sending.FOUNDER_EMAIL], f"Gmail took {[m.to for m in sent]}"
     founder = h.conn.execute("SELECT * FROM message WHERE message_id = ?", (ids.founder_message,)).fetchone()
-    assert founder["state"] == "sent" and founder["rfc_message_id"] == sent[0].message_id, "the founder's email is sent"
+    stored = ids.gmail.sent[0][1].rfc_message_id  # the Message-ID Gmail stored it under, not the one set
+    assert founder["state"] == "sent" and founder["rfc_message_id"] == stored, "the founder's email is sent"
     other = h.conn.execute("SELECT state FROM message WHERE message_id = ?", (ids.other_message,)).fetchone()
     assert other["state"] == "drafted", f"the never-approved draft is {other['state']}"
     logged = h.conn.execute("SELECT channel, json_extract(context, '$.source') AS source FROM outreach_touch "

@@ -132,11 +132,12 @@ class SendRecord:
     person: str
     role_kind: str
     seq: int
-    message_id: str      # the Message-ID it went out under
+    message_id: str      # the Message-ID Gmail stored it under (the one the person sees)
     in_reply_to: str | None
     thread_id: str       # the Gmail thread it landed in
     to: str
     zone: str
+    marker: str = ""     # the sender's X-Outreach-Id on it (the claimed token)
 
 
 @dataclass
@@ -258,8 +259,9 @@ class _Run:
                     self._seed_person(company_id, company, c, p, zone)
 
     def _seed_import(self) -> None:
-        """One email the old mailer sent, found in Gmail's Sent under its own Message-ID: the proof that Gmail
-        keeps the Message-ID the sender sets, without which the sender never sends (it is the switch's own check)."""
+        """One email the old mailer sent, found in Gmail's Sent under its own Message-ID (the switch's own check of
+        imported history). It proves nothing about the sender's marker: the run's first email goes out alone and is
+        read back before the rest (`proof`)."""
         conn = self.conn
         company = conn.execute("INSERT INTO company(name, status_at, created_at) VALUES ('Simco imported', ?, ?)",
                                (STAMP, STAMP)).lastrowid
@@ -449,9 +451,9 @@ class _Run:
             if info is None:
                 continue
             out.append(SendRecord(at=at, company=info.company, person=info.key, role_kind=info.role_kind,
-                                  seq=1 if outgoing.in_reply_to else 0, message_id=outgoing.message_id,
+                                  seq=1 if outgoing.in_reply_to else 0, message_id=sent.rfc_message_id,
                                   in_reply_to=outgoing.in_reply_to, thread_id=sent.thread_id, to=outgoing.to,
-                                  zone=info.zone))
+                                  zone=info.zone, marker=outgoing.marker))
         return tuple(out)
 
 

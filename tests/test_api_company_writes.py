@@ -42,8 +42,8 @@ class CompanyWritesBase(ApiCase):
         return seed.message(self.conn, tid, 0, "approved")
 
     def prove(self):
-        """Gmail is shown to keep the Message-ID the sender sets, so every message goes, not just the first."""
-        append_event(self.conn, entity="message", entity_id=1, kind="import_verified", actor="sender",
+        """Gmail is shown to keep the sender's marker, so every message goes, not just the first."""
+        append_event(self.conn, entity="message", entity_id=1, kind="marker_verified", actor="sender",
                      at="2026-11-01T12:00:00Z", idempotency_key="proof")
 
     def verdict(self, message_id: int) -> str:

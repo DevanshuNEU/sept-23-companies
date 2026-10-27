@@ -434,7 +434,7 @@ def verify_imported(conn: sqlite3.Connection, client: MailClient, *, now: dateti
     one transaction. A message in Sent with the same Message-ID gets event `import_verified`; a 404, a message not
     in Sent or another Message-ID gets `import_not_in_sent`. A message is never changed. A placeholder Message-ID
     (`@outreach.invalid`) is never looked up. Any other Gmail error stops the round and is tried again next tick.
-    This is also the check that Gmail keeps the Message-ID a sender sets. Returns counts."""
+    It checks imported history only: it proves nothing about the sender's marker (`proof`). Returns counts."""
     if conn.in_transaction:
         raise RuntimeError("verify_imported calls Gmail, so it runs with no transaction open")
     rows = conn.execute(

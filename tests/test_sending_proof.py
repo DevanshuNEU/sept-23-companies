@@ -1,5 +1,5 @@
-"""The first-send proof: at most one email is ever claimed before Gmail is shown to keep the Message-ID the sender
-sets, and that email is read back from Gmail by its Gmail id (`outreach.sending.proof`).
+"""The marker proof: at most one email is ever claimed before Gmail is shown to keep the sender's marker
+(`X-Outreach-Id`), and that email is read back from Gmail by its Gmail id (`outreach.sending.proof`).
 
 Every test uses FakeGmail and a scratch store. The tick's own tests (`test_sending_tick.FirstSendTest`) run the
 whole path; these pin the pieces: the phases, the claim's own check, the read back and `queue.first_only`.
@@ -50,6 +50,18 @@ class Base(unittest.TestCase):
         append_event(self.db, entity="message", entity_id=entity_id, kind=kind, actor="sender", at=iso(MON),
                      idempotency_key=f"test:{kind}:{entity_id}")
 
+    def sent_before_the_marker(self) -> int:
+        """An email the sender sent before it set the marker, as on the live store: claimed with no `marker`,
+        recorded sent under the Message-ID Gmail made, read back under that other id (`send_id_mismatch`)."""
+        company = seed_company(self.db, "Before")
+        mid = seed_sent(self.db, seed_email_person(self.db, company, "Before", "before@before.example"),
+                        at=MON - timedelta(hours=1), rfc="<CABkiztq.1@mail.gmail.com>")
+        append_event(self.db, entity="message", entity_id=mid, kind="claimed", actor="sender",
+                     at=iso(MON - timedelta(hours=1)), idempotency_key="claimed:<179312908749.1656@gmail.com>",
+                     detail={"pending_rfc_id": "<179312908749.1656@gmail.com>", "attempt": 1, "seq": 0})
+        self.event("send_id_mismatch", mid)
+        return mid
+
     def events(self, kind: str) -> list:
         return self.db.execute("SELECT * FROM event WHERE kind = ? ORDER BY event_id", (kind,)).fetchall()
 
@@ -67,22 +79,49 @@ class PhaseTest(Base):
         seed_sent(self.db, seed_email_person(self.db, company, "Old", "old@old.example"), at=MON - timedelta(days=1))
         self.assertEqual(proof.phase(self.db), proof.FIRST_SEND)
 
-    def test_each_kind_of_proof(self):
-        for kind in ("import_verified", "send_verified"):
-            with self.subTest(kind):
+    def test_only_marker_verified_is_proof(self):
+        self.approve()
+        self.event("marker_verified")
+        self.assertEqual(proof.phase(self.db), proof.PROVEN)
+
+    def test_the_message_id_events_are_no_proof_of_the_marker_and_stop_nothing(self):
+        """`import_verified` and `send_verified` say Gmail kept a Message-ID, `send_id_mismatch` that it did not:
+        none is about the marker."""
+        for kinds in (("import_verified",), ("send_verified",), ("send_id_mismatch",),
+                      ("import_verified", "send_verified", "send_id_mismatch")):
+            with self.subTest(kinds=kinds):
                 self.setUp()
-                self.approve()
-                self.event(kind)
-                self.assertEqual(proof.phase(self.db), proof.PROVEN)
+                for n, kind in enumerate(kinds):
+                    self.event(kind, n + 1)
+                self.assertEqual(proof.phase(self.db), proof.FIRST_SEND)
+                self.assertTrue(proof.may_claim(self.db))
+
+    def test_an_email_sent_before_the_marker_neither_proves_nor_blocks(self):
+        """The live store's shape: message 5 went out claimed without a marker and is `sent`. It is not a marked
+        claim, so the phase is the first send, never `checking` or `stopped`, and exactly one marked email may go."""
+        self.sent_before_the_marker()
+        self.assertEqual(proof.phase(self.db), proof.FIRST_SEND)
+        first, second = self.approve(), self.approve()
+        self.assertTrue(self.claim(first))
+        self.assertEqual(proof.phase(self.db), proof.IN_DOUBT)
+        with self.assertRaises(claim.Unproven):
+            self.claim(second)
+
+    def test_every_claim_names_its_marker(self):
+        first = self.approve()
+        self.assertTrue(self.claim(first))
+        [claimed] = self.events("claimed")
+        detail = json.loads(claimed["detail"])
+        self.assertEqual(detail["marker"], detail["pending_rfc_id"])
+        self.assertEqual(detail["marker"], f"<first.{first.message_id}@gmail.com>")
 
     def test_a_sent_event_under_its_claimed_id_is_not_proof_on_its_own(self):
-        """The real client reports a send under the claimed id even when its read back failed, and a Sent scan hit
-        is only by the id: neither reads the email back by its Gmail id, so only `send_verified` proves it."""
+        """The send's own read back can fail and still report the send, and a Sent scan hit is a scan: only the
+        next tick's read back by Gmail id (`marker_verified`) proves the marker."""
         first = self.approve()
         self.assertEqual(self.send(first), "sent")
         [sent] = [e for e in self.events("sent") if e["entity"] == "message"]
-        detail = json.loads(sent["detail"])
-        self.assertEqual(detail["rfc_message_id"], detail["claimed_rfc_id"])
+        self.assertEqual(json.loads(sent["detail"])["marker"], json.loads(sent["detail"])["claimed_rfc_id"])
         self.assertEqual(proof.phase(self.db), proof.CHECKING)
 
     def test_the_phases_follow_the_first_email(self):
@@ -103,11 +142,10 @@ class PhaseTest(Base):
         self.assertEqual(self.state(first.message_id), "approved")
         self.assertEqual(proof.phase(self.db), proof.STOPPED)  # back in the queue, but never claimed again
 
-    def test_a_mismatch_beats_any_proof(self):
-        self.event("send_id_mismatch", 1)
-        self.event("import_verified")
-        self.event("send_verified", 2)
-        self.assertEqual(proof.phase(self.db), proof.MISMATCH)
+    def test_a_missing_marker_beats_any_proof(self):
+        self.event("marker_missing", 1)
+        self.event("marker_verified", 2)
+        self.assertEqual(proof.phase(self.db), proof.MISSING)
         self.assertFalse(proof.may_claim(self.db))
 
     def test_every_phase_has_its_words(self):
@@ -117,6 +155,8 @@ class PhaseTest(Base):
                 self.assertNotIn("\u2014", text)
                 self.assertNotIn("\u2013", text)
         self.assertEqual(proof.PHASE_TEXT[proof.FIRST_SEND], queue.REASON_TEXT["message_id_unproven"])
+        self.assertEqual(proof.PHASE_TEXT[proof.FIRST_SEND],
+                         "The first email goes out alone, then Gmail is checked. The rest follow.")
 
 
 class ClaimTest(Base):
@@ -154,21 +194,21 @@ class ClaimTest(Base):
     def test_once_proven_every_email_may_be_claimed(self):
         first, second = self.approve(), self.approve()
         self.assertEqual(self.send(first), "sent")
-        self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock())["verified"], 1)
+        self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["verified"], 1)
         self.clock.advance(minutes=10)
         self.assertEqual(self.send(second), "sent")
         self.assertEqual(len(self.gmail.sent), 2)
 
-    def test_a_mismatch_refuses_every_claim_even_with_proof(self):
+    def test_a_missing_marker_refuses_every_claim_even_with_proof(self):
         first = self.approve()
-        self.event("import_verified")
-        self.event("send_id_mismatch", 99)
+        self.event("marker_verified")
+        self.event("marker_missing", 99)
         with self.assertRaises(claim.Unproven):
             self.claim(first)
         self.assertEqual(self.state(first.message_id), "approved")
 
 
-class VerifySentTest(Base):
+class VerifyMarkerTest(Base):
     def sent_first(self) -> tuple[queue.Queued, str]:
         first = self.approve()
         self.assertEqual(self.send(first), "sent")
@@ -176,76 +216,138 @@ class VerifySentTest(Base):
                                    (first.message_id,)).fetchone()[0]
         return first, gmail_id
 
-    def test_a_match_is_proof_and_is_written_once(self):
+    def test_every_email_carries_its_claimed_token_as_the_marker(self):
+        first, gmail_id = self.sent_first()
+        out, sent, _ = self.gmail.sent[0]
+        pending = json.loads(self.events("claimed")[0]["detail"])["pending_rfc_id"]
+        self.assertEqual((out.marker, out.message_id), (pending, pending))
+        self.assertEqual(self.gmail.message(gmail_id).headers["x-outreach-id"], pending)
+        self.assertEqual(sent.marker, pending)
+
+    def test_a_kept_marker_is_proof_and_is_written_once(self):
         first, gmail_id = self.sent_first()
         calls = len(self.gmail.calls)
-        self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock()),
-                         {"verified": 1, "mismatch": 0, "errors": 0})
+        self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock()),
+                         {"verified": 1, "missing": 0, "errors": 0})
         self.assertEqual(self.gmail.calls[calls:], ["message"])
-        [event] = self.events("send_verified")
-        self.assertEqual((event["entity_id"], event["actor"]), (first.message_id, "sender"))
-        self.assertEqual(json.loads(event["detail"])["gmail_message_id"], gmail_id)
+        [event] = self.events("marker_verified")
+        self.assertEqual((event["entity_id"], event["actor"], event["idempotency_key"]),
+                         (first.message_id, "sender", f"marker_verified:{first.message_id}"))
+        detail = json.loads(event["detail"])
+        self.assertEqual(detail["gmail_message_id"], gmail_id)
+        self.assertEqual(detail["found_marker"], detail["marker"])
         self.assertEqual(proof.phase(self.db), proof.PROVEN)
-        self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock())["verified"], 0)
-        self.assertEqual(self.gmail.calls[calls:], ["message"])  # proven: nothing is read again
+        self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["verified"], 0)
+        self.assertEqual(self.gmail.calls[calls:], ["message"])  # read back once: never again
 
-    def test_a_header_that_differs_only_in_folding_still_matches(self):
+    def test_a_marker_that_differs_only_in_folding_still_matches(self):
         _, gmail_id = self.sent_first()
-        stored = self.gmail.message(gmail_id).headers["message-id"]
-        self.gmail.change_stored(gmail_id, message_id=f" {stored}\r\n ")
-        self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock())["verified"], 1)
+        stored = self.gmail.message(gmail_id).headers["x-outreach-id"]
+        self.gmail.change_stored(gmail_id, marker=f" {stored}\r\n ")
+        self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["verified"], 1)
 
-    def test_another_id_no_id_no_sent_label_or_gone_is_a_mismatch(self):
-        cases = [("other_message_id", {"message_id": "<x@mail.gmail.com>"}),
-                 ("other_message_id", {"message_id": ""}),
+    def test_a_rewritten_message_id_is_normal_and_the_marker_proves_it(self):
+        self.gmail.rewrite_message_ids = True
+        first, gmail_id = self.sent_first()
+        stored = self.gmail.message(gmail_id).headers["message-id"]
+        claimed = json.loads(self.events("claimed")[0]["detail"])["marker"]
+        self.assertNotEqual(stored, claimed)
+        row = self.db.execute("SELECT state, rfc_message_id FROM message WHERE message_id = ?",
+                              (first.message_id,)).fetchone()
+        self.assertEqual(tuple(row), ("sent", stored))  # recorded under the id Gmail kept
+        self.assertEqual(self.db.execute("SELECT paused FROM sender").fetchone()[0], 0)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM event WHERE kind = 'hard_block'").fetchone()[0], 0)
+        self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["verified"], 1)
+        self.assertEqual(proof.phase(self.db), proof.PROVEN)
+
+    def test_no_marker_another_marker_no_sent_label_or_gone_is_missing(self):
+        cases = [("no_marker", {"marker": ""}),
+                 ("other_marker", {"marker": "<someone.else@gmail.com>"}),
                  ("not_in_sent", {"labels": ("INBOX",)})]
         for reason, change in cases:
-            with self.subTest(reason=reason, change=change):
+            with self.subTest(reason=reason):
                 self.setUp()
                 first, gmail_id = self.sent_first()
                 self.gmail.change_stored(gmail_id, **change)
-                self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock())["mismatch"], 1)
-                [event] = self.events("send_id_mismatch")
+                self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["missing"], 1)
+                [event] = self.events("marker_missing")
                 self.assertEqual(json.loads(event["detail"])["reason"], reason)
-                self.assertEqual(proof.phase(self.db), proof.MISMATCH)
+                self.assertEqual(proof.phase(self.db), proof.MISSING)
+        with self.subTest("the replaced id kept, the marker dropped: never proof"):
+            self.setUp()
+            self.gmail.drop_markers, self.gmail.keep_original_id = True, True
+            self.sent_first()
+            self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["missing"], 1)
+            self.assertEqual(proof.phase(self.db), proof.MISSING)
+        with self.subTest("dropped by Gmail"):
+            self.setUp()
+            self.gmail.drop_markers = True
+            self.sent_first()
+            self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["missing"], 1)
+            self.assertEqual(json.loads(self.events("marker_missing")[0]["detail"])["reason"], "no_marker")
         with self.subTest("gone"):
             self.setUp()
             self.sent_first()
-            with mock.patch.object(self.gmail, "message",
-                                            side_effect=GmailError("bad_request", 404, "Not Found")):
-                self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock())["mismatch"], 1)
-            self.assertEqual(json.loads(self.events("send_id_mismatch")[0]["detail"])["reason"], "not_found")
+            with mock.patch.object(self.gmail, "message", side_effect=GmailError("bad_request", 404, "Not Found")):
+                self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["missing"], 1)
+            self.assertEqual(json.loads(self.events("marker_missing")[0]["detail"])["reason"], "not_found")
 
     def test_a_gmail_error_writes_nothing_and_is_tried_again(self):
         self.sent_first()
         before = self.db.total_changes
         with mock.patch.object(self.gmail, "message", side_effect=GmailError("timeout", None, "slow")):
-            self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock()),
-                             {"verified": 0, "mismatch": 0, "errors": 1})
+            self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock()),
+                             {"verified": 0, "missing": 0, "errors": 1})
         self.assertEqual(self.db.total_changes, before)
         self.assertEqual(proof.phase(self.db), proof.CHECKING)
-        self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock())["verified"], 1)
+        self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["verified"], 1)
 
-    def test_it_reads_nothing_unless_a_first_email_waits_for_its_check(self):
-        for setup in (lambda: None, lambda: self.event("import_verified"), lambda: self.claim(self.approve())):
+    def test_it_reads_nothing_unless_a_marked_sent_email_waits_for_its_read_back(self):
+        for setup in (lambda: None, lambda: self.event("marker_verified"), lambda: self.claim(self.approve()),
+                      self.sent_before_the_marker):
             self.setUp()
             setup()
             calls = len(self.gmail.calls)
-            self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock())["verified"], 0)
+            self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["verified"], 0)
             self.assertEqual(self.gmail.calls[calls:], [])
 
-    def test_a_rewritten_send_is_compared_with_the_id_it_was_claimed_with(self):
+    def test_the_read_back_records_the_message_id_gmail_kept_when_the_send_could_not(self):
         self.gmail.rewrite_message_ids = True
-        first = self.approve()
-        with self.assertRaises(GmailError):
-            self.send(first)  # recorded sent under Gmail's own id, and paused
-        self.assertEqual(proof.verify_sent(self.db, self.gmail, now=self.clock())["mismatch"], 1)
-        self.assertEqual(proof.phase(self.db), proof.MISMATCH)
+        self.gmail.readback_fails = True
+        first, gmail_id = self.sent_first()
+        claimed = json.loads(self.events("claimed")[0]["detail"])["marker"]
+        row = self.db.execute("SELECT rfc_message_id, touch_id FROM message WHERE message_id = ?",
+                              (first.message_id,)).fetchone()
+        self.assertEqual(row["rfc_message_id"], claimed)  # all the send could say
+        [sent] = [e for e in self.events("sent") if e["entity"] == "message"]
+        self.assertIsNone(json.loads(sent["detail"])["marker"])
+        self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["verified"], 1)
+        stored = self.gmail.message(gmail_id).headers["message-id"]
+        self.assertEqual(self.db.execute("SELECT rfc_message_id FROM message WHERE message_id = ?",
+                                         (first.message_id,)).fetchone()[0], stored)
+        self.assertEqual(self.db.execute("SELECT first_rfc_id FROM touch WHERE touch_id = ?",
+                                         (row["touch_id"],)).fetchone()[0], stored)
+
+    def test_once_proven_every_later_email_is_read_back_and_one_without_its_marker_stops_sending(self):
+        first, second, third = self.approve(), self.approve(), self.approve()
+        self.assertEqual(self.send(first), "sent")
+        proof.verify_marker(self.db, self.gmail, now=self.clock())
+        self.clock.advance(minutes=10)
+        self.gmail.drop_markers = True  # Gmail stops keeping it later on
+        self.assertEqual(self.send(second), "sent")
+        self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock()),
+                         {"verified": 0, "missing": 1, "errors": 0})
+        self.assertEqual(self.events("marker_missing")[0]["entity_id"], second.message_id)
+        self.assertEqual(proof.phase(self.db), proof.MISSING)
+        self.clock.advance(minutes=10)
+        with self.assertRaises(claim.Unproven):
+            self.send(third)
+        self.assertEqual(len(self.gmail.sent), 2)
 
     def test_it_never_runs_inside_a_transaction(self):
         with transaction(self.db):
             with self.assertRaises(RuntimeError):
-                proof.verify_sent(self.db, self.gmail, now=self.clock())
+                proof.verify_marker(self.db, self.gmail, now=self.clock())
 
 
 class FirstOnlyTest(unittest.TestCase):

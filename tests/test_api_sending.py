@@ -34,7 +34,7 @@ class SendingBase(ApiCase):
                     revision=3)
 
     def prove(self):
-        append_event(self.conn, entity="message", entity_id=1, kind="import_verified", actor="sender",
+        append_event(self.conn, entity="message", entity_id=1, kind="marker_verified", actor="sender",
                      at="2026-11-01T12:00:00Z", idempotency_key="proof")
 
     def approved(self, company: int, name: str, approved_at: str = seed.T0) -> tuple[int, int]:

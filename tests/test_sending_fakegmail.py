@@ -20,10 +20,11 @@ GOOD_IDS = ("<177.1.2@gmail.com>", "<a!#$%&'*+/=?^_`{|}~-z@x-y.example>", "<CAgm
 
 
 def outgoing(to="founder@sendwell.example", subject="Backend role at Sendwell", *, message_id="<a1@gmail.com>",
-             thread_id=None, in_reply_to=None, references=()):
+             thread_id=None, in_reply_to=None, references=(), marker=None):
+    """An email as `claim.outgoing_for` builds it: the marker is the claimed token, the Message-ID's value."""
     return Outgoing(to=to, subject=subject, body="Hi Sam,\n\nShort note.\n\nDevanshu", from_name="Devanshu C",
                     from_addr=ACCOUNT, message_id=message_id, thread_id=thread_id, in_reply_to=in_reply_to,
-                    references=tuple(references))
+                    references=tuple(references), marker=message_id if marker is None else marker)
 
 
 def ms(dt: datetime) -> int:
@@ -56,11 +57,14 @@ class FakeGmailTest(unittest.TestCase):
 
     def test_send_assigns_ids_and_lands_in_sent(self):
         sent = self.gmail.send(outgoing())
-        self.assertEqual(sent, Sent(gmail_message_id="m1", thread_id="t1", rfc_message_id="<a1@gmail.com>"))
+        # Gmail stores it under a Message-ID of its own, as the real one does (`rewrite_message_ids`, on by default).
+        self.assertEqual(sent, Sent(gmail_message_id="m1", thread_id="t1", rfc_message_id="<rewritten1@mail.gmail.com>",
+                                    marker="<a1@gmail.com>"))
         self.assertEqual(len(self.gmail.sent), 1)
         out, got, at = self.gmail.sent[0]
         self.assertEqual((out.to, got, at), ("founder@sendwell.example", sent, START))
-        self.assertEqual([m.headers["message-id"] for m in self.gmail.sent_box], ["<a1@gmail.com>"])
+        self.assertEqual([m.headers["message-id"] for m in self.gmail.sent_box], ["<rewritten1@mail.gmail.com>"])
+        self.assertEqual([m.headers["x-outreach-id"] for m in self.gmail.sent_box], ["<a1@gmail.com>"])
         meta = self.gmail.message("m1")
         self.assertEqual(meta.labels, ("SENT",))
         self.assertEqual(meta.to_addr, "founder@sendwell.example")
@@ -78,8 +82,8 @@ class FakeGmailTest(unittest.TestCase):
         self.assertEqual(follow.thread_id, first.thread_id)
         thread = self.gmail.thread(first.thread_id)
         self.assertEqual([m.gmail_message_id for m in thread], [first.gmail_message_id, follow.gmail_message_id])
-        self.assertEqual(thread[1].headers["in-reply-to"], "<a1@gmail.com>")
-        self.assertEqual(thread[1].headers["references"], "<a1@gmail.com>")
+        self.assertEqual(thread[1].headers["in-reply-to"], first.rfc_message_id)
+        self.assertEqual(thread[1].headers["references"], first.rfc_message_id)
 
     def test_follow_up_with_another_subject_starts_a_new_thread_as_gmail_does(self):
         first = self.gmail.send(outgoing())
@@ -96,7 +100,8 @@ class FakeGmailTest(unittest.TestCase):
     def test_malformed_message_ids_are_refused_in_every_header(self):
         for bad in BAD_IDS:
             for m in (outgoing(message_id=bad), outgoing(in_reply_to=bad, references=("<a0@gmail.com>",)),
-                      outgoing(in_reply_to="<a0@gmail.com>", references=("<a0@gmail.com>", bad))):
+                      outgoing(in_reply_to="<a0@gmail.com>", references=("<a0@gmail.com>", bad)),
+                      outgoing(marker=bad)):
                 with self.subTest(bad=bad, m=m), self.assertRaises(GmailError) as cm:
                     self.gmail.send(m)
                 self.assertEqual(cm.exception.kind, "bad_request")
@@ -108,20 +113,36 @@ class FakeGmailTest(unittest.TestCase):
                 self.gmail.send(outgoing(to=f"p{i}@co.example", message_id=good))
         self.assertEqual(len(self.gmail.sent), len(GOOD_IDS))
 
-    def test_a_rewritten_message_id_is_its_own_error_and_still_counts_as_sent(self):
+    def test_a_rewritten_message_id_is_a_normal_send_that_keeps_the_marker(self):
+        # What Gmail did on the first live send: it stored the email under a Message-ID of its own.
         self.gmail.rewrite_message_ids = True
-        with self.assertRaises(GmailError) as cm:
-            self.gmail.send(outgoing())
-        err = cm.exception
-        self.assertEqual(err.kind, "message_id_rewritten")
-        self.assertFalse(err.retryable)
+        sent = self.gmail.send(outgoing())
         self.assertEqual(len(self.gmail.sent), 1)
-        self.assertEqual((err.sent.gmail_message_id, err.sent.thread_id), ("m1", "t1"))
-        self.assertNotEqual(err.sent.rfc_message_id, "<a1@gmail.com>")
-        self.assertEqual(self.gmail.message("m1").headers["message-id"], err.sent.rfc_message_id)
+        self.assertEqual((sent.gmail_message_id, sent.thread_id, sent.marker), ("m1", "t1", "<a1@gmail.com>"))
+        self.assertNotEqual(sent.rfc_message_id, "<a1@gmail.com>")
+        stored = self.gmail.message("m1").headers
+        self.assertEqual((stored["message-id"], stored["x-outreach-id"]), (sent.rfc_message_id, "<a1@gmail.com>"))
+
+    def test_gmail_can_keep_the_id_it_replaced_and_a_scan_takes_it_as_a_hit(self):
+        self.gmail.keep_original_id, self.gmail.drop_markers = True, True
+        sent = self.gmail.send(outgoing())
+        self.assertEqual(self.gmail.message("m1").headers["x-google-original-message-id"], "<a1@gmail.com>")
+        found, complete = self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=ms(START))
+        self.assertEqual((found.gmail_message_id, found.marker, complete), (sent.gmail_message_id, "<a1@gmail.com>",
+                                                                           True))
+
+    def test_a_dropped_marker_and_a_failed_read_back_can_be_scripted(self):
+        self.gmail.drop_markers = True
+        sent = self.gmail.send(outgoing())
+        self.assertEqual(sent.marker, "")
+        self.assertNotIn("x-outreach-id", self.gmail.message("m1").headers)
+        self.gmail.drop_markers, self.gmail.rewrite_message_ids, self.gmail.readback_fails = False, True, True
+        blind = self.gmail.send(outgoing(to="cto@other.example", subject="Hello", message_id="<a2@gmail.com>"))
+        self.assertEqual((blind.rfc_message_id, blind.marker), ("<a2@gmail.com>", None))
+        self.assertNotEqual(self.gmail.message("m2").headers["message-id"], "<a2@gmail.com>")
 
     def test_bad_outgoing_is_refused_before_anything_goes_out(self):
-        for bad in (outgoing(to="a@x.example, b@y.example"), outgoing(message_id=""),
+        for bad in (outgoing(to="a@x.example, b@y.example"), outgoing(message_id=""), outgoing(marker=""),
                     outgoing(subject="Hi\r\nBcc: x@y.example")):
             with self.subTest(bad=bad), self.assertRaises(GmailError) as cm:
                 self.gmail.send(bad)
@@ -216,7 +237,7 @@ class FakeGmailTest(unittest.TestCase):
         self.assertEqual(loose.headers["x-failed-recipients"], "founder@sendwell.example")
         self.assertNotIn("in-reply-to", loose.headers)
 
-    def test_find_sent_by_message_id_reports_a_complete_scan(self):
+    def test_find_sent_by_marker_reports_a_complete_scan(self):
         claim = START
         target = self.gmail.send(outgoing())
         for i in range(120):                       # many newer messages: more than two fake pages
@@ -229,10 +250,21 @@ class FakeGmailTest(unittest.TestCase):
         # A miss that reached the end of Sent is proof too.
         self.assertEqual(self.gmail.find_sent("<never@gmail.com>", 0, send_returned_ms=done), (None, True))
 
-    def test_find_sent_matches_by_message_id_only(self):
-        self.gmail.add_to_sent("founder@sendwell.example", "Backend role at Sendwell", message_id="<other@gmail.com>")
+    def test_find_sent_matches_by_marker_only(self):
+        # Same To and Subject, and even the very Message-ID looked for, but no marker: not a hit.
+        self.gmail.add_to_sent("founder@sendwell.example", "Backend role at Sendwell", message_id="<a1@gmail.com>")
+        self.gmail.add_to_sent("founder@sendwell.example", "Backend role at Sendwell", message_id="<b1@gmail.com>",
+                               marker="<other@gmail.com>")
         self.clock.advance(minutes=10)
         self.assertEqual(self.gmail.find_sent("<a1@gmail.com>", 0, send_returned_ms=ms(START)), (None, True))
+
+    def test_find_sent_finds_a_rewritten_send_by_its_marker(self):
+        self.gmail.rewrite_message_ids = True
+        sent = self.gmail.send(outgoing())
+        found, complete = self.gmail.find_sent("<a1@gmail.com>", ms(START), send_returned_ms=ms(START))
+        self.assertTrue(complete)
+        self.assertEqual(found, sent)  # with the Message-ID Gmail stored, not the one set
+        self.assertNotEqual(found.rfc_message_id, "<a1@gmail.com>")
 
     def test_find_sent_with_a_page_cap_reports_incomplete(self):
         self.gmail.send(outgoing())
@@ -327,7 +359,7 @@ class FakeGmailTest(unittest.TestCase):
             self.assertIsInstance(meta, MessageMeta)
             self.assertLessEqual(set(meta.headers), {
                 "auto-submitted", "x-autoreply", "x-autorespond", "precedence", "x-auto-response-suppress",
-                "message-id", "in-reply-to", "references", "x-failed-recipients", "content-type"})
+                "message-id", "in-reply-to", "references", "x-failed-recipients", "content-type", "x-outreach-id"})
 
 
 class ClassifyHttpTest(unittest.TestCase):
@@ -356,8 +388,6 @@ class ClassifyHttpTest(unittest.TestCase):
         kinds = {"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
                  "timeout"}
         self.assertEqual(kinds - RETRYABLE, {"bad_request"})
-        # A rewritten Message-ID means the email went out: never retried.
-        self.assertNotIn("message_id_rewritten", RETRYABLE)
         self.assertLessEqual(RETRYABLE, kinds)
 
 
@@ -379,8 +409,10 @@ class GmailErrorTest(unittest.TestCase):
         self.assertEqual(normalise_message_id("<a1@\r\n gmail.com>"), "<a1@gmail.com>")
 
     def test_unknown_kind_is_refused(self):
-        with self.assertRaises(ValueError):
-            GmailError("whatever", None, "")
+        # message_id_rewritten is gone: Gmail storing its own Message-ID is how a send normally ends.
+        for kind in ("whatever", "message_id_rewritten"):
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                GmailError(kind, None, "")
 
 
 if __name__ == "__main__":

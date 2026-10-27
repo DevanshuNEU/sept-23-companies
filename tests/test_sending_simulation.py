@@ -159,7 +159,7 @@ class TwoWeeksTest(unittest.TestCase):
         row = self.r.conn.execute("SELECT state, rfc_message_id FROM message WHERE message_id = ?",
                                   (message_id,)).fetchone()
         self.assertEqual(row["state"], "sent", "it was sent once, after the resume")
-        self.assertEqual(sum(1 for m, _, _ in self.r.fake.sent if m.message_id == row["rfc_message_id"]), 1)
+        self.assertEqual(sum(1 for _, sent, _ in self.r.fake.sent if sent.rfc_message_id == row["rfc_message_id"]), 1)
         self.assertEqual(self.r.conn.execute("SELECT COUNT(*) FROM message WHERE state = 'sent' AND seq >= 0 AND "
                                              "touch_id IN (SELECT touch_id FROM touch WHERE origin = 'sender')")
                          .fetchone()[0], len(accepted))

@@ -34,7 +34,7 @@ class WritesBase(ApiCase):
         self.acme = seed.company(self.conn, "Acme", status="working")
         self.pat = seed.person(self.conn, self.acme, "Pat Lee", email="pat@acme.example")
         self.touch = seed.touch(self.conn, self.pat)
-        append_event(self.conn, entity="message", entity_id=1, kind="import_verified", actor="sender",
+        append_event(self.conn, entity="message", entity_id=1, kind="marker_verified", actor="sender",
                      at="2026-11-01T12:00:00Z", idempotency_key="proof")
 
     def message(self, mid):

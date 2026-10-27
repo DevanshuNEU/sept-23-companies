@@ -7,6 +7,7 @@ import re
 import shutil
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest import mock
 
@@ -133,6 +134,88 @@ class ShowCommandTest(CliBase):
         code, out, _ = self.run_main("show", "--date", DAY)
         self.assertEqual(code, 0)
         self.assertIn("none built", out)
+        self.assertEqual(self.count("daily_list"), 0)
+
+
+class ReplaceCommandTest(CliBase):
+    """`build --replace`: today's untouched plan rebuilt with the current config. `_today` is pinned to DAY."""
+
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.object(cli, "_today", return_value=date.fromisoformat(DAY))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def old_plan(self):
+        from outreach.plan.build import build_plan
+        from tests.plan_seed import PEOPLE_ON
+        self.world()
+        build_plan(self.conn, today=date.fromisoformat(DAY), cfg=PEOPLE_ON)
+        rows = self.conn.execute("SELECT * FROM daily_list_entry ORDER BY rank").fetchall()
+        self.assertEqual(rows[0]["person_id"] is not None, True)  # Ada's person row, the old config
+        return rows
+
+    def test_replace_deletes_the_old_rows_and_prints_the_new_list(self):
+        old = self.old_plan()
+        code, out, err = self.run_main("build", "--replace", "--no-read-boards", "--reason", "company rows now")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"Replaced {len(old)} rows of the plan for {DAY}", out)
+        self.assertIn(" 1 Co00 | Ada Lovelace | linkedin_request | level_role | proposed", out)  # an old row
+        self.assertIn(f"Plan {DAY}: built", out)
+        self.assertIn(" 1 Co00 | find someone | linkedin_request | level_role", out)  # the new one
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM daily_list_entry WHERE person_id IS NOT NULL"
+                                           ).fetchone()[0], 0)
+        detail = self.conn.execute("SELECT detail FROM event WHERE kind = 'plan_replaced'").fetchone()[0]
+        self.assertIn("company rows now", detail)
+
+    def test_dry_run_replace_prints_what_would_go_and_writes_nothing(self):
+        old = self.old_plan()
+        tables = ("daily_list", "daily_list_entry", "job_run", "event")
+        before = [self.count(t) for t in tables]
+        code, out, err = self.run_main("build", "--replace", "--dry-run", "--no-read-boards")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"Would replace {len(old)} rows of the plan for {DAY}", out)
+        self.assertIn("dry run, nothing written", out)
+        self.assertIn(" 1 Co00 | find someone | linkedin_request | level_role", out)
+        self.assertEqual([self.count(t) for t in tables], before)
+        self.assertEqual(self.conn.execute("SELECT person_id FROM daily_list_entry WHERE rank = 1").fetchone()[0],
+                         old[0]["person_id"])
+
+    def test_a_touched_plan_is_refused_with_exit_one_and_nothing_written(self):
+        self.old_plan()
+        self.conn.execute("UPDATE daily_list_entry SET state = 'backlog', decided_at = '2026-11-10T15:00:00Z', "
+                          "revision = 2 WHERE rank = 1")
+        tables = ("daily_list", "daily_list_entry", "job_run", "event")
+        before = [self.count(t) for t in tables]
+        code, out, err = self.run_main("build", "--replace", "--no-read-boards")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("was not replaced", err)
+        self.assertIn("decision by you", err)
+        self.assertEqual([self.count(t) for t in tables], before)
+
+    def test_replace_is_for_today_only(self):
+        self.old_plan()
+        tables = ("daily_list", "daily_list_entry", "job_run", "event")
+        before = [self.count(t) for t in tables]
+        code, out, err = self.run_main("build", "--replace", "--no-read-boards", "--date", "2026-11-09")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("only today's plan", err)
+        self.assertEqual([self.count(t) for t in tables], before)
+        code, _, _ = self.run_main("build", "--replace", "--no-read-boards", "--date", DAY)
+        self.assertEqual(code, 0)
+
+    def test_replace_with_no_plan_yet_builds_and_says_so(self):
+        self.world()
+        code, out, _ = self.run_main("build", "--replace", "--no-read-boards")
+        self.assertEqual(code, 0)
+        self.assertIn(f"No plan for {DAY} to replace", out)
+        self.assertIn(f"Plan {DAY}: built", out)
+
+    def test_reason_needs_replace(self):
+        self.world()
+        code, _, err = self.run_main("build", "--no-read-boards", "--reason", "why")
+        self.assertEqual(code, 1)
+        self.assertIn("--reason", err)
         self.assertEqual(self.count("daily_list"), 0)
 
 

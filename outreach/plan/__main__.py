@@ -5,6 +5,11 @@
   New York. Unless `--no-read-boards` is given it refuses to run outside the live checkout before it opens anything,
   because it then asks the crawler to read boards and the ranker to re-rank. `--dry-run` computes and prints and writes
   nothing, not even a job run. A weekend builds nothing unless `--force-weekend`.
+- `build --replace [--reason TEXT]`: rebuild today's plan (New York; `--date` may only name today) with the current
+  config, only while nothing on it was acted on (no request, email, application, decision, saved or confirmed note,
+  or anything else he did today at a listed company). It prints the old rows, then the new plan. A plan that was acted
+  on is refused: exit 1, the reasons on stderr, nothing written. With `--dry-run` it prints what would be deleted and
+  the new list and writes nothing. With no plan for today it is a plain build.
 - `show [--date YYYY-MM-DD]`: print the stored plan, read only: `<rank> <company> <person or find someone> <channel>
   <lane>`, and the people search link under each find-someone row.
 - `prepare [--count N]`: the morning prepare step (Task 14): find people for the top companies with nobody to ask and
@@ -33,7 +38,7 @@ from datetime import date
 import live_checkout
 from outreach.drafts.checks import load_banned
 from outreach.plan.boards import BoardsReadError, crawler_boards_reader, rank_runner
-from outreach.plan.build import PlanResult, build_plan
+from outreach.plan.build import DEFAULT_REASON, PlanResult, build_plan
 from outreach.plan.claude_run import claude_runner
 from outreach.plan.config import default_plan_config
 from outreach.plan.dates import today_ny
@@ -55,6 +60,9 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--no-read-boards", action="store_true", help="skip the crawler and the ranker")
     build.add_argument("--dry-run", action="store_true", help="compute and print, write nothing")
     build.add_argument("--force-weekend", action="store_true", help="build on a Saturday or Sunday too")
+    build.add_argument("--replace", action="store_true",
+                       help="rebuild today's plan with the current config, only if nothing on it was acted on")
+    build.add_argument("--reason", default=None, help="why the plan is replaced (kept on the plan_replaced event)")
     show = sub.add_parser("show", help="print a stored plan")
     show.add_argument("--date", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD")
     prepare = sub.add_parser("prepare", help="find people and draft notes through claude -p (live checkout only)")
@@ -102,6 +110,22 @@ def _report(conn: sqlite3.Connection, result: PlanResult, dry_run: bool) -> list
     return lines
 
 
+def _replaced_lines(conn: sqlite3.Connection, result: PlanResult, dry_run: bool) -> list[str]:
+    """The old rows a replace deleted (or would delete), one line each with their state."""
+    day = result.list_date.isoformat()
+    if result.replaced is None:
+        return [f"No plan for {day} to replace: building it."]
+    verb = "Would replace" if dry_run else "Replaced"
+    lines = [f"{verb} {result.replaced} rows of the plan for {day}:"]
+    companies = _names(conn, "company", "company_id", [r.company_id for r in result.old_rows])
+    people = _names(conn, "person", "person_id", [r.person_id for r in result.old_rows])
+    for r in result.old_rows:
+        lines.append(_row_line(r.rank, companies.get(r.company_id, str(r.company_id)),
+                               people.get(r.person_id) if r.person_id is not None else None, r.channel or "",
+                               r.list_group) + f" | {r.state}")
+    return lines
+
+
 def _start_caffeinate() -> None:
     """Keep the Mac awake until this process ends (caffeinate exits with it). Never a reason not to build."""
     try:
@@ -111,6 +135,11 @@ def _start_caffeinate() -> None:
 
 
 def _build(args: argparse.Namespace, root: str | None, live_root: str | None, stdout) -> int:
+    if args.reason is not None and not args.replace:
+        raise ValueError("--reason goes with --replace")
+    day = args.date or _today()
+    if args.replace and day != _today():
+        raise ValueError(f"--replace rebuilds only today's plan ({_today().isoformat()}), not {day.isoformat()}")
     reading = not args.no_read_boards
     if reading:
         live_checkout.require_live("the daily plan build", root or live_checkout.REPO_ROOT,
@@ -120,9 +149,13 @@ def _build(args: argparse.Namespace, root: str | None, live_root: str | None, st
     ranker = rank_runner() if reading else None
     conn = connect()
     try:
-        result = build_plan(conn, today=args.date or _today(), boards_reader=boards_reader, ranker=ranker,
-                            read_boards=reading, force_weekend=args.force_weekend, dry_run=args.dry_run)
-        print("\n".join(_report(conn, result, args.dry_run)), file=stdout)
+        result = build_plan(conn, today=day, boards_reader=boards_reader, ranker=ranker,
+                            read_boards=reading, force_weekend=args.force_weekend, dry_run=args.dry_run,
+                            replace=args.replace, reason=args.reason or DEFAULT_REASON)
+        lines = _report(conn, result, args.dry_run)
+        if args.replace and result.status == "built":
+            lines = _replaced_lines(conn, result, args.dry_run) + lines
+        print("\n".join(lines), file=stdout)
     finally:
         conn.close()
     return 0

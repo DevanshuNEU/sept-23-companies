@@ -57,32 +57,39 @@ class EarlyCareerFitTests(unittest.TestCase):
                 self.assertFalse(early_career_fit(tier, basis))
 
     def test_a_title_with_no_level_that_asks_two_years_or_fewer_fits(self):
-        # The rules store "Software Engineer" asking 2 years as swe2 with the basis "Asks 2 years".
+        # The rules store "Software Engineer" asking 2 years as swe2, basis "Asks 2 years", years_asked 2.
         for tier in ("swe2", "open"):
             for years in (0, 1, 2):
                 with self.subTest(tier=tier, years=years):
-                    self.assertTrue(early_career_fit(tier, f"Asks {years} years"))
-                    self.assertEqual(rank_tier(tier, f"Asks {years} years"), "early_career")
-            self.assertTrue(early_career_fit(tier, "Asks 1 year"))
-            self.assertFalse(early_career_fit(tier, "Asks 3 years"))
-            self.assertEqual(rank_tier(tier, "Asks 3 years"), tier)
-            self.assertFalse(early_career_fit(tier, "Asks 12 years"))
+                    self.assertTrue(early_career_fit(tier, f"Asks {years} years", years))
+                    self.assertEqual(rank_tier(tier, f"Asks {years} years", years), "early_career")
+            self.assertFalse(early_career_fit(tier, "Asks 3 years", 3))
+            self.assertEqual(rank_tier(tier, "Asks 3 years", 3), tier)
+            self.assertFalse(early_career_fit(tier, "Asks 12 years", 12))
 
     def test_a_title_level_is_never_overridden_by_years(self):
-        self.assertEqual(rank_tier("swe2", "Title says II"), "swe2")
-        self.assertFalse(early_career_fit("swe2", "Title says Asks 2 years"))
-        self.assertFalse(early_career_fit("senior", "Asks 2 years"))  # only open and swe2 read the years
-        self.assertFalse(early_career_fit("swe2", "Asks 2 years or more"))  # the whole basis must be the years
-        self.assertTrue(early_career_fit("swe2", "  Asks 2 years "))
-        self.assertTrue(early_career_fit("swe1", ""))
-        self.assertEqual(rank_tier(None, None), None)
+        self.assertEqual(rank_tier("swe2", "Title says II", 2), "swe2")  # "Software Engineer II" asking 2 years
+        self.assertFalse(early_career_fit("swe2", "Title says Engineer II", 1))
+        self.assertFalse(early_career_fit("senior", "Asks 2 years", 2))  # only open and swe2 read the years
+        self.assertFalse(early_career_fit("not_stated", "Posting does not state a level", 1))
+        self.assertTrue(early_career_fit("swe1", "", None))
+        self.assertTrue(early_career_fit("swe1", "Title says Engineer I", 3))
+        self.assertEqual(rank_tier(None, None, None), None)
+
+    def test_with_no_years_nothing_is_promoted(self):
+        # The two argument form the plan can call: the basis alone never promotes a tier.
+        self.assertFalse(early_career_fit("swe2", "Asks 2 years"))
+        self.assertFalse(early_career_fit("open", "MTS role, no level in the title"))
+        self.assertTrue(early_career_fit("new_grad", "Title says new grad"))
+        self.assertEqual(rank_tier("swe2", "Asks 2 years"), "swe2")
 
 
 class TierValueTests(unittest.TestCase):
-    def value(self, tier, basis="", age=90, **facts):
+    def value(self, tier, basis="", age=90, years=None, **facts):
         return check_assessment(self, LiveRole(CFG.section("live_role")),
                                 neutral_facts(lanes=("level_role",), best_role_age_days=age, best_title="T",
-                                              best_level_tier=tier, best_level_basis=basis, **facts))
+                                              best_level_tier=tier, best_level_basis=basis, best_years_asked=years,
+                                              **facts))
 
     def test_the_shipped_tier_values(self):
         self.assertEqual(CFG.section("live_role")["tier_values"],
@@ -103,14 +110,16 @@ class TierValueTests(unittest.TestCase):
 
     def test_swe2_is_point_four_five(self):
         self.assertAlmostEqual(self.value("swe2", "Title says Engineer II").value, 0.45)
-        self.assertAlmostEqual(self.value("swe2", "Asks 3 years").value, 0.45)
+        self.assertAlmostEqual(self.value("swe2", "Asks 3 years", years=3).value, 0.45)
+        self.assertAlmostEqual(self.value("swe2", "Title says II", years=2).value, 0.45)
 
     def test_open_is_point_four_five(self):
         self.assertAlmostEqual(self.value("open", "MTS role, no level in the title").value, 0.45)
 
     def test_no_level_asking_two_years_takes_the_early_career_value(self):
-        self.assertAlmostEqual(self.value("swe2", "Asks 2 years").value, 0.8)
-        self.assertAlmostEqual(self.value("open", "Asks 1 year").value, 0.8)
+        self.assertAlmostEqual(self.value("swe2", "Asks 2 years", years=2).value, 0.8)
+        self.assertAlmostEqual(self.value("open", "Asks 1 year", years=1).value, 0.8)
+        self.assertAlmostEqual(self.value("swe2", "Asks 2 years").value, 0.45)  # no years stored: as stored
 
     def test_a_tier_with_no_value_falls_back_to_level_role(self):
         for tier in (None, "not_stated", "something_new"):
@@ -154,10 +163,10 @@ class TierValueTests(unittest.TestCase):
 
 
 class TierReasonTests(unittest.TestCase):
-    def reason(self, tier, basis, title="T"):
+    def reason(self, tier, basis, title="T", years=None):
         return check_assessment(self, LiveRole(CFG.section("live_role")), neutral_facts(
             lanes=("level_role",), best_role_age_days=3, best_title=title, best_level_tier=tier,
-            best_level_basis=basis)).reason
+            best_level_basis=basis, best_years_asked=years)).reason
 
     def test_the_reason_names_the_tier(self):
         self.assertEqual(self.reason("new_grad", "Title says new grad", "Software Engineer, New Grad"),
@@ -168,10 +177,11 @@ class TierReasonTests(unittest.TestCase):
                          "Open SWE II role, ranked after new grad and SWE I: Software Engineer II, posted 3 days ago")
 
     def test_a_level_from_the_posting_names_the_tier_and_the_basis(self):
-        self.assertEqual(self.reason("swe2", "Asks 2 years"), "Open early career role (asks 2 years): T, posted 3 days ago")
+        self.assertEqual(self.reason("swe2", "Asks 2 years", years=2),
+                         "Open early career role (asks 2 years): T, posted 3 days ago")
         self.assertEqual(self.reason("early_career", "Posting says entry level"),
                          "Open early career role (posting says entry level): T, posted 3 days ago")
-        self.assertEqual(self.reason("swe2", "Asks 3 years"),
+        self.assertEqual(self.reason("swe2", "Asks 3 years", years=3),
                          "Open SWE II role (asks 3 years), ranked after new grad and SWE I: T, posted 3 days ago")
 
     def test_an_open_level_says_so_and_that_it_ranks_after_new_grad_and_swe1(self):
@@ -253,16 +263,17 @@ class GoldenTests(Base):
 
     def seed_levels(self) -> dict[str, int]:
         ids = {}
-        for key, title, tier, basis in (
-                ("NewGrad", "Software Engineer, New Grad", "new_grad", "Title says new grad"),
-                ("Early", "Early Career Software Engineer", "early_career", "Title says early career"),
-                ("SweI", "Software Engineer I", "swe1", "Title says Engineer I"),
-                ("SweII", "Software Engineer II", "swe2", "Title says Engineer II"),
-                ("Open", "Member of Technical Staff", "open", "MTS role, no level in the title"),
-                ("Asks2", "Backend Engineer", "swe2", "Asks 2 years"),
-                ("Asks3", "Backend Engineer", "swe2", "Asks 3 years")):
+        for key, title, tier, basis, years in (
+                ("NewGrad", "Software Engineer, New Grad", "new_grad", "Title says new grad", None),
+                ("Early", "Early Career Software Engineer", "early_career", "Title says early career", None),
+                ("SweI", "Software Engineer I", "swe1", "Title says Engineer I", None),
+                ("SweII", "Software Engineer II", "swe2", "Title says Engineer II", 2),
+                ("Open", "Member of Technical Staff", "open", "MTS role, no level in the title", None),
+                ("Asks2", "Backend Engineer", "swe2", "Asks 2 years", 2),
+                ("Asks3", "Backend Engineer", "swe2", "Asks 3 years", 3)):
             cid, board = self.company(key)
-            self.role(cid, board, title, posted_on="2026-07-01", level_tier=tier, level_basis=basis)
+            self.role(cid, board, title, posted_on="2026-07-01", level_tier=tier, level_basis=basis,
+                      years_asked=years, years_quote=f"{years} years" if years is not None else "")
             ids[key] = cid
         cid, board = self.company("Refuses")  # a final refusal: hidden, one no-go row
         self.refusal(cid, board)

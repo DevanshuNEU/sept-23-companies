@@ -76,12 +76,12 @@ class LiveRoleTests(unittest.TestCase):
         self.assertTrue(self.value(lanes=("level_role",), best_role_age_days=1, best_title="T").reason.endswith("posted 1 day ago"))
 
     def test_the_level_label_names_the_title_only_when_the_title_set_the_level(self):
-        def reason(tier, basis, title):
+        def reason(tier, basis, title, years=None):
             return self.value(lanes=("level_role",), best_role_age_days=3, best_title=title, best_level_tier=tier,
-                              best_level_basis=basis).reason
+                              best_level_basis=basis, best_years_asked=years).reason
         self.assertEqual(reason("swe2", "Title says II", "Software Engineer II"),
                          "Open SWE II role, ranked after new grad and SWE I: Software Engineer II, posted 3 days ago")
-        self.assertEqual(reason("swe2", "Asks 2 years", "Growth Data Engineer"),
+        self.assertEqual(reason("swe2", "Asks 2 years", "Growth Data Engineer", 2),
                          "Open early career role (asks 2 years): Growth Data Engineer, posted 3 days ago")
         self.assertEqual(reason("early_career", "Posting says entry level", "Software Engineer"),
                          "Open early career role (posting says entry level): Software Engineer, posted 3 days ago")

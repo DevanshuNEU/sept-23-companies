@@ -11,7 +11,6 @@ would be hidden is listed nowhere, and one on a doubtful board counts as ignored
 """
 from __future__ import annotations
 
-import re
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -34,26 +33,25 @@ _SPONSOR_RANK = {"yes": 0, "opt_only": 1}
 EARLY_CAREER_TIERS = ("new_grad", "early_career", "swe1")
 # A role whose title names no level counts as early career when its posting asks this many years or fewer.
 EARLY_CAREER_MAX_YEARS = 2
-# The rules' level basis when the years came from the posting body, not the title (rules/decide.py `_level`).
-_ASKS_YEARS = re.compile(r"Asks (\d+) years?")
+_TITLE_BASIS = "Title says"  # the rules' basis when the title set the level (rules/title.py)
 
 
-def rank_tier(level_tier: str | None, level_basis: str) -> str | None:
-    """The tier ranking uses for a posting. The rules store a title with no level ("Software Engineer", "MTS") that
-    asks 2 or 3 years as `swe2` with the basis "Asks 2 years" (an `open` tier never carries years there), so a tier
-    the title did not set and a basis asking at most EARLY_CAREER_MAX_YEARS counts as `early_career`. Every other
-    tier is returned as stored."""
-    if level_tier in ("open", "swe2"):  # a title level reads "Title says ...", never a bare "Asks N years"
-        m = _ASKS_YEARS.fullmatch((level_basis or "").strip())
-        if m and int(m.group(1)) <= EARLY_CAREER_MAX_YEARS:
-            return "early_career"
+def rank_tier(level_tier: str | None, level_basis: str, years_asked: int | None = None) -> str | None:
+    """The tier ranking uses for a posting. The rules store a title with no level ("Software Engineer", "MTS") whose
+    posting asks 2 or 3 years as `swe2` with the basis "Asks 2 years", and the years in the decision's `years_asked`.
+    So an `open` or `swe2` tier the title did not set, asking at most EARLY_CAREER_MAX_YEARS, counts as
+    `early_career`. Every other tier is returned as stored; with no years given, nothing is promoted."""
+    if (level_tier in ("open", "swe2") and years_asked is not None and years_asked <= EARLY_CAREER_MAX_YEARS
+            and not (level_basis or "").startswith(_TITLE_BASIS)):
+        return "early_career"
     return level_tier
 
 
-def early_career_fit(level_tier: str | None, level_basis: str) -> bool:
+def early_career_fit(level_tier: str | None, level_basis: str, years_asked: int | None = None) -> bool:
     """True for a new grad, early career or SWE I posting, or one whose title names no level and whose posting asks
-    at most EARLY_CAREER_MAX_YEARS years (see rank_tier). Pure: reads only its two arguments."""
-    return rank_tier(level_tier, level_basis) in EARLY_CAREER_TIERS
+    at most EARLY_CAREER_MAX_YEARS years (see rank_tier). Pure: reads only its arguments, all from the stored
+    decision (`level_tier`, `level_basis`, `years_asked`) or a `Best`."""
+    return rank_tier(level_tier, level_basis, years_asked) in EARLY_CAREER_TIERS
 
 
 @dataclass(frozen=True)
@@ -72,6 +70,7 @@ class Best:
     provisional: bool   # the decision's flag
     stale_reason: str = ""  # empty for a live posting
     level_basis: str = ""   # the decision's level basis, dashes cleaned
+    years_asked: int | None = None  # the decision's years asked, None when the posting states none
 
 
 @dataclass(frozen=True)
@@ -175,7 +174,8 @@ def load_roles(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             sponsorship=d.sponsorship, age_days=age_days(r["posted_on"] or r["first_seen_at"], today),
             pay=r["pay"], location=r["location"], posted_on=r["posted_on"], last_seen_on=r["last_seen_at"][:10],
             board_state=_board_state(r["last_read"], bool(r["has_board"])), provisional=bool(r["provisional"]),
-            stale_reason=stale[pid].reason if is_stale else "", level_basis=clean_text(d.level_basis or ""))
+            stale_reason=stale[pid].reason if is_stale else "", level_basis=clean_text(d.level_basis or ""),
+            years_asked=d.years_asked)
         g["stale" if is_stale else "visible"].append(best)
 
     states = company_board_states(conn, canon, doubtful) if groups else {}

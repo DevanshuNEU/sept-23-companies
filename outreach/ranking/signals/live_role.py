@@ -4,7 +4,7 @@ from __future__ import annotations
 from outreach.ranking.common import clean_text
 from outreach.ranking.confidence import Assessment
 from outreach.ranking.facts import RankFacts
-from outreach.ranking.roles import EARLY_CAREER_TIERS, newest_stale, rank_tier
+from outreach.ranking.roles import newest_stale, rank_tier
 
 _LANES = ("level_role", "intern_junior", "any_us_role")  # strongest first
 _LABELS = {"new_grad": "new grad", "early_career": "early career", "swe1": "SWE I", "swe2": "SWE II"}
@@ -12,7 +12,7 @@ _TITLE_BASIS = "Title says"
 _AFTER = ", ranked after new grad and SWE I"
 
 
-def _label(lane: str, tier: str | None, basis: str) -> str:
+def _label(lane: str, tier: str | None, basis: str, years: int | None) -> str:
     """What the role is, named by the tier ranking uses (roles.rank_tier): "Open new grad role", "Open SWE I role".
     A level the posting set, not the title, adds the basis ("Open early career role (asks 2 years)"); an open level
     names no tier. A SWE II or open level role says it ranks after the early career tiers (#6, level priority)."""
@@ -20,7 +20,7 @@ def _label(lane: str, tier: str | None, basis: str) -> str:
         return "Open intern role"
     if lane != "level_role":
         return f"Open {_LABELS.get(tier, 'engineering')} role"
-    ranked = rank_tier(tier, basis)
+    ranked = rank_tier(tier, basis, years)
     after = _AFTER if ranked in ("swe2", "open") else ""
     if ranked == "open":
         return f"Open role, no level in the title{after}"
@@ -57,8 +57,9 @@ class LiveRole:
         basis = clean_text(facts.best_level_basis)
         base = self.params[lane]
         if lane == "level_role":  # by the best posting's tier; a tier with no value keeps level_role
-            base = self.params["tier_values"].get(rank_tier(facts.best_level_tier, basis), base)
-        label = _label(lane, facts.best_level_tier, basis)
+            tier = rank_tier(facts.best_level_tier, basis, facts.best_years_asked)
+            base = self.params["tier_values"].get(tier, base)
+        label = _label(lane, facts.best_level_tier, basis, facts.best_years_asked)
         title = f": {clean_text(facts.best_title)}" if facts.best_title else ""
         return Assessment(round(min(1.0, base + bonus), 4),
                           f"{label}{title}{_posted(facts.best_role_age_days, facts.best_dated)}", grade)

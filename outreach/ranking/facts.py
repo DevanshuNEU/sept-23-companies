@@ -39,6 +39,7 @@ class RankFacts(CompanyFacts):
     best_title: str = ""
     best_level_tier: str | None = None
     best_level_basis: str = ""           # the rules' level basis ("Title says new grad", "Asks 2 years")
+    best_years_asked: int | None = None  # the rules' years asked of the best posting, None when it states none
     best_sponsorship: str | None = None  # yes, opt_only, unclear or silent; None with no live posting
     best_dated: bool = True              # False when the posting has no posted date: its age is from first seen
     pay_basis: str = ""                  # posted, lca or empty
@@ -296,6 +297,7 @@ def load_facts(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             reachable_person=bool(reach_via), name=name, best_title=best.title if best else "",
             best_level_tier=best.level_tier if best else None, best_level_basis=best.level_basis if best else "",
             best_dated=best.posted_on is not None if best else True,
+            best_years_asked=best.years_asked if best else None,
             best_sponsorship=best.sponsorship if best else None,
             pay_basis=pay_basis, pay_note=pay_note, weak_flags=tuple(flags),
             size_confidence=size_row["confidence"] if size_row else None, work_tier=work_tier,

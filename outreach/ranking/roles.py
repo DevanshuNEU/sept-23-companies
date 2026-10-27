@@ -36,7 +36,6 @@ EARLY_CAREER_TIERS = ("new_grad", "early_career", "swe1")
 EARLY_CAREER_MAX_YEARS = 2
 # The rules' level basis when the years came from the posting body, not the title (rules/decide.py `_level`).
 _ASKS_YEARS = re.compile(r"Asks (\d+) years?")
-_TITLE_BASIS = "Title says"
 
 
 def rank_tier(level_tier: str | None, level_basis: str) -> str | None:
@@ -44,7 +43,7 @@ def rank_tier(level_tier: str | None, level_basis: str) -> str | None:
     asks 2 or 3 years as `swe2` with the basis "Asks 2 years" (an `open` tier never carries years there), so a tier
     the title did not set and a basis asking at most EARLY_CAREER_MAX_YEARS counts as `early_career`. Every other
     tier is returned as stored."""
-    if level_tier in ("open", "swe2") and not (level_basis or "").startswith(_TITLE_BASIS):
+    if level_tier in ("open", "swe2"):  # a title level reads "Title says ...", never a bare "Asks N years"
         m = _ASKS_YEARS.fullmatch((level_basis or "").strip())
         if m and int(m.group(1)) <= EARLY_CAREER_MAX_YEARS:
             return "early_career"

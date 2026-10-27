@@ -219,6 +219,16 @@ class PassResult(Wire):
     text: str  # "Passed. Added Tessera Labs."
 
 
+class SwapResult(Wire):
+    """A swap (Browse companies, #120): the chosen company took the pick's slot as `row`. The replaced pick is back on
+    the bench; it is not a Not now, so it has no cooldown."""
+
+    replaced_entry_id: int
+    replaced: CompanyRef
+    row: PlanRow
+    text: str  # "Swapped in Ember for Beacon."
+
+
 class BenchCompany(Wire):
     """One company of the bench ("More options"), in the compact shape of a pick row."""
 
@@ -241,6 +251,23 @@ class BenchView(Wire):
     # emailed, by the stored ranking. Nothing here is on today's list; he brings the people from his terminal.
     email_lane: list[BenchCompany] = []
     email_lane_text: str = ""
+
+
+class BrowseCompany(BenchCompany):
+    """One company of the Browse drawer: the bench's compact shape, `position` the stored rank. `blocked` is why it
+    cannot be swapped in today (a Not now, an application, the rotation rules), else null; `worked` is that he has
+    reached or applied to it before."""
+
+    blocked: str | None
+    worked: bool
+
+
+class BrowseView(Wire):
+    as_of: str
+    date: str
+    companies: list[BrowseCompany]  # stored rank order, one page
+    total: int  # companies that match the search and the filters
+    next_after: int | None  # the cursor (`after`) for the next page; null on the last
 
 
 class LoggedPerson(Wire):

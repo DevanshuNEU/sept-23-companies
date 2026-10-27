@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { NavLink } from 'react-router';
-import { Activity, Award, Ban, Building2, CalendarCheck, ChartColumn, CircleAlert, CircleCheck, Moon, Search, Send, Sun } from 'lucide-react';
+import { Activity, Award, Ban, Building2, CalendarCheck, ChartColumn, CircleAlert, CircleCheck, Moon, Search, Send, Sun, Telescope } from 'lucide-react';
 import { pollMs, queryKeys, useClient, type JobRunSummary, type SenderState, type ShellSummary } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -82,6 +82,23 @@ function NavItem({
           <Icon aria-hidden />
           <span>{label}</span>
           {children}
+        </NavLink>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * Browse companies (#120): opens Today with the drawer open (`?browse=1`). It is not a page of its own, so it never takes
+ * the "current page" mark from Today.
+ */
+function BrowseItem() {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild className={ITEM}>
+        <NavLink to="/today?browse=1" aria-current="false">
+          <Telescope aria-hidden />
+          <span>Browse companies</span>
         </NavLink>
       </SidebarMenuButton>
     </SidebarMenuItem>
@@ -176,6 +193,7 @@ function ListItems({ s }: { s: ShellSummary | undefined }) {
       <nav aria-label="Lists">
         <SidebarGroupLabel className="text-muted-foreground">Lists</SidebarGroupLabel>
         <SidebarMenu className="gap-0.5">
+          <BrowseItem />
           <NavItem to="/no-go" icon={Ban} label="No-go" described={s && s.noGoCount > 0 ? `${s.noGoCount}` : undefined}>
             {s && s.noGoCount > 0 ? <Count value={s.noGoCount} /> : null}
           </NavItem>

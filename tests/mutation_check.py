@@ -526,6 +526,36 @@ MUTATIONS = [
      'RANKING_FILES = ("config.toml", "wages.toml", "giants.toml",',
      'RANKING_FILES = ("config.toml", "wages.toml",',
      "test_every_top_level_file_is_ranking_or_not"),
+    # ---- Browse companies (#120): every company, paged, and the swap --------------------------------------------
+    (PLAN / "browse.py", "browse: a no-go company is listed",
+     "            and c not in no_go and c not in taken]", "            and c not in taken]",
+     "test_a_no_go_company_is_never_listed"),
+    (PLAN / "browse.py", "browse: a company in flight is listed",
+     '    keep = [c for c in live if states[c].status not in ("waiting", "engaged")]', "    keep = list(live)",
+     "test_todays_list_and_in_flight_companies_are_never_listed"),
+    (PLAN / "browse.py", "browse: a company held back can be swapped in",
+     "    ok, why = eligibility(p, cfg)\n    if ok:\n        return None",
+     "    ok, why = eligibility(p, cfg)\n    if True:\n        return None",
+     "test_a_held_back_company_is_listed_with_its_reason"),
+    (API / "services" / "picks.py", "swap: a swap uses room, so it fails when the week is full",
+     "    why_not = _swap_target_refusal(conn, survivor, name, today)\n",
+     "    why_not = _swap_target_refusal(conn, survivor, name, today)\n"
+     "    if room_today(conn, today, cfg, pending_picks(queries.plan_rows(conn, today, cfg, ctx.now) or [])) <= 0:\n"
+     "        raise _refuse(\"No room to add more this week.\")\n",
+     "test_swap_works_when_there_is_no_room"),
+    (API / "services" / "picks.py", "swap: a swap also writes a Not now, so the replaced pick starts a cooldown",
+     "    append_event(conn, entity=\"company\", entity_id=old_survivor, company_id=old_survivor, kind=SWAPPED_OUT,",
+     "    append_event(conn, entity=\"company\", entity_id=old_survivor, company_id=old_survivor, kind=PASSED,\n"
+     "                 actor=\"devanshu\", at=ctx.now, detail={\"list_date\": today})\n"
+     "    append_event(conn, entity=\"company\", entity_id=old_survivor, company_id=old_survivor, kind=SWAPPED_OUT,",
+     "test_swap_writes_no_pick_passed_and_no_cooldown"),
+    (API / "services" / "picks.py", "swap: the replaced pick's row is kept, so it stays off the bench",
+     "    conn.execute(\"DELETE FROM daily_list_entry WHERE rowid = ?\", (entry_id,))\n    old_survivor",
+     "    old_survivor",
+     "test_swap_takes_the_picks_rank_and_returns_the_pick_to_the_bench"),
+    (API / "services" / "picks.py", "swap: a no-go company is swapped in",
+     "        return f\"{name} is on your no-go list, so it is not swapped in.\"", "        pass",
+     "test_a_no_go_company_is_refused"),
     # ---- the email fit and the email lane (2026-10-27): which companies are worth a cold email -------------------
     (PLAN / "email_fit.py", "email fit: a company with no website on file can be emailed",
      "    if f.domain is None:\n        out.append(", "    if False:\n        out.append(",

@@ -29,3 +29,7 @@ export function benchToPick(b: BenchCompany, position: number): PlanRow {
     state: 'todo', carriedFrom: null, revision: 1, queue: b.queue,
   };
 }
+
+/** The picks a swap may replace: still to do, nothing logged, not still coming in. */
+export const replaceable = (rows: PlanRow[]): PlanRow[] =>
+  rows.filter((r) => r.state === 'todo' && r.channel === 'linkedin_request' && !isProvisional(r) && !r.steps.some((s) => s.at !== null));

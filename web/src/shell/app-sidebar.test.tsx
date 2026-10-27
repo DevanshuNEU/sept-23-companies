@@ -105,6 +105,15 @@ describe('AppShell sidebar', () => {
     expect(within(nav(/^Done/)).getByText('4')).toBeInTheDocument();
   });
 
+  it('Browse companies is a link in Lists that opens Today with the drawer, and never marks Today twice', async () => {
+    await shell();
+    const link = nav(/^Browse companies/);
+    expect(link).toHaveAttribute('href', '/today?browse=1');
+    expect(within(sidebar()).getByRole('navigation', { name: 'Lists' })).toContainElement(link);
+    expect(link).not.toHaveAttribute('aria-current', 'page');
+    expect(nav(/^Today/)).toHaveAttribute('aria-current', 'page');
+  });
+
   it('names what each count means for screen readers', async () => {
     await shell();
     expect(nav(/^Outbox/)).toHaveAccessibleName('Outbox, 1 reply to handle, 7 drafts to review');

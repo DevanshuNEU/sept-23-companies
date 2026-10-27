@@ -1030,6 +1030,20 @@ changed, and wins where the two differ. No mockup was drawn; the sample is `?sce
   why today, the opening, reasons and size, visa, the applied note, the three links) with **Add to today**, which puts
   it after the last pick while the 7-day limit has room ("Room to add 17 more companies this week."; with none the
   button is off and the line says why). A company held back by Not now or an application, or in flight, is not on it.
+- **Browse companies (F, #120).** A second drawer on the right, 480 px, from **Browse companies** in the sidebar's Lists (it opens Today with `?browse=1`, so a reload keeps it open and it opens even before the plan is built) or the key F. There is no button in the rail.
+  It lists every company the plan could pick, best ranked first, 25 at a time (Show more loads the next page by a
+  cursor), each in the same compact row as the bench (monogram, name, Fit chip, new tag, why today, the opening, reasons
+  and size, visa, the three links). Under the title: a search box (a name, as the store keys names, so "retell inc" finds
+  Retell AI) and three filter chips: Role at my level, Visa not a no, Not worked yet. The line under the title counts the
+  matches and says "A swap uses no room this week." It never lists a company on today's list or one in flight, and a
+  no-go company is not in it at all. A company held back (Not now, an application, or no way back through the rotation
+  rules) is listed with the reason in muted text and has no button. **Use instead of...** (Enter on the highlighted row)
+  turns into a short list under the row: today's picks that can give up their slot, numbered 1 to 9 ("The pick goes back
+  to More options. It is not a Not now, and it uses no room."). A digit, Enter or a click chooses; the rail changes at once
+  with the toast "Swapped in Retell AI for Pylon." and Undo (Z) for 8 seconds, then the drawer closes. A pick he reached,
+  did or carried is not offered. The replaced pick is back on More options with no cooldown and no pass counted, and
+  the swap works when Add to today is off for lack of room. Keys: arrows move through the rows (also from the search
+  box), Enter opens Use instead of..., Escape closes the list of picks and then the drawer, F opens and closes it.
 - **New opening toast.** When a new early career opening reaches the bench mid-day (the pulse refetches it), a toast
   says "New opening at Retell AI" with Show, which opens the drawer.
 - **Finish.** "8 of 8 handled: 6 reached, Hex carries to tomorrow. You passed on 2 for now." A pick he passed left
@@ -1327,6 +1341,7 @@ Single keys work only outside text fields, as in section 3.
 | Today | 1 to 8 | With the chips open: pass with that reason (Visa worry, Too big, Too early, Role not for me, Not into the product, Already know it, Not a fit right now, Other) |
 | Today | Enter, Esc | With the chips open: pass with no reason |
 | Today | B | Open or close More options (the bench) |
+| Today | F | Open or close Browse companies. Inside: ↓ / ↑ move through the rows (also from the search box), Enter opens Use instead of..., then 1 to 9, ↓ / ↑ and Enter choose the pick, Esc closes the list of picks, then the drawer |
 | Today | 1 / 2 / 3 | Answer the question: Accepted, Replied, Nothing yet (while the Not now chips are open, the digits are theirs) |
 | Today | W | Mark wins seen |
 | Today | ⇧C | Copy every company line for the terminal (a plan with person rows: every find-someone handoff) |

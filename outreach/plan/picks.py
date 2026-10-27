@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Collection
 from datetime import date, datetime
 
 from outreach.plan.config import PlanConfig
@@ -21,7 +22,7 @@ from outreach.plan.select import BenchPick, Chosen, Prospect, bench, eligibility
 from outreach.ranking.common import canonical_ids
 from outreach.ranking.scores import StoredScore, latest_version, ranked_list
 
-__all__ = ["listed_today", "bench_picks", "bench_and_lane", "write_pick"]
+__all__ = ["listed_today", "pool", "bench_picks", "bench_and_lane", "write_pick"]
 
 
 def listed_today(conn: sqlite3.Connection, day: date, canon: dict[int, int]) -> set[int]:
@@ -33,14 +34,14 @@ def listed_today(conn: sqlite3.Connection, day: date, canon: dict[int, int]) -> 
     return out
 
 
-def _pool(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanConfig
-          ) -> tuple[dict[int, int], list[Prospect], set[int], dict[int, StoredScore]]:
+def pool(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanConfig, only: Collection[int] | None = None
+         ) -> tuple[dict[int, int], list[Prospect], set[int], dict[int, StoredScore]]:
     """The plan job's prospects at `now`, every company on today's list, and each survivor's score row (the first
-    ranked row of its merge family)."""
+    ranked row of its merge family). `only` scans just those survivors, past the scan limit (browse, #120)."""
     canon = canonical_ids(conn)
     ranked = ranked_list(conn, laned_only=True)
     outbound = load_outbound(conn, canon, tz=cfg.get("plan", "timezone"))
-    prospects = load_prospects(conn, ranked, canon, today, cfg, outbound, now=now)
+    prospects = load_prospects(conn, ranked, canon, today, cfg, outbound, now=now, only=only)
     stored: dict[int, StoredScore] = {}
     for s in ranked:
         stored.setdefault(canon.get(s.company_id, s.company_id), s)
@@ -50,7 +51,7 @@ def _pool(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanConfig
 def bench_picks(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanConfig,
                 n: int | None = None) -> tuple[list[BenchPick], dict[int, StoredScore]]:
     """The bench for `today` at `now`, and each survivor's score row (the first ranked row of its merge family)."""
-    _, prospects, taken, stored = _pool(conn, today, now, cfg)
+    _, prospects, taken, stored = pool(conn, today, now, cfg)
     return bench(prospects, taken, cfg, n), stored
 
 
@@ -58,7 +59,7 @@ def bench_and_lane(conn: sqlite3.Connection, today: date, now: datetime, cfg: Pl
                    ) -> tuple[list[BenchPick], list[BenchPick], dict[int, StoredScore]]:
     """The bench and the email lane from one read of the pool. The email facts are read only for the companies the
     plan could pick today that are not on today's list (the lane's candidates), with their contact states."""
-    canon, prospects, taken, stored = _pool(conn, today, now, cfg)
+    canon, prospects, taken, stored = pool(conn, today, now, cfg)
     open_ = {p.company_id: p.contact for p in prospects if p.company_id not in taken and eligibility(p, cfg)[0]}
     facts = load_email_facts(conn, canon, open_, today, cfg, states=open_) if open_ else {}
     fits = {cid: email_fit(f, cfg) for cid, f in facts.items()}

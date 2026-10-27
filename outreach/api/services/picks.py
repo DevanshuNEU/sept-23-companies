@@ -1,5 +1,5 @@
-"""Not now and Add to today (top picks, the owner's spec and his rulings of 2026-10-26), each inside the caller's
-`run_write` transaction.
+"""Not now, Add to today and Swap (top picks, the owner's spec and his rulings of 2026-10-26; Browse companies,
+#120), each inside the caller's `run_write` transaction.
 
 Not now (`pass_pick`) is a cooldown, never a ban and never a no-go: the company row is not touched (no status
 change, no `no_go`), it stays on every other page, and it comes back to the picks after `queue.pass_cooldown_days`,
@@ -30,8 +30,8 @@ from zoneinfo import ZoneInfo
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
 from outreach.api.models.company import CompanyRef
-from outreach.api.models.plan import PassResult, PlanRow
-from outreach.api.models.plan_writes import AddFromBenchBody, PassPickBody
+from outreach.api.models.plan import PassResult, PlanRow, SwapResult
+from outreach.api.models.plan_writes import AddFromBenchBody, PassPickBody, SwapPickBody
 from outreach.api.queries import plan as queries
 from outreach.api.queries.bench import pending_picks, room_today
 from outreach.api.queries.company import merge_parents, survivor_of
@@ -39,18 +39,22 @@ from outreach.api.queries.outcomes import NOT_SAVED, company_refs
 from outreach.api.revisions import bump
 from outreach.insights.bands import default_bands, size_band
 from outreach.outcomes.windows import ny_day
+from outreach.plan.browse import blocked_text
 from outreach.plan.config import PlanConfig
 from outreach.plan.fresh import PASSED, as_utc
 from outreach.plan.outbound import load_outbound
-from outreach.plan.picks import bench_picks, write_pick
+from outreach.plan.picks import bench_picks, pool, write_pick
 from outreach.plan.prospects import load_prospects
 from outreach.plan.route import day_text
-from outreach.plan.select import eligibility
+from outreach.plan.prospects import KEPT_STATUSES
+from outreach.plan.select import bench_pick_of, eligibility
 from outreach.ranking.common import canonical_ids
 from outreach.ranking.scores import ranked_list
 from outreach.store import append_event
 
 ADDED = "pick_added"  # event kind: a bench company he added to today's list
+SWAPPED = "pick_swapped"  # event kind, on the chosen company: it took a pick's slot
+SWAPPED_OUT = "pick_swapped_out"  # event kind, on the replaced company: it went back to the bench (not a Not now)
 
 
 def _refuse(text: str) -> ApiProblem:
@@ -193,3 +197,92 @@ def _not_on_bench(conn: sqlite3.Connection, survivor: int, name: str, today: str
     if why in ("waiting", "engaged"):
         return f"{name} is in flight: {found.contact.reason}."
     return f"{name} is not free to add today."
+
+
+def _swap_answer(conn: sqlite3.Connection, detail: dict, cfg: PlanConfig, now: str) -> SwapResult:
+    row = queries.build_row(conn, detail["entry_id"], cfg, now)
+    if row is None:
+        raise _refuse(f"{detail['company']} was swapped in and has left today's list since.")
+    return SwapResult(replaced_entry_id=detail["replaced_entry_id"], replaced=_ref(conn, detail["replaced_company_id"]),
+                      row=row, text=f"Swapped in {detail['company']} for {detail['replaced_company']}.")
+
+
+def _swap_target_refusal(conn: sqlite3.Connection, survivor: int, name: str, today: str) -> str | None:
+    """The refusal sentence for a company that cannot take a pick's slot (a no-go, already listed, closed, paused or
+    holding a reply), or None. The pick rules (`blocked_text`) come after this, on the company's prospect."""
+    if conn.execute("SELECT 1 FROM no_go WHERE company_id IN (SELECT company_id FROM company WHERE company_id = ? "
+                    "OR merged_into = ?) AND lifted_at IS NULL", (survivor, survivor)).fetchone() is not None:
+        return f"{name} is on your no-go list, so it is not swapped in."
+    listed = conn.execute("SELECT state FROM daily_list_entry WHERE list_date = ? AND company_id = ?",
+                          (today, survivor)).fetchone()
+    if listed is not None:
+        return f"{name} is already on today's list." if listed["state"] != "removed" \
+            else f"{name} was on today's list earlier. It can come back from tomorrow."
+    c = conn.execute("SELECT status, paused_at, held_by_touch FROM company WHERE company_id = ?", (survivor,)).fetchone()
+    if c["status"] not in KEPT_STATUSES or c["paused_at"] is not None or c["held_by_touch"] is not None:
+        return f"{name} is not free to swap in: it is closed, removed, paused or holding a reply."
+    return None
+
+
+def swap_pick(ctx: WriteCtx, entry_id: int, body: SwapPickBody, cfg: PlanConfig) -> SwapResult:
+    conn = ctx.conn
+    key = f"pick-swap:{body.idempotency_key}"
+    done = _event_by_key(conn, key)
+    if done is not None:  # this swap landed before: the same answer, nothing written
+        return _swap_answer(conn, json.loads(done["detail"]), cfg, ctx.now)
+    entry = conn.execute(f"{queries.ENTRY_SQL} WHERE rowid = ?", (entry_id,)).fetchone()
+    if entry is None:
+        raise ApiProblem("not_found", f"There is no plan row {entry_id}.")
+    old = conn.execute("SELECT company_id, name FROM company WHERE company_id = ?", (entry["company_id"],)).fetchone()
+    old_name = old["name"]
+    today = ny_day(ctx.now)
+    if entry["state"] == "removed":
+        raise _refuse(f"{old_name} is already off today's list.")
+    if entry["list_date"] != today:
+        raise _refuse(f"That row is on the list of {entry['list_date']}. A swap works on today's list.")
+    row = queries.build_row(conn, entry_id, cfg, ctx.now)
+    if row is None:
+        raise _refuse(f"{old_name} is already off today's list.")
+    if row.state == "skipped":
+        raise _refuse(f"{old_name} is carried to tomorrow, so it stays on the list.")
+    if row.state == "done":
+        raise _refuse(f"{old_name} is already done, so it stays on the list.")
+    if any(s.kind == "request" and s.at for s in row.steps):
+        raise _refuse(f"You already reached {old_name} today, so it stays on the list.")
+    if any(s.at for s in row.steps):
+        raise _refuse(f"You already worked {old_name} today, so it stays on the list.")
+    if conn.execute("SELECT 1 FROM company WHERE company_id = ?", (body.company_id,)).fetchone() is None:
+        raise ApiProblem("not_found", f"There is no company {body.company_id}.")
+    parents = merge_parents(conn)
+    survivor = survivor_of(parents, body.company_id)
+    name = conn.execute("SELECT name FROM company WHERE company_id = ?", (survivor,)).fetchone()["name"]
+    why_not = _swap_target_refusal(conn, survivor, name, today)
+    if why_not is not None:
+        raise _refuse(why_not)
+    _, found, _, stored = pool(conn, date.fromisoformat(today), as_utc(ctx.now), cfg, only={survivor})
+    prospect = next((p for p in found if p.company_id == survivor), None)
+    if prospect is None:
+        raise _refuse(f"{name} is not in the ranked list (no open lane, or the rules hide it), so it is not swapped in.")
+    blocked = blocked_text(prospect, cfg)
+    if blocked is not None:
+        raise _refuse(blocked)
+    # The revision check: a stale one is a conflict and nothing is written. The old row steps aside to the last rank
+    # so the new one can take its rank, then it goes: the pick is back on the bench, with no Not now on record.
+    last = conn.execute("SELECT max(rank) FROM daily_list_entry WHERE list_date = ?", (today,)).fetchone()[0]
+    bump(conn, "daily_list_entry", "rowid", entry_id, body.revision,
+         {"state": "removed", "decided_at": ctx.now, "rank": last + 1}, at=ctx.now)
+    new_id = write_pick(conn, bench_pick_of(prospect, cfg), stored[survivor], today=date.fromisoformat(today),
+                        rank=entry["rank"], now_iso=ctx.now, cfg=cfg)
+    conn.execute("DELETE FROM daily_list_entry WHERE rowid = ?", (entry_id,))
+    old_survivor = survivor_of(parents, old["company_id"])
+    old_survivor_name = conn.execute("SELECT name FROM company WHERE company_id = ?", (old_survivor,)).fetchone()["name"]
+    detail = {"list_date": today, "rank": entry["rank"], "entry_id": new_id, "replaced_entry_id": entry_id,
+              "company": name, "company_id": survivor, "replaced_company_id": old_survivor,
+              "replaced_company": old_survivor_name}
+    append_event(conn, entity="company", entity_id=survivor, company_id=survivor, kind=SWAPPED, actor="devanshu",
+                 at=ctx.now, idempotency_key=key,
+                 detail={**detail, "text": f"Swapped in for {old_survivor_name} on today's list."})
+    append_event(conn, entity="company", entity_id=old_survivor, company_id=old_survivor, kind=SWAPPED_OUT,
+                 actor="devanshu", at=ctx.now,
+                 detail={**detail, "text": f"Swapped out for {name} on today's list. It is back on the bench."})
+    return _swap_answer(conn, detail, cfg, ctx.now)

@@ -172,6 +172,120 @@
         "title": "BenchView",
         "type": "object"
       },
+      "BrowseCompany": {
+        "description": "One company of the Browse drawer: the bench's compact shape, `position` the stored rank. `blocked` is why it\ncannot be swapped in today (a Not now, an application, the rotation rules), else null; `worked` is that he has\nreached or applied to it before.",
+        "properties": {
+          "blocked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked"
+          },
+          "company": {
+            "$ref": "#/components/schemas/PlanCompany"
+          },
+          "earlyFit": {
+            "title": "Earlyfit",
+            "type": "boolean"
+          },
+          "fresh": {
+            "title": "Fresh",
+            "type": "boolean"
+          },
+          "lane": {
+            "enum": [
+              "level_role",
+              "intern_junior",
+              "any_us_role",
+              "reason_no_role"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/CompanyQueue"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleToName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "worked": {
+            "title": "Worked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "company",
+          "position",
+          "lane",
+          "role",
+          "queue",
+          "fresh",
+          "earlyFit",
+          "blocked",
+          "worked"
+        ],
+        "title": "BrowseCompany",
+        "type": "object"
+      },
+      "BrowseView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "companies": {
+            "items": {
+              "$ref": "#/components/schemas/BrowseCompany"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "nextAfter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextafter"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asOf",
+          "date",
+          "companies",
+          "total",
+          "nextAfter"
+        ],
+        "title": "BrowseView",
+        "type": "object"
+      },
       "Check": {
         "properties": {
           "code": {
@@ -7520,6 +7634,62 @@
         "title": "StillEmailing",
         "type": "object"
       },
+      "SwapPickBody": {
+        "additionalProperties": false,
+        "description": "Browse companies (#120): put `companyId` in the slot of this pick. `idempotencyKey` is\n`pick-swap:<entryId>:<companyId>`: the same key again answers with the first answer and writes nothing. It\nchanges the pick's row, so a stale `revision` conflicts.",
+        "properties": {
+          "companyId": {
+            "maximum": 4.611686018427388e+18,
+            "minimum": 1.0,
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "idempotencyKey": {
+            "pattern": "^[A-Za-z0-9:._-]{1,200}$",
+            "title": "Idempotencykey",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "companyId",
+          "idempotencyKey",
+          "revision"
+        ],
+        "title": "SwapPickBody",
+        "type": "object"
+      },
+      "SwapResult": {
+        "description": "A swap (Browse companies, #120): the chosen company took the pick's slot as `row`. The replaced pick is back on\nthe bench; it is not a Not now, so it has no cooldown.",
+        "properties": {
+          "replaced": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "replacedEntryId": {
+            "title": "Replacedentryid",
+            "type": "integer"
+          },
+          "row": {
+            "$ref": "#/components/schemas/PlanRow"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "replacedEntryId",
+          "replaced",
+          "row",
+          "text"
+        ],
+        "title": "SwapResult",
+        "type": "object"
+      },
       "ThreadMessage": {
         "properties": {
           "at": {
@@ -12055,6 +12225,145 @@
         ]
       }
     },
+    "/api/plan/browse": {
+      "get": {
+        "description": "Browse companies (#120): every company the plan could pick, in stored rank order, one page at a time.",
+        "operationId": "browse",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "levelRole",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Levelrole",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "visaOk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Visaok",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unworked",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Unworked",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 4611686018427387904,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowseView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Browse",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
     "/api/plan/{entry_id}/apply": {
       "post": {
         "operationId": "log_applied",
@@ -12734,6 +13043,120 @@
           }
         },
         "summary": "Skip Row",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/{entry_id}/swap": {
+      "post": {
+        "operationId": "swap_pick",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwapPickBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwapResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Swap Pick",
         "tags": [
           "plan"
         ]

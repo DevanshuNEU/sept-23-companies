@@ -81,10 +81,13 @@ export const _parity: [
   Same<T.PassResult, S['PassResult']>,
   Same<T.BenchCompany, S['BenchCompany']>,
   Same<T.BenchView, S['BenchView']>,
+  Same<T.BrowseCompany, S['BrowseCompany']>,
+  Same<T.BrowseView, S['BrowseView']>,
+  Same<T.SwapResult, S['SwapResult']>,
   Same<T.PassReason, NonNullable<S['PassPickBody']['reason']>>,
   Same<T.InFlightCompany, S['InFlightCompany']>,
   Same<T.PlanRow, S['PlanRow']>,
   Same<T.PlanView, S['PlanView']>,
   Same<T.LoggedPerson, S['LoggedPerson']>,
   Same<T.LogPeopleResult, S['LogPeopleResult']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

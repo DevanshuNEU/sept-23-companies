@@ -72,6 +72,9 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   passPick: 'plan',
   bench: 'plan',
   addFromBench: 'plan',
+  // Browse companies (#120): every company, paged, and the swap.
+  browse: 'plan',
+  swapPick: 'plan',
   saveNote: 'plan',
   confirmReason: 'plan',
   outcomePrompt: 'outcomes',

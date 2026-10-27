@@ -385,6 +385,13 @@ export interface BenchView {
   emailLane: BenchCompany[];                                                         // the email lane: companies beyond today's list that can be emailed, by rank
   emailLaneText: string;
 }
+/** One company of the Browse drawer: the bench's shape, `position` the stored rank. `blocked` says why it cannot be swapped in today (null: it can). */
+export interface BrowseCompany extends BenchCompany { blocked: string | null; worked: boolean }
+export interface BrowseView { asOf: IsoTime; date: IsoDate; companies: BrowseCompany[]; total: number; nextAfter: number | null }
+/** What the Browse drawer asks for: a name search, three filters and the cursor (`after`, the stored position of the last row seen; 0 for the first page). */
+export interface BrowseParams { q: string; levelRole: boolean; visaOk: boolean; unworked: boolean; after: number }
+/** A swap: the chosen company took the pick's slot as `row`; the replaced pick is back on the bench (it is not a Not now). */
+export interface SwapResult { replacedEntryId: Id; replaced: CompanyRef; row: PlanRow; text: string }
 export interface InFlightCompany { company: CompanyRef; status: 'in_flight' | 'replied'; text: string; reason: string; freeOn: IsoDate | null }
 export interface PlanRow {
   entryId: Id; position: number; channel: 'linkedin_request' | 'email'; lane: ListGroup;

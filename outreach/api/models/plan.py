@@ -219,6 +219,16 @@ class PassResult(Wire):
     text: str  # "Passed. Added Tessera Labs."
 
 
+class SwapResult(Wire):
+    """A swap (Browse companies, #120): the chosen company took the pick's slot as `row`. The replaced pick is back on
+    the bench; it is not a Not now, so it has no cooldown."""
+
+    replaced_entry_id: int
+    replaced: CompanyRef
+    row: PlanRow
+    text: str  # "Swapped in Ember for Beacon."
+
+
 class BenchCompany(Wire):
     """One company of the bench ("More options"), in the compact shape of a pick row."""
 

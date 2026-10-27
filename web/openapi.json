@@ -7634,6 +7634,62 @@
         "title": "StillEmailing",
         "type": "object"
       },
+      "SwapPickBody": {
+        "additionalProperties": false,
+        "description": "Browse companies (#120): put `companyId` in the slot of this pick. `idempotencyKey` is\n`pick-swap:<entryId>:<companyId>`: the same key again answers with the first answer and writes nothing. It\nchanges the pick's row, so a stale `revision` conflicts.",
+        "properties": {
+          "companyId": {
+            "maximum": 4.611686018427388e+18,
+            "minimum": 1.0,
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "idempotencyKey": {
+            "pattern": "^[A-Za-z0-9:._-]{1,200}$",
+            "title": "Idempotencykey",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "companyId",
+          "idempotencyKey",
+          "revision"
+        ],
+        "title": "SwapPickBody",
+        "type": "object"
+      },
+      "SwapResult": {
+        "description": "A swap (Browse companies, #120): the chosen company took the pick's slot as `row`. The replaced pick is back on\nthe bench; it is not a Not now, so it has no cooldown.",
+        "properties": {
+          "replaced": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "replacedEntryId": {
+            "title": "Replacedentryid",
+            "type": "integer"
+          },
+          "row": {
+            "$ref": "#/components/schemas/PlanRow"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "replacedEntryId",
+          "replaced",
+          "row",
+          "text"
+        ],
+        "title": "SwapResult",
+        "type": "object"
+      },
       "ThreadMessage": {
         "properties": {
           "at": {
@@ -12987,6 +13043,120 @@
           }
         },
         "summary": "Skip Row",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/{entry_id}/swap": {
+      "post": {
+        "operationId": "swap_pick",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwapPickBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwapResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Swap Pick",
         "tags": [
           "plan"
         ]

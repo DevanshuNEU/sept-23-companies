@@ -2,7 +2,9 @@
 
 `POST /api/plan/{entryId}/request`, `/apply`, `/search` and `/skip` answer with the row as the plan shows it;
 `POST /api/plan/{entryId}/pass` (Not now, top picks) answers with the company that came in from the bench;
-`GET /api/plan/browse` (Browse companies, #120) is every company, paged; `GET /api/plan/bench` is the bench ("More options") and `POST /api/plan/bench/{companyId}/add` adds one of it;
+`GET /api/plan/bench` is the bench ("More options") and `POST /api/plan/bench/{companyId}/add` adds one of it;
+`GET /api/plan/browse` (Browse companies, #120) is every company, paged, and `POST /api/plan/{entryId}/swap` takes a
+chosen one into a pick's slot;
 `POST /api/plan/{entryId}/people` (company first: the people he asked, pasted) answers with the row and each person
 logged; `PUT
 /api/notes/{noteId}` and `POST /api/notes/{noteId}/confirm` answer with the note. Each is one `run_write`. See
@@ -13,10 +15,10 @@ from fastapi import APIRouter, Query, Request, Response
 from outreach.api import views
 from outreach.api.db import read_conn
 from outreach.api.idempotency import run_write
-from outreach.api.models.plan import BenchView, BrowseView, LogPeopleResult, NoteDraft, PassResult, PlanRow, PlanView
+from outreach.api.models.plan import BenchView, BrowseView, LogPeopleResult, NoteDraft, PassResult, PlanRow, PlanView, SwapResult
 from outreach.api.models.plan_writes import (
     AddFromBenchBody, ConfirmReasonBody, LogAppliedBody, LogPeopleBody, LogRequestBody, PassPickBody, SaveNoteBody,
-    SaveSearchBody, SkipRowBody,
+    SaveSearchBody, SkipRowBody, SwapPickBody,
 )
 from outreach.api.queries import bench as bench_queries
 from outreach.api.queries import browse as browse_queries
@@ -71,6 +73,12 @@ async def browse(request: Request, q: str = Query("", max_length=100), level_rol
 def pass_pick(body: PassPickBody, request: Request, entry_id: int = row_id()) -> Response:
     cfg = default_plan_config()
     return run_write(request, lambda ctx: picks.pass_pick(ctx, entry_id, body, cfg))
+
+
+@router.post("/plan/{entry_id}/swap", response_model=SwapResult)
+def swap_pick(body: SwapPickBody, request: Request, entry_id: int = row_id()) -> Response:
+    cfg = default_plan_config()
+    return run_write(request, lambda ctx: picks.swap_pick(ctx, entry_id, body, cfg))
 
 
 @router.post("/plan/bench/{company_id}/add", response_model=PlanRow)

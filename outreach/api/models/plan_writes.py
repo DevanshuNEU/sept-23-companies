@@ -91,3 +91,13 @@ class AddFromBenchBody(WireRequest):
     key answers with the row and writes nothing."""
 
     idempotency_key: str = Field(pattern=TOUCH_KEY)
+
+
+class SwapPickBody(WireRequest):
+    """Browse companies (#120): put `companyId` in the slot of this pick. `idempotencyKey` is
+    `pick-swap:<entryId>:<companyId>`: the same key again answers with the first answer and writes nothing. It
+    changes the pick's row, so a stale `revision` conflicts."""
+
+    company_id: int = Field(ge=1, le=MAX_ID)
+    idempotency_key: str = Field(pattern=TOUCH_KEY)
+    revision: int = Field(ge=1)

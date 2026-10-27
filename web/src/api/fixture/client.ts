@@ -1115,7 +1115,7 @@ export class FixtureClient implements OutreachClient {
 
   /** Browse companies, as the API: stored order, a name search, three filters, 25 a page by cursor. Never a company on today's list. */
   browse(params: BrowseParams): Promise<BrowseView> {
-    return this.read(() => browseView(this.browsePool(), new Set(this.db.plan.rows.map((r) => r.company.id)), params, this.db.plan.asOf, this.db.plan.date));
+    return this.read(() => browseView(this.browsePool(), new Set(this.db.plan.rows.map((r) => r.company.id)), params, this.db.plan.asOf, this.db.plan.date, params.limit));
   }
 
   /**

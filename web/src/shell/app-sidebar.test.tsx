@@ -105,14 +105,15 @@ describe('AppShell sidebar', () => {
     expect(within(nav(/^Done/)).getByText('4')).toBeInTheDocument();
   });
 
-  it('Browse companies is a link in Lists that opens Today with the drawer, and never marks Today twice', async () => {
-    await shell();
+  it('Browse companies is a link in Lists to its own page, marked current there', async () => {
+    await shell('/browse');
     const link = nav(/^Browse companies/);
-    expect(link).toHaveAttribute('href', '/today?browse=1');
+    expect(link).toHaveAttribute('href', '/browse');
     expect(within(sidebar()).getByRole('navigation', { name: 'Lists' })).toContainElement(link);
-    expect(link).not.toHaveAttribute('aria-current', 'page');
-    expect(nav(/^Today/)).toHaveAttribute('aria-current', 'page');
+    expect(link).toHaveAttribute('aria-current', 'page');
+    expect(nav(/^Today/)).not.toHaveAttribute('aria-current', 'page');
   });
+
 
   it('names what each count means for screen readers', async () => {
     await shell();

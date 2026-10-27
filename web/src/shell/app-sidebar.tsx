@@ -88,23 +88,6 @@ function NavItem({
   );
 }
 
-/**
- * Browse companies (#120): opens Today with the drawer open (`?browse=1`). It is not a page of its own, so it never takes
- * the "current page" mark from Today.
- */
-function BrowseItem() {
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton asChild className={ITEM}>
-        <NavLink to="/today?browse=1" aria-current="false">
-          <Telescope aria-hidden />
-          <span>Browse companies</span>
-        </NavLink>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  );
-}
-
 function Count({ value, after = false }: { value: number | string; after?: boolean }) {
   return (
     <span aria-hidden className={cn(COUNT, after && 'ml-1.5')}>
@@ -193,7 +176,7 @@ function ListItems({ s }: { s: ShellSummary | undefined }) {
       <nav aria-label="Lists">
         <SidebarGroupLabel className="text-muted-foreground">Lists</SidebarGroupLabel>
         <SidebarMenu className="gap-0.5">
-          <BrowseItem />
+          <NavItem to="/browse" icon={Telescope} label="Browse companies" />
           <NavItem to="/no-go" icon={Ban} label="No-go" described={s && s.noGoCount > 0 ? `${s.noGoCount}` : undefined}>
             {s && s.noGoCount > 0 ? <Count value={s.noGoCount} /> : null}
           </NavItem>

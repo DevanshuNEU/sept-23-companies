@@ -147,3 +147,7 @@ Neither kind is read by the cooldown (`load_passes` reads only `pick_passed`). O
 - [ ] **Step 3: Docs**: add this plan and the browse route and drawer to `docs/README.md`; the drawer, its keys and the swap rule to `docs/design/README.md`.
 - [ ] **Step 4: Run** the full suite `uv run python -m unittest discover -s tests -t .` and `cd web && pnpm test && pnpm typecheck && pnpm lint`. Expected: all pass.
 - [ ] **Step 5: Commit** `Docs and mutation check for Browse companies (#120)`, push, open the PR (`Closes #120`, base master), check `gh pr view <n> --json baseRefName,mergeStateStatus`.
+
+## Follow-up: a page, not a drawer (his ask after the first deploy)
+
+He wanted Browse companies full screen, nicely labelled, in the sidebar. The drawer became `web/src/routes/browse/index.tsx` (`/browse`): one table with a label on every column, 50 rows a page, the same read and swap. Opened from the sidebar, `G B` or F on Today; there is no button on Today's rail. The chooser moved to `web/src/routes/browse/chooser.tsx` (a grid under the row). The search box takes focus on arrival, because a focused sidebar link would take Enter. `limit` (up to 50) is a new query parameter on `GET /api/plan/browse`. Nothing changed in the swap or the read rules.

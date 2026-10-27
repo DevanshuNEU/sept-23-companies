@@ -17,6 +17,7 @@ import {
   Play,
   Send,
   Sun,
+  Telescope,
   User,
   type LucideIcon,
 } from 'lucide-react';
@@ -139,6 +140,7 @@ const VIEWS: { name: string; path: string; icon: LucideIcon; keys: string }[] = 
   { name: 'Done companies', path: '/done', icon: CircleCheck, keys: 'g d' },
   { name: 'Progress', path: '/progress', icon: ChartColumn, keys: 'g p' },
   { name: 'Wins', path: '/wins', icon: Award, keys: 'g w' },
+  { name: 'Browse companies', path: '/browse', icon: Telescope, keys: 'g b' },
 ];
 
 type Action = { id: string; label: string; sub: string; icon: LucideIcon; run: () => void };

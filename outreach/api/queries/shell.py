@@ -1,7 +1,7 @@
 """The shell summary: the sidebar's counts and the sender line, in one read.
 
 A dozen counts and no per-row query: every number reads the same rows the view it summarizes reads, through that
-view's own count (`done_count`, `no_go_count`, `open_count`, `to_reach_count`, `plan_counts`, `wins_unseen`), so the
+view's own count (`done_count`, `no_go_count`, `open_count`, `replied_count`, `plan_counts`, `wins_unseen`), so the
 sidebar never disagrees with the page it links to. The ones with no view of their own are counted here:
 
 - `draftsToReview`: the Outbox's `review` group: an open email thread whose current message (the newest that is not
@@ -46,7 +46,7 @@ def shell_summary(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sen
         as_of=now, picked_today=today.picked_count(conn, day), capacity_today=built["capacity"] if built is not None else today.capacity_from(sender, cfg),
         unhandled_replies=conn.execute("SELECT count(*) FROM touch WHERE state = 'replied' "
                                        "AND reply_kind = 'unsorted'").fetchone()[0],
-        drafts_to_review=drafts_to_review(conn), linkedin_to_reach=linkedin.to_reach_count(conn),
+        drafts_to_review=drafts_to_review(conn), linkedin_replied=linkedin.replied_count(conn),
         open_review_items=needs_you.open_count(conn, now), no_go_count=no_go.no_go_count(conn),
         done_count=done.done_count(conn), sending=summary_of(sender),
         replies_this_month=done.replies_this_month(conn, now), jobs=jobs.last_runs(conn, now),

@@ -111,8 +111,8 @@ class WhoStays(Base):
 
     def test_a_no_go_person_stays(self):
         pid = self.person("Stopped")
-        self.conn.execute("INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'said_no', 'devanshu', ?)",
-                          (pid, utcnow()))
+        self.conn.execute("INSERT INTO no_go(person_id, reason, source, created_at) "
+                          "VALUES (?, 'said_no', 'devanshu', ?)", (pid, utcnow()))
         plan = plan_clear(self.conn, now=NOW)
         self.assertNotIn(pid, _ids(plan))
         self.assertIn("no-go", " ".join(_kept(plan)[pid]))

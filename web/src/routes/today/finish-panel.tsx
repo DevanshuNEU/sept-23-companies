@@ -59,18 +59,20 @@ const ledgerWord = (label: string, count: number) => {
 };
 
 /**
- * How the day ended, in the API's counts: every row is done or carried to tomorrow. A company removed as not a fit
- * is off the plan (the API leaves it out of the rows and the total), so it is not counted here.
+ * How the day ended, in the API's counts: every row is done or carried to tomorrow. A pick he said Not now to is off
+ * the list (the API leaves it out of the rows and the total), so it is counted apart.
  */
 function summary(plan: PlanView, carried: PlanRow[]) {
   const { done, total } = plan;
   if (isQueue(plan)) {
-    // Company first (#9): a company is reached once a request or an email there is logged (and applied, with a role).
-    const reached = `${done} ${done === 1 ? 'company' : 'companies'} reached`;
-    if (carried.length === 0) return { sub: `${reached}. That is everything on today's queue.`, say: `Done for today. ${reached}.` };
+    // Top picks (2026-10-26): every pick is handled, reached (a request or an email there, and applied with a role)
+    // or carried to tomorrow. A pick he said Not now to left the list and the bench filled its place, so the count
+    // stays the day's picks; the passes are said after it.
+    const handled = done + carried.length;
     const first = carried[0];
-    const carries = carried.length === 1 && first ? `${nameOf(first)} carries to tomorrow` : `${carried.length} carry to tomorrow`;
-    return { sub: `${reached} of ${total}. ${carries}.`, say: `Done for today. ${reached} of ${total}, ${carried.length} carried to tomorrow.` };
+    const parts = [`${done} reached`, ...(carried.length === 0 ? [] : [carried.length === 1 && first ? `${nameOf(first)} carries to tomorrow` : `${carried.length} carry to tomorrow`])];
+    const passed = plan.passed > 0 ? ` You passed on ${plan.passed} for now.` : '';
+    return { sub: `${handled} of ${total} handled: ${parts.join(', ')}.${passed}`, say: `Done for today. ${handled} of ${total} handled.` };
   }
   if (carried.length === 0) {
     const sub = total === 1 ? "The one person on today's plan is done." : `All ${total} people on today's plan are done.`;

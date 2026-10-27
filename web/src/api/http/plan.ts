@@ -24,6 +24,11 @@ export const planMethods = (t: Transport): LiveMethods => ({
     sendJson(t, 'post', '/api/plan/{entry_id}/search', { url }, o, { params: { entry_id: entryId } }),
   skipRow: (entryId, revision, o) =>
     sendJson(t, 'post', '/api/plan/{entry_id}/skip', { revision }, o, { params: { entry_id: entryId } }),
+  passPick: (entryId, input, revision, o) =>
+    sendJson(t, 'post', '/api/plan/{entry_id}/pass', { ...input, revision }, o, { params: { entry_id: entryId } }),
+  bench: () => getJson(t, '/api/plan/bench'),
+  addFromBench: (companyId, input, o) =>
+    sendJson(t, 'post', '/api/plan/bench/{company_id}/add', input, o, { params: { company_id: companyId } }),
   saveNote: (noteId, edit, o) =>
     sendJson(t, 'put', '/api/notes/{note_id}', edit, o, { params: { note_id: noteId } }),
   confirmReason: (noteId, revision, o) =>

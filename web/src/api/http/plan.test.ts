@@ -10,6 +10,7 @@ const EMPTY: PlanView = {
   tomorrow: { total: 7, text: 'Tomorrow: 7 people.', preview: [] },
   week: { requests: 0, accepts: 0, replies: 0 },
   inFlight: [],
+  passed: 0,
 };
 
 describe('planMethods', () => {

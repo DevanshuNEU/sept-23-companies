@@ -7,10 +7,11 @@ import {
   type Id,
   type OutcomeKind,
   type OutcomePromptView,
+  type BenchView,
+  type PassReason,
   type PlanRow,
   type PlanView,
   type PromptTouch,
-  type RemoveReason,
   type ReplyKind,
   type Revision,
   type ShellSummary,
@@ -22,6 +23,7 @@ import { replyKindStatus } from '@/lib/status';
 import { newestRevision, noteRevision } from '@/pending/revisions';
 import { usePendingControls, usePendingWrite, type Patch } from '@/pending/pending';
 import { withStepLogged } from './plan-steps';
+import { benchToPick, isProvisional } from './picks';
 
 type Reply = Exclude<ReplyKind, 'unsorted' | 'auto_reply'>;
 
@@ -94,7 +96,7 @@ let pastes = 0;
 /** The newest save per note, per client, so the view can tell a note whose save has not landed yet. */
 const lastSave = new WeakMap<QueryClient, Map<Id, string>>();
 
-const removeId = (row: PlanRow) => `remove:${row.company.id}`;
+const passId = (row: PlanRow) => `pass:${row.entryId}`;
 const cachedPlan = (queryClient: QueryClient) => queryClient.getQueryData<PlanView>(queryKeys.plan);
 const cachedRow = (queryClient: QueryClient, entryId: Id) => cachedPlan(queryClient)?.rows.find((r) => r.entryId === entryId);
 
@@ -154,12 +156,13 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
   const queryClient = useQueryClient();
 
   /**
-   * Why a press on this row must do nothing, or null. The company was removed as not a fit (by a remove still on its
-   * way; once it lands the API leaves the row off the plan), or the newest plan no longer has the row.
+   * Why a press on this row must do nothing, or null. The row is a company still coming in from the bench (its Not now
+   * waits in its window), he said Not now to it (still on its way), or the newest plan no longer has the row.
    */
   const goneOrNoGo = (row: PlanRow, latest: PlanRow | undefined, what: 'Not logged' | 'Not carried'): string | null => {
     const company = row.company.name;
-    if (isPending(removeId(row))) return `${what}. ${company} is on the No-go list.`;
+    if (isProvisional(row)) return `${what}. ${company} joins today's list once your Not now is saved. Press Z to undo it.`;
+    if (isPending(passId(row))) return `${what}. You said Not now to ${company}.`;
     if (cachedPlan(queryClient) && !latest) return `${what}. ${company}'s row is no longer on today's plan.`;
     return null;
   };
@@ -441,48 +444,108 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
   };
 
   /**
-   * Not a fit: the company goes on the No-go list at once, with no Undo (a dialog action, phase 1 lead decision 2).
-   * Its row leaves today's plan and the day's total, as the API leaves a removed entry off the plan. True when queued.
+   * Why Not now must not start on this row, or null: a row he already reached (a request logged, on screen or still in
+   * its window) stays on the list as done. An application never stops it (his ruling, 2026-10-26).
    */
-  const notAFit = (row: PlanRow, reason: RemoveReason, note: string): boolean => {
-    const id = removeId(row);
+  const passRefusal = (row: PlanRow): string | null => {
+    if (isProvisional(row)) return `${row.company.name} is still coming in. Press Z to undo the Not now before it.`;
+    if (row.steps.some((s) => s.kind === 'request' && s.at !== null)) return `You already reached ${row.company.name} today, so it stays on the list.`;
+    return null;
+  };
+
+  /**
+   * Not now (top picks, 2026-10-26): a cooldown, never a no-go. The pick leaves the rail and the bench's first company
+   * slides into its place at once, with Undo for the window; nothing reaches the API until the window ends, so Undo
+   * puts the day back exactly. The API picks the company that comes in from the same bench; if that turned out to be
+   * another one, the toast says so once it lands. True when queued.
+   */
+  const passPick = (row: PlanRow, reason: PassReason | null): boolean => {
+    const id = passId(row);
     if (isPending(id)) return false;
-    const blocked = notAFitRefusal(row);
+    const blocked = passRefusal(row);
     if (blocked) return refuse(blocked);
-    const label = `Removed ${row.company.name}. Find it on the No-go list.`;
+    const latest = cachedRow(queryClient, row.entryId);
+    if (cachedPlan(queryClient) && !latest) return refuse(`${row.company.name}'s row is no longer on today's plan.`);
+    const bench = queryClient.getQueryData<BenchView>(queryKeys.bench);
+    const taken = new Set((cachedPlan(queryClient)?.rows ?? []).map((r) => r.company.id));
+    const next = bench?.companies.find((b) => !taken.has(b.company.id)) ?? null;
+    const company = row.company.name;
+    const label = next ? `Passed. Added ${next.company.name}.` : `Passed on ${company}.`;
     write({
       id,
       label,
-      afterCommit: label,
-      immediate: true,
+      afterCommit: `${label} It comes back in 14 days, or sooner with a new opening.`,
       patches: [
         {
           key: queryKeys.plan,
           apply: (p: PlanView) => {
-            const kept = p.rows.filter((r) => r.entryId !== row.entryId);
-            if (kept.length === p.rows.length) return p;
-            const rows = kept.map((r, i) => (r.position === i + 1 ? r : { ...r, position: i + 1 }));
-            return { ...p, rows, total: rows.length, done: rows.filter((r) => r.state === 'done').length };
+            const at = p.rows.findIndex((r) => r.entryId === row.entryId);
+            if (at < 0) return p;
+            const rows = [...p.rows];
+            rows.splice(at, 1, ...(next ? [benchToPick(next, row.position)] : []));
+            const numbered = rows.map((r, i) => (r.position === i + 1 ? r : { ...r, position: i + 1 }));
+            return { ...p, rows: numbered, total: numbered.length, done: numbered.filter((r) => r.state === 'done').length, passed: p.passed + 1 };
           },
         },
-        shellPatch((s) => ({ ...s, noGoCount: s.noGoCount + 1, plan: { ...s.plan, total: Math.max(0, s.plan.total - 1) } })),
+        {
+          key: queryKeys.bench,
+          apply: (b: BenchView) => ({ ...b, companies: next ? b.companies.filter((c) => c.company.id !== next.company.id) : b.companies }),
+        },
+        shellPatch(),
       ],
-      commit: (o) => client.removeCompany(row.company.id, reason, note, row.company.revision, o),
+      commit: (o) =>
+        sendVersioned(queryClient, `plan:${row.entryId}`, row.revision, () => cachedRow(queryClient, row.entryId)?.revision, o, (revision) =>
+          client.passPick(row.entryId, { reason, idempotencyKey: `plan:${row.entryId}:pass` }, revision, o).then(
+            (res) => {
+              // The API chose from the same bench; when another company came in, say which.
+              if ((res.added?.company.id ?? null) !== (next?.company.id ?? null)) toast(res.text);
+              return { ...res, revision: revision + 1 };
+            },
+            (err: unknown) => {
+              if (err instanceof ApiError && err.code === 'not_allowed') throw new ApiError('not_allowed', `Not passed. ${sentence(err.message)}`);
+              throw err;
+            },
+          ),
+        ),
     });
     return true;
   };
 
-  /**
-   * Why Not a fit must not start on this row, or null: a row that is not to do, or one with a step logged (on screen,
-   * pending included). The API removes no company with a LinkedIn request or an application out; that one is closed
-   * on its page.
-   */
-  const notAFitRefusal = (row: PlanRow): string | null => {
-    if (row.state !== 'todo') return `${row.company.name} is not on today's list to do.`;
-    if (row.steps.some((s) => s.at !== null)) {
-      return `Not removed. ${row.company.name} already has a request or an application logged. To stop, close it on its page.`;
-    }
-    return null;
+  /** Add to today from the bench: the company joins after the last pick. True when queued. */
+  const addFromBench = (companyId: Id, name: string): boolean => {
+    const id = `bench-add:${companyId}`;
+    if (isPending(id)) return false;
+    const bench = queryClient.getQueryData<BenchView>(queryKeys.bench);
+    const b = bench?.companies.find((c) => c.company.id === companyId);
+    if (!b) return refuse(`Not added. ${name} is no longer on the bench.`);
+    if (bench && bench.room <= 0) return refuse(`Not added. ${sentence(bench.roomText)}`);
+    if (cachedPlan(queryClient)?.rows.some((r) => r.company.id === companyId)) return refuse(`${name} is already on today's list.`);
+    const label = `Added ${name} to today.`;
+    write({
+      id,
+      label,
+      afterCommit: label,
+      patches: [
+        {
+          key: queryKeys.plan,
+          apply: (p: PlanView) => {
+            const rows = [...p.rows, benchToPick(b, p.rows.length + 1)];
+            return { ...p, rows, total: rows.length };
+          },
+        },
+        {
+          key: queryKeys.bench,
+          apply: (v: BenchView) => ({ ...v, companies: v.companies.filter((c) => c.company.id !== companyId), room: Math.max(0, v.room - 1) }),
+        },
+        shellPatch((s) => ({ ...s, plan: { ...s.plan, total: s.plan.total + 1 } })),
+      ],
+      commit: (o) =>
+        client.addFromBench(companyId, { idempotencyKey: `bench:${companyId}:add` }, o).catch((err: unknown) => {
+          if (err instanceof ApiError && err.code === 'not_allowed') throw new ApiError('not_allowed', `Not added. ${sentence(err.message)}`);
+          throw err;
+        }),
+    });
+    return true;
   };
 
   /** True while the newest save of this note waits in its window or for its commit: its checks are unknown. */
@@ -494,6 +557,6 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
   const confirming = (noteId: Id): boolean => isPending(`confirm:${noteId}`);
 
   return {
-    logRequest, logApplied, logPeople, saveSearch, skip, notAFit, notAFitRefusal, saveNote, confirmReason, answer, seeWins, noteSaving, confirming,
+    logRequest, logApplied, logPeople, saveSearch, skip, passPick, passRefusal, addFromBench, saveNote, confirmReason, answer, seeWins, noteSaving, confirming,
   };
 }

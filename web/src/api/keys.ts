@@ -13,6 +13,7 @@ export const queryKeys = {
   company: (id: Id) => ['company', id],
   done: ['done'],
   plan: ['plan'],
+  bench: ['plan', 'bench'],
   outcomePrompt: ['outcome-prompt'],
   wins: ['wins'],
   progress: ['progress'],

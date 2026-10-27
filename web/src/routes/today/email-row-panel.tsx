@@ -19,7 +19,7 @@ export function EmailRowPanel({
 }: {
   row: PlanRow;
   asOf: IsoTime;
-  actions: Pick<PanelActions, 'onCarry' | 'onNotFit'>;
+  actions: Pick<PanelActions, 'onCarry' | 'onNotNow'>;
   headingId?: string;
 }) {
   const client = usePageClient('plan');

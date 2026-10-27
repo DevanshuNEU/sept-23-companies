@@ -312,7 +312,32 @@ export interface CompanyQueue {
   peopleOnRecord: number; peopleLine: string;
   peopleSearchUrl: string; searchSaved: boolean; careersUrl: string | null;          // opened in his browser, never fetched
   terminalLine: string;                                                              // "Knock: Tessera Labs (company 1304), role: Forward Deployed Engineer"
+  // Top picks (2026-10-26): why today first, then the three research links. The app never fetches linkedin.com.
+  whyToday: string;                                                                  // "New grad role, first seen 6 hours ago"
+  opening: QueueOpening | null;
+  websiteUrl: string | null;                                                         // https of the company's domain
+  linkedinCompanyUrl: string;                                                        // a LinkedIn company search for the name
 }
+/** The opening a pick names: its level and age in words, and whether it is new (opened within 72 hours, visa gate clear). */
+export interface QueueOpening {
+  postingId: Id; title: string; url: string | null;
+  level: string | null;                                                              // "New grad role", "SWE II role"
+  age: string;                                                                       // "first seen 6 hours ago", "posted yesterday"
+  openedAt: IsoTime;
+  fresh: boolean; earlyFit: boolean;                                                 // earlyFit: new grad, early career, SWE I, or open asking 2 years or fewer
+  freshTag: string | null;                                                           // "New opening, 6 hours ago"
+  appliedNote: string | null;                                                        // "You applied on Oct 20; this is a new role."
+}
+/** Not now's reasons, in chip order (keys 1 to 8). None of them is a no-go. */
+export type PassReason = 'visa' | 'too_big' | 'too_early' | 'role' | 'product' | 'know_it' | 'not_a_fit' | 'other';
+export interface PassResult { passedEntryId: Id; company: CompanyRef; added: PlanRow | null; text: string }
+/** One company of the bench ("More options"), in the compact shape of a pick row. */
+export interface BenchCompany {
+  company: CompanyRef & { domain: string | null; hq: string; revision: Revision };
+  position: number; lane: ListGroup; role: RoleToName | null; queue: CompanyQueue;
+  fresh: boolean; earlyFit: boolean;
+}
+export interface BenchView { asOf: IsoTime; date: IsoDate; companies: BenchCompany[]; room: number; roomText: string }
 export interface InFlightCompany { company: CompanyRef; status: 'in_flight' | 'replied'; text: string; reason: string; freeOn: IsoDate | null }
 export interface PlanRow {
   entryId: Id; position: number; channel: 'linkedin_request' | 'email'; lane: ListGroup;
@@ -344,6 +369,7 @@ export interface PlanView {
   tomorrow: { total: number; text: string; preview: TomorrowRow[] };                     // total is room; preview is a dry run of the next plan
   week: { requests: number; accepts: number; replies: number };
   inFlight: InFlightCompany[];                                                       // waves out in the last 14 days and replies, replies first
+  passed: number;                                                                    // picks he said Not now to today (the bench filled each place)
 }
 
 // Done (spec 13.8)

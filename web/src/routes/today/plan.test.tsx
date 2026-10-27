@@ -546,96 +546,41 @@ describe('Today as a plan', () => {
     expect(within(panel()).queryByRole('button', { name: /^Log / })).not.toBeInTheDocument();
   });
 
-  it('n opens the not a fit dialog with the four reasons', async () => {
-    await openPlan();
-    press('n');
-    const dialog = await screen.findByRole('dialog', { name: 'Remove Pylon for good?' });
-    expect(within(dialog).getAllByRole('radio')).toHaveLength(4);
-    expect(within(dialog).getByLabelText('Not a fit for me')).toBeInTheDocument();
-    expect(within(dialog).getByLabelText('Already applied or in touch another way')).toBeInTheDocument();
-    expect(within(dialog).getByLabelText('Bigger than it looks')).toBeInTheDocument();
-    expect(within(dialog).getByLabelText('Other')).toBeInTheDocument();
-  });
-
-  it('Remove in the not a fit dialog removes the company at once and moves on', async () => {
+  it('n opens Not now with its reason chips, never the old remove dialog (his ruling, 2026-10-26)', async () => {
     const { client } = await openPlan();
     const remove = vi.spyOn(client, 'removeCompany');
     press('n');
-    const dialog = await screen.findByRole('dialog', { name: 'Remove Pylon for good?' });
-    fireEvent.click(within(dialog).getByLabelText('Bigger than it looks'));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
-    expect(await screen.findByText('Removed Pylon. Find it on the No-go list.')).toBeInTheDocument();
-    await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
-    expect(remove.mock.calls[0]?.[1]).toBe('bigger_than_it_looks');
-    await expect(remove.mock.results[0]?.value).resolves.toBeUndefined();
+    const chips = screen.getByRole('group', { name: 'Not now for Pylon' });
+    expect(within(chips).getAllByRole('button')).toHaveLength(10);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    press('4');
+    expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { level: 2, name: 'Jonah Park' })).toBeInTheDocument();
-  });
-
-  it('a removed company leaves the plan at once, as the API leaves it off, and nothing is logged for it', async () => {
-    const { client } = await openPlan();
-    const request = vi.spyOn(client, 'logRequest');
-    const applied = vi.spyOn(client, 'logApplied');
-    const skip = vi.spyOn(client, 'skipRow');
-    const pylon = (await client.plan()).rows[2]?.entryId;
-    press('n');
-    const dialog = await screen.findByRole('dialog', { name: 'Remove Pylon for good?' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
-    // At once, before the commit lands: the row is off the rail and out of the day's total.
-    expect(options()).toHaveLength(6);
-    expect(options().map((o) => o.textContent).join(' ')).not.toMatch(/Pylon/);
-    expect(screen.getByText('6 people, 2 done')).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { level: 2, name: 'Jonah Park' })).toBeInTheDocument();
-    // Once the commit and the refetch land, the API says the same, with the positions counted again.
-    await waitFor(async () => expect((await client.plan()).rows.map((r) => r.company.name)).not.toContain('Pylon'));
-    await waitFor(() => expect(option(3)).toHaveAccessibleName(/^3\. Jonah Park at Inngest/));
-    press('r');
+    expect(options().map((o) => o.textContent).join(' ')).not.toMatch(/Lena Ortiz/);
     await leavePage();
-    // r logged Jonah's request, never Pylon's; nothing was carried.
-    expect(request.mock.calls.every(([entryId]) => entryId !== pylon)).toBe(true);
-    expect(applied).not.toHaveBeenCalled();
-    expect(skip).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
   });
 
-  it('the finish line is reached when the last row to do is removed', async () => {
-    const db = buildFixture();
-    for (const r of db.plan.rows.slice(2, 6)) r.state = 'skipped';
-    await open({ db });
-    expect(await screen.findByRole('heading', { level: 2, name: 'Mintlify, by email' })).toBeInTheDocument();
-    const finish = () => document.querySelector('[data-finish]');
-    expect(finish()).toHaveAttribute('data-done', 'false');
-    press('n');
-    const dialog = await screen.findByRole('dialog', { name: 'Remove Mintlify for good?' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
-    await waitFor(() => expect(finish()).toHaveAttribute('data-done', 'true'));
-    expect(finish()).toHaveAttribute('aria-current', 'step');
-    // Mintlify is off the plan, as the API leaves a removed company off it.
-    expect(options()).toHaveLength(6);
-    expect(options().map((o) => o.textContent).join(' ')).not.toMatch(/Mintlify/);
-  });
-
-  it('Not a fit after a step is logged is refused up front, as the API keeps a company with a request out', async () => {
+  it('Not now after the request is logged is refused up front: he reached them', async () => {
     const { client } = await openPlan();
-    const remove = vi.spyOn(client, 'removeCompany');
+    const passed = vi.spyOn(client, 'passPick');
     press('r');
     expect(await screen.findByText('Logged: request sent to Lena Ortiz.')).toBeInTheDocument();
     press('n');
-    expect(await screen.findByText('Not removed. Pylon already has a request or an application logged. To stop, close it on its page.')).toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    fireEvent.click(within(panel()).getByRole('button', { name: 'Not a fit' }));
-    await act(async () => {});
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(await screen.findByText('You already reached Pylon today, so it stays on the list.')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: /Not now/ })).not.toBeInTheDocument();
     await leavePage();
-    expect(remove).not.toHaveBeenCalled();
+    expect(passed).not.toHaveBeenCalled();
   });
 
   it('n acts only on a row to do, like its button', async () => {
     await openPlan();
     fireEvent.click(option(1));
     await screen.findByRole('heading', { level: 2, name: 'Dana Whitfield' });
-    expect(within(panel()).queryByRole('button', { name: 'Not a fit' })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
     press('n');
     await act(async () => {});
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: /Not now/ })).not.toBeInTheDocument();
   });
 
   it('coming back to a row with a kept edit does not take focus into the editor', async () => {

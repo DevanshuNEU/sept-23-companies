@@ -45,6 +45,7 @@ from outreach.outcomes.windows import day_bounds_utc, next_weekday, ny_day, week
 from outreach.plan.build import build_plan
 from outreach.plan.capacity import linkedin_capacity, plan_capacity
 from outreach.plan.config import PlanConfig
+from outreach.plan.fresh import as_utc
 from outreach.plan.outbound import load_outbound
 from outreach.plan.people import people_search_url
 from outreach.plan.prospects import HANDOFF
@@ -254,8 +255,10 @@ def _company_asked(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: Pl
     return out
 
 
-def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanConfig) -> list[PlanRow]:
-    """A `PlanRow` for each entry, in the entries' order, positions 1 up. One query per table, however many rows."""
+def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanConfig,
+               now: str | None = None) -> list[PlanRow]:
+    """A `PlanRow` for each entry, in the entries' order, positions 1 up. One query per table, however many rows.
+    `now` is the moment a company row's opening is aged at (default: the plan's moment for the list date)."""
     if not entries:
         return []
     parents = merge_parents(conn)
@@ -288,7 +291,7 @@ def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanCo
                for e, p in zip(entries, parsed_all)}
     # Company first (#9): a company row's lines, as of the list's own date (every entry here shares it).
     facts = queue_facts(conn, entries, daily, canonical_ids(conn), cfg, date.fromisoformat(entries[0]["list_date"]),
-                        reasons)
+                        reasons, now=as_utc(now) if now else None)
     rows = []
     for position, (e, d, parsed) in enumerate(zip(entries, daily, parsed_all), 1):
         person = people.get(e["person_id"]) if e["person_id"] is not None else None
@@ -335,14 +338,31 @@ def build_rows(conn: sqlite3.Connection, entries: list[sqlite3.Row], cfg: PlanCo
     return rows
 
 
-def build_row(conn: sqlite3.Connection, entry_id: int, cfg: PlanConfig) -> PlanRow | None:
+def build_row(conn: sqlite3.Connection, entry_id: int, cfg: PlanConfig, now: str | None = None) -> PlanRow | None:
     """One row exactly as `GET /api/plan` shows it (its position among the rows of its date), or None when the entry
     is gone or removed. The writes answer with it."""
     row = conn.execute(f"{ENTRY_SQL} WHERE rowid = ?", (entry_id,)).fetchone()
     if row is None:
         return None
-    return next((r for r in build_rows(conn, entries_of(conn, row["list_date"]), cfg) if r.entry_id == entry_id),
-                None)
+    return next((r for r in in_pick_order(build_rows(conn, entries_of(conn, row["list_date"]), cfg, now))
+                 if r.entry_id == entry_id), None)
+
+
+def _desc(ts: str) -> str:
+    """A canonical timestamp as a key that sorts newest first."""
+    return "".join(chr(0x7f - ord(c)) for c in ts)
+
+
+def in_pick_order(rows: list[PlanRow]) -> list[PlanRow]:
+    """Top picks: rows with a new opening first (early career fits, then the others), each newest opening first,
+    then the plan's own order; positions numbered again from 1."""
+    def key(r: PlanRow) -> tuple:
+        o = r.queue.opening if r.queue is not None else None
+        if o is None or not o.fresh:
+            return (2, "")
+        return (0 if o.early_fit else 1, _desc(o.opened_at))
+    ordered = sorted(rows, key=key)  # stable: the plan's own order after that
+    return [r if r.position == i else r.model_copy(update={"position": i}) for i, r in enumerate(ordered, 1)]
 
 
 # ---------------------------------------------------------------------------------------------- the view
@@ -457,13 +477,13 @@ def from_plan_job(conn: sqlite3.Connection, day: str) -> bool:
         "LIMIT 1", (day,)).fetchone() is not None
 
 
-def plan_rows(conn: sqlite3.Connection, day: str, cfg: PlanConfig) -> list[PlanRow] | None:
+def plan_rows(conn: sqlite3.Connection, day: str, cfg: PlanConfig, now: str | None = None) -> list[PlanRow] | None:
     """The rows of the day's people plan, or None when there is none (no list, or a list the lean Today stored). The
     plan view, the shell and progress count from these, so they always agree."""
     if conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (day,)).fetchone() is None \
             or not from_plan_job(conn, day):
         return None
-    return build_rows(conn, entries_of(conn, day), cfg)
+    return in_pick_order(build_rows(conn, entries_of(conn, day), cfg, now))
 
 
 def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
@@ -475,7 +495,7 @@ def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
     lean = built is not None and not from_plan_job(conn, day)
     if lean:
         built = None
-    rows = plan_rows(conn, day, cfg) or []
+    rows = plan_rows(conn, day, cfg, now) or []
     week = linkedin_capacity(conn, canon, date.fromisoformat(day), cfg)
     return PlanView(
         as_of=now, date=day, built_at=built["built_at"] if built is not None else None,

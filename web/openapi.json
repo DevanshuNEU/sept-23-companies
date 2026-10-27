@@ -1,6 +1,22 @@
 {
   "components": {
     "schemas": {
+      "AddFromBenchBody": {
+        "additionalProperties": false,
+        "description": "Add a bench company to today's list. `idempotencyKey` is `bench:<companyId>:add`: once it landed, the same\nkey answers with the row and writes nothing.",
+        "properties": {
+          "idempotencyKey": {
+            "pattern": "^[A-Za-z0-9:._-]{1,200}$",
+            "title": "Idempotencykey",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotencyKey"
+        ],
+        "title": "AddFromBenchBody",
+        "type": "object"
+      },
       "BaseRates": {
         "properties": {
           "accepts": {
@@ -49,6 +65,96 @@
           "minRequests"
         ],
         "title": "BaseRates",
+        "type": "object"
+      },
+      "BenchCompany": {
+        "description": "One company of the bench (\"More options\"), in the compact shape of a pick row.",
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/PlanCompany"
+          },
+          "earlyFit": {
+            "title": "Earlyfit",
+            "type": "boolean"
+          },
+          "fresh": {
+            "title": "Fresh",
+            "type": "boolean"
+          },
+          "lane": {
+            "enum": [
+              "level_role",
+              "intern_junior",
+              "any_us_role",
+              "reason_no_role"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/CompanyQueue"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleToName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "company",
+          "position",
+          "lane",
+          "role",
+          "queue",
+          "fresh",
+          "earlyFit"
+        ],
+        "title": "BenchCompany",
+        "type": "object"
+      },
+      "BenchView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "companies": {
+            "items": {
+              "$ref": "#/components/schemas/BenchCompany"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "room": {
+            "title": "Room",
+            "type": "integer"
+          },
+          "roomText": {
+            "title": "Roomtext",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asOf",
+          "date",
+          "companies",
+          "room",
+          "roomText"
+        ],
+        "title": "BenchView",
         "type": "object"
       },
       "Check": {
@@ -674,6 +780,21 @@
             ],
             "title": "Lasttouch"
           },
+          "linkedinCompanyUrl": {
+            "default": "",
+            "title": "Linkedincompanyurl",
+            "type": "string"
+          },
+          "opening": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueueOpening"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "peopleLine": {
             "title": "Peopleline",
             "type": "string"
@@ -729,6 +850,22 @@
           "terminalLine": {
             "title": "Terminalline",
             "type": "string"
+          },
+          "websiteUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Websiteurl"
+          },
+          "whyToday": {
+            "default": "",
+            "title": "Whytoday",
+            "type": "string"
           }
         },
         "required": [
@@ -746,7 +883,11 @@
           "peopleSearchUrl",
           "searchSaved",
           "careersUrl",
-          "terminalLine"
+          "terminalLine",
+          "whyToday",
+          "opening",
+          "websiteUrl",
+          "linkedinCompanyUrl"
         ],
         "title": "CompanyQueue",
         "type": "object"
@@ -4079,6 +4220,83 @@
         "title": "OutcomePromptView",
         "type": "object"
       },
+      "PassPickBody": {
+        "additionalProperties": false,
+        "description": "Not now on a pick. `reason` is one of the chips, or none. `idempotencyKey` is the pass's own key\n(`plan:<entryId>:pass`): the same key again answers with the first answer and writes nothing. It changes the\nrow's state, so a stale `revision` conflicts.",
+        "properties": {
+          "idempotencyKey": {
+            "pattern": "^[A-Za-z0-9:._-]{1,200}$",
+            "title": "Idempotencykey",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "visa",
+                  "too_big",
+                  "too_early",
+                  "role",
+                  "product",
+                  "know_it",
+                  "not_a_fit",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "idempotencyKey",
+          "revision"
+        ],
+        "title": "PassPickBody",
+        "type": "object"
+      },
+      "PassResult": {
+        "description": "Not now on a pick: the row left today's list (the company is kept everywhere, it is not a no-go), and the\nnext best company from the bench took its place, or none when the bench is empty.",
+        "properties": {
+          "added": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanRow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyRef"
+          },
+          "passedEntryId": {
+            "title": "Passedentryid",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "passedEntryId",
+          "company",
+          "added",
+          "text"
+        ],
+        "title": "PassResult",
+        "type": "object"
+      },
       "PauseSendingBody": {
         "additionalProperties": false,
         "properties": {
@@ -4997,6 +5215,93 @@
           "revision"
         ],
         "title": "Pulse",
+        "type": "object"
+      },
+      "QueueOpening": {
+        "description": "The opening a pick names (top picks, 2026-10-26): the row's role, its level and age, and whether it is new.",
+        "properties": {
+          "age": {
+            "title": "Age",
+            "type": "string"
+          },
+          "appliedNote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Appliednote"
+          },
+          "earlyFit": {
+            "title": "Earlyfit",
+            "type": "boolean"
+          },
+          "fresh": {
+            "title": "Fresh",
+            "type": "boolean"
+          },
+          "freshTag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshtag"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "openedAt": {
+            "title": "Openedat",
+            "type": "string"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "postingId",
+          "title",
+          "url",
+          "level",
+          "age",
+          "openedAt",
+          "fresh",
+          "earlyFit",
+          "freshTag",
+          "appliedNote"
+        ],
+        "title": "QueueOpening",
         "type": "object"
       },
       "QueueStanding": {
@@ -11234,6 +11539,191 @@
         ]
       }
     },
+    "/api/plan/bench": {
+      "get": {
+        "operationId": "bench",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Bench",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/bench/{company_id}/add": {
+      "post": {
+        "operationId": "add_from_bench",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddFromBenchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanRow"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Add From Bench",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
     "/api/plan/{entry_id}/apply": {
       "post": {
         "operationId": "log_applied",
@@ -11343,6 +11833,120 @@
           }
         },
         "summary": "Log Applied",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/{entry_id}/pass": {
+      "post": {
+        "operationId": "pass_pick",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PassPickBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Pass Pick",
         "tags": [
           "plan"
         ]

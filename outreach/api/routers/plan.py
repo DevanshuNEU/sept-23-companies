@@ -1,6 +1,8 @@
 """The people plan (#15): `GET /api/plan` and the writes on its rows and notes.
 
 `POST /api/plan/{entryId}/request`, `/apply`, `/search` and `/skip` answer with the row as the plan shows it;
+`POST /api/plan/{entryId}/pass` (Not now, top picks) answers with the company that came in from the bench;
+`GET /api/plan/bench` is the bench ("More options") and `POST /api/plan/bench/{companyId}/add` adds one of it;
 `POST /api/plan/{entryId}/people` (company first: the people he asked, pasted) answers with the row and each person
 logged; `PUT
 /api/notes/{noteId}` and `POST /api/notes/{noteId}/confirm` answer with the note. Each is one `run_write`. See
@@ -11,12 +13,15 @@ from fastapi import APIRouter, Depends, Request, Response
 from outreach.api.clock import Clock, get_clock
 from outreach.api.db import read_conn
 from outreach.api.idempotency import run_write
-from outreach.api.models.plan import LogPeopleResult, NoteDraft, PlanRow, PlanView
+from outreach.api.models.plan import BenchView, LogPeopleResult, NoteDraft, PassResult, PlanRow, PlanView
 from outreach.api.models.plan_writes import (
-    ConfirmReasonBody, LogAppliedBody, LogPeopleBody, LogRequestBody, SaveNoteBody, SaveSearchBody, SkipRowBody,
+    AddFromBenchBody, ConfirmReasonBody, LogAppliedBody, LogPeopleBody, LogRequestBody, PassPickBody, SaveNoteBody,
+    SaveSearchBody, SkipRowBody,
 )
+from outreach.api.queries import bench as bench_queries
 from outreach.api.queries import plan as queries
 from outreach.api.routers import row_id
+from outreach.api.services import picks
 from outreach.api.services import plan as service
 from outreach.drafts.checks import load_banned
 from outreach.plan.config import default_plan_config
@@ -30,6 +35,25 @@ def plan(request: Request, clock: Clock = Depends(get_clock)) -> PlanView:
     now = clock()
     with read_conn(request) as conn:
         return queries.plan_view(conn, now, default_plan_config())
+
+
+@router.get("/plan/bench", response_model=BenchView)
+def bench(request: Request, clock: Clock = Depends(get_clock)) -> BenchView:
+    now = clock()
+    with read_conn(request) as conn:
+        return bench_queries.bench_view(conn, now, default_plan_config())
+
+
+@router.post("/plan/{entry_id}/pass", response_model=PassResult)
+def pass_pick(body: PassPickBody, request: Request, entry_id: int = row_id()) -> Response:
+    cfg = default_plan_config()
+    return run_write(request, lambda ctx: picks.pass_pick(ctx, entry_id, body, cfg))
+
+
+@router.post("/plan/bench/{company_id}/add", response_model=PlanRow)
+def add_from_bench(body: AddFromBenchBody, request: Request, company_id: int = row_id()) -> Response:
+    cfg = default_plan_config()
+    return run_write(request, lambda ctx: picks.add_from_bench(ctx, company_id, body, cfg))
 
 
 def _banned(request: Request, cfg) -> list:

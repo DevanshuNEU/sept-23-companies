@@ -16,7 +16,10 @@ holds, one query per table however many rows:
 - the people on record, and how many were asked;
 - the people search: his saved search (an `event` of kind `linkedin_search_saved`), else a stored LinkedIn company id
   (a `company_alias` of source `linkedin`, key `linkedin:<id>`), else the name (`people_search_url`);
-- the careers link (`pick_careers_url`) and the one line he copies to his terminal.
+- the careers link (`pick_careers_url`) and the one line he copies to his terminal;
+- top picks (2026-10-26): the opening the row names, with its level and age and whether it is new (`outreach.plan.fresh`:
+  opened within `queue.fresh_hours` at his level and clear of the visa gate), the one line of why today, the company's
+  website (https of its domain) and a LinkedIn company search for its name (never fetched).
 
 `in_flight` lists every company still being worked with a wave out inside `linkedin.rotate_days` (a queued email
 counts) or a reply, replies first, then by the day each is free again. Reads only; the app never fetches LinkedIn.
@@ -24,10 +27,11 @@ counts) or a reply, replies first, then by the day each is free again. Reads onl
 import json
 import sqlite3
 from collections.abc import Sequence
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from urllib.parse import quote, urlsplit
 
 from outreach.api.models.company import CompanyRef
-from outreach.api.models.plan import CompanyQueue, InFlightCompany, QueueStanding
+from outreach.api.models.plan import CompanyQueue, InFlightCompany, QueueOpening, QueueStanding
 from outreach.api.models.today import DailyEntry
 from outreach.api.queries.company import Holds
 from outreach.api.queries.outcomes import by_ids, company_refs, people_by_ids
@@ -35,18 +39,21 @@ from outreach.plan.careers import pick_careers_url
 from outreach.plan.config import PlanConfig
 from outreach.plan.contact import ContactState, contact_states
 from outreach.plan.dates import ny_date
+from outreach.plan.fresh import (Opening, age_words, as_utc, fresh_tag, level_words, load_applied, load_openings,
+                                 load_visa_facts, opened, plan_moment, visa_clear)
 from outreach.plan.outbound import Outbound, load_outbound
 from outreach.plan.people import (linkedin_search_url, load_candidates, people_search_url, pick_channel,
                                   rank_people)
 from outreach.plan.route import day_text
 from outreach.ranking.confidence import scrub_text
 
-__all__ = ["SAVED_SEARCH", "LINKEDIN_ALIAS", "HIRING_DAYS", "standing", "queue_facts", "in_flight",
-           "saved_searches", "linkedin_ids"]
+__all__ = ["SAVED_SEARCH", "LINKEDIN_ALIAS", "HIRING_DAYS", "LINKEDIN_COMPANY_SEARCH", "standing", "queue_facts",
+           "in_flight", "saved_searches", "linkedin_ids", "website_url", "linkedin_company_url"]
 
 SAVED_SEARCH = "linkedin_search_saved"  # event kind: his saved people search for a company, detail {url}
 LINKEDIN_ALIAS = "linkedin:"  # company_alias key prefix of a LinkedIn company id (source 'linkedin')
 HIRING_DAYS = 30
+LINKEDIN_COMPANY_SEARCH = "https://www.linkedin.com/search/results/companies/?keywords="
 REASONS = 3
 CONFIDENCE = {"confirmed": None, "estimate": "estimate", "guess": "guess"}
 STAGES = {"pre_seed": "pre-seed", "seed": "seed", "series_a": "Series A", "series_b": "Series B",
@@ -168,6 +175,32 @@ def _hiring_line(n: int) -> str:
     return f"{n} new engineering {'role' if n == 1 else 'roles'} in the last {HIRING_DAYS} days"
 
 
+def website_url(domain: str | None) -> str | None:
+    """`https://<domain>` for a plain host name, else None (no path, no scheme, no spaces)."""
+    if not isinstance(domain, str):
+        return None
+    host = domain.strip().lower().removeprefix("www.")
+    if not host or any(c in host for c in "/:?#@ ") or "." not in host:
+        return None
+    try:
+        return f"https://{host}" if urlsplit(f"https://{host}").hostname == host else None
+    except ValueError:
+        return None
+
+
+def linkedin_company_url(name: str) -> str:
+    """A LinkedIn company search for the name: the app never fetches linkedin.com, he opens it."""
+    return LINKEDIN_COMPANY_SEARCH + quote(" ".join(name.split()), safe="")
+
+
+def _plain_url(url: str | None) -> str | None:
+    try:
+        parts = urlsplit(url or "")
+    except ValueError:
+        return None
+    return url if parts.scheme in ("http", "https") and parts.hostname else None
+
+
 # ---------------------------------------------------------------------------------------------- bulk reads
 
 def _family(canon: dict[int, int], survivors: set[int]) -> tuple[set[int], dict[int, int]]:
@@ -237,13 +270,15 @@ def _email_hints(conn: sqlite3.Connection, survivors: set[int], canon: dict[int,
 
 def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily: Sequence[DailyEntry],
                 canon: dict[int, int], cfg: PlanConfig, today: date,
-                fallback: dict[int, str]) -> dict[int, CompanyQueue]:
+                fallback: dict[int, str], *, now: datetime | None = None) -> dict[int, CompanyQueue]:
     """A `CompanyQueue` for every company row (no person, not an email row), by the entry's rowid. `fallback` is
-    each row's reason, the one reason shown when the stored why has no signal reasons."""
+    each row's reason, the one reason shown when the stored why has no signal reasons. `now` is the moment the
+    opening's age and freshness are read at (default `plan_moment(today)`)."""
     rows = [(e, d) for e, d in zip(entries, daily) if e["person_id"] is None and e["channel"] != "email"]
     if not rows:
         return {}
     tz = cfg.get("plan", "timezone")
+    now = now or plan_moment(today, tz)
     survivors = {d.company.id for _, d in rows}
     family, owner = _family(canon, survivors)
     outbound = load_outbound(conn, canon, tz=tz, company_ids=survivors)
@@ -252,6 +287,9 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
     roles = {r["posting_id"]: r for r in by_ids(conn, "SELECT posting_id, posted_on, first_seen_at FROM posting "
                                                       "WHERE posting_id IN ({ids})",
                                                 {d.role.posting_id for _, d in rows if d.role is not None})}
+    fresh_ids = {o.posting_id: o for os in load_openings(conn, canon, now, cfg).values() for o in os}
+    visa = load_visa_facts(conn, canon, survivors)
+    applied = load_applied(conn, canon, tz)
     boards: dict[int, list[tuple[str, str]]] = {}
     for r in by_ids(conn, "SELECT company_id, ats, token FROM board WHERE active = 1 AND company_id IN ({ids}) "
                           "ORDER BY board_id", family):
@@ -281,12 +319,15 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
         word = d.sponsorship if role is not None or d.sponsorship != "not_stated" else "not_stated"
         sponsorship = ", ".join(w for w in (SPONSORSHIP[word], EVERIFY.get(everify.get(cid))) if w)
         n = hiring.get(cid, 0)
+        reasons = _reasons(e["why"], fallback.get(e["rowid"], "Ranked for today."))
+        opening = _opening(role, posted, fresh_ids, visa.get(cid, (None, None)), applied.get(cid),
+                           e["list_group"] == "intern_junior", now, tz)
         out[e["rowid"]] = CompanyQueue(
             size_line=size_line(d.size, d.stage),
             role_line=f"{role.title}, {_posted_age(posted, today, tz)}" if role is not None and posted is not None
             else None,
             hiring=n, hiring_line=_hiring_line(n), sponsorship_line=sponsorship,
-            reasons=_reasons(e["why"], fallback.get(e["rowid"], "Ranked for today.")),
+            reasons=reasons,
             standing=standing(st, today, cfg, held=d.company.held),
             last_touch=_last_touch(by_company.get(cid, ()), people),
             email_hint=hints.get(cid),
@@ -296,8 +337,46 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
             careers_url=pick_careers_url(posting_url=role.url if role is not None else None,
                                          boards=boards.get(cid, ()), watched_url=watched.get(cid),
                                          domain=d.company.domain),
-            terminal_line=f"Knock: {d.company.name} (company {cid})" + (f", role: {role.title}" if role else ""))
+            terminal_line=f"Knock: {d.company.name} (company {cid})" + (f", role: {role.title}" if role else ""),
+            why_today=_why_today(opening, reasons), opening=opening, website_url=website_url(d.company.domain),
+            linkedin_company_url=linkedin_company_url(d.company.name))
     return out
+
+
+def _opening(role, posted: sqlite3.Row | None, fresh_ids: dict, visa: tuple, applied_on: date | None, intern: bool,
+             now: datetime, tz: str) -> QueueOpening | None:
+    """The row's role as an opening: its level, its age and, when it is one of `load_openings` and the company clears
+    the visa gate, new. An application there before it was first seen is said."""
+    if role is None or posted is None:
+        return None
+    fresh = fresh_ids.get(role.posting_id)
+    if fresh is not None and not visa_clear(fresh.stance, *visa):
+        fresh = None
+    if fresh is not None:
+        age, tag, early = age_words(fresh, now, tz), fresh_tag(fresh, now, tz), fresh.early_fit
+        seen_on, at = fresh.first_seen_on, fresh.opened_at
+    else:  # the same words for a role that is not new
+        seen = as_utc(posted["first_seen_at"])
+        posted_on = date.fromisoformat(posted["posted_on"]) if posted["posted_on"] else None
+        at, timed = opened(posted_on, seen, tz)
+        o = Opening(posting_id=role.posting_id, company_id=0, title=role.title, url=role.url, location=role.location,
+                    lane="intern_junior" if intern else "level_role", level_tier=role.level_tier,
+                    years_asked=role.years_asked, stance="silent", posted_on=posted_on, first_seen_at=seen,
+                    first_seen_on=ny_date(posted["first_seen_at"], tz), opened_at=at, timed=timed)
+        age, tag, early, seen_on = age_words(o, now, tz), None, o.early_fit, o.first_seen_on
+    note = (f"You applied on {day_text(applied_on)}; this is a new role."
+            if applied_on is not None and seen_on > applied_on else None)
+    return QueueOpening(posting_id=role.posting_id, title=scrub_text(role.title), url=_plain_url(role.url),
+                        level=level_words(role.level_tier, role.years_asked, intern=intern), age=age,
+                        opened_at=at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        fresh=fresh is not None, early_fit=early, fresh_tag=tag, applied_note=note)
+
+
+def _why_today(opening: QueueOpening | None, reasons: list[str]) -> str:
+    """The one line under the name: the opening's level and age, else the top reason it ranks."""
+    if opening is not None:
+        return f"{opening.level or 'Open role'}, {opening.age}"
+    return reasons[0] if reasons else "Ranked for today."
 
 
 # ---------------------------------------------------------------------------------------------- in flight

@@ -2,6 +2,7 @@ import type { RouteObject } from 'react-router';
 import { RootError, RouteError } from '@/app/route-error';
 import { AppShell } from '@/shell/app-shell';
 import {
+  BrowsePage,
   CompanyPage,
   DonePage,
   LinkedInPage,
@@ -24,6 +25,7 @@ import {
 export const viewRoutes: RouteObject[] = [
   { path: 'today', element: <TodayPage /> },
   { path: 'proposals', element: <ProposalsPage /> },
+  { path: 'browse', element: <BrowsePage /> },
   { path: 'outbox', element: <OutboxPage />, children: [{ path: ':touchId', element: <ParentReads /> }] },
   { path: 'linkedin', element: <LinkedInPage /> },
   { path: 'needs-you', element: <NeedsYouPage /> },

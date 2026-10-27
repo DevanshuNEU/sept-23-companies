@@ -389,7 +389,7 @@ export interface BenchView {
 export interface BrowseCompany extends BenchCompany { blocked: string | null; worked: boolean }
 export interface BrowseView { asOf: IsoTime; date: IsoDate; companies: BrowseCompany[]; total: number; nextAfter: number | null }
 /** What the Browse drawer asks for: a name search, three filters and the cursor (`after`, the stored position of the last row seen; 0 for the first page). */
-export interface BrowseParams { q: string; levelRole: boolean; visaOk: boolean; unworked: boolean; after: number }
+export interface BrowseParams { q: string; levelRole: boolean; visaOk: boolean; unworked: boolean; after: number; limit?: number }
 /** A swap: the chosen company took the pick's slot as `row`; the replaced pick is back on the bench (it is not a Not now). */
 export interface SwapResult { replacedEntryId: Id; replaced: CompanyRef; row: PlanRow; text: string }
 export interface InFlightCompany { company: CompanyRef; status: 'in_flight' | 'replied'; text: string; reason: string; freeOn: IsoDate | null }

@@ -1,49 +1,47 @@
 import { expect, test } from './fixtures';
 
-// Browse companies (#120, F), on the `queue` sample: every company the plan could pick, paged, with a name search and
-// three filters. "Use instead of..." swaps one of today's picks for the company: not a Not now, no room used.
-test('Browse companies: search, filters, paging, a refused company and a swap by keyboard', async ({ page, consoleErrors }) => {
+// Browse companies (#120), the full page at /browse, on the `queue` sample: every company the plan could pick, in one
+// labelled table, with a name search and three filters. "Use instead of..." swaps one of today's picks for the
+// company: not a Not now, no room used.
+test('Browse companies: the table, search, filters, a refused company and a swap by keyboard', async ({ page, consoleErrors }) => {
   await page.clock.install({ time: new Date('2026-11-10T15:14:00Z') });
   await page.goto('/today?scenario=queue');
   const rail = page.getByRole('listbox', { name: "Today's picks" });
   await expect(rail.getByRole('option')).toHaveCount(8);
-
-  // The sidebar's link opens Today with the drawer; Escape closes it, and F opens it again.
-  await page.getByRole('link', { name: 'Browse companies' }).click();
-  await expect(page).toHaveURL(/browse=1/);
-  await expect(page.getByRole('dialog', { name: /Browse companies/ })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: /Browse companies/ })).toHaveCount(0);
-  await expect(page).not.toHaveURL(/browse=1/);
   await expect(page.getByRole('button', { name: /^Browse companies/ })).toHaveCount(0); // no button in the rail
+
+  // The sidebar link opens the page; F on Today does the same.
+  await page.getByRole('link', { name: 'Browse companies' }).click();
+  await expect(page).toHaveURL(/\/browse/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Browse companies' })).toBeVisible();
+  await page.goBack();
+  await expect(rail.getByRole('option')).toHaveCount(8);
   await page.locator('body').press('f');
-  const drawer = page.getByRole('dialog', { name: /Browse companies/ });
-  const rows = drawer.getByRole('list', { name: 'Companies' }).getByRole('listitem');
-  await expect(rows).toHaveCount(25);
-  await expect(rows.first()).toContainText('Retell AI');
-  await expect(drawer).not.toContainText('Pylon'); // on today's list
-  await expect(drawer).not.toContainText('Warp'); // in flight: never listed
+  await expect(page).toHaveURL(/\/browse/);
 
-  // Paging: 25 a page, no repeats.
-  await drawer.getByRole('button', { name: 'Show more' }).click();
+  const table = page.getByRole('table', { name: 'Companies' });
+  const rows = table.locator('tbody tr[data-browse]');
+  await expect(table.getByRole('columnheader')).toHaveText(['Rank', 'Company', 'Fit', 'Why it ranked', 'Open role', 'Size and stage', 'Visa', 'Email', 'Research', 'Action']);
   await expect(rows).toHaveCount(42);
-  await expect(drawer.getByRole('button', { name: 'Show more' })).toHaveCount(0);
+  await expect(page.getByText('Showing 42 of 42 companies')).toBeVisible();
+  await expect(rows.first()).toContainText('Retell AI');
+  await expect(table).not.toContainText('Pylon'); // on today's list
+  await expect(table).not.toContainText('Warp'); // in flight: never listed
 
-  // Search by name key, then a filter chip.
-  const search = drawer.getByRole('searchbox', { name: 'Search companies by name' });
+  // Search by name key, then each filter chip.
+  const search = page.getByRole('searchbox', { name: 'Search companies by name' });
   await search.fill('retell');
   await expect(rows).toHaveCount(1);
   await search.fill('...');
-  await expect(drawer).toContainText('No company matches');
+  await expect(page.getByText('No company matches')).toBeVisible();
   await search.fill('');
-  await expect(rows).toHaveCount(42); // the pages he already loaded are kept
-  const all = await drawer.getByText(/\d+ companies, best ranked first/).textContent();
+  await expect(rows).toHaveCount(42);
   for (const chip of ['Role at my level', 'Visa not a no', 'Not worked yet']) {
-    await drawer.getByRole('button', { name: chip }).click();
-    await expect(drawer.getByRole('button', { name: chip })).toHaveAttribute('aria-pressed', 'true');
-    await expect(drawer.getByText(/\d+ companies, best ranked first/)).not.toHaveText(all ?? '');
-    await drawer.getByRole('button', { name: chip }).click();
-    await expect(drawer.getByText(/\d+ companies, best ranked first/)).toHaveText(all ?? '');
+    await page.getByRole('button', { name: chip }).click();
+    await expect(page.getByRole('button', { name: chip })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByText('Showing 42 of 42 companies')).toHaveCount(0);
+    await page.getByRole('button', { name: chip }).click();
+    await expect(page.getByText('Showing 42 of 42 companies')).toBeVisible();
   }
 
   // A company held back: listed with its reason, no button.
@@ -54,32 +52,31 @@ test('Browse companies: search, filters, paging, a refused company and a swap by
   await search.fill('');
   await expect(rows).toHaveCount(42);
 
-  // The keys: arrows move, Enter opens Use instead of..., Escape steps back, a digit swaps.
+  // The keys: arrows move, Enter opens Use instead of..., Escape closes it, a digit swaps.
   await search.press('ArrowDown');
   await expect(rows.nth(1)).toHaveAttribute('aria-current', 'true');
   await search.press('ArrowUp');
   await expect(rows.first()).toHaveAttribute('aria-current', 'true');
   await search.press('Enter');
-  const chooser = drawer.getByRole('group', { name: 'Use Retell AI instead of' });
+  const chooser = page.getByRole('group', { name: 'Use Retell AI instead of' });
   await expect(chooser).toContainText('It is not a Not now, and it uses no room.');
   await expect(chooser.getByRole('button')).toHaveCount(6); // Resend and Baseten were reached
   await page.keyboard.press('Escape');
   await expect(chooser).toHaveCount(0);
-  await expect(drawer).toBeVisible();
+  await expect(page).toHaveURL(/\/browse/); // Escape closed the list, it did not leave the page
   await page.keyboard.press('Enter');
   await expect(chooser).toBeVisible();
   await page.keyboard.press('1');
   await expect(page.getByText('Swapped in Retell AI for Pylon.')).toBeVisible();
-  await expect(page.getByRole('dialog', { name: /Browse companies/ })).toHaveCount(0);
+  await expect(rows.filter({ hasText: 'Retell AI' })).toHaveCount(0); // it is on today's list now
+  await page.clock.runFor(9000); // the undo window closes and the swap commits
+  await expect(rows.filter({ hasText: 'Pylon' })).toHaveCount(1); // the replaced pick is back in the list
+
+  // On Today: the swapped company is in the rail, no pass counted.
+  await page.getByRole('link', { name: /^Today/ }).click();
   await expect(rail.getByRole('option')).toHaveCount(8);
   await expect(rail).toContainText('Retell AI');
   await expect(rail).not.toContainText('Pylon');
-  await page.clock.runFor(9000); // the undo window closes and the swap commits
-  await expect(page.getByText('8 picks', { exact: true })).toBeVisible(); // no "passed" count: it is not a Not now
-
-  // The replaced pick is back on More options, with no cooldown.
-  await page.locator('body').press('b');
-  const bench = page.getByRole('dialog', { name: /More options/ });
-  await expect(bench.getByRole('list', { name: 'More options' })).toContainText('Pylon');
+  await expect(page.getByText('8 picks', { exact: true })).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });

@@ -25,7 +25,6 @@ import { cn } from '@/lib/utils';
 import { openExternal, safeHref } from '@/lib/safe-href';
 import { useViewQuery } from '@/pending/pending';
 import { BenchDrawer } from './bench-drawer';
-import { BrowseDrawer } from './browse-drawer';
 import { CompanyPanel } from './company-panel';
 import { EmailLaneList } from './email-lane';
 import { EmailRowPanel } from './email-row-panel';
@@ -38,7 +37,6 @@ import { OutcomePrompt } from './outcome-prompt';
 import { PassChips } from './pass-chips';
 import { ProfileFold, ProfilePanel } from './profile-panel';
 import { canLogPeople, isCompanyRow, nextTodoAfter, peopleFieldId } from './plan-steps';
-import { useUrlState } from '@/lib/url-state';
 import { usePlanActions } from './use-plan-actions';
 import { WatchList } from './watch-list';
 import { WinStrip } from './win-strip';
@@ -396,6 +394,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
   useHotkeys([
     { keys: 'shift+c', label: isQueue(plan) ? 'Copy every company line for the terminal' : 'Copy every find-someone handoff', group, run: copyAllHandoffs },
     { keys: 'b', label: 'More options (the bench)', group, inDialogs: true, run: () => setBenchOpen((o) => !o) },
+    { keys: 'f', label: 'Browse companies', group, run: () => navigate('/browse') },
   ]);
 
   /* ------------------------------------------------------------------ layout */
@@ -578,20 +577,6 @@ function useNewOpeningToast(bench: BenchView | undefined, show: () => void) {
   }, [bench, show]);
 }
 
-/**
- * Browse companies (the sidebar's entry, or F): a drawer over Today, open while the URL has `?browse=1`, so the sidebar
- * link opens it and a reload keeps it. It is here, not in the plan's work area, so it opens even before today's plan is
- * built; with no plan there are no picks to swap, and the list is for looking.
- */
-function BrowseOnToday({ rows }: { rows: PlanRow[] }) {
-  const actions = usePlanActions();
-  const [flag, setFlag] = useUrlState('browse', '');
-  const open = flag === '1';
-  const setOpen = (o: boolean) => setFlag(o ? '1' : '');
-  useHotkeys([{ keys: 'f', label: 'Browse companies', group: 'Today', inDialogs: true, run: () => setOpen(!open) }]);
-  return <BrowseDrawer open={open} onOpenChange={setOpen} rows={rows} onSwap={actions.swapPick} />;
-}
-
 export default function TodayPage() {
   const client = usePageClient('plan');
   const plan = useViewQuery(queryKeys.plan, () => client.plan(), { pollMs: pollMs.default });
@@ -601,7 +586,6 @@ export default function TodayPage() {
       {/* The view's name for the outline; the visible heading is the date. */}
       <h1 className="sr-only">Today</h1>
       <WinStrip />
-      <BrowseOnToday rows={plan.data?.rows ?? []} />
       <div className="min-h-0 flex-1">
         <QueryState query={plan} skeleton={<PlanSkeleton />} empty={null}>
           {(p) => <PlanContent plan={p} bench={bench.data} />}

@@ -30,7 +30,7 @@ export const planMethods = (t: Transport): LiveMethods => ({
   addFromBench: (companyId, input, o) =>
     sendJson(t, 'post', '/api/plan/bench/{company_id}/add', input, o, { params: { company_id: companyId } }),
   browse: (p) =>
-    getJson(t, '/api/plan/browse', { query: { q: p.q || undefined, levelRole: p.levelRole ? 'true' : undefined, visaOk: p.visaOk ? 'true' : undefined, unworked: p.unworked ? 'true' : undefined, after: p.after || undefined } }),
+    getJson(t, '/api/plan/browse', { query: { q: p.q || undefined, levelRole: p.levelRole ? 'true' : undefined, visaOk: p.visaOk ? 'true' : undefined, unworked: p.unworked ? 'true' : undefined, after: p.after || undefined, limit: p.limit } }),
   swapPick: (entryId, input, revision, o) =>
     sendJson(t, 'post', '/api/plan/{entry_id}/swap', { ...input, revision }, o, { params: { entry_id: entryId } }),
   saveNote: (noteId, edit, o) =>

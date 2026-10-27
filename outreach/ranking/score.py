@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from outreach.insights.bands import Features
 from outreach.ranking.common import clean_text
-from outreach.ranking.config import RankerConfig
+from outreach.ranking.config import TILT_WEIGHTS, RankerConfig
 from outreach.ranking.confidence import (Confidence, RankReason, build_rank_reason, factor, rank_confidence,
                                          scrub_text)
 from outreach.ranking.facts import RankFacts
@@ -80,9 +80,10 @@ def score_company(facts: RankFacts, hide: Hide | None, signals: list[Signal], cf
 
     ranked = sorted(((n, p) for n, p in values.items() if p.raw_points != 0), key=lambda x: (-abs(x[1].points), x[0]))
     reasons = tuple(p.reason for _n, p in ranked)
-    # The interview tilt only ever adds points; it must not also be able to lower the label on the facts below it.
+    # The one-way lifts (the interview tilt, the profile fit) only ever add points; they must not also be able to
+    # lower the label on the facts below them.
     confidence = rank_confidence({n: (p.raw_points, p.confidence) for n, p in values.items()
-                                  if n != "interview_like"}, cfg)
+                                  if n not in TILT_WEIGHTS}, cfg)
 
     flags = list(facts.weak_flags)
     doubtful = facts.ignored_postings - facts.inactive_postings

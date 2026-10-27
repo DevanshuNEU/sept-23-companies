@@ -103,17 +103,18 @@ class InterviewLikeTest(unittest.TestCase):
 
     def test_no_profile_scores_zero_with_the_reason(self):
         signals = build_signals(CFG)
-        self.assertEqual("interview_like", signals[-1].name)
-        got = signals[-1].score(facts_like(FULL))
+        self.assertEqual("interview_like", signals[-2].name)
+        got = signals[-2].score(facts_like(FULL))
         self.assertEqual(0.0, got.value)
         self.assertEqual("Fewer than 3 interview companies so far", got.reason)
         self.assertEqual(("low", "no interview companies yet"), (got.confidence.level, got.confidence.basis))
 
     def test_build_signals_keeps_the_first_eleven_and_appends_the_tilt(self):
         names = [s.name for s in build_signals(CFG, make_profile(5))]
-        self.assertEqual(12, len(names))
+        self.assertEqual(13, len(names))  # the profile fit (Part of #6 and #15) comes after the tilt
         self.assertEqual(["live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
-                          "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"], names)
+                          "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like",
+                          "profile_fit"], names)
 
     def test_a_company_is_not_lifted_by_its_own_interview(self):
         me = ProfileEntry(1, "Me", "2026-10-10", FULL)

@@ -21,9 +21,10 @@ from tests.ranking_helpers import check_assessment, neutral_facts
 
 CFG = default_ranker_config()
 ORDER = ["live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
-         "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"]
-# The one signal whose grade belongs to the interview profile, not to the company's facts (#81).
-PROFILE_GRADED = "interview_like"
+         "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like", "profile_fit"]
+# The signals that grade themselves, not from the company's facts: the interview tilt (its profile, #81) and the
+# profile fit (the judge's evidence, Part of #6 and #15).
+PROFILE_GRADED = ("interview_like", "profile_fit")
 
 
 def sig(cls, section=None):
@@ -230,7 +231,7 @@ class RegistryTests(unittest.TestCase):
         facts = neutral_facts()
         for s in build_signals(CFG):
             with self.subTest(signal=s.name):
-                if s.name == PROFILE_GRADED:
+                if s.name in PROFILE_GRADED:
                     got = s.score(facts)
                     self.assertEqual(got.value, 0.0)
                     self.assertEqual(got.confidence.level, "low")
@@ -245,7 +246,7 @@ class RegistryTests(unittest.TestCase):
         grades = {s.name: Confidence("high", f"basis of {s.name}") for s in build_signals(CFG)}
         facts = neutral_facts(grades=grades)
         for s in build_signals(CFG):
-            if s.name == PROFILE_GRADED:  # graded by the profile: "no interview companies yet", never the facts' grade
+            if s.name in PROFILE_GRADED:  # graded by the profile: "no interview companies yet", never the facts' grade
                 self.assertNotEqual(s.score(facts).confidence, grades[s.name])
                 continue
             self.assertEqual(s.score(facts).confidence, grades[s.name])

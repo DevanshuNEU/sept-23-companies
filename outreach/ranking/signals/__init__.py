@@ -1,5 +1,6 @@
 """One module per ranking signal (#6). Each class has a `name`, takes its `[section]` of the config and turns
-`RankFacts` into an `Assessment`. `build_signals` joins them in the plan's order, the interview tilt (#81) last."""
+`RankFacts` into an `Assessment`. `build_signals` joins them in the plan's order, then the two one-way lifts: the
+interview tilt (#81) and the profile judge's fit (Part of #6 and #15)."""
 from __future__ import annotations
 
 from outreach.insights.similar import InterviewProfile, interview_profile
@@ -13,6 +14,7 @@ from outreach.ranking.signals.lca_junior import LcaJunior
 from outreach.ranking.signals.live_role import LiveRole
 from outreach.ranking.signals.pay_level import PayLevel
 from outreach.ranking.signals.posting_sponsors import PostingSponsors
+from outreach.ranking.signals.profile_fit import ProfileFit
 from outreach.ranking.signals.reachable_person import ReachablePerson
 from outreach.ranking.signals.small import Small
 from outreach.ranking.signals.staffing_risk import StaffingRisk
@@ -22,7 +24,7 @@ __all__ = ["build_signals"]
 
 
 def build_signals(cfg: RankerConfig, profile: InterviewProfile | None = None) -> list[Signal]:
-    """The twelve signals in order. `profile` is the run's interview profile (#81); with none, the tilt has an empty
+    """The thirteen signals in order. `profile` is the run's interview profile (#81); with none, the tilt has an empty
     profile and lifts nobody. A signal with no `[weights]` entry raises KeyError naming it; a weight with no signal
     raises ValueError naming it, so neither can quietly score nothing."""
     tilt = cfg.section("interview_like")
@@ -40,7 +42,8 @@ def build_signals(cfg: RankerConfig, profile: InterviewProfile | None = None) ->
         Funding(cfg.section("funding"), cfg.ranker["funding_window_months"]),
         StaffingRisk(cfg.section("staffing_risk")),
         LargeLaterStage(cfg.section("small")),  # no keys of its own: it reads the stage lists in [small]
-        InterviewLike(tilt, profile),  # last, so the first eleven keep their order
+        InterviewLike(tilt, profile),  # after the first eleven, so they keep their order
+        ProfileFit(cfg.section("profile_fit")),  # last
     ]
     for s in signals:
         if s.name not in cfg.weights:

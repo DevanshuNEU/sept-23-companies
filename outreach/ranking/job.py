@@ -48,7 +48,8 @@ __all__ = ["CONFLICT_FLAG", "HIDDEN_KINDS", "RankRun", "compute_rank", "run_rank
 CONFLICT_FLAG = "postings disagree on sponsorship"
 # The summary's hidden counts: the three hide kinds, and a provisional hide (pending reader) as its own count.
 HIDDEN_KINDS = ("no_go", "over_size", "no_sponsorship", "provisional")
-_LABELS = {"everify": "E-Verify", "interview_like": "Like your interview companies"}
+_LABELS = {"everify": "E-Verify", "interview_like": "Like your interview companies",
+           "profile_fit": "Fits what you build"}
 _TEXT_MAX_CHANGES = 3
 
 

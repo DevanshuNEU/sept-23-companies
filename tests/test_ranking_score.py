@@ -151,7 +151,7 @@ class ScoreTests(unittest.TestCase):
 
     def test_every_component_has_a_confidence_and_basis_even_when_unknown(self):
         got = score(neutral_facts())
-        self.assertEqual(len(got.values), 12)  # eleven signals and the interview tilt (#81)
+        self.assertEqual(len(got.values), 13)  # eleven signals, the interview tilt (#81) and the profile fit
         for name, p in got.values.items():
             with self.subTest(signal=name):
                 self.assertIn(p.confidence.level, LEVELS)

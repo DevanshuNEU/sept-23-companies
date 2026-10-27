@@ -69,11 +69,11 @@ def _load_edited(tc: unittest.TestCase, *edits: tuple[str, str, str]):
         return load_ranker_config(p)
 
 
-# Numbers that are exact in binary, so a boundary test can sit exactly on the limit: the positive weights add to 126
-# (120 plus the interview tilt's 6) and the worst non-bottom negatives are 12 * 0.5 + 10 * 0.25 + 12 * 0.25 = 11.5, a
-# limit of 137.5.
+# Numbers that are exact in binary, so a boundary test can sit exactly on the limit: the positive weights add to 136
+# (120 plus the interview tilt's 6 and the profile fit's 10) and the worst non-bottom negatives are
+# 12 * 0.5 + 10 * 0.25 + 12 * 0.25 = 11.5, a limit of 147.5.
 EXACT = (("everify", "not_enrolled", "-0.5"), ("pay_level", "level_1", "-0.25"), ("small", "weak_flag_value", "-0.25"))
-LIMIT = 137.5
+LIMIT = 147.5
 
 
 def _flip(path: Path) -> None:
@@ -304,7 +304,8 @@ class ConfigTests(unittest.TestCase):
     def test_bottom_weights_outweigh_every_positive_weight(self):
         w = default_ranker_config().weights
         positive = sum(v for k, v in w.items() if k not in BOTTOM)
-        self.assertEqual(positive, 126.0, "120 plus the interview tilt's 6: the tilt counts toward the bottom push")
+        self.assertEqual(positive, 136.0, "120 plus the interview tilt's 6 and the profile fit's 10: both lifts count "
+                                          "toward the bottom push")
         for name in BOTTOM:
             self.assertGreater(w[name], positive, f"{name} must outweigh every positive weight added together")
 
@@ -335,12 +336,12 @@ class ConfigTests(unittest.TestCase):
                 self.assertEqual(cfg.weights[name], LIMIT + 1)
 
     def test_the_limit_includes_the_worst_non_bottom_negatives(self):
-        # Without the negatives the limit would be 126, so 130 passes; with them (137.5) it must not.
-        edits = (("weights", "staffing_risk", "130.0"), ("weights", "large_later_stage", "300.0"))
+        # Without the negatives the limit would be 136, so 140 passes; with them (147.5) it must not.
+        edits = (("weights", "staffing_risk", "140.0"), ("weights", "large_later_stage", "300.0"))
         with self.assertRaises(ValueError):
             _load_edited(self, *EXACT, *edits)
         zero = (("everify", "not_enrolled", "0.0"), ("pay_level", "level_1", "0.0"), ("small", "weak_flag_value", "0.0"))
-        _load_edited(self, *zero, *edits)  # no negatives: 130 > 126 is fine
+        _load_edited(self, *zero, *edits)  # no negatives: 140 > 136 is fine
         # Each negative moves the limit on its own.
         for section, key, weight, value in (("everify", "not_enrolled", "everify", "-1.0"),
                                             ("pay_level", "level_1", "pay_level", "-1.0"),
@@ -456,7 +457,7 @@ class ConfigTests(unittest.TestCase):
     def test_the_shipped_tilt_is_small(self):
         cfg = default_ranker_config()
         w = cfg.weights
-        others = sum(v for k, v in w.items() if k not in BOTTOM and k != TILT)
+        others = sum(v for k, v in w.items() if k not in BOTTOM and k not in (TILT, "profile_fit"))
         self.assertEqual(120.0, others)
         self.assertLessEqual(w[TILT], 0.1 * others)
         self.assertEqual(0.1, cfg.section(TILT)["max_weight_share"])

@@ -1194,6 +1194,25 @@ class PlanFlowTests(HarnessCase):
         self.assertGreater(sum(c.person_id is not None for c in on.chosen), 0)
         self.assertEqual(sum(c.channel == "email" for c in on.chosen), 1)
 
+    def test_flow_plan_replace_turns_the_people_plan_into_the_shipped_company_plan(self):
+        # The 2026-10-26 case: the stage's people plan (person rows, the founder's email row) was built with the old
+        # config and nothing on it was acted on. A replace with the shipped config gives company rows only, keeps the
+        # blocked companies off, and leaves every person, note and touch the stage seeded.
+        h = self.flow()
+        old = self.entries(h)
+        self.assertTrue(any(r["person_id"] is not None for r in old))
+        kept = {t: [tuple(r) for r in _rows(h, f"SELECT * FROM {t} ORDER BY rowid")] for t in
+                ("person", "linkedin_draft", "outreach_touch", "linkedin_log", "application")}
+        result = build_plan(h.conn, today=TODAY, read_boards=False, replace=True)
+        self.assertEqual((result.status, result.replaced), ("built", len(old)))
+        rows = self.entries(h)
+        self.assertEqual(len(rows), result.linkedin.today)
+        self.assertEqual(sum(r["person_id"] is not None or r["channel"] == "email" for r in rows), 0)
+        self.assertEqual({r["company_id"] for r in rows} & set(h.plan.situation.blocked), set())
+        self.assertIn(h.plan.situation.founder, [r["company_id"] for r in rows])
+        for t, before in kept.items():
+            self.assertEqual([tuple(r) for r in _rows(h, f"SELECT * FROM {t} ORDER BY rowid")], before, t)
+
     def test_flow_plan_only_proposes_companies_with_a_lane_and_not_hidden_ones(self):
         h = self.harness()
         h.run(through="rank")

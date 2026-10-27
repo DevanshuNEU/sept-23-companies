@@ -11,12 +11,14 @@ import json
 import sqlite3
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 from outreach.plan.config import PlanConfig
 from outreach.plan.contact import contact_states
 from outreach.plan.dates import business_days_between, ny_date
+from outreach.plan.fresh import load_applied, load_openings, load_passes, load_visa_facts, plan_moment
 from outreach.plan.outbound import Outbound
 from outreach.plan.people import Candidate, load_candidates, people_search_url, small_company_ids
 from outreach.plan.select import CarriedRow, Chosen, Prospect
@@ -116,16 +118,24 @@ def _carryable(conn: sqlite3.Connection, plan_day: str, list_date: date, today: 
 # Prospects
 
 def load_prospects(conn: sqlite3.Connection, ranked: Sequence[StoredScore], canon: dict[int, int], today: date,
-                   cfg: PlanConfig, outbound: Sequence[Outbound]) -> list[Prospect]:
+                   cfg: PlanConfig, outbound: Sequence[Outbound], *, now: datetime | None = None) -> list[Prospect]:
     """A `Prospect` for each of the first `plan.scan_limit` ranked rows whose company may be reached: status
     `candidate`, `backlog` or `working`, not paused, not held by a reply, no active company `no_go`. A merged-away
     id counts as its survivor (the first ranked row wins). `position` is the 1-based place in `ranked`. A person
-    with any `outbound` row (a queued first email included) is not a candidate again."""
+    with any `outbound` row (a queued first email included) is not a candidate again.
+
+    Top picks: a ranked company further down with a fresh opening (`fresh.load_openings` at `now`, default
+    `plan_moment(today)`) is scanned too, so the fresh lane is not cut by the scan limit. Each prospect carries its
+    openings, its E-Verify and sponsorship facts, his newest Not now inside the cooldown and his newest application."""
+    tz = cfg.get("plan", "timezone")
+    now = now or plan_moment(today, tz)
+    openings = load_openings(conn, canon, now, cfg)
+    limit = cfg.get("plan", "scan_limit")
     scanned: list[tuple[int, StoredScore, int]] = []
     seen: set[int] = set()
-    for place, s in enumerate(ranked[:cfg.get("plan", "scan_limit")], 1):
+    for place, s in enumerate(ranked, 1):
         company = canon.get(s.company_id, s.company_id)
-        if company not in seen:
+        if company not in seen and (place <= limit or company in openings):
             seen.add(company)
             scanned.append((company, s, place))
     ids = [c for c, _, _ in scanned]
@@ -150,9 +160,16 @@ def load_prospects(conn: sqlite3.Connection, ranked: Sequence[StoredScore], cano
     candidates = load_candidates(conn, kept, canon, contacted, today, cfg)
     small = small_company_ids(conn, kept, canon, cfg)
     carried = load_carried(conn, today, cfg, outbound)
+    visa = load_visa_facts(conn, canon, [c for c in kept if c in openings])
+    passes = load_passes(conn, canon, today, cfg)
+    applied = load_applied(conn, canon, tz)
     return [Prospect(company_id=c, name=company_rows[c]["name"], score=s.score, position=place, lanes=s.lanes,
                      contact=states[c], candidates=tuple(candidates.get(c, ())), small=c in small,
-                     carried=carried.get(c))
+                     carried=carried.get(c), openings=openings.get(c, ()),
+                     everify=visa.get(c, (None, None))[0], company_sponsorship=visa.get(c, (None, None))[1],
+                     passed_at=passes.get(c),
+                     passed_days=(today - passes[c].astimezone(ZoneInfo(tz)).date()).days if c in passes else None,
+                     applied_on=applied.get(c))
             for c, s, place in keep]
 
 

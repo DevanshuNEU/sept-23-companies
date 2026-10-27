@@ -19,7 +19,8 @@ class PlanConfigTest(unittest.TestCase):
         want = {
             "linkedin": {"plan_quota": 150, "hard_total": 200, "rotate_days": 14,
                          "rotate_top_n": 150, "max_people_per_company": 8},
-            "queue": {"companies_per_day": 8, "requests_per_company": 4},
+            "queue": {"companies_per_day": 8, "requests_per_company": 4, "fresh_slots": 3, "fresh_hours": 72,
+                      "pass_cooldown_days": 14, "bench_size": 12},
             "lanes": {"role": ["level_role", "intern_junior"], "reason": ["reason_no_role"],
                       "fill": ["any_us_role"], "role_share": 0.8, "reason_share": 0.2},
             "email": {"start_limit": 20, "rows_max": 15, "people_per_company": 2, "hn_post_days": 90},
@@ -141,6 +142,31 @@ class PlanConfigTest(unittest.TestCase):
             self.assertIn(f"queue.{key}", str(ctx.exception))
         self.assertEqual(load_plan_config(_variant("companies_per_day = 8", "companies_per_day = 30"))
                          .get("queue", "companies_per_day"), 30)
+
+    def test_top_picks_keys_are_checked(self):
+        # The fresh lane, the Not now cooldown and the bench (top picks, 2026-10-26).
+        c = load_plan_config()
+        self.assertEqual([c.get("queue", k) for k in ("fresh_slots", "fresh_hours", "pass_cooldown_days", "bench_size")],
+                         [3, 72, 14, 12])
+        for old, new, name in (("fresh_slots = 3", "fresh_slots = 9", "queue.fresh_slots"),
+                               ("fresh_slots = 3", "fresh_slots = -1", "queue.fresh_slots"),
+                               ("fresh_slots = 3", "fresh_slots = true", "queue.fresh_slots"),
+                               ("fresh_hours = 72", "fresh_hours = 0", "queue.fresh_hours"),
+                               ("fresh_hours = 72", "fresh_hours = 337", "queue.fresh_hours"),
+                               ("fresh_hours = 72", "fresh_hours = 72.5", "queue.fresh_hours"),
+                               ("pass_cooldown_days = 14", "pass_cooldown_days = 0", "queue.pass_cooldown_days"),
+                               ("pass_cooldown_days = 14", "pass_cooldown_days = 91", "queue.pass_cooldown_days"),
+                               ("bench_size = 12", "bench_size = 0", "queue.bench_size"),
+                               ("bench_size = 12", "bench_size = 31", "queue.bench_size")):
+            with self.subTest(new=new), self.assertRaises(ValueError) as ctx:
+                load_plan_config(_variant(old, new))
+            self.assertIn(name, str(ctx.exception))
+        for key in ("fresh_slots", "fresh_hours", "pass_cooldown_days", "bench_size"):
+            with self.subTest(key=key), self.assertRaises(KeyError) as ctx:
+                load_plan_config(_variant(f"\n{key} = ", "\nunused_key = "))
+            self.assertIn(f"queue.{key}", str(ctx.exception))
+        self.assertEqual(load_plan_config(_variant("fresh_slots = 3", "fresh_slots = 0")).get("queue", "fresh_slots"), 0)
+        self.assertEqual(load_plan_config(_variant("fresh_slots = 3", "fresh_slots = 8")).get("queue", "fresh_slots"), 8)
 
     def test_no_dashes_in_config(self):
         text = CONFIG_PATH.read_text(encoding="utf-8")

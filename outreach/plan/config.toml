@@ -16,6 +16,15 @@ max_people_per_company = 8    # #9 (2026-10-26): up to 8 people per company over
 # linkedin.per_day and route.wave_size).
 companies_per_day = 8         # #9: 150 a week over 5 weekdays is 30 a day, at about 4 people per company
 requests_per_company = 4      # #9: one wave of up to 4 people per company
+# Top picks (2026-10-26, the owner's spec). Up to fresh_slots of the day's companies are kept for a NEW opening: an
+# early career role (new grad, early career, SWE I, or an open level that asks 2 years or fewer) first seen or posted
+# within fresh_hours that clears the visa gate. Not now on a pick keeps the company out of the picks for
+# pass_cooldown_days, or until a new qualifying opening appears after the pass; it is never a no-go. The bench
+# ("More options") shows up to bench_size more companies.
+fresh_slots = 3               # of companies_per_day; 0 turns the fresh lane off
+fresh_hours = 72
+pass_cooldown_days = 14
+bench_size = 12
 
 [lanes]
 role = ["level_role", "intern_junior"]   # the 80% share

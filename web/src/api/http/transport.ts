@@ -10,7 +10,8 @@ export interface Transport {
 
 export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
-const READ_TIMEOUT_MS = 15000;
+// Longer than the API's `[api] queue_wait_seconds` (25), so a read that waits for its turn hears "busy" instead of giving up.
+const READ_TIMEOUT_MS = 30000;
 
 /** The JSON of a response, `undefined` when it is empty (204) and `null` when it is not JSON. */
 async function readJson(res: Response): Promise<unknown> {

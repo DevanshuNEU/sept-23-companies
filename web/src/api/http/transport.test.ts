@@ -77,12 +77,15 @@ describe('transport reads', () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it('a read times out after 15 seconds and says so as a network error', async () => {
+  it('a read times out after 30 seconds (after the server has said busy at 25) and says so as a network error', async () => {
     vi.useFakeTimers();
     try {
       const fetchFn = vi.fn((_url: RequestInfo | URL, init: RequestInit = {}) => new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal?.reason))));
       const failed = caught(createTransport({ fetchFn }).get('/api/x'));
-      await vi.advanceTimersByTimeAsync(14999);
+      let settled = false;
+      void failed.then(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(29999);
+      expect(settled).toBe(false);
       expect(fetchFn).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(2);
       expect((await failed).code).toBe('network');

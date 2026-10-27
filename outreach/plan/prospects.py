@@ -118,7 +118,8 @@ def _carryable(conn: sqlite3.Connection, plan_day: str, list_date: date, today: 
 # Prospects
 
 def load_prospects(conn: sqlite3.Connection, ranked: Sequence[StoredScore], canon: dict[int, int], today: date,
-                   cfg: PlanConfig, outbound: Sequence[Outbound], *, now: datetime | None = None) -> list[Prospect]:
+                   cfg: PlanConfig, outbound: Sequence[Outbound], *, now: datetime | None = None,
+                   only: Collection[int] | None = None) -> list[Prospect]:
     """A `Prospect` for each of the first `plan.scan_limit` ranked rows whose company may be reached: status
     `candidate`, `backlog` or `working`, not paused, not held by a reply, no active company `no_go`. A merged-away
     id counts as its survivor (the first ranked row wins). `position` is the 1-based place in `ranked`. A person
@@ -127,7 +128,11 @@ def load_prospects(conn: sqlite3.Connection, ranked: Sequence[StoredScore], cano
     Top picks: a ranked company past the scan limit but inside `queue.fresh_pool_top_n` with a fresh opening
     (`fresh.load_openings` at `now`, default `plan_moment(today)`) is scanned too, so the fresh lane is not cut by the
     scan limit. Each prospect carries its
-    openings, its E-Verify and sponsorship facts, his newest Not now inside the cooldown and his newest application."""
+    openings, its E-Verify and sponsorship facts, his newest Not now inside the cooldown and his newest application.
+
+    Browse companies (#120): `only` names survivors to scan and nothing else. The scan limit and the fresh-pool rule
+    do not apply to them (every other rule does: no-go, pause, hold, status), and `position` is still the place in
+    the full `ranked`."""
     tz = cfg.get("plan", "timezone")
     now = now or plan_moment(today, tz)
     openings = load_openings(conn, canon, now, cfg)
@@ -137,7 +142,8 @@ def load_prospects(conn: sqlite3.Connection, ranked: Sequence[StoredScore], cano
     seen: set[int] = set()
     for place, s in enumerate(ranked, 1):
         company = canon.get(s.company_id, s.company_id)
-        if company not in seen and (place <= limit or (place <= pool and company in openings)):
+        wanted = company in only if only is not None else (place <= limit or (place <= pool and company in openings))
+        if company not in seen and wanted:
             seen.add(company)
             scanned.append((company, s, place))
     ids = [c for c, _, _ in scanned]

@@ -319,19 +319,20 @@ def fresh_lane(eligible: Sequence[Prospect], cfg: PlanConfig) -> list[tuple[Pros
     return sorted(found, key=lambda x: (-x[1].opened_at.timestamp(), -x[0].score, x[0].company_id))
 
 
+def bench_pick_of(p: Prospect, cfg: PlanConfig) -> BenchPick:
+    """The company as a bench or browse row: its fresh early career fit, else any fresh opening at his level, else
+    none. It says nothing about whether the company may be picked (`eligibility` does)."""
+    fit = fresh_pick(p, cfg)
+    return BenchPick(p, fit or fresh_any(p, cfg), fit is not None)
+
+
 def bench(prospects: Sequence[Prospect], taken: Collection[int], cfg: PlanConfig,
           n: int | None = None) -> list[BenchPick]:
     """The next best companies not in `taken` (every company on the day's list, in any state): eligible ones only
     (not held back, not in flight), fresh early career fits first, then other fresh openings at his level, each newest
     first, then the rest by score. Up to `n` (default `queue.bench_size`)."""
     n = cfg.get("queue", "bench_size") if n is None else n
-    picks = []
-    for p in prospects:
-        if p.company_id in taken or not eligibility(p, cfg)[0]:
-            continue
-        fit = fresh_pick(p, cfg)
-        opening = fit or fresh_any(p, cfg)
-        picks.append(BenchPick(p, opening, fit is not None))
+    picks = [bench_pick_of(p, cfg) for p in prospects if p.company_id not in taken and eligibility(p, cfg)[0]]
     picks.sort(key=lambda b: (0 if b.early_fit else 1 if b.opening else 2,
                               -b.opening.opened_at.timestamp() if b.opening else 0.0, -b.prospect.score,
                               b.prospect.company_id))

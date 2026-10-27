@@ -189,6 +189,7 @@ class PassTest(PicksCase):
         self.assertEqual(self.get(f"/api/companies/{self.ids['Beacon']}").status_code, 200)
         self.assertNotIn("Beacon", self.names(self.bench()["companies"]))
         self.assertEqual(self.get("/api/shell").json()["plan"]["total"], 3)
+        self.assertEqual(self.view()["passed"], 1)
 
     def test_the_same_key_answers_again_and_writes_nothing(self):
         first = self.pass_("Beacon").json()

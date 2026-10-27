@@ -4789,6 +4789,11 @@
               }
             ]
           },
+          "passed": {
+            "default": 0,
+            "title": "Passed",
+            "type": "integer"
+          },
           "rows": {
             "items": {
               "$ref": "#/components/schemas/PlanRow"
@@ -4819,7 +4824,8 @@
           "linkedinWeek",
           "tomorrow",
           "week",
-          "inFlight"
+          "inFlight",
+          "passed"
         ],
         "title": "PlanView",
         "type": "object"

@@ -2702,6 +2702,11 @@ export interface components {
             linkedinWeek: components["schemas"]["LinkedinWeek"];
             listJob: components["schemas"]["JobRunSummary"] | null;
             notReady: components["schemas"]["NotReady"] | null;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
             /** Rows */
             rows: components["schemas"]["PlanRow"][];
             tomorrow: components["schemas"]["Tomorrow"];

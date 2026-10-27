@@ -234,3 +234,4 @@ class PlanView(Wire):
     tomorrow: Tomorrow
     week: PlanWeek
     in_flight: list[InFlightCompany] = []  # waves out in the last 14 days and replies, replies first
+    passed: int = 0  # picks he said Not now to on today's list (each one left it; the bench filled its place)

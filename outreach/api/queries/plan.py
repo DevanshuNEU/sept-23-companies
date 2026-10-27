@@ -45,7 +45,7 @@ from outreach.outcomes.windows import day_bounds_utc, next_weekday, ny_day, week
 from outreach.plan.build import build_plan
 from outreach.plan.capacity import linkedin_capacity, plan_capacity
 from outreach.plan.config import PlanConfig
-from outreach.plan.fresh import as_utc
+from outreach.plan.fresh import PASSED, as_utc
 from outreach.plan.outbound import load_outbound
 from outreach.plan.people import people_search_url
 from outreach.plan.prospects import HANDOFF
@@ -506,4 +506,6 @@ def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
         linkedin_week=LinkedinWeek(used=week.used, limit=week.budget, hard_used=week.hard_used,
                                    hard_limit=week.hard_limit),
         tomorrow=_tomorrow(conn, day, canon, cfg), week=_week(conn, now),
-        in_flight=in_flight(conn, canon, company_holds(conn), cfg, date.fromisoformat(day)))
+        in_flight=in_flight(conn, canon, company_holds(conn), cfg, date.fromisoformat(day)),
+        passed=conn.execute("SELECT count(*) FROM event WHERE kind = ? AND entity = 'company' AND json_valid(detail) "
+                            "AND json_extract(detail, '$.list_date') = ?", (PASSED, day)).fetchone()[0])

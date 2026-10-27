@@ -40,6 +40,20 @@ level_role = 0.7
 any_us_role = 0.15
 fresh_days = [14, 30, 60]
 fresh_bonus = [0.3, 0.15, 0.05]
+# An early career fit is the best posting before a fresher SWE II or open level role only while it is at most this
+# many days old (an age from first seen counts the same; no age at all keeps the preference). 1 to 365.
+early_career_max_age_days = 90
+
+# The level_role lane's base value by the level tier of the best posting (he graduated May 2026, on OPT: "focus on
+# early careers, new grad, SD1"). A title with no level that asks 2 years or fewer counts as early_career (see
+# roles.rank_tier). Any other tier falls back to level_role. Each value is 0 to 1; the freshness bonus is added on top
+# and the sum is capped at 1.0. Only values move here, never a weight, so the bottom push and the tilt cap are untouched.
+[live_role.tier_values]
+new_grad = 0.8
+early_career = 0.8
+swe1 = 0.8
+swe2 = 0.45
+open = 0.45
 
 [posting_sponsors]
 yes = 1.0

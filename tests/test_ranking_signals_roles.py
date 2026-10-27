@@ -64,29 +64,31 @@ class LiveRoleTests(unittest.TestCase):
         self.assertIn("new grad", got.reason)
 
     def test_live_role_reason_labels_and_ages(self):
-        cases = [("early_career", "early career"), ("swe1", "SWE I"), ("swe2", "SWE II"),
-                 ("senior", "engineering"), (None, "engineering")]
+        cases = [("early_career", "early career role"), ("swe1", "SWE I role"),
+                 ("swe2", "SWE II role, ranked after new grad and SWE I"), ("senior", "engineering role"),
+                 (None, "engineering role")]
         for tier, label in cases:
             got = self.value(lanes=("level_role",), best_role_age_days=3, best_title="T", best_level_tier=tier)
-            self.assertIn(f"Open {label} role: T", got.reason)
+            self.assertIn(f"Open {label}: T", got.reason)
         intern = self.value(lanes=("intern_junior",), best_role_age_days=3, best_title="Intern", best_level_tier="x")
         self.assertIn("Open intern role: Intern", intern.reason)
         self.assertTrue(self.value(lanes=("level_role",), best_role_age_days=0, best_title="T").reason.endswith("posted today"))
         self.assertTrue(self.value(lanes=("level_role",), best_role_age_days=1, best_title="T").reason.endswith("posted 1 day ago"))
 
     def test_the_level_label_names_the_title_only_when_the_title_set_the_level(self):
-        def reason(tier, basis, title):
+        def reason(tier, basis, title, years=None):
             return self.value(lanes=("level_role",), best_role_age_days=3, best_title=title, best_level_tier=tier,
-                              best_level_basis=basis).reason
+                              best_level_basis=basis, best_years_asked=years).reason
         self.assertEqual(reason("swe2", "Title says II", "Software Engineer II"),
-                         "Open SWE II role: Software Engineer II, posted 3 days ago")
-        self.assertEqual(reason("swe2", "Asks 2 years", "Growth Data Engineer"),
-                         "Open role at his level (asks 2 years): Growth Data Engineer, posted 3 days ago")
+                         "Open SWE II role, ranked after new grad and SWE I: Software Engineer II, posted 3 days ago")
+        self.assertEqual(reason("swe2", "Asks 2 years", "Growth Data Engineer", 2),
+                         "Open early career role (asks 2 years): Growth Data Engineer, posted 3 days ago")
         self.assertEqual(reason("early_career", "Posting says entry level", "Software Engineer"),
-                         "Open role at his level (posting says entry level): Software Engineer, posted 3 days ago")
+                         "Open early career role (posting says entry level): Software Engineer, posted 3 days ago")
         self.assertEqual(reason("open", "Forward Deployed Engineer role, no level in the title", "FDE"),
-                         "Open role, no level in the title: FDE, posted 3 days ago")
-        self.assertEqual(reason("open", "", "FDE"), "Open role, no level in the title: FDE, posted 3 days ago")
+                         "Open role, no level in the title, ranked after new grad and SWE I: FDE, posted 3 days ago")
+        self.assertEqual(reason("open", "", "FDE"),
+                         "Open role, no level in the title, ranked after new grad and SWE I: FDE, posted 3 days ago")
         for tier, basis in (("open", "x"), ("swe2", "Asks 2 years")):
             self.assertNotIn("open level", reason(tier, basis, "T"))
         intern = self.value(lanes=("intern_junior",), best_role_age_days=3, best_title="Intern",
@@ -96,7 +98,7 @@ class LiveRoleTests(unittest.TestCase):
     def test_an_undated_posting_says_first_seen_and_gets_no_freshness_bonus(self):
         got = self.value(lanes=("level_role",), best_role_age_days=3, best_dated=False, best_title="T",
                          best_level_tier="new_grad")
-        self.assertAlmostEqual(got.value, 0.7)
+        self.assertAlmostEqual(got.value, 0.8)  # the new grad tier value, no bonus
         self.assertEqual(got.reason, "Open new grad role: T, first seen 3 days ago")
         today = self.value(lanes=("level_role",), best_role_age_days=0, best_dated=False, best_title="T")
         self.assertTrue(today.reason.endswith("first seen today"), today.reason)

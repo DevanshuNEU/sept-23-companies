@@ -11,6 +11,7 @@ would be hidden is listed nowhere, and one on a doubtful board counts as ignored
 """
 from __future__ import annotations
 
+import functools
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -19,14 +20,40 @@ from datetime import date
 from outreach.crawl.stale import Stale
 from outreach.ranking.common import age_days, clean_text
 from outreach.ranking.confidence import Confidence, grade_no_role, grade_role
+from outreach.ranking.config import default_ranker_config
 from outreach.ranking.hide import posting_visible
 from outreach.rules.rebuild import stored_decision
 
-__all__ = ["LANE_ORDER", "Best", "Roles", "role_sort_key", "newest_stale", "load_roles", "company_board_states"]
+__all__ = ["LANE_ORDER", "Best", "Roles", "role_sort_key", "newest_stale", "load_roles", "company_board_states",
+           "EARLY_CAREER_TIERS", "EARLY_CAREER_MAX_YEARS", "rank_tier", "early_career_fit"]
 
 LANE_ORDER = ("level_role", "intern_junior", "any_us_role")
 _LANE_RANK = {lane: i for i, lane in enumerate(LANE_ORDER)}
 _SPONSOR_RANK = {"yes": 0, "opt_only": 1}
+
+# The level tiers he wants first: he graduated in May 2026 and is on OPT, so new grad, early career and SWE I.
+EARLY_CAREER_TIERS = ("new_grad", "early_career", "swe1")
+# A role whose title names no level counts as early career when its posting asks this many years or fewer.
+EARLY_CAREER_MAX_YEARS = 2
+_TITLE_BASIS = "Title says"  # the rules' basis when the title set the level (rules/title.py)
+
+
+def rank_tier(level_tier: str | None, level_basis: str, years_asked: int | None = None) -> str | None:
+    """The tier ranking uses for a posting. The rules store a title with no level ("Software Engineer", "MTS") whose
+    posting asks 2 or 3 years as `swe2` with the basis "Asks 2 years", and the years in the decision's `years_asked`.
+    So an `open` or `swe2` tier the title did not set, asking at most EARLY_CAREER_MAX_YEARS, counts as
+    `early_career`. Every other tier is returned as stored; with no years given, nothing is promoted."""
+    if (level_tier in ("open", "swe2") and years_asked is not None and years_asked <= EARLY_CAREER_MAX_YEARS
+            and not (level_basis or "").startswith(_TITLE_BASIS)):
+        return "early_career"
+    return level_tier
+
+
+def early_career_fit(level_tier: str | None, level_basis: str, years_asked: int | None = None) -> bool:
+    """True for a new grad, early career or SWE I posting, or one whose title names no level and whose posting asks
+    at most EARLY_CAREER_MAX_YEARS years (see rank_tier). Pure: reads only its arguments, all from the stored
+    decision (`level_tier`, `level_basis`, `years_asked`) or a `Best`."""
+    return rank_tier(level_tier, level_basis, years_asked) in EARLY_CAREER_TIERS
 
 
 @dataclass(frozen=True)
@@ -45,6 +72,7 @@ class Best:
     provisional: bool   # the decision's flag
     stale_reason: str = ""  # empty for a live posting
     level_basis: str = ""   # the decision's level basis, dashes cleaned
+    years_asked: int | None = None  # the decision's years asked, None when the posting states none
 
 
 @dataclass(frozen=True)
@@ -61,9 +89,17 @@ class Roles:
     inactive: int = 0           # the part of `ignored` on inactive boards (the crawler no longer reads them)
 
 
-def role_sort_key(b: Best) -> tuple:
-    """Lane, then freshest (unknown age last), then a sponsorship of yes, opt_only, the rest, then the newest id."""
-    return (_LANE_RANK[b.lane], b.age_days is None, b.age_days or 0, _SPONSOR_RANK.get(b.sponsorship, 2),
+def role_sort_key(b: Best, early_max_age_days: int | None = None) -> tuple:
+    """Lane, then in the level_role lane an early career fit at most `early_max_age_days` old first (level priority:
+    an 80 day old new grad role beats a fresher SWE II one; a 200 day old one does not), then freshest (unknown age
+    last), then a sponsorship of yes, opt_only, the rest, then the newest id. `age_days` is from first seen when there
+    is no posted date, a lower bound held to the same limit; a role with no age keeps the preference. With no limit
+    given, the shipped `[live_role] early_career_max_age_days`."""
+    if early_max_age_days is None:
+        early_max_age_days = default_ranker_config().section("live_role")["early_career_max_age_days"]
+    fit = b.lane == "level_role" and early_career_fit(b.level_tier, b.level_basis, b.years_asked)
+    fit = fit and (b.age_days is None or b.age_days <= early_max_age_days)
+    return (_LANE_RANK[b.lane], not fit, b.age_days is None, b.age_days or 0, _SPONSOR_RANK.get(b.sponsorship, 2),
             -b.posting_id)
 
 
@@ -121,7 +157,7 @@ _QUERY = (
 
 
 def load_roles(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozenset[int], today: date,
-               stale: Mapping[int, Stale]) -> dict[int, Roles]:
+               stale: Mapping[int, Stale], early_max_age_days: int | None = None) -> dict[int, Roles]:
     """Roles for every surviving company with at least one open posting, from one query over open postings (plus
     one over boards for the no-role grade). A company with no open posting has no entry."""
     groups: dict[int, dict] = {}
@@ -148,14 +184,16 @@ def load_roles(conn: sqlite3.Connection, canon: dict[int, int], doubtful: frozen
             sponsorship=d.sponsorship, age_days=age_days(r["posted_on"] or r["first_seen_at"], today),
             pay=r["pay"], location=r["location"], posted_on=r["posted_on"], last_seen_on=r["last_seen_at"][:10],
             board_state=_board_state(r["last_read"], bool(r["has_board"])), provisional=bool(r["provisional"]),
-            stale_reason=stale[pid].reason if is_stale else "", level_basis=clean_text(d.level_basis or ""))
+            stale_reason=stale[pid].reason if is_stale else "", level_basis=clean_text(d.level_basis or ""),
+            years_asked=d.years_asked)
         g["stale" if is_stale else "visible"].append(best)
 
     states = company_board_states(conn, canon, doubtful) if groups else {}
+    key = functools.partial(role_sort_key, early_max_age_days=early_max_age_days)
     out: dict[int, Roles] = {}
     for cid, g in groups.items():
-        visible = tuple(sorted(g["visible"], key=role_sort_key))
-        stale_list = tuple(sorted(g["stale"], key=role_sort_key))
+        visible = tuple(sorted(g["visible"], key=key))
+        stale_list = tuple(sorted(g["stale"], key=key))
         best = visible[0] if visible else None
         if best is not None:
             grade = grade_role(board_state=best.board_state, posted_known=best.posted_on is not None,

@@ -102,7 +102,8 @@ def compute_rank(conn: sqlite3.Connection, *, today: date, cfg: RankerConfig | N
                                     confident_at=cfg.section("interview_like")["confident_at"])
         doubtful = doubtful_board_ids(conn)
         stale = crawl_stale.load_stale(conn, today, max_age_months=stale_after_months)
-        roles = load_roles(conn, canon, doubtful, today, stale)
+        roles = load_roles(conn, canon, doubtful, today, stale,
+                           early_max_age_days=cfg.section("live_role")["early_career_max_age_days"])
         facts = load_facts(conn, canon, doubtful, roles, today, cfg, wages)
         all_inputs = load_hide_inputs(conn, canon, doubtful, stale)
     finally:

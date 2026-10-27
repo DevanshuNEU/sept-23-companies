@@ -172,6 +172,120 @@
         "title": "BenchView",
         "type": "object"
       },
+      "BrowseCompany": {
+        "description": "One company of the Browse drawer: the bench's compact shape, `position` the stored rank. `blocked` is why it\ncannot be swapped in today (a Not now, an application, the rotation rules), else null; `worked` is that he has\nreached or applied to it before.",
+        "properties": {
+          "blocked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked"
+          },
+          "company": {
+            "$ref": "#/components/schemas/PlanCompany"
+          },
+          "earlyFit": {
+            "title": "Earlyfit",
+            "type": "boolean"
+          },
+          "fresh": {
+            "title": "Fresh",
+            "type": "boolean"
+          },
+          "lane": {
+            "enum": [
+              "level_role",
+              "intern_junior",
+              "any_us_role",
+              "reason_no_role"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/CompanyQueue"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleToName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "worked": {
+            "title": "Worked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "company",
+          "position",
+          "lane",
+          "role",
+          "queue",
+          "fresh",
+          "earlyFit",
+          "blocked",
+          "worked"
+        ],
+        "title": "BrowseCompany",
+        "type": "object"
+      },
+      "BrowseView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "companies": {
+            "items": {
+              "$ref": "#/components/schemas/BrowseCompany"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "nextAfter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextafter"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asOf",
+          "date",
+          "companies",
+          "total",
+          "nextAfter"
+        ],
+        "title": "BrowseView",
+        "type": "object"
+      },
       "Check": {
         "properties": {
           "code": {
@@ -12050,6 +12164,145 @@
           }
         },
         "summary": "Add From Bench",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/browse": {
+      "get": {
+        "description": "Browse companies (#120): every company the plan could pick, in stored rank order, one page at a time.",
+        "operationId": "browse",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "levelRole",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Levelrole",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "visaOk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Visaok",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unworked",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Unworked",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 4611686018427387904,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowseView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Browse",
         "tags": [
           "plan"
         ]

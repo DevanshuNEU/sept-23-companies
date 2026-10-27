@@ -243,6 +243,23 @@ class BenchView(Wire):
     email_lane_text: str = ""
 
 
+class BrowseCompany(BenchCompany):
+    """One company of the Browse drawer: the bench's compact shape, `position` the stored rank. `blocked` is why it
+    cannot be swapped in today (a Not now, an application, the rotation rules), else null; `worked` is that he has
+    reached or applied to it before."""
+
+    blocked: str | None
+    worked: bool
+
+
+class BrowseView(Wire):
+    as_of: str
+    date: str
+    companies: list[BrowseCompany]  # stored rank order, one page
+    total: int  # companies that match the search and the filters
+    next_after: int | None  # the cursor (`after`) for the next page; null on the last
+
+
 class LoggedPerson(Wire):
     """One line of a pasted people log, as written."""
 

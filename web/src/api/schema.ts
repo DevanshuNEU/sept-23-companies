@@ -650,6 +650,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plan/browse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Browse
+         * @description Browse companies (#120): every company the plan could pick, in stored rank order, one page at a time.
+         */
+        get: operations["browse"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plan/{entry_id}/apply": {
         parameters: {
             query?: never;
@@ -1181,6 +1201,45 @@ export interface components {
             room: number;
             /** Roomtext */
             roomText: string;
+        };
+        /**
+         * BrowseCompany
+         * @description One company of the Browse drawer: the bench's compact shape, `position` the stored rank. `blocked` is why it
+         *     cannot be swapped in today (a Not now, an application, the rotation rules), else null; `worked` is that he has
+         *     reached or applied to it before.
+         */
+        BrowseCompany: {
+            /** Blocked */
+            blocked: string | null;
+            company: components["schemas"]["PlanCompany"];
+            /** Earlyfit */
+            earlyFit: boolean;
+            /** Fresh */
+            fresh: boolean;
+            /**
+             * Lane
+             * @enum {string}
+             */
+            lane: "level_role" | "intern_junior" | "any_us_role" | "reason_no_role";
+            /** Position */
+            position: number;
+            queue: components["schemas"]["CompanyQueue"];
+            role: components["schemas"]["RoleToName"] | null;
+            /** Worked */
+            worked: boolean;
+        };
+        /** BrowseView */
+        BrowseView: {
+            /** Asof */
+            asOf: string;
+            /** Companies */
+            companies: components["schemas"]["BrowseCompany"][];
+            /** Date */
+            date: string;
+            /** Nextafter */
+            nextAfter: number | null;
+            /** Total */
+            total: number;
         };
         /** Check */
         Check: {
@@ -6884,6 +6943,78 @@ export interface operations {
             };
             /** @description blocked or idempotency_mismatch: the write changed nothing */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    browse: {
+        parameters: {
+            query?: {
+                q?: string;
+                levelRole?: boolean;
+                visaOk?: boolean;
+                unworked?: boolean;
+                after?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowseView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

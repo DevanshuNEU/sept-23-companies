@@ -2,28 +2,30 @@
 
 `POST /api/plan/{entryId}/request`, `/apply`, `/search` and `/skip` answer with the row as the plan shows it;
 `POST /api/plan/{entryId}/pass` (Not now, top picks) answers with the company that came in from the bench;
-`GET /api/plan/bench` is the bench ("More options") and `POST /api/plan/bench/{companyId}/add` adds one of it;
+`GET /api/plan/browse` (Browse companies, #120) is every company, paged; `GET /api/plan/bench` is the bench ("More options") and `POST /api/plan/bench/{companyId}/add` adds one of it;
 `POST /api/plan/{entryId}/people` (company first: the people he asked, pasted) answers with the row and each person
 logged; `PUT
 /api/notes/{noteId}` and `POST /api/notes/{noteId}/confirm` answer with the note. Each is one `run_write`. See
 `outreach.api.queries.plan` for how a row is derived and `outreach.api.services.plan` for the writes.
 """
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 
 from outreach.api import views
 from outreach.api.db import read_conn
 from outreach.api.idempotency import run_write
-from outreach.api.models.plan import BenchView, LogPeopleResult, NoteDraft, PassResult, PlanRow, PlanView
+from outreach.api.models.plan import BenchView, BrowseView, LogPeopleResult, NoteDraft, PassResult, PlanRow, PlanView
 from outreach.api.models.plan_writes import (
     AddFromBenchBody, ConfirmReasonBody, LogAppliedBody, LogPeopleBody, LogRequestBody, PassPickBody, SaveNoteBody,
     SaveSearchBody, SkipRowBody,
 )
 from outreach.api.queries import bench as bench_queries
+from outreach.api.queries import browse as browse_queries
 from outreach.api.queries import plan as queries
-from outreach.api.routers import row_id
+from outreach.api.routers import MAX_ID, row_id
 from outreach.api.services import picks
 from outreach.api.services import plan as service
 from outreach.drafts.checks import load_banned
+from outreach.plan.browse import BrowseFilters
 from outreach.plan.config import default_plan_config
 from outreach.plan.drafts import me_unconfirmed
 
@@ -48,6 +50,21 @@ async def bench(request: Request) -> Response:
             return bench_queries.bench_view(conn, now, cfg)
 
     return await views.serve(request, BenchView, compute)
+
+
+@router.get("/plan/browse", response_model=BrowseView)
+async def browse(request: Request, q: str = Query("", max_length=100), level_role: bool = Query(False, alias="levelRole"),
+                 visa_ok: bool = Query(False, alias="visaOk"), unworked: bool = False,
+                 after: int = Query(0, ge=0, le=MAX_ID), limit: int = Query(25, ge=1, le=50)) -> Response:
+    """Browse companies (#120): every company the plan could pick, in stored rank order, one page at a time."""
+    f = BrowseFilters(q=q, level_role=level_role, visa_ok=visa_ok, unworked=unworked)
+
+    def compute(now: str, _) -> BrowseView:
+        cfg = default_plan_config()
+        with read_conn(request) as conn:
+            return browse_queries.browse_view(conn, now, cfg, f, after, limit)
+
+    return await views.serve(request, BrowseView, compute)
 
 
 @router.post("/plan/{entry_id}/pass", response_model=PassResult)

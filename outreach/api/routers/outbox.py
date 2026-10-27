@@ -10,7 +10,7 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
-from outreach.api import mx
+from outreach.api import mx, views
 from outreach.api.clock import Clock, get_clock
 from outreach.api.db import busy_problem, connect_for, is_busy, read_conn
 from outreach.api.errors import ApiProblem
@@ -28,11 +28,13 @@ router = APIRouter(tags=["outbox"])
 
 
 @router.get("/outbox", response_model=OutboxView)
-def outbox(request: Request, clock: Clock = Depends(get_clock)) -> OutboxView:
-    now, cfg = clock(), load_config()
-    old_sender = request.app.state.old_sender_loaded()
-    with read_conn(request) as conn:
-        return queries.outbox_view(conn, now, cfg, old_sender_loaded=old_sender)
+async def outbox(request: Request) -> Response:
+    def compute(now: str, old_sender: bool) -> OutboxView:
+        cfg = load_config()
+        with read_conn(request) as conn:
+            return queries.outbox_view(conn, now, cfg, old_sender_loaded=old_sender)
+
+    return await views.serve(request, OutboxView, compute, request.app.state.old_sender_loaded)
 
 
 # Declared before /outbox/{touch_id}, which would otherwise take "compare" as an id.

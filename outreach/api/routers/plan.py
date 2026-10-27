@@ -8,9 +8,9 @@ logged; `PUT
 /api/notes/{noteId}` and `POST /api/notes/{noteId}/confirm` answer with the note. Each is one `run_write`. See
 `outreach.api.queries.plan` for how a row is derived and `outreach.api.services.plan` for the writes.
 """
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Request, Response
 
-from outreach.api.clock import Clock, get_clock
+from outreach.api import views
 from outreach.api.db import read_conn
 from outreach.api.idempotency import run_write
 from outreach.api.models.plan import BenchView, LogPeopleResult, NoteDraft, PassResult, PlanRow, PlanView
@@ -31,17 +31,23 @@ router = APIRouter(tags=["plan"])
 
 
 @router.get("/plan", response_model=PlanView)
-def plan(request: Request, clock: Clock = Depends(get_clock)) -> PlanView:
-    now = clock()
-    with read_conn(request) as conn:
-        return queries.plan_view(conn, now, default_plan_config())
+async def plan(request: Request) -> Response:
+    def compute(now: str, _) -> PlanView:
+        cfg = default_plan_config()
+        with read_conn(request) as conn:
+            return queries.plan_view(conn, now, cfg)
+
+    return await views.serve(request, PlanView, compute)
 
 
 @router.get("/plan/bench", response_model=BenchView)
-def bench(request: Request, clock: Clock = Depends(get_clock)) -> BenchView:
-    now = clock()
-    with read_conn(request) as conn:
-        return bench_queries.bench_view(conn, now, default_plan_config())
+async def bench(request: Request) -> Response:
+    def compute(now: str, _) -> BenchView:
+        cfg = default_plan_config()
+        with read_conn(request) as conn:
+            return bench_queries.bench_view(conn, now, cfg)
+
+    return await views.serve(request, BenchView, compute)
 
 
 @router.post("/plan/{entry_id}/pass", response_model=PassResult)

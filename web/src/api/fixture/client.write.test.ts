@@ -1450,3 +1450,104 @@ describe('plan writes: top picks', () => {
     expect((await rejection(full.addFromBench(first.company.id, { idempotencyKey: 'bench:x' }, opt()))).code).toBe('not_allowed');
   });
 });
+
+describe('Browse companies', () => {
+  const none = { q: '', levelRole: false, visaOk: false, unworked: false, after: 0 };
+  const names = (v: { companies: { company: { name: string } }[] }) => v.companies.map((c) => c.company.name);
+
+  it('pages by cursor in stored order and never lists a company on today\'s list', async () => {
+    const c = client('queue');
+    const first = await c.browse(none);
+    expect(first.companies).toHaveLength(25);
+    expect(first.nextAfter).toBe(first.companies.at(-1)?.position);
+    const second = await c.browse({ ...none, after: first.nextAfter ?? 0 });
+    const all = [...names(first), ...names(second)];
+    expect(new Set(all).size).toBe(all.length);
+    expect(first.companies.map((x) => x.position)).toEqual([...first.companies.map((x) => x.position)].sort((a, b) => a - b));
+    const today = (await c.plan()).rows.map((r) => r.company.name);
+    for (const name of today) expect(all).not.toContain(name);
+    expect(first.total).toBe(second.total);
+    expect(second.nextAfter === null || second.companies.length === 25).toBe(true);
+  });
+
+  it('searches by name key and finds nothing for a query with no letters', async () => {
+    const c = client('queue');
+    expect(names(await c.browse({ ...none, q: 'RETELL ai' }))).toEqual(['Retell AI']);
+    expect((await c.browse({ ...none, q: 'zzzz' })).total).toBe(0);
+    expect((await c.browse({ ...none, q: '...' })).companies).toEqual([]);
+  });
+
+  it('filters by level role, visa and not worked', async () => {
+    const c = client('queue');
+    const all = await c.browse(none);
+    const level = await c.browse({ ...none, levelRole: true });
+    expect(level.companies.every((x) => x.lane === 'level_role')).toBe(true);
+    expect(level.total).toBeLessThan(all.total);
+    const visa = await c.browse({ ...none, visaOk: true });
+    expect(visa.companies.every((x) => !/does not sponsor/i.test(x.queue.sponsorshipLine))).toBe(true);
+    expect(visa.total).toBeLessThan(all.total);
+    const fresh = await c.browse({ ...none, unworked: true });
+    expect(fresh.companies.every((x) => !x.worked)).toBe(true);
+    expect(fresh.total).toBeLessThan(all.total);
+  });
+
+  it('lists a held back company with its reason', async () => {
+    const c = client('queue');
+    const cinder = (await c.browse({ ...none, q: 'cinder' })).companies[0];
+    expect(cinder?.blocked).toContain('Not now');
+  });
+
+  it('a swap takes the pick\'s slot and puts the pick back on the bench, with no Not now and no room used', async () => {
+    const c = client('queue');
+    const pylon = await rowAt(c, 1);
+    const room = (await c.bench()).room;
+    const retell = (await c.browse({ ...none, q: 'retell' })).companies[0];
+    if (!retell) throw new Error('no Retell AI');
+    const key = `pick-swap:${pylon.entryId}:${retell.company.id}`;
+    const res = await c.swapPick(pylon.entryId, { companyId: retell.company.id, idempotencyKey: key }, pylon.revision, opt());
+    expect(res.text).toBe('Swapped in Retell AI for Pylon.');
+    expect(res.replaced.name).toBe('Pylon');
+    const plan = await c.plan();
+    expect(plan.rows.map((r) => r.company.name)).toContain('Retell AI');
+    expect(plan.rows.map((r) => r.company.name)).not.toContain('Pylon');
+    expect([plan.total, plan.passed]).toEqual([8, 0]);
+    const bench = await c.bench();
+    expect(bench.companies.map((b) => b.company.name)).toContain('Pylon');
+    expect(bench.companies.map((b) => b.company.name)).not.toContain('Retell AI');
+    expect(bench.room).toBe(room);
+    expect(names(await c.browse({ ...none, q: 'pylon' }))).toEqual(['Pylon']);
+    expect(await c.swapPick(pylon.entryId, { companyId: retell.company.id, idempotencyKey: key }, pylon.revision, opt())).toEqual(res);
+  });
+
+  it('a swap works when Add to today has no room', async () => {
+    const db = buildFixture('queue');
+    db.bench.room = 0;
+    const c = new FixtureClient(db);
+    const pylon = await rowAt(c, 1);
+    const graphite = (await c.browse({ ...none, q: 'graphite' })).companies[0];
+    if (!graphite) throw new Error('no Graphite');
+    await expect(c.addFromBench(graphite.company.id, { idempotencyKey: 'bench:g' }, opt())).rejects.toMatchObject({ code: 'not_allowed' });
+    const res = await c.swapPick(pylon.entryId, { companyId: graphite.company.id, idempotencyKey: 'pick-swap:g' }, pylon.revision, opt());
+    expect(res.row.company.name).toBe('Graphite');
+  });
+
+  it('a swap refuses a held back company, a company on the list, a reached pick and a stale revision', async () => {
+    const c = client('queue');
+    const pylon = await rowAt(c, 1);
+    const cinder = (await c.browse({ ...none, q: 'cinder' })).companies[0];
+    if (!cinder) throw new Error('no Cinder');
+    const refused = (companyId: Id, entry = pylon, revision = pylon.revision) =>
+      rejection(c.swapPick(entry.entryId, { companyId, idempotencyKey: `k-${companyId}-${entry.entryId}-${revision}` }, revision, opt()));
+    expect((await refused(cinder.company.id)).message).toContain('Not now');
+    const other = (await c.plan()).rows.find((r) => r.company.name !== 'Pylon' && r.state === 'todo');
+    if (!other) throw new Error('no other pick');
+    expect((await refused(other.company.id)).code).toBe('not_allowed');
+    const resend = (await c.plan()).rows.find((r) => r.company.name === 'Resend');
+    if (!resend) throw new Error('no Resend');
+    const retell = (await c.browse({ ...none, q: 'retell' })).companies[0];
+    if (!retell) throw new Error('no Retell AI');
+    expect((await refused(retell.company.id, resend, resend.revision)).code).toBe('not_allowed');
+    expect((await refused(retell.company.id, pylon, pylon.revision + 1)).code).toBe('conflict');
+    expect((await c.plan()).rows.map((r) => r.company.name)).toContain('Pylon'); // nothing changed
+  });
+});

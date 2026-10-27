@@ -3,10 +3,11 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  BenchView, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult,
+  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
+import { benchOrder, browseView, buildExtras, rowToBench, toBrowse } from './browse-data';
 import { askedToday, benchRoom, benchRoomText, benchToRow, emailCountOf, emailTextOf, laneTextOf, pickOrder } from './queue-data';
 
 const STOP_WORDS = new Set(['of', 'the', 'and', 'a', 'an', 'at', 'for', 'in', 'to']);
@@ -106,6 +107,11 @@ export class FixtureClient implements OutreachClient {
   private readonly pastes = new Map<string, LoggedPerson[]>();
   /** Not now and Add to today by their keys: the same key again answers the same (top picks). */
   private readonly picks = new Map<string, PassResult | Id>();
+  /** Swaps by their keys: the same key again answers the same (Browse companies). */
+  private readonly swaps = new Map<string, SwapResult>();
+  /** Browse companies: the stored position of each company, fixed the first time it is seen, and the 30 below the bench. */
+  private readonly browseRanks = new Map<Id, number>();
+  private extras: BenchCompany[] | undefined;
   /** Prompt touches that got an outcome and left the prompt. A reply on a quiet touch still finds its person here. */
   private readonly leftPrompt = new Map<Id, PromptTouch>();
   /** Touch revisions after an outcome. A touch with no entry is at its own revision, or 1. */
@@ -1083,6 +1089,64 @@ export class FixtureClient implements OutreachClient {
         text: added ? `Passed. Added ${added.company.name}.` : `Passed on ${row.company.name}. Nothing else is free to add right now.`,
       };
       this.picks.set(`pass:${input.idempotencyKey}`, result);
+      return result;
+    });
+  }
+
+  /** Every company the plan could pick, in stored order, as Browse companies: today's picks, the bench and the rest. */
+  private browsePool(): BrowseCompany[] {
+    const { plan, bench } = this.db;
+    const first = bench.companies.find((b) => b.role) ?? bench.companies[0];
+    this.extras ??= first ? buildExtras(first, 700_000) : [];
+    const rank = (id: Id): number => {
+      const known = this.browseRanks.get(id);
+      if (known !== undefined) return known;
+      this.browseRanks.set(id, this.browseRanks.size + 1);
+      return this.browseRanks.size;
+    };
+    const seen = new Set<Id>();
+    const all = [...plan.rows.map(rowToBench).filter((b): b is BenchCompany => b !== null), ...bench.companies, ...this.extras].filter((b) => {
+      if (seen.has(b.company.id)) return false;
+      seen.add(b.company.id);
+      return true;
+    });
+    return all.map((b) => { const at = rank(b.company.id); return toBrowse(b, at, at); });
+  }
+
+  /** Browse companies, as the API: stored order, a name search, three filters, 25 a page by cursor. Never a company on today's list. */
+  browse(params: BrowseParams): Promise<BrowseView> {
+    return this.read(() => browseView(this.browsePool(), new Set(this.db.plan.rows.map((r) => r.company.id)), params, this.db.plan.asOf, this.db.plan.date));
+  }
+
+  /**
+   * Swap, as the API: the chosen company takes the pick's slot and the pick goes back to the bench. It is not a Not now
+   * (no pass counted, no cooldown) and it uses no room. A pick he reached stays; a company held back, or already on the
+   * list, is refused. The same key again answers the same.
+   */
+  swapPick(entryId: Id, input: { companyId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<SwapResult> {
+    return this.write(o, () => {
+      const done = this.swaps.get(input.idempotencyKey);
+      if (done) return done;
+      const row = this.freshRow(entryId, revision);
+      if (row.state !== 'todo' || row.steps.some((st) => st.at)) throw notAllowed(`${row.company.name} is already worked today, so it stays on the list`);
+      const plan = this.db.plan;
+      const target = this.browsePool().find((c) => c.company.id === input.companyId);
+      if (!target) throw notAllowed('That company is not in the ranked list, so it is not swapped in');
+      if (plan.rows.some((r) => r.company.id === target.company.id)) throw notAllowed(`${target.company.name} is already on today's list`);
+      if (target.blocked) throw notAllowed(target.blocked.replace(/\.$/, ''));
+      const back = rowToBench(row);
+      const added = benchToRow(target, this.nextId++);
+      const at = plan.rows.indexOf(row);
+      plan.rows.splice(at, 1, added);
+      const rest = this.db.bench.companies.filter((b) => b.company.id !== target.company.id);
+      const rank = (id: Id) => this.browseRanks.get(id) ?? 0;
+      this.db.bench.companies = benchOrder(back ? [...rest, back] : rest, rank);
+      this.settlePicks();
+      const result: SwapResult = {
+        replacedEntryId: entryId, replaced: { ...row.company }, row: structuredClone(plan.rows.find((r) => r.entryId === added.entryId) ?? added),
+        text: `Swapped in ${target.company.name} for ${row.company.name}.`,
+      };
+      this.swaps.set(input.idempotencyKey, result);
       return result;
     });
   }

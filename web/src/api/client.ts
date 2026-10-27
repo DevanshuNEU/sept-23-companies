@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, PassReason, PassResult } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -83,6 +83,11 @@ export interface OutreachClient {
   bench(): Promise<BenchView>; // the next best companies, fresh early career fits first
   /** Adds a bench company after today's last pick; 'not_allowed' with no room this week or a company not on the bench. */
   addFromBench(companyId: Id, input: { idempotencyKey: string }, o: WriteOptions): Promise<PlanRow>;
+  /** Browse companies (#120): one page of every company the plan could pick, in stored rank order; `after` is the cursor. */
+  browse(params: BrowseParams): Promise<BrowseView>;
+  /** Swap: the company takes the pick's slot and the pick goes back to the bench (not a Not now, no cooldown, no room used).
+   *  `idempotencyKey` is `pick-swap:<entryId>:<companyId>`. A no-go, in flight or held back company, or a pick he already reached, is 'not_allowed'. */
+  swapPick(entryId: Id, input: { companyId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<SwapResult>;
   saveNote(noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions): Promise<NoteDraft>;
   confirmReason(noteId: Id, revision: Revision, o: WriteOptions): Promise<NoteDraft>; // reasonState becomes 'confirmed'; 'not_allowed' with an empty line
   markWinsSeen(winIds: Id[], o: WriteOptions): Promise<void>; // 'not_found' for an unknown id

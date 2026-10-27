@@ -51,7 +51,7 @@ describe('plan fixture: the company queue', () => {
     }
     expect(plan.rows.map((r) => r.state)).toEqual(['todo', 'todo', 'done', 'done', 'todo', 'todo', 'todo', 'todo']);
     expect(plan.rows.map((r) => r.queue?.opening?.freshTag ?? null)).toEqual(['New opening, 6 hours ago', 'New opening, yesterday', null, null, null, null, null, null]);
-    expect(row(plan, 1).queue?.whyToday).toBe('SWE I role, first seen 6 hours ago');
+    expect(row(plan, 1).queue?.whyToday).toBe('SWE I role: Software Engineer I');
     expect(row(plan, 3).queue?.standing.text).toBe('3 asked today, room for 1 more, free again Nov 24');
     expect(row(plan, 1).queue?.searchSaved).toBe(true);
     expect(row(plan, 6).carriedFrom).toBe('2026-11-09');

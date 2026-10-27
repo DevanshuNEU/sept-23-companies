@@ -73,8 +73,8 @@ describe('Today as a company queue', () => {
     );
     expect(option(1)).toHaveAttribute('aria-selected', 'true');
     expect(option(1)).toHaveAccessibleName('1. Pylon, To do, new opening, 6 hours ago');
-    expect(option(1)).toHaveTextContent('New opening, 6 hours agoSWE I role, first seen 6 hours ago');
-    expect(option(2)).toHaveTextContent('New opening, yesterdaySWE I role, posted yesterday');
+    expect(option(1)).toHaveTextContent('New opening, 6 hours agoSWE I role: Software Engineer I');
+    expect(option(2)).toHaveTextContent('New opening, yesterdaySWE I role: Member of Technical Staff');
     expect(option(3)).toHaveAccessibleName('3. Resend, Done');
     expect(option(3)).toHaveTextContent('New grad role, posted 4 days ago');
     expect(option(3).querySelector('[data-fresh]')).toBeNull();
@@ -374,7 +374,7 @@ describe('the bench (top picks)', () => {
     const items = within(list).getAllByRole('listitem');
     expect(items[0]).toHaveTextContent('New opening, 3 hours ago');
     expect(items[1]).toHaveTextContent('You applied on Oct 20; this is a new role.');
-    expect(items[2]).toHaveTextContent('New opening, 10 hours agoSWE II role, first seen 10 hours ago');
+    expect(items[2]).toHaveTextContent('New opening, 10 hours agoSWE II role: Software Engineer II');
     expect(items[3]?.querySelector('[data-fresh]')).toBeNull();
     expect(bench()).toHaveTextContent(/Room to add \d+ more companies this week\. New openings come first\./);
     press('b');

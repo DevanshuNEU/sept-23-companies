@@ -111,7 +111,7 @@ class OpeningTest(PicksCase):
             "level": "New grad role", "age": "first seen 6 hours ago", "openedAt": "2026-11-10T09:14:00Z",
             "fresh": True, "earlyFit": True,
             "freshTag": "New opening, 6 hours ago", "appliedNote": None})
-        self.assertEqual(q["whyToday"], "New grad role, first seen 6 hours ago")
+        self.assertEqual(q["whyToday"], "New grad role: Software Engineer, New Grad")
         self.assertEqual(q["websiteUrl"], "https://aster.example")
         self.assertEqual(q["linkedinCompanyUrl"], "https://www.linkedin.com/search/results/companies/?keywords=Aster")
 

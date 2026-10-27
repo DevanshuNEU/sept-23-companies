@@ -373,7 +373,10 @@ def _opening(role, posted: sqlite3.Row | None, fresh_ids: dict, visa: tuple, app
 
 
 def _why_today(opening: QueueOpening | None, reasons: list[str]) -> str:
-    """The one line under the name: the opening's level and age, else the top reason it ranks."""
+    """The one line under the name: a new opening's level and title (its tag says how new), an older role's level and
+    age, else the top reason it ranks."""
+    if opening is not None and opening.fresh:
+        return f"{opening.level or 'Open role'}: {opening.title}"
     if opening is not None:
         return f"{opening.level or 'Open role'}, {opening.age}"
     return reasons[0] if reasons else "Ranked for today."

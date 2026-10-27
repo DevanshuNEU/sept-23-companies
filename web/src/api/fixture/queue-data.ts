@@ -33,7 +33,9 @@ export function openingOf(role: { postingId: Id; title: string; url: string }, t
     fresh: fresh !== null, earlyFit: !intern && EARLY.has(tier), freshTag: fresh ? `New opening, ${fresh}` : null, appliedNote,
   };
 }
-export const whyTodayOf = (o: QueueOpening | null, reasons: string[]) => (o ? `${o.level ?? 'Open role'}, ${o.age}` : (reasons[0] ?? 'Ranked for today.'));
+/** As the API's `_why_today`: a new opening's level and title, an older role's level and age, else the top reason. */
+export const whyTodayOf = (o: QueueOpening | null, reasons: string[]) =>
+  o?.fresh ? `${o.level ?? 'Open role'}: ${o.title}` : o ? `${o.level ?? 'Open role'}, ${o.age}` : (reasons[0] ?? 'Ranked for today.');
 
 const NEW: QueueStanding = { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null };
 /** A wave he sent today: n asked, room for the rest, free again in 14 days. */

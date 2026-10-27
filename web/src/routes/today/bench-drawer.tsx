@@ -36,7 +36,9 @@ function BenchRow({ b, room, onAdd }: { b: BenchCompany; room: number; onAdd: (b
         ) : null}
         <div className="flex gap-2">
           <dt className="sr-only">Why it should answer</dt>
-          <dd className="min-w-0 text-muted-foreground">{[...q.reasons.slice(0, 2), ...(q.sizeLine ? [q.sizeLine] : [])].join('. ')}</dd>
+          <dd className="min-w-0 text-muted-foreground">
+            {[...q.reasons.filter((r) => r !== q.whyToday).slice(0, 2), ...(q.sizeLine ? [q.sizeLine] : [])].join('. ')}
+          </dd>
         </div>
         <div className="flex gap-2">
           <dt className="text-muted-foreground">Visa</dt>

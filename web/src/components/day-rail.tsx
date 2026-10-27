@@ -1,4 +1,6 @@
+import { useId } from 'react';
 import { Check, Flag, Sparkles } from 'lucide-react';
+import { EmailChip } from '@/components/email-chip';
 import { FitChip } from '@/components/fit-chip';
 import { Monogram } from '@/components/monogram';
 import type { Id, IsoTime, PlanRow, PlanView } from '@/api';
@@ -81,6 +83,10 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
   const fresh = row.queue?.opening?.fresh ? row.queue.opening.freshTag : null;
   // The profile judge's fit, only when it has judged the company (the panel says when it has not).
   const judged = row.queue?.judgeFit ?? null;
+  // The email flag (2026-10-27): the "Email" chip, its reasons on hover.
+  const emailFit = row.queue?.emailFit ?? null;
+  // The row's name stays as it is; the flag is its description, read after the name.
+  const emailId = useId();
   const where = row.channel === 'email' ? `${title(row)} by email` : companyRow(row) ? title(row) : `${title(row)} at ${row.company.name}`;
   const label = [`${row.position}. ${where}`, word, ...[fresh, carried, ask].flatMap((p) => (p ? [lowerFirst(p)] : []))].join(', ');
   const left = node === 'done' || node === 'carried';
@@ -90,6 +96,7 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
       role="option"
       {...aria}
       aria-label={label}
+      aria-describedby={emailFit ? emailId : undefined}
       aria-current={current ? 'step' : undefined}
       data-entry={row.entryId}
       data-node={node}
@@ -107,6 +114,13 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
         <span className="flex min-w-0 items-center gap-2">
           <b className={cn('min-w-0 flex-1 truncate text-sm leading-5 font-medium', left && 'font-normal text-muted-foreground')}>{title(row)}</b>
           <FitChip fit={judged} />
+          {/* Only "Email" shows on the rail: "LinkedIn only" on every row would crowd out the names. The panel says it. */}
+          {emailFit?.verdict === 'email' ? <EmailChip id={emailId} fit={emailFit} /> : null}
+          {emailFit && emailFit.verdict !== 'email' ? (
+            <span id={emailId} className="sr-only">
+              {emailFit.label}
+            </span>
+          ) : null}
         </span>
         {fresh ? (
           <span data-fresh className="flex min-w-0 items-center gap-1 text-xs leading-4 font-medium text-info">

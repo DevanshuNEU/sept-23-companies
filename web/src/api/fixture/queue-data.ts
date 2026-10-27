@@ -11,7 +11,7 @@
  * Oct 20, before this role), Temporal (a new SWE II opening), then 9 by rank. Crusoe, passed on Nov 7, is not on it.
  */
 import { buildProfile } from './profile-data';
-import type { BenchCompany, BenchView, CompanyQueue, Id, InFlightCompany, IsoDate, LevelTier, ListGroup, PlanRow, PlanStep, QueueOpening, QueueStanding } from '../types';
+import type { BenchCompany, BenchView, CompanyQueue, EmailFitView, Id, InFlightCompany, IsoDate, LevelTier, ListGroup, PlanRow, PlanStep, QueueOpening, QueueStanding } from '../types';
 import type { PlanCtx } from './plan-data';
 
 export const QUEUE_HANDOFF = 'Open the search and reach out to the people you pick. Then log who you asked on this row.';
@@ -44,13 +44,51 @@ const lowerFirst = (s: string) => (s.length > 1 && /[A-Z]/.test(s[0] ?? '') && /
 export const judgeOf = (j?: JudgeSpec): Pick<CompanyQueue, 'judgeLine' | 'judgeFit'> =>
   j ? { judgeLine: `Judge: ${lowerFirst(j.builds)} Fit ${j.fit}. Risk: ${lowerFirst(j.risk)}`, judgeFit: j.fit } : { judgeLine: 'Judge: not judged yet.', judgeFit: null };
 
+/* ------------------------------------------------------------------ email fit (2026-10-27) */
+
+const NO_WEBSITE = 'No website on file, so no address pattern';
+const SIZE_UNKNOWN = 'Size not on file, no sign it is large';
+
+/**
+ * The API's email fit for a fixture company (outreach/plan/email_fit.py): the blockers given, plus no website when the
+ * domain is null, make it LinkedIn only; else email, with the website and the size line. A wave in flight adds its room.
+ */
+export function emailFitOf(domain: string | null, o: { size?: string; blockers?: string[]; standing?: QueueStanding } = {}): EmailFitView {
+  const website = { text: domain, note: domain ? 'estimate, your old dashboard' : null };
+  const st = o.standing;
+  const wave = st?.status === 'in_flight' && st.room === 0 && st.freeOn ? [`Wave in flight: ${st.asked} asked, free again ${shortDay(st.freeOn)}`] : [];
+  const blocked = [...(o.blockers ?? []), ...wave, ...(domain ? [] : [NO_WEBSITE])];
+  if (blocked.length > 0) return { verdict: 'linkedin_only', label: 'LinkedIn only', reasons: blocked, website };
+  const room = st?.status === 'in_flight' && st.room > 0 ? [`${st.asked} asked in this wave, room for ${st.room} more`] : [];
+  return { verdict: 'email', label: 'Email', reasons: [`Website known (${domain})`, o.size ?? SIZE_UNKNOWN, ...room], website };
+}
+
+/** As the API's `email_text`: the Today header's count. */
+export const emailTextOf = (rows: PlanRow[]): string => {
+  const queued = rows.filter((r) => r.queue !== null);
+  const n = queued.filter((r) => r.queue?.emailFit.verdict === 'email').length;
+  if (queued.length === 0) return '';
+  return n === 0 ? `None of today's ${queued.length} can be emailed yet` : `${n} of today's ${queued.length} can be emailed`;
+};
+export const emailCountOf = (rows: PlanRow[]): number => rows.filter((r) => r.queue?.emailFit.verdict === 'email').length;
+
+/** As the API's `lane_text`. */
+export const laneTextOf = (n: number): string =>
+  n === 0
+    ? 'No other company can be emailed today. Companies come back after their wave or with a website on file.'
+    : `${n} more ${n === 1 ? 'company' : 'companies'} you can email today, by rank. Find up to 2 people at each and bring the names to your terminal.`;
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function shortDay(day: IsoDate): string {
+  const [, m, d] = day.split('-').map(Number);
+  return `${MONTHS[(m ?? 1) - 1]} ${d}`;
+}
+
 const NEW: QueueStanding = { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null };
 /** A wave he sent today: n asked, room for the rest, free again in 14 days. */
 export function askedToday(n: number, freeOn: IsoDate): QueueStanding {
   const room = Math.max(0, 4 - n);
-  const [, m, d] = freeOn.split('-').map(Number);
-  const day = `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(m ?? 1) - 1]} ${d}`;
-  const text = [`${n} asked today`, ...(room > 0 ? [`room for ${room} more`] : []), `free again ${day}`].join(', ');
+  const text = [`${n} asked today`, ...(room > 0 ? [`room for ${room} more`] : []), `free again ${shortDay(freeOn)}`].join(', ');
   return { status: 'in_flight', text, reason: 'Request sent today, no answer yet', asked: n, room, freeOn };
 }
 
@@ -63,19 +101,20 @@ interface Spec {
   done?: [asked: number, last: string]; // asked today, and the newest person asked ("Ana Ruiz (Engineer)")
   judge?: JudgeSpec; // the profile judge's judgment; none is "not judged yet"
   applied?: string; // his application there before this role was first seen: the opening says so
+  email?: { size?: string; blockers?: string[] }; // the email fit's size line and blockers (no website is read from the domain)
 }
 
 const ROWS: Spec[] = [
   {
     company: 'Resend', lane: 'level_role', role: { title: 'Software Engineer, New Grad', tier: 'new_grad', loc: 'San Francisco or remote US', age: 4, line: 'Software Engineer, New Grad, posted 4 days ago', words: 'posted 4 days ago', opened: '2026-11-06T05:00:00Z' },
     reason: 'Resend has a new grad role open and has sponsored H-1B before.', reasons: ['Open role at your level', 'Has sponsored before', 'Small company'],
-    size: '38 people, Series A', hiring: 3, sponsorship: 'Has sponsored before, E-Verify enrolled', people: [4, 3], careers: 'https://resend.example/careers/new-grad', done: [3, 'Ana Ruiz (Engineer)'],
+    size: '38 people, Series A', hiring: 3, sponsorship: 'Has sponsored before, E-Verify enrolled', people: [4, 3], careers: 'https://resend.example/careers/new-grad', done: [3, 'Ana Ruiz (Engineer)'], email: { size: 'About 38 people: a founder or engineer reads this' },
     judge: { fit: 64, builds: 'Builds an email API for developers.', risk: 'Little agent or AI work on its pages.' },
   },
   {
     company: 'Baseten', lane: 'level_role', role: { title: 'Forward Deployed Engineer, New Grad', tier: 'new_grad', loc: 'San Francisco', age: 5, line: 'Forward Deployed Engineer, New Grad, posted 5 days ago', words: 'posted 5 days ago', opened: '2026-11-05T05:00:00Z' },
     reason: 'Baseten has a new grad forward deployed role open and has sponsored H-1B before.', reasons: ['Open role at your level', 'Has sponsored before'],
-    size: '150 people, Series C', hiring: 6, sponsorship: 'Has sponsored before', people: [2, 2], careers: 'https://jobs.ashbyhq.com/baseten', done: [2, 'Kofi Mensah (Engineer)'],
+    size: '150 people, Series C', hiring: 6, sponsorship: 'Has sponsored before', people: [2, 2], careers: 'https://jobs.ashbyhq.com/baseten', done: [2, 'Kofi Mensah (Engineer)'], email: { size: 'About 150 people: a founder or engineer reads this' },
   },
   {
     company: 'Pylon', lane: 'level_role', role: { title: 'Software Engineer I', tier: 'swe1', loc: 'San Francisco', age: 0, line: 'Software Engineer I, first seen today', words: 'first seen 6 hours ago', opened: '2026-11-10T09:14:00Z', fresh: '6 hours ago' },
@@ -83,14 +122,14 @@ const ROWS: Spec[] = [
     size: '30 people (estimate), Series A', hiring: 3, sponsorship: 'Says it sponsors, E-Verify enrolled', people: [1, 0],
     judge: { fit: 82, builds: 'Builds a support platform for B2B teams, with AI agents that answer tickets.', risk: 'No E-Verify statement on its pages.' },
     saved: `${SEARCH}?currentCompany=%5B%2281234%22%5D&geoUrn=%5B%22103644278%22%5D&titleFreeText=engineer&origin=FACETED_SEARCH`,
-    careers: 'https://pylon.example/careers/swe-1',
+    careers: 'https://pylon.example/careers/swe-1', email: { size: 'About 30 people: a founder or engineer reads this' },
   },
   {
     company: 'Inngest', lane: 'level_role', role: { title: 'Software Engineer II', tier: 'swe2', loc: 'Remote US', age: 6, line: 'Software Engineer II, first seen 6 days ago', words: 'first seen 6 days ago', opened: '2026-11-04T16:00:00Z' },
     reason: 'Inngest has a Software Engineer II role open and the team is small.', reasons: ['Open role at your level', 'Small company'],
     size: '35 people (estimate)', hiring: 2, sponsorship: 'Sponsorship not stated', people: [3, 2],
     standing: { status: 'asked_before', text: '2 asked before. No answer for 20 days', reason: 'No answer for 20 days', asked: 0, room: 4, freeOn: null },
-    lastTouch: 'Request to Jonah Park (Manager) on Oct 21', careers: 'https://inngest.example/careers/swe-2',
+    lastTouch: 'Request to Jonah Park (Manager) on Oct 21', careers: 'https://inngest.example/careers/swe-2', email: { size: 'About 35 people: a founder or engineer reads this' },
   },
   {
     company: 'Cerebrium', lane: 'level_role', role: { title: 'Member of Technical Staff', tier: 'swe1', loc: 'New York', age: 1, line: 'Member of Technical Staff, posted 1 day ago', words: 'posted yesterday', opened: '2026-11-09T05:00:00Z', fresh: 'yesterday' },
@@ -102,7 +141,7 @@ const ROWS: Spec[] = [
     company: 'Turso', lane: 'intern_junior', role: { title: 'Software Engineering Intern', tier: 'not_stated', loc: 'Remote US', age: 4, line: 'Software Engineering Intern, posted 4 days ago', words: 'posted 4 days ago', opened: '2026-11-06T05:00:00Z' },
     reason: 'Turso posted an intern role you can do on OPT, and its founder reads every request.', reasons: ['Intern role on OPT', 'Founder led team'],
     size: '45 people (guess), seed', hiring: 1, sponsorship: 'OPT only', people: [1, 0], emailHint: 'Email works here: a founder has a published address.',
-    careers: 'https://turso.example/careers/intern', carriedFrom: '2026-11-09',
+    careers: 'https://turso.example/careers/intern', carriedFrom: '2026-11-09', email: { size: 'About 45 people: a founder or engineer reads this' },
   },
   {
     company: 'Trigger.dev', lane: 'reason_no_role',
@@ -113,6 +152,7 @@ const ROWS: Spec[] = [
     company: 'Hex', lane: 'level_role', role: { title: 'Software Engineer, New Grad', tier: 'new_grad', loc: 'San Francisco', age: 12, line: 'Software Engineer, New Grad, posted 12 days ago', words: 'posted 12 days ago', opened: '2026-10-29T04:00:00Z' },
     reason: 'Hex has a new grad role open for a 2027 start.', reasons: ['Open role at your level', 'Unclear on sponsorship'],
     size: '180 people, Series B', hiring: 4, sponsorship: 'Unclear on sponsorship', people: [2, 0], careers: 'https://jobs.lever.co/hex', applied: 'You applied on Oct 20; this is a new role.',
+    email: { blockers: ['2 people there already emailed (up to 2)'] },
   },
 ];
 
@@ -152,6 +192,7 @@ export function buildQueueRows(c: PlanCtx, mode: 'default' | 'fresh'): QueueBuil
       terminalLine: terminalLine(spec.company, ref.id, role?.title ?? null),
       whyToday: whyTodayOf(opening, spec.reasons), opening, websiteUrl: ref.domain ? `https://${ref.domain}` : null,
       linkedinCompanyUrl: companySearch(spec.company), ...judgeOf(spec.judge),
+      emailFit: emailFitOf(ref.domain, { ...spec.email, standing }),
       profile: buildProfile({
         company: spec.company, size: spec.size, domain: ref.domain, standing, onRecord: spec.people[0], contacted: spec.people[1] || asked,
         opening, judge: spec.judge,
@@ -186,18 +227,20 @@ interface BenchSpec {
   company: string; score: number;
   role?: { title: string; tier: LevelTier; age: number; words: string; opened: string; fresh?: string };
   reasons: string[]; size: string | null; hiring: number; sponsorship: string; applied?: string; judge?: JudgeSpec;
+  email?: { size?: string; blockers?: string[] };
 }
 
 const BENCH: BenchSpec[] = [
   { company: 'Retell AI', score: 61, role: { title: 'Software Engineer, New Grad', tier: 'new_grad', age: 0, words: 'first seen 3 hours ago', opened: '2026-11-10T12:14:00Z', fresh: '3 hours ago' },
-    reasons: ['Open role at your level', 'New opening today', 'Small company'], size: '40 people (estimate), Series A', hiring: 2, sponsorship: 'Sponsorship not stated, E-Verify enrolled',
+    reasons: ['Open role at your level', 'New opening today', 'Small company'], size: '40 people (estimate), Series A', hiring: 2, sponsorship: 'Sponsorship not stated, E-Verify enrolled', email: { size: 'About 40 people: a founder or engineer reads this' },
     judge: { fit: 88, builds: 'Builds voice AI agents that answer phone calls for businesses.', risk: 'A small team that may hire senior first.' } },
   { company: 'Railway', score: 58, role: { title: 'Software Engineer, Early Career', tier: 'early_career', age: 1, words: 'posted yesterday', opened: '2026-11-09T05:00:00Z', fresh: 'yesterday' },
     reasons: ['Open role at your level', 'Has sponsored before'], size: '60 people, Series B', hiring: 3, sponsorship: 'Has sponsored before', applied: 'You applied on Oct 20; this is a new role.' },
   { company: 'Temporal', score: 55, role: { title: 'Software Engineer II', tier: 'swe2', age: 0, words: 'first seen 10 hours ago', opened: '2026-11-10T05:14:00Z', fresh: '10 hours ago' },
-    reasons: ['Open role at your level', 'Has sponsored before'], size: '300 people, Series D', hiring: 5, sponsorship: 'Has sponsored before, E-Verify enrolled' },
+    reasons: ['Open role at your level', 'Has sponsored before'], size: '300 people, Series D', hiring: 5, sponsorship: 'Has sponsored before, E-Verify enrolled',
+    email: { blockers: ['About 300 people: over 200, a cold email gets lost there'] } },
   { company: 'Graphite', score: 54, role: { title: 'Software Engineer, New Grad', tier: 'new_grad', age: 9, words: 'posted 9 days ago', opened: '2026-11-01T04:00:00Z' },
-    reasons: ['Open role at your level', 'Small company'], size: '45 people (estimate), Series B', hiring: 1, sponsorship: 'Sponsorship not stated' },
+    reasons: ['Open role at your level', 'Small company'], size: '45 people (estimate), Series B', hiring: 1, sponsorship: 'Sponsorship not stated', email: { size: 'About 45 people: a founder or engineer reads this' } },
   { company: 'Supabase', score: 52, reasons: ['Raised in the last 6 months', 'Like your interview companies'], size: '120 people, Series C', hiring: 0, sponsorship: 'Has sponsored before' },
   { company: 'Fly.io', score: 50, role: { title: 'Platform Engineer', tier: 'swe1', age: 7, words: 'posted 7 days ago', opened: '2026-11-03T05:00:00Z' },
     reasons: ['Open role at your level'], size: '90 people (estimate)', hiring: 2, sponsorship: 'Sponsorship not stated' },
@@ -236,7 +279,7 @@ export function buildBench(c: PlanCtx, room: number): BenchView {
       peopleOnRecord: 0, peopleLine: 'Nobody on record yet', peopleSearchUrl: keywordSearch(spec.company), searchSaved: false,
       careersUrl: role?.url ?? (ref.domain ? `https://${ref.domain}` : null), terminalLine: terminalLine(spec.company, ref.id, role?.title ?? null),
       whyToday: whyTodayOf(opening, spec.reasons), opening, websiteUrl: ref.domain ? `https://${ref.domain}` : null, linkedinCompanyUrl: companySearch(spec.company),
-      ...judgeOf(spec.judge),
+      ...judgeOf(spec.judge), emailFit: emailFitOf(ref.domain, spec.email),
       profile: buildProfile({
         company: spec.company, size: spec.size, domain: ref.domain, standing: { ...NEW }, onRecord: 0, contacted: 0,
         opening, judge: spec.judge,
@@ -248,7 +291,21 @@ export function buildBench(c: PlanCtx, room: number): BenchView {
       lane: spec.role ? 'level_role' : 'reason_no_role', role, queue, fresh: opening?.fresh ?? false, earlyFit: opening !== null && opening.fresh && opening.earlyFit,
     };
   });
-  return { asOf: c.asOf, date: c.date, companies, room, roomText: benchRoomText(room) };
+  const emailLane = emailLaneOf(companies);
+  return { asOf: c.asOf, date: c.date, companies, room, roomText: benchRoomText(room), emailLane, emailLaneText: laneTextOf(emailLane.length) };
+}
+
+/**
+ * The email lane, as the API: up to 6 companies not on today's list whose fit is email, by rank (here the bench's
+ * scores, highest first), positions 1 up. The API's lane may name companies the bench also shows, as here.
+ */
+export function emailLaneOf(companies: BenchCompany[], listed: ReadonlySet<Id> = new Set()): BenchCompany[] {
+  const score = new Map(BENCH.map((b) => [b.company, b.score]));
+  return companies
+    .filter((b) => b.queue.emailFit.verdict === 'email' && !listed.has(b.company.id))
+    .sort((a, b) => (score.get(b.company.name) ?? 0) - (score.get(a.company.name) ?? 0))
+    .slice(0, 6)
+    .map((b, i) => ({ ...structuredClone(b), position: i + 1 }));
 }
 
 /** A bench company as the row the API writes when it joins today's list. */

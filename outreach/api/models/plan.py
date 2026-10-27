@@ -134,6 +134,17 @@ class CompanyProfile(Wire):
     history: ProfileHistory
 
 
+class EmailFitView(Wire):
+    """Whether a cold email is worth it at this company (`outreach.plan.email_fit`, 2026-10-27): `email` or
+    `linkedin_only`, with short reasons in plain words, the most important first (every blocker when LinkedIn only).
+    It only flags the company: he brings the people, Claude drafts, he approves in the Outbox."""
+
+    verdict: Literal["email", "linkedin_only"]
+    label: str  # "Email" or "LinkedIn only"
+    reasons: list[str]  # "Website known (acme.com)", "11 to 50 people: a founder or engineer reads this"
+    website: ProfileValue  # the domain the fit read and how sure it is; text None: no website on file
+
+
 class CompanyQueue(Wire):
     """A company row's lines (company first, #9 2026-10-26). Every line is the API's; the page shows them as given."""
 
@@ -161,6 +172,7 @@ class CompanyQueue(Wire):
     # The profile judge (Part of #6 and #15): what the company builds and how well it fits him, from its own pages.
     judge_line: str = "Judge: not judged yet."  # "Judge: builds X. Fit 72. Risk: Y."
     judge_fit: int | None = None  # 0 to 100; None with no fresh judgment
+    email_fit: EmailFitView  # email or LinkedIn only, and why (2026-10-27)
 
 
 class InFlightCompany(Wire):
@@ -225,6 +237,10 @@ class BenchView(Wire):
     companies: list[BenchCompany]  # fresh early career fits first, then other fresh openings, then by rank
     room: int  # companies he may still add today: what the 7-day limit leaves after today's list
     room_text: str
+    # The email lane (2026-10-27): up to email.email_companies_per_day companies beyond today's picks that can be
+    # emailed, by the stored ranking. Nothing here is on today's list; he brings the people from his terminal.
+    email_lane: list[BenchCompany] = []
+    email_lane_text: str = ""
 
 
 class LoggedPerson(Wire):
@@ -285,3 +301,5 @@ class PlanView(Wire):
     week: PlanWeek
     in_flight: list[InFlightCompany] = []  # waves out in the last 14 days and replies, replies first
     passed: int = 0  # picks he said Not now to on today's list (each one left it; the bench filled its place)
+    email_count: int = 0  # today's company rows whose email fit is `email`
+    email_text: str = ""  # "5 of today's 8 can be emailed"; empty with no company rows

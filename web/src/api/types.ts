@@ -349,6 +349,17 @@ export interface CompanyQueue {
   // The profile judge (Part of #6 and #15): what the company builds and how well it fits him, read from its own pages.
   judgeLine: string;                                                                 // "Judge: builds X. Fit 72. Risk: Y." or "Judge: not judged yet."
   judgeFit: number | null;                                                           // 0 to 100; null with no fresh judgment
+  emailFit: EmailFitView;                                                            // email or LinkedIn only, and why (2026-10-27)
+}
+/**
+ * Whether a cold email is worth it at a company (2026-10-27): `email` or `linkedin_only`, with short reasons, the most
+ * important first (every blocker when LinkedIn only), and the website domain it read. It only flags the company.
+ */
+export interface EmailFitView {
+  verdict: 'email' | 'linkedin_only';
+  label: string;                                                                     // "Email" or "LinkedIn only"
+  reasons: string[];                                                                 // "Website known (acme.com)", "No website on file, so no address pattern"
+  website: ProfileValue;                                                             // the domain and how sure it is; text null: none on file
 }
 /** The opening a pick names: its level and age in words, and whether it is new (opened within 72 hours, visa gate clear). */
 export interface QueueOpening {
@@ -369,7 +380,11 @@ export interface BenchCompany {
   position: number; lane: ListGroup; role: RoleToName | null; queue: CompanyQueue;
   fresh: boolean; earlyFit: boolean;
 }
-export interface BenchView { asOf: IsoTime; date: IsoDate; companies: BenchCompany[]; room: number; roomText: string }
+export interface BenchView {
+  asOf: IsoTime; date: IsoDate; companies: BenchCompany[]; room: number; roomText: string;
+  emailLane: BenchCompany[];                                                         // the email lane: companies beyond today's list that can be emailed, by rank
+  emailLaneText: string;
+}
 export interface InFlightCompany { company: CompanyRef; status: 'in_flight' | 'replied'; text: string; reason: string; freeOn: IsoDate | null }
 export interface PlanRow {
   entryId: Id; position: number; channel: 'linkedin_request' | 'email'; lane: ListGroup;
@@ -402,6 +417,8 @@ export interface PlanView {
   week: { requests: number; accepts: number; replies: number };
   inFlight: InFlightCompany[];                                                       // waves out in the last 14 days and replies, replies first
   passed: number;                                                                    // picks he said Not now to today (the bench filled each place)
+  emailCount: number;                                                                // today's picks whose email fit is `email`
+  emailText: string;                                                                 // "5 of today's 8 can be emailed"; empty with no company rows
 }
 
 // Done (spec 13.8)

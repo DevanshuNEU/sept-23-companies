@@ -7,7 +7,7 @@ import type {
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
-import { askedToday, benchRoom, benchRoomText, benchToRow, pickOrder } from './queue-data';
+import { askedToday, benchRoom, benchRoomText, benchToRow, emailCountOf, emailTextOf, laneTextOf, pickOrder } from './queue-data';
 
 const STOP_WORDS = new Set(['of', 'the', 'and', 'a', 'an', 'at', 'for', 'in', 'to']);
 
@@ -1051,6 +1051,14 @@ export class FixtureClient implements OutreachClient {
     this.db.bench.room = benchRoom(plan.linkedinWeek, plan.rows);
     this.db.bench.roomText = benchRoomText(this.db.bench.room);
     this.db.bench.companies.forEach((b, i) => { b.position = i + 1; });
+    // The email lane never names a company on today's list (2026-10-27); the header counts today's emailable picks.
+    const listed = new Set(plan.rows.map((r) => r.company.id));
+    const lane = this.db.bench.emailLane.filter((b) => !listed.has(b.company.id));
+    lane.forEach((b, i) => { b.position = i + 1; });
+    this.db.bench.emailLane = lane;
+    this.db.bench.emailLaneText = laneTextOf(lane.length);
+    plan.emailCount = emailCountOf(plan.rows);
+    plan.emailText = emailTextOf(plan.rows);
   }
 
   /**

@@ -138,6 +138,19 @@
             "title": "Date",
             "type": "string"
           },
+          "emailLane": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BenchCompany"
+            },
+            "title": "Emaillane",
+            "type": "array"
+          },
+          "emailLaneText": {
+            "default": "",
+            "title": "Emaillanetext",
+            "type": "string"
+          },
           "room": {
             "title": "Room",
             "type": "integer"
@@ -152,7 +165,9 @@
           "date",
           "companies",
           "room",
-          "roomText"
+          "roomText",
+          "emailLane",
+          "emailLaneText"
         ],
         "title": "BenchView",
         "type": "object"
@@ -835,6 +850,9 @@
             ],
             "title": "Careersurl"
           },
+          "emailFit": {
+            "$ref": "#/components/schemas/EmailFitView"
+          },
           "emailHint": {
             "anyOf": [
               {
@@ -994,7 +1012,8 @@
           "websiteUrl",
           "linkedinCompanyUrl",
           "judgeLine",
-          "judgeFit"
+          "judgeFit",
+          "emailFit"
         ],
         "title": "CompanyQueue",
         "type": "object"
@@ -1801,6 +1820,41 @@
           "count"
         ],
         "title": "EffortLine",
+        "type": "object"
+      },
+      "EmailFitView": {
+        "description": "Whether a cold email is worth it at this company (`outreach.plan.email_fit`, 2026-10-27): `email` or\n`linkedin_only`, with short reasons in plain words, the most important first (every blocker when LinkedIn only).\nIt only flags the company: he brings the people, Claude drafts, he approves in the Outbox.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "verdict": {
+            "enum": [
+              "email",
+              "linkedin_only"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          },
+          "website": {
+            "$ref": "#/components/schemas/ProfileValue"
+          }
+        },
+        "required": [
+          "verdict",
+          "label",
+          "reasons",
+          "website"
+        ],
+        "title": "EmailFitView",
         "type": "object"
       },
       "Empty": {
@@ -4898,6 +4952,16 @@
             "title": "Done",
             "type": "integer"
           },
+          "emailCount": {
+            "default": 0,
+            "title": "Emailcount",
+            "type": "integer"
+          },
+          "emailText": {
+            "default": "",
+            "title": "Emailtext",
+            "type": "string"
+          },
           "inFlight": {
             "default": [],
             "items": {
@@ -4965,7 +5029,9 @@
           "tomorrow",
           "week",
           "inFlight",
-          "passed"
+          "passed",
+          "emailCount",
+          "emailText"
         ],
         "title": "PlanView",
         "type": "object"

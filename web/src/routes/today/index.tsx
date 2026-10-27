@@ -26,6 +26,7 @@ import { openExternal, safeHref } from '@/lib/safe-href';
 import { useViewQuery } from '@/pending/pending';
 import { BenchDrawer } from './bench-drawer';
 import { CompanyPanel } from './company-panel';
+import { EmailLaneList } from './email-lane';
 import { EmailRowPanel } from './email-row-panel';
 import { FinishPanel } from './finish-panel';
 import { InFlightList } from './in-flight-list';
@@ -75,9 +76,10 @@ const without = (rows: PlanRow[], entryId: Id): PlanRow[] => rows.map((r) => (r.
  * Below the plan, quiet (design 16.1): the 7-day question, then the watch list. Each part draws nothing when it has nothing to say, so the
  * rule above them only shows with something under it.
  */
-function BelowPlan({ className, plan }: { className?: string; plan?: PlanView }) {
+function BelowPlan({ className, plan, bench }: { className?: string; plan?: PlanView; bench?: BenchView }) {
   return (
     <div className={cn('mt-8 grid max-w-[720px] gap-6 empty:hidden', className)}>
+      {bench ? <EmailLaneList lane={bench.emailLane} text={bench.emailLaneText} /> : null}
       {plan ? <InFlightList items={plan.inFlight} /> : null}
       <OutcomePrompt />
       <WatchList />
@@ -99,6 +101,11 @@ function PlanHead({ plan }: { plan: PlanView }) {
             {isQueue(plan)
               ? `${plural(plan.total, 'pick', 'picks')}${carried > 0 ? `, ${carried} carried over` : ''}${plan.passed > 0 ? `, ${plan.passed} passed` : ''}`
               : `${plural(plan.total, 'person', 'people')}, ${plan.done} done${carried > 0 ? `, ${carried} carried over` : ''}`}
+          </p>
+        )}
+        {plan.notReady || !plan.emailText ? null : (
+          <p data-email-count className="text-[13px] text-muted-foreground tabular-nums">
+            {plan.emailText}
           </p>
         )}
       </div>
@@ -493,7 +500,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
               <ProfileFold key={profileRow.entryId} row={profileRow} />
             </div>
           ) : null}
-          <BelowPlan plan={plan} />
+          <BelowPlan plan={plan} bench={bench} />
         </div>
       </section>
       {sideProfile && profileRow ? (
@@ -531,7 +538,7 @@ function PlanContent({ plan, bench }: { plan: PlanView; bench: BenchView | undef
       {plan.notReady || plan.rows.length === 0 ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           {plan.notReady ? <PlanNotReady plan={plan} /> : <PlanEmpty />}
-          <BelowPlan className="mx-auto px-8 pb-12" plan={plan} />
+          <BelowPlan className="mx-auto px-8 pb-12" plan={plan} bench={bench} />
         </div>
       ) : (
         <PlanWork plan={plan} bench={bench} />

@@ -133,7 +133,7 @@ const POSTING_MIN_CHARS = 3;
 const VIEWS: { name: string; path: string; icon: LucideIcon; keys: string }[] = [
   { name: 'Today', path: '/today', icon: CalendarCheck, keys: 'g t' },
   { name: 'Outbox', path: '/outbox', icon: Send, keys: 'g o' },
-  { name: 'LinkedIn list', path: '/linkedin', icon: Activity, keys: 'g l' },
+  { name: 'LinkedIn replies', path: '/linkedin', icon: Activity, keys: 'g l' },
   { name: 'Needs you', path: '/needs-you', icon: CircleAlert, keys: 'g n' },
   { name: 'No-go list', path: '/no-go', icon: Ban, keys: 'g x' },
   { name: 'Done companies', path: '/done', icon: CircleCheck, keys: 'g d' },

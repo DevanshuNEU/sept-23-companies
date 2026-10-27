@@ -39,7 +39,7 @@ describe('FixtureClient reads: default scenario', () => {
       capacityToday: 5,
       unhandledReplies: 1,
       draftsToReview: 7,
-      linkedinToReach: 12,
+      linkedinReplied: 2,
       openReviewItems: 5,
       noGoCount: 31,
       doneCount: 4,
@@ -294,6 +294,8 @@ describe('FixtureClient reads: default scenario', () => {
     const l = await client().linkedin();
     expect(l.counts).toEqual({ toReach: 12, waiting: 9, replied: 2, all: 31 });
     expect(l.requestsThisWeek).toBe(14);
+    // Requests 2 to 6 days ago count in the 7 days; 7 and 8 days ago only in the total.
+    expect(l.activity).toEqual({ messagedWeek: 8, repliedWeek: 2, messagedTotal: 11, repliedTotal: 2 });
     const people = l.groups.flatMap((g) => g.people);
     expect(people.filter((p) => p.tab === 'to_reach')).toHaveLength(12);
     expect(people.filter((p) => p.tab === 'waiting')).toHaveLength(9);
@@ -359,7 +361,7 @@ describe('FixtureClient scenarios', () => {
   it('empty gives empty lists everywhere', async () => {
     const c = client('empty');
     const s = await c.shell();
-    expect(s).toMatchObject({ pickedToday: 0, unhandledReplies: 0, draftsToReview: 0, linkedinToReach: 0, openReviewItems: 0, noGoCount: 0, doneCount: 0, repliesThisMonth: 0 });
+    expect(s).toMatchObject({ pickedToday: 0, unhandledReplies: 0, draftsToReview: 0, linkedinReplied: 0, openReviewItems: 0, noGoCount: 0, doneCount: 0, repliesThisMonth: 0 });
     const t = await c.today();
     expect([t.proposed, t.backlog, t.stillEmailing].every((l) => l.length === 0)).toBe(true);
     expect(t.notReady).toBeNull();

@@ -17,7 +17,7 @@
 import type {
   Actor, Check, CheckFix, CheckSeverity, CloseReason, CompanyEvent, CompanyPerson, CompanyRef, CompanyStatus, CompanyView, Confidence,
   DailyEntry, DoneView, DraftCompare, Fact, FactKind, Id, ImportSource, IsoDate, IsoTime, JobRunSummary, LevelTier, LinkedInGroup,
-  LinkedInPerson, LinkedInReason, LinkedInStep, LinkedInView, MergeSide, MessageState, NeedsYouView, NoGoReason, NoGoRow, NoGoSource, NoGoView,
+  LinkedInActivity, LinkedInPerson, LinkedInReason, LinkedInStep, LinkedInView, MergeSide, MessageState, NeedsYouView, NoGoReason, NoGoRow, NoGoSource, NoGoView,
   OutboxCounts, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, PostingRow, RemovedRow, ResolvedReview,
   ReviewItem, ReviewKind, RoleKind, RoleToName, Schedule, SearchCompany, SearchIndex, SearchPerson, SenderState, SendingStatus,
   ShellSummary, SourceKind, SponsorshipShown, StillEmailing, ThreadMessage, TodayView, TouchState,
@@ -29,7 +29,7 @@ export type Scenario =
   | 'default' | 'hard_block' | 'signed_out' | 'empty' | 'weekend' | 'job_failed' | 'error' | 'many_sent'
   | 'quiet_week' | 'first_week' | 'plan_done' | 'win' | 'fresh' // the plan scenarios (#33); `fresh` has no outcomes ever
   | 'review' // Needs you with every kind, a merge question and today's settlings (#16)
-  | 'many_linkedin' // the LinkedIn list long enough to page: 52 to reach across 26 companies
+  | 'many_linkedin' // the LinkedIn replies list long enough to page: 52 replied across 26 companies
   | 'queue'; // Today as the company queue the shipped config builds (company first, #9): 8 companies, 2 done
 export const SCENARIOS: readonly Scenario[] = [
   'default', 'hard_block', 'signed_out', 'empty', 'weekend', 'job_failed', 'error', 'many_sent', 'quiet_week', 'first_week', 'plan_done', 'win', 'fresh', 'review',
@@ -833,6 +833,21 @@ function manyLinkedIn(c: Ctx, group: (company: string, role: RoleToName | null, 
   });
 }
 
+/** The page's counts line as the API counts it: people with a request, and people with a reply, in the last 7 days and in all. */
+export function linkedinActivity(groups: LinkedInGroup[], asOf: IsoTime): LinkedInActivity {
+  const day = (at: IsoTime) => NY_DATE.format(new Date(at));
+  const from = day(new Date(Date.parse(asOf) - 6 * 86_400_000).toISOString());
+  const all = groups.flatMap((g) => g.people);
+  const at = (p: LinkedInPerson, step: LinkedInStep) => p.steps.find((s) => s.step === step)?.at;
+  const inWeek = (t: IsoTime | undefined) => t !== undefined && day(t) >= from;
+  return {
+    messagedWeek: all.filter((p) => inWeek(at(p, 'request_sent'))).length,
+    repliedWeek: all.filter((p) => inWeek(at(p, 'replied'))).length,
+    messagedTotal: all.filter((p) => at(p, 'request_sent') !== undefined).length,
+    repliedTotal: all.filter((p) => at(p, 'replied') !== undefined).length,
+  };
+}
+
 function buildLinkedIn(c: Ctx, scenario: Scenario): LinkedInView {
   const group = (company: string, role: RoleToName | null, emailed: number, people: LinkedInPerson[], heldBy: LinkedInGroup['heldBy'] = null): LinkedInGroup =>
     ({ company: c.co(company), role, emailed, onLinkedIn: people.length, heldBy, people });
@@ -877,11 +892,24 @@ function buildLinkedIn(c: Ctx, scenario: Scenario): LinkedInView {
     ]),
   ];
   const many = scenario === 'many_linkedin';
-  if (many) groups.push(...manyLinkedIn(c, group));
+  if (many) {
+    groups.push(...manyLinkedIn(c, group));
+    // The page lists only people who replied, so here everyone who was to reach has replied (52 across 26 companies,
+    // enough to page) and everyone else still waits.
+    const replied: StepList = [['request_sent', 9], ['accepted', 7], ['replied', 1]];
+    for (const g of groups) {
+      g.people = g.people.map((p): LinkedInPerson => p.tab === 'to_reach'
+        ? { ...p, tab: 'replied', replyKind: 'interested', steps: replied.map(([step, ago]) => ({ step, at: noon(ago) })) }
+        : { ...p, tab: 'waiting', replyKind: null, steps: p.steps.filter((x) => x.step !== 'replied') });
+    }
+  }
   const count = (tab: LinkedInPerson['tab']) => groups.reduce((n, g) => n + g.people.filter((p) => p.tab === tab).length, 0);
   // The mockup's All tab reads 31 while the three tabs add to 23, so `all` is stored as shown.
   const all = many ? groups.reduce((n, g) => n + g.people.length, 0) : 31;
-  return { asOf: AS_OF, groups, counts: { toReach: count('to_reach'), waiting: count('waiting'), replied: count('replied'), all }, requestsThisWeek: 14 };
+  return {
+    asOf: AS_OF, groups, counts: { toReach: count('to_reach'), waiting: count('waiting'), replied: count('replied'), all },
+    activity: linkedinActivity(groups, AS_OF), requestsThisWeek: 14,
+  };
 }
 
 /* ------------------------------------------------------------------ Needs you (needs-you.html) */
@@ -1301,7 +1329,7 @@ export function computeShell(db: Pick<FixtureDb, 'today' | 'outbox' | 'linkedin'
   const s = db.outbox.sending;
   return {
     asOf: db.today.asOf, pickedToday: db.today.picked, capacityToday: db.today.capacity, unhandledReplies: db.outbox.counts.replied, draftsToReview: db.outbox.counts.review,
-    linkedinToReach: db.linkedin.counts.toReach, openReviewItems: db.needsYou.open.length, noGoCount: db.noGo.companies.length + db.noGo.people.length,
+    linkedinReplied: db.linkedin.counts.replied, openReviewItems: db.needsYou.open.length, noGoCount: db.noGo.companies.length + db.noGo.people.length,
     doneCount: db.done.companies.length, sending: { state: s.state, sentToday: s.sentToday, limitToday: s.limitToday },
     repliesThisMonth: db.done.metrics.repliesThisMonth, jobs: db.jobs,
     plan: { done: db.plan.done, total: db.plan.total }, winsUnseen: db.wins.unseen,
@@ -1379,6 +1407,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
     s.sentToday = 0; s.nextSend = null; s.noneReason = 'Nothing is approved.';
     db.details = {}; db.compares = []; db.companies = {};
     db.linkedin.groups = []; db.linkedin.counts = { toReach: 0, waiting: 0, replied: 0, all: 0 }; db.linkedin.requestsThisWeek = 0;
+    db.linkedin.activity = { messagedWeek: 0, repliedWeek: 0, messagedTotal: 0, repliedTotal: 0 };
     db.needsYou.open = []; db.needsYou.dataGaps = []; db.needsYou.resolvedThisWeek = []; db.settled = {};
     db.noGo.companies = []; db.noGo.people = []; db.noGo.countsByReason = []; db.noGo.hiddenCompanies = [];
     db.done.companies = [];

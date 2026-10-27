@@ -10,7 +10,7 @@ const views: Array<[path: string, heading: string]> = [
   ['/today', 'Today'],
   ['/outbox', 'Outbox'],
   ['/outbox/1', 'Outbox'],
-  ['/linkedin', 'LinkedIn list'],
+  ['/linkedin', 'LinkedIn replies'],
   ['/needs-you', 'Needs you'],
   ['/no-go', 'No-go list'],
   ['/no-go/people', 'No-go list'],

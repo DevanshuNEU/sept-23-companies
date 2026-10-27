@@ -3,7 +3,7 @@ import type { Transport } from './transport';
 import type { ShellSummary } from '../types';
 
 const EMPTY: ShellSummary = {
-  asOf: '2026-11-10T15:14:00Z', pickedToday: 0, capacityToday: 0, unhandledReplies: 0, draftsToReview: 0, linkedinToReach: 0,
+  asOf: '2026-11-10T15:14:00Z', pickedToday: 0, capacityToday: 0, unhandledReplies: 0, draftsToReview: 0, linkedinReplied: 0,
   openReviewItems: 0, noGoCount: 0, doneCount: 0, sending: { state: 'running', sentToday: 0, limitToday: 10 },
   repliesThisMonth: 0, jobs: [], plan: { done: 0, total: 0 }, winsUnseen: 0,
 };

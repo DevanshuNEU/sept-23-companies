@@ -103,7 +103,7 @@ describe('a key right after a selection change acts on the new row', () => {
 
   it('LinkedIn: a click on a row then r logs for that row', async () => {
     const client = new FixtureClient();
-    renderWithApp(<LinkedInPage />, { route: '/linkedin', client });
+    renderWithApp(<LinkedInPage />, { route: '/linkedin?all=1', client }); // All recorded: everyone, not only replies
     await screen.findByText('Hannah Cole');
     const spy = vi.spyOn(client, 'logLinkedIn');
     const table = screen.getByRole('table', { hidden: true });

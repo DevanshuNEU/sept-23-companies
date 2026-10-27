@@ -96,7 +96,7 @@ describe('AppShell sidebar', () => {
     expect(within(outbox).getByText('7')).toBeInTheDocument();
     expect(within(outbox).getByText('7').closest('[data-slot="badge"]')).toBeNull();
 
-    expect(within(nav(/^LinkedIn/)).getByText('12')).toBeInTheDocument();
+    expect(within(nav(/^LinkedIn/)).getByText('2')).toBeInTheDocument(); // the people who replied
     const review = within(nav(/^Needs you/)).getByText('5');
     const reviewBadge = review.closest('[data-slot="badge"]');
     expect(reviewBadge).toHaveClass('bg-muted', 'text-foreground');

@@ -1,33 +1,41 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Plus } from 'lucide-react';
 import type { BenchCompany, BenchView } from '@/api';
 import { EmailChip } from '@/components/email-chip';
+import { FitChip } from '@/components/fit-chip';
+import { Monogram } from '@/components/monogram';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { FreshTag, ResearchLinks } from './why-today';
 
-/** One bench company, in the compact shape of a pick: the new tag, why today, size, visa, the links and Add to today. */
-function BenchRow({ b, room, onAdd }: { b: BenchCompany; room: number; onAdd: (b: BenchCompany) => void }) {
+/**
+ * One company in the compact shape of a pick: the name, the new tag, why today, the fit chip, the opening, reasons and
+ * size, visa, the links. `action` sits at the right of the name (Add to today, Use instead of...) and `footer` under the
+ * links. The bench and Browse companies draw the same row.
+ */
+export function CompanyRowBody({ b, action, footer }: { b: BenchCompany; action: ReactNode; footer?: ReactNode }) {
   const q = b.queue;
   return (
-    <li data-bench={b.company.id} className="grid gap-2 border-b px-4 py-3 last:border-b-0">
+    <>
       <div className="flex items-start gap-3">
+        <Monogram name={b.company.name} className="mt-0.5 size-7 text-[13px]" />
         <div className="grid min-w-0 flex-1 gap-0.5">
-          <Link
-            to={`/companies/${b.company.id}`}
-            className="w-fit truncate rounded-sm font-medium outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/70"
-          >
-            {b.company.name}
-          </Link>
+          <div className="flex min-w-0 items-center gap-2">
+            <Link
+              to={`/companies/${b.company.id}`}
+              className="w-fit truncate rounded-sm font-medium outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/70"
+            >
+              {b.company.name}
+            </Link>
+            <FitChip fit={q.judgeFit} />
+          </div>
           <FreshTag opening={q.opening} />
           <p className="truncate text-[13px] text-muted-foreground">{q.whyToday}</p>
         </div>
         <EmailChip fit={q.emailFit} className="mt-1" />
-        <Button type="button" variant="outline" size="sm" className="h-7 flex-none gap-1.5 px-2.5 text-xs" disabled={room <= 0} onClick={() => onAdd(b)}>
-          <Plus aria-hidden />
-          Add to today
-        </Button>
+        {action}
       </div>
       <dl className="grid gap-0.5 text-[13px]">
         {q.opening ? (
@@ -54,6 +62,24 @@ function BenchRow({ b, room, onAdd }: { b: BenchCompany; room: number; onAdd: (b
         ) : null}
       </dl>
       <ResearchLinks q={q} keys={false} />
+      {footer}
+    </>
+  );
+}
+
+/** One bench company, in the compact shape of a pick row, with Add to today. */
+function BenchRow({ b, room, onAdd }: { b: BenchCompany; room: number; onAdd: (b: BenchCompany) => void }) {
+  return (
+    <li data-bench={b.company.id} className="grid gap-2 border-b px-4 py-3 last:border-b-0">
+      <CompanyRowBody
+        b={b}
+        action={
+          <Button type="button" variant="outline" size="sm" className="h-7 flex-none gap-1.5 px-2.5 text-xs" disabled={room <= 0} onClick={() => onAdd(b)}>
+            <Plus aria-hidden />
+            Add to today
+          </Button>
+        }
+      />
     </li>
   );
 }

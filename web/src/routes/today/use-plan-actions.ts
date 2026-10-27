@@ -8,6 +8,7 @@ import {
   type OutcomeKind,
   type OutcomePromptView,
   type BenchView,
+  type BrowseCompany,
   type PassReason,
   type PlanRow,
   type PlanView,
@@ -97,6 +98,8 @@ let pastes = 0;
 const lastSave = new WeakMap<QueryClient, Map<Id, string>>();
 
 const passId = (row: PlanRow) => `pass:${row.entryId}`;
+/** The pending write of a swap, named by the company coming in (its provisional row has the id `-companyId`). */
+const swapInId = (companyId: Id) => `swap-in:${companyId}`;
 const cachedPlan = (queryClient: QueryClient) => queryClient.getQueryData<PlanView>(queryKeys.plan);
 const cachedRow = (queryClient: QueryClient, entryId: Id) => cachedPlan(queryClient)?.rows.find((r) => r.entryId === entryId);
 
@@ -161,7 +164,10 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
    */
   const goneOrNoGo = (row: PlanRow, latest: PlanRow | undefined, what: 'Not logged' | 'Not carried'): string | null => {
     const company = row.company.name;
-    if (isProvisional(row)) return `${what}. ${company} joins today's list once your Not now is saved. Press Z to undo it.`;
+    if (isProvisional(row)) {
+      const saved = isPending(swapInId(-row.entryId)) ? 'your swap' : 'your Not now';
+      return `${what}. ${company} joins today's list once ${saved} is saved. Press Z to undo it.`;
+    }
     if (isPending(passId(row))) return `${what}. You said Not now to ${company}.`;
     if (cachedPlan(queryClient) && !latest) return `${what}. ${company}'s row is no longer on today's plan.`;
     return null;
@@ -448,7 +454,7 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
    * its window) stays on the list as done. An application never stops it (his ruling, 2026-10-26).
    */
   const passRefusal = (row: PlanRow): string | null => {
-    if (isProvisional(row)) return `${row.company.name} is still coming in. Press Z to undo the Not now before it.`;
+    if (isProvisional(row)) return `${row.company.name} is still coming in. Press Z to undo ${isPending(swapInId(-row.entryId)) ? 'the swap' : 'the Not now'} before it.`;
     if (row.steps.some((s) => s.kind === 'request' && s.at !== null)) return `You already reached ${row.company.name} today, so it stays on the list.`;
     return null;
   };
@@ -511,6 +517,70 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
     return true;
   };
 
+  /**
+   * Why a swap must not start: the pick is still coming in, was reached, done or carried, or the company is held back
+   * or already on the list. A company he said Not now to is not blocked here: the API says so with its dates.
+   */
+  const swapRefusal = (row: PlanRow, b: BrowseCompany): string | null => {
+    if (isProvisional(row)) return `${row.company.name} is still coming in. Press Z to undo it before swapping it.`;
+    if (row.state !== 'todo' || row.steps.some((s) => s.at !== null)) return `${row.company.name} is already worked or carried, so it stays on the list.`;
+    if (b.blocked) return sentence(b.blocked);
+    if (cachedPlan(queryClient)?.rows.some((r) => r.company.id === b.company.id)) return `${b.company.name} is already on today's list.`;
+    return null;
+  };
+
+  /**
+   * Swap (Browse companies): the chosen company takes the pick's slot and the pick goes back to More options. It is not
+   * a Not now: no cooldown, no pass counted, and it uses no room. The rail shows the change at once; nothing reaches
+   * the API until the window ends, so Undo puts the day back exactly. True when queued.
+   */
+  const swapPick = (row: PlanRow, b: BrowseCompany): boolean => {
+    const id = swapInId(b.company.id);
+    if (isPending(id) || isPending(passId(row))) return false;
+    const refused = swapRefusal(row, b);
+    if (refused) return refuse(`Not swapped. ${refused}`);
+    const latest = cachedRow(queryClient, row.entryId);
+    if (cachedPlan(queryClient) && !latest) return refuse(`Not swapped. ${row.company.name}'s row is no longer on today's plan.`);
+    const label = `Swapped in ${b.company.name} for ${row.company.name}.`;
+    write({
+      id,
+      label,
+      afterCommit: `${label} ${row.company.name} is back on More options.`,
+      patches: [
+        {
+          key: queryKeys.plan,
+          apply: (p: PlanView) => {
+            const at = p.rows.findIndex((r) => r.entryId === row.entryId);
+            if (at < 0) return p;
+            const rows = [...p.rows];
+            rows.splice(at, 1, benchToPick(b, row.position));
+            return { ...p, rows };
+          },
+        },
+        {
+          key: queryKeys.bench,
+          apply: (v: BenchView) => ({ ...v, companies: v.companies.filter((c) => c.company.id !== b.company.id) }),
+        },
+        shellPatch(),
+      ],
+      commit: (o) =>
+        sendVersioned(queryClient, `plan:${row.entryId}`, row.revision, () => cachedRow(queryClient, row.entryId)?.revision, o, (revision) =>
+          client.swapPick(row.entryId, { companyId: b.company.id, idempotencyKey: `pick-swap:${row.entryId}:${b.company.id}` }, revision, o).then(
+            (res) => {
+              // The browse list names the pick that went back: read it again.
+              void queryClient.invalidateQueries({ queryKey: queryKeys.browseAll });
+              return { ...res, revision: revision + 1 };
+            },
+            (err: unknown) => {
+              if (err instanceof ApiError && err.code === 'not_allowed') throw new ApiError('not_allowed', `Not swapped. ${sentence(err.message)}`);
+              throw err;
+            },
+          ),
+        ),
+    });
+    return true;
+  };
+
   /** Add to today from the bench: the company joins after the last pick. True when queued. */
   const addFromBench = (companyId: Id, name: string): boolean => {
     const id = `bench-add:${companyId}`;
@@ -557,6 +627,6 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
   const confirming = (noteId: Id): boolean => isPending(`confirm:${noteId}`);
 
   return {
-    logRequest, logApplied, logPeople, saveSearch, skip, passPick, passRefusal, addFromBench, saveNote, confirmReason, answer, seeWins, noteSaving, confirming,
+    logRequest, logApplied, logPeople, saveSearch, skip, passPick, passRefusal, addFromBench, swapPick, swapRefusal, saveNote, confirmReason, answer, seeWins, noteSaving, confirming,
   };
 }

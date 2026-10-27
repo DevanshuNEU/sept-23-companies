@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
-import { HelpCircle, Layers, Terminal } from 'lucide-react';
+import { HelpCircle, Layers, Search, Terminal } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { openExternal, safeHref } from '@/lib/safe-href';
 import { useViewQuery } from '@/pending/pending';
 import { BenchDrawer } from './bench-drawer';
+import { BrowseDrawer } from './browse-drawer';
 import { CompanyPanel } from './company-panel';
 import { EmailLaneList } from './email-lane';
 import { EmailRowPanel } from './email-row-panel';
@@ -145,6 +146,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
   // Not now's reason chips are open on this row; the bench drawer (B) is open.
   const [passing, setPassing] = useState<Id | null>(null);
   const [benchOpen, setBenchOpen] = useState(false);
+  const [browseOpen, setBrowseOpen] = useState(false);
   // The company whose Log people box is open: it starts closed on every row, and closes when he moves to another.
   const [peopleOpen, setPeopleOpen] = useState<Id | null>(null);
   const showBench = useCallback(() => setBenchOpen(true), []);
@@ -394,6 +396,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
   useHotkeys([
     { keys: 'shift+c', label: isQueue(plan) ? 'Copy every company line for the terminal' : 'Copy every find-someone handoff', group, run: copyAllHandoffs },
     { keys: 'b', label: 'More options (the bench)', group, inDialogs: true, run: () => setBenchOpen((o) => !o) },
+    { keys: 'f', label: 'Browse companies', group, inDialogs: true, run: () => setBrowseOpen((o) => !o) },
   ]);
 
   /* ------------------------------------------------------------------ layout */
@@ -476,6 +479,11 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
             {`More options${bench && bench.companies.length > 0 ? ` (${bench.companies.length})` : ''}`}
             <KeyHint k="B" />
           </Button>
+          <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="f" onClick={() => setBrowseOpen(true)}>
+            <Search aria-hidden />
+            Browse companies
+            <KeyHint k="F" />
+          </Button>
           <Link
             to="/proposals"
             className="ml-2.5 rounded-sm text-xs text-muted-foreground underline decoration-foreground/30 underline-offset-3 transition-colors outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70"
@@ -513,6 +521,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
         </aside>
       ) : null}
 
+      <BrowseDrawer open={browseOpen} onOpenChange={setBrowseOpen} rows={plan.rows} onSwap={actions.swapPick} />
       <BenchDrawer
         open={benchOpen}
         onOpenChange={setBenchOpen}

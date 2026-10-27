@@ -72,7 +72,7 @@ class WatchReport:
 def page_fingerprint(markup: str) -> str:
     """sha256 of the page text, lower-cased, with dates and copyright years removed (standalone years are kept:
     "2027 new grad" is content)."""
-    text = html_to_text(markup).lower()
+    text = html_to_text(markup, visible_only=False).lower()
     text = _COPYRIGHT.sub(" ", text)
     text = _DATES.sub(" ", text)
     return hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()
@@ -80,7 +80,7 @@ def page_fingerprint(markup: str) -> str:
 
 def _unusable(markup: str, min_chars: int) -> str | None:
     """None when the page has real text, else why not: a challenge page, or too little text (a JavaScript shell)."""
-    text = html_to_text(markup)
+    text = html_to_text(markup, visible_only=False)
     if len(text) < _CHALLENGE_MAX_CHARS and any(m in text.lower() for m in _CHALLENGE):
         return _CHALLENGED
     if len(text) < min_chars:

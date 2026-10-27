@@ -64,6 +64,59 @@ class HtmlToTextTests(unittest.TestCase):
     def test_plain_text_passes_through(self):
         self.assertEqual(html_to_text("  Just text, 3 < 5 and 5 > 3.  "), "Just text, 3 < 5 and 5 > 3.")
 
+    def test_hidden_elements_are_left_out(self):
+        # A hidden "We sponsor" read yes; a hidden line can also talk to the reader or the judge (#112).
+        for opener in ('<div hidden>', '<div style="display:none">',
+                       '<div style="DISPLAY : None">', '<div style="visibility:hidden">',
+                       '<div style="font-size:0px">', '<div style="color:transparent">',
+                       '<div style="position:absolute;left:-9999px">', '<div style="text-indent:-10000px">',
+                       '<div style="clip:rect(0 0 0 0)">', '<div style="clip-path:inset(100%)">',
+                       '<div style="height:0;overflow:hidden">', '<div style="display&#58;none">',
+                       '<div style="display:/**/none">'):
+            self.assertEqual(html_to_text(f"<p>Great team.</p>{opener}We sponsor H-1B visas.</div><p>Apply.</p>"),
+                             "Great team.\nApply.", opener)
+
+    def test_everyday_styles_are_not_hidden(self):
+        # Webflow puts opacity:0 on every block that fades in, so it is not hidden.
+        for opener in ('<div style="opacity:0">', '<div style="opacity:0.5">', '<div style="height:0">',
+                       '<div style="overflow:hidden">', '<div style="font-size:0.9em">', '<div style="left:-20px">',
+                       '<div aria-hidden="true">', '<div class="hidden-xs">'):
+            # aria-hidden only hides from a screen reader: the text is on the screen, so the rules read it.
+            self.assertEqual(html_to_text(f"{opener}We sponsor H-1B visas.</div>"), "We sponsor H-1B visas.", opener)
+
+    def test_a_hidden_element_ends_at_its_own_closing_tag(self):
+        markup = '<div hidden><div>a</div><div>b</div>c</div>visible'
+        self.assertEqual(html_to_text(markup), "visible")
+        self.assertEqual(html_to_text('<section><span hidden>x</span>shown</section>'), "shown")
+
+    def test_a_closing_parent_ends_an_unclosed_hidden_child(self):
+        self.assertEqual(html_to_text('<ul><li hidden>x</ul><p>visible</p>'), "visible")
+
+    def test_implied_ends_close_a_hidden_element(self):
+        self.assertEqual(html_to_text('<ul><li hidden>x<li>shown</ul>'), "shown")
+        self.assertEqual(html_to_text('<p hidden>x<div>shown</div>'), "shown")
+        self.assertEqual(html_to_text('<table><tr><td hidden>x<td>shown</tr></table>'), "shown")
+
+    def test_a_self_closing_slash_on_a_normal_tag_is_ignored_as_browsers_do(self):
+        self.assertEqual(html_to_text('<div hidden/>secret</div>shown'), "shown")
+
+    def test_a_hidden_void_tag_hides_nothing_after_it(self):
+        self.assertEqual(html_to_text('<img hidden src="x.png">shown<br hidden>too'), "shown\ntoo")
+        self.assertEqual(html_to_text('<input type="hidden" value="x">shown'), "shown")
+
+    def test_template_and_svg_are_dropped(self):
+        self.assertEqual(html_to_text('<template>We sponsor</template><svg><text>logo</text></svg>shown'), "shown")
+
+    def test_invisible_characters_are_dropped(self):
+        self.assertEqual(html_to_text("<p>We do n‍ot spon&shy;sor\U000E0041\U000E0042 visas.</p>"),
+                         "We do not sponsor visas.")
+        self.assertEqual(html_to_text("a b"), "a\nb")
+
+    def test_visible_only_false_reads_the_page_as_before(self):
+        markup = '<p>a</p><div hidden>b</div><template>c</template><svg><text>d</text></svg><p>e\u200bf</p>'
+        self.assertEqual(html_to_text(markup, visible_only=False), "a\nb\ncd\ne\u200bf")
+        self.assertEqual(html_to_text(markup), "a\nef")
+
     def test_empty_and_markup_only(self):
         self.assertEqual(html_to_text(""), "")
         self.assertEqual(html_to_text("<div><br></div>"), "")

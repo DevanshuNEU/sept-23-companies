@@ -31,6 +31,7 @@ from outreach.crawl.watch import usable_text
 from outreach.judge.config import JudgeConfig
 from outreach.net import FetchError, HttpClient, UrllibClient
 from outreach.plan.people import is_linkedin_url
+from outreach.rules.text import strip_invisible
 from outreach.store import utcnow
 
 __all__ = ["Fetched", "SiteReader", "build_reader", "unavailable"]
@@ -150,7 +151,7 @@ class SiteReader:
         markup = r.text()
         if not usable_text(markup, self.cfg.min_text_chars):
             return unavailable(kind, url, "no readable text (a JavaScript page or a challenge page)", now)
-        text = html_to_text(markup) if ctype != "text/plain" else markup.strip()
+        text = html_to_text(markup) if ctype != "text/plain" else strip_invisible(markup).strip()  # #112
         text = text[:self.cfg.page_max_chars]
         return Fetched({"kind": kind, "url": url, "status": "ok", "why": "", "text": text, "fetched_at": now,
                         "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}, markup)

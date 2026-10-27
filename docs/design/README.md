@@ -997,7 +997,7 @@ changed, and wins where the two differ. No mockup was drawn; the sample is `?sce
   not in flight, not held back, and within the top `fresh_pool_top_n` (300) of the stored ranking (the quality floor:
   a new opening at a low scored company never pushes out a strong one; it still competes by rank). They come first,
   newest opening first; the rest are the normal ranking.
-- **Head.** `8 picks, 2 reached` (`, 1 carried over`, `, 2 passed` when there are any).
+- **Head.** `8 picks` (`, 1 carried over`, `, 2 passed` when there are any; 16.1c moved the reached count into the rail).
 - **Rail ("Today's picks").** Picks with a new opening first, each with a small tag in the info hue, "New opening, 6
   hours ago", then its one line of why today: a new opening's level and title (`SWE I role: Software Engineer I`), an
   older role's level and age (`New grad role, posted 4 days ago`), else the top reason it ranks. Under the rail:
@@ -1033,6 +1033,81 @@ changed, and wins where the two differ. No mockup was drawn; the sample is `?sce
   says "New opening at Retell AI" with Show, which opens the drawer.
 - **Finish.** "8 of 8 handled: 6 reached, Hex carries to tomorrow. You passed on 2 for now." A pick he passed left
   the list and the bench filled its place, so the count stays the day's picks.
+
+#### 16.1c The Today redesign (2026-10-27, the owner's ruling)
+
+His words: the page was "so dull" and "not at all easy on the eyes", and the space on the right should "share details and
+things that are not gonna change". This section wins over 16.1a and 16.1b wherever it differs (their Head, Rail and Panel
+lines); their rules for rows, keys, Not now and the bench stand. No mockup was drawn; the sample is `?scenario=queue`.
+
+**Three columns from 1280 px.** The rail (256 to 292 px), the company in the middle (it fills what is left; its content
+is at most 720 px and is centred in it, so a wide window gets air, not stretched text) and the **profile** (296 to 350
+px) on the right. Each column scrolls on its own, so the profile stays put while the middle scrolls. The profile is a
+card-coloured column with a hairline on its left; the rail and the middle sit on the canvas. Under 1280 px the profile
+folds under the company as one closed row, **Company profile**, with a line of what is known ("Series A, 30 people, San
+Francisco, CA", or "Not much known yet"); it opens to the same facts, so nothing is lost on a narrow window. Under 1100
+px the rail stacks above the company as before. The profile follows the selection and closes again when he moves.
+
+**The profile (`profile-panel.tsx`; every line is `queue.profile`, built in `outreach/api/queries/profile.py`).** Small
+icon headers, in order. Each fact shows its words, then in small muted text how sure it is and where it comes from
+("estimate, LinkedIn", "confirmed, SEC Form D"; a fact he set himself says "set by you"). A fact nothing is known about
+says **Not known** in the muted colour, never red, and its row keeps a free column on the right for a future edit pencil
+(editing is not built).
+
+| Section | Shows | Comes from |
+|---|---|---|
+| What they build | The judge's sentence and "Judged Nov 9" (", thin evidence" when it read little); its domains as small chips; else "Not judged yet" | the newest fresh judgment |
+| Stage and funding | Stage ("Series A"); the latest Form D ("$17,000,000 raised, Form D filed Jul 8, 2026") | the best `stage` and `funding` facts |
+| Headcount | "30 people" with its confidence | the best `size` fact, else `headcount` |
+| Where | HQ; where the open roles at his level are ("San Francisco; Remote US") | the `hq` fact; the postings below |
+| Visa | E-Verify with the day it was checked; sponsorship stance; "4 software LCA filings in FY2024 and FY2025" (the last two fiscal years on record, DOL disclosure data) | `everify`, the shown sponsorship word, the `lca` evidence rows |
+| Open roles at your level | Up to 5: title (a link), level, age, place; early career fits first, then newest; else "None open at your level" | the postings under the current ruleset (`outreach/plan/fresh.py` `load_level_roles`) |
+| People on record | "2 on record, none asked yet", "4 on record, 4 asked, free again Nov 18" | the people and the contact state |
+| Your history | "You applied on Oct 20; this is a new role." (or "You applied on Oct 20."), the last touch, up to 3 "Not now on Nov 7: too big" lines; else "Nothing yet" | applications, outbound touches, `pick_passed` events |
+| Links | Careers, Website, LinkedIn page (new tab, `noopener`; never fetched) | as the three research links |
+
+**The company, calmer (`company-panel.tsx`, `why-today.tsx`).**
+
+- **Header.** A 44 px monogram, the name at 28 px with tight tracking (the focus target), one line under it: what they
+  build (the judge's sentence, two lines at most, else "What they build is not known yet." in muted). Under that, chips:
+  the level word ("SWE I role", else the lane word) and **Fit 82** when the judge has read the company: green from 70,
+  amber 50 to 69, muted below 50 (a weak fit is quiet, never red).
+- **Why today** is one card (`bg-card`, hairline, 12 px radius): the opening title as a link with its level and age, "You
+  applied on Oct 20; this is a new role." when it applies, then the reasons as **chips with icons** (the new opening in
+  the info hue, E-Verify, sponsorship, size and stage, new roles in 30 days, then the ranker's own reasons, each once),
+  then the judge's one-line reason in a quiet quote style with "Risk: ..." under it. Not judged: "Judge: not judged yet."
+- **Actions.** One filled button, Open LinkedIn search (S). Quieter beside it: Copy for terminal (C), Log applied (A);
+  on the next line the research links, Careers (O), Website, LinkedIn page, all in the soft grey button.
+- **Where it stands** (and the email hint) in one quiet list. **Log people you asked** (L) and **Save this search** are
+  two small rows that start closed (a chevron, the name, a hint in grey, the key); L opens the first and puts the cursor
+  in it, and it closes again when he moves to another company. A company with no room in its wave has no such row, and L
+  says "Nothing to log at Baseten: its wave is full." Carry to tomorrow (X) and Not now (P) stay at the bottom with the
+  step marks. In flight, the 7-day question and the watch list stay below, closed.
+
+**The rail, more alive.** The day first: "2 of 8 reached" over a slim bar (`role="meter"`, green), counting what is done and
+never what is left. Each row: a 32 px **monogram** (the company's first letter on one of eight calm hues chosen by a hash
+of the name, so it is the same colour every day; never the brand violet; `src/lib/monogram.ts`), the name, the fit chip
+on the right when judged, the new-opening tag, one reason line, and a word only once the row is Done, Logged or Carried
+over (a check, dot or half disc sits on the monogram). The selected row is a card with a hairline, a shadow and a 3 px
+foreground bar on its left. The head under the date says `8 picks` (`, 1 carried over`, `, 2 passed`); the reached count
+lives in the rail.
+
+**Ease on the eyes.** Cards one step above the canvas, body 14 px at 1.55 to 1.65 line height, sections divided by space
+and hairlines rather than boxes, 150 ms colour and rotate transitions only (off under reduced motion), a hover and
+press state on every control. No serif here: the serif stays for the notes he writes.
+
+**Monogram tokens** (`globals.css`, checked in `tokens.test.ts`: text on tile 6:1 or more, neither is the brand):
+
+| Hue | Light tile, text | Dark tile, text |
+|---|---|---|
+| teal | #d3eeea, #0b5650 | #133632, #86ddd3 |
+| cyan | #d2ebf6, #0b5372 | #12344a, #92d4f2 |
+| green | #d6efda, #165f2b | #143821, #8ddfa0 |
+| amber | #f5e5bf, #764606 | #3d2c0d, #f2c870 |
+| orange | #f9dac7, #85380b | #40240f, #f6ad82 |
+| rose | #f8d7df, #99193b | #42192a, #f59fb5 |
+| slate | #dce2ee, #2d4266 | #212a3d, #aebfe0 |
+| olive | #e4ecc2, #4a5809 | #2c3310, #cbdb78 |
 
 #### 16.1a Today as a company queue (P2)
 
@@ -1242,7 +1317,7 @@ Single keys work only outside text fields, as in section 3.
 | Today | O | A company row: open the careers page. A person row: open the role |
 | Today | C | A company row: copy the line for the terminal. A person row: copy the note |
 | Today | A | Log applied |
-| Today | L | A company row: put the cursor in Log people you asked (Cmd+Enter logs the paste). A person row: open the profile |
+| Today | L | A company row: open Log people you asked, which starts closed, and put the cursor in it (Cmd+Enter logs the paste). A person row: open the profile |
 | Today | R | A person row: log request sent. A company row: as L |
 | Today | E | Edit the note (person rows) |
 | Today | Y | Confirm your line (person rows) |

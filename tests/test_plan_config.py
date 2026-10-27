@@ -20,6 +20,7 @@ class PlanConfigTest(unittest.TestCase):
             "linkedin": {"plan_quota": 150, "hard_total": 200, "rotate_days": 14,
                          "rotate_top_n": 150, "max_people_per_company": 8},
             "queue": {"companies_per_day": 8, "requests_per_company": 4, "fresh_slots": 3, "fresh_hours": 72,
+                      "fresh_pool_top_n": 300,
                       "pass_cooldown_days": 14, "bench_size": 12},
             "lanes": {"role": ["level_role", "intern_junior"], "reason": ["reason_no_role"],
                       "fill": ["any_us_role"], "role_share": 0.8, "reason_share": 0.2},
@@ -157,16 +158,22 @@ class PlanConfigTest(unittest.TestCase):
                                ("pass_cooldown_days = 14", "pass_cooldown_days = 0", "queue.pass_cooldown_days"),
                                ("pass_cooldown_days = 14", "pass_cooldown_days = 91", "queue.pass_cooldown_days"),
                                ("bench_size = 12", "bench_size = 0", "queue.bench_size"),
+                               ("fresh_pool_top_n = 300", "fresh_pool_top_n = 49", "queue.fresh_pool_top_n"),
+                               ("fresh_pool_top_n = 300", "fresh_pool_top_n = 1501", "queue.fresh_pool_top_n"),
+                               ("fresh_pool_top_n = 300", "fresh_pool_top_n = true", "queue.fresh_pool_top_n"),
                                ("bench_size = 12", "bench_size = 31", "queue.bench_size")):
             with self.subTest(new=new), self.assertRaises(ValueError) as ctx:
                 load_plan_config(_variant(old, new))
             self.assertIn(name, str(ctx.exception))
-        for key in ("fresh_slots", "fresh_hours", "pass_cooldown_days", "bench_size"):
+        for key in ("fresh_slots", "fresh_hours", "fresh_pool_top_n", "pass_cooldown_days", "bench_size"):
             with self.subTest(key=key), self.assertRaises(KeyError) as ctx:
                 load_plan_config(_variant(f"\n{key} = ", "\nunused_key = "))
             self.assertIn(f"queue.{key}", str(ctx.exception))
         self.assertEqual(load_plan_config(_variant("fresh_slots = 3", "fresh_slots = 0")).get("queue", "fresh_slots"), 0)
         self.assertEqual(load_plan_config(_variant("fresh_slots = 3", "fresh_slots = 8")).get("queue", "fresh_slots"), 8)
+        for edge in (50, 1500):
+            self.assertEqual(load_plan_config(_variant("fresh_pool_top_n = 300", f"fresh_pool_top_n = {edge}"))
+                             .get("queue", "fresh_pool_top_n"), edge)
 
     def test_no_dashes_in_config(self):
         text = CONFIG_PATH.read_text(encoding="utf-8")

@@ -193,6 +193,28 @@ class FreshLaneTest(unittest.TestCase):
         self.assertNotIn(5, ids(choose_rows([p, prospect(1)], Caps(8, 0, 7, 1), CFG)))
 
 
+class QualityFloorTest(unittest.TestCase):
+    def test_rank_300_takes_the_lane_and_301_does_not(self):
+        at300 = dataclasses.replace(prospect(5, score=13, openings=[opening(5)]), position=300)
+        at301 = dataclasses.replace(at300, position=301)
+        self.assertIsNotNone(fresh_pick(at300, CFG))
+        self.assertIsNone(fresh_pick(at301, CFG))
+        strong = [prospect(c, score=160 - c) for c in range(101, 109)]
+        self.assertEqual(ids(choose_rows([*strong, at300], Caps(8, 0, 7, 1), CFG))[0], 5)
+        rows = choose_rows([*strong, at301], Caps(8, 0, 7, 1), CFG)
+        self.assertNotIn(5, ids(rows))  # a 13 point company below the floor never pushes out a 60 point one
+        self.assertTrue(all(r.opening is None for r in rows))
+
+    def test_below_the_floor_the_bench_does_not_flag_it_new(self):
+        low = dataclasses.replace(prospect(5, score=13, openings=[opening(5)]), position=301)
+        b = bench([prospect(1, score=60), low], taken=set(), cfg=CFG)
+        self.assertEqual([(x.prospect.company_id, x.opening) for x in b], [(1, None), (5, None)])
+
+    def test_below_the_floor_a_new_opening_does_not_end_the_cooldown(self):
+        p = dataclasses.replace(prospect(5, passed_days=5, openings=[opening(5)]), position=301)
+        self.assertEqual(eligibility(p, CFG), (False, "passed"))
+
+
 class NotNowTest(unittest.TestCase):
     def test_passed_13_days_ago_is_held_and_15_is_back(self):
         p13 = prospect(5, passed_days=13)
@@ -387,6 +409,11 @@ class LoadProspectsFreshTest(unittest.TestCase):
                                                     cfg, load_outbound(self.conn, canon, tz=TZ), now=NOW)}
         self.assertIn(low, got)
         self.assertEqual(len(got), 3)
+        # Past the scan limit and below the quality floor: not scanned.
+        cfg = dc.replace(cfg, queue={**cfg.queue, "fresh_pool_top_n": 3})
+        got = {p.company_id for p in load_prospects(self.conn, ranked_list(self.conn, laned_only=True), canon, TODAY,
+                                                    cfg, load_outbound(self.conn, canon, tz=TZ), now=NOW)}
+        self.assertNotIn(low, got)
 
     def test_a_pass_and_an_application_reach_the_prospect(self):
         c = seed_scored_company(self.conn, "Passed Co", 60, ["level_role"], with_posting=False)

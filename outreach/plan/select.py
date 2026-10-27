@@ -11,8 +11,8 @@ With `plan.propose_people = false` (shipped: company first, #9 2026-10-26) the o
 every row is a company row on LinkedIn, no person and no email, and a carried person row comes back as its company.
 
 Top picks (the owner's spec, 2026-10-26; `outreach.plan.fresh` has the rules): before anything else, up to
-`queue.fresh_slots` rows go to companies with a fresh early career opening that clears the visa gate, newest opening
-first, then by score; they come first in the display order. A company he said Not now to is held back for
+`queue.fresh_slots` rows go to companies within the top `queue.fresh_pool_top_n` of the ranking with a fresh early
+career opening that clears the visa gate, newest opening first, then by score; they come first in the display order. A company he said Not now to is held back for
 `queue.pass_cooldown_days`, and one he applied to is held back, each until an opening of that kind was first seen
 after it (then it is fresh again). `bench` is the next best companies not on the day's list.
 """
@@ -28,7 +28,7 @@ from outreach.plan.contact import ContactState
 from outreach.plan.fresh import Opening, visa_clear
 from outreach.plan.people import Candidate, pick_channel, rank_people
 
-__all__ = ["CarriedRow", "Prospect", "Caps", "Chosen", "BenchPick", "group_of", "qualifying", "held_back",
+__all__ = ["CarriedRow", "Prospect", "Caps", "Chosen", "BenchPick", "group_of", "qualifying", "held_back", "in_fresh_pool",
            "fresh_pick", "fresh_any", "fresh_lane", "eligibility", "options", "choose_rows", "bench"]
 
 FIND_SOMEONE = ("linkedin_request", None, "find_someone")
@@ -119,15 +119,26 @@ def _holds(p: Prospect, cfg: PlanConfig) -> list:
     return tests
 
 
+def in_fresh_pool(p: Prospect, cfg: PlanConfig) -> bool:
+    """The quality floor: only a company within the top `queue.fresh_pool_top_n` of the stored ranking may take the
+    fresh lane, so a new opening at a low scored company never pushes out a strong one. Below it the company still
+    competes by rank like any other."""
+    return p.position <= cfg.get("queue", "fresh_pool_top_n")
+
+
 def fresh_pick(p: Prospect, cfg: PlanConfig) -> Opening | None:
     """The opening the fresh lane would name: the first early career fit that clears the gate and, when the company
-    is held back, came after what holds it. None when there is none."""
+    is held back, came after what holds it. None when there is none, or below the quality floor (`in_fresh_pool`)."""
+    if not in_fresh_pool(p, cfg):
+        return None
     tests = _holds(p, cfg)
     return next((o for o in qualifying(p) if o.early_fit and all(t(o) for t in tests)), None)
 
 
 def fresh_any(p: Prospect, cfg: PlanConfig) -> Opening | None:
-    """As `fresh_pick` for any opening at his level (the bench flags these as new too)."""
+    """As `fresh_pick` for any opening at his level (the bench flags these as new too), with the same floor."""
+    if not in_fresh_pool(p, cfg):
+        return None
     tests = _holds(p, cfg)
     return next((o for o in qualifying(p) if all(t(o) for t in tests)), None)
 

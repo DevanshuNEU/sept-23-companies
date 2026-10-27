@@ -124,18 +124,20 @@ def load_prospects(conn: sqlite3.Connection, ranked: Sequence[StoredScore], cano
     id counts as its survivor (the first ranked row wins). `position` is the 1-based place in `ranked`. A person
     with any `outbound` row (a queued first email included) is not a candidate again.
 
-    Top picks: a ranked company further down with a fresh opening (`fresh.load_openings` at `now`, default
-    `plan_moment(today)`) is scanned too, so the fresh lane is not cut by the scan limit. Each prospect carries its
+    Top picks: a ranked company past the scan limit but inside `queue.fresh_pool_top_n` with a fresh opening
+    (`fresh.load_openings` at `now`, default `plan_moment(today)`) is scanned too, so the fresh lane is not cut by the
+    scan limit. Each prospect carries its
     openings, its E-Verify and sponsorship facts, his newest Not now inside the cooldown and his newest application."""
     tz = cfg.get("plan", "timezone")
     now = now or plan_moment(today, tz)
     openings = load_openings(conn, canon, now, cfg)
     limit = cfg.get("plan", "scan_limit")
+    pool = cfg.get("queue", "fresh_pool_top_n")
     scanned: list[tuple[int, StoredScore, int]] = []
     seen: set[int] = set()
     for place, s in enumerate(ranked, 1):
         company = canon.get(s.company_id, s.company_id)
-        if company not in seen and (place <= limit or company in openings):
+        if company not in seen and (place <= limit or (place <= pool and company in openings)):
             seen.add(company)
             scanned.append((company, s, place))
     ids = [c for c, _, _ in scanned]

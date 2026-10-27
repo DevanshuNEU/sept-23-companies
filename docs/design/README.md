@@ -994,7 +994,9 @@ changed, and wins where the two differ. No mockup was drawn; the sample is `?sce
 - **The fresh lane.** Up to `[queue] fresh_slots` (3) picks are kept for a new opening: an early career role (new
   grad, early career, SWE I, or an open level asking 2 years or fewer) first seen or posted within `fresh_hours` (72)
   at a company that clears the visa gate (no refusal, and E-Verify enrolled, or the posting sponsors or is silent),
-  not in flight, not held back. They come first, newest opening first; the rest are the normal ranking.
+  not in flight, not held back, and within the top `fresh_pool_top_n` (300) of the stored ranking (the quality floor:
+  a new opening at a low scored company never pushes out a strong one; it still competes by rank). They come first,
+  newest opening first; the rest are the normal ranking.
 - **Head.** `8 picks, 2 reached` (`, 1 carried over`, `, 2 passed` when there are any).
 - **Rail ("Today's picks").** Picks with a new opening first, each with a small tag in the info hue, "New opening, 6
   hours ago", then its one line of why today: a new opening's level and title (`SWE I role: Software Engineer I`), an

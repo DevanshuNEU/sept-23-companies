@@ -106,13 +106,12 @@ def pass_pick(ctx: WriteCtx, entry_id: int, body: PassPickBody, cfg: PlanConfig)
     today = ny_day(ctx.now)
     if entry["list_date"] != today:
         raise _refuse(f"That row is on the list of {entry['list_date']}. Not now works on today's list.")
-    if entry["revision"] != body.revision:
-        raise ApiProblem("conflict", f"The plan row changed since you loaded it. {NOT_SAVED}")
     row = queries.build_row(conn, entry_id, cfg, ctx.now)
     if row is not None and any(s.kind == "request" and s.at for s in row.steps):
         raise _refuse(f"You already reached {name} today, so it stays on the list as done.")
     survivor = survivor_of(merge_parents(conn), entry["company_id"])
     last = conn.execute("SELECT max(rank) FROM daily_list_entry WHERE list_date = ?", (today,)).fetchone()[0]
+    # The revision check: a stale one is a conflict and nothing is written.
     bump(conn, "daily_list_entry", "rowid", entry_id, body.revision,
          {"state": "removed", "decided_at": ctx.now, "rank": last + 1}, at=ctx.now)
     picks, stored = bench_picks(conn, date.fromisoformat(today), as_utc(ctx.now), cfg, n=1)

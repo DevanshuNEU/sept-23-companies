@@ -1,9 +1,8 @@
-"""`python -m outreach.people clear-reach [--include-history] [--apply]`: clear the LinkedIn To reach list (#15).
+"""`python -m outreach.people clear-reach [--apply]`: clear the LinkedIn list for the new system (#15).
 
 The default is a dry run: it prints who would be removed, who stays and why, and the row counts, and writes nothing.
-`--never-contacted` (the default scope) removes LinkedIn people with no history and nothing of his; `--include-history`
-also looks at people whose only history is imported touches, prints a bigger warning, and keeps every one of them
-(a touch is never deleted, so its person stays). See `outreach.people.clear` for the rules.
+It removes LinkedIn people with no history and nothing of his; everyone with history stays in the store. See
+`outreach.people.clear` for the rules.
 
 `--apply` first writes a full backup in `backups/` next to the store and prints its path; if the backup fails nothing
 is deleted (exit 1). Then one transaction decides again and deletes, and the counts before and after are printed. It
@@ -23,20 +22,10 @@ from outreach.store import connect, db_path, is_live_path, utcnow
 
 __all__ = ["main"]
 
-WARNING = ("WARNING: --include-history also looks at people whose only history is imported touches. A touch is never "
-           "deleted, and deleting its person would orphan it, so each of them is kept and listed below.")
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m outreach.people", description="People clean-up.")
     sub = parser.add_subparsers(dest="command", required=True)
     clear = sub.add_parser("clear-reach", help="remove the never-contacted people from the LinkedIn list")
-    scope = clear.add_mutually_exclusive_group()
-    scope.add_argument("--never-contacted", dest="scope", action="store_const", const="never_contacted",
-                       help="only people with no history and nothing of his (the default)")
-    scope.add_argument("--include-history", dest="scope", action="store_const", const="include_history",
-                       help="also look at people whose only history is imported touches")
-    clear.set_defaults(scope="never_contacted")
     clear.add_argument("--apply", action="store_true", help="back up the store, then delete (default: dry run)")
     return parser
 
@@ -71,10 +60,6 @@ def _print_plan(plan: ClearPlan, stdout, *, verb: str) -> None:
     print(f"Keeps {len(plan.kept)} people:", file=stdout)
     for k in plan.kept:
         print(f"  - {k.name} (person {k.person_id}) at {k.company}: {'; '.join(k.reasons)}", file=stdout)
-    if plan.scope == "include_history":
-        looked = sum(1 for k in plan.kept if k.history)
-        print(f"--include-history removes no one more than the default: {looked} people with history were looked "
-              "at and every one is kept.", file=stdout)
 
 
 def clear_reach(args, stdout) -> int:
@@ -82,21 +67,17 @@ def clear_reach(args, stdout) -> int:
         raise SystemExit("clear-reach --apply only runs from the live checkout, or with OUTREACH_DB set to a scratch "
                          f"store; this is {live_checkout.REPO_ROOT}.")
     now = utcnow()
-    scope_words = "never contacted" if args.scope == "never_contacted" else "include history"
     conn = connect()
     try:
-        if args.scope == "include_history":
-            print(WARNING, file=stdout)
-        plan = plan_clear(conn, scope=args.scope, now=now)
+        plan = plan_clear(conn, now=now)
         if not args.apply:
-            print(f"Clear the LinkedIn To reach list (scope: {scope_words}, today {plan.today}). "
-                  "DRY RUN: nothing is written.", file=stdout)
+            print(f"Clear the LinkedIn list (today {plan.today}). DRY RUN: nothing is written.", file=stdout)
             _print_plan(plan, stdout, verb="Would remove")
             _counts("Rows now:", table_counts(conn), stdout)
             if plan.remove:
                 print("Run again with --apply to remove them (it writes a backup first).", file=stdout)
             return 0
-        print(f"Clear the LinkedIn To reach list (scope: {scope_words}, today {plan.today}). APPLY.", file=stdout)
+        print(f"Clear the LinkedIn list (today {plan.today}). APPLY.", file=stdout)
         if not plan.remove:
             _print_plan(plan, stdout, verb="Would remove")
             print("Nothing to remove: no backup written, nothing changed.", file=stdout)
@@ -109,7 +90,7 @@ def clear_reach(args, stdout) -> int:
             return 1
         print(f"Backup written: {backup}", file=stdout)
         result = apply_clear(conn, plan, backup=backup, now=now)
-        _print_plan(ClearPlan(plan.scope, plan.today, result.removed, plan.kept), stdout, verb="Removed")
+        _print_plan(ClearPlan(plan.today, result.removed, plan.kept), stdout, verb="Removed")
         for r in result.changed:
             print(f"  - kept, it changed while this ran: {r.name} (person {r.person_id}) at {r.company}", file=stdout)
         _counts("Rows before:", before, stdout)

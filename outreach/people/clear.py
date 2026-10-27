@@ -17,9 +17,8 @@ A LinkedIn person (`person.channel = 'linkedin'`) is kept when any of these hold
 
 For a person who goes: their `linkedin_draft` (the prepare step's, saved by `claude`) and `person_source` rows are
 deleted, a past `proposed` or `backlog` plan row that names them keeps the row and loses the name (`person_id` set
-to NULL; the column allows it), and `person` goes last. Events stay: they are history. `--include-history` also
-looks at people whose only history is imported touches, but a touch is never deleted and deleting its person would
-orphan it, so it keeps every one of them: it removes no one more than the default.
+to NULL; the column allows it), and `person` goes last. Events stay: they are history. The people with old-system
+history stay in the store; the LinkedIn page shows only people who replied, so they stop showing without a delete.
 
 `apply_clear` takes the plan the caller printed, decides again under `BEGIN IMMEDIATE`, and deletes only a person
 whose record is the same in both (same revision, drafts, sources and plan rows, and still no reason to keep). So a
@@ -37,11 +36,10 @@ from outreach.plan.dates import today_ny
 from outreach.ranking.common import canonical_ids
 from outreach.store import append_event, transaction
 
-__all__ = ["SCOPES", "BackupFailed", "ClearChanged", "PlanRow", "Removal", "Kept", "ClearPlan", "Applied",
+__all__ = ["BackupFailed", "ClearChanged", "PlanRow", "Removal", "Kept", "ClearPlan", "Applied",
            "plan_clear", "write_backup", "backup_path", "apply_clear", "table_counts"]
 
 TZ = "America/New_York"
-SCOPES = ("never_contacted", "include_history")
 DECIDED_BY_HIM = ("picked", "removed")
 
 # What the run prints before and after: the tables it writes and the history it must leave alone.
@@ -96,12 +94,10 @@ class Kept:
     name: str
     company: str
     reasons: tuple[str, ...]
-    history: bool  # has a touch, a log row or an email thread
 
 
 @dataclass(frozen=True)
 class ClearPlan:
-    scope: str
     today: str
     remove: tuple[Removal, ...]
     kept: tuple[Kept, ...]
@@ -121,8 +117,8 @@ def _count(conn: sqlite3.Connection, sql: str, *args) -> int:
     return conn.execute(sql, args).fetchone()[0]
 
 
-def _reasons(conn: sqlite3.Connection, p: sqlite3.Row, today: str, scope: str, his_events: set[int],
-             live_plan: dict[int, set[int]], canon: dict[int, int]) -> tuple[list[str], bool]:
+def _reasons(conn: sqlite3.Connection, p: sqlite3.Row, today: str, his_events: set[int],
+             live_plan: dict[int, set[int]], canon: dict[int, int]) -> list[str]:
     pid = p["person_id"]
     reasons: list[str] = []
     touches = conn.execute("SELECT channel, count(*) FROM outreach_touch WHERE person_id = ? GROUP BY channel "
@@ -131,10 +127,7 @@ def _reasons(conn: sqlite3.Connection, p: sqlite3.Row, today: str, scope: str, h
     threads = _count(conn, "SELECT count(*) FROM touch WHERE person_id = ?", pid)
     if touches:
         said = ", ".join(f"{channel} x{n}" for channel, n in touches)
-        why = f"has outreach touches ({said}): a touch is never deleted and feeds dedup and the weekly count"
-        if scope == "include_history":
-            why += "; deleting this person would orphan it, so --include-history keeps them too"
-        reasons.append(why)
+        reasons.append(f"has outreach touches ({said}): a touch is never deleted and feeds dedup and the weekly count")
     if logs:
         reasons.append(f"has {logs} LinkedIn log rows (append-only history)")
     if threads:
@@ -159,13 +152,11 @@ def _reasons(conn: sqlite3.Connection, p: sqlite3.Row, today: str, scope: str, h
             reasons.append(f"is on a plan row he decided ({row['state']}, {row['list_date']})")
     if live_plan.get(canon.get(p["company_id"], p["company_id"]), set()) - {pid}:
         reasons.append("their company has a person row on the plan for today or later")
-    return reasons, bool(touches or logs or threads)
+    return reasons
 
 
-def plan_clear(conn: sqlite3.Connection, *, scope: str = "never_contacted", now: str) -> ClearPlan:
+def plan_clear(conn: sqlite3.Connection, *, now: str) -> ClearPlan:
     """Who would go and who stays, and why. Reads only."""
-    if scope not in SCOPES:
-        raise ValueError(f"scope must be one of {SCOPES}, got {scope!r}")
     today = today_ny(now, TZ).isoformat()
     canon = canonical_ids(conn)
     his_events = {r[0] for r in conn.execute(
@@ -181,9 +172,9 @@ def plan_clear(conn: sqlite3.Connection, *, scope: str = "never_contacted", now:
         "SELECT p.*, c.name AS company FROM person p JOIN company c ON c.company_id = p.company_id "
         "WHERE p.channel = 'linkedin' ORDER BY p.person_id").fetchall()
     for p in people:
-        reasons, history = _reasons(conn, p, today, scope, his_events, live_plan, canon)
+        reasons = _reasons(conn, p, today, his_events, live_plan, canon)
         if reasons:
-            kept.append(Kept(p["person_id"], p["name"], p["company"], tuple(reasons), history))
+            kept.append(Kept(p["person_id"], p["name"], p["company"], tuple(reasons)))
             continue
         pid = p["person_id"]
         remove.append(Removal(
@@ -197,7 +188,7 @@ def plan_clear(conn: sqlite3.Connection, *, scope: str = "never_contacted", now:
                 "SELECT list_date, company_id, revision FROM daily_list_entry WHERE person_id = ? "
                 "ORDER BY list_date, company_id", (pid,))),
         ))
-    return ClearPlan(scope, today, tuple(remove), tuple(kept))
+    return ClearPlan(today, tuple(remove), tuple(kept))
 
 
 def backup_path(store_path: str, now: str) -> Path:
@@ -247,7 +238,7 @@ def apply_clear(conn: sqlite3.Connection, before: ClearPlan, *, backup: Path, no
     if not before.remove:
         return Applied((), ())
     with transaction(conn):
-        fresh = {r.person_id: r for r in plan_clear(conn, scope=before.scope, now=now).remove}
+        fresh = {r.person_id: r for r in plan_clear(conn, now=now).remove}
         go = tuple(r for r in before.remove if fresh.get(r.person_id) == r)
         changed = tuple(r for r in before.remove if fresh.get(r.person_id) != r)
         for r in go:
@@ -265,7 +256,7 @@ def apply_clear(conn: sqlite3.Connection, before: ClearPlan, *, backup: Path, no
                                   (r.person_id, r.revision)), 1, f"person {r.person_id}")
         if go:
             append_event(conn, entity="person", kind="people_cleared", actor="system", at=now, detail={
-                "scope": before.scope, "backup": str(backup), "people": [_detail(r) for r in go],
+                "backup": str(backup), "people": [_detail(r) for r in go],
                 "counts": {"people": len(go), "drafts": sum(len(r.drafts) for r in go),
                            "sources": sum(len(r.sources) for r in go),
                            "plan_rows_cleared": sum(len(r.plan_rows) for r in go)},

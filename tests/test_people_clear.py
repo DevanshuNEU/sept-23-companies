@@ -217,7 +217,6 @@ class WhoGoes(Base):
         self.assertEqual((ev["entity"], ev["actor"]), ("person", "system"))
         detail = json.loads(ev["detail"])
         self.assertEqual(detail["backup"], "/b/clear.db")
-        self.assertEqual(detail["scope"], "never_contacted")
         self.assertEqual(detail["counts"], {"people": 1, "drafts": 1, "sources": 0, "plan_rows_cleared": 1})
         self.assertEqual(detail["people"], [{
             "person_id": pid, "name": "Prepared", "company_id": self.co, "company": "Acme", "added_by": "claude",
@@ -277,21 +276,16 @@ class WhoGoes(Base):
         self.assertEqual(self.conn.execute("SELECT person_id FROM daily_list_entry").fetchone()[0], first)
 
 
-class Scopes(Base):
-    def test_include_history_still_keeps_every_touched_person(self):
+class History(Base):
+    def test_a_person_with_old_system_history_stays_in_the_store(self):
         touched = self.person("Old import")
         seed_email_touch(self.conn, touched, PAST, company_id=self.co, outreach=True)
         untouched = self.person("Untouched")
-        default = plan_clear(self.conn, now=NOW)
-        wide = plan_clear(self.conn, scope="include_history", now=NOW)
-        self.assertEqual(_ids(wide), _ids(default))
-        self.assertEqual(_ids(wide), {untouched})
-        self.assertIn("never deleted", " ".join(_kept(wide)[touched]))
-        self.assertEqual([k.person_id for k in wide.kept if k.history], [touched])
-
-    def test_an_unknown_scope_is_refused(self):
-        with self.assertRaises(ValueError):
-            plan_clear(self.conn, scope="everyone", now=NOW)
+        plan = plan_clear(self.conn, now=NOW)
+        self.assertEqual(_ids(plan), {untouched})
+        self.assertIn("never deleted", " ".join(_kept(plan)[touched]))
+        apply_clear(self.conn, plan, backup=Path("/b.db"), now=NOW)
+        self.assertIsNotNone(self.conn.execute("SELECT 1 FROM person WHERE person_id = ?", (touched,)).fetchone())
 
 
 class Backup(Base):
@@ -389,15 +383,9 @@ class Command(Base):
                     cli.main(["clear-reach", "--apply"], stdout=io.StringIO())
         opened.assert_not_called()
 
-    def test_include_history_prints_the_bigger_warning_and_says_it_removes_no_one_more(self):
-        touched = self.person("Old import")
-        seed_outbound(self.conn, touched, self.co, "email", PAST, context_source="own")
-        code, out = self.run_cli("--include-history")
-        self.assertEqual(code, 0)
-        self.assertIn("WARNING", out)
-        self.assertIn("removes no one more", out)
-        self.assertIn(f"Old import (person {touched})", out)
-
+    def test_there_is_no_include_history_mode(self):
+        with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):
+            cli.main(["clear-reach", "--include-history"], stdout=io.StringIO())
 
 if __name__ == "__main__":
     unittest.main()

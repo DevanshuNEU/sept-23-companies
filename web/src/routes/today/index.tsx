@@ -17,6 +17,7 @@ import { DayRail } from '@/components/day-rail';
 import { QueryState } from '@/components/state-views';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useMinWidth } from '@/hooks/use-min-width';
 import { isMac, useHotkeys, type Binding } from '@/keyboard/hotkeys';
 import { useListNav, type RowProps } from '@/keyboard/list-nav';
 import { formatLongDate } from '@/lib/format';
@@ -33,10 +34,14 @@ import { KeyHint, PersonPanel, type PanelActions } from './plan-panel';
 import { PlanEmpty, PlanJobBanner, PlanNotReady, PlanSkeleton } from './plan-states';
 import { OutcomePrompt } from './outcome-prompt';
 import { PassChips } from './pass-chips';
-import { isCompanyRow, nextTodoAfter, peopleFieldId } from './plan-steps';
+import { ProfileFold, ProfilePanel } from './profile-panel';
+import { canLogPeople, isCompanyRow, nextTodoAfter, peopleFieldId } from './plan-steps';
 import { usePlanActions } from './use-plan-actions';
 import { WatchList } from './watch-list';
 import { WinStrip } from './win-strip';
+
+/** From this window width the profile is the third column; under it, it folds under the main column. */
+export const PROFILE_COLUMN_MIN = 1280;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -92,7 +97,7 @@ function PlanHead({ plan }: { plan: PlanView }) {
         {plan.notReady ? null : (
           <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums">
             {isQueue(plan)
-              ? `${plural(plan.total, 'pick', 'picks')}, ${plan.done} reached${carried > 0 ? `, ${carried} carried over` : ''}${plan.passed > 0 ? `, ${plan.passed} passed` : ''}`
+              ? `${plural(plan.total, 'pick', 'picks')}${carried > 0 ? `, ${carried} carried over` : ''}${plan.passed > 0 ? `, ${plan.passed} passed` : ''}`
               : `${plural(plan.total, 'person', 'people')}, ${plan.done} done${carried > 0 ? `, ${carried} carried over` : ''}`}
           </p>
         )}
@@ -133,6 +138,8 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
   // Not now's reason chips are open on this row; the bench drawer (B) is open.
   const [passing, setPassing] = useState<Id | null>(null);
   const [benchOpen, setBenchOpen] = useState(false);
+  // The company whose Log people box is open: it starts closed on every row, and closes when he moves to another.
+  const [peopleOpen, setPeopleOpen] = useState<Id | null>(null);
   const showBench = useCallback(() => setBenchOpen(true), []);
   useNewOpeningToast(bench, showBench);
   // The panel's heading takes focus after a save or a confirm, so focus never drops to the page.
@@ -154,6 +161,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
       return row ? nameOf(row) : '';
     },
   });
+  if (peopleOpen !== null && selected !== peopleOpen) setPeopleOpen(null);
   const allDone = rows.every((r) => r.state !== 'todo');
 
   // The finish line takes the work panel the moment no row is to do (design 16.2) and stays until he picks a
@@ -182,11 +190,17 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
 
   /* ------------------------------------------------------------------ what each key and button does */
 
-  /** A company row's Log people box: L (and R) put the cursor there; Cmd+Enter or the button logs the paste. */
+  /**
+   * A company row's Log people box (it starts closed): L (and R) open it and put the cursor there; Cmd+Enter or the
+   * button logs the paste. A row with no box says why, once.
+   */
   const focusPeople = (row: PlanRow) => {
-    const field = document.getElementById(peopleFieldId(headingId));
-    if (field) return void requestAnimationFrame(() => field.focus());
-    toast(row.state === 'skipped' ? `${row.company.name} is carried to tomorrow.` : `Nothing to log at ${row.company.name}: its wave is full.`);
+    if (!canLogPeople(row)) {
+      return void toast(row.state === 'skipped' ? `${row.company.name} is carried to tomorrow.` : `Nothing to log at ${row.company.name}: its wave is full.`);
+    }
+    setPeopleOpen(row.entryId);
+    // One frame for the box to open, one more for its field to be there.
+    requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(peopleFieldId(headingId))?.focus()));
   };
   const log = (row: PlanRow, kind: StepKind) => {
     if (kind === 'request' && isCompanyRow(row)) return focusPeople(row);
@@ -404,6 +418,8 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
           actions={{ ...a, onPass: (reason) => pass(current, reason), onCancelPass: () => setPassing(null) }}
           headingId={headingId}
           passing={passing === current.entryId}
+          peopleOpen={peopleOpen === current.entryId}
+          onPeopleOpenChange={(o) => setPeopleOpen(o ? current.entryId : null)}
         />
       ) : (
         <PersonPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} note={state} headingId={headingId} />
@@ -424,12 +440,23 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
     };
   };
 
+  // From 1280 px the profile of the selected company is the third column; under it, it folds under the main column.
+  const wide = useMinWidth(PROFILE_COLUMN_MIN);
+  const profileRow = !showFinish && current !== null && current.channel !== 'email' && current.person === null && current.queue !== null ? current : null;
+  const sideProfile = wide && profileRow !== null;
+
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] max-[1100px]:grid-cols-1 max-[1100px]:overflow-y-auto">
+    <div
+      data-layout={sideProfile ? 'three-columns' : 'two-columns'}
+      className={cn(
+        'grid min-h-0 flex-1 max-[1100px]:grid-cols-1 max-[1100px]:overflow-y-auto',
+        sideProfile ? 'grid-cols-[clamp(256px,19vw,292px)_minmax(0,1fr)_clamp(296px,22vw,350px)]' : 'grid-cols-[300px_minmax(0,1fr)]',
+      )}
+    >
       <div className="min-h-0 overflow-y-auto border-r px-3 pt-4 pb-6 max-[1100px]:overflow-visible max-[1100px]:border-r-0 max-[1100px]:border-b">
         <DayRail rows={rows} rowProps={railProps} tomorrow={plan.tomorrow} allDone={allDone} asOf={plan.asOf} />
-        <div className="mx-3 mt-6 grid justify-items-start gap-2">
-          <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="shift+c" onClick={copyAllHandoffs}>
+        <div className="mt-6 grid justify-items-start gap-2">
+          <Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full gap-1.5 px-2.5 py-1 text-left text-xs whitespace-normal" aria-keyshortcuts="shift+c" onClick={copyAllHandoffs}>
             <Terminal aria-hidden />
             {isQueue(plan) ? 'Copy every company line' : 'Copy every find-someone handoff'}
             <span aria-hidden className="inline-flex gap-0.5">
@@ -452,16 +479,32 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
       </div>
       <section
         aria-label={showFinish ? 'Finish' : current && isCompanyRow(current) ? 'Selected company' : 'Selected person'}
-        className="min-w-0 overflow-y-auto px-8 pt-5 pb-12 max-[1100px]:overflow-visible"
+        className="min-w-0 overflow-y-auto px-6 pt-6 pb-12 min-[1440px]:px-8 max-[1100px]:overflow-visible"
       >
-        {showFinish ? <FinishPanel plan={plan} /> : panel}
-        {current && current.person !== null && passing === current.entryId ? (
-          <div className="mt-4 max-w-[720px]">
-            <PassChips company={current.company.name} onPass={(reason) => pass(current, reason)} onCancel={() => setPassing(null)} />
-          </div>
-        ) : null}
-        <BelowPlan plan={plan} />
+        <div className="mx-auto w-full max-w-[720px]">
+          {showFinish ? <FinishPanel plan={plan} /> : panel}
+          {current && current.person !== null && passing === current.entryId ? (
+            <div className="mt-4">
+              <PassChips company={current.company.name} onPass={(reason) => pass(current, reason)} onCancel={() => setPassing(null)} />
+            </div>
+          ) : null}
+          {profileRow && !sideProfile ? (
+            <div className="mt-5">
+              <ProfileFold key={profileRow.entryId} row={profileRow} />
+            </div>
+          ) : null}
+          <BelowPlan plan={plan} />
+        </div>
       </section>
+      {sideProfile && profileRow ? (
+        <aside aria-label="Company profile" className="min-h-0 overflow-y-auto border-l bg-card px-5 py-5">
+          <header className="mb-4 grid gap-0.5">
+            <h2 className="text-sm font-semibold">Company profile</h2>
+            <p className="text-xs text-muted-foreground">What does not change. Sources in grey.</p>
+          </header>
+          <ProfilePanel key={profileRow.entryId} row={profileRow} />
+        </aside>
+      ) : null}
 
       <BenchDrawer
         open={benchOpen}

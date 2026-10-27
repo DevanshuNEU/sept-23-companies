@@ -195,14 +195,14 @@ const stepAt = (row: PlanRow, kind: StepKind) => row.steps.find((s) => s.kind ==
  * One log button. The row's next step is the only filled button, unless his line still waits for him: then
  * Confirm line in the note is the filled one (ruling 13). A logged step stays, quiet, with its time.
  */
-export function LogButton({ row, kind, filled, onLog }: { row: PlanRow; kind: StepKind; filled: boolean; onLog: (kind: StepKind) => void }) {
+export function LogButton({ row, kind, filled, quiet = false, onLog }: { row: PlanRow; kind: StepKind; filled: boolean; quiet?: boolean; onLog: (kind: StepKind) => void }) {
   const at = stepAt(row, kind);
   const key = kind === 'request' ? 'R' : 'A';
   const label = at ? (kind === 'request' ? `Request logged ${formatClockTime(at)}` : `Applied ${formatClockTime(at)}`) : kind === 'request' ? 'Log request sent' : 'Log applied';
   return (
     <Button
       type="button"
-      variant={at ? 'ghost' : filled ? 'default' : 'outline'}
+      variant={at ? 'ghost' : filled ? 'default' : quiet ? 'secondary' : 'outline'}
       aria-keyshortcuts={key.toLowerCase()}
       onClick={() => onLog(kind)}
       size="sm"

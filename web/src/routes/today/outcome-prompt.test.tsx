@@ -218,7 +218,7 @@ describe('OutcomePrompt', () => {
       const person = screen.getByRole('region', { name: 'Selected person' });
       const prompt = await within(person).findByRole('region', { name: /Last week, what happened/ });
       // After the person's panel, in the same scrolling column.
-      expect(person.firstElementChild?.compareDocumentPosition(prompt)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(person.firstElementChild?.firstElementChild?.compareDocumentPosition(prompt)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       press('3');
       expect(await screen.findByText('Logged: nothing yet from Owen Brandt.')).toBeInTheDocument();
     });

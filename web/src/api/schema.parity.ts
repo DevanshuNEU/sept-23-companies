@@ -72,6 +72,10 @@ export const _parity: [
   Same<T.PlanStep, S['PlanStep']>,
   Same<T.QueueStanding, S['QueueStanding']>,
   Same<T.CompanyQueue, S['CompanyQueue']>,
+  Same<T.CompanyProfile, S['CompanyProfile']>,
+  Same<T.ProfileValue, S['ProfileValue']>,
+  Same<T.ProfileRole, S['ProfileRole']>,
+  Same<T.ProfileHistory, S['ProfileHistory']>,
   Same<T.QueueOpening, S['QueueOpening']>,
   Same<T.PassResult, S['PassResult']>,
   Same<T.BenchCompany, S['BenchCompany']>,
@@ -82,4 +86,4 @@ export const _parity: [
   Same<T.PlanView, S['PlanView']>,
   Same<T.LoggedPerson, S['LoggedPerson']>,
   Same<T.LogPeopleResult, S['LogPeopleResult']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

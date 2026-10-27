@@ -10,6 +10,7 @@
  * them, asked today). The bench holds 12: Retell AI and Railway (new early career openings; he applied to Railway on
  * Oct 20, before this role), Temporal (a new SWE II opening), then 9 by rank. Crusoe, passed on Nov 7, is not on it.
  */
+import { buildProfile } from './profile-data';
 import type { BenchCompany, BenchView, CompanyQueue, Id, InFlightCompany, IsoDate, LevelTier, ListGroup, PlanRow, PlanStep, QueueOpening, QueueStanding } from '../types';
 import type { PlanCtx } from './plan-data';
 
@@ -61,6 +62,7 @@ interface Spec {
   saved?: string; careers: string | null; carriedFrom?: IsoDate;
   done?: [asked: number, last: string]; // asked today, and the newest person asked ("Ana Ruiz (Engineer)")
   judge?: JudgeSpec; // the profile judge's judgment; none is "not judged yet"
+  applied?: string; // his application there before this role was first seen: the opening says so
 }
 
 const ROWS: Spec[] = [
@@ -110,7 +112,7 @@ const ROWS: Spec[] = [
   {
     company: 'Hex', lane: 'level_role', role: { title: 'Software Engineer, New Grad', tier: 'new_grad', loc: 'San Francisco', age: 12, line: 'Software Engineer, New Grad, posted 12 days ago', words: 'posted 12 days ago', opened: '2026-10-29T04:00:00Z' },
     reason: 'Hex has a new grad role open for a 2027 start.', reasons: ['Open role at your level', 'Unclear on sponsorship'],
-    size: '180 people, Series B', hiring: 4, sponsorship: 'Unclear on sponsorship', people: [2, 0], careers: 'https://jobs.lever.co/hex',
+    size: '180 people, Series B', hiring: 4, sponsorship: 'Unclear on sponsorship', people: [2, 0], careers: 'https://jobs.lever.co/hex', applied: 'You applied on Oct 20; this is a new role.',
   },
 ];
 
@@ -135,12 +137,13 @@ export function buildQueueRows(c: PlanCtx, mode: 'default' | 'fresh'): QueueBuil
     requests += asked;
     applications += steps.filter((s) => s.kind === 'apply' && s.at).length;
     const search = spec.saved ?? keywordSearch(spec.company);
-    const opening = role && spec.role ? openingOf(role, spec.role.tier, spec.role.words, spec.role.opened, spec.role.fresh ?? null, spec.lane === 'intern_junior') : null;
+    const opening = role && spec.role ? openingOf(role, spec.role.tier, spec.role.words, spec.role.opened, spec.role.fresh ?? null, spec.lane === 'intern_junior', spec.applied ?? null) : null;
+    const standing = asked > 0 ? askedToday(asked, c.addDays(c.date, 14)) : { ...(spec.standing ?? NEW) };
     const queue: CompanyQueue = {
       sizeLine: spec.size, roleLine: spec.role?.line ?? null, hiring: spec.hiring,
       hiringLine: spec.hiring === 0 ? 'No new engineering roles in the last 30 days' : `${spec.hiring} new engineering ${spec.hiring === 1 ? 'role' : 'roles'} in the last 30 days`,
       sponsorshipLine: spec.sponsorship, reasons: [...spec.reasons],
-      standing: asked > 0 ? askedToday(asked, c.addDays(c.date, 14)) : { ...(spec.standing ?? NEW) },
+      standing,
       lastTouch: asked > 0 ? `Request to ${spec.done?.[1] ?? 'someone'} on Nov 10` : (spec.lastTouch ?? null),
       emailHint: spec.emailHint ?? null,
       peopleOnRecord: spec.people[0],
@@ -149,6 +152,11 @@ export function buildQueueRows(c: PlanCtx, mode: 'default' | 'fresh'): QueueBuil
       terminalLine: terminalLine(spec.company, ref.id, role?.title ?? null),
       whyToday: whyTodayOf(opening, spec.reasons), opening, websiteUrl: ref.domain ? `https://${ref.domain}` : null,
       linkedinCompanyUrl: companySearch(spec.company), ...judgeOf(spec.judge),
+      profile: buildProfile({
+        company: spec.company, size: spec.size, domain: ref.domain, standing, onRecord: spec.people[0], contacted: spec.people[1] || asked,
+        opening, judge: spec.judge,
+        role: role && spec.role && opening ? { title: role.title, url: role.url, level: opening.level, age: spec.role.words, location: spec.role.loc, early: opening.earlyFit } : null,
+      }),
     };
     return {
       entryId: 6500 + n, position: n, channel: 'linkedin_request', lane: spec.lane,
@@ -229,6 +237,11 @@ export function buildBench(c: PlanCtx, room: number): BenchView {
       careersUrl: role?.url ?? (ref.domain ? `https://${ref.domain}` : null), terminalLine: terminalLine(spec.company, ref.id, role?.title ?? null),
       whyToday: whyTodayOf(opening, spec.reasons), opening, websiteUrl: ref.domain ? `https://${ref.domain}` : null, linkedinCompanyUrl: companySearch(spec.company),
       ...judgeOf(spec.judge),
+      profile: buildProfile({
+        company: spec.company, size: spec.size, domain: ref.domain, standing: { ...NEW }, onRecord: 0, contacted: 0,
+        opening, judge: spec.judge,
+        role: role && spec.role && opening ? { title: role.title, url: role.url, level: opening.level, age: spec.role.words, location: ref.hq, early: opening.earlyFit } : null,
+      }),
     };
     return {
       company: { ...c.co(spec.company), domain: ref.domain, hq: ref.hq, revision: 1 }, position: i + 1,

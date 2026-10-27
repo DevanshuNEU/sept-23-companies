@@ -50,6 +50,7 @@ function contrast(a: Rgb, b: Rgb): number {
 }
 
 const STATUSES = ['ok', 'warn', 'bad', 'info', 'idle'] as const;
+const MONOGRAM_HUES = ['teal', 'cyan', 'green', 'amber', 'orange', 'rose', 'slate', 'olive'] as const;
 
 describe.each([
   ['light', ':root'],
@@ -93,6 +94,12 @@ describe.each([
 
   it.each(STATUSES)('%s text on its soft background is at least 4.5', (status) => {
     expect(ratio(t[status] as string, t[`${status}-bg`] as string)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(MONOGRAM_HUES)('the %s monogram text on its tile is at least 4.5, and the tile is not the brand', (hue) => {
+    expect(ratio(t[`mono-${hue}-fg`] as string, t[`mono-${hue}-bg`] as string)).toBeGreaterThanOrEqual(4.5);
+    expect(t[`mono-${hue}-bg`]).not.toBe(t['brand']);
+    expect(t[`mono-${hue}-fg`]).not.toBe(t['brand']);
   });
 
   it('defines every status token', () => {

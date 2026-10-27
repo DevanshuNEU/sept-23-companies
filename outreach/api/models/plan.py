@@ -88,6 +88,52 @@ class QueueOpening(Wire):
     applied_note: str | None  # "You applied on Oct 20; this is a new role." when he applied there before
 
 
+class ProfileValue(Wire):
+    """One fact of a company's profile in the words the page shows. `text` is None when nothing is known (the page says
+    "Not known", never an error); `note` says how sure it is and where it comes from ("estimate, LinkedIn")."""
+
+    text: str | None
+    note: str | None
+
+
+class ProfileRole(Wire):
+    """An open engineering role at his level: what the profile's roles list shows."""
+
+    posting_id: int
+    title: str
+    url: str | None  # a plain http(s) link, else None
+    level: str | None  # "New grad role", "SWE II role"; None when the posting does not say
+    age: str  # "first seen 6 hours ago", "posted 4 days ago"
+    location: str
+    early_fit: bool  # new grad, early career, SWE I, or an open level asking 2 years or fewer
+
+
+class ProfileHistory(Wire):
+    applied: str | None  # "You applied on Oct 20; this is a new role." or "You applied on Oct 20."
+    passes: list[str]  # "Not now on Nov 7: too big", newest first, up to 3
+
+
+class CompanyProfile(Wire):
+    """What does not change about a company (the Today redesign): what it builds, how big and where, its visa position,
+    its open roles at his level, the people on record and his own history with it. Every line is the API's."""
+
+    builds: ProfileValue  # the profile judge's sentence, else not known
+    domains: list[str]  # the judge's domains in words: "AI agents", "Dev tools"
+    verdict: ProfileValue  # the judge's one-line reason for its fit
+    risk: str | None  # the judge's risk line
+    stage: ProfileValue
+    funding: ProfileValue
+    headcount: ProfileValue
+    hq: ProfileValue
+    role_places: ProfileValue  # where the open roles at his level are: "Remote US, San Francisco, CA"
+    everify: ProfileValue
+    sponsorship: ProfileValue
+    lca: ProfileValue  # "6 software LCA filings in FY2024 and FY2025"
+    roles: list[ProfileRole]  # open roles at his level, early career fits first then newest, up to 5
+    people: ProfileValue  # "2 on record, none asked yet", "4 on record, 4 asked, free again Nov 18"
+    history: ProfileHistory
+
+
 class CompanyQueue(Wire):
     """A company row's lines (company first, #9 2026-10-26). Every line is the API's; the page shows them as given."""
 
@@ -106,6 +152,7 @@ class CompanyQueue(Wire):
     search_saved: bool  # the link is the search he saved
     careers_url: str | None  # the posting, else the board's page, else the watched page, else https://<domain>
     terminal_line: str  # "Knock: Tessera Labs (company 1304), role: Forward Deployed Engineer"
+    profile: CompanyProfile  # what does not change about the company (the Today redesign), on every company row
     # Top picks (2026-10-26): why today first, then the three research links. The app never fetches linkedin.com.
     why_today: str = ""  # the one line under the name: "New grad role, first seen 6 hours ago"
     opening: QueueOpening | None = None

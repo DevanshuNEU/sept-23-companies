@@ -1,0 +1,42 @@
+# The profile judge's settings (Part of #6 and #15). The model, the prompt and his profile (mail/me.md without its ASK
+# lines) make the judge version (judge_version in prompt.py): a change to any of them is a new version.
+
+[judge]
+# Off as shipped: `python -m outreach.judge run` prints "judge is off" and exits 0, with no fetch, no call and no
+# write. Set to true to turn the nightly job on. `eval` runs either way: it is how he checks the judge first.
+enabled = false
+# The model the judge asks for, through his Claude Code seat (claude -p, no API key).
+model = "claude-sonnet-5-5"
+# The companies the judge looks at: the top of the stored ranking, hidden ones left out.
+top_n = 40
+# Companies handled in one run, at most; each is at most one model call. 15 calls a night at the most.
+per_run = 15
+# A judgment, and every page it read, is reused for this many days: no page is fetched twice and no company is sent
+# to the model twice inside it. After it, the pages are read again, and the model is asked again only when the page
+# text, the best posting or the judge version changed.
+cache_days = 14
+# The reply schema version, part of the judge version.
+schema_version = 1
+
+[fetch]
+# Each request, through the crawler's polite client (its User-Agent, per-host spacing and breaker, the switched-off
+# hosts) after the site's robots.txt allows it.
+timeout_s = 20
+# A page larger than this is not read.
+max_bytes = 2000000
+# The page text given to the model is cut to this many characters.
+page_max_chars = 6000
+# A page with less text than this is a JavaScript shell or a challenge page: not read.
+min_text_chars = 200
+
+[run]
+call_timeout_s = 300
+# Failed calls in a row (not a session limit or a login problem) before the run stops.
+max_consecutive_failures = 2
+# Lower-case text in the CLI's own error output that means "the session ran out" or "not signed in": stop cleanly.
+session_limit_patterns = ["usage limit", "session limit", "limit reached", "resets at"]
+auth_patterns = ["not logged in", "please run /login", "authentication", "invalid api key", "oauth token"]
+
+[eval]
+# A fit of at least this is the judge's yes when its verdicts are compared with the golden set (golden.toml).
+yes_at = 60

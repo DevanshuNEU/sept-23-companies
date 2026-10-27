@@ -5,6 +5,7 @@ fixture, and one `FakeClient` that stands for every host (HN, SEC, DOL, careers 
 network, the live store or the real sources folder.
 """
 import contextlib
+import dataclasses
 import io
 import json
 import os
@@ -21,11 +22,13 @@ from outreach.install import install
 from outreach.net import FetchError
 from outreach.sources import __main__ as cli
 from outreach.sources.formd import SEC_USER_AGENT
+from outreach.sources.freehire import load_freehire_config
 from outreach.sources.stapply import MANIFEST_URL
 from outreach.store import connect, finish_job, start_job, writes
-from tests.fakes import FakeClient, status_response, text_response
+from tests.fakes import FakeClient, json_response, status_response, text_response
 from tests.storetest import planned_adapters, table_marks
 from tests.test_formd import DATASET, routes as formd_routes
+from tests.test_freehire import FIRST_PAGE as FREEHIRE_PAGE
 from tests.test_hn import NOV, OCT, fixture_client, november_client
 from tests.test_jobs_find_boards import CAREERS, STAPPLY, careers_routes
 from tests.test_lca_source import FILES
@@ -59,9 +62,11 @@ def sec_down(routes: dict) -> dict:
 
 
 def all_routes(**careers_overrides) -> dict:
-    """What every host the CLI talks to answers: HN's Algolia, SEC (page, data set, submissions), careers pages.
-    Greenfield's site answers 404, so a clean run is `ok`; `careers_overrides` replace a careers route."""
+    """What every host the CLI talks to answers: HN's Algolia, freehire (an empty page, so no other count moves), SEC
+    (page, data set, submissions), careers pages. Greenfield's site answers 404, so a clean run is `ok`;
+    `careers_overrides` replace a careers route."""
     routes = dict(fixture_client().routes)
+    routes[FREEHIRE_PAGE] = json_response({"data": [], "meta": {"total": 0}})
     routes.update(formd_routes())
     routes.update({FORMD_PAGE: text_response(PAGE_HTML), FORMD_Q3: formd_zip()})
     routes.update(careers_routes(**{"https://greenfield.ai/careers": status_response(404),
@@ -153,6 +158,16 @@ class DiscoverCommandTest(CliCase):
         code, _, err = self.cli("discover", "hn", "--since", "2026-13")
         self.assertEqual(code, 1)
         self.assertIn("2026-13", err)
+
+    def test_discover_freehire_and_days(self):
+        report = self.ok("discover", "freehire")
+        self.assertEqual(report["reports"]["freehire"]["candidates"], 0)
+        self.assertEqual(report["reports"]["freehire"]["notes"]["pages"], 1)
+        wide = FREEHIRE_PAGE.replace("posted_within_days=3", "posted_within_days=30")
+        self.client.routes[wide] = json_response({"data": [], "meta": {"total": 0}})
+        self.ok("discover", "freehire", "--days", "30")
+        self.assertEqual(self.client.requests[-1], wide)
+        self.assertEqual(self.cli("discover", "freehire", "--days", "0")[0], 1)
 
     def test_discover_formd_reads_a_dataset(self):
         self.ok("discover", "lca", "--files", *FILES)
@@ -334,11 +349,13 @@ class RunDueTest(CliCase):
         self.assertEqual(got, code, f"{out} {err}")
         return json.loads(out)
 
-    def test_run_due_runs_hn_formd_stapply_resolve_and_find_boards_in_order(self):
+    def test_run_due_runs_hn_freehire_formd_stapply_resolve_and_find_boards_in_order(self):
         report = self.due()
-        self.assertEqual(list(report["steps"]), ["hn", "formd", "stapply", "resolve", "find_boards"])
+        self.assertEqual(list(report["steps"]), ["hn", "freehire", "formd", "stapply", "resolve", "find_boards"])
         self.assertEqual({k: v["status"] for k, v in report["steps"].items()},
-                         {"hn": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok"})
+                         {"hn": "ok", "freehire": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok",
+                          "find_boards": "ok"})
+        self.assertIn(FREEHIRE_PAGE, self.client.requests)
         self.assertEqual(report["status"], "ok")
         self.assertEqual(self.client.unrouted, [])
         conn = self.conn()
@@ -466,7 +483,7 @@ class RunDueTest(CliCase):
         self.assertEqual(report["steps"]["stapply"]["status"], "failed")
         self.assertEqual(self.marker.read_text(encoding="utf-8").strip(), "2026-10-01T06:30:00Z")  # asked again
         self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "stapply"},
-                         {"hn": "ok", "formd": "ok", "resolve": "ok", "find_boards": "ok"})
+                         {"hn": "ok", "freehire": "ok", "formd": "ok", "resolve": "ok", "find_boards": "ok"})
 
     def test_formd_is_skipped_until_a_newer_set_is_out(self):
         folder = self.sources / "formd"
@@ -485,8 +502,24 @@ class RunDueTest(CliCase):
         report = self.due(code=1)
         self.assertEqual(report["steps"]["hn"]["status"], "failed")
         self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "hn"},
-                         {"formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok"})
+                         {"freehire": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok"})
         self.assertEqual(report["status"], "failed")
+
+    def test_a_failed_freehire_step_exits_1_and_every_other_step_still_runs(self):
+        routes = all_routes()
+        routes[FREEHIRE_PAGE] = status_response(429)
+        self.client = FakeClient(routes)
+        report = self.due(code=1)
+        self.assertEqual(report["steps"]["freehire"]["status"], "failed")
+        self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "freehire"},
+                         {"hn": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok"})
+
+    def test_freehire_off_is_skipped_and_never_asked(self):
+        off = dataclasses.replace(load_freehire_config(), enabled=False)
+        with mock.patch("outreach.sources.freehire.load_freehire_config", return_value=off):
+            report = self.due()
+        self.assertEqual(report["steps"]["freehire"]["status"], "skipped")
+        self.assertNotIn(FREEHIRE_PAGE, self.client.requests)
 
     def test_a_partial_step_exits_1_and_the_run_still_finishes(self):
         self.client = FakeClient(all_routes(**{"https://greenfield.ai/careers": status_response(503)}))

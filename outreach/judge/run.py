@@ -243,7 +243,7 @@ def gather(target: Target, reader, cfg: JudgeConfig, now: datetime) -> list[dict
     home_url = f"https://{target.domain}/" if target.domain else None
     if home_url is None:
         pages.append(unavailable("home", "", "no domain on record", at).page)
-    elif _fresh_page(old.get("home"), now, cfg) and old["home"].get("url", "").startswith(home_url.rstrip("/")):
+    elif _fresh_page(old.get("home"), now, cfg) and old["home"].get("url"):  # really requested, wherever it went
         pages.append(old["home"])
         if _fresh_page(old.get("about"), now, cfg):
             pages.append(old["about"])
@@ -272,6 +272,8 @@ def _for_model(pages: list[dict]) -> list[dict]:
 
 
 class Judging:
+    """One run's prompt, version and counts; `one` judges one company (the nightly loop and `eval` share it)."""
+
     def __init__(self, conn, runner: Runner, reader, cfg: JudgeConfig, me_text: str, now: datetime):
         self.conn, self.runner, self.reader, self.cfg, self.now = conn, runner, reader, cfg, now
         self.prompt = render_prompt(me_text, cfg)

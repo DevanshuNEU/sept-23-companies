@@ -195,6 +195,19 @@ class Judging(Base):
         self.assertEqual(["https://jobs.example.com/new"], self.reader.reads, "the homepage is not fetched again")
         self.assertEqual(HOME_TEXT, next(p["text"] for p in self.runner.calls[0][1]["pages"] if p["kind"] == "home"))
 
+    def test_a_homepage_that_redirected_is_still_not_fetched_again_inside_the_window(self):
+        cid = self.company("Acme", 90, domain="acme.example")
+
+        class Moved(StubReader):
+            def read(self, url, kind):
+                got = super().read(url, kind)
+                return Fetched({**got.page, "url": url.replace("://", "://www.")}, got.markup)
+
+        self.judge(reader=Moved())
+        self.conn.execute("UPDATE posting SET url = 'https://jobs.example.com/new' WHERE company_id = ?", (cid,))
+        self.judge(at=T0 + timedelta(days=3))
+        self.assertEqual(["https://jobs.example.com/new"], self.reader.reads)
+
     def test_a_new_judge_version_judges_again_from_the_stored_pages(self):
         self.company("Acme", 90, domain="acme.example")
         self.judge()

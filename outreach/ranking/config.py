@@ -24,7 +24,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
                 "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"),
     "hide": ("size_over", "size_confidences"),
     "live_role": ("intern_junior", "level_role", "any_us_role", "fresh_days", "fresh_bonus",
-                  "tier_values"),
+                  "tier_values", "early_career_max_age_days"),
     "posting_sponsors": ("yes", "opt_only"),
     "everify": ("enrolled", "not_enrolled"),
     "cap_exempt": ("confirmed", "likely"),
@@ -133,6 +133,13 @@ def _check_tier_values(section: dict) -> None:
             raise ValueError(f"[live_role.tier_values] {tier} must be from 0 to 1, got {value!r}")
 
 
+def _check_early_age(section: dict) -> None:
+    """[live_role] early_career_max_age_days: whole days from 1 to 365."""
+    days = section["early_career_max_age_days"]
+    if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 365:
+        raise ValueError(f"[live_role] early_career_max_age_days must be a whole number from 1 to 365, got {days!r}")
+
+
 def _check_confidence(c: dict) -> None:
     factors = [_number(c[f"factor_{level}"], f"[confidence] factor_{level}") for level in ("high", "medium", "low")]
     if not all(0 < f <= 1 for f in factors):
@@ -191,6 +198,7 @@ def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
     _check_tilt(data)
     _check_confidence(data["confidence"])
     _check_tier_values(data["live_role"])
+    _check_early_age(data["live_role"])
     _check_hide(data["hide"])
     _check_ranker(data)
     others = {k: v for k, v in data.items() if k not in ("ranker", "weights", "hide")}

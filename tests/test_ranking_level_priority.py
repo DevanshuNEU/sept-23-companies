@@ -388,6 +388,78 @@ class BestPostingTests(unittest.TestCase):
                                     best(2, "senior", lane="any_us_role", age=3)), [2, 1])
 
 
+class EarlyCareerAgeTests(unittest.TestCase):
+    """The early career preference holds only for a role at most early_career_max_age_days old (90). An older fit
+    sorts by freshness like any other posting. An age from first seen is a lower bound, so it counts the same way; a
+    role with no age at all keeps the preference."""
+
+    def order(self, *postings, limit=None):
+        key = role_sort_key if limit is None else (lambda b: role_sort_key(b, early_max_age_days=limit))
+        return [b.posting_id for b in sorted(postings, key=key)]
+
+    def test_the_shipped_limit(self):
+        self.assertEqual(CFG.section("live_role")["early_career_max_age_days"], 90)
+
+    def test_a_fit_89_or_90_days_old_still_jumps_ahead(self):
+        for age in (89, 90):
+            with self.subTest(age=age):
+                self.assertEqual(self.order(best(1, "swe2", age=2, basis="Title says II"), best(2, "new_grad", age=age)),
+                                 [2, 1])
+
+    def test_a_fit_91_days_old_sorts_by_freshness(self):
+        self.assertEqual(self.order(best(1, "swe2", age=2, basis="Title says II"), best(2, "new_grad", age=91)), [1, 2])
+        self.assertEqual(self.order(best(1, "open", age=200), best(2, "swe1", age=335)), [1, 2])
+        # still a fit: against an older non-fit it wins on freshness alone
+        self.assertEqual(self.order(best(1, "swe2", age=120, basis="Title says II"), best(2, "new_grad", age=91)),
+                         [2, 1])
+
+    def test_an_age_from_first_seen_counts_the_same(self):
+        # Best.age_days is from first seen when there is no posted date: a lower bound, held to the same limit
+        def undated(pid, tier, age):
+            return Best(pid, "level_role", "t", tier, "silent", age, "", "", None, "2026-10-21", "read_ok", True)
+        self.assertEqual(self.order(best(1, "swe2", age=2, basis="Title says II"), undated(2, "new_grad", 30)), [2, 1])
+        self.assertEqual(self.order(best(1, "swe2", age=2, basis="Title says II"), undated(2, "new_grad", 120)), [1, 2])
+
+    def test_a_role_with_no_age_keeps_the_preference(self):
+        self.assertEqual(self.order(best(1, "swe2", age=2, basis="Title says II"), best(2, "new_grad", age=None)),
+                         [2, 1])
+
+    def test_the_limit_is_read_from_the_argument(self):
+        pair = (best(1, "swe2", age=2, basis="Title says II"), best(2, "new_grad", age=40))
+        self.assertEqual(self.order(*pair, limit=30), [1, 2])
+        self.assertEqual(self.order(*pair, limit=40), [2, 1])
+
+
+class EarlyCareerAgeConfigTests(unittest.TestCase):
+    def load(self, value):
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        text, n = re.subn(r"(?m)^early_career_max_age_days = 90$", f"early_career_max_age_days = {value}", text)
+        assert n == 1
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.toml"
+            p.write_text(text, encoding="utf-8")
+            return load_ranker_config(p)
+
+    def test_one_to_365_whole_days(self):
+        for ok in (1, 90, 365):
+            self.assertEqual(self.load(ok).section("live_role")["early_career_max_age_days"], ok)
+        for bad in (0, 366, -5, "90.0", "true", '"90"'):
+            with self.subTest(value=bad), self.assertRaises(ValueError) as cm:
+                self.load(bad)
+            self.assertIn("early_career_max_age_days", str(cm.exception))
+
+    def test_the_key_is_required(self):
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        text, n = re.subn(r"(?m)^early_career_max_age_days = 90\n", "", text)
+        assert n == 1
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.toml"
+            p.write_text(text, encoding="utf-8")
+            with self.assertRaises(KeyError) as cm:
+                load_ranker_config(p)
+        self.assertIn("early_career_max_age_days", str(cm.exception))
+
+
 class BestPostingStoreTests(Store):
     def test_load_roles_picks_the_older_new_grad_role_over_a_fresher_swe2_one(self):
         ng = self.add("ng", posted_on=ago(40))
@@ -408,9 +480,32 @@ class BestPostingStoreTests(Store):
 
 
 class BestPostingRankTests(Base):
+    def test_a_rank_reads_the_age_limit_from_its_config(self):
+        cid, board = self.company("Mixed")
+        ng = self.role(cid, board, "Software Engineer, New Grad", posted_on="2026-08-01")  # 82 days
+        swe2 = self.role(cid, board, "Software Engineer II", posted_on="2026-10-21", level_tier="swe2",
+                         level_basis="Title says Engineer II")
+        text = CONFIG_PATH.read_text(encoding="utf-8").replace("early_career_max_age_days = 90",
+                                                               "early_career_max_age_days = 60")
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.toml"
+            p.write_text(text, encoding="utf-8")
+            short = load_ranker_config(p)
+        self.assertEqual(compute_rank(self.conn, today=TODAY)[0][0].best_posting_id, ng)
+        self.assertEqual(compute_rank(self.conn, today=TODAY, cfg=short)[0][0].best_posting_id, swe2)
+
+    def test_an_old_new_grad_role_no_longer_hides_a_fresh_swe2_one(self):
+        cid, board = self.company("Old")
+        self.role(cid, board, "Software Engineer, New Grad", posted_on="2025-11-25")  # 331 days
+        swe2 = self.role(cid, board, "Software Engineer II", posted_on="2026-10-21", level_tier="swe2",
+                         level_basis="Title says Engineer II")
+        got = compute_rank(self.conn, today=TODAY)[0][0]
+        self.assertEqual(got.best_posting_id, swe2)
+        self.assertIsNone(got.hide)
+
     def test_the_score_and_reason_follow_the_early_career_role(self):
         cid, board = self.company("Mixed")
-        ng = self.role(cid, board, "Software Engineer, New Grad", posted_on="2026-07-01")
+        ng = self.role(cid, board, "Software Engineer, New Grad", posted_on="2026-08-01")
         self.role(cid, board, "Software Engineer II", posted_on="2026-10-21", level_tier="swe2",
                   level_basis="Title says Engineer II")
         flat = config_with_tiers(FLAT_TIERS)
@@ -418,9 +513,9 @@ class BestPostingRankTests(Base):
         before, _ = compute_rank(self.conn, today=TODAY, cfg=flat)
         now, then = shipped[0], before[0]
         self.assertEqual(now.best_posting_id, ng)
-        self.assertEqual(now.values["live_role"].value, 0.8)  # 113 days old: no bonus
+        self.assertEqual(now.values["live_role"].value, 0.8)  # 82 days old: no bonus
         self.assertEqual(now.values["live_role"].reason,
-                         "Open new grad role: Software Engineer, New Grad, posted 113 days ago")
+                         "Open new grad role: Software Engineer, New Grad, posted 82 days ago")
         self.assertIsNone(now.hide)
         self.assertEqual(now.hide, then.hide)
 

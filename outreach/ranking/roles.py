@@ -11,6 +11,7 @@ would be hidden is listed nowhere, and one on a doubtful board counts as ignored
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,11 +23,38 @@ from outreach.ranking.confidence import Confidence, grade_no_role, grade_role
 from outreach.ranking.hide import posting_visible
 from outreach.rules.rebuild import stored_decision
 
-__all__ = ["LANE_ORDER", "Best", "Roles", "role_sort_key", "newest_stale", "load_roles", "company_board_states"]
+__all__ = ["LANE_ORDER", "Best", "Roles", "role_sort_key", "newest_stale", "load_roles", "company_board_states",
+           "EARLY_CAREER_TIERS", "EARLY_CAREER_MAX_YEARS", "rank_tier", "early_career_fit"]
 
 LANE_ORDER = ("level_role", "intern_junior", "any_us_role")
 _LANE_RANK = {lane: i for i, lane in enumerate(LANE_ORDER)}
 _SPONSOR_RANK = {"yes": 0, "opt_only": 1}
+
+# The level tiers he wants first: he graduated in May 2026 and is on OPT, so new grad, early career and SWE I.
+EARLY_CAREER_TIERS = ("new_grad", "early_career", "swe1")
+# A role whose title names no level counts as early career when its posting asks this many years or fewer.
+EARLY_CAREER_MAX_YEARS = 2
+# The rules' level basis when the years came from the posting body, not the title (rules/decide.py `_level`).
+_ASKS_YEARS = re.compile(r"Asks (\d+) years?")
+_TITLE_BASIS = "Title says"
+
+
+def rank_tier(level_tier: str | None, level_basis: str) -> str | None:
+    """The tier ranking uses for a posting. The rules store a title with no level ("Software Engineer", "MTS") that
+    asks 2 or 3 years as `swe2` with the basis "Asks 2 years" (an `open` tier never carries years there), so a tier
+    the title did not set and a basis asking at most EARLY_CAREER_MAX_YEARS counts as `early_career`. Every other
+    tier is returned as stored."""
+    if level_tier in ("open", "swe2") and not (level_basis or "").startswith(_TITLE_BASIS):
+        m = _ASKS_YEARS.fullmatch((level_basis or "").strip())
+        if m and int(m.group(1)) <= EARLY_CAREER_MAX_YEARS:
+            return "early_career"
+    return level_tier
+
+
+def early_career_fit(level_tier: str | None, level_basis: str) -> bool:
+    """True for a new grad, early career or SWE I posting, or one whose title names no level and whose posting asks
+    at most EARLY_CAREER_MAX_YEARS years (see rank_tier). Pure: reads only its two arguments."""
+    return rank_tier(level_tier, level_basis) in EARLY_CAREER_TIERS
 
 
 @dataclass(frozen=True)

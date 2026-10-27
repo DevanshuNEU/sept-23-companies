@@ -23,7 +23,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "weights": ("live_role", "posting_sponsors", "everify", "cap_exempt", "pay_level", "lca_junior", "small",
                 "reachable_person", "funding", "staffing_risk", "large_later_stage", "interview_like"),
     "hide": ("size_over", "size_confidences"),
-    "live_role": ("intern_junior", "level_role", "any_us_role", "fresh_days", "fresh_bonus"),
+    "live_role": ("intern_junior", "level_role", "any_us_role", "fresh_days", "fresh_bonus",
+                  "tier_values"),
     "posting_sponsors": ("yes", "opt_only"),
     "everify": ("enrolled", "not_enrolled"),
     "cap_exempt": ("confirmed", "likely"),
@@ -47,6 +48,8 @@ ZERO_WEIGHT_OK = ("interview_like",)
 # The one-way interview tilt (#81), capped by _check_tilt.
 TILT_WEIGHT = "interview_like"
 _TILT_MAX_SHARE = 0.25
+# The level tiers [live_role.tier_values] must give, each a value from 0 to 1, and no other.
+LIVE_ROLE_TIERS = ("new_grad", "early_career", "swe1", "swe2", "open")
 # The negative values of the other signals: (section, key, the weight it is multiplied by).
 _OTHER_NEGATIVES = (("everify", "not_enrolled", "everify"), ("pay_level", "level_1", "pay_level"),
                     ("small", "weak_flag_value", "small"))
@@ -114,6 +117,22 @@ def _check_tilt(data: dict) -> None:
                          f"({share:g} of the top score {top:g}), so the tilt would no longer be small")
 
 
+def _check_tier_values(section: dict) -> None:
+    """[live_role.tier_values] is a table with a value from 0 to 1 for every level tier, and no unknown tier (a typo
+    would otherwise fall back to level_role without a word)."""
+    tiers = section["tier_values"]
+    if not isinstance(tiers, dict):
+        raise ValueError(f"[live_role] tier_values must be a table of level tiers, got {tiers!r}")
+    for tier in LIVE_ROLE_TIERS:
+        if tier not in tiers:
+            raise KeyError(f"[live_role.tier_values] {tier} is missing")
+    for tier, value in tiers.items():
+        if tier not in LIVE_ROLE_TIERS:
+            raise ValueError(f"[live_role.tier_values] {tier} is not a level tier (one of {LIVE_ROLE_TIERS})")
+        if not 0 <= _number(value, f"[live_role.tier_values] {tier}") <= 1:
+            raise ValueError(f"[live_role.tier_values] {tier} must be from 0 to 1, got {value!r}")
+
+
 def _check_confidence(c: dict) -> None:
     factors = [_number(c[f"factor_{level}"], f"[confidence] factor_{level}") for level in ("high", "medium", "low")]
     if not all(0 < f <= 1 for f in factors):
@@ -171,6 +190,7 @@ def load_ranker_config(path: Path = CONFIG_PATH) -> RankerConfig:
     _check_bottom_weights(data)
     _check_tilt(data)
     _check_confidence(data["confidence"])
+    _check_tier_values(data["live_role"])
     _check_hide(data["hide"])
     _check_ranker(data)
     others = {k: v for k, v in data.items() if k not in ("ranker", "weights", "hide")}

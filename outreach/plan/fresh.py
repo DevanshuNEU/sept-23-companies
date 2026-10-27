@@ -183,6 +183,15 @@ _OPENINGS = (
     "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
     "WHERE p.closed_at IS NULL AND {where} ORDER BY p.posting_id")
 
+# The decision rows that can reach each ranker lane (`_lane` below), as SQL. Only engineering and intern postings can
+# be visible (`posting_visible`), so every other decision lane reaches none. This only narrows the read: each row
+# still goes through `posting_visible` and `_lane`, so the rule itself lives there and nowhere else.
+_LANE_SQL = {
+    "intern_junior": "d.lane = 'intern'",
+    "level_role": "(d.lane = 'engineering' AND d.level_ok = 1)",
+    "any_us_role": "(d.lane = 'engineering' AND d.level_ok = 0)",
+}
+
 
 def _lane(d) -> str:
     """The ranker's lane of a visible posting (`outreach.ranking.roles._lane`)."""
@@ -234,7 +243,11 @@ def load_openings(conn: sqlite3.Connection, canon: dict[int, int], now: datetime
     first, then the newest. The SQL keeps postings first seen inside the window (an opening never opens after its
     first sighting); `opened` and `is_fresh` decide."""
     since = now - timedelta(hours=cfg.get("queue", "fresh_hours"))
-    rows = conn.execute(_OPENINGS.format(where="p.first_seen_at >= ?"), (_iso(since),)).fetchall()
+    lanes = [_LANE_SQL[lane] for lane in sorted(set(cfg.get("lanes", "role"))) if lane in _LANE_SQL]
+    if not lanes:
+        return {}
+    rows = conn.execute(_OPENINGS.format(where="p.first_seen_at >= ? AND (" + " OR ".join(lanes) + ")"),
+                        (_iso(since),)).fetchall()
     return _build(conn, rows, canon, now, cfg, only_fresh=True)
 
 

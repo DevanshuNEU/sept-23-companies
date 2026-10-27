@@ -307,6 +307,9 @@ if __name__ == "__main__":
 
 # ---------------------------------------------------------------------------------------------- the reads
 
+from unittest import mock  # noqa: E402
+
+import outreach.plan.fresh as fresh_module  # noqa: E402
 from outreach.plan.fresh import PASSED, load_applied, load_openings, load_passes  # noqa: E402
 from outreach.plan.outbound import load_outbound  # noqa: E402
 from outreach.plan.prospects import load_prospects  # noqa: E402
@@ -365,6 +368,31 @@ class LoadOpeningsTest(unittest.TestCase):
         self.assertEqual([o.posting_id for o in got], [ng, swe2])
         self.assertEqual([o.early_fit for o in got], [True, False])
         self.assertEqual(got[1].level, "SWE II role")
+
+    def test_only_postings_in_a_role_lane_are_read_into_decisions(self):
+        """The read keeps postings outside every role lane in SQL, so a store of 100,000 postings does not build a
+        decision for each (the plan, the bench and the shell each read the openings: 0.9 s each on real data)."""
+        good = _opening(self.conn, self.c, hours=5)
+        intern = _opening(self.conn, self.c, hours=4, lane="intern", level_tier="not_stated")
+        _opening(self.conn, self.c, hours=3, lane="not_engineering")
+        _opening(self.conn, self.c, hours=2, level_tier="senior")  # any_us_role: not a role lane here
+        seen = []
+        real = fresh_module.stored_decision
+
+        def counting(row):
+            seen.append(row["posting_id"])
+            return real(row)
+
+        with mock.patch.object(fresh_module, "stored_decision", counting):
+            got = self.openings()
+        self.assertEqual(sorted(o.posting_id for o in got), sorted([good, intern]))
+        self.assertEqual(sorted(seen), sorted([good, intern]))
+
+    def test_a_role_lane_of_any_us_role_still_reads_postings_below_his_level(self):
+        senior = _opening(self.conn, self.c, hours=2, level_tier="senior")
+        cfg = dataclasses.replace(CFG, lanes={**CFG.lanes, "role": ["any_us_role"]})
+        got = load_openings(self.conn, canonical_ids(self.conn), NOW, cfg).get(self.c, ())
+        self.assertEqual([o.posting_id for o in got], [senior])
 
 
 class LoadProspectsFreshTest(unittest.TestCase):

@@ -70,7 +70,7 @@ export const FACTS: Record<string, Facts> = {
   Hex: {
     stage: ['Series B', 'confirmed, SEC Form D'], funding: ['$70,000,000 raised, Form D filed Mar 11, 2026', 'confirmed, SEC Form D'],
     headcount: ['180 people', 'estimate, LinkedIn'], hq: ['San Francisco, CA', 'confirmed, its website'],
-    sponsorship: ['Unclear', 'from a posting'], lca: ['3 software LCA filings in FY2024 and FY2025', 'DOL disclosure data'], domains: ['Data'],
+    sponsorship: ['Unclear on sponsorship', 'from a posting'], lca: ['3 software LCA filings in FY2024 and FY2025', 'DOL disclosure data'], domains: ['Data'],
     more: [['Software Engineer, Data Platform', 'SWE I role', 'posted 20 days ago', 'San Francisco', true]],
   },
   'Retell AI': {

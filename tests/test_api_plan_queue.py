@@ -368,3 +368,25 @@ class ProfileTest(QueueCase):
         dup = s.company(self.conn, "Tessera", status="removed", merged_into=self.tessera)
         s.evidence(self.conn, dup, "hq", "Austin, TX", confidence="guess", source_kind="hn")
         self.assertEqual({"text": "Austin, TX", "note": "guess, Hacker News"}, self.profile(self.tessera_entry)["hq"])
+
+    def test_the_profile_reads_do_not_grow_with_the_number_of_companies(self):
+        """One query per table however many rows (the profile is set-based, never one query per company)."""
+        from datetime import datetime, timezone
+        from outreach.api.queries.profile import load_profile_data
+        from outreach.api.queries.queue import _family
+        from outreach.plan.config import default_plan_config
+        from outreach.ranking.common import canonical_ids
+
+        def statements(ids):
+            seen = []
+            self.conn.set_trace_callback(seen.append)
+            canon = canonical_ids(self.conn)
+            family, owner = _family(canon, set(ids))
+            load_profile_data(self.conn, canon, set(ids), family, owner,
+                              datetime(2026, 11, 10, 15, 14, tzinfo=timezone.utc), default_plan_config())
+            self.conn.set_trace_callback(None)
+            return len([q for q in seen if q.lstrip().upper().startswith(("SELECT", "WITH"))])
+
+        one = statements([self.tessera])
+        three = statements([self.tessera, self.avante, self.quill])
+        self.assertEqual(one, three)

@@ -42,8 +42,6 @@ STAGES = {"pre_seed": "pre-seed", "seed": "seed", "series_a": "Series A", "serie
           "late_private": "late stage private", "public": "public", "yc": "YC", "early": "early stage"}
 SPONSORSHIP = {"has_sponsored": "Has sponsored before", "says_yes": "Says it sponsors", "says_no": "Does not sponsor",
                "opt_only": "OPT only", "unclear": "Unclear on sponsorship", "not_stated": "Sponsorship not stated"}
-SPONSORSHIP_SHORT = {"has_sponsored": "Has sponsored before", "says_yes": "Says it sponsors",
-                     "says_no": "Does not sponsor", "opt_only": "OPT only", "unclear": "Unclear"}
 EVERIFY = {"enrolled": "E-Verify enrolled", "not_enrolled": "Not in E-Verify"}
 SOURCES = {"hand": "added by you", "posting": "a posting", "old_dashboard": "your old dashboard", "yc": "Y Combinator",
            "builtin": "Built In", "linkedin": "LinkedIn", "website": "its website", "formd": "SEC Form D",
@@ -178,7 +176,7 @@ def _sponsorship(word: str, fact_row) -> ProfileValue:
         note = _note(fact_row["confidence"], fact_row["source_kind"], bool(fact_row["locked"]))
     else:
         note = "from its LCA filings" if word == "has_sponsored" else "from a posting"
-    return ProfileValue(text=SPONSORSHIP_SHORT[word], note=note)
+    return ProfileValue(text=SPONSORSHIP[word], note=note)
 
 
 def _people(on_record: int, contacted: int, standing: QueueStanding) -> ProfileValue:

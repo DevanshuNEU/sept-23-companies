@@ -455,8 +455,8 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
     >
       <div className="min-h-0 overflow-y-auto border-r px-3 pt-4 pb-6 max-[1100px]:overflow-visible max-[1100px]:border-r-0 max-[1100px]:border-b">
         <DayRail rows={rows} rowProps={railProps} tomorrow={plan.tomorrow} allDone={allDone} asOf={plan.asOf} />
-        <div className="mx-3 mt-6 grid justify-items-start gap-2">
-          <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="shift+c" onClick={copyAllHandoffs}>
+        <div className="mt-6 grid justify-items-start gap-2">
+          <Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full gap-1.5 px-2.5 py-1 text-left text-xs whitespace-normal" aria-keyshortcuts="shift+c" onClick={copyAllHandoffs}>
             <Terminal aria-hidden />
             {isQueue(plan) ? 'Copy every company line' : 'Copy every find-someone handoff'}
             <span aria-hidden className="inline-flex gap-0.5">

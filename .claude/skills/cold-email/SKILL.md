@@ -30,15 +30,44 @@ get past.
    `why_not` says whether you may draft at all. `company` lists the open postings. Note the city for `tz`. Done
    when you hold one exact role title (with req ID when the posting shows one), or know none is open, which makes
    the ask a referral for future new-grad roles. If `can_draft_email` is false, report `why_not` and move on.
-3. **Hook.** The one fact that makes this person the right reader, from his paste: they went to Northeastern or
-   the Dhirubhai Ambani Institute of ICT; they worked in India or at a shared past employer; their team owns the
-   product area of the role; they posted or shipped something specific. An event (a post, a launch) counts only
-   if it is 30 days old or newer, and goes in `hook_on` as YYYY-MM-DD. Done when the hook is a fact with its
-   source, dated if it is an event. If there is none, say so and ask him; a weak true hook beats an invented one.
-4. **Evidence.** The one project or job in `mail/me.md` closest to the role, with one number from it when me.md
-   has one. Its link is the email's second link. Done when the evidence is a line from me.md above "Needs
-   Devanshu".
-5. **Write** the draft to the rules below. Done when every rule holds.
+3. **Hook.** Work this out silently; never show it to him.
+   - **Explore.** List at least five candidate hooks from his paste, each a true fact with its source: Northeastern or
+     the Dhirubhai Ambani Institute of ICT; India or a shared past employer; their team owns the product area of the
+     role; something specific they posted, shipped or wrote; a move or change in their own career the paste states. Every
+     hook is a fact about the person, never a guess about their product or needs. Do not take the most obvious LinkedIn connection by default.
+   - **Rank** each on relevance to the role, credibility (the paste proves it), uniqueness (would ten other
+     applicants find the same one?) and how likely this reader is to care. Drop any that is forced, speculative or
+     flattery.
+   - **Rules.** An event (a post, a launch) counts only if it is 30 days old or newer, and goes in `hook_on` as
+     YYYY-MM-DD. The email carries one hook. Done when it is a fact with its source, dated if it is an event. If
+     every candidate is weak or none is true, say so and ask him; a weak true hook beats an invented one.
+4. **Evidence.** Choose from `mail/me.md` above "Needs Devanshu" only. Do not just take the project closest to the
+   job text. Weigh technical difficulty, how much he owned, a measurable result, how easy it is to believe, and what
+   this reader would value most (an engineer on the area, a founder, a recruiter). One project or job, with one number
+   from it when me.md has one; its link is the default second link (see Links). Done when the evidence is a line from me.md and
+   you can say why it beats the next-best one.
+5. **Write.**
+   - **Read the person.** Use what he pasted about their real work, interests, and how close they are to hiring and to
+     the role. The by-reader table below is the default, not a mold: when the paste shows something else (an engineer
+     who owns hiring, a founder who still writes code), follow the person. The hard rules for a reader kind still hold
+     (a recruiter gets the exact role title and the work-authorization line early).
+   - **Compete.** Draft at least three emails on substantially different strategies (for example peer to peer on a
+     shared technical problem, evidence first, a direct and plain referral ask), not rewordings. Each follows every
+     rule below.
+   - **Judge as the reader** among dozens of other emails: Would they see at once why this person wrote? Is there a
+     reason to keep reading? Does it stand apart from other applicants? Is the personalization specific, or forced?
+     Is the evidence believable? Does anything sound generic, inflated or written by a model? Does it spend their
+     time well? A fact he cannot back from me.md or his paste disqualifies a draft outright.
+   - **Choose the call to action** for this person: one direct, low-friction ask (a referral, a pointer to who owns the
+     req, a short call, one question about their work, two times for a screen). Do not default to a meeting or a
+     referral; pick the ask this reader can answer in one line.
+   - **Refine.** Take the winner, name its weakest points (a soft hook, a spare sentence, a vague claim, a heavy ask),
+     fix only those, and compare the revision with the original. Keep the revision only if it is clearly better; stop
+     when a change adds words, polish or cleverness without adding a reason to reply.
+   - **Keep his voice** (Draft rules, Voice): short, blunt, humble, human. No corporate phrasing, no big claims, no
+     cleverness for its own sake.
+   - **Decide alone.** Never show him the other drafts, the angles or any ranking, and never ask him to pick. Only the
+     one final email goes to `save_draft`. Done when every rule below holds for it.
 6. **Save.** `save_draft` with `person_id`, `subject`, `body`, `hook`, `hook_on` (events only) and `project`. It
    runs the #9 checks. Fix every `blocks` entry and save again; a block still saves, so he sees the draft either
    way. Fix each `warns` entry you can and carry the rest to the report. Done when `blocks` is empty. A person who
@@ -83,17 +112,29 @@ emails; the save checks block near-copies.
 
 | kind | lead with | ask | work authorization |
 |---|---|---|---|
-| engineer | the hook, peer to peer | would they refer him, or point him to who owns the req | only if it fits |
-| manager | the evidence | a short call about the named role | early in the body |
-| founder | one line on why their product, then the evidence | one concrete next step tied to what they build | leave out unless relevant |
+| engineer | the hook, peer to peer | would they refer him, or point him to who owns the req | leave out |
+| manager | the evidence | a short call about the named role | leave out |
+| founder | one line on why their product, then the evidence | one concrete next step tied to what they build | leave out |
 | recruiter | the exact role title and req ID | a screen at two concrete times he gives you (ask him) | first or second line |
 
-The work-authorization line is me.md's, word for word: on F-1 OPT, authorized to work now, eligible for STEM OPT
-through 2029, can start right away.
+The work-authorization line goes to recruiters only. Engineers, managers and founders get no visa, OPT or
+sponsorship line, unless they ask in a reply. The line is me.md's, word for word: on F-1 OPT, authorized to work
+now, eligible for STEM OPT through 2029, can start right away.
 
-**Links.** Exactly 2 in a first email, as bare URLs on their own lines: https://www.devanshuchicholikar.com
-first, then the project link from me.md. The role is named by title, not linked. Gmail turns any written domain
+**Links.** Exactly 2 in a first email, as bare URLs on their own lines. The portfolio,
+https://www.devanshuchicholikar.com, is always first and never left out. The second link is chosen per email, from
+me.md's Links and projects: the evidence project's link when the email leans on that project (the default, because
+the link backs the claim), otherwise his GitHub (https://github.com/DevanshuNEU) or LinkedIn
+(https://www.linkedin.com/in/devanshuchicholikar/). Use GitHub or LinkedIn when the email does not hinge on one
+project, such as a short referral ask or a recruiter email, and vary between them so emails to a team do not all
+look alike. Never a third link. `project` in `save_draft` stays the evidence project named in the body. The role is named by title, not linked. Gmail turns any written domain
 into a link, so write "Claude", not "Claude.ai", and keep the signature to his name. Full links only.
+
+**Resume.** Never attached to a first email (#9: no attachments, and the resume link is not one of the two
+links). Decide per person whether to offer it: a recruiter, a posting that asks for a resume, or a reader who would
+want more than the project. When it helps, end the ask with one short plain line such as "I can send my resume."
+It counts toward the word count. Skip it when the email is already clear without it; do not add it to every draft.
+When he is asked for the resume after a reply, he attaches it himself.
 
 **Subject.** Unique to this person: name something of theirs (their post, their team's product, the role) in 4
 to 7 calm, lowercase words. A first email never starts with "Re:" and never names his own product. Recruiters

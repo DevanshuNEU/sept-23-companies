@@ -23,6 +23,7 @@ const option = (n: number) => {
   return o;
 };
 const panel = () => screen.getByRole('region', { name: 'Selected company' });
+const progress = () => screen.getByRole('meter', { name: 'Picks reached today' });
 const leavePage = () =>
   act(() => {
     window.dispatchEvent(new Event('pagehide'));
@@ -67,9 +68,10 @@ describe('Today as a company queue', () => {
   it('lands on the first pick to do, new openings first, and the panel leads with why today', async () => {
     const { db } = await open();
     const pylon = rowOf(db, 'Pylon');
-    expect(screen.getByText('8 picks, 2 reached')).toBeInTheDocument();
+    expect(screen.getByText('8 picks')).toBeInTheDocument();
+    expect(screen.getByRole('meter', { name: 'Picks reached today' })).toHaveAttribute('aria-valuetext', '2 of 8 reached');
     expect(options().map((o) => o.querySelector('b')?.textContent)).toEqual(
-      ['1Pylon', '2Cerebrium', '3Resend', '4Baseten', '5Inngest', '6Turso', '7Trigger.dev', '8Hex'],
+      ['Pylon', 'Cerebrium', 'Resend', 'Baseten', 'Inngest', 'Turso', 'Trigger.dev', 'Hex'],
     );
     expect(option(1)).toHaveAttribute('aria-selected', 'true');
     expect(option(1)).toHaveAccessibleName('1. Pylon, To do, new opening, 6 hours ago');
@@ -81,17 +83,17 @@ describe('Today as a company queue', () => {
 
     // Why today comes first: the opening and its age, why it should answer, the visa position.
     const why = within(panel()).getByRole('region', { name: 'Why today' });
-    expect(panel().firstElementChild?.children[1]).toBe(why); // right under the name
+    expect(panel().firstElementChild?.firstElementChild?.children[1]).toBe(why); // right under the name
     expect(why).toHaveTextContent('New opening, 6 hours ago');
     expect(within(why).getByRole('link', { name: 'Software Engineer I' })).toHaveAttribute('href', pylon.role?.url);
     expect(why).toHaveTextContent('SWE I role, first seen 6 hours ago');
+    // The reasons are small chips: the new opening, E-Verify, sponsorship, size, hiring, then the ranker's own (each once).
     expect(within(why).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
-      ...(pylon.queue?.reasons ?? []), '30 people (estimate), Series A', '3 new engineering roles in the last 30 days',
+      'New opening, 6 hours ago', 'E-Verify enrolled', 'Says it sponsors', '30 people (estimate), Series A',
+      '3 new engineering roles in the last 30 days', 'Open role at your level', 'New opening today',
     ]);
-    expect(why).toHaveTextContent('VisaSays it sponsors, E-Verify enrolled');
     const about = within(panel()).getByLabelText('About Pylon');
     expect(about).toHaveTextContent('Where it standsNew');
-    expect(about).toHaveTextContent('People1 person on record, none asked');
     // nothing about Claude, no note, no person
     expect(panel()).not.toHaveTextContent(/Claude/);
     expect(within(panel()).queryByRole('region', { name: 'Note to send' })).not.toBeInTheDocument();
@@ -105,8 +107,11 @@ describe('Today as a company queue', () => {
       'Judge: builds a support platform for B2B teams, with AI agents that answer tickets. Fit 82. Risk: no E-Verify statement on its pages.',
     );
     const why = within(panel()).getByRole('region', { name: 'Why today' });
-    expect(within(why).getByText(pylon.queue?.judgeLine ?? '')).toBeInTheDocument();
-    expect(option(1)).toHaveTextContent('Judge fit 82');
+    // His one-line reason in a quote, with its risk; the fit is a chip on the rail and under the name.
+    expect(within(why).getByText('Agent work on support tickets is close to the work he wants.')).toBeInTheDocument();
+    expect(within(why).getByText('Risk: No E-Verify statement on its pages.')).toBeInTheDocument();
+    expect(option(1)).toHaveTextContent('Fit 82');
+    expect(within(panel()).getByText('Fit 82')).toBeInTheDocument();
     // Inngest has no judgment: the panel says so plainly, and the rail says nothing.
     expect(option(5)).not.toHaveTextContent('Judge');
     fireEvent.click(option(5));
@@ -124,7 +129,7 @@ describe('Today as a company queue', () => {
     expect(search.getAttribute('rel')).toContain('noopener');
     expect(search).toHaveAttribute('data-variant', 'default');
     expect(search).toHaveAttribute('aria-keyshortcuts', 's');
-    expect(within(panel()).getByText('Your saved search opens with S.')).toBeInTheDocument();
+    expect(within(panel()).getByText('Your saved search opens with S')).toBeInTheDocument();
     const research = within(panel()).getByRole('group', { name: 'Research' });
     const careers = within(research).getByRole('link', { name: 'Careers' });
     expect(careers).toHaveAttribute('href', pylon.queue?.careersUrl);
@@ -187,7 +192,7 @@ describe('Today as a company queue', () => {
     await user.click(within(panel()).getByRole('button', { name: 'Log people' }));
     expect(await screen.findByText('Logged: 2 people at Trigger.dev.')).toBeInTheDocument();
     expect(option(7)).toHaveAccessibleName('7. Trigger.dev, Done');
-    expect(screen.getByText('8 picks, 3 reached')).toBeInTheDocument();
+    expect(progress()).toHaveAttribute('aria-valuetext', '3 of 8 reached');
     // done, so the selection moved on to the next company to do
     expect(await screen.findByRole('heading', { level: 2, name: 'Hex' })).toBeInTheDocument();
     await leavePage();
@@ -202,6 +207,7 @@ describe('Today as a company queue', () => {
     const user = userEvent.setup();
     const { client } = await open();
     const logged = vi.spyOn(client, 'logPeople');
+    await user.click(within(panel()).getByRole('button', { name: /Log people you asked/ }));
     await user.click(within(panel()).getByRole('button', { name: 'Log people' }));
     expect(await screen.findByText('Not logged. Paste one line per person: Name | Title | note.')).toBeInTheDocument();
     await leavePage();
@@ -223,7 +229,7 @@ describe('Today as a company queue', () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.plan });
     });
     await waitFor(() => expect(option(7)).toHaveAccessibleName('7. Trigger.dev, Done'));
-    expect(screen.getByText('8 picks, 3 reached')).toBeInTheDocument();
+    expect(progress()).toHaveAttribute('aria-valuetext', '3 of 8 reached');
   });
 
   it('Save this search keeps his LinkedIn search for the company, and refuses any other address', async () => {
@@ -232,6 +238,7 @@ describe('Today as a company queue', () => {
     const saved = vi.spyOn(client, 'saveSearch');
     fireEvent.click(option(8));
     await screen.findByRole('heading', { level: 2, name: 'Hex' });
+    await user.click(within(panel()).getByRole('button', { name: /Save this search/ }));
     const field = within(panel()).getByRole('textbox', { name: 'Save this search' });
     await user.type(field, 'https://evil.example/search/results/people/');
     await user.click(within(panel()).getByRole('button', { name: 'Save' }));
@@ -295,7 +302,8 @@ describe('Today as a company queue', () => {
     renderWithApp(<TodayPage />, { route: '/today', client, queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) });
     expect(await screen.findByRole('heading', { level: 2, name: "Today's list is done." })).toBeInTheDocument();
     expect(screen.getByText('8 of 8 handled: 7 reached, Hex carries to tomorrow. You passed on 2 for now.')).toBeInTheDocument();
-    expect(screen.getByText('8 picks, 7 reached, 1 carried over, 2 passed')).toBeInTheDocument();
+    expect(screen.getByText('8 picks, 1 carried over, 2 passed')).toBeInTheDocument();
+    expect(progress()).toHaveAttribute('aria-valuetext', '7 of 8 reached');
   });
 });
 

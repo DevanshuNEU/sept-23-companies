@@ -248,7 +248,7 @@ function companyQueue(c: PlanCtx, company: string, role: RoleToName | null): Pla
     peopleSearchUrl: keywordSearch(company), searchSaved: false, careersUrl: 'https://cerebrium.example/careers/mts', terminalLine: terminalLine(company, id, role?.title ?? null),
     profile: buildProfile({
       company, size: '18 people (estimate), seed (guess)', domain: ref?.domain ?? null, standing: { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null },
-      onRecord: 0, contacted: 0, sponsorshipWord: null, opening,
+      onRecord: 0, contacted: 0, opening,
       role: role && opening ? { title: role.title, url: role.url, level: opening.level, age: 'posted 3 days ago', location: role.location, early: opening.earlyFit } : null,
     }),
   };

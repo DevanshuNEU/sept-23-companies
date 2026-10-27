@@ -1,4 +1,6 @@
 import { Check, Flag, Sparkles } from 'lucide-react';
+import { FitChip } from '@/components/fit-chip';
+import { Monogram } from '@/components/monogram';
 import type { Id, IsoTime, PlanRow, PlanView } from '@/api';
 import type { RowProps } from '@/keyboard/list-nav';
 import { formatCarriedDay } from '@/lib/format';
@@ -41,30 +43,33 @@ function sub(row: PlanRow): string {
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
-function NodeMark({ node, selected }: { node: Node; selected: boolean }) {
+/**
+ * The small state mark on a row's monogram: a check when done, the working dot once something is logged, a half
+ * disc when carried to tomorrow. A row still to do has none. The word is in the row's label, so the mark is the
+ * second signal.
+ */
+function StateMark({ node }: { node: Node }) {
+  if (node === 'todo' || node === 'current') return null;
   return (
     <span
       aria-hidden
       className={cn(
-        'relative z-[1] grid size-5 place-items-center rounded-full border-[1.5px] border-muted-foreground bg-background text-background',
-        selected && 'border-2 border-foreground',
-        node === 'done' && 'border-foreground bg-foreground',
-        node === 'logged' && 'border-info-dot bg-info-bg text-info',
-        node === 'carried' && 'bg-[linear-gradient(90deg,var(--muted-foreground)_50%,var(--background)_50%)]',
+        'absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full border-2 border-background',
+        node === 'done' && 'bg-ok-dot text-white',
+        node === 'logged' && 'bg-info-dot',
+        node === 'carried' && 'bg-muted-foreground',
       )}
     >
-      {node === 'done' ? <Check className="size-3" strokeWidth={3} /> : null}
-      {node === 'logged' ? <span className="size-1.5 rounded-full bg-info-dot" /> : null}
+      {node === 'done' ? <Check className="size-2.5" strokeWidth={4} /> : null}
     </span>
   );
 }
 
 const option = cn(
-  'relative grid cursor-default grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-md px-3 py-2.5 outline-none',
-  'hover:bg-muted/55 aria-selected:bg-muted aria-selected:hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/70',
-  // The line from under this node to the next one; darker once the row is done, so the distance travelled shows.
-  "before:absolute before:top-8 before:-bottom-2.5 before:left-[21.5px] before:w-px before:bg-border before:content-['']",
-  'data-[node=done]:before:bg-muted-foreground',
+  'group relative grid cursor-default grid-cols-[32px_minmax(0,1fr)] items-start gap-x-3 rounded-lg border border-transparent px-2.5 py-2.5 outline-none transition-colors duration-150',
+  'hover:bg-muted/55 aria-selected:border-border aria-selected:bg-card aria-selected:shadow-sm aria-selected:hover:bg-card',
+  "aria-selected:before:absolute aria-selected:before:top-3 aria-selected:before:bottom-3 aria-selected:before:-left-px aria-selected:before:w-[3px] aria-selected:before:rounded-r-full aria-selected:before:bg-foreground aria-selected:before:content-['']",
+  'focus-visible:ring-[3px] focus-visible:ring-ring/70',
 );
 
 function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps; current: boolean; asOf: IsoTime }) {
@@ -78,6 +83,7 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
   const judged = row.queue?.judgeFit ?? null;
   const where = row.channel === 'email' ? `${title(row)} by email` : companyRow(row) ? title(row) : `${title(row)} at ${row.company.name}`;
   const label = [`${row.position}. ${where}`, word, ...[fresh, carried, ask].flatMap((p) => (p ? [lowerFirst(p)] : []))].join(', ');
+  const left = node === 'done' || node === 'carried';
 
   return (
     <div
@@ -93,32 +99,49 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
       onClick={onClick}
       className={option}
     >
-      <NodeMark node={node} selected={aria['aria-selected']} />
-      <span className="grid min-w-0 gap-px">
-        <b className="truncate font-medium">
-          <span className="mr-1.5 font-normal text-muted-foreground tabular-nums">{row.position}</span>
-          {title(row)}
-        </b>
+      <span className={cn('relative mt-px', left && 'opacity-70')}>
+        <Monogram name={row.company.name} />
+        <StateMark node={node} />
+      </span>
+      <span className="grid min-w-0 gap-0.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <b className={cn('min-w-0 flex-1 truncate text-sm leading-5 font-medium', left && 'font-normal text-muted-foreground')}>{title(row)}</b>
+          <FitChip fit={judged} />
+        </span>
         {fresh ? (
-          <span data-fresh className="flex min-w-0 items-center gap-1 truncate text-xs leading-4 font-medium text-info">
+          <span data-fresh className="flex min-w-0 items-center gap-1 text-xs leading-4 font-medium text-info">
             <Sparkles aria-hidden className="size-3 flex-none" />
             <span className="truncate">{fresh}</span>
           </span>
         ) : null}
-        <span className="truncate text-[13px] text-muted-foreground">{sub(row)}</span>
-        {judged !== null ? <span data-judge className="truncate text-xs leading-4 text-muted-foreground">Judge fit {judged}</span> : null}
+        <span className="truncate text-[13px] leading-5 text-muted-foreground">{sub(row)}</span>
+        {node === 'done' || node === 'logged' || node === 'carried' ? (
+          <span className={cn('text-xs leading-4', node === 'logged' ? 'text-info' : 'text-muted-foreground')}>{word}</span>
+        ) : null}
         {carried ? <span className="truncate text-xs leading-4 text-muted-foreground">{carried}</span> : null}
         {ask ? <span className="truncate text-xs leading-4 text-muted-foreground">{ask}</span> : null}
       </span>
-      <span
-        className={cn(
-          'text-xs leading-5 whitespace-nowrap text-muted-foreground',
-          node === 'logged' && 'text-info',
-          node === 'done' && 'text-foreground',
-        )}
+    </div>
+  );
+}
+
+/** The day so far as a slim bar: "2 of 8 reached". Calm: a count of what is done, never of what is left. */
+function Progress({ done, total, queue }: { done: number; total: number; queue: boolean }) {
+  const word = `${done} of ${total} ${queue ? 'reached' : 'done'}`;
+  return (
+    <div className="mb-3 grid gap-1.5 px-3">
+      <p className="text-xs leading-4 font-medium text-muted-foreground tabular-nums">{word}</p>
+      <div
+        role="meter"
+        aria-label={queue ? 'Picks reached today' : 'People done today'}
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={done}
+        aria-valuetext={word}
+        className="h-1 overflow-hidden rounded-full bg-muted"
       >
-        {word}
-      </span>
+        <div className="h-full rounded-full bg-ok transition-[width] duration-150" style={{ width: total > 0 ? `${Math.round((done / total) * 100)}%` : '0%' }} />
+      </div>
     </div>
   );
 }
@@ -147,6 +170,7 @@ export function DayRail({
   const queue = rows.length > 0 && rows.every(companyRow);
   return (
     <div className="grid">
+      {rows.length > 0 ? <Progress done={rows.filter((r) => r.state === 'done').length} total={rows.length} queue={queue} /> : null}
       <div role="listbox" aria-label={queue ? "Today's picks" : "Today's people"} className="grid">
         {rows.map((row) => (
           <RailRow key={row.entryId} row={row} props={rowProps(row.entryId)} current={row.entryId === firstTodo} asOf={asOf} />
@@ -156,25 +180,21 @@ export function DayRail({
         data-finish
         data-done={allDone}
         aria-current={allDone ? 'step' : undefined}
-        className={cn(
-          'relative grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-md px-3 py-2.5',
-          allDone && 'bg-muted',
-        )}
+        className={cn('mt-1 grid grid-cols-[32px_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-2.5 py-2.5', allDone && 'bg-card shadow-sm ring-1 ring-border')}
       >
         <span
           aria-hidden
           className={cn(
-            'relative z-[1] grid size-5 place-items-center rounded-full border-[1.5px] border-dashed border-muted-foreground bg-background text-muted-foreground',
+            'grid size-8 place-items-center rounded-lg border-[1.5px] border-dashed border-muted-foreground text-muted-foreground',
             allDone && 'border-solid border-foreground bg-foreground text-background',
           )}
         >
-          <Flag className="size-3" strokeWidth={3} />
+          <Flag className="size-3.5" strokeWidth={2.5} />
         </span>
-        <span className="grid min-w-0 gap-px">
-          <b className="truncate font-medium">Done for today</b>
-          <span className="truncate text-[13px] text-muted-foreground">{tomorrow.text}</span>
+        <span className="grid min-w-0 gap-0.5">
+          <b className="truncate text-sm leading-5 font-medium">Done for today</b>
+          <span className="truncate text-[13px] leading-5 text-muted-foreground">{tomorrow.text}</span>
         </span>
-        <span />
       </div>
     </div>
   );

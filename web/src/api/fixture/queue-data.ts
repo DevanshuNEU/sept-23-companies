@@ -154,7 +154,7 @@ export function buildQueueRows(c: PlanCtx, mode: 'default' | 'fresh'): QueueBuil
       linkedinCompanyUrl: companySearch(spec.company), ...judgeOf(spec.judge),
       profile: buildProfile({
         company: spec.company, size: spec.size, domain: ref.domain, standing, onRecord: spec.people[0], contacted: spec.people[1] || asked,
-        sponsorshipWord: spec.sponsorship, opening, judge: spec.judge,
+        opening, judge: spec.judge,
         role: role && spec.role && opening ? { title: role.title, url: role.url, level: opening.level, age: spec.role.words, location: spec.role.loc, early: opening.earlyFit } : null,
       }),
     };
@@ -238,7 +238,7 @@ export function buildBench(c: PlanCtx, room: number): BenchView {
       whyToday: whyTodayOf(opening, spec.reasons), opening, websiteUrl: ref.domain ? `https://${ref.domain}` : null, linkedinCompanyUrl: companySearch(spec.company),
       ...judgeOf(spec.judge),
       profile: buildProfile({
-        company: spec.company, size: spec.size, domain: ref.domain, standing: { ...NEW }, onRecord: 0, contacted: 0, sponsorshipWord: spec.sponsorship,
+        company: spec.company, size: spec.size, domain: ref.domain, standing: { ...NEW }, onRecord: 0, contacted: 0,
         opening, judge: spec.judge,
         role: role && spec.role && opening ? { title: role.title, url: role.url, level: opening.level, age: spec.role.words, location: ref.hq, early: opening.earlyFit } : null,
       }),

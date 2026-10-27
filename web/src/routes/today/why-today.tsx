@@ -1,4 +1,4 @@
-import { Briefcase, Building, Globe, Sparkles } from 'lucide-react';
+import { Briefcase, Building, Check, FileCheck2, Globe, ShieldCheck, Sparkles, TrendingUp, Users, type LucideIcon } from 'lucide-react';
 import type { CompanyQueue, QueueOpening } from '@/api';
 import { Button } from '@/components/ui/button';
 import { safeHref } from '@/lib/safe-href';
@@ -24,7 +24,7 @@ export function OpeningLine({ opening }: { opening: QueueOpening }) {
   const href = safeHref(opening.url);
   return (
     <div className="grid gap-1">
-      <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-base leading-6">
+      <p className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 text-base leading-6">
         {href ? (
           <a href={href} target="_blank" rel="noopener noreferrer" className={cn(link, 'font-medium')}>
             {opening.title}
@@ -39,52 +39,101 @@ export function OpeningLine({ opening }: { opening: QueueOpening }) {
   );
 }
 
-/**
- * Why today, first in the panel (top picks): the opening and its age, why the company should answer (the ranker's
- * reasons, its size and stage, recent hiring), where it stands on a visa, and the profile judge's one line (what the
- * company builds, its fit and the risk, or "not judged yet"). Every line is the API's.
- */
-export function WhyToday({ q, compact = false }: { q: CompanyQueue; compact?: boolean }) {
-  const answer = [...q.reasons, ...(q.sizeLine ? [q.sizeLine] : []), ...(q.hiring > 0 ? [q.hiringLine] : [])];
+/** One reason as a small chip: an icon, then the API's words. The fresh one is the only coloured chip (the info hue). */
+function ReasonChip({ icon: Icon, tone = 'plain', children }: { icon: LucideIcon; tone?: 'plain' | 'fresh'; children: string }) {
   return (
-    <section aria-label="Why today" className={cn('grid gap-3', !compact && 'rounded-lg border px-4 py-3.5')}>
-      <div className="grid gap-1.5">
-        {!compact ? <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Why today</h3> : null}
-        <FreshTag opening={q.opening} />
-        {q.opening ? <OpeningLine opening={q.opening} /> : <p className="text-base leading-6 text-muted-foreground">No open role at your level. {q.whyToday}</p>}
-      </div>
-      <dl className="grid gap-1.5 text-[13px]">
-        <div className="grid grid-cols-[132px_minmax(0,1fr)] items-baseline gap-x-4 max-[700px]:grid-cols-1">
-          <dt className="text-muted-foreground">Why it should answer</dt>
-          <dd>
-            <ul className="grid gap-0.5">
-              {answer.map((r) => (
-                <li key={r}>{r}</li>
-              ))}
-            </ul>
-          </dd>
-        </div>
-        <div className="grid grid-cols-[132px_minmax(0,1fr)] items-baseline gap-x-4 max-[700px]:grid-cols-1">
-          <dt className="text-muted-foreground">Visa</dt>
-          <dd>{q.sponsorshipLine}</dd>
-        </div>
-      </dl>
-      <p data-judge className={cn('text-[13px]', q.judgeFit === null && 'text-muted-foreground')}>
+    <li
+      data-reason={tone}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] leading-5',
+        tone === 'fresh' ? 'border-info-bd bg-info-bg text-info' : 'bg-subtle text-foreground',
+      )}
+    >
+      <Icon aria-hidden className={cn('size-3.5 flex-none', tone === 'plain' && 'text-muted-foreground')} />
+      {children}
+    </li>
+  );
+}
+
+/**
+ * Why it should answer, as chips: the new opening, E-Verify, sponsorship, size and stage, recent hiring, then the
+ * ranker's own reasons (each once: a reason that says what a chip already says is dropped). Every word is the API's.
+ */
+function reasonChips(q: CompanyQueue): { icon: LucideIcon; tone: 'plain' | 'fresh'; text: string }[] {
+  const p = q.profile;
+  const all: { icon: LucideIcon; tone: 'plain' | 'fresh'; text: string | null }[] = [
+    { icon: Sparkles, tone: 'fresh', text: q.opening?.fresh ? q.opening.freshTag : null },
+    { icon: ShieldCheck, tone: 'plain', text: p.everify.text },
+    { icon: FileCheck2, tone: 'plain', text: p.sponsorship.text },
+    { icon: Users, tone: 'plain', text: q.sizeLine },
+    { icon: TrendingUp, tone: 'plain', text: q.hiring > 0 ? q.hiringLine : null },
+    ...q.reasons.map((text) => ({ icon: Check, tone: 'plain' as const, text })),
+  ];
+  const seen = new Set<string>();
+  const out: { icon: LucideIcon; tone: 'plain' | 'fresh'; text: string }[] = [];
+  for (const c of all) {
+    if (!c.text) continue;
+    const key = c.text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...c, text: c.text });
+  }
+  return out;
+}
+
+/** The judge's one-line reason in a quieter quote style, with its risk line; or that it has not judged this company. */
+function Verdict({ q }: { q: CompanyQueue }) {
+  const p = q.profile;
+  if (q.judgeFit === null || p.verdict.text === null) {
+    return (
+      <p data-judge className="text-[13px] text-muted-foreground">
         {q.judgeLine}
       </p>
+    );
+  }
+  return (
+    <blockquote data-judge className="grid gap-1 border-l-2 pl-3.5 text-sm leading-[1.6]">
+      <p className="text-foreground/90">{p.verdict.text}</p>
+      {p.risk ? <p className="text-[13px] text-muted-foreground">{`Risk: ${p.risk}`}</p> : null}
+    </blockquote>
+  );
+}
+
+/**
+ * Why today, first in the panel (top picks): the opening and its age, why the company should answer as chips, and the
+ * profile judge's one-line reason and risk (or that it has not judged the company). Every line is the API's.
+ */
+export function WhyToday({ q }: { q: CompanyQueue }) {
+  const chips = reasonChips(q);
+  return (
+    <section aria-label="Why today" className="grid gap-4 rounded-xl border bg-card px-5 py-4.5 shadow-xs">
+      <div className="grid gap-2">
+        <h3 className="text-xs font-medium text-muted-foreground">Why today</h3>
+        {q.opening ? <OpeningLine opening={q.opening} /> : <p className="text-[15px] leading-6 text-muted-foreground">No open role at your level. {q.whyToday}</p>}
+      </div>
+      {chips.length > 0 ? (
+        <ul aria-label="Why it should answer" className="flex flex-wrap gap-2">
+          {chips.map((c) => (
+            <ReasonChip key={c.text} icon={c.icon} tone={c.tone}>
+              {c.text}
+            </ReasonChip>
+          ))}
+        </ul>
+      ) : null}
+      <Verdict q={q} />
     </section>
   );
 }
 
 /** The three research links: Careers (O), the company's website, its LinkedIn page (a company search; never fetched). */
-export function ResearchLinks({ q, keys = true }: { q: CompanyQueue; keys?: boolean }) {
+export function ResearchLinks({ q, keys = true, variant = 'outline' }: { q: CompanyQueue; keys?: boolean; variant?: 'outline' | 'secondary' }) {
   const careers = safeHref(q.careersUrl);
   const site = safeHref(q.websiteUrl);
   const linkedin = safeHref(q.linkedinCompanyUrl);
   return (
     <div role="group" aria-label="Research" className="flex flex-wrap items-center gap-2">
       {careers ? (
-        <Button asChild variant="outline" size="sm" className={MAIN}>
+        <Button asChild variant={variant} size="sm" className={MAIN}>
           <a href={careers} target="_blank" rel="noopener noreferrer" aria-keyshortcuts={keys ? 'o' : undefined}>
             <Briefcase aria-hidden />
             Careers
@@ -93,7 +142,7 @@ export function ResearchLinks({ q, keys = true }: { q: CompanyQueue; keys?: bool
         </Button>
       ) : null}
       {site ? (
-        <Button asChild variant="outline" size="sm" className={MAIN}>
+        <Button asChild variant={variant} size="sm" className={MAIN}>
           <a href={site} target="_blank" rel="noopener noreferrer">
             <Globe aria-hidden />
             Website
@@ -101,7 +150,7 @@ export function ResearchLinks({ q, keys = true }: { q: CompanyQueue; keys?: bool
         </Button>
       ) : null}
       {linkedin ? (
-        <Button asChild variant="outline" size="sm" className={MAIN}>
+        <Button asChild variant={variant} size="sm" className={MAIN}>
           <a href={linkedin} target="_blank" rel="noopener noreferrer">
             <Building aria-hidden />
             LinkedIn page

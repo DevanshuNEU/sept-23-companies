@@ -32,7 +32,7 @@ export const FACTS: Record<string, Facts> = {
     lca: ['4 software LCA filings in FY2024 and FY2025', 'DOL disclosure data'], domains: ['AI agents', 'LLM apps'],
     why: 'Agent work on support tickets is close to the work he wants.',
     more: [
-      ['Software Engineer II, Platform', 'SWE II role', 'posted 5 days ago', 'San Francisco, CA', false],
+      ['Software Engineer II, Platform', 'SWE II role', 'posted 5 days ago', 'San Francisco', false],
       ['Forward Deployed Engineer', 'Early career role', 'posted 12 days ago', 'Remote US', true],
     ],
   },
@@ -47,7 +47,7 @@ export const FACTS: Record<string, Facts> = {
     everify: ['E-Verify enrolled', 'confirmed, the E-Verify list, checked Oct 3'], sponsorship: ['Has sponsored before', 'from its LCA filings'],
     lca: ['7 software LCA filings in FY2024 and FY2025', 'DOL disclosure data'], domains: ['Dev tools', 'Infrastructure'],
     why: 'A developer product with a small, senior team.',
-    more: [['Software Engineer, Platform', 'SWE I role', 'posted 9 days ago', 'Remote US', true]],
+    more: [['Software Engineer, Platform', 'SWE I role', 'posted 9 days ago', 'San Francisco or remote US', true]],
   },
   Baseten: {
     stage: ['Series C', 'confirmed, SEC Form D'], funding: ['$75,000,000 raised, Form D filed Aug 19, 2026', 'confirmed, SEC Form D'],
@@ -70,8 +70,8 @@ export const FACTS: Record<string, Facts> = {
   Hex: {
     stage: ['Series B', 'confirmed, SEC Form D'], funding: ['$70,000,000 raised, Form D filed Mar 11, 2026', 'confirmed, SEC Form D'],
     headcount: ['180 people', 'estimate, LinkedIn'], hq: ['San Francisco, CA', 'confirmed, its website'],
-    lca: ['3 software LCA filings in FY2024 and FY2025', 'DOL disclosure data'], domains: ['Data'],
-    more: [['Software Engineer, Data Platform', 'SWE I role', 'posted 20 days ago', 'San Francisco, CA', true]],
+    sponsorship: ['Unclear', 'from a posting'], lca: ['3 software LCA filings in FY2024 and FY2025', 'DOL disclosure data'], domains: ['Data'],
+    more: [['Software Engineer, Data Platform', 'SWE I role', 'posted 20 days ago', 'San Francisco', true]],
   },
   'Retell AI': {
     stage: ['Series A', 'confirmed, SEC Form D'], headcount: ['40 people', 'estimate, LinkedIn'], hq: ['San Francisco, CA', 'confirmed, its website'],
@@ -105,7 +105,7 @@ export function factsFromSize(size: string | null): Facts {
 export interface ProfileInput {
   company: string; size: string | null; domain: string | null;
   role: { title: string; url: string; level: string | null; age: string; location: string; early: boolean } | null;
-  opening: QueueOpening | null; standing: QueueStanding; onRecord: number; contacted: number; sponsorshipWord: string | null;
+  opening: QueueOpening | null; standing: QueueStanding; onRecord: number; contacted: number;
   judge?: { why?: string; risk: string; builds: string; fit: number; domains?: string[] }; applied?: IsoDate; extra?: Facts;
 }
 

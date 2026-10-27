@@ -38,3 +38,12 @@ export const isCompanyRow = (row: PlanRow) => row.person === null && row.channel
 export const peopleFieldId = (headingId: string | undefined) => `${headingId ?? 'plan'}-people`;
 /** The id of a company row's "Save this search" field. */
 export const searchFieldId = (headingId: string | undefined) => `${headingId ?? 'plan'}-search`;
+
+/**
+ * Whether a company row has a Log people box: not carried to tomorrow, not coming in from the bench, and either still
+ * to do or with room left in its wave. The box starts closed; the panel and the L key read this one rule.
+ */
+export function canLogPeople(row: PlanRow): boolean {
+  if (row.state === 'skipped' || row.entryId < 0) return false;
+  return row.state === 'todo' || (row.queue ? row.queue.standing.room : 4) > 0;
+}

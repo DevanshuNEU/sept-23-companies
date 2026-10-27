@@ -62,9 +62,10 @@ describe('DayRail', () => {
       '6. Ines Duarte at Turso, To do, carried over from Monday',
       '7. Mintlify by email, To do',
     ]);
-    // What the label says is also on screen: the number, the person, the company and the word.
+    // What the label says is also on screen: the monogram, the person and the company; a row still to do needs no word.
     const lena = screen.getByRole('option', { name: '3. Lena Ortiz at Pylon, To do' });
-    expect(lena).toHaveTextContent('3Lena OrtizPylonTo do');
+    expect(lena).toHaveTextContent('PLena OrtizPylon');
+    expect(lena).not.toHaveTextContent('To do');
     expect(screen.getByRole('option', { name: /^6\. Ines Duarte/ })).toHaveTextContent('Carried over from Monday');
     expect(screen.getByRole('option', { name: /^4\. Jonah Park/ })).toHaveTextContent('Your line to confirm');
     expect(screen.getByRole('option', { name: /^7\. Mintlify/ })).toHaveTextContent('By email, in the Outbox');

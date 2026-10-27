@@ -25,7 +25,8 @@ export type PanelActions = {
   /** A company row: copy the one line for his terminal. */
   onCopyLine: () => void;
   onCarry: () => void;
-  onNotFit: () => void;
+  /** Not now (top picks): opens the reason chips. Never a no-go, never a remove. */
+  onNotNow: () => void;
   onCopy: () => void;
   /** Open the profile, then copy the note (Enter on a person). */
   onCopyOpen: () => void;
@@ -153,23 +154,23 @@ export function PanelRole({ row }: { row: PlanRow }) {
   );
 }
 
-/** Carry to tomorrow (X) and Not a fit (N): quiet, at the end of the row's actions. */
-export function QuietActions({ actions }: { actions: Pick<PanelActions, 'onCarry' | 'onNotFit'> }) {
+/** Carry to tomorrow (X) and Not now (P, or N): quiet, at the end of the row's actions. */
+export function QuietActions({ actions }: { actions: Pick<PanelActions, 'onCarry' | 'onNotNow'> }) {
   return (
     <>
       <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="x" onClick={actions.onCarry}>
         Carry to tomorrow
         <KeyHint k="X" />
       </Button>
-      <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="n" onClick={actions.onNotFit}>
-        Not a fit
-        <KeyHint k="N" />
+      <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="p n" onClick={actions.onNotNow}>
+        Not now
+        <KeyHint k="P" />
       </Button>
     </>
   );
 }
 
-/** Why a skipped row left the day: it is carried to tomorrow (a company removed as not a fit is off the plan). */
+/** Why a skipped row left the day: it is carried to tomorrow (a pick he said Not now to is off the list). */
 export function SkippedLine() {
   return <p className="text-[13px] text-muted-foreground">Carried to tomorrow. It is first on tomorrow&apos;s plan.</p>;
 }

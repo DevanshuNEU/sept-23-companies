@@ -1,12 +1,14 @@
-import { useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
-import { HelpCircle, Terminal } from 'lucide-react';
+import { HelpCircle, Layers, Terminal } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
   usePageClient,
+  type BenchView,
   type Id,
+  type PassReason,
   type PlanRow,
   type PlanView,
   type StepKind,
@@ -21,7 +23,7 @@ import { formatLongDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { openExternal, safeHref } from '@/lib/safe-href';
 import { useViewQuery } from '@/pending/pending';
-import { RemoveDialog } from '@/routes/proposals/remove-dialog';
+import { BenchDrawer } from './bench-drawer';
 import { CompanyPanel } from './company-panel';
 import { EmailRowPanel } from './email-row-panel';
 import { FinishPanel } from './finish-panel';
@@ -30,6 +32,7 @@ import type { NoteEdit } from './note-editor';
 import { KeyHint, PersonPanel, type PanelActions } from './plan-panel';
 import { PlanEmpty, PlanJobBanner, PlanNotReady, PlanSkeleton } from './plan-states';
 import { OutcomePrompt } from './outcome-prompt';
+import { PassChips } from './pass-chips';
 import { isCompanyRow, nextTodoAfter, peopleFieldId } from './plan-steps';
 import { usePlanActions } from './use-plan-actions';
 import { WatchList } from './watch-list';
@@ -89,7 +92,7 @@ function PlanHead({ plan }: { plan: PlanView }) {
         {plan.notReady ? null : (
           <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums">
             {isQueue(plan)
-              ? `${plural(plan.total, 'company', 'companies')}, ${plan.done} reached${carried > 0 ? `, ${carried} carried over` : ''}`
+              ? `${plural(plan.total, 'pick', 'picks')}, ${plan.done} reached${carried > 0 ? `, ${carried} carried over` : ''}${plan.passed > 0 ? `, ${plan.passed} passed` : ''}`
               : `${plural(plan.total, 'person', 'people')}, ${plan.done} done${carried > 0 ? `, ${carried} carried over` : ''}`}
           </p>
         )}
@@ -122,12 +125,16 @@ function PlanHead({ plan }: { plan: PlanView }) {
  * Every key acts on the row he moved to last (`useHotkeys` with the selection), and follows the same rules as its
  * button.
  */
-function PlanWork({ plan }: { plan: PlanView }) {
+function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefined }) {
   const navigate = useNavigate();
   const actions = usePlanActions();
   const [pinned] = useState(() => plan.rows.find((r) => r.state === 'todo')?.entryId);
   const [edits, setEdits] = useState<ReadonlyMap<Id, NoteEdit>>(new Map());
-  const [removing, setRemoving] = useState<PlanRow | null>(null);
+  // Not now's reason chips are open on this row; the bench drawer (B) is open.
+  const [passing, setPassing] = useState<Id | null>(null);
+  const [benchOpen, setBenchOpen] = useState(false);
+  const showBench = useCallback(() => setBenchOpen(true), []);
+  useNewOpeningToast(bench, showBench);
   // The panel's heading takes focus after a save or a confirm, so focus never drops to the page.
   const headingId = useId();
   const noteFieldId = `${headingId}-note`;
@@ -196,11 +203,19 @@ function PlanWork({ plan }: { plan: PlanView }) {
   const carry = (row: PlanRow) => {
     if (actions.skip(row)) moveOn(row);
   };
-  /** Not a fit opens its dialog only when the API could remove the company; else it says why, once. */
-  const askNotAFit = (row: PlanRow) => {
-    const blocked = actions.notAFitRefusal(row);
+  /**
+   * Not now (P, or N; top picks, his ruling of 2026-10-26): never a remove and never a no-go. It opens the reason chips
+   * when the row may pass; else it says why, once. A pick passes with the chip he presses (or none), and the bench's
+   * best company slides into its place.
+   */
+  const askNotNow = (row: PlanRow) => {
+    const blocked = actions.passRefusal(row);
     if (blocked) return void toast(blocked);
-    setRemoving(row);
+    setPassing((p) => (p === row.entryId ? null : row.entryId));
+  };
+  const pass = (row: PlanRow, reason: PassReason | null) => {
+    setPassing(null);
+    if (actions.passPick(row, reason)) moveOn(row);
   };
   /** An open edit that differs from the saved note: Copy would copy the saved text, so it waits for Save. */
   const unsavedEdit = (row: PlanRow): boolean => {
@@ -308,7 +323,7 @@ function PlanWork({ plan }: { plan: PlanView }) {
     onSaveSearch: (url) => actions.saveSearch(row, url),
     onCopyLine: () => copyLine(row),
     onCarry: () => carry(row),
-    onNotFit: () => askNotAFit(row),
+    onNotNow: () => askNotNow(row),
     onCopy: () => copyNote(row),
     onCopyOpen: () => copyAndOpen(row),
     onEdit: () => edit(row),
@@ -348,13 +363,17 @@ function PlanWork({ plan }: { plan: PlanView }) {
     { keys: 'y', label: 'Confirm your line', group, enabled: has && person !== null, run: on(confirm) },
     { keys: 'r', label: company ? 'Log people you asked' : 'Log request sent', group, enabled: has, run: on((r) => log(r, 'request')) },
     { keys: 'x', label: 'Carry to tomorrow', group, enabled: has, run: on(carry) },
-    // Only a row to do has a Not a fit button, so only a row to do answers n.
-    { keys: 'n', label: 'Not a fit', group, enabled: current?.state === 'todo', run: on(askNotAFit) },
+    // Only a row to do has a Not now button, so only a row to do answers p and n (one action since 2026-10-26).
+    { keys: 'p', label: 'Not now', group, enabled: current?.state === 'todo' && passing === null, run: on(askNotNow) },
+    { keys: 'n', label: 'Not now', group, enabled: current?.state === 'todo' && passing === null, run: on(askNotNow) },
     { keys: 'mod+s', label: 'Save the note', group, enabled: editing, run: on(save) },
   ];
   // These act on the selected person, so a key right after j, k or a click waits for that move to render.
   useHotkeys(onRow, { selection: selected });
-  useHotkeys([{ keys: 'shift+c', label: isQueue(plan) ? 'Copy every company line for the terminal' : 'Copy every find-someone handoff', group, run: copyAllHandoffs }]);
+  useHotkeys([
+    { keys: 'shift+c', label: isQueue(plan) ? 'Copy every company line for the terminal' : 'Copy every find-someone handoff', group, run: copyAllHandoffs },
+    { keys: 'b', label: 'More options (the bench)', group, inDialogs: true, run: () => setBenchOpen((o) => !o) },
+  ]);
 
   /* ------------------------------------------------------------------ layout */
 
@@ -378,7 +397,14 @@ function PlanWork({ plan }: { plan: PlanView }) {
       current.channel === 'email' ? (
         <EmailRowPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} headingId={headingId} />
       ) : current.person === null ? (
-        <CompanyPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} headingId={headingId} />
+        <CompanyPanel
+          key={current.entryId}
+          row={current}
+          asOf={plan.asOf}
+          actions={{ ...a, onPass: (reason) => pass(current, reason), onCancelPass: () => setPassing(null) }}
+          headingId={headingId}
+          passing={passing === current.entryId}
+        />
       ) : (
         <PersonPanel key={current.entryId} row={current} asOf={plan.asOf} actions={a} note={state} headingId={headingId} />
       );
@@ -411,6 +437,11 @@ function PlanWork({ plan }: { plan: PlanView }) {
               <KeyHint k="C" />
             </span>
           </Button>
+          <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts="b" onClick={() => setBenchOpen(true)}>
+            <Layers aria-hidden />
+            {`More options${bench && bench.companies.length > 0 ? ` (${bench.companies.length})` : ''}`}
+            <KeyHint k="B" />
+          </Button>
           <Link
             to="/proposals"
             className="ml-2.5 rounded-sm text-xs text-muted-foreground underline decoration-foreground/30 underline-offset-3 transition-colors outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70"
@@ -424,24 +455,27 @@ function PlanWork({ plan }: { plan: PlanView }) {
         className="min-w-0 overflow-y-auto px-8 pt-5 pb-12 max-[1100px]:overflow-visible"
       >
         {showFinish ? <FinishPanel plan={plan} /> : panel}
+        {current && current.person !== null && passing === current.entryId ? (
+          <div className="mt-4 max-w-[720px]">
+            <PassChips company={current.company.name} onPass={(reason) => pass(current, reason)} onCancel={() => setPassing(null)} />
+          </div>
+        ) : null}
         <BelowPlan plan={plan} />
       </section>
 
-      <RemoveDialog
-        name={removing?.company.name ?? ''}
-        open={removing !== null}
-        onOpenChange={(o) => {
-          if (!o) setRemoving(null);
-        }}
-        onRemove={(reason, note) => {
-          if (removing && actions.notAFit(removing, reason, note)) moveOn(removing);
+      <BenchDrawer
+        open={benchOpen}
+        onOpenChange={setBenchOpen}
+        bench={bench}
+        onAdd={(b) => {
+          if (actions.addFromBench(b.company.id, b.company.name)) setBenchOpen(false);
         }}
       />
     </div>
   );
 }
 
-function PlanContent({ plan }: { plan: PlanView }) {
+function PlanContent({ plan, bench }: { plan: PlanView; bench: BenchView | undefined }) {
   const failed = plan.listJob && (plan.listJob.status === 'failed' || plan.listJob.late);
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -457,7 +491,7 @@ function PlanContent({ plan }: { plan: PlanView }) {
           <BelowPlan className="mx-auto px-8 pb-12" plan={plan} />
         </div>
       ) : (
-        <PlanWork plan={plan} />
+        <PlanWork plan={plan} bench={bench} />
       )}
     </div>
   );
@@ -471,9 +505,31 @@ function PlanContent({ plan }: { plan: PlanView }) {
  * Every reason, state, count and not-ready line comes from the client; the page lays them out. The phase-1 picks
  * and backlog live at /proposals.
  */
+/**
+ * A toast when a new early career opening reaches the bench mid-day: "New opening at Retell AI". The first read seeds
+ * what he has seen, so opening the page says nothing; the pulse refetches the bench whenever anything is written.
+ */
+function useNewOpeningToast(bench: BenchView | undefined, show: () => void) {
+  const seen = useRef<Set<Id> | null>(null);
+  useEffect(() => {
+    if (!bench) return;
+    const fresh = bench.companies.filter((b) => b.fresh && b.earlyFit);
+    if (seen.current === null) {
+      seen.current = new Set(fresh.map((b) => b.company.id));
+      return;
+    }
+    for (const b of fresh) {
+      if (seen.current.has(b.company.id)) continue;
+      seen.current.add(b.company.id);
+      toast(`New opening at ${b.company.name}`, { description: b.queue.whyToday, action: { label: 'Show', onClick: show } });
+    }
+  }, [bench, show]);
+}
+
 export default function TodayPage() {
   const client = usePageClient('plan');
   const plan = useViewQuery(queryKeys.plan, () => client.plan(), { pollMs: pollMs.default });
+  const bench = useViewQuery(queryKeys.bench, () => client.bench(), { pollMs: pollMs.default });
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* The view's name for the outline; the visible heading is the date. */}
@@ -481,7 +537,7 @@ export default function TodayPage() {
       <WinStrip />
       <div className="min-h-0 flex-1">
         <QueryState query={plan} skeleton={<PlanSkeleton />} empty={null}>
-          {(p) => <PlanContent plan={p} />}
+          {(p) => <PlanContent plan={p} bench={bench.data} />}
         </QueryState>
       </div>
     </div>

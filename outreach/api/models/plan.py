@@ -73,6 +73,21 @@ class QueueStanding(Wire):
     free_on: str | None  # the day the company is free again, while a wave is in flight
 
 
+class QueueOpening(Wire):
+    """The opening a pick names (top picks, 2026-10-26): the row's role, its level and age, and whether it is new."""
+
+    posting_id: int
+    title: str
+    url: str | None  # a plain http(s) link, else None
+    level: str | None  # "New grad role", "SWE II role"; None when the posting does not say
+    age: str  # "first seen 6 hours ago", "posted yesterday", "posted 3 days ago"
+    opened_at: str  # when it opened: its first sighting, or the New York start of an earlier posted date
+    fresh: bool  # opened within queue.fresh_hours at his level, and the company clears the visa gate
+    early_fit: bool  # new grad, early career, SWE I, or an open level asking 2 years or fewer
+    fresh_tag: str | None  # "New opening, 6 hours ago" when fresh
+    applied_note: str | None  # "You applied on Oct 20; this is a new role." when he applied there before
+
+
 class CompanyQueue(Wire):
     """A company row's lines (company first, #9 2026-10-26). Every line is the API's; the page shows them as given."""
 
@@ -91,6 +106,11 @@ class CompanyQueue(Wire):
     search_saved: bool  # the link is the search he saved
     careers_url: str | None  # the posting, else the board's page, else the watched page, else https://<domain>
     terminal_line: str  # "Knock: Tessera Labs (company 1304), role: Forward Deployed Engineer"
+    # Top picks (2026-10-26): why today first, then the three research links. The app never fetches linkedin.com.
+    why_today: str = ""  # the one line under the name: "New grad role, first seen 6 hours ago"
+    opening: QueueOpening | None = None
+    website_url: str | None = None  # https://<the company's domain>, else None
+    linkedin_company_url: str = ""  # a LinkedIn company search for the name
 
 
 class InFlightCompany(Wire):
@@ -122,6 +142,39 @@ class PlanRow(Wire):
     carried_from: str | None
     revision: int  # the entry's own revision: every write on the row checks it
     queue: CompanyQueue | None = None  # set only on a company row (no person, not an email row)
+
+
+PassReason = Literal["visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other"]
+
+
+class PassResult(Wire):
+    """Not now on a pick: the row left today's list (the company is kept everywhere, it is not a no-go), and the
+    next best company from the bench took its place, or none when the bench is empty."""
+
+    passed_entry_id: int
+    company: CompanyRef
+    added: PlanRow | None
+    text: str  # "Passed. Added Tessera Labs."
+
+
+class BenchCompany(Wire):
+    """One company of the bench ("More options"), in the compact shape of a pick row."""
+
+    company: PlanCompany
+    position: int
+    lane: ListGroup
+    role: RoleToName | None
+    queue: CompanyQueue
+    fresh: bool  # a new opening at his level that clears the visa gate
+    early_fit: bool  # that opening is the fresh lane's kind
+
+
+class BenchView(Wire):
+    as_of: str
+    date: str
+    companies: list[BenchCompany]  # fresh early career fits first, then other fresh openings, then by rank
+    room: int  # companies he may still add today: what the 7-day limit leaves after today's list
+    room_text: str
 
 
 class LoggedPerson(Wire):
@@ -181,3 +234,4 @@ class PlanView(Wire):
     tomorrow: Tomorrow
     week: PlanWeek
     in_flight: list[InFlightCompany] = []  # waves out in the last 14 days and replies, replies first
+    passed: int = 0  # picks he said Not now to on today's list (each one left it; the bench filled its place)

@@ -1,5 +1,7 @@
 """The bodies of the plan's writes: log a request, log applied, log the people he asked at a company, save his
 people search, skip a row, save a note, confirm its reason line."""
+from typing import Literal
+
 from pydantic import Field
 
 from outreach.api.models.base import WireRequest
@@ -72,3 +74,20 @@ class SaveNoteBody(WireRequest):
 
 class ConfirmReasonBody(WireRequest):
     revision: int = Field(ge=1)
+
+
+class PassPickBody(WireRequest):
+    """Not now on a pick. `reason` is one of the chips, or none. `idempotencyKey` is the pass's own key
+    (`plan:<entryId>:pass`): the same key again answers with the first answer and writes nothing. It changes the
+    row's state, so a stale `revision` conflicts."""
+
+    reason: Literal["visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other"] | None = None
+    idempotency_key: str = Field(pattern=TOUCH_KEY)
+    revision: int = Field(ge=1)
+
+
+class AddFromBenchBody(WireRequest):
+    """Add a bench company to today's list. `idempotencyKey` is `bench:<companyId>:add`: once it landed, the same
+    key answers with the row and writes nothing."""
+
+    idempotency_key: str = Field(pattern=TOUCH_KEY)

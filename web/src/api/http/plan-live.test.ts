@@ -44,6 +44,7 @@ const NOT_BUILT: PlanView = {
   tomorrow: { total: 7, text: 'Tomorrow: 7 people.', preview: [] },
   week: { requests: 0, accepts: 0, replies: 0 },
   inFlight: [],
+  passed: 0,
 };
 
 /** Just enough of a row and a note: the client hands back what the API sent, field for field. */

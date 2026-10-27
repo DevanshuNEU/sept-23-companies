@@ -61,13 +61,17 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   liftNoGo: 'no-go',
   company: 'company',
   done: 'done',
-  // The people plan and its writes (#33, #11 Tasks 10 and 11); Not a fit is the Today view's removeCompany.
+  // The people plan and its writes (#33, #11 Tasks 10 and 11). Today no longer removes a company (Not now, 2026-10-26).
   plan: 'plan',
   logRequest: 'plan',
   logApplied: 'plan',
   logPeople: 'plan',
   saveSearch: 'plan',
   skipRow: 'plan',
+  // Top picks (2026-10-26): Not now, the bench and Add to today.
+  passPick: 'plan',
+  bench: 'plan',
+  addFromBench: 'plan',
   saveNote: 'plan',
   confirmReason: 'plan',
   outcomePrompt: 'outcomes',

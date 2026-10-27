@@ -33,10 +33,11 @@ describe("plan fixture: tomorrow's draft", () => {
 });
 
 describe('plan fixture: the company queue', () => {
-  it('has 8 company rows with the API lines, the first 2 done, and nobody named', async () => {
+  it('has 8 company rows with the API lines, new openings first, 2 done, and nobody named', async () => {
     const plan = await client('queue').plan();
-    expect(plan.rows.map((r) => r.company.name)).toEqual(['Resend', 'Baseten', 'Pylon', 'Inngest', 'Cerebrium', 'Turso', 'Trigger.dev', 'Hex']);
-    expect([plan.done, plan.total]).toEqual([2, 8]);
+    expect(plan.rows.map((r) => r.company.name)).toEqual(['Pylon', 'Cerebrium', 'Resend', 'Baseten', 'Inngest', 'Turso', 'Trigger.dev', 'Hex']);
+    expect(plan.rows.map((r) => r.position)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect([plan.done, plan.total, plan.passed]).toEqual([2, 8, 0]);
     for (const r of plan.rows) {
       expect(r.person).toBeNull();
       expect(r.note).toBeNull();
@@ -44,12 +45,33 @@ describe('plan fixture: the company queue', () => {
       expect(r.findSomeone?.searchUrl).toBe(r.queue?.peopleSearchUrl);
       expect(r.queue?.terminalLine).toBe(`Knock: ${r.company.name} (company ${r.company.id})${r.role ? `, role: ${r.role.title}` : ''}`);
       expect(r.queue?.peopleSearchUrl.startsWith('https://www.linkedin.com/search/results/people/?')).toBe(true);
+      expect(r.queue?.linkedinCompanyUrl).toBe(`https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(r.company.name)}`);
+      expect(r.queue?.whyToday).toBeTruthy();
+      expect(r.queue?.opening?.postingId ?? null).toBe(r.role?.postingId ?? null);
     }
-    expect(plan.rows.map((r) => r.state)).toEqual(['done', 'done', 'todo', 'todo', 'todo', 'todo', 'todo', 'todo']);
-    expect(row(plan, 1).queue?.standing.text).toBe('3 asked today, room for 1 more, free again Nov 24');
-    expect(row(plan, 3).queue?.searchSaved).toBe(true);
+    expect(plan.rows.map((r) => r.state)).toEqual(['todo', 'todo', 'done', 'done', 'todo', 'todo', 'todo', 'todo']);
+    expect(plan.rows.map((r) => r.queue?.opening?.freshTag ?? null)).toEqual(['New opening, 6 hours ago', 'New opening, yesterday', null, null, null, null, null, null]);
+    expect(row(plan, 1).queue?.whyToday).toBe('SWE I role: Software Engineer I');
+    expect(row(plan, 3).queue?.standing.text).toBe('3 asked today, room for 1 more, free again Nov 24');
+    expect(row(plan, 1).queue?.searchSaved).toBe(true);
     expect(row(plan, 6).carriedFrom).toBe('2026-11-09');
+    expect(row(plan, 6).queue?.opening?.level).toBe('Intern role');
+    expect(row(plan, 7).queue?.opening).toBeNull();
     expect(plan.tomorrow.text).toBe("Tomorrow's plan builds at 08:00. Room for 8 companies. A draft of who it would propose is below.");
+  });
+
+  it('has a bench of 12: new early career openings first, then other new ones, then by rank; a passed company is not on it', async () => {
+    const bench = await client('queue').bench();
+    expect(bench.companies.map((b) => b.company.name)).toEqual(['Retell AI', 'Railway', 'Temporal', 'Graphite', 'Supabase', 'Fly.io', 'Weaviate', 'Clerk', 'Tailscale', 'Sourcegraph', 'Render', 'PlanetScale']);
+    expect(bench.companies.map((b) => [b.fresh, b.earlyFit]).slice(0, 4)).toEqual([[true, true], [true, true], [true, false], [false, false]]);
+    expect(bench.companies[1]?.queue.opening?.appliedNote).toBe('You applied on Oct 20; this is a new role.');
+    expect(bench.companies.map((b) => b.company.name)).not.toContain('Crusoe');
+    expect(bench.companies.map((b) => b.position)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    // 150 a week less the plan's requests leaves whole waves of 4, less the 6 picks still to do.
+    const plan = await client('queue').plan();
+    const waves = Math.floor(Math.min(150 - plan.linkedinWeek.used, 200 - plan.linkedinWeek.hardUsed) / 4);
+    expect(bench.room).toBe(waves - 6);
+    expect(bench.roomText).toBe(`Room to add ${bench.room} more companies this week.`);
   });
 
   it('lists the replies first in flight, then by the day each is free again', async () => {

@@ -616,6 +616,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plan/bench": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bench */
+        get: operations["bench"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan/bench/{company_id}/add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add From Bench */
+        post: operations["add_from_bench"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plan/{entry_id}/apply": {
         parameters: {
             query?: never;
@@ -627,6 +661,23 @@ export interface paths {
         put?: never;
         /** Log Applied */
         post: operations["log_applied"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plan/{entry_id}/pass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pass Pick */
+        post: operations["pass_pick"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1062,6 +1113,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AddFromBenchBody
+         * @description Add a bench company to today's list. `idempotencyKey` is `bench:<companyId>:add`: once it landed, the same
+         *     key answers with the row and writes nothing.
+         */
+        AddFromBenchBody: {
+            /** Idempotencykey */
+            idempotencyKey: string;
+        };
         /** BaseRates */
         BaseRates: {
             /** Accepts */
@@ -1078,6 +1138,39 @@ export interface components {
             requests: number;
             /** Since */
             since: string;
+        };
+        /**
+         * BenchCompany
+         * @description One company of the bench ("More options"), in the compact shape of a pick row.
+         */
+        BenchCompany: {
+            company: components["schemas"]["PlanCompany"];
+            /** Earlyfit */
+            earlyFit: boolean;
+            /** Fresh */
+            fresh: boolean;
+            /**
+             * Lane
+             * @enum {string}
+             */
+            lane: "level_role" | "intern_junior" | "any_us_role" | "reason_no_role";
+            /** Position */
+            position: number;
+            queue: components["schemas"]["CompanyQueue"];
+            role: components["schemas"]["RoleToName"] | null;
+        };
+        /** BenchView */
+        BenchView: {
+            /** Asof */
+            asOf: string;
+            /** Companies */
+            companies: components["schemas"]["BenchCompany"][];
+            /** Date */
+            date: string;
+            /** Room */
+            room: number;
+            /** Roomtext */
+            roomText: string;
         };
         /** Check */
         Check: {
@@ -1292,6 +1385,12 @@ export interface components {
             hiringLine: string;
             /** Lasttouch */
             lastTouch: string | null;
+            /**
+             * Linkedincompanyurl
+             * @default
+             */
+            linkedinCompanyUrl: string;
+            opening: components["schemas"]["QueueOpening"] | null;
             /** Peopleline */
             peopleLine: string;
             /** Peopleonrecord */
@@ -1311,6 +1410,13 @@ export interface components {
             standing: components["schemas"]["QueueStanding"];
             /** Terminalline */
             terminalLine: string;
+            /** Websiteurl */
+            websiteUrl: string | null;
+            /**
+             * Whytoday
+             * @default
+             */
+            whyToday: string;
         };
         /** CompanyRef */
         CompanyRef: {
@@ -2430,6 +2536,33 @@ export interface components {
             /** Touches */
             touches: components["schemas"]["PromptTouch"][];
         };
+        /**
+         * PassPickBody
+         * @description Not now on a pick. `reason` is one of the chips, or none. `idempotencyKey` is the pass's own key
+         *     (`plan:<entryId>:pass`): the same key again answers with the first answer and writes nothing. It changes the
+         *     row's state, so a stale `revision` conflicts.
+         */
+        PassPickBody: {
+            /** Idempotencykey */
+            idempotencyKey: string;
+            /** Reason */
+            reason?: ("visa" | "too_big" | "too_early" | "role" | "product" | "know_it" | "not_a_fit" | "other") | null;
+            /** Revision */
+            revision: number;
+        };
+        /**
+         * PassResult
+         * @description Not now on a pick: the row left today's list (the company is kept everywhere, it is not a no-go), and the
+         *     next best company from the bench took its place, or none when the bench is empty.
+         */
+        PassResult: {
+            added: components["schemas"]["PlanRow"] | null;
+            company: components["schemas"]["CompanyRef"];
+            /** Passedentryid */
+            passedEntryId: number;
+            /** Text */
+            text: string;
+        };
         /** PauseSendingBody */
         PauseSendingBody: {
             /** Revision */
@@ -2569,6 +2702,11 @@ export interface components {
             linkedinWeek: components["schemas"]["LinkedinWeek"];
             listJob: components["schemas"]["JobRunSummary"] | null;
             notReady: components["schemas"]["NotReady"] | null;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
             /** Rows */
             rows: components["schemas"]["PlanRow"][];
             tomorrow: components["schemas"]["Tomorrow"];
@@ -2709,6 +2847,32 @@ export interface components {
         Pulse: {
             /** Revision */
             revision: number;
+        };
+        /**
+         * QueueOpening
+         * @description The opening a pick names (top picks, 2026-10-26): the row's role, its level and age, and whether it is new.
+         */
+        QueueOpening: {
+            /** Age */
+            age: string;
+            /** Appliednote */
+            appliedNote: string | null;
+            /** Earlyfit */
+            earlyFit: boolean;
+            /** Fresh */
+            fresh: boolean;
+            /** Freshtag */
+            freshTag: string | null;
+            /** Level */
+            level: string | null;
+            /** Openedat */
+            openedAt: string;
+            /** Postingid */
+            postingId: number;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string | null;
         };
         /**
          * QueueStanding
@@ -6466,6 +6630,160 @@ export interface operations {
             };
         };
     };
+    bench: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BenchView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    add_from_bench: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddFromBenchBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanRow"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     log_applied: {
         parameters: {
             query?: never;
@@ -6488,6 +6806,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanRow"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    pass_pick: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PassPickBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PassResult"];
                 };
             };
             /** @description bad_request: the request was not valid */

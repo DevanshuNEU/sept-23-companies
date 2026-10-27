@@ -3,11 +3,11 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView,
+  BenchView, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
-import { askedToday } from './queue-data';
+import { askedToday, benchRoom, benchRoomText, benchToRow, pickOrder } from './queue-data';
 
 const STOP_WORDS = new Set(['of', 'the', 'and', 'a', 'an', 'at', 'for', 'in', 'to']);
 
@@ -104,6 +104,8 @@ export class FixtureClient implements OutreachClient {
   private readonly keys = new Map<string, Id>();
   /** Pasted people logs by their key, so the same paste again writes nothing. */
   private readonly pastes = new Map<string, LoggedPerson[]>();
+  /** Not now and Add to today by their keys: the same key again answers the same (top picks). */
+  private readonly picks = new Map<string, PassResult | Id>();
   /** Prompt touches that got an outcome and left the prompt. A reply on a quiet touch still finds its person here. */
   private readonly leftPrompt = new Map<Id, PromptTouch>();
   /** Touch revisions after an outcome. A touch with no entry is at its own revision, or 1. */
@@ -190,6 +192,7 @@ export class FixtureClient implements OutreachClient {
   }
   done(): Promise<DoneView> { return this.read(() => this.db.done); }
   plan(): Promise<PlanView> { return this.read(() => this.db.plan); }
+  bench(): Promise<BenchView> { return this.read(() => this.db.bench); }
   outcomePrompt(): Promise<OutcomePromptView> { return this.read(() => this.db.prompt); }
   wins(): Promise<WinsView> { return this.read(() => this.db.wins); }
   progress(): Promise<ProgressView> { return this.read(() => this.db.progress); }
@@ -1031,6 +1034,64 @@ export class FixtureClient implements OutreachClient {
       t.preview = [...others.slice(0, at < 0 ? others.length : at), carried, ...others.slice(at < 0 ? others.length : at)].slice(0, t.total);
       t.text = tomorrowText(/^\w+/.exec(t.text)?.[0] ?? 'Tomorrow', t.total, t.preview.length);
       return row;
+    });
+  }
+
+  /* ---------------------------------------------------- top picks: Not now, the bench (2026-10-26) */
+
+  /** The plan in pick order and the bench's room, as the API reads them after a pick write. */
+  private settlePicks(): void {
+    const plan = this.db.plan;
+    plan.rows = pickOrder(plan.rows);
+    this.db.bench.room = benchRoom(plan.linkedinWeek, plan.rows);
+    this.db.bench.roomText = benchRoomText(this.db.bench.room);
+    this.db.bench.companies.forEach((b, i) => { b.position = i + 1; });
+  }
+
+  /**
+   * Not now, as the API: the row leaves today's list (the company is kept everywhere and is never a no-go), the bench's
+   * first company takes its place, in one write. A row he already reached stays. The same key again answers the same.
+   */
+  passPick(entryId: Id, input: { reason: PassReason | null; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PassResult> {
+    return this.write(o, () => {
+      const done = this.picks.get(`pass:${input.idempotencyKey}`);
+      if (done !== undefined && typeof done !== 'number') return done;
+      const row = this.freshRow(entryId, revision);
+      if (row.steps.some((st) => st.kind === 'request' && st.at)) throw notAllowed(`You already reached ${row.company.name} today, so it stays on the list as done`);
+      const plan = this.db.plan;
+      const at = plan.rows.indexOf(row);
+      const next = this.db.bench.companies.shift();
+      const added = next ? benchToRow(next, this.nextId++) : null;
+      plan.rows.splice(at, 1, ...(added ? [added] : []));
+      plan.passed += 1;
+      this.settlePicks();
+      const result: PassResult = {
+        passedEntryId: entryId, company: { ...row.company }, added: added ? structuredClone(plan.rows.find((r) => r.entryId === added.entryId) ?? added) : null,
+        text: added ? `Passed. Added ${added.company.name}.` : `Passed on ${row.company.name}. Nothing else is free to add right now.`,
+      };
+      this.picks.set(`pass:${input.idempotencyKey}`, result);
+      return result;
+    });
+  }
+
+  /** Add to today, as the API: the bench company joins after the last pick while the week has room. */
+  addFromBench(companyId: Id, input: { idempotencyKey: string }, o: WriteOptions): Promise<PlanRow> {
+    return this.write(o, () => {
+      const done = this.picks.get(`add:${input.idempotencyKey}`);
+      if (typeof done === 'number') return this.planRow(done);
+      const plan = this.db.plan;
+      const listed = plan.rows.find((r) => r.company.id === companyId);
+      if (listed) throw notAllowed(`${listed.company.name} is already on today's list`);
+      const at = this.db.bench.companies.findIndex((b) => b.company.id === companyId);
+      if (at < 0) throw notAllowed('That company is not free to add today');
+      if (this.db.bench.room <= 0) throw notAllowed("No room to add more this week: the 7-day limit is taken by today's picks and the requests already sent");
+      const [b] = this.db.bench.companies.splice(at, 1);
+      if (!b) throw notAllowed('That company is not free to add today');
+      const row = benchToRow(b, this.nextId++);
+      plan.rows.push(row);
+      this.settlePicks();
+      this.picks.set(`add:${input.idempotencyKey}`, row.entryId);
+      return this.planRow(row.entryId);
     });
   }
 

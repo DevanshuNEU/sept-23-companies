@@ -1,4 +1,4 @@
-import { Check, Flag } from 'lucide-react';
+import { Check, Flag, Sparkles } from 'lucide-react';
 import type { Id, IsoTime, PlanRow, PlanView } from '@/api';
 import type { RowProps } from '@/keyboard/list-nav';
 import { formatCarriedDay } from '@/lib/format';
@@ -32,8 +32,9 @@ function title(row: PlanRow): string {
 }
 
 function sub(row: PlanRow): string {
-  // A company row says where it stands ("New", "3 asked today, room for 1 more, ..."), as the API words it.
-  if (companyRow(row)) return row.queue?.standing.text ?? row.role?.title ?? 'A company to reach';
+  // A pick says why today in one line ("New grad role, first seen 6 hours ago"), as the API words it (top picks).
+  if (row.entryId < 0) return 'Coming in from the bench';
+  if (companyRow(row)) return row.queue?.whyToday || row.queue?.standing.text || row.role?.title || 'A company to reach';
   if (row.channel !== 'email') return row.company.name;
   return row.state === 'done' ? 'By email, reviewed' : 'By email, in the Outbox';
 }
@@ -72,8 +73,9 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
   const word = WORD[node];
   const carried = row.carriedFrom !== null && row.state === 'todo' ? `Carried over from ${formatCarriedDay(row.carriedFrom, asOf)}` : null;
   const ask = row.state === 'todo' && row.note?.needsYourLine === true ? 'Your line to confirm' : null;
+  const fresh = row.queue?.opening?.fresh ? row.queue.opening.freshTag : null;
   const where = row.channel === 'email' ? `${title(row)} by email` : companyRow(row) ? title(row) : `${title(row)} at ${row.company.name}`;
-  const label = [`${row.position}. ${where}`, word, ...[carried, ask].flatMap((p) => (p ? [lowerFirst(p)] : []))].join(', ');
+  const label = [`${row.position}. ${where}`, word, ...[fresh, carried, ask].flatMap((p) => (p ? [lowerFirst(p)] : []))].join(', ');
 
   return (
     <div
@@ -83,6 +85,7 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
       aria-current={current ? 'step' : undefined}
       data-entry={row.entryId}
       data-node={node}
+      data-provisional={row.entryId < 0 ? true : undefined}
       tabIndex={-1}
       ref={ref}
       onClick={onClick}
@@ -94,6 +97,12 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
           <span className="mr-1.5 font-normal text-muted-foreground tabular-nums">{row.position}</span>
           {title(row)}
         </b>
+        {fresh ? (
+          <span data-fresh className="flex min-w-0 items-center gap-1 truncate text-xs leading-4 font-medium text-info">
+            <Sparkles aria-hidden className="size-3 flex-none" />
+            <span className="truncate">{fresh}</span>
+          </span>
+        ) : null}
         <span className="truncate text-[13px] text-muted-foreground">{sub(row)}</span>
         {carried ? <span className="truncate text-xs leading-4 text-muted-foreground">{carried}</span> : null}
         {ask ? <span className="truncate text-xs leading-4 text-muted-foreground">{ask}</span> : null}
@@ -112,8 +121,9 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
 }
 
 /**
- * The day rail (design 16.1, `.rail-*`): one node per row in plan order (a company on the queue, or a person on a
- * plan with person rows), joined by a line, ending in a finish node. The rows stay where the API put them; a logged row is relabelled in place, never moved.
+ * The day rail (design 16.1, `.rail-*`): one node per row in plan order (a pick, or a person on a plan with person
+ * rows), joined by a line, ending in a finish node. The rows stay where the API put them (picks with a new opening
+ * first, each with its "New opening, 6 hours ago" tag); a logged row is relabelled in place, never moved.
  * `aria-current="step"` marks the first row still to do, or the finish node once the day is done. The
  * selection itself belongs to the view (`rowProps` from `useListNav`).
  */
@@ -134,7 +144,7 @@ export function DayRail({
   const queue = rows.length > 0 && rows.every(companyRow);
   return (
     <div className="grid">
-      <div role="listbox" aria-label={queue ? "Today's companies" : "Today's people"} className="grid">
+      <div role="listbox" aria-label={queue ? "Today's picks" : "Today's people"} className="grid">
         {rows.map((row) => (
           <RailRow key={row.entryId} row={row} props={rowProps(row.entryId)} current={row.entryId === firstTodo} asOf={asOf} />
         ))}

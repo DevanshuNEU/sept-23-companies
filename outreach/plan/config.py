@@ -58,6 +58,11 @@ def _check(data: dict) -> None:
             raise ValueError(f"{section}.{key} must be true or false, got {data[section][key]!r}")
     _whole(data, "queue", "companies_per_day", 1, 30)
     wave = _whole(data, "queue", "requests_per_company", 1, 8)
+    _whole(data, "queue", "fresh_slots", 0, data["queue"]["companies_per_day"])
+    _whole(data, "queue", "fresh_hours", 1, 336)
+    _whole(data, "queue", "fresh_pool_top_n", 50, 1500)
+    _whole(data, "queue", "pass_cooldown_days", 1, 90)
+    _whole(data, "queue", "bench_size", 1, 30)
     most = data["linkedin"]["max_people_per_company"]
     if isinstance(most, bool) or not isinstance(most, int) or most < wave:
         raise ValueError(f"linkedin.max_people_per_company must be a whole number of at least "
@@ -103,7 +108,8 @@ def load_plan_config(path: Path = CONFIG_PATH) -> PlanConfig:
 _CHECKED = {"lanes": ("role", "reason", "fill", "role_share", "reason_share"),
             "plan": ("scan_limit", "timezone", "propose_people"),
             "linkedin": ("rotate_top_n", "max_people_per_company"), "note": ("max_chars",),
-            "queue": ("companies_per_day", "requests_per_company"), "prepare": ("enabled", "deny_rule_checked"),
+            "queue": ("companies_per_day", "requests_per_company", "fresh_slots", "fresh_hours", "fresh_pool_top_n",
+                      "pass_cooldown_days", "bench_size"), "prepare": ("enabled", "deny_rule_checked"),
             "route": ("prefer_ic_in_role",), "bridge": ("log_back_days",)}
 # The on and off switches, each checked to be a boolean. `prepare.enabled` and `plan.propose_people` are the
 # company-first switches (#9, 2026-10-26); `prepare.deny_rule_checked` records the one-time LinkedIn deny check.

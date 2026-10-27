@@ -22,7 +22,7 @@ import type {
   ReviewItem, ReviewKind, RoleKind, RoleToName, Schedule, SearchCompany, SearchIndex, SearchPerson, SenderState, SendingStatus,
   ShellSummary, SourceKind, SponsorshipShown, StillEmailing, ThreadMessage, TodayView, TouchState,
 } from '../types';
-import type { FindingsView, OutcomePromptView, PlanView, ProgressView, ScoreView, WatchView, WinsView } from '../types';
+import type { BenchView, FindingsView, OutcomePromptView, PlanView, ProgressView, ScoreView, WatchView, WinsView } from '../types';
 import { buildPlanFixture } from './plan-data';
 
 export type Scenario =
@@ -51,6 +51,7 @@ export interface FixtureDb {
   companies: Record<Id, CompanyView>;
   done: DoneView;
   plan: PlanView;
+  bench: BenchView; // top picks: the next best companies, fresh early career fits first
   prompt: OutcomePromptView;
   wins: WinsView;
   progress: ProgressView;

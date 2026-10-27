@@ -984,13 +984,13 @@ describe('plan writes: logging', () => {
 describe('plan writes: the company queue', () => {
   it('a pasted people log finishes the request step, grows the wave and replays as one', async () => {
     const c = client('queue');
-    const pylon = await rowAt(c, 3);
+    const pylon = await rowAt(c, 1);
     expect(pylon.company.name).toBe('Pylon');
     const key = `plan:${pylon.entryId}:people:1`;
     const lines = `Jane Doe | Senior Software Engineer | Hi Jane ${String.fromCharCode(0x2014)} quick question\n\nOmar Diaz | Engineering Manager`;
     const out = await c.logPeople(pylon.entryId, { lines, idempotencyKey: key }, pylon.revision, opt());
     expect(out.people.map((p) => [p.name, p.roleKind, p.added, p.warnings.length])).toEqual([['Jane Doe', 'engineer', true, 1], ['Omar Diaz', 'manager', true, 0]]);
-    const row = await rowAt(c, 3);
+    const row = await rowAt(c, 1);
     expect(row.steps[0]?.at).not.toBeNull();
     expect(row.queue?.standing.text).toBe('2 asked today, room for 2 more, free again Nov 24');
     expect(row.queue?.lastTouch).toBe('Request to Omar Diaz (Manager) on Nov 10');
@@ -1002,11 +1002,11 @@ describe('plan writes: the company queue', () => {
 
   it('a paste it cannot read, or one on an email row, is refused and writes nothing', async () => {
     const c = client('queue');
-    const pylon = await rowAt(c, 3);
+    const pylon = await rowAt(c, 1);
     for (const lines of ['', ' | Engineer', Array.from({ length: 11 }, (_, i) => `P${i}`).join('\n'), `Ana | Eng | ${'y'.repeat(301)}`]) {
       expect((await rejection(c.logPeople(pylon.entryId, { lines, idempotencyKey: `k-${lines.length}` }, pylon.revision, opt()))).code).toBe('not_allowed');
     }
-    expect((await rowAt(c, 3)).steps[0]?.at).toBeNull();
+    expect((await rowAt(c, 1)).steps[0]?.at).toBeNull();
     const email = (await client().plan()).rows.find((r) => r.channel === 'email');
     if (!email) throw new Error('no email row');
     expect((await rejection(client().logPeople(email.entryId, { lines: 'Ana', idempotencyKey: 'k' }, 1, opt()))).code).toBe('not_allowed');
@@ -1390,5 +1390,49 @@ describe('the pulse', () => {
     expect((await c.pulse()).revision).toBe(start + 1);
     await c.pauseSending(o); // the same request id again is a replay, not a write
     expect((await c.pulse()).revision).toBe(start + 1);
+  });
+});
+
+describe('plan writes: top picks', () => {
+  it('Not now takes the pick off the list, the bench head takes its place, and the same key answers the same', async () => {
+    const c = client('queue');
+    const pylon = await rowAt(c, 1);
+    const key = `plan:${pylon.entryId}:pass`;
+    const res = await c.passPick(pylon.entryId, { reason: 'too_big', idempotencyKey: key }, pylon.revision, opt());
+    expect(res.text).toBe('Passed. Added Retell AI.');
+    const plan = await c.plan();
+    expect(plan.rows.map((r) => r.company.name)).not.toContain('Pylon');
+    expect(plan.rows[0]?.company.name).toBe('Retell AI'); // the newest new opening comes first
+    expect([plan.total, plan.passed]).toEqual([8, 1]);
+    expect((await c.bench()).companies.map((b) => b.company.name)).not.toContain('Retell AI');
+    const again = await c.passPick(pylon.entryId, { reason: 'too_big', idempotencyKey: key }, pylon.revision, opt());
+    expect(again).toEqual(res);
+    expect((await c.plan()).passed).toBe(1);
+  });
+
+  it('Not now refuses a reached row and a stale revision', async () => {
+    const c = client('queue');
+    const resend = (await c.plan()).rows.find((r) => r.company.name === 'Resend');
+    if (!resend) throw new Error('no Resend');
+    expect((await rejection(c.passPick(resend.entryId, { reason: null, idempotencyKey: 'k1' }, resend.revision, opt()))).code).toBe('not_allowed');
+    const pylon = await rowAt(c, 1);
+    expect((await rejection(c.passPick(pylon.entryId, { reason: null, idempotencyKey: 'k2' }, pylon.revision + 1, opt()))).code).toBe('conflict');
+  });
+
+  it('Add to today appends a bench company, once per key, and refuses with no room', async () => {
+    const c = client('queue');
+    const graphite = (await c.bench()).companies.find((b) => b.company.name === 'Graphite');
+    if (!graphite) throw new Error('no Graphite');
+    const row = await c.addFromBench(graphite.company.id, { idempotencyKey: 'bench:g' }, opt());
+    expect(row.company.name).toBe('Graphite');
+    expect((await c.plan()).rows.at(-1)?.company.name).toBe('Graphite');
+    expect((await c.addFromBench(graphite.company.id, { idempotencyKey: 'bench:g' }, opt())).entryId).toBe(row.entryId);
+    expect((await rejection(c.addFromBench(graphite.company.id, { idempotencyKey: 'bench:g2' }, opt()))).code).toBe('not_allowed');
+    const db = buildFixture('queue');
+    db.bench.room = 0;
+    const full = new FixtureClient(db);
+    const first = db.bench.companies[0];
+    if (!first) throw new Error('empty bench');
+    expect((await rejection(full.addFromBench(first.company.id, { idempotencyKey: 'bench:x' }, opt()))).code).toBe('not_allowed');
   });
 });

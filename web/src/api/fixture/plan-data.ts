@@ -11,12 +11,12 @@
  * Numbers the tests and the e2e specs rely on (default, 2026-11-10): see Task 2 of docs/superpowers/plans/2026-10-21-web-experience.md.
  */
 import type {
-  Check, CompanyRef, CompanyStatus, FindingsView, FunnelKey, Id, IsoDate, IsoTime, JobRunSummary, LevelTier, ListGroup, NoteDraft, NoteFact,
+  BenchView, Check, CompanyRef, CompanyStatus, FindingsView, FunnelKey, Id, IsoDate, IsoTime, JobRunSummary, LevelTier, ListGroup, NoteDraft, NoteFact,
   OutcomePromptView, PersonRef, PlanRow, PlanStep, PlanView, ProgressPeriod, ProgressView, RoleKind, RoleToName, SavedBy, ScoreSignal, ScoreView,
   SourceLink, TomorrowRow, WatchView, WinsView, Win,
 } from '../types';
 import type { Scenario } from './data';
-import { buildInFlight, buildQueueRows, keywordSearch, terminalLine } from './queue-data';
+import { benchRoom, buildBench, buildInFlight, buildQueueRows, companySearch, keywordSearch, openingOf, terminalLine, whyTodayOf } from './queue-data';
 
 /** What data.ts hands over: the clock, the company registry and the people and roles it already made. */
 export interface PlanCtx {
@@ -33,7 +33,7 @@ export interface PlanCtx {
 }
 
 export interface PlanFixture {
-  plan: PlanView; prompt: OutcomePromptView; wins: WinsView; progress: ProgressView; findings: FindingsView; watch: WatchView;
+  plan: PlanView; bench: BenchView; prompt: OutcomePromptView; wins: WinsView; progress: ProgressView; findings: FindingsView; watch: WatchView;
   scores: Record<Id, ScoreView>; // fixture-internal lookup by company id, not the wire
 }
 
@@ -224,7 +224,7 @@ function buildRows(c: PlanCtx, mode: Mode): Built {
       emailTouchId: spec.channel === 'email' ? c.touch.marcus : null,
       steps, state: isDone ? 'done' : 'todo',
       carriedFrom: spec.carriedFrom && !isDone ? spec.carriedFrom : null, revision: 1,
-      queue: person || spec.channel === 'email' ? null : companyQueue(c, spec.company, role?.title ?? null),
+      queue: person || spec.channel === 'email' ? null : companyQueue(c, spec.company, role),
     };
   });
   // An email row has no steps of its own: it is done once its draft is reviewed in the Outbox.
@@ -232,14 +232,18 @@ function buildRows(c: PlanCtx, mode: Mode): Built {
 }
 
 /** The API's lines for the one company row of the people plan (Cerebrium): nobody on record, nobody asked. */
-function companyQueue(c: PlanCtx, company: string, role: string | null): PlanRow['queue'] {
-  const id = c.companies.find((x) => x.name === company)?.id ?? 0;
+function companyQueue(c: PlanCtx, company: string, role: RoleToName | null): PlanRow['queue'] {
+  const ref = c.companies.find((x) => x.name === company);
+  const id = ref?.id ?? 0;
+  const opening = role ? openingOf(role, role.levelTier, 'posted 3 days ago', '2026-11-07T05:00:00Z', null) : null;
+  const reasons = ['Open role at your level', 'Small company'];
   return {
-    sizeLine: '18 people (estimate), seed (guess)', roleLine: role ? `${role}, posted 3 days ago` : null, hiring: 1,
+    whyToday: whyTodayOf(opening, reasons), opening, websiteUrl: ref?.domain ? `https://${ref.domain}` : null, linkedinCompanyUrl: companySearch(company),
+    sizeLine: '18 people (estimate), seed (guess)', roleLine: role ? `${role.title}, posted 3 days ago` : null, hiring: 1,
     hiringLine: '1 new engineering role in the last 30 days', sponsorshipLine: 'Sponsorship not stated, E-Verify enrolled',
-    reasons: ['Open role at your level', 'Small company'], standing: { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null },
+    reasons, standing: { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null },
     lastTouch: null, emailHint: null, peopleOnRecord: 0, peopleLine: 'Nobody on record yet',
-    peopleSearchUrl: keywordSearch(company), searchSaved: false, careersUrl: 'https://cerebrium.example/careers/mts', terminalLine: terminalLine(company, id, role),
+    peopleSearchUrl: keywordSearch(company), searchSaved: false, careersUrl: 'https://cerebrium.example/careers/mts', terminalLine: terminalLine(company, id, role?.title ?? null),
   };
 }
 
@@ -570,8 +574,10 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
     linkedinWeek: { used: n.linkedin[0], limit: 150, hardUsed: n.linkedin[1], hardLimit: 200 },
     tomorrow, week: { requests: week[0], accepts: week[1], replies: week[2] },
     inFlight: scenario === 'empty' || scenario === 'fresh' ? [] : buildInFlight(c, rows),
+    passed: 0,
   };
 
+  const bench: BenchView = noList ? { asOf: c.asOf, date: c.date, companies: [], room: 0, roomText: '' } : buildBench(c, benchRoom(plan.linkedinWeek, rows));
   const wins = buildWins(c, scenario, rows);
   const progress: ProgressView = {
     asOf: c.asOf,
@@ -585,6 +591,6 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
   };
 
   return {
-    plan, prompt: buildPrompt(c, scenario), wins, progress, findings: buildFindings(c, scenario), watch: buildWatch(c, scenario), scores: buildScores(c, scenario),
+    plan, bench, prompt: buildPrompt(c, scenario), wins, progress, findings: buildFindings(c, scenario), watch: buildWatch(c, scenario), scores: buildScores(c, scenario),
   };
 }

@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { composeClient } from '@/api/compose';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
@@ -29,6 +29,7 @@ const EMPTY_DAY = {
   tomorrow: { total: 7, text: 'Tomorrow: 7 people.', preview: [] },
   week: { requests: 0, accepts: 0, replies: 0 },
   inFlight: [],
+  passed: 0,
 } satisfies Omit<PlanView, 'listJob' | 'notReady'>;
 
 const FAILED_JOB: JobRunSummary = {
@@ -66,8 +67,8 @@ describe('the plan page on the live API', () => {
 });
 
 /**
- * The plan on sample data while Today is live. Its writes must then stay on the sample side: Not a fit is the Today
- * view's removeCompany, and a fixture company id must never reach the real store.
+ * The plan on sample data while Today is live. Its writes must then stay on the sample side: a fixture company id must
+ * never reach the real store, whether it is a log or Not now.
  */
 describe('the sample plan beside a live Today', () => {
   const VIEWS = DEFAULT_LIVE_VIEWS.filter((v) => v !== 'plan');
@@ -86,19 +87,19 @@ describe('the sample plan beside a live Today', () => {
     expect(VIEWS).not.toContain('plan');
   });
 
-  it('Not a fit and a log never reach the live transport', async () => {
+  it('Not now and a log never reach the live transport', async () => {
     const { t, sample } = await open();
-    const remove = vi.spyOn(sample, 'removeCompany');
+    const passed = vi.spyOn(sample, 'passPick');
     const request = vi.spyOn(sample, 'logRequest');
     press('r');
     await screen.findByText('Logged: request sent to Lena Ortiz.');
     fireEvent.click(screen.getByRole('option', { name: /^4\. Jonah Park/ }));
     await screen.findByRole('heading', { level: 2, name: 'Jonah Park' });
     press('n');
-    const dialog = await screen.findByRole('dialog', { name: 'Remove Inngest for good?' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
-    await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+    press('2');
+    await screen.findByText('Passed. Added Retell AI.');
     await closeTab();
+    await waitFor(() => expect(passed).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     expect(t.get).not.toHaveBeenCalled();
     expect(t.send).not.toHaveBeenCalled();

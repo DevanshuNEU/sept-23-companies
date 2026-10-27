@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { BookmarkCheck, Briefcase, Search, Terminal } from 'lucide-react';
-import type { IsoTime, PlanRow } from '@/api';
+import { BookmarkCheck, Search, Terminal } from 'lucide-react';
+import type { IsoTime, PassReason, PlanRow } from '@/api';
 import { StepMarks } from '@/components/step-marks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,9 @@ import { safeHref } from '@/lib/safe-href';
 import { cn } from '@/lib/utils';
 import { searchFieldId, peopleFieldId } from './plan-steps';
 import { MAIN, CarriedOver, ClosedLine, KeyHint, LogButton, PanelHead, QuietActions, type PanelActions } from './plan-panel';
+import { PassChips } from './pass-chips';
+import { isProvisional } from './picks';
+import { ResearchLinks, WhyToday } from './why-today';
 
 /** One line of the company's facts: a quiet label, then the API's words. */
 function Fact({ label, children, muted = false }: { label: string; children: ReactNode; muted?: boolean }) {
@@ -28,33 +31,37 @@ function Standing({ row }: { row: PlanRow }) {
 }
 
 /**
- * A company on today's queue (company first, #9 2026-10-26): Knock picked it; he finds the people on LinkedIn and
- * writes his own notes. The panel shows what the row knows, each line as the API words it (size and stage, the role and
- * its age, recent hiring, sponsorship, why it ranks, where it stands, the last touch, the email hint, the people on
- * record), then the actions: Open LinkedIn search (S, the filled button), Careers page (O), Copy for terminal (C),
- * Log applied (A) when there is a role, the Log people box (L) for when the terminal cannot log them, Save this
- * search, and the quiet Carry (X) and Not a fit (N). The row is done once a request or an email at the company is
- * logged on or after the list date, from the terminal or here; a log from the terminal shows within seconds.
+ * A pick on today's list (company first, #9; top picks, 2026-10-26): Knock picked it; he finds the people on LinkedIn
+ * and writes his own notes. The panel leads with why today (the opening, its level and age, why the company should
+ * answer, its visa position), then the three research links (Careers O, Website, LinkedIn page), then the reach
+ * pipeline: Open LinkedIn search (S, the filled button), Copy for terminal (C), Log applied (A) when there is a role,
+ * where it stands, the Log people box (L) for when the terminal cannot log them, Save this search, and the quiet Carry
+ * (X) and Not now (P or N, the reason chips). The row is done once a request or an email at the company is logged on
+ * or after the list date, from the terminal or here; a log from the terminal shows within seconds.
  */
 export function CompanyPanel({
   row,
   asOf,
   actions,
   headingId,
+  passing = false,
 }: {
   row: PlanRow;
   asOf: IsoTime;
-  actions: Pick<PanelActions, 'onCarry' | 'onNotFit' | 'onLog' | 'onLogPeople' | 'onSaveSearch' | 'onCopyLine'>;
+  actions: Pick<PanelActions, 'onCarry' | 'onNotNow' | 'onLog' | 'onLogPeople' | 'onSaveSearch' | 'onCopyLine'> & {
+    onPass?: (reason: PassReason | null) => void;
+    onCancelPass?: () => void;
+  };
   headingId?: string;
+  /** The Not now chips are open on this row. */
+  passing?: boolean;
 }) {
   const [lines, setLines] = useState('');
   const [url, setUrl] = useState('');
   const q = row.queue;
   const search = safeHref(q?.peopleSearchUrl ?? row.findSomeone?.searchUrl);
-  const careers = safeHref(q?.careersUrl);
-  const roleHref = safeHref(row.role?.url);
-  const todo = row.state === 'todo';
-  const open = row.state !== 'skipped';
+  const todo = row.state === 'todo' && !isProvisional(row);
+  const open = row.state !== 'skipped' && !isProvisional(row);
   const hasApply = row.steps.some((s) => s.kind === 'apply');
   const room = q ? q.standing.room : 4;
   const peopleId = peopleFieldId(headingId);
@@ -76,58 +83,14 @@ export function CompanyPanel({
         headingId={headingId}
         meta={
           <>
-            <span>A company to reach. You find the people.</span>
+            <span>{isProvisional(row) ? 'Coming in from the bench once your Not now is saved.' : 'A company to reach. You find the people.'}</span>
             <CarriedOver row={row} asOf={asOf} />
           </>
         }
       />
 
-      {q ? (
-        <dl aria-label={`About ${row.company.name}`} className="grid border-y py-1">
-          <Fact label="Size and stage" muted={!q.sizeLine}>
-            {q.sizeLine ?? 'Not known yet'}
-          </Fact>
-          <Fact label="Role" muted={!q.roleLine}>
-            {q.roleLine ? (
-              roleHref ? (
-                <a
-                  href={roleHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-sm underline decoration-foreground/30 underline-offset-3 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70"
-                >
-                  {q.roleLine}
-                </a>
-              ) : (
-                q.roleLine
-              )
-            ) : (
-              'No open role at your level'
-            )}
-          </Fact>
-          <Fact label="Hiring now" muted={q.hiring === 0}>
-            {q.hiringLine}
-          </Fact>
-          <Fact label="Sponsorship">{q.sponsorshipLine}</Fact>
-          <Fact label="Why it ranks">
-            <ul className="grid gap-0.5">
-              {q.reasons.map((r) => (
-                <li key={r}>{r}</li>
-              ))}
-            </ul>
-          </Fact>
-          <Fact label="Where it stands">
-            <Standing row={row} />
-          </Fact>
-          {q.lastTouch ? <Fact label="Last touch">{q.lastTouch}</Fact> : null}
-          {q.emailHint ? <Fact label="Email">{q.emailHint}</Fact> : null}
-          <Fact label="People" muted={q.peopleOnRecord === 0}>
-            {q.peopleLine}
-          </Fact>
-        </dl>
-      ) : (
-        <p className="max-w-[62ch] text-base leading-6">{row.reason}</p>
-      )}
+      {q ? <WhyToday q={q} /> : <p className="max-w-[62ch] text-base leading-6">{row.reason}</p>}
+      {q ? <ResearchLinks q={q} /> : null}
 
       {todo ? (
         <div className="flex flex-wrap items-center gap-2">
@@ -140,15 +103,6 @@ export function CompanyPanel({
               </a>
             </Button>
           ) : null}
-          {careers ? (
-            <Button asChild variant="outline" size="sm" className={MAIN}>
-              <a href={careers} target="_blank" rel="noopener noreferrer" aria-keyshortcuts="o">
-                <Briefcase aria-hidden />
-                Careers page
-                <KeyHint k="O" />
-              </a>
-            </Button>
-          ) : null}
           {q ? (
             <Button type="button" variant="outline" size="sm" className={MAIN} aria-keyshortcuts="c" onClick={actions.onCopyLine}>
               <Terminal aria-hidden />
@@ -158,6 +112,23 @@ export function CompanyPanel({
           ) : null}
           {hasApply ? <LogButton row={row} kind="apply" filled={false} onLog={actions.onLog} /> : null}
         </div>
+      ) : null}
+
+      {passing && actions.onPass && actions.onCancelPass ? (
+        <PassChips company={row.company.name} onPass={actions.onPass} onCancel={actions.onCancelPass} />
+      ) : null}
+
+      {q ? (
+        <dl aria-label={`About ${row.company.name}`} className="grid border-y py-1">
+          <Fact label="Where it stands">
+            <Standing row={row} />
+          </Fact>
+          {q.lastTouch ? <Fact label="Last touch">{q.lastTouch}</Fact> : null}
+          {q.emailHint ? <Fact label="Email">{q.emailHint}</Fact> : null}
+          <Fact label="People" muted={q.peopleOnRecord === 0}>
+            {q.peopleLine}
+          </Fact>
+        </dl>
       ) : null}
 
       {open && (todo || room > 0) ? (

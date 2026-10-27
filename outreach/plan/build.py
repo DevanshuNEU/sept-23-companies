@@ -156,12 +156,15 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
     stored: dict[int, StoredScore] = {}
     for s in ranked:
         stored.setdefault(_survivor(canon, s.company_id), s)
-    postings = load_postings(conn, [stored[c.company_id].signals.get("best_posting_id") for c in chosen], cfg)
+    # A fresh lane row names its new opening; any other row the company's best posting.
+    best = {c.company_id: c.opening.posting_id if c.opening else stored[c.company_id].signals.get("best_posting_id")
+            for c in chosen}
+    postings = load_postings(conn, list(best.values()), cfg)
     version = latest_version(conn) or ""
     entries = []
     for rank, row in enumerate(chosen, 1):
         score = stored[row.company_id]
-        posting = postings.get(score.signals.get("best_posting_id"))
+        posting = postings.get(best[row.company_id])
         why = build_why(by_company[row.company_id], row, score, posting, today=today, cfg=cfg, ranker_version=version)
         entries.append((rank, row, posting.posting_id if posting else None, json.dumps(why, sort_keys=True)))
 

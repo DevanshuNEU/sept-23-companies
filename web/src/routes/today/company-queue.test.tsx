@@ -10,12 +10,13 @@ import { renderWithApp } from '@/test/render';
 import TodayPage from './index';
 
 /*
- * Today as a company queue (#9 company-first ruling, P2), on the `queue` sample: 8 companies, Resend and Baseten
- * reached, Pylon first to do (with his saved search), Turso carried from Monday, 5 companies in flight.
+ * Today as the top picks (#9 company-first ruling, P2; top picks 2026-10-26), on the `queue` sample: 8 picks, Pylon
+ * (new opening, 6 hours ago) and Cerebrium (new opening, yesterday) first, Pylon first to do (with his saved search),
+ * Resend and Baseten reached, Turso carried from Monday, 5 companies in flight, 12 companies on the bench.
  */
 
 const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
-const options = () => within(screen.getByRole('listbox', { name: "Today's companies" })).getAllByRole('option');
+const options = () => within(screen.getByRole('listbox', { name: "Today's picks" })).getAllByRole('option');
 const option = (n: number) => {
   const o = options()[n - 1];
   if (!o) throw new Error(`No option ${n}`);
@@ -63,34 +64,41 @@ afterEach(() => {
 });
 
 describe('Today as a company queue', () => {
-  it('lands on the first company to do and shows every line the API gives', async () => {
+  it('lands on the first pick to do, new openings first, and the panel leads with why today', async () => {
     const { db } = await open();
     const pylon = rowOf(db, 'Pylon');
-    expect(screen.getByText('8 companies, 2 reached')).toBeInTheDocument();
-    expect(option(3)).toHaveAttribute('aria-selected', 'true');
-    expect(option(3)).toHaveAccessibleName('3. Pylon, To do');
-    expect(option(1)).toHaveAccessibleName('1. Resend, Done');
-    expect(option(1)).toHaveTextContent('3 asked today, room for 1 more, free again Nov 24');
+    expect(screen.getByText('8 picks, 2 reached')).toBeInTheDocument();
+    expect(options().map((o) => o.querySelector('b')?.textContent)).toEqual(
+      ['1Pylon', '2Cerebrium', '3Resend', '4Baseten', '5Inngest', '6Turso', '7Trigger.dev', '8Hex'],
+    );
+    expect(option(1)).toHaveAttribute('aria-selected', 'true');
+    expect(option(1)).toHaveAccessibleName('1. Pylon, To do, new opening, 6 hours ago');
+    expect(option(1)).toHaveTextContent('New opening, 6 hours agoSWE I role: Software Engineer I');
+    expect(option(2)).toHaveTextContent('New opening, yesterdaySWE I role: Member of Technical Staff');
+    expect(option(3)).toHaveAccessibleName('3. Resend, Done');
+    expect(option(3)).toHaveTextContent('New grad role, posted 4 days ago');
+    expect(option(3).querySelector('[data-fresh]')).toBeNull();
+
+    // Why today comes first: the opening and its age, why it should answer, the visa position.
+    const why = within(panel()).getByRole('region', { name: 'Why today' });
+    expect(panel().firstElementChild?.children[1]).toBe(why); // right under the name
+    expect(why).toHaveTextContent('New opening, 6 hours ago');
+    expect(within(why).getByRole('link', { name: 'Software Engineer I' })).toHaveAttribute('href', pylon.role?.url);
+    expect(why).toHaveTextContent('SWE I role, first seen 6 hours ago');
+    expect(within(why).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      ...(pylon.queue?.reasons ?? []), '30 people (estimate), Series A', '3 new engineering roles in the last 30 days',
+    ]);
+    expect(why).toHaveTextContent('VisaSays it sponsors, E-Verify enrolled');
     const about = within(panel()).getByLabelText('About Pylon');
-    for (const [label, text] of [
-      ['Size and stage', '30 people (estimate), Series A'],
-      ['Role', 'Software Engineer I, posted 1 day ago'],
-      ['Hiring now', '3 new engineering roles in the last 30 days'],
-      ['Sponsorship', 'Says it sponsors, E-Verify enrolled'],
-      ['Where it stands', 'New'],
-      ['People', '1 person on record, none asked'],
-    ] as const) {
-      expect(about).toHaveTextContent(`${label}${text}`);
-    }
-    expect(within(about).getAllByRole('listitem').map((li) => li.textContent)).toEqual(pylon.queue?.reasons);
-    expect(within(about).getByRole('link', { name: 'Software Engineer I, posted 1 day ago' })).toHaveAttribute('href', pylon.role?.url);
+    expect(about).toHaveTextContent('Where it standsNew');
+    expect(about).toHaveTextContent('People1 person on record, none asked');
     // nothing about Claude, no note, no person
     expect(panel()).not.toHaveTextContent(/Claude/);
     expect(within(panel()).queryByRole('region', { name: 'Note to send' })).not.toBeInTheDocument();
     expect(within(panel()).queryByRole('button', { name: /Confirm|Edit/ })).not.toBeInTheDocument();
   });
 
-  it('S, O and the buttons open LinkedIn search and the careers page in a new tab', async () => {
+  it('the three research links and S, O open in a new tab; the app never fetches LinkedIn', async () => {
     const { db } = await open();
     const pylon = rowOf(db, 'Pylon');
     const search = within(panel()).getByRole('link', { name: 'Open LinkedIn search' });
@@ -100,10 +108,15 @@ describe('Today as a company queue', () => {
     expect(search).toHaveAttribute('data-variant', 'default');
     expect(search).toHaveAttribute('aria-keyshortcuts', 's');
     expect(within(panel()).getByText('Your saved search opens with S.')).toBeInTheDocument();
-    const careers = within(panel()).getByRole('link', { name: 'Careers page' });
+    const research = within(panel()).getByRole('group', { name: 'Research' });
+    const careers = within(research).getByRole('link', { name: 'Careers' });
     expect(careers).toHaveAttribute('href', pylon.queue?.careersUrl);
-    expect(careers.getAttribute('rel')).toContain('noopener');
     expect(careers).toHaveAttribute('aria-keyshortcuts', 'o');
+    expect(within(research).getByRole('link', { name: 'Website' })).toHaveAttribute('href', pylon.queue?.websiteUrl);
+    expect(within(research).getByRole('link', { name: 'LinkedIn page' })).toHaveAttribute(
+      'href', 'https://www.linkedin.com/search/results/companies/?keywords=Pylon',
+    );
+    for (const a of within(research).getAllByRole('link')) expect(a.getAttribute('rel')).toContain('noopener');
 
     const opened = vi.spyOn(window, 'open').mockImplementation(() => null);
     press('s');
@@ -125,6 +138,7 @@ describe('Today as a company queue', () => {
     const all = writeText.mock.calls.at(-1)?.[0].split('\n') ?? [];
     expect(all).toHaveLength(6);
     expect(all[4]).toBe(`Knock: Trigger.dev (company ${rowOf(db, 'Trigger.dev').company.id})`);
+    expect(all[0]).toBe(`Knock: Pylon (company ${rowOf(db, 'Pylon').company.id}), role: Software Engineer I`);
   });
 
   it('A logs applied on a row with a role, and a row with none says so', async () => {
@@ -156,7 +170,7 @@ describe('Today as a company queue', () => {
     await user.click(within(panel()).getByRole('button', { name: 'Log people' }));
     expect(await screen.findByText('Logged: 2 people at Trigger.dev.')).toBeInTheDocument();
     expect(option(7)).toHaveAccessibleName('7. Trigger.dev, Done');
-    expect(screen.getByText('8 companies, 3 reached')).toBeInTheDocument();
+    expect(screen.getByText('8 picks, 3 reached')).toBeInTheDocument();
     // done, so the selection moved on to the next company to do
     expect(await screen.findByRole('heading', { level: 2, name: 'Hex' })).toBeInTheDocument();
     await leavePage();
@@ -192,7 +206,7 @@ describe('Today as a company queue', () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.plan });
     });
     await waitFor(() => expect(option(7)).toHaveAccessibleName('7. Trigger.dev, Done'));
-    expect(screen.getByText('8 companies, 3 reached')).toBeInTheDocument();
+    expect(screen.getByText('8 picks, 3 reached')).toBeInTheDocument();
   });
 
   it('Save this search keeps his LinkedIn search for the company, and refuses any other address', async () => {
@@ -234,27 +248,177 @@ describe('Today as a company queue', () => {
     expect(within(list).getByRole('link', { name: 'Warp' }).getAttribute('href')).toMatch(/^\/companies\/\d+$/);
   });
 
-  it('X carries a company and N opens Not a fit, as on any row', async () => {
+  it('X carries a pick; N and P both open Not now, never the old Not a fit dialog', async () => {
     await open();
     press('x');
     expect(await screen.findByText('Carried to tomorrow: Pylon.')).toBeInTheDocument();
-    expect(option(3)).toHaveAccessibleName('3. Pylon, Carried over');
-    await screen.findByRole('heading', { level: 2, name: 'Inngest' });
+    expect(option(1)).toHaveAccessibleName('1. Pylon, Carried over, new opening, 6 hours ago');
+    await screen.findByRole('heading', { level: 2, name: 'Cerebrium' });
     press('n');
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Inngest');
+    expect(within(panel()).getByRole('group', { name: 'Not now for Cerebrium' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(panel()).not.toHaveTextContent(/No-go list|Never show/);
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Keep it' }));
+    expect(within(panel()).queryByRole('group', { name: 'Not now for Cerebrium' })).not.toBeInTheDocument();
+    press('p');
+    expect(within(panel()).getByRole('group', { name: 'Not now for Cerebrium' })).toBeInTheDocument();
   });
 
-  it('the finish line counts companies reached', async () => {
+  it('the finish line counts the picks handled', async () => {
     const db = buildFixture('queue');
     for (const r of db.plan.rows) {
       r.steps = r.steps.map((s) => ({ ...s, at: s.at ?? db.plan.asOf, touchId: s.touchId ?? 1 }));
       r.state = 'done';
     }
-    db.plan.done = db.plan.rows.length;
+    const last = db.plan.rows.at(-1);
+    if (last) last.state = 'skipped';
+    db.plan.done = db.plan.rows.length - 1;
+    db.plan.passed = 2;
     const client = new FixtureClient(db);
     renderWithApp(<TodayPage />, { route: '/today', client, queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) });
     expect(await screen.findByRole('heading', { level: 2, name: "Today's list is done." })).toBeInTheDocument();
-    expect(screen.getByText("8 companies reached. That is everything on today's queue.")).toBeInTheDocument();
-    expect(screen.getByText('8 companies, 8 reached')).toBeInTheDocument();
+    expect(screen.getByText('8 of 8 handled: 7 reached, Hex carries to tomorrow. You passed on 2 for now.')).toBeInTheDocument();
+    expect(screen.getByText('8 picks, 7 reached, 1 carried over, 2 passed')).toBeInTheDocument();
+  });
+});
+
+describe('Not now (top picks)', () => {
+  it('P then a number passes with that reason, and the bench head slides into the place, with Undo', async () => {
+    const { client, db } = await open();
+    const passed = vi.spyOn(client, 'passPick');
+    const pylon = rowOf(db, 'Pylon');
+    press('p');
+    const chips = within(panel()).getByRole('group', { name: 'Not now for Pylon' });
+    expect(chips).toHaveTextContent('It comes back in 14 days, or sooner with a new opening. It is not a no-go.');
+    expect(within(chips).getAllByRole('button').map((b) => b.getAttribute('aria-keyshortcuts'))).toEqual(
+      ['1', '2', '3', '4', '5', '6', '7', '8', 'enter', null],
+    );
+    expect(within(chips).getByRole('button', { name: /Not a fit right now/ })).toBeInTheDocument();
+    press('2');
+    expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
+    expect(option(1)).toHaveAttribute('data-provisional', 'true');
+    expect(option(1)).toHaveTextContent('Retell AI');
+    expect(option(1)).toHaveTextContent('Coming in from the bench');
+    expect(screen.queryByText('Pylon', { selector: 'b *, b' })).toBeNull();
+    // the selection moved on to the next pick to do
+    expect(await screen.findByRole('heading', { level: 2, name: 'Cerebrium' })).toBeInTheDocument();
+    expect(passed).not.toHaveBeenCalled(); // still inside the undo window
+    await leavePage();
+    expect(passed).toHaveBeenCalledWith(pylon.entryId, { reason: 'too_big', idempotencyKey: `plan:${pylon.entryId}:pass` }, pylon.revision, expect.anything());
+    await waitFor(() => expect(options().some((o) => o.getAttribute('data-provisional'))).toBe(false));
+    expect(option(1)).toHaveTextContent('Retell AI');
+    expect(option(1)).toHaveTextContent('New opening, 3 hours ago');
+    expect(options()).toHaveLength(8);
+  });
+
+  it('Enter or Esc passes with no reason; Z undoes and nothing is sent', async () => {
+    const { client } = await open({ shell: true });
+    const passed = vi.spyOn(client, 'passPick');
+    press('p');
+    press('Escape');
+    expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
+    press('z');
+    await waitFor(() => expect(option(1)).toHaveAccessibleName('1. Pylon, To do, new opening, 6 hours ago'));
+    expect(options().some((o) => o.getAttribute('data-provisional'))).toBe(false);
+    fireEvent.click(option(1));
+    await screen.findByRole('heading', { level: 2, name: 'Pylon' });
+    press('p');
+    press('Enter');
+    await leavePage();
+    expect(passed).toHaveBeenCalledTimes(1);
+    expect(passed.mock.calls[0]?.[1].reason).toBeNull();
+  });
+
+  it('a pick he already reached stays; one with only an application passes', async () => {
+    const db = buildFixture('queue');
+    const hex = rowOf(db, 'Hex');
+    hex.steps = hex.steps.map((s) => (s.kind === 'apply' ? { ...s, at: db.plan.asOf, touchId: 77 } : s));
+    const inngest = rowOf(db, 'Inngest');
+    inngest.steps = inngest.steps.map((s) => (s.kind === 'request' ? { ...s, at: db.plan.asOf, touchId: 78 } : s));
+    await open({ db });
+    fireEvent.click(option(5));
+    await screen.findByRole('heading', { level: 2, name: 'Inngest' });
+    press('p');
+    expect(await screen.findByText('You already reached Inngest today, so it stays on the list.')).toBeInTheDocument();
+    expect(within(panel()).queryByRole('group', { name: /Not now/ })).not.toBeInTheDocument();
+    fireEvent.click(option(8));
+    await screen.findByRole('heading', { level: 2, name: 'Hex' });
+    press('p');
+    expect(within(panel()).getByRole('group', { name: 'Not now for Hex' })).toBeInTheDocument();
+    press('7');
+    expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
+  });
+
+  it('the keys on a pick still coming in say so', async () => {
+    await open();
+    press('p');
+    press('1');
+    await screen.findByRole('heading', { level: 2, name: 'Cerebrium' });
+    fireEvent.click(option(1));
+    await screen.findByRole('heading', { level: 2, name: 'Retell AI' });
+    press('a');
+    expect(await screen.findByText(/Retell AI joins today's list once your Not now is saved/)).toBeInTheDocument();
+  });
+});
+
+describe('the bench (top picks)', () => {
+  const bench = () => screen.getByRole('dialog', { name: /More options/ });
+
+  it('B opens More options: new early career openings first, then other new ones, then by rank', async () => {
+    await open();
+    press('b');
+    const list = within(await screen.findByRole('dialog', { name: /More options/ })).getByRole('list', { name: 'More options' });
+    const names = within(list).getAllByRole('listitem').map((li) => li.querySelector('a')?.textContent);
+    expect(names).toEqual(['Retell AI', 'Railway', 'Temporal', 'Graphite', 'Supabase', 'Fly.io', 'Weaviate', 'Clerk', 'Tailscale', 'Sourcegraph', 'Render', 'PlanetScale']);
+    expect(names).not.toContain('Crusoe'); // passed on Nov 7: cooling off
+    const items = within(list).getAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('New opening, 3 hours ago');
+    expect(items[1]).toHaveTextContent('You applied on Oct 20; this is a new role.');
+    expect(items[2]).toHaveTextContent('New opening, 10 hours agoSWE II role: Software Engineer II');
+    expect(items[3]?.querySelector('[data-fresh]')).toBeNull();
+    expect(bench()).toHaveTextContent(/Room to add \d+ more companies this week\. New openings come first\./);
+    press('b');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /More options/ })).not.toBeInTheDocument());
+  });
+
+  it('Add to today appends the company after the last pick', async () => {
+    const user = userEvent.setup();
+    const { client, db } = await open();
+    const added = vi.spyOn(client, 'addFromBench');
+    await user.click(screen.getByRole('button', { name: /More options/ }));
+    const graphite = within(bench()).getAllByRole('listitem')[3];
+    if (!graphite) throw new Error('no Graphite');
+    await user.click(within(graphite).getByRole('button', { name: 'Add to today' }));
+    expect(await screen.findByText('Added Graphite to today.')).toBeInTheDocument();
+    expect(options()).toHaveLength(9);
+    expect(option(9)).toHaveTextContent('Graphite');
+    await leavePage();
+    const id = buildFixture('queue').bench.companies.find((b) => b.company.name === 'Graphite')?.company.id;
+    expect(db.bench.companies.some((b) => b.company.id === id)).toBe(false);
+    expect(added).toHaveBeenCalledWith(id, { idempotencyKey: `bench:${id}:add` }, expect.anything());
+  });
+
+  it('with no room this week Add to today is off and says why', async () => {
+    const db = buildFixture('queue');
+    db.bench.room = 0;
+    db.bench.roomText = "No room to add more this week: the 7-day limit is taken by today's picks and the requests already sent.";
+    await open({ db });
+    press('b');
+    const first = within(await screen.findByRole('dialog', { name: /More options/ })).getAllByRole('listitem')[0];
+    expect(within(first as HTMLElement).getByRole('button', { name: 'Add to today' })).toBeDisabled();
+    expect(bench()).toHaveTextContent('No room to add more this week');
+  });
+
+  it('a new opening that reaches the bench mid-day says so in a toast', async () => {
+    const { db, queryClient } = await open();
+    await waitFor(() => expect(queryClient.getQueryData(queryKeys.bench)).toBeDefined());
+    const fresh = structuredClone(db.bench.companies[0]);
+    if (!fresh) throw new Error('fixture: a bench company');
+    fresh.company = { ...fresh.company, id: 99_001, name: 'Northbeam Labs' };
+    db.bench.companies.unshift(fresh);
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.bench });
+    });
+    expect(await screen.findByText('New opening at Northbeam Labs')).toBeInTheDocument();
   });
 });

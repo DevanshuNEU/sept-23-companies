@@ -72,9 +72,14 @@ export const _parity: [
   Same<T.PlanStep, S['PlanStep']>,
   Same<T.QueueStanding, S['QueueStanding']>,
   Same<T.CompanyQueue, S['CompanyQueue']>,
+  Same<T.QueueOpening, S['QueueOpening']>,
+  Same<T.PassResult, S['PassResult']>,
+  Same<T.BenchCompany, S['BenchCompany']>,
+  Same<T.BenchView, S['BenchView']>,
+  Same<T.PassReason, NonNullable<S['PassPickBody']['reason']>>,
   Same<T.InFlightCompany, S['InFlightCompany']>,
   Same<T.PlanRow, S['PlanRow']>,
   Same<T.PlanView, S['PlanView']>,
   Same<T.LoggedPerson, S['LoggedPerson']>,
   Same<T.LogPeopleResult, S['LogPeopleResult']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

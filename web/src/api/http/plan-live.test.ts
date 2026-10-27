@@ -45,6 +45,8 @@ const NOT_BUILT: PlanView = {
   week: { requests: 0, accepts: 0, replies: 0 },
   inFlight: [],
   passed: 0,
+  emailCount: 0,
+  emailText: '',
 };
 
 /** Just enough of a row and a note: the client hands back what the API sent, field for field. */

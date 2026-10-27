@@ -39,6 +39,14 @@ start_limit = 20              # #9: the first day's send limit
 rows_max = 15
 people_per_company = 2        # #9
 hn_post_days = 90             # same as ranking
+# Email fit and the email lane (2026-10-27, outreach/plan/email_fit.py). It only flags and lists companies: he finds
+# the people, Claude drafts, he approves in the Outbox, the sender sends inside the ramp (outreach/sending/config.toml,
+# not changed here). A company can be emailed when its website domain is on file (an address pattern needs it), its
+# best size is at or under email_max_headcount (no size on file is fine: the size gate already passed it), and no
+# no-go, pause, reply, full wave or people_per_company emailed people stands in the way. The lane adds up to
+# email_companies_per_day such companies a day beyond today's picks, by the stored ranking; 0 turns it off.
+email_max_headcount = 200     # his call to make; the size gate (#9) hides over 300
+email_companies_per_day = 6
 
 [plan]
 timezone = "America/New_York"

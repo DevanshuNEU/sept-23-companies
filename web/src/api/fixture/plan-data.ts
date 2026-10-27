@@ -17,7 +17,7 @@ import type {
 } from '../types';
 import type { Scenario } from './data';
 import { buildProfile } from './profile-data';
-import { benchRoom, buildBench, buildInFlight, buildQueueRows, companySearch, judgeOf, keywordSearch, openingOf, terminalLine, whyTodayOf } from './queue-data';
+import { benchRoom, buildBench, buildInFlight, buildQueueRows, companySearch, emailCountOf, emailFitOf, emailTextOf, judgeOf, keywordSearch, openingOf, terminalLine, whyTodayOf } from './queue-data';
 
 /** What data.ts hands over: the clock, the company registry and the people and roles it already made. */
 export interface PlanCtx {
@@ -240,7 +240,7 @@ function companyQueue(c: PlanCtx, company: string, role: RoleToName | null): Pla
   const reasons = ['Open role at your level', 'Small company'];
   return {
     whyToday: whyTodayOf(opening, reasons), opening, websiteUrl: ref?.domain ? `https://${ref.domain}` : null, linkedinCompanyUrl: companySearch(company),
-    ...judgeOf(),
+    ...judgeOf(), emailFit: emailFitOf(ref?.domain ?? null, { size: 'About 18 people: a founder reads this' }),
     sizeLine: '18 people (estimate), seed (guess)', roleLine: role ? `${role.title}, posted 3 days ago` : null, hiring: 1,
     hiringLine: '1 new engineering role in the last 30 days', sponsorshipLine: 'Sponsorship not stated, E-Verify enrolled',
     reasons, standing: { status: 'new', text: 'New', reason: 'No outreach yet', asked: 0, room: 4, freeOn: null },
@@ -585,10 +585,10 @@ export function buildPlanFixture(scenario: Scenario, c: PlanCtx): PlanFixture {
     linkedinWeek: { used: n.linkedin[0], limit: 150, hardUsed: n.linkedin[1], hardLimit: 200 },
     tomorrow, week: { requests: week[0], accepts: week[1], replies: week[2] },
     inFlight: scenario === 'empty' || scenario === 'fresh' ? [] : buildInFlight(c, rows),
-    passed: 0,
+    passed: 0, emailCount: emailCountOf(rows), emailText: emailTextOf(rows),
   };
 
-  const bench: BenchView = noList ? { asOf: c.asOf, date: c.date, companies: [], room: 0, roomText: '' } : buildBench(c, benchRoom(plan.linkedinWeek, rows));
+  const bench: BenchView = noList ? { asOf: c.asOf, date: c.date, companies: [], room: 0, roomText: '', emailLane: [], emailLaneText: '' } : buildBench(c, benchRoom(plan.linkedinWeek, rows));
   const wins = buildWins(c, scenario, rows);
   const progress: ProgressView = {
     asOf: c.asOf,

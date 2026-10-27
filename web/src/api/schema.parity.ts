@@ -77,6 +77,7 @@ export const _parity: [
   Same<T.ProfileRole, S['ProfileRole']>,
   Same<T.ProfileHistory, S['ProfileHistory']>,
   Same<T.QueueOpening, S['QueueOpening']>,
+  Same<T.EmailFitView, S['EmailFitView']>,
   Same<T.PassResult, S['PassResult']>,
   Same<T.BenchCompany, S['BenchCompany']>,
   Same<T.BenchView, S['BenchView']>,
@@ -86,4 +87,4 @@ export const _parity: [
   Same<T.PlanView, S['PlanView']>,
   Same<T.LoggedPerson, S['LoggedPerson']>,
   Same<T.LogPeopleResult, S['LogPeopleResult']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

@@ -38,7 +38,7 @@ from outreach.api.queries import jobs
 from outreach.api.queries.company import company_holds, merge_parents, person_ref
 from outreach.api.queries.outcomes import by_ids, people_by_ids
 from outreach.api.queries.progress import live_touches
-from outreach.api.queries.queue import in_flight, queue_facts
+from outreach.api.queries.queue import email_text, in_flight, queue_facts
 from outreach.api.queries.today import LANE_WORDS, build_entries
 from outreach.outcomes import report
 from outreach.outcomes.windows import day_bounds_utc, next_weekday, ny_day, week_bounds
@@ -497,6 +497,8 @@ def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
         built = None
     rows = plan_rows(conn, day, cfg, now) or []
     week = linkedin_capacity(conn, canon, date.fromisoformat(day), cfg)
+    queued = [r for r in rows if r.queue is not None]
+    emailable = sum(1 for r in queued if r.queue.email_fit.verdict == "email")
     return PlanView(
         as_of=now, date=day, built_at=built["built_at"] if built is not None else None,
         list_job=jobs.run_summary(last, now) if last is not None else None,
@@ -508,4 +510,5 @@ def plan_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> PlanView:
         tomorrow=_tomorrow(conn, day, canon, cfg), week=_week(conn, now),
         in_flight=in_flight(conn, canon, company_holds(conn), cfg, date.fromisoformat(day)),
         passed=conn.execute("SELECT count(*) FROM event WHERE kind = ? AND entity = 'company' AND json_valid(detail) "
-                            "AND json_extract(detail, '$.list_date') = ?", (PASSED, day)).fetchone()[0])
+                            "AND json_extract(detail, '$.list_date') = ?", (PASSED, day)).fetchone()[0],
+        email_count=emailable, email_text=email_text(emailable, len(queued)))

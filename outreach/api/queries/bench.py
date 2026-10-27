@@ -4,7 +4,11 @@ The next best companies not on today's list (`outreach.plan.picks.bench_picks`: 
 now or an application, not in flight), fresh early career fits first, then other new openings at his level, then by
 rank. Each comes in the compact shape of a pick row: the company, its role and the same `CompanyQueue` lines a pick
 shows (`queue_facts` over the rows the bench would write), so the page draws both the same way. `room` is how many he
-may still add today: the whole waves the 7-day limit leaves, less today's picks still to do. Reads only.
+may still add today: the whole waves the 7-day limit leaves, less today's picks still to do.
+
+The same answer carries the email lane (2026-10-27, `outreach.plan.picks.bench_and_lane`): up to
+`email.email_companies_per_day` companies not on today's list whose email fit is `email`, by the stored ranking, in the
+same compact shape. One read of the pool serves both, so the page asks for no extra heavy view. Reads only.
 """
 import json
 import sqlite3
@@ -19,7 +23,8 @@ from outreach.outcomes.windows import ny_day
 from outreach.plan.capacity import linkedin_capacity
 from outreach.plan.config import PlanConfig
 from outreach.plan.fresh import as_utc
-from outreach.plan.picks import bench_picks
+from outreach.plan.email_fit import lane_text
+from outreach.plan.picks import bench_and_lane
 from outreach.plan.prospects import _signals
 from outreach.plan.select import BenchPick
 from outreach.ranking.common import canonical_ids
@@ -84,8 +89,9 @@ def pending_picks(rows) -> int:
 
 def bench_view(conn: sqlite3.Connection, now: str, cfg: PlanConfig) -> BenchView:
     day = ny_day(now)
-    picks, stored = bench_picks(conn, date.fromisoformat(day), as_utc(now), cfg)
+    picks, lane, stored = bench_and_lane(conn, date.fromisoformat(day), as_utc(now), cfg)
     rows = plan_rows(conn, day, cfg, now) or []
     room = room_today(conn, day, cfg, pending_picks(rows))
     return BenchView(as_of=now, date=day, companies=bench_rows(conn, picks, stored, day, now, cfg), room=room,
-                     room_text=room_text(room))
+                     room_text=room_text(room), email_lane=bench_rows(conn, lane, stored, day, now, cfg),
+                     email_lane_text=lane_text(len(lane), cfg))

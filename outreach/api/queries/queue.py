@@ -21,7 +21,9 @@ holds, one query per table however many rows:
   opened within `queue.fresh_hours` at his level and clear of the visa gate), the one line of why today, the company's
   website (https of its domain) and a LinkedIn company search for its name (never fetched);
 - the profile judge (Part of #6 and #15): its one line and fit when a judgment newer than the ranker's
-  `[profile_fit] max_age_days` exists (`outreach.ranking.judged.load_judgments`, one query), else "not judged yet".
+  `[profile_fit] max_age_days` exists (`outreach.ranking.judged.load_judgments`, one query), else "not judged yet";
+- the email fit (2026-10-27, `outreach.plan.email_fit`): email or LinkedIn only, the reasons, and the website domain
+  it read (`load_email_facts`, one query per table over the rows, the contact states shared with the lines above).
 
 `in_flight` lists every company still being worked with a wave out inside `linkedin.rotate_days` (a queued email
 counts) or a reply, replies first, then by the day each is free again. Reads only; the app never fetches LinkedIn.
@@ -33,16 +35,18 @@ from datetime import date, datetime, timedelta
 from urllib.parse import quote, urlsplit
 
 from outreach.api.models.company import CompanyRef
-from outreach.api.models.plan import CompanyQueue, InFlightCompany, QueueOpening, QueueStanding
+from outreach.api.models.plan import (CompanyQueue, EmailFitView, InFlightCompany, ProfileValue, QueueOpening,
+                                      QueueStanding)
 from outreach.api.models.today import DailyEntry
 from outreach.api.queries.company import Holds
 from outreach.api.queries.outcomes import by_ids, company_refs, people_by_ids
-from outreach.api.queries.profile import (EVERIFY, SPONSORSHIP, STAGES, company_profile, count_words, load_profile_data,
-                                          plain_url)
+from outreach.api.queries.profile import (EVERIFY, SOURCES, SPONSORSHIP, STAGES, company_profile, count_words,
+                                          load_profile_data, plain_url)
 from outreach.plan.careers import pick_careers_url
 from outreach.plan.config import PlanConfig
 from outreach.plan.contact import ContactState, contact_states
 from outreach.plan.dates import ny_date
+from outreach.plan.email_fit import EmailFacts, email_fit, load_email_facts
 from outreach.plan.fresh import (Opening, age_words, as_utc, fresh_tag, level_words, load_applied, load_openings,
                                  load_visa_facts, opened, plan_moment, visa_clear)
 from outreach.plan.outbound import Outbound, load_outbound
@@ -54,7 +58,8 @@ from outreach.ranking.confidence import scrub_text
 from outreach.ranking.judged import judge_line, load_judgments
 
 __all__ = ["SAVED_SEARCH", "LINKEDIN_ALIAS", "HIRING_DAYS", "LINKEDIN_COMPANY_SEARCH", "standing", "queue_facts",
-           "in_flight", "saved_searches", "linkedin_ids", "website_url", "linkedin_company_url"]
+           "in_flight", "saved_searches", "linkedin_ids", "website_url", "linkedin_company_url", "email_fit_view",
+           "email_text"]
 
 SAVED_SEARCH = "linkedin_search_saved"  # event kind: his saved people search for a company, detail {url}
 LINKEDIN_ALIAS = "linkedin:"  # company_alias key prefix of a LinkedIn company id (source 'linkedin')
@@ -187,6 +192,26 @@ def linkedin_company_url(name: str) -> str:
     return LINKEDIN_COMPANY_SEARCH + quote(" ".join(name.split()), safe="")
 
 
+def email_fit_view(f: EmailFacts, cfg: PlanConfig) -> EmailFitView:
+    """The company's email fit as the page shows it, with the domain it read and how sure that is."""
+    fit = email_fit(f, cfg)
+    note = None
+    if f.domain is not None:
+        note = "set by you" if f.domain_locked else \
+            f"{f.domain_confidence}, {SOURCES.get(f.domain_source or '', 'another source')}"
+    return EmailFitView(verdict=fit.verdict, label=fit.label, reasons=list(fit.reasons),
+                        website=ProfileValue(text=f.domain, note=note))
+
+
+def email_text(n: int, total: int) -> str:
+    """The Today header's count: "5 of today's 8 can be emailed"; empty with no company rows."""
+    if total == 0:
+        return ""
+    if n == 0:
+        return f"None of today's {total} can be emailed yet"
+    return f"{n} of today's {total} can be emailed"
+
+
 # ---------------------------------------------------------------------------------------------- bulk reads
 
 def _family(canon: dict[int, int], survivors: set[int]) -> tuple[set[int], dict[int, int]]:
@@ -295,6 +320,7 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
     judged = load_judgments(conn, canon, today=today,
                             max_age_days=default_ranker_config().section("profile_fit")["max_age_days"])
     profiles = load_profile_data(conn, canon, survivors, family, owner, now, cfg)
+    email = load_email_facts(conn, canon, survivors, today, cfg, states=states)
     by_company: dict[int, list[Outbound]] = {}
     for o in outbound:
         by_company.setdefault(o.company_id, []).append(o)
@@ -332,7 +358,7 @@ def queue_facts(conn: sqlite3.Connection, entries: Sequence[sqlite3.Row], daily:
                                     applied.get(cid)),
             why_today=_why_today(opening, reasons), opening=opening, website_url=website_url(d.company.domain),
             linkedin_company_url=linkedin_company_url(d.company.name), judge_line=judge_line(judged.get(cid)),
-            judge_fit=judged[cid].fit if cid in judged else None)
+            judge_fit=judged[cid].fit if cid in judged else None, email_fit=email_fit_view(email[cid], cfg))
     return out
 
 

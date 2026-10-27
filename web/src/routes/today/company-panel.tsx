@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { BookmarkCheck, ChevronRight, Search, Terminal } from 'lucide-react';
 import type { IsoTime, PassReason, PlanRow } from '@/api';
+import { EmailChip } from '@/components/email-chip';
 import { FitChip } from '@/components/fit-chip';
 import { Monogram } from '@/components/monogram';
 import { StepMarks } from '@/components/step-marks';
@@ -140,6 +141,7 @@ export function CompanyPanel({
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
           <Badge variant="idle">{q?.opening?.level ?? laneLabel[row.lane]}</Badge>
           <FitChip fit={q?.judgeFit} className="h-[22px]" />
+          {q ? <EmailChip fit={q.emailFit} interactive className="h-[22px]" /> : null}
           <CarriedOver row={row} asOf={asOf} />
         </div>
       </header>
@@ -180,7 +182,10 @@ export function CompanyPanel({
           <Fact label="Where it stands">
             <Standing row={row} />
           </Fact>
-          {q.emailHint ? <Fact label="Email">{q.emailHint}</Fact> : null}
+          <Fact label="Email" muted={q.emailFit.verdict !== 'email'}>
+            <span data-email-reasons>{`${q.emailFit.label}. ${q.emailFit.reasons.join('. ')}.`}</span>
+            {q.emailHint ? <span className="block text-muted-foreground">{q.emailHint}</span> : null}
+          </Fact>
         </dl>
       ) : null}
 

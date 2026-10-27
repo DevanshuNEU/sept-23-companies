@@ -2,7 +2,8 @@
 
 `bench_picks` reads the same prospects the plan job reads (`load_prospects` over the laned ranked list, at `now`)
 and returns `select.bench`: the next best companies not on today's list in any state, fresh early career fits
-first. `write_pick` adds one of them to today's list as a new company row, with the plan's own `why`, an id above
+first. `bench_and_lane` reads the same pool once for the bench and the email lane (`outreach.plan.email_fit`: up to
+`email.email_companies_per_day` more companies that can be emailed, by rank). `write_pick` adds one of them to today's list as a new company row, with the plan's own `why`, an id above
 every row there is (the page names a row by its rowid, so a stale tab never reaches a new row) and the rank asked
 for. It runs inside the caller's transaction and writes only `daily_list_entry`.
 """
@@ -13,13 +14,14 @@ import sqlite3
 from datetime import date, datetime
 
 from outreach.plan.config import PlanConfig
+from outreach.plan.email_fit import email_fit, email_lane, load_email_facts
 from outreach.plan.outbound import load_outbound
 from outreach.plan.prospects import build_why, load_postings, load_prospects
-from outreach.plan.select import BenchPick, Chosen, bench, group_of
+from outreach.plan.select import BenchPick, Chosen, Prospect, bench, eligibility, group_of
 from outreach.ranking.common import canonical_ids
 from outreach.ranking.scores import StoredScore, latest_version, ranked_list
 
-__all__ = ["listed_today", "bench_picks", "write_pick"]
+__all__ = ["listed_today", "bench_picks", "bench_and_lane", "write_pick"]
 
 
 def listed_today(conn: sqlite3.Connection, day: date, canon: dict[int, int]) -> set[int]:
@@ -31,9 +33,10 @@ def listed_today(conn: sqlite3.Connection, day: date, canon: dict[int, int]) -> 
     return out
 
 
-def bench_picks(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanConfig,
-                n: int | None = None) -> tuple[list[BenchPick], dict[int, StoredScore]]:
-    """The bench for `today` at `now`, and each survivor's score row (the first ranked row of its merge family)."""
+def _pool(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanConfig
+          ) -> tuple[dict[int, int], list[Prospect], set[int], dict[int, StoredScore]]:
+    """The plan job's prospects at `now`, every company on today's list, and each survivor's score row (the first
+    ranked row of its merge family)."""
     canon = canonical_ids(conn)
     ranked = ranked_list(conn, laned_only=True)
     outbound = load_outbound(conn, canon, tz=cfg.get("plan", "timezone"))
@@ -41,7 +44,25 @@ def bench_picks(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanC
     stored: dict[int, StoredScore] = {}
     for s in ranked:
         stored.setdefault(canon.get(s.company_id, s.company_id), s)
-    return bench(prospects, listed_today(conn, today, canon), cfg, n), stored
+    return canon, prospects, listed_today(conn, today, canon), stored
+
+
+def bench_picks(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanConfig,
+                n: int | None = None) -> tuple[list[BenchPick], dict[int, StoredScore]]:
+    """The bench for `today` at `now`, and each survivor's score row (the first ranked row of its merge family)."""
+    _, prospects, taken, stored = _pool(conn, today, now, cfg)
+    return bench(prospects, taken, cfg, n), stored
+
+
+def bench_and_lane(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanConfig
+                   ) -> tuple[list[BenchPick], list[BenchPick], dict[int, StoredScore]]:
+    """The bench and the email lane from one read of the pool. The email facts are read only for the companies the
+    plan could pick today that are not on today's list (the lane's candidates), with their contact states."""
+    canon, prospects, taken, stored = _pool(conn, today, now, cfg)
+    open_ = {p.company_id: p.contact for p in prospects if p.company_id not in taken and eligibility(p, cfg)[0]}
+    facts = load_email_facts(conn, canon, open_, today, cfg, states=open_) if open_ else {}
+    fits = {cid: email_fit(f, cfg) for cid, f in facts.items()}
+    return bench(prospects, taken, cfg), email_lane(prospects, taken, fits, cfg), stored
 
 
 def write_pick(conn: sqlite3.Connection, pick: BenchPick, stored: StoredScore, *, today: date, rank: int,

@@ -63,6 +63,8 @@ def _check(data: dict) -> None:
     _whole(data, "queue", "fresh_pool_top_n", 50, 1500)
     _whole(data, "queue", "pass_cooldown_days", 1, 90)
     _whole(data, "queue", "bench_size", 1, 30)
+    _whole(data, "email", "email_max_headcount", 1, 300)  # #9's size cap is 300
+    _whole(data, "email", "email_companies_per_day", 0, 20)
     most = data["linkedin"]["max_people_per_company"]
     if isinstance(most, bool) or not isinstance(most, int) or most < wave:
         raise ValueError(f"linkedin.max_people_per_company must be a whole number of at least "
@@ -110,6 +112,7 @@ _CHECKED = {"lanes": ("role", "reason", "fill", "role_share", "reason_share"),
             "linkedin": ("rotate_top_n", "max_people_per_company"), "note": ("max_chars",),
             "queue": ("companies_per_day", "requests_per_company", "fresh_slots", "fresh_hours", "fresh_pool_top_n",
                       "pass_cooldown_days", "bench_size"), "prepare": ("enabled", "deny_rule_checked"),
+            "email": ("email_max_headcount", "email_companies_per_day"),
             "route": ("prefer_ic_in_role",), "bridge": ("log_back_days",)}
 # The on and off switches, each checked to be a boolean. `prepare.enabled` and `plan.propose_people` are the
 # company-first switches (#9, 2026-10-26); `prepare.deny_rule_checked` records the one-time LinkedIn deny check.

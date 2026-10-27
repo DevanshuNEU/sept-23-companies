@@ -136,6 +136,7 @@ export function ProfilePanel({ row, className }: { row: PlanRow; className?: str
 
       <Section icon={MapPin} title="Where">
         <Fact id="hq" label="HQ" v={p.hq} />
+        <Fact id="website" label="Website" v={q.emailFit.website} unknown="Not on file" />
         <Fact id="roleplaces" label="Roles in" v={p.rolePlaces} />
       </Section>
 

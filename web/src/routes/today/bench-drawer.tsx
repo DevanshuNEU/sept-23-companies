@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import { Plus } from 'lucide-react';
 import type { BenchCompany, BenchView } from '@/api';
+import { EmailChip } from '@/components/email-chip';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -22,6 +23,7 @@ function BenchRow({ b, room, onAdd }: { b: BenchCompany; room: number; onAdd: (b
           <FreshTag opening={q.opening} />
           <p className="truncate text-[13px] text-muted-foreground">{q.whyToday}</p>
         </div>
+        <EmailChip fit={q.emailFit} className="mt-1" />
         <Button type="button" variant="outline" size="sm" className="h-7 flex-none gap-1.5 px-2.5 text-xs" disabled={room <= 0} onClick={() => onAdd(b)}>
           <Plus aria-hidden />
           Add to today

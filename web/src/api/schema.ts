@@ -1167,6 +1167,16 @@ export interface components {
             companies: components["schemas"]["BenchCompany"][];
             /** Date */
             date: string;
+            /**
+             * Emaillane
+             * @default []
+             */
+            emailLane: components["schemas"]["BenchCompany"][];
+            /**
+             * Emaillanetext
+             * @default
+             */
+            emailLaneText: string;
             /** Room */
             room: number;
             /** Roomtext */
@@ -1402,6 +1412,7 @@ export interface components {
         CompanyQueue: {
             /** Careersurl */
             careersUrl: string | null;
+            emailFit: components["schemas"]["EmailFitView"];
             /** Emailhint */
             emailHint: string | null;
             /** Hiring */
@@ -1697,6 +1708,24 @@ export interface components {
             count: number;
             /** Label */
             label: string;
+        };
+        /**
+         * EmailFitView
+         * @description Whether a cold email is worth it at this company (`outreach.plan.email_fit`, 2026-10-27): `email` or
+         *     `linkedin_only`, with short reasons in plain words, the most important first (every blocker when LinkedIn only).
+         *     It only flags the company: he brings the people, Claude drafts, he approves in the Outbox.
+         */
+        EmailFitView: {
+            /** Label */
+            label: string;
+            /** Reasons */
+            reasons: string[];
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "email" | "linkedin_only";
+            website: components["schemas"]["ProfileValue"];
         };
         /**
          * Empty
@@ -2744,6 +2773,16 @@ export interface components {
             date: string;
             /** Done */
             done: number;
+            /**
+             * Emailcount
+             * @default 0
+             */
+            emailCount: number;
+            /**
+             * Emailtext
+             * @default
+             */
+            emailText: string;
             /**
              * Inflight
              * @default []

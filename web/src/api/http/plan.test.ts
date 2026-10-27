@@ -11,6 +11,8 @@ const EMPTY: PlanView = {
   week: { requests: 0, accepts: 0, replies: 0 },
   inFlight: [],
   passed: 0,
+  emailCount: 0,
+  emailText: '',
 };
 
 describe('planMethods', () => {

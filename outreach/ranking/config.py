@@ -37,7 +37,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     "reachable_person": ("role_kinds", "person", "hn_post"),
     "staffing_risk": ("high", "medium", "promoted_high"),
     "interview_like": ("min_interview_companies", "min_matches", "confident_at", "max_weight_share"),
-    "profile_fit": ("max_weight_share", "max_age_days"),
+    "profile_fit": ("max_weight_share", "max_age_days", "floor"),
     "confidence": ("factor_high", "factor_medium", "factor_low", "evidence_old_days", "lca_pay_medium_filings",
                    "rank_high_share", "rank_low_share", "reason_count"),
 }
@@ -106,13 +106,16 @@ def _check_tilt(data: dict) -> None:
     """Each one-way lift (`TILT_WEIGHTS`) stays small: its weight is at most its `max_weight_share` of the top score,
     the sum of every other weight except the bottom push and the lifts, and the share itself is above 0 and at most
     0.25. The interview tilt's counts are whole numbers of at least 1; the profile fit's `max_age_days` is whole days
-    from 1 to 365."""
+    from 1 to 365 and its `floor` a whole fit from 0 to 90."""
     section = data["interview_like"]
     for key in ("min_interview_companies", "min_matches", "confident_at"):
         _whole_at_least_one(section[key], f"[interview_like] {key}")
     days = data["profile_fit"]["max_age_days"]
     if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 365:
         raise ValueError(f"[profile_fit] max_age_days must be a whole number from 1 to 365, got {days!r}")
+    floor = data["profile_fit"]["floor"]
+    if not isinstance(floor, int) or isinstance(floor, bool) or not 0 <= floor <= 90:
+        raise ValueError(f"[profile_fit] floor must be a whole number from 0 to 90, got {floor!r}")
     w = data["weights"]
     top = sum(v for name, v in w.items() if name not in BOTTOM_WEIGHTS and name not in TILT_WEIGHTS)
     for tilt in TILT_WEIGHTS:

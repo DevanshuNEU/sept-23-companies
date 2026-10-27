@@ -109,14 +109,15 @@ min_matches = 2
 confident_at = 20
 max_weight_share = 0.1
 
-# The profile judge's fit (Part of #6 and #15). One way, like the interview tilt: its value is the judged fit / 100, 0
-# to 1, so it only adds points; it never lowers a score, never hides a company and never writes a no-go. A company with
+# The profile judge's fit (Part of #6 and #15). One way, like the interview tilt: its value is the judged fit above
+# `floor` as a share of the way to 100 (fit 50 or less earns nothing, 75 half, 100 all), 0 to 1, so it only adds points; it never lowers a score, never hides a company and never writes a no-go. A company with
 # no judgment newer than max_age_days gets 0 ("Not judged yet"). Its weight may be at most max_weight_share of the top
 # score (every other weight except the bottom push and the two tilts, 120 today, so at most 12); 0.0 switches it off.
 # max_age_days (1 to 365) is twice the judge's 14-day cache, so a missed night never drops a company's points.
 [profile_fit]
 max_weight_share = 0.1
 max_age_days = 30
+floor = 50
 
 [staffing_risk]
 high = -1.0

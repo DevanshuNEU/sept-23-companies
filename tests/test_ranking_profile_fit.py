@@ -53,7 +53,7 @@ class Signal(unittest.TestCase):
 
     def test_the_fit_is_the_value_and_the_judge_says_why(self):
         got = self.signal().score(neutral_facts(judgment=judgment(72)))
-        self.assertAlmostEqual(0.72, got.value)
+        self.assertAlmostEqual(0.44, got.value)  # (72 - 50) / 50
         self.assertIn("Builds email inboxes for AI agents.", got.reason)
         self.assertIn("Agent infrastructure is his work.", got.reason)
         self.assertIn("72", got.reason)
@@ -62,11 +62,23 @@ class Signal(unittest.TestCase):
     def test_thin_evidence_is_low_confidence(self):
         got = self.signal().score(neutral_facts(judgment=judgment(72, thin=True)))
         self.assertEqual("low", got.confidence.level)
-        self.assertAlmostEqual(0.72, got.value)
+        self.assertAlmostEqual(0.44, got.value)
 
     def test_no_judgment_is_zero_and_says_so(self):
         got = self.signal().score(neutral_facts())
         self.assertEqual((0.0, "Not judged yet", "low"), (got.value, got.reason, got.confidence.level))
+
+    def test_a_fit_at_or_below_the_floor_earns_nothing_and_a_perfect_fit_earns_all(self):
+        for fit, value in ((0, 0.0), (49, 0.0), (50, 0.0), (51, 0.02), (75, 0.5), (100, 1.0)):
+            with self.subTest(fit=fit):
+                self.assertAlmostEqual(value, self.signal().score(neutral_facts(judgment=judgment(fit))).value)
+
+    def test_the_floor_is_validated(self):
+        self.assertEqual(50, CFG.section("profile_fit")["floor"])
+        for value in ("-1", "91", "50.5", '"50"', "true"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                edited(self, ("profile_fit", "floor", value))
+        self.assertEqual(0, edited(self, ("profile_fit", "floor", "0")).section("profile_fit")["floor"])
 
     def test_profile_fit_never_goes_below_zero(self):
         for fit in range(0, 101):
@@ -162,8 +174,8 @@ class Rank(unittest.TestCase):
                 self.assertGreaterEqual(on[name].score, flat[name].score)
                 self.assertEqual(on[name].hide, flat[name].hide)
                 self.assertEqual(on[name].confidence, flat[name].confidence)
-        self.assertAlmostEqual(10 * 0.72 * 0.85, on["Judged"].values["profile_fit"].points)  # medium: factor 0.85
-        self.assertAlmostEqual(10 * 0.72 * 0.5, on["Thin"].values["profile_fit"].points)  # low: factor 0.5
+        self.assertAlmostEqual(10 * 0.44 * 0.85, on["Judged"].values["profile_fit"].points)  # fit 72: (72 - 50) / 50; medium: 0.85
+        self.assertAlmostEqual(10 * 0.44 * 0.5, on["Thin"].values["profile_fit"].points)  # low: factor 0.5
         self.assertEqual((0.0, "Not judged yet"), (on["Unjudged"].values["profile_fit"].points,
                                                    on["Unjudged"].values["profile_fit"].reason))
         self.assertEqual("Not judged yet", on["Old"].values["profile_fit"].reason, "older than max_age_days")

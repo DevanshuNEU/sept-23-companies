@@ -49,7 +49,7 @@ export function NoteEditor({
         aria-label={`Note to ${name}`}
         value={edit.text}
         onChange={(e) => onChange({ ...edit, text: e.target.value })}
-        className="min-h-[120px] max-w-[62ch] bg-card font-serif text-[16px] leading-[1.65] md:text-[16px]"
+        className="min-h-[120px] max-w-[62ch] bg-card font-sans text-[16px] leading-[1.65] md:text-[16px]"
       />
       <div className="grid gap-1">
         <label htmlFor={`${ids}-line`} className="text-xs text-muted-foreground">

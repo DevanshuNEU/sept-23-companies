@@ -171,7 +171,7 @@ describe('NoteBlock', () => {
     const note = { ...noteOf(plan(), 'Pylon'), chars: 100, maxChars: 300 };
     noteBlock(note);
     const text = screen.getByText(note.text);
-    expect(text).toHaveClass('font-serif', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]');
+    expect(text).toHaveClass('font-sans', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]');
     // The card spans the whole block, so the text never sits in a narrower box than its surroundings.
     expect(text.parentElement).toHaveClass('bg-card');
   });

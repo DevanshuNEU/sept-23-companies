@@ -187,7 +187,7 @@ function ReadOnlyDraft({ subject, body }: { subject: string; body: string }) {
         <span className="w-[52px] text-xs text-muted-foreground">Subject</span>
         <b className="font-medium">{subject}</b>
       </div>
-      <p data-slot="email-body" className="max-w-[62ch] p-3 font-serif text-[16px] leading-[1.65] break-words whitespace-pre-wrap">
+      <p data-slot="email-body" className="max-w-[62ch] p-3 font-sans text-[16px] leading-[1.65] break-words whitespace-pre-wrap">
         {body}
       </p>
     </div>

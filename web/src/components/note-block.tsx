@@ -150,7 +150,7 @@ export function NoteBlock({
 
       {editing ?? (
         <div className="bg-card">
-          <p className="max-w-[62ch] px-4 py-3.5 font-serif text-[16px] leading-[1.65] whitespace-pre-wrap">{note.text}</p>
+          <p className="max-w-[62ch] px-4 py-3.5 font-sans text-[16px] leading-[1.65] whitespace-pre-wrap">{note.text}</p>
         </div>
       )}
 

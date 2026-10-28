@@ -97,8 +97,17 @@ company or stops email on its own.
 - **`contact_check`** before reaching anyone at a company. A near name or a tie is a question for him. "Not in
   Knock" means ask once whether to add it; on his yes, run the `add_command` it gives in the live checkout.
 - **`intake`** when he pastes people (any company, up to 20). It records them as found, not contacted, and gives
-  each a route with its reason. `email` means draft through the steps above; `linkedin_note` means he writes and
-  sends the note himself; `wait`, `find_someone_else` and `stop` are said in one line. It never sends.
+  each a route with its reason. It never sends. Call it once per paste; a repeat or an added email updates the person
+  already on record, but ask him before you re-call it for any other reason.
+  - **Channel.** An address he gives (for example from Apollo screenshots) is the email channel and needs no source
+    page. A LinkedIn profile with no address is the connect channel. When one paste has both and he wants the
+    connect, pass `channel: "linkedin"`; the address stays on record.
+  - `email`: draft that person now through the steps above and queue the draft in the Outbox. Do not ask first; he
+    checks every draft there. Pick the strongest of the three strategies per person, as step 3 says.
+  - `linkedin_note`: he writes and sends the note himself.
+  - `wait` and `find_someone_else` are a one-line heads-up (a full wave, a paused company, a reply elsewhere, a role
+    outside engineering), never a reason to skip someone. Only `stop` ends a person, and it means a no-go, said no or
+    already asked.
 - **`log_sent`** only after he says he sent LinkedIn requests: each person, the exact note he sent (empty if
   none) and `at` when it was not just now. It records requests only, never an email, accept, reply or undo.
 

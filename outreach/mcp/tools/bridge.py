@@ -26,7 +26,7 @@ import re
 import shlex
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from difflib import get_close_matches
 from pathlib import Path
@@ -312,7 +312,8 @@ def _known_facts(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row], c: _Comp
             name=r["name"], title=title, role_kind=r["role_kind"], seniority=seniority(title, cfg),
             tenure_months=tenure.get(r["person_id"]), no_go=r["person_id"] in no_go_people,
             said_no=r["person_id"] in said_no, asked_on=_asked_on(outbound, r["person_id"]), email_code=code,
-            has_email=r["email"] is not None, recruiter_blocked=r["role_kind"] == "recruiter" and others)
+            has_email=r["email"] is not None, recruiter_blocked=r["role_kind"] == "recruiter" and others,
+            wants_email=r["email"] is not None and r["channel"] == "email")
     return out
 
 
@@ -486,7 +487,11 @@ class IntakePerson(Input):
     company: str | None = Field(None, min_length=1, max_length=200)
     company_id: int | None = Field(None, ge=1, le=MAX_ID, description="When contact_check named the company.")
     linkedin_url: str | None = Field(None, max_length=300)
-    email: str | None = Field(None, max_length=254, description="Only an address he gave or a page publishes.")
+    email: str | None = Field(None, max_length=254, description="Only an address he gave (for example from Apollo) "
+                                                                "or a page publishes. A page is not needed.")
+    channel: Literal["linkedin", "email"] | None = Field(
+        None, description="How he wants this person reached. Default: email when an address is given, else "
+                          "linkedin. email needs an address on record; the address stays on record either way.")
     email_source: EmailSourceIn | None = Field(None, description="The page that publishes or verifies the email.")
     tenure_months: int | None = Field(None, ge=0, le=600)
     source_text: str | None = Field(None, max_length=8000, description="What he pasted about them (data).")
@@ -567,7 +572,8 @@ def intake(ctx: Ctx, args: IntakeInput) -> dict:
                 rec = recorded.get(i)
                 pid = rec["person_id"] if rec else None
                 if pid is not None and pid in facts:
-                    listed.append(facts[pid])
+                    asked = args.people[i].channel or ("email" if args.people[i].email else "linkedin")
+                    listed.append(replace(facts[pid], wants_email=facts[pid].has_email and asked == "email"))
                 else:
                     no_go, said_no = _stops_elsewhere(conn, args.people[i].linkedin_url, pid, no_go_people)
                     listed.append(_unknown_facts(args.people[i].name, args.people[i].title,
@@ -593,7 +599,9 @@ def intake(ctx: Ctx, args: IntakeInput) -> dict:
                     "message": rec["message"] if rec else None, **UNTRUSTED}
     return {"companies": companies, "people": results, "linkedin_week": week,
             "next": "People with route linkedin_note: he writes and sends the notes, then log_sent after he says "
-                    "sent. Route email: draft with save_draft per the cold-email skill. Nothing was sent."}
+                    "sent. Route email: draft each one now with save_draft per the cold-email skill and tell him "
+                    "it is in the Outbox; do not ask first. A wait or find_someone_else is a heads-up, not a "
+                    "stop, except for a person or company no-go, said no or already asked. Nothing was sent."}
 
 
 # ---------------------------------------------------------------------------------------------- log_sent
@@ -783,7 +791,8 @@ def log_sent(ctx: Ctx, args: LogSentInput) -> dict:
 
 # ---------------------------------------------------------------------------------------------- the tools
 
-_PEOPLE_GRANTS = {"person": Grant(insert=True, update=frozenset({"profile_text", "notes", "updated_at", "revision"})),
+_PEOPLE_GRANTS = {"person": Grant(insert=True, update=frozenset({"email", "linkedin_url", "channel", "linkedin_reason",
+                                                                 "profile_text", "notes", "updated_at", "revision"})),
                   "person_source": Grant(insert=True), "event": Grant(insert=True)}
 
 TOOLS = (
@@ -799,9 +808,10 @@ TOOLS = (
              ContactCheckInput, contact_check),
     ToolSpec("intake",
              "Record the people Devanshu pasted (1 to 20, any companies): name, title, company, and a LinkedIn "
-             "link, email with its page, tenure and his paste when given. Each is stored as found, not contacted, "
-             "with a route: linkedin_note, email, wait, find_someone_else or stop, each with a reason. Never "
-             "sends. A second identical call writes nothing.",
+             "link, email (a page is optional), channel, tenure and his paste when given. Each is stored as found, "
+             "not contacted, with a route: linkedin_note, email, wait, find_someone_else or stop, each with a "
+             "reason. Someone already on record at the company (same name, nothing conflicting) is filled in "
+             "place, never added twice. Never sends. A second identical call writes nothing.",
              IntakeInput, intake, _PEOPLE_GRANTS),
     ToolSpec("log_sent",
              "Call only after Devanshu says he sent these LinkedIn requests. Records each request he sent (who, "

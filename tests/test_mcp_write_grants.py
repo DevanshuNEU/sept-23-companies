@@ -19,6 +19,8 @@ from tests.test_drafts_checks import BODY, FIXTURE_BANNED
 READER_BODY = "We build tools for small teams and ship every week. " * 12
 
 INSERT = Grant(insert=True)
+PERSON_UPDATE = frozenset({"email", "linkedin_url", "channel", "linkedin_reason", "profile_text", "notes",
+                           "updated_at", "revision"})
 PINNED = {
     "record_research": {"evidence": INSERT, "event": INSERT},
     "flag_review": {"review_item": INSERT, "event": INSERT},
@@ -29,7 +31,7 @@ PINNED = {
     "save_followup": {"event": INSERT,
                       "message": Grant(update=frozenset({"state", "subject", "body", "checks", "saved_by",
                                                          "updated_at", "revision"}))},
-    "add_people": {"person": Grant(insert=True, update=frozenset({"profile_text", "notes", "updated_at", "revision"})),
+    "add_people": {"person": Grant(insert=True, update=PERSON_UPDATE),
                    "person_source": INSERT, "event": INSERT},
     "save_linkedin_note": {"event": INSERT,
                            "linkedin_draft": Grant(insert=True, update=frozenset({
@@ -43,7 +45,7 @@ PINNED = {
                           "linkedin_draft": Grant(insert=True, update=frozenset({
                               "posting_id", "body", "reason_line", "facts", "checks", "prepared_by_version",
                               "updated_at", "revision"}))},
-    "intake": {"person": Grant(insert=True, update=frozenset({"profile_text", "notes", "updated_at", "revision"})),
+    "intake": {"person": Grant(insert=True, update=PERSON_UPDATE),
                "person_source": INSERT, "event": INSERT},
     "log_sent": {"linkedin_log": INSERT, "outreach_touch": INSERT, "event": INSERT},
 }
@@ -139,7 +141,7 @@ class GrantsCase(McpCase):
 
     def test_intake_cannot_write_beyond_its_grants(self):
         self.check_tool("intake", [
-            ("UPDATE person SET email = 'new@acme.example' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET tz = 'UTC' WHERE person_id = ?", (self.pat,)),
             ("UPDATE person SET role_kind = 'founder', title = 'CEO' WHERE person_id = ?", (self.pat,)),
             ("INSERT INTO person(company_id, name, role_kind, channel, linkedin_reason, added_by, created_at, "
              "updated_at) VALUES (?, 'Dev Anshu', 'engineer', 'linkedin', 'no_email', 'devanshu', ?, ?)",
@@ -236,7 +238,7 @@ class GrantsCase(McpCase):
 
     def test_add_people_cannot_write_beyond_its_grants(self):
         self.check_tool("add_people", [
-            ("UPDATE person SET email = 'new@acme.example' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET tz = 'UTC' WHERE person_id = ?", (self.pat,)),
             ("UPDATE person SET company_id = ? WHERE person_id = ?", (seed.company(self.db, "Elsewhere"), self.pat)),
             ("UPDATE person SET added_by = 'claude' WHERE person_id = ?", (self.pat,)),
             ("UPDATE person SET role_kind = 'founder', title = 'CEO' WHERE person_id = ?", (self.pat,)),

@@ -10,14 +10,18 @@ setting can change, `#9 <the rule>`. First match wins:
    this person was asked under `linkedin.rotate_days` ago.
 3. find_someone_else: this person was asked longer ago with no answer; their role is outside `route.reach_kinds`
    (advice only: the note is still his pick); a recruiter while anyone else at the company is known (#9).
-4. wait: the company's wave is full (`queue.requests_per_company` people inside `linkedin.rotate_days`), until it
-   is free.
+4. email: he gave the address and the channel is email (`wants_email`, #9 ruling 2026-10-28): it goes to the Outbox
+   with a draft whatever the role basis or the room; he checks it there.
 5. email: `outreach.plan.people.pick_channel` already said email (a published or verified address, for a founder,
    an HN post that asks, or a company of recruiters only) and the company has room (`email.people_per_company`).
    The sender then holds every other #9 email rule: the ramp, 3 a day per company, 60 minutes apart.
 6. wait: no LinkedIn requests left in the 7-day windows (`linkedin.plan_quota` for a company on today's queue,
    else `linkedin.hard_total`).
 7. linkedin_note.
+
+A full wave (`queue.requests_per_company` people inside `linkedin.rotate_days`) is a pacing size for the daily
+queue, not a gate on people he found himself (#9 ruling 2026-10-28): it adds a heads-up to the reason of rules 4 and
+7 and changes no verdict.
 
 `route.prefer_ic_in_role` (his call, not measured yet) only orders people inside one company (`order_people`); it
 never hides a person or a company. Recruiters go last whatever it says.
@@ -71,6 +75,7 @@ class PersonFacts:
     email_code: str | None      # pick_channel's code when it said email, else None
     has_email: bool             # an address is known, usable or not
     recruiter_blocked: bool     # a recruiter while someone else at the company is known
+    wants_email: bool = False   # he gave the address and the channel is email (#131): it goes to the Outbox
 
 
 @dataclass(frozen=True)
@@ -180,27 +185,34 @@ def route_person(p: PersonFacts, c: CompanyFacts, budget: Budget, taken: Taken, 
         return Route("find_someone_else", f"{p.name} is a recruiter and {c.name} has someone else on record; "
                                           "recruiters come last.", "#9 recruiters last")
     wave_size = cfg.get("queue", "requests_per_company")
-    if c.wave_people + taken.wave >= wave_size:
+    reached = c.wave_people + taken.wave
+    heads_up = ""
+    if reached >= wave_size:
         free = f"; free again {day_text(c.free_on)}" if c.free_on is not None else ""
-        return Route("wait", f"{c.wave_people + taken.wave} people at {c.name} are in this wave (up to "
-                             f"{wave_size}){free}.", "queue.requests_per_company")
+        heads_up = (f" {reached} people at {c.name} are already reached or queued (a wave is {wave_size}{free}); "
+                    "your call.")
     room = cfg.get("email", "people_per_company") - c.email_people - taken.email
+    if p.wants_email and p.has_email:
+        crowded = f" {c.name} already has {c.email_people + taken.email} on email; your call." if room <= 0 else ""
+        return Route("email", f"Email: you gave the address, so it goes to the Outbox with a draft and you check "
+                              f"it there. The sender sends it inside the ramp, at most 3 a day per company, 60 "
+                              f"minutes apart.{crowded}{heads_up}", "#9 supplied email")
     if p.email_code is not None and room > 0:
         return Route("email", f"Email: {_EMAIL_WHY.get(p.email_code, 'the address is published or verified')}. "
-                              "The sender sends it inside the ramp, at most 3 a day per company, 60 minutes apart.",
-                     "email.people_per_company")
+                              f"The sender sends it inside the ramp, at most 3 a day per company, 60 minutes "
+                              f"apart.{heads_up}", "email.people_per_company")
     if budget.linkedin_left - taken.linkedin <= 0:
         limit = cfg.get("linkedin", budget.key.split(".", 1)[1])
         return Route("wait", f"No LinkedIn requests left in the last 7 days ({limit} is the limit).", budget.key)
     if p.email_code is not None:
         held = f"; {c.name} already has {cfg.get('email', 'people_per_company')} people on email"
     elif p.has_email:
-        held = "; email needs a published or verified address with its page"
+        held = "; the address stays on record"
     else:
         held = ""
     counts = "the plan's 150" if budget.key == "linkedin.plan_quota" else "the 200 a week"
     return Route("linkedin_note", f"LinkedIn note: {p.role_kind} ({p.title or 'no title'}{_tenure(p.tenure_months)})"
-                                  f"{held}; it counts toward {counts}.", budget.key)
+                                  f"{held}; it counts toward {counts}.{heads_up}", budget.key)
 
 
 # ---------------------------------------------------------------------------------------------- one company

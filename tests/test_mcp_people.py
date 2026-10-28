@@ -248,6 +248,46 @@ class SameNameTest(PeopleCase):
         self.assertEqual(res["flags"], [f"same_name_as:{pat}"])
         self.assertEqual(self.count(), 2)
 
+    def test_a_new_email_for_someone_known_by_name_and_linkedin_fills_the_email_in_place(self):
+        known = seed.person(self.db, self.acme, "Pat Lee", email=None, channel="linkedin",
+                            linkedin_url="https://www.linkedin.com/in/pat-lee")
+        res = self.add(person("Pat Lee", email="Pat@Acme.Example"))["results"][0]
+        self.assertEqual((res["person_id"], res["created"], res["flags"]), (known, False, ["duplicate", "filled_email"]))
+        row = self.people()[0]
+        self.assertEqual((self.count(), row["email"], row["channel"], row["linkedin_reason"], row["revision"]),
+                         (1, "pat@acme.example", "email", None, 2))
+        self.assertEqual(row["linkedin_url"], "https://www.linkedin.com/in/pat-lee")
+
+    def test_a_linkedin_url_for_someone_known_by_name_and_email_fills_the_profile_in_place(self):
+        known = seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example")
+        res = self.add(person("Pat Lee", linkedin_url="https://linkedin.com/in/Pat-Lee/"))["results"][0]
+        self.assertEqual((res["person_id"], res["created"], res["flags"]),
+                         (known, False, ["duplicate", "filled_linkedin_url"]))
+        self.assertEqual((self.count(), self.people()[0]["linkedin_url"], self.people()[0]["channel"]),
+                         (1, "https://www.linkedin.com/in/pat-lee", "email"))
+
+    def test_a_namesake_with_a_different_address_or_profile_is_another_person(self):
+        seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example")
+        seed.person(self.db, self.acme, "Pat Lee", email=None, channel="linkedin",
+                    linkedin_url="https://www.linkedin.com/in/pat-lee-1")
+        before = self.count()
+        res = self.add(person("Pat Lee", email="other@acme.example",
+                              linkedin_url="https://www.linkedin.com/in/pat-lee-2"))["results"][0]
+        self.assertTrue(res["created"])
+        self.assertEqual(self.count(), before + 1)
+
+    def test_filling_an_email_never_overwrites_one_already_on_record(self):
+        known = seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example",
+                            linkedin_url="https://www.linkedin.com/in/pat-lee")
+        res = self.add(person("Pat Lee", email="pat@acme.example", linkedin_url="https://linkedin.com/in/pat-lee"))
+        self.assertEqual(res["results"][0]["flags"], ["duplicate"])
+        self.assertEqual((self.people()[0]["person_id"], self.people()[0]["revision"]), (known, 1))
+
+    def test_an_email_he_gave_needs_no_source_page_and_the_event_says_so(self):
+        self.add(person(email="pat@acme.example"))
+        detail = self.db.execute("SELECT detail FROM event WHERE entity = 'person'").fetchone()[0]
+        self.assertIn('"email": "provided"', detail)
+
     def test_a_known_person_who_said_no_is_refused_and_left_as_they_are(self):
         sid = seed.person(self.db, self.acme, "Sid No", email="sid@acme.example")
         seed.touch(self.db, sid, "replied", reply_kind="said_no")

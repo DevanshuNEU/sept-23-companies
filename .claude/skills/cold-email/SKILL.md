@@ -18,6 +18,13 @@ get past.
 
 ## Steps
 
+0. **Read his voice first.** Once at the start of every batch, before any drafting, read these DevVault files in full:
+   `~/Desktop/DevVault/skills/human-voice.md` (the Posture section above all), `~/Desktop/DevVault/lens/voice.md`,
+   and `~/Desktop/DevVault/lens/contexts/context_outreach.md` (the overlay for the reader's kind). They are his
+   rules for how he sounds. They are voice only: where they disagree with #9 or with this file on a limit or a
+   format (one draft, not versions; no authorship gate; 80 to 120 words; 2 links; OPT line for recruiters only;
+   no `lint_draft.sh`), #9 and this file win. If a file cannot be read, say so in the report and go on with the Voice
+   rules below.
 1. **Inputs.** Per person: name, company, title, the pasted LinkedIn text, and an email address only if he gave
    one (used exactly as given, never guessed). Set `role_kind` from the title: engineer, manager (engineering
    manager, tech lead, head of, VP), founder (founder, CEO, CTO at a small startup), recruiter (recruiter, talent,
@@ -72,8 +79,8 @@ get past.
    - **Refine.** Take the winner, name its weakest points (a soft hook, a spare sentence, a vague claim, a heavy ask),
      fix only those, and compare the revision with the original. Keep the revision only if it is clearly better; stop
      when a change adds words, polish or cleverness without adding a reason to reply.
-   - **Keep his voice** (Draft rules, Voice): short, blunt, humble, human. No corporate phrasing, no big claims, no
-     cleverness for its own sake.
+   - **Keep his voice** (Draft rules, Voice): run the read-back test on the winner, cut every model tell and every
+     line he would not say. No corporate phrasing, no big claims, no cleverness for its own sake.
    - **Decide alone.** Never show him the other drafts, the angles or any ranking, and never ask him to pick. Only the
      one final email goes to `save_draft`. Done when every rule below holds for it.
 6. **Save.** `save_draft` with `person_id`, `subject`, `body`, `hook`, `hook_on` (events only) and `project`. It
@@ -113,10 +120,29 @@ company or stops email on its own.
 
 ## Draft rules
 
-**Voice.** His, cleaned up. In his own messages he writes very short sentences, says what he wants straight out
-("I want in"), asks direct questions, and is warm and a little vulnerable without begging. Keep all of that and
-add proper capitalization, full spelling and zero typos. Contractions, plain words, one blunt ask, humble and
-kind. Specific beats warm: name the thing they did, never praise them.
+**Voice.** His, not a model's. A Cartesia recruiter called two of his messages "generated" although both passed every
+style check, so passing the checks proves nothing; the sound has to be his. The full doctrine is in DevVault
+(`skills/human-voice.md`, `lens/voice.md`, `skills/connect.md`); these are the parts that apply to an email.
+- **Register.** Very short sentences, contractions, plain words, a direct question, a blunt line that is allowed to
+  be a fragment ("I want it."). Warm and a little vulnerable, sometimes dry. His own messages are the anchor: "do
+  you need me? i will be super awesome for your team. i guarantee" and "i soo wanted this to work". Take the
+  attitude, not the typos: proper capitalization and spelling stay.
+- **Posture: calm, never eager.** He is the one being sought. State what he wants flat, once. Never grateful for the
+  chance, never selling past the point. Banned: "glad to", "happy to", "I'd love", "looking forward", "excited",
+  "confident I can", "thank you for being open", "I'm passionate". Own a gap in one flat clause. No bluff.
+- **Never recite their profile or resume back** ("Your resume lists...", "I saw that you built..."). Name the one
+  thing, then give one plain reaction or tie to his own work, in his words. A reader who sees their own bio quoted
+  hears a script.
+- **No model rhythm.** Not "it's not X, it's Y". No neat closing line that calls back to the opening. Not every
+  sentence the same length: mix a five-word one with a longer one. No asides added to sound loose ("honestly",
+  "funny enough"). No house words: genuinely, curious, no agenda, either way, passionate, thrilled, leverage.
+- **Fresh sentences per person.** Never reuse a sentence across people, and do not open every email the same way.
+  The beats repeat across people; the wording does not. "I want in" is his line, so say it a different way each
+  time.
+- **No system words.** Not lane, wave, hook, evidence, req ID unless the posting uses it, stage, fit.
+- **Read-back test.** Read the draft as the recipient: does he sound like he is chasing? Rewrite. Then read it aloud
+  as Devanshu to a friend: cut every line he would not say. If it still sounds like a template, it is one.
+- **Specific beats warm:** name the thing they did, never praise them.
 
 **Length.** 80 to 120 words in the body, counting greeting and sign-off, links excluded. Recruiters about 90.
 

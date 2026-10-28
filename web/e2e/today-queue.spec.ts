@@ -75,6 +75,31 @@ test('the company queue: facts, the search link, a pasted log, a saved search an
   expect(foreign).toEqual([]);
 });
 
+// Flag a bad pick (2026-10-28): Wrong company and Wrong location are chips, and Other asks for his own words first.
+test('Not now: Wrong location is a chip, and Other takes his own words', async ({ page, consoleErrors }) => {
+  await page.clock.install({ time: new Date('2026-11-10T15:14:00Z') });
+  await page.goto('/today?scenario=queue');
+  const panel = page.getByRole('region', { name: 'Selected company' });
+  await expect(panel.getByRole('heading', { level: 2, name: 'Pylon' })).toBeVisible();
+
+  await page.locator('body').press('p');
+  const chips = panel.getByRole('group', { name: 'Not now for Pylon' });
+  await expect(chips.getByRole('button', { name: /Wrong company/ })).toBeVisible();
+  await expect(chips.getByRole('button', { name: /Wrong location/ })).toBeVisible();
+  await chips.screenshot({ path: '../.context/not-now-chips.png' });
+
+  await page.locator('body').press('8');
+  const why = chips.getByRole('textbox', { name: 'Why' });
+  await expect(why).toBeFocused();
+  await why.fill('Based in Brazil, I cannot apply');
+  await page.screenshot({ path: '../.context/not-now-other.png' });
+  await why.press('Enter');
+  await expect(page.getByText('Passed. Added Retell AI.')).toBeVisible();
+  await page.clock.runFor(9000);
+  await expect(page.getByText('8 picks, 1 passed')).toBeVisible();
+  expect(consoleErrors).toEqual([]);
+});
+
 // Not now and the bench (top picks, 2026-10-26): a cooldown, never a no-go; the bench's best company takes the place.
 test('Not now slides in the next best company, and More options adds one to today', async ({ page, consoleErrors }) => {
   await page.clock.install({ time: new Date('2026-11-10T15:14:00Z') });

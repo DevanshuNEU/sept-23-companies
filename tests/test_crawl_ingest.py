@@ -260,6 +260,27 @@ class DoubtfulBoardTests(IngestTestCase):
         self.assertIn("301", item["reason"])
         self.assertEqual(item["evidence_key"], f"board-doubtful:{self.board_id}")
 
+    def size(self, low, high):
+        self.conn.execute(
+            "INSERT INTO evidence(company_id, fact, value, num_low, num_high, confidence, source_kind, recorded_at) "
+            "VALUES (?, 'size', ?, ?, ?, 'estimate', 'builtin', ?)", (self.company, f"{low}-{high}", low, high, T0))
+
+    def test_a_company_already_known_to_be_big_is_not_doubted_for_a_big_board(self):
+        # NVIDIA's Workday board on NVIDIA: right, and the size gate already hides it. 47 such items would be noise.
+        self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
+        self.set_found_by("stapply_name")
+        self.size(501, 2000)
+        self.read(ok(many_jobs(301)))
+        self.assertEqual(self.items("flagged"), [])
+        self.assertEqual(ingest.recheck_big_boards(self.conn, T0), 0)
+
+    def test_a_company_known_to_be_small_with_a_big_board_is_doubtful(self):
+        self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
+        self.set_found_by("stapply_name")
+        self.size(201, 500)  # Cadence (cadence.care): 201 to 500 people, and Cadence Design Systems' 674 jobs
+        self.read(ok(many_jobs(301)))
+        self.assertEqual(len(self.items("flagged")), 1)
+
     def test_a_board_found_by_hand_is_not_held_to_the_size_rule(self):
         self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
         self.set_found_by("hand")

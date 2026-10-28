@@ -44,6 +44,7 @@ __all__ = ["ReadOutcome", "read_board", "list_board", "full_read_due", "DOUBTFUL
 
 # Ruling 8: every LCA company files 25 or fewer, so a board listing more jobs than this is likely another company's.
 DOUBTFUL_JOBS = 300
+SIZE_CAP = 300  # a company over this many people is hidden by the size gate (#9), so a big board is no surprise
 # Boards found by a name match or a slug guess: either can belong to another company with the same name.
 GUESSED_BOARDS = ("stapply_name", "slug_probe")
 # The weekly full read: once no posting of a board has been listed for this long, the list goes out with no
@@ -230,6 +231,16 @@ def _company_name_keys(conn: sqlite3.Connection, company_id: int) -> set[str]:
     return keys
 
 
+_KNOWN_BIG = (f"SELECT 1 FROM company_fact WHERE fact = 'size' AND num_low > {SIZE_CAP} AND company_id IN "
+              "(SELECT company_id FROM company WHERE company_id = :c OR merged_into = :c) LIMIT 1")
+
+
+def _known_big(conn: sqlite3.Connection, company_id: int) -> bool:
+    """The company's best size fact says it has more than 300 people. A big board is then no sign of a wrong match
+    (and the size gate already hides the company), so it raises no item."""
+    return conn.execute(_KNOWN_BIG, {"c": company_id}).fetchone() is not None
+
+
 def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResult, now: str) -> None:
     """Ruling 8: raise one `flagged` item when the board's org name is none of the company's names, or a company with
     LCA evidence (a filer of 25 or fewer) or a board found by a name match or a guessed slug has over DOUBTFUL_JOBS
@@ -251,7 +262,7 @@ def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResul
                         (board.company_id,)).fetchone():
             why.append(f"it lists {jobs} jobs, more than {DOUBTFUL_JOBS} for a company that files 25 or "
                        "fewer LCAs")
-        elif board.found_by in GUESSED_BOARDS:
+        elif board.found_by in GUESSED_BOARDS and not _known_big(conn, board.company_id):
             why.append(f"it lists {jobs} jobs, more than {DOUBTFUL_JOBS} for a company matched by name only")
     if not why:
         return
@@ -278,6 +289,8 @@ def recheck_big_boards(conn: sqlite3.Connection, now: str) -> int:
         f"SELECT b.board_id, b.company_id, b.ats, b.token, b.found_by, c.name, count(*) AS jobs FROM board b "
         f"JOIN company c ON c.company_id = b.company_id JOIN posting p ON p.board_id = b.board_id "
         f"AND p.closed_at IS NULL WHERE b.active = 1 AND b.found_by IN ({marks}) "
+        f"AND NOT EXISTS (SELECT 1 FROM company_fact f WHERE f.company_id = b.company_id AND f.fact = 'size' "
+        f"AND f.num_low > {SIZE_CAP}) "
         f"GROUP BY b.board_id HAVING count(*) > ? ORDER BY b.board_id", (*GUESSED_BOARDS, DOUBTFUL_JOBS)).fetchall()
     raised = 0
     for r in rows:

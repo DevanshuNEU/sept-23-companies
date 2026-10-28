@@ -137,7 +137,7 @@ Rules (each a regex or count on the body with links removed, case-insensitive, `
 
 **Interfaces:**
 - Consumes: `load_voice_pack`, `read_evidence`, `check_brief` (Tasks 1, 2); `voice_checks` through `run_checks(..., ground=...)` (Task 3).
-- Gate order inside `save_draft`, before the transaction opens: load the pack and evidence (`voice_unreadable` on failure); `check_brief` false raises `ToolError("no_brief", ...)` when `brief_id` is empty-looking is impossible (the field is required), so use `stale_brief` for a mismatch with the fix "Call draft_brief for this person again, then save."
+- Gate order inside `save_draft`, before the transaction opens: load the pack and evidence (`voice_unreadable` on failure); a missing `brief_id` is already refused by the input schema; a `brief_id` that `check_brief` rejects raises `ToolError("stale_brief", ...)` with the fix "Call draft_brief for this person again, then save." (this covers a wrong id, another person's id and a voice file or me.md that changed since the brief).
 - `ground` text passed to `checks_of`: evidence + the person's `profile_text` and notes + the hook.
 - The saved `checks` JSON gains one entry `{"code": "voice_brief", "severity": "pass", "title": "Voice pack read", "detail": "brief <id>, voice <first 12 of digest>", "fix": null, "spans": []}`.
 

@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 
 from outreach.outcomes.context import build_context
 from outreach.plan.config import default_plan_config
-from outreach.plan.fresh import load_openings, load_passes
+from outreach.plan.fresh import load_openings, load_passes, without_turned_down
 from outreach.ranking.common import canonical_ids
 from outreach.sources.boards import BoardRef, add_board
 from outreach.store import log_touch
@@ -92,11 +92,13 @@ class PicksCase(ApiCase):
     def names(self, rows):
         return [r["company"]["name"] for r in rows]
 
-    def pass_(self, name, reason="too_big", *, key=None, revision=1, request_id=None, note=None):
+    def pass_(self, name, reason="too_big", *, key=None, revision=1, request_id=None, note=None, posting_id=None):
         eid = self.entries[name]
         body = {"reason": reason, "idempotencyKey": key or f"plan:{eid}:pass", "revision": revision}
         if note is not None:
             body["note"] = note
+        if posting_id is not None:
+            body["postingId"] = posting_id
         return self.post(f"/api/plan/{eid}/pass", body, key=request_id)
 
     def add(self, name, *, key=None, request_id=None):
@@ -385,3 +387,33 @@ class FlagTest(PicksCase):
         self.pass_("Aster", "visa")
         self.assertIn(self.ids["Aster"], self.passes())
         self.assertIsNone(self.posting_row(self.posts["Aster"])["closed_at"])
+
+    # The final review (2026-10-28): four gaps in the first pass.
+    def test_wrong_company_on_a_posting_with_no_board_closes_that_posting(self):
+        self.assertIsNone(self.count("SELECT board_id FROM posting WHERE posting_id = ?", self.posts["Aster"]))
+        self.pass_("Aster", "wrong_company")
+        self.assertEqual(self.posting_row(self.posts["Aster"])["close_reason"], "hand")
+        self.assertIsNone(self.posting_row(self.second)["closed_at"])
+
+    def test_the_flag_is_in_needs_you_though_the_pick_left_the_list(self):
+        self.pass_("Aster", "wrong_location", note="Brazil only")
+        res = self.get("/api/needs-you")
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertIn("You flagged", res.text)
+
+    def test_the_flag_hits_the_posting_the_client_names(self):
+        self.pass_("Aster", "wrong_location", posting_id=self.second)
+        self.assertEqual(self.posting_row(self.second)["close_reason"], "hand")
+        self.assertIsNone(self.posting_row(self.posts["Aster"])["closed_at"])
+        self.assertEqual(self.detail("Aster")["posting_id"], self.second)
+
+    def test_a_posting_of_another_company_is_ignored(self):
+        self.pass_("Aster", "wrong_location", posting_id=self.posts["Beacon"])
+        self.assertIsNone(self.posting_row(self.posts["Beacon"])["closed_at"])
+        self.assertEqual(self.posting_row(self.posts["Aster"])["close_reason"], "hand")  # its own opening instead
+
+    def test_a_role_he_turned_down_is_not_the_rankers_best_posting_either(self):
+        self.pass_("Aster", "role")
+        self.assertIsNone(without_turned_down(self.conn, self.posts["Aster"]))
+        self.assertEqual(without_turned_down(self.conn, self.second), self.second)
+        self.assertIsNone(without_turned_down(self.conn, None))

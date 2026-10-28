@@ -481,7 +481,7 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
     write({
       id,
       label,
-      afterCommit: dataError ? `${label} The ${reason === 'wrong_company' ? 'board' : 'posting'} is fixed and in Needs you.` : `${label} It comes back in 14 days, or sooner with a new opening.`,
+      afterCommit: dataError ? `${label} Your flag is in Needs you.` : `${label} It comes back in 14 days, or sooner with a new opening.`,
       patches: [
         {
           key: queryKeys.plan,
@@ -502,7 +502,7 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
       ],
       commit: (o) =>
         sendVersioned(queryClient, `plan:${row.entryId}`, row.revision, () => cachedRow(queryClient, row.entryId)?.revision, o, (revision) =>
-          client.passPick(row.entryId, { reason, ...(note ? { note } : {}), idempotencyKey: `plan:${row.entryId}:pass` }, revision, o).then(
+          client.passPick(row.entryId, { reason, ...(note ? { note } : {}), ...(row.queue?.opening ? { postingId: row.queue.opening.postingId } : {}), idempotencyKey: `plan:${row.entryId}:pass` }, revision, o).then(
             (res) => {
               // The API chose from the same bench; when another company came in, say which.
               if ((res.added?.company.id ?? null) !== (next?.company.id ?? null)) toast(res.text);

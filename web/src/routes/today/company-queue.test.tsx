@@ -329,7 +329,12 @@ describe('Not now (top picks)', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Cerebrium' })).toBeInTheDocument();
     expect(passed).not.toHaveBeenCalled(); // still inside the undo window
     await leavePage();
-    expect(passed).toHaveBeenCalledWith(pylon.entryId, { reason: 'too_big', idempotencyKey: `plan:${pylon.entryId}:pass` }, pylon.revision, expect.anything());
+    expect(passed).toHaveBeenCalledWith(
+      pylon.entryId,
+      { reason: 'too_big', ...(pylon.queue?.opening ? { postingId: pylon.queue.opening.postingId } : {}), idempotencyKey: `plan:${pylon.entryId}:pass` },
+      pylon.revision,
+      expect.anything(),
+    );
     await waitFor(() => expect(options().some((o) => o.getAttribute('data-provisional'))).toBe(false));
     expect(option(1)).toHaveTextContent('Retell AI');
     expect(option(1)).toHaveTextContent('New opening, 3 hours ago');

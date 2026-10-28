@@ -42,6 +42,14 @@ def held_companies(conn: sqlite3.Connection) -> frozenset[int]:
                          if row["held_by_touch"] is not None or company_reply_held(row))
 
 
+def flagged_by_him(conn: sqlite3.Connection, canon: Mapping[int, int]) -> frozenset[int]:
+    """The companies with an open item he raised himself on Today (Not now: Wrong company, Wrong location or his own
+    words). The pick leaves the list at once, so without this the item would sit in Data gaps, out of his sight."""
+    return frozenset(canon.get(r[0], r[0]) for r in conn.execute(
+        "SELECT company_id FROM review_item WHERE state = 'open' AND kind = 'flagged' AND raised_by = 'daily_list' "
+        "AND evidence_key LIKE 'pick-flag:%'"))
+
+
 def attention(conn: sqlite3.Connection, *, today: str, planned_days: int,
               canon: Mapping[int, int] | None = None) -> frozenset[int]:
     """The companies whose open items belong in Needs you: in play, being emailed, or held by a reply. `canon` as
@@ -49,7 +57,7 @@ def attention(conn: sqlite3.Connection, *, today: str, planned_days: int,
     canon = canonical_ids(conn) if canon is None else canon
     playing = in_play(conn, today=today, planned_days=planned_days, canon=canon)
     mailing = emailing(conn, today=today, planned_days=planned_days, canon=canon)
-    return frozenset(playing) | mailing | held_companies(conn)
+    return frozenset(playing) | mailing | held_companies(conn) | flagged_by_him(conn, canon)
 
 
 def crawler_scope(conn: sqlite3.Connection, *, today: str, cfg: ReviewConfig,

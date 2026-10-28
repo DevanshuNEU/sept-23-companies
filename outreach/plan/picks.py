@@ -16,6 +16,7 @@ from datetime import date, datetime
 
 from outreach.plan.config import PlanConfig
 from outreach.plan.email_fit import email_fit, email_lane, load_email_facts
+from outreach.plan.fresh import without_turned_down
 from outreach.plan.outbound import load_outbound
 from outreach.plan.prospects import build_why, load_postings, load_prospects
 from outreach.plan.select import BenchPick, Chosen, Prospect, bench, eligibility, group_of
@@ -76,7 +77,8 @@ def write_pick(conn: sqlite3.Connection, pick: BenchPick, stored: StoredScore, *
     chosen = Chosen(company_id=p.company_id, channel="linkedin_request", person_id=None, group=group_of((lane,), cfg),
                     list_group=lane, channel_reason="find_someone", carried_from=None, first_proposed=None,
                     rotation_from=p.contact.last_person_id if p.contact.status == "stale" else None, opening=opening)
-    posting_id = pick.opening.posting_id if pick.opening is not None else stored.signals.get("best_posting_id")
+    posting_id = pick.opening.posting_id if pick.opening is not None \
+        else without_turned_down(conn, stored.signals.get("best_posting_id"))
     posting = load_postings(conn, [posting_id], cfg).get(posting_id) if posting_id is not None else None
     why = build_why(p, chosen, stored, posting, today=today, cfg=cfg, ranker_version=latest_version(conn) or "")
     rowid = conn.execute("SELECT coalesce(max(rowid), 0) + 1 FROM daily_list_entry").fetchone()[0]

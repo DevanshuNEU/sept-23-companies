@@ -581,7 +581,12 @@ describe('Today as a plan', () => {
     expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
     await leavePage();
     expect(passed).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ reason }), expect.any(Number), expect.anything());
-    expect(passed.mock.calls[0][1]).not.toHaveProperty('note');
+    expect(passed.mock.calls[0]?.[1]).not.toHaveProperty('note');
+    // the posting the pick showed him goes along: the lead opening can change before the pass commits
+    const sent = passed.mock.calls[0];
+    const shown = (await client.plan()).rows.find((r) => r.entryId === sent?.[0])?.queue?.opening?.postingId;
+    if (shown !== undefined) expect(sent?.[1]).toMatchObject({ postingId: shown });
+    else expect(sent?.[1]).not.toHaveProperty('postingId');
   });
 
   it.each([
@@ -613,8 +618,8 @@ describe('Today as a plan', () => {
     fireEvent.submit(screen.getByRole('textbox', { name: 'Why' }).closest('form')!);
     expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
     await leavePage();
-    expect(passed.mock.calls[0][1]).toMatchObject({ reason: 'other' });
-    expect(passed.mock.calls[0][1]).not.toHaveProperty('note');
+    expect(passed.mock.calls[0]?.[1]).toMatchObject({ reason: 'other' });
+    expect(passed.mock.calls[0]?.[1]).not.toHaveProperty('note');
   });
 
   it('Not now after the request is logged is refused up front: he reached them', async () => {

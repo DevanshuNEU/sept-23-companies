@@ -26,6 +26,7 @@ from outreach.plan.capacity import (EmailCapacity, LinkedinCapacity, email_capac
                                     linkedin_capacity, plan_email_slots)
 from outreach.plan.config import PlanConfig, default_plan_config
 from outreach.plan.dates import is_weekday
+from outreach.plan.fresh import without_turned_down
 from outreach.plan.outbound import load_outbound
 from outreach.plan.prospects import build_why, load_postings, load_prospects
 from outreach.plan.replace import OldRow, ReplaceRefused, blockers, delete_plan, old_rows
@@ -157,8 +158,8 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
     for s in ranked:
         stored.setdefault(_survivor(canon, s.company_id), s)
     # A fresh lane row names its new opening; any other row the company's best posting.
-    best = {c.company_id: c.opening.posting_id if c.opening else stored[c.company_id].signals.get("best_posting_id")
-            for c in chosen}
+    best = {c.company_id: c.opening.posting_id if c.opening
+            else without_turned_down(conn, stored[c.company_id].signals.get("best_posting_id")) for c in chosen}
     postings = load_postings(conn, list(best.values()), cfg)
     version = latest_version(conn) or ""
     entries = []

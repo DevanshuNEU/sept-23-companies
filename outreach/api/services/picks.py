@@ -99,6 +99,12 @@ def _snapshot(conn: sqlite3.Connection, survivor: int, row: PlanRow) -> dict:
             "sponsorship": row.queue.sponsorship_line if row.queue is not None else None}
 
 
+def _is_company_posting(conn: sqlite3.Connection, posting_id: int, survivor: int) -> bool:
+    """The posting belongs to this company (or one merged into it): a client cannot flag another company's posting."""
+    row = conn.execute("SELECT company_id FROM posting WHERE posting_id = ?", (posting_id,)).fetchone()
+    return row is not None and survivor_of(merge_parents(conn), row["company_id"]) == survivor
+
+
 def pass_pick(ctx: WriteCtx, entry_id: int, body: PassPickBody, cfg: PlanConfig) -> PassResult:
     conn = ctx.conn
     key = f"pick-passed:{body.idempotency_key}"
@@ -132,8 +138,11 @@ def pass_pick(ctx: WriteCtx, entry_id: int, body: PassPickBody, cfg: PlanConfig)
               "added_company_id": picks[0].prospect.company_id if picks else None,
               "signals": _snapshot(conn, survivor, row) if row is not None else {}}
     # Wrong company, Wrong location and a typed reason act on the pick's posting or board, never on the company.
-    detail.update(apply_flag(conn, reason=body.reason, note=body.note, company_id=survivor, now=ctx.now,
-                             opening=row.queue.opening if row is not None and row.queue is not None else None))
+    shown = row.queue.opening.posting_id if row is not None and row.queue is not None and row.queue.opening else None
+    named = body.posting_id if body.posting_id is not None and _is_company_posting(conn, body.posting_id, survivor) \
+        else shown
+    detail.update(apply_flag(conn, reason=body.reason, note=body.note, company_id=survivor, posting_id=named,
+                             now=ctx.now))
     append_event(conn, entity="company", entity_id=survivor, company_id=survivor, kind=PASSED, actor="devanshu",
                  at=ctx.now, detail=detail, idempotency_key=key)
     return _pass_answer(conn, detail, cfg, ctx.now)

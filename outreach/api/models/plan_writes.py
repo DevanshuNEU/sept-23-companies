@@ -86,6 +86,8 @@ class PassPickBody(WireRequest):
     reason: Literal["visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other",
                     "wrong_company", "wrong_location"] | None = None
     note: str | None = Field(default=None, max_length=PASS_NOTE_MAX)  # his own words; blank is none
+    # The posting the pick showed him when he flagged it: the lead opening can change before the pass commits.
+    posting_id: int | None = Field(default=None, ge=1, le=MAX_ID)
     idempotency_key: str = Field(pattern=TOUCH_KEY)
     revision: int = Field(ge=1)
 

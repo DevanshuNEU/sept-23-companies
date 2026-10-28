@@ -80,7 +80,7 @@ export interface OutreachClient {
   // takes its place, in one write. `idempotencyKey` is `plan:<entryId>:pass`: the same key again answers the same. A stale revision is
   // 'conflict'; a row he already reached is 'not_allowed'. `note` is what he typed under Role not for me or Other (up to 280
   // characters). Wrong company and Wrong location fix the posting or board and give no cooldown.
-  passPick(entryId: Id, input: { reason: PassReason | null; note?: string | null; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PassResult>;
+  passPick(entryId: Id, input: { reason: PassReason | null; note?: string | null; postingId?: Id | null; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PassResult>;
   bench(): Promise<BenchView>; // the next best companies, fresh early career fits first
   /** Adds a bench company after today's last pick; 'not_allowed' with no room this week or a company not on the bench. */
   addFromBench(companyId: Id, input: { idempotencyKey: string }, o: WriteOptions): Promise<PlanRow>;

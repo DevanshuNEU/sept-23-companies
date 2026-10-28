@@ -14,7 +14,6 @@ Everything here runs inside the caller's `run_write` transaction. The company is
 """
 import sqlite3
 
-from outreach.api.models.plan import QueueOpening
 from outreach.review.boardfix import detach_board
 
 __all__ = ["apply_flag"]
@@ -35,24 +34,25 @@ def _raise_item(conn: sqlite3.Connection, *, reason: str, note: str | None, comp
 
 
 def apply_flag(conn: sqlite3.Connection, *, reason: str | None, note: str | None, company_id: int,
-               opening: QueueOpening | None, now: str) -> dict:
-    """Do what the reason says and return what the `pick_passed` event adds to its detail: the note, and the opening's
-    `posting_id` and `title` (null with no opening), whatever the reason."""
-    posting_id = opening.posting_id if opening is not None else None
-    out: dict = {"note": note, "posting_id": posting_id, "title": opening.title if opening is not None else None}
+               posting_id: int | None, now: str) -> dict:
+    """Do what the reason says and return what the `pick_passed` event adds to its detail: the note, and the
+    posting's id and title (null with no posting), whatever the reason. `posting_id` is the posting the pick showed
+    (the caller checks it is the company's own)."""
+    post = conn.execute("SELECT title, location, board_id FROM posting WHERE posting_id = ?", (posting_id,)).fetchone() \
+        if posting_id is not None else None
+    title = post["title"] if post is not None else None
+    out: dict = {"note": note, "posting_id": posting_id if post is not None else None, "title": title}
     if reason not in ("wrong_location", "wrong_company") and not (reason == "other" and note):
         return out
-    location, board_id = "", None
-    if posting_id is not None:
-        post = conn.execute("SELECT location, board_id FROM posting WHERE posting_id = ?", (posting_id,)).fetchone()
-        location, board_id = (post["location"], post["board_id"]) if post is not None else ("", None)
-    if reason == "wrong_location" and posting_id is not None:
+    location = post["location"] if post is not None else ""
+    board_id = post["board_id"] if post is not None else None
+    if post is not None and (reason == "wrong_location" or (reason == "wrong_company" and board_id is None)):
+        # A wrong location, or a wrong company on a posting with no board: this posting is the only thing to fix.
         out["closed"] = conn.execute("UPDATE posting SET closed_at = ?, close_reason = 'hand' "
                                      "WHERE posting_id = ? AND closed_at IS NULL", (now, posting_id)).rowcount
-    if reason == "wrong_company" and board_id is not None:
+    elif reason == "wrong_company" and board_id is not None:
         out["board_id"] = board_id
         out["closed"] = detach_board(conn, board_id, now=now)
-    _raise_item(conn, reason=reason, note=note, company_id=company_id, posting_id=posting_id,
-                board_id=board_id if reason == "wrong_company" else None, title=out["title"], location=location,
-                now=now)
+    _raise_item(conn, reason=reason, note=note, company_id=company_id, posting_id=out["posting_id"],
+                board_id=board_id if reason == "wrong_company" else None, title=title, location=location, now=now)
     return out

@@ -1071,7 +1071,7 @@ export class FixtureClient implements OutreachClient {
    * Not now, as the API: the row leaves today's list (the company is kept everywhere and is never a no-go), the bench's
    * first company takes its place, in one write. A row he already reached stays. The same key again answers the same.
    */
-  passPick(entryId: Id, input: { reason: PassReason | null; note?: string | null; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PassResult> {
+  passPick(entryId: Id, input: { reason: PassReason | null; note?: string | null; postingId?: Id | null; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<PassResult> {
     return this.write(o, () => {
       const done = this.picks.get(`pass:${input.idempotencyKey}`);
       if (done !== undefined && typeof done !== 'number') return done;

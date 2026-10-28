@@ -36,7 +36,7 @@ from outreach.rules.rebuild import stored_decision
 from outreach.ranking.roles import EARLY_CAREER_MAX_YEARS, early_career_fit as _shared_fit
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
-__all__ = ["PASSED", "PASS_REASONS", "DATA_ERRORS", "load_passed_postings", "EARLY_TIERS", "Opening", "early_career_fit", "level_words", "opened",
+__all__ = ["PASSED", "PASS_REASONS", "DATA_ERRORS", "load_passed_postings", "without_turned_down", "EARLY_TIERS", "Opening", "early_career_fit", "level_words", "opened",
            "hours_old", "is_fresh", "visa_clear", "age_words", "fresh_tag", "plan_moment", "as_utc", "load_openings",
            "load_level_roles", "load_visa_facts", "load_passes", "load_applied"]
 
@@ -302,6 +302,12 @@ def load_passed_postings(conn: sqlite3.Connection) -> frozenset[int]:
     return frozenset(r[0] for r in conn.execute(
         "SELECT json_extract(detail, '$.posting_id') FROM event WHERE kind = ? AND entity = 'company' "
         "AND json_extract(detail, '$.reason') = 'role' AND json_extract(detail, '$.posting_id') IS NOT NULL", (PASSED,)))
+
+
+def without_turned_down(conn: sqlite3.Connection, posting_id: int | None) -> int | None:
+    """`posting_id`, or None when he turned that posting down with Role not for me: the ranker's best posting must not
+    bring a rejected role back as a company's role."""
+    return None if posting_id is None or posting_id in load_passed_postings(conn) else posting_id
 
 
 def load_applied(conn: sqlite3.Connection, canon: dict[int, int], tz: str) -> dict[int, date]:

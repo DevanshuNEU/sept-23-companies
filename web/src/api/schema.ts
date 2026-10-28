@@ -2703,6 +2703,8 @@ export interface components {
             idempotencyKey: string;
             /** Note */
             note?: string | null;
+            /** Postingid */
+            postingId?: number | null;
             /** Reason */
             reason?: ("visa" | "too_big" | "too_early" | "role" | "product" | "know_it" | "not_a_fit" | "other" | "wrong_company" | "wrong_location") | null;
             /** Revision */

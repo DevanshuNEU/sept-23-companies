@@ -24,12 +24,16 @@ from datetime import date
 
 from pydantic import Field
 
-from outreach.drafts.checks import HOOK_DATE, URL, DraftInput, cached_mx, email_domain, load_banned, run_checks
+from outreach.drafting.brief import brief_id, read_evidence
+from outreach.drafting.voice import VoiceUnreadable, load_voice_pack
+from outreach.drafts.checks import (DEFAULT_BANNED_PHRASES, DEFAULT_WORDS, HOOK_DATE, MAX_LINKS, URL, WORDS, DraftInput,
+                                    cached_mx, email_domain, load_banned, run_checks)
 from outreach.drafts.followups import company_map, due_followups, held_survivors, no_go_sets, resolve_company
 from outreach.mcp.guard import Grant
 from outreach.mcp.tools import PREPARED_BY, Ctx, Input, ToolError, ToolSpec
 from outreach.mcp.tools.people import said_no_ids
-from outreach.mcp.tools.reads import HOOK_CHARS, MAX_ID, PROJECT_CHARS, Family, company_row, why_not_email
+from outreach.mcp.tools.reads import (HOOK_CHARS, MAX_ID, PROJECT_CHARS, Family, PersonInput, company_row, person,
+                                      why_not_email)
 from outreach.plan.config import default_plan_config
 from outreach.plan.drafts import DraftLocked, LinkedinDraft, get_draft, save_linkedin_draft
 from outreach.plan.notecheck import Fact, NoteCheck
@@ -130,6 +134,34 @@ def redraft(ctx: Ctx, m: sqlite3.Row, sets: dict, *, company_id: int, kind: str,
                  detail={"seq": m["seq"], "revision": revision,
                          "blocks": [c["code"] for c in found if c["severity"] == "block"]})
     return revision
+
+
+# ---------------------------------------------------------------------------------------------- draft_brief
+
+def voice_unreadable(caught: VoiceUnreadable) -> ToolError:
+    return ToolError("voice_unreadable", f"{caught.path}: the voice pack or the evidence could not be read.",
+                     "Check OUTREACH_VOICE_DIR, the DevVault folder and mail/me.md. Nothing was drafted.")
+
+
+def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
+    """Everything the drafter is given for one person, assembled by code (#135): the person as the `person` tool
+    reads them, his DevVault voice files, me.md above its open questions, and the limits. Its `brief_id` is what
+    `save_draft` later requires. Reads only."""
+    try:
+        pack, evidence = load_voice_pack(), read_evidence()
+    except VoiceUnreadable as caught:
+        raise voice_unreadable(caught) from None
+    one = person(ctx, args)
+    kind = one["person"]["role_kind"]
+    return {
+        "brief_id": brief_id(pack, evidence, args.person_id),
+        "can_draft_email": one["can_draft_email"],
+        "person": one,
+        "voice": {"digest": pack.digest, "files": [{"path": path, "text": text} for path, text in pack.files]},
+        "evidence": evidence,
+        "limits": {"words": list(WORDS.get(kind, DEFAULT_WORDS)), "max_links": MAX_LINKS,
+                   "banned_phrases_path": DEFAULT_BANNED_PHRASES},
+    }
 
 
 # ---------------------------------------------------------------------------------------------- save_draft
@@ -388,6 +420,10 @@ def save_linkedin_note(ctx: Ctx, args: SaveNoteInput) -> dict:
 
 
 TOOLS = (
+    ToolSpec("draft_brief",
+             "Call this first for each person you will draft: it returns the person's facts, Devanshu's DevVault voice "
+             "files, the me.md evidence and the limits, plus the brief_id that save_draft requires. Reads only. "
+             "Write from what it returns.", PersonInput, draft_brief),
     ToolSpec("save_draft",
              "Save the first email to a person as a draft for Devanshu to review. It runs the #9 checks and returns "
              "blocks, warns and a count of passes; a block still saves, so fix it and save again. It never "

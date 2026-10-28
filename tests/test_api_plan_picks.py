@@ -3,8 +3,13 @@ fresh lane first, Not now (`POST /api/plan/{entryId}/pass`), the bench (`GET /ap
 (`POST /api/plan/bench/{companyId}/add`). Scratch store, no network; the app never fetches LinkedIn.
 """
 import json
+from datetime import date, datetime, timezone
 
 from outreach.outcomes.context import build_context
+from outreach.plan.config import default_plan_config
+from outreach.plan.fresh import load_openings, load_passes
+from outreach.ranking.common import canonical_ids
+from outreach.sources.boards import BoardRef, add_board
 from outreach.store import log_touch
 from tests import apiseed as s
 from tests.apitest import ApiCase
@@ -87,10 +92,12 @@ class PicksCase(ApiCase):
     def names(self, rows):
         return [r["company"]["name"] for r in rows]
 
-    def pass_(self, name, reason="too_big", *, key=None, revision=1, request_id=None):
+    def pass_(self, name, reason="too_big", *, key=None, revision=1, request_id=None, note=None):
         eid = self.entries[name]
-        return self.post(f"/api/plan/{eid}/pass", {"reason": reason, "idempotencyKey": key or f"plan:{eid}:pass",
-                                                   "revision": revision}, key=request_id)
+        body = {"reason": reason, "idempotencyKey": key or f"plan:{eid}:pass", "revision": revision}
+        if note is not None:
+            body["note"] = note
+        return self.post(f"/api/plan/{eid}/pass", body, key=request_id)
 
     def add(self, name, *, key=None, request_id=None):
         cid = self.ids[name]
@@ -268,3 +275,113 @@ class AddTest(PicksCase):
         res = self.add("Ember")
         self.assertEqual(res.json()["code"], "not_allowed")
         self.assertIn("No room to add more this week", res.json()["message"])
+
+
+class FlagTest(PicksCase):
+    """Wrong company, wrong location and a note (2026-10-28, Cadence's Belo Horizonte posting): the flag acts on the
+    posting or the board, never on the company, and a role he turned down is never a pick again."""
+
+    NOW = datetime(2026, 11, 10, 15, 14, tzinfo=timezone.utc)
+
+    def setUp(self):
+        super().setUp()
+        self.second = s.posting(self.conn, self.ids["Aster"], "Backend Engineer", first_seen_at="2026-11-10T09:30:00Z",
+                                last_seen_at="2026-11-10T15:00:00Z", url="https://jobs.example/aster-backend")
+        s.decision(self.conn, self.second, level_tier="swe1")
+
+    def passes(self):
+        return load_passes(self.conn, canonical_ids(self.conn), date(2026, 11, 10), default_plan_config())
+
+    def posting_row(self, posting_id):
+        return self.conn.execute("SELECT closed_at, close_reason FROM posting WHERE posting_id = ?",
+                                 (posting_id,)).fetchone()
+
+    def items(self):
+        return self.conn.execute("SELECT * FROM review_item WHERE kind = 'flagged' ORDER BY review_id").fetchall()
+
+    def detail(self, name):
+        ev = self.conn.execute("SELECT detail FROM event WHERE kind = 'pick_passed' AND company_id = ?",
+                               (self.ids[name],)).fetchone()
+        return json.loads(ev["detail"])
+
+    def test_wrong_location_closes_that_posting_by_hand_and_keeps_the_company_eligible(self):
+        no_go = self.count("SELECT count(*) FROM no_go")
+        res = self.pass_("Aster", "wrong_location", note="Brazil")
+        self.assertEqual(res.status_code, 200, res.text)
+        closed = self.posting_row(self.posts["Aster"])
+        self.assertEqual((closed["close_reason"], closed["closed_at"] is not None), ("hand", True))
+        self.assertIsNone(self.posting_row(self.second)["closed_at"])  # the company's other posting is untouched
+        self.assertEqual(self.count("SELECT count(*) FROM no_go"), no_go)
+        self.assertNotIn(self.ids["Aster"], self.passes())  # a data error, not a Not now: no cooldown
+        detail = self.detail("Aster")
+        self.assertEqual((detail["reason"], detail["posting_id"], detail["title"], detail["note"]),
+                         ("wrong_location", self.posts["Aster"], "Software Engineer, New Grad", "Brazil"))
+
+    def test_wrong_company_detaches_the_board(self):
+        board = s.board(self.conn, self.ids["Aster"], "greenhouse", "aster")
+        self.conn.execute("UPDATE posting SET board_id = ? WHERE posting_id IN (?, ?)",
+                          (board, self.posts["Aster"], self.second))
+        res = self.pass_("Aster", "wrong_company")
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(self.count("SELECT active FROM board WHERE board_id = ?", board), 0)
+        for pid in (self.posts["Aster"], self.second):
+            self.assertEqual(self.posting_row(pid)["close_reason"], "hand")
+        self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind = 'board_detached' AND entity_id = ?", board), 1)
+        self.assertNotIn(self.ids["Aster"], self.passes())
+        self.assertEqual(add_board(self.conn, self.ids["Aster"], BoardRef("greenhouse", "aster"), via="test",
+                                   matched_on="name", found_by="stapply_name"), "exists")
+        self.assertEqual(self.count("SELECT active FROM board WHERE board_id = ?", board), 0)  # found again, still off
+
+    def test_a_flag_raises_one_flagged_review_item_with_the_note(self):
+        self.pass_("Aster", "wrong_location", note="Brazil only")
+        item, = self.items()
+        self.assertEqual((item["state"], item["raised_by"], item["company_id"], item["posting_id"]),
+                         ("open", "daily_list", self.ids["Aster"], self.posts["Aster"]))
+        self.assertTrue(item["reason"].startswith("You flagged"), item["reason"])
+        for text in ("Software Engineer, New Grad", "Brazil only"):
+            self.assertIn(text, item["reason"])
+
+    def test_other_keeps_a_trimmed_note_and_a_blank_note_is_none(self):
+        self.pass_("Aster", "other", note="  Brazil only  ")
+        self.assertEqual(self.detail("Aster")["note"], "Brazil only")
+        self.assertEqual(len(self.items()), 1)
+        self.pass_("Beacon", "other", note="   ")
+        self.assertIsNone(self.detail("Beacon")["note"])
+        self.assertEqual(len(self.items()), 1)  # a blank note says nothing to look at
+        self.assertEqual(self.pass_("Corvid", "other", note="x" * 281).status_code, 400)
+
+    def test_the_same_key_twice_flags_once(self):
+        first = self.pass_("Aster", "wrong_location", note="Brazil").json()
+        self.assertEqual(self.pass_("Aster", "wrong_location", note="Brazil").json(), first)
+        self.assertEqual(len(self.items()), 1)
+        self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind = 'pick_passed' AND company_id = ?",
+                                    self.ids["Aster"]), 1)
+
+    def test_a_pick_with_no_opening_passes_and_closes_nothing(self):
+        closed = self.count("SELECT count(*) FROM posting WHERE closed_at IS NOT NULL")
+        res = self.pass_("Corvid", "wrong_location")
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(self.count("SELECT count(*) FROM posting WHERE closed_at IS NOT NULL"), closed)
+        item, = self.items()
+        self.assertEqual((item["company_id"], item["posting_id"]), (self.ids["Corvid"], None))
+        self.assertIsNone(self.detail("Corvid")["posting_id"])
+
+    def test_role_not_for_me_hides_that_posting_from_every_later_pick_but_not_the_company(self):
+        def openings():
+            return [o.posting_id for o in load_openings(self.conn, canonical_ids(self.conn), self.NOW,
+                                                         default_plan_config()).get(self.ids["Aster"], ())]
+        self.assertIn(self.posts["Aster"], openings())
+        res = self.pass_("Aster", "role", note="HL7 and Mirth, not my skills")
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertNotIn(self.posts["Aster"], openings())
+        self.assertIn(self.second, openings())  # the company's other opening still counts
+        self.assertIsNone(self.posting_row(self.posts["Aster"])["closed_at"])  # still on the company page
+        self.assertEqual(self.items(), [])  # a preference, not a data error: nothing for Needs you
+        detail = self.detail("Aster")
+        self.assertEqual((detail["posting_id"], detail["note"]), (self.posts["Aster"], "HL7 and Mirth, not my skills"))
+        self.assertIn(self.ids["Aster"], self.passes())  # a role pass is still the 14 day cooldown
+
+    def test_an_ordinary_reason_still_gives_the_14_day_cooldown(self):
+        self.pass_("Aster", "visa")
+        self.assertIn(self.ids["Aster"], self.passes())
+        self.assertIsNone(self.posting_row(self.posts["Aster"])["closed_at"])

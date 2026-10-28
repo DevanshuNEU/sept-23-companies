@@ -551,14 +551,70 @@ describe('Today as a plan', () => {
     const remove = vi.spyOn(client, 'removeCompany');
     press('n');
     const chips = screen.getByRole('group', { name: 'Not now for Pylon' });
-    expect(within(chips).getAllByRole('button')).toHaveLength(10);
+    expect(within(chips).getAllByRole('button')).toHaveLength(12);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    press('4');
+    press('6');
     expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { level: 2, name: 'Jonah Park' })).toBeInTheDocument();
     expect(options().map((o) => o.textContent).join(' ')).not.toMatch(/Lena Ortiz/);
     await leavePage();
     expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('Not now offers Wrong company and Wrong location next to the other reasons', async () => {
+    await openPlan();
+    press('n');
+    const chips = screen.getByRole('group', { name: 'Not now for Pylon' });
+    expect(within(chips).getByRole('button', { name: /Wrong company/ })).toHaveAttribute('aria-keyshortcuts', '9');
+    expect(within(chips).getByRole('button', { name: /Wrong location/ })).toHaveAttribute('aria-keyshortcuts', '0');
+    expect(chips).toHaveTextContent('Wrong company and Wrong location fix the data and are not a Not now.');
+  });
+
+  it.each([
+    ['9', 'wrong_company'],
+    ['0', 'wrong_location'],
+  ])('pressing %s passes at once with %s', async (key, reason) => {
+    const { client } = await openPlan();
+    const passed = vi.spyOn(client, 'passPick');
+    press('n');
+    press(key);
+    expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
+    await leavePage();
+    expect(passed).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ reason }), expect.any(Number), expect.anything());
+    expect(passed.mock.calls[0][1]).not.toHaveProperty('note');
+  });
+
+  it.each([
+    ['8', 'other'],
+    ['4', 'role'],
+  ])('%s (%s) asks for his words first and passes with them on Enter', async (key, reason) => {
+    const { client } = await openPlan();
+    const passed = vi.spyOn(client, 'passPick');
+    press('n');
+    press(key);
+    const why = screen.getByRole('textbox', { name: 'Why' });
+    expect(passed).not.toHaveBeenCalled();
+    fireEvent.change(why, { target: { value: '  Brazil only  ' } });
+    fireEvent.submit(why.closest('form')!);
+    expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
+    await leavePage();
+    expect(passed).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ reason, note: 'Brazil only' }), expect.any(Number), expect.anything());
+  });
+
+  it('Enter with nothing typed still passes with the reason, and Esc goes back to the chips', async () => {
+    const { client } = await openPlan();
+    const passed = vi.spyOn(client, 'passPick');
+    press('n');
+    press('8');
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Why' }), { key: 'Escape' });
+    expect(screen.queryByRole('textbox', { name: 'Why' })).not.toBeInTheDocument();
+    expect(passed).not.toHaveBeenCalled();
+    press('8');
+    fireEvent.submit(screen.getByRole('textbox', { name: 'Why' }).closest('form')!);
+    expect(await screen.findByText('Passed. Added Retell AI.')).toBeInTheDocument();
+    await leavePage();
+    expect(passed.mock.calls[0][1]).toMatchObject({ reason: 'other' });
+    expect(passed.mock.calls[0][1]).not.toHaveProperty('note');
   });
 
   it('Not now after the request is logged is refused up front: he reached them', async () => {

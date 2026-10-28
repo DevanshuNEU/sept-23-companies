@@ -1,6 +1,9 @@
 import type { BenchCompany, PassReason, PlanRow } from '@/api';
 
-/** Not now's reasons, in chip order: keys 1 to 8. None of them is a no-go; each is a 14 day cooldown. */
+/**
+ * Not now's reasons, in chip order: keys 1 to 8, then 9 and 0. None of them is a no-go. All but the last two are a 14 day
+ * cooldown; Wrong company and Wrong location fix the posting or board and give none.
+ */
 export const PASS_REASONS: readonly { reason: PassReason; label: string; key: string }[] = [
   { reason: 'visa', label: 'Visa worry', key: '1' },
   { reason: 'too_big', label: 'Too big', key: '2' },
@@ -10,7 +13,12 @@ export const PASS_REASONS: readonly { reason: PassReason; label: string; key: st
   { reason: 'know_it', label: 'Already know it', key: '6' },
   { reason: 'not_a_fit', label: 'Not a fit right now', key: '7' },
   { reason: 'other', label: 'Other', key: '8' },
+  { reason: 'wrong_company', label: 'Wrong company', key: '9' },
+  { reason: 'wrong_location', label: 'Wrong location', key: '0' },
 ];
+
+/** The reasons that ask for his own words first (Enter with nothing typed still passes). */
+export const NOTE_REASONS: readonly PassReason[] = ['role', 'other'];
 
 /** A company coming in from the bench while its Not now waits in the undo window: it has no row on the API yet. */
 export const isProvisional = (row: PlanRow): boolean => row.entryId < 0;

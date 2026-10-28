@@ -57,7 +57,7 @@ DOMAINS = {"ai_agents": "AI agents", "llm_apps": "LLM apps", "devtools": "Dev to
 FUNDING_KINDS = {"form_d": "Form D", "form_d_amendment": "Form D amendment"}
 PASS_WORDS = {"visa": "visa worry", "too_big": "too big", "too_early": "too early", "role": "role not for me",
               "product": "not into the product", "know_it": "already know it", "not_a_fit": "not a fit right now",
-              "other": "other"}
+              "other": "other", "wrong_company": "wrong company", "wrong_location": "wrong location"}
 NOT_KNOWN = ProfileValue(text=None, note=None)
 
 

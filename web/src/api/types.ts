@@ -372,7 +372,7 @@ export interface QueueOpening {
   appliedNote: string | null;                                                        // "You applied on Oct 20; this is a new role."
 }
 /** Not now's reasons, in chip order (keys 1 to 8). None of them is a no-go. */
-export type PassReason = 'visa' | 'too_big' | 'too_early' | 'role' | 'product' | 'know_it' | 'not_a_fit' | 'other';
+export type PassReason = 'visa' | 'too_big' | 'too_early' | 'role' | 'product' | 'know_it' | 'not_a_fit' | 'other' | 'wrong_company' | 'wrong_location';
 export interface PassResult { passedEntryId: Id; company: CompanyRef; added: PlanRow | null; text: string }
 /** One company of the bench ("More options"), in the compact shape of a pick row. */
 export interface BenchCompany {

@@ -94,7 +94,7 @@ describe('DraftEditor', () => {
     const detail = await kenji();
     render(<DraftEditor {...base} subject={detail.item.subject} body={detail.body} onChange={() => {}} />);
     const body = screen.getByLabelText('Email body');
-    expect(body).toHaveClass('font-serif', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]');
+    expect(body).toHaveClass('font-sans', 'text-[16px]', 'leading-[1.65]', 'max-w-[62ch]');
     // The card is the editor's own box, so the flag marks behind the text stay visible.
     expect(body.closest('.bg-card')).not.toBeNull();
   });

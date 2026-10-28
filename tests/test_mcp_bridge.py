@@ -194,28 +194,52 @@ class IntakeTest(BridgeCase):
                                             "linkedin_url": "https://www.linkedin.com/in/sam-said"}))
         self.assertEqual((out["people"][0]["refused"], out["people"][0]["route"]["verdict"]), ("person_no_go", "stop"))
 
-    def test_email_only_with_a_published_address_and_never_a_guess(self):
+    def test_an_address_he_gave_routes_to_email_with_or_without_a_page(self):
         out = self.ok("intake", self.paste(
             {"name": "Ana Ruiz", "title": "Co-founder & CEO", "email": "ana@acme.example",
              "email_source": {"url": "https://acme.example/about", "basis": "published",
                               "quote": "Write to ana@acme.example"}},
-            {"name": "Ben Guess", "title": "Founder", "email": "ben@acme.example"}))
+            {"name": "Ben Apollo", "title": "Software Engineer", "email": "ben@acme.example"}))
         ana, ben = out["people"]
-        self.assertEqual(ana["route"]["verdict"], "email")
-        self.assertEqual(ana["route"]["key"], "email.people_per_company")
-        self.assertEqual(ben["route"]["verdict"], "linkedin_note")
-        self.assertIn("published or verified", ben["route"]["reason"])
+        self.assertEqual((ana["route"]["verdict"], ana["route"]["key"]), ("email", "#9 supplied email"))
+        self.assertEqual((ben["route"]["verdict"], ben["route"]["key"]), ("email", "#9 supplied email"))
+        rows = self.db.execute("SELECT name, channel, email FROM person WHERE person_id IN (?, ?) ORDER BY person_id",
+                               (ana["person_id"], ben["person_id"])).fetchall()
+        self.assertEqual([tuple(r) for r in rows], [("Ana Ruiz", "email", "ana@acme.example"),
+                                                    ("Ben Apollo", "email", "ben@acme.example")])
 
-    def test_one_wave_of_four_per_company_and_nobody_is_hidden(self):
+    def test_the_channel_field_can_keep_an_address_on_record_and_still_connect(self):
+        out = self.ok("intake", self.paste({"name": "Cy Both", "title": "Software Engineer",
+                                            "email": "cy@acme.example", "channel": "linkedin",
+                                            "linkedin_url": "https://www.linkedin.com/in/cy-both"}))
+        got = out["people"][0]
+        self.assertEqual(got["route"]["verdict"], "linkedin_note")
+        self.assertIn("stays on record", got["route"]["reason"])
+
+    def test_an_email_for_someone_already_pasted_with_a_profile_fills_them_in_place(self):
+        first = self.ok("intake", self.paste({"name": "Dee Profile", "title": "Software Engineer",
+                                              "linkedin_url": "https://www.linkedin.com/in/dee-profile"}))
+        pid = first["people"][0]["person_id"]
+        count = self.db.execute("SELECT count(*) FROM person").fetchone()[0]
+        second = self.ok("intake", self.paste({"name": "Dee Profile", "title": "Software Engineer",
+                                               "email": "dee@acme.example"}))
+        got = second["people"][0]
+        self.assertEqual((got["person_id"], got["created"], got["route"]["verdict"]), (pid, False, "email"))
+        self.assertIn("filled_email", got["flags"])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM person").fetchone()[0], count)
+        row = self.db.execute("SELECT email, channel, linkedin_url FROM person WHERE person_id = ?", (pid,)).fetchone()
+        self.assertEqual(tuple(row), ("dee@acme.example", "email", "https://www.linkedin.com/in/dee-profile"))
+
+    def test_a_full_wave_warns_and_every_note_still_goes(self):
         people = [{"name": f"Eng {n}", "title": "Software Engineer"} for n in "ABCDE"]
         people.insert(0, {"name": "Rae Recruiter", "title": "Technical Recruiter"})
         out = self.ok("intake", self.paste(*people))
         self.assertEqual(len(out["people"]), 6)
         self.assertTrue(all(p["recorded"] for p in out["people"]))
         verdicts = [p["route"]["verdict"] for p in out["people"]]
-        self.assertEqual(verdicts, ["find_someone_else", "linkedin_note", "linkedin_note", "linkedin_note",
-                                    "linkedin_note", "wait"])
-        self.assertEqual(out["people"][5]["route"]["key"], "queue.requests_per_company")
+        self.assertEqual(verdicts, ["find_someone_else"] + ["linkedin_note"] * 5)
+        self.assertEqual(out["people"][5]["route"]["key"], "linkedin.hard_total")
+        self.assertIn("your call", out["people"][5]["route"]["reason"])
 
     def test_a_company_on_todays_queue_routes_against_the_plan_quota(self):
         self.plan_today(self.acme)

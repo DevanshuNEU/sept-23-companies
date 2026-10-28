@@ -23,7 +23,7 @@ def company(**over) -> CompanyFacts:
 def person(name="Priya Rao", title="Software Engineer", **over) -> PersonFacts:
     base = dict(name=name, title=title, role_kind=classify_role(title, CFG), seniority=seniority(title, CFG),
                 tenure_months=None, no_go=False, said_no=False, asked_on=None, email_code=None, has_email=False,
-                recruiter_blocked=False)
+                recruiter_blocked=False, wants_email=False)
     base.update(over)
     return PersonFacts(**base)
 
@@ -103,14 +103,42 @@ class RouteTest(unittest.TestCase):
                           "#9 recruiters last")
         self.assert_route(route(person(title="Technical Recruiter")), "linkedin_note", "linkedin.hard_total")
 
-    def test_a_full_wave_waits_until_the_company_is_free_again(self):
+    def test_a_full_wave_is_a_heads_up_and_never_stops_a_connect(self):
         got = route(c=company(contact="waiting", wave_people=4, free_on=date(2026, 11, 20)))
-        self.assert_route(got, "wait", "queue.requests_per_company")
+        self.assert_route(got, "linkedin_note", "linkedin.hard_total")
+        self.assertIn("4 people", got.reason)
         self.assertIn("Nov 20", got.reason)
-        self.assert_route(route(c=company(contact="waiting", wave_people=2, free_on=date(2026, 11, 20)),
-                                taken=Taken(wave=1)), "linkedin_note", "linkedin.hard_total")
-        self.assert_route(route(c=company(contact="waiting", wave_people=2, free_on=date(2026, 11, 20)),
-                                taken=Taken(wave=2)), "wait", "queue.requests_per_company")
+        self.assertIn("your call", got.reason)
+        quiet = route(c=company(contact="waiting", wave_people=2, free_on=date(2026, 11, 20)), taken=Taken(wave=1))
+        self.assertNotIn("your call", quiet.reason)
+        over = route(c=company(contact="waiting", wave_people=2, free_on=date(2026, 11, 20)), taken=Taken(wave=2))
+        self.assert_route(over, "linkedin_note", "linkedin.hard_total")
+        self.assertIn("your call", over.reason)
+
+    def test_an_address_he_gave_goes_to_email_whatever_the_role_basis_or_room(self):
+        gave = person("Eli Park", has_email=True, wants_email=True)
+        self.assert_route(route(gave), "email", "#9 supplied email")
+        self.assertIn("gave", route(gave).reason)
+        crowded = route(gave, company(email_people=2, wave_people=4))
+        self.assert_route(crowded, "email", "#9 supplied email")
+        self.assertIn("your call", crowded.reason)
+        recruiter = person("Rae Recruiter", "Technical Recruiter", has_email=True, wants_email=True,
+                           recruiter_blocked=True)
+        self.assert_route(route(recruiter), "find_someone_else", "#9 recruiters last")
+        self.assert_route(route(person("Sam Sales", "Account Executive", has_email=True, wants_email=True)),
+                          "find_someone_else", "route.reach_kinds")
+
+    def test_an_address_he_gave_still_stops_on_a_real_dedup(self):
+        gave = person(has_email=True, wants_email=True)
+        self.assert_route(route(gave, company(no_go=True)), "stop", "#9 no-go")
+        self.assert_route(route(person(has_email=True, wants_email=True, said_no=True)), "stop", "#9 said no")
+        self.assert_route(route(person(has_email=True, wants_email=True, asked_on=date(2026, 11, 5))), "wait",
+                          "linkedin.rotate_days")
+
+    def test_a_linkedin_channel_keeps_the_address_on_record_and_connects(self):
+        got = route(person(has_email=True, wants_email=False))
+        self.assert_route(got, "linkedin_note", "linkedin.hard_total")
+        self.assertIn("stays on record", got.reason)
 
     def test_email_only_where_pick_channel_said_email_and_the_company_has_room(self):
         founder = person("Ana Ruiz", "Founder", email_code="founder_published_email", has_email=True)
@@ -120,9 +148,6 @@ class RouteTest(unittest.TestCase):
         self.assertIn("ramp", got.reason)
         self.assert_route(route(founder, company(email_people=2)), "linkedin_note", "linkedin.hard_total")
         self.assert_route(route(founder, taken=Taken(email=2)), "linkedin_note", "linkedin.hard_total")
-        unbacked = route(person("Eli Park", has_email=True))
-        self.assert_route(unbacked, "linkedin_note", "linkedin.hard_total")
-        self.assertIn("published or verified", unbacked.reason)
 
     def test_no_requests_left_in_the_week_waits(self):
         self.assert_route(route(budget=Budget(linkedin_left=0, key="linkedin.hard_total")), "wait",
@@ -142,7 +167,7 @@ class OrderTest(unittest.TestCase):
         off = dataclasses.replace(CFG, route={**CFG.route, "prefer_ic_in_role": False})
         self.assertEqual(order_people(self.PEOPLE, off), [0, 1, 3, 2])
 
-    def test_route_all_fills_one_wave_and_hides_nobody(self):
+    def test_route_all_hides_nobody_and_a_full_wave_only_warns(self):
         six = self.PEOPLE + [person("Una Plain", "Software Engineer"), person("Ned Plain", "Software Engineer")]
         out = route_all(six, company(), BUDGET, TODAY, CFG)
         self.assertEqual(sorted(i for i, _r, _p in out), [0, 1, 2, 3, 4, 5])  # everyone comes back
@@ -150,7 +175,7 @@ class OrderTest(unittest.TestCase):
                          ["Ian Plain", "Una Plain", "Ned Plain", "Sam Senior", "Mo Lead", "Rae Recruiter"])
         verdicts = {six[i].name: r.verdict for i, r, _p in out}
         self.assertEqual(verdicts, {"Ian Plain": "linkedin_note", "Una Plain": "linkedin_note",
-                                    "Ned Plain": "linkedin_note", "Sam Senior": "linkedin_note", "Mo Lead": "wait",
+                                    "Ned Plain": "linkedin_note", "Sam Senior": "linkedin_note", "Mo Lead": "linkedin_note",
                                     "Rae Recruiter": "find_someone_else"})
         prefs = [p for _i, _r, p in out]
         self.assertTrue(all(p["key"] == "route.prefer_ic_in_role" and p["label"] == "unmeasured" for p in prefs))

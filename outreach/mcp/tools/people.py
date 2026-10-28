@@ -5,10 +5,12 @@ source that breaks the person_source rules rejects every person and writes nothi
 
 - A merged company id adds to the company it was merged into. A removed company, or one on an active no-go (any
   company of its merged family), refuses the call.
-- Someone already known by email, else by LinkedIn profile (compared in one normal form), else, with neither given,
-  by name at the company, is not added again: their id comes back with created false and flag `duplicate`. At the
-  same company an empty profile or empty notes are filled (never over text already there) and new sources added,
-  except on a name-only match (flag `name_only_match`), which writes nothing: a name alone may be someone else.
+- Someone already known by email, else by LinkedIn profile (compared in one normal form), else by name at the
+  company when nothing they gave conflicts with the namesake's address or profile (#131), is not added again: their
+  id comes back with created false and flag `duplicate`. At the same company an empty email, LinkedIn profile,
+  profile text or notes are filled (never over text already there; a filled email makes them an email contact) and
+  new sources added. With neither an address nor a profile given, a name alone is flagged `name_only_match` and
+  writes nothing: a name alone may be someone else.
   Known at another company: returned with flag `other_company` and left as they are.
 - A known person on an active no-go, or who said no or asked to stop (on an email thread or a logged outreach
   touch), is that person's refusal (`person_no_go`, `said_no`), with a plain reason; the others in the call still go
@@ -151,6 +153,18 @@ def _match(conn: sqlite3.Connection, want: dict) -> tuple[sqlite3.Row | None, st
     return by_email or by_page, None
 
 
+def _same_person(namesakes: list[sqlite3.Row], want: dict) -> sqlite3.Row | None:
+    """The namesake this address or profile adds to (#131): nothing they gave conflicts with what is on record (an
+    empty field on either side never does). A namesake with another address or another profile is someone else."""
+    for r in namesakes:
+        if r["email"] and want["email"] and r["email"] != want["email"]:
+            continue
+        if r["linkedin_url"] and want["linkedin"] and linkedin_key(r["linkedin_url"]) != want["linkedin"]:
+            continue
+        return r
+    return None
+
+
 def _sources(ctx: Ctx, person_id: int, sources) -> int:
     added = 0
     for s in sources:
@@ -160,6 +174,13 @@ def _sources(ctx: Ctx, person_id: int, sources) -> int:
             (person_id, s.kind, s.url, s.label.strip(), s.quote.strip(), s.email_basis, s.observed_on, ctx.now))
         added += cur.rowcount
     return added
+
+
+def _email_basis(want: dict) -> str:
+    """How the address got here: the basis of a page that holds it, else `provided` (he gave it, for example from
+    Apollo; he checks every draft in the Outbox, so no page is needed, #9 2026-10-28)."""
+    bases = [s.email_basis for s in want["sources"] if s.kind == "email"]
+    return bases[0] if bases else "provided"
 
 
 def _known(ctx: Ctx, known: sqlite3.Row, want: dict, *, family: Family, survivor: int, no_go_people: set[int]
@@ -174,17 +195,25 @@ def _known(ctx: Ctx, known: sqlite3.Row, want: dict, *, family: Family, survivor
                 "flags": ["duplicate", "other_company"],
                 "message": f"Already known at {theirs['name']} (company {theirs['company_id']}); left as they are."}
     flags = ["duplicate"]
-    filled = {c: want[c] for c in ("profile_text", "notes") if want[c] and not known[c]}
+    filled = {c: want[c] for c in ("email", "profile_text", "notes") if want[c] and not known[c]}
+    if want["linkedin"] and not known["linkedin_url"]:
+        filled["linkedin_url"] = want["linkedin"]
     if filled:
-        conn.execute(f"UPDATE person SET {', '.join(f'{c} = ?' for c in filled)}, updated_at = ?, "
-                     f"revision = revision + 1 WHERE person_id = ?", (*filled.values(), ctx.now, known["person_id"]))
+        sets = [f"{c} = ?" for c in filled]
+        if "email" in filled:  # an address makes them an email contact (a linkedin contact needs no address)
+            sets += ["channel = 'email'", "linkedin_reason = NULL"]
+        conn.execute(f"UPDATE person SET {', '.join(sets)}, updated_at = ?, revision = revision + 1 "
+                     f"WHERE person_id = ?", (*filled.values(), ctx.now, known["person_id"]))
         flags += [f"filled_{c}" for c in filled]
     added = _sources(ctx, known["person_id"], want["sources"])
     if added:
         flags.append("added_sources")
     if filled or added:
+        detail = {"filled": sorted(filled), "sources_added": added}
+        if "email" in filled:
+            detail["email"] = _email_basis(want)
         append_event(conn, entity="person", kind="updated", actor="claude", entity_id=known["person_id"],
-                     company_id=survivor, at=ctx.now, detail={"filled": sorted(filled), "sources_added": added})
+                     company_id=survivor, at=ctx.now, detail=detail)
     return {"person_id": known["person_id"], "created": False, "refused": None, "flags": flags,
             "message": "Already known; not added again."}
 
@@ -198,8 +227,11 @@ def _new(ctx: Ctx, want: dict, survivor: int, flags: list[str]) -> dict:
          want["profile_text"], want["notes"], channel, None if channel == "email" else "no_email", ctx.now,
          ctx.now)).lastrowid
     added = _sources(ctx, person_id, want["sources"])
+    detail = {"channel": channel, "role_kind": want["role_kind"], "sources": added}
+    if want["email"]:
+        detail["email"] = _email_basis(want)
     append_event(ctx.conn, entity="person", kind="added", actor="claude", entity_id=person_id, company_id=survivor,
-                 at=ctx.now, detail={"channel": channel, "role_kind": want["role_kind"], "sources": added})
+                 at=ctx.now, detail=detail)
     return {"person_id": person_id, "created": True, "refused": None, "flags": flags,
             "message": "Someone with this name is already at the company; check it is not the same person."
             if flags else None}
@@ -236,6 +268,8 @@ def record_people(ctx: Ctx, company_id: int, wanted: list[dict]) -> dict:
             out = _known(ctx, known, want, family=family, survivor=survivor, no_go_people=no_go_people)
         elif stopped is not None:  # a new address or profile never brings back someone who must not be emailed
             out = stopped
+        elif (same := _same_person(namesakes, want)) is not None and (want["email"] or want["linkedin"]):
+            out = _known(ctx, same, want, family=family, survivor=survivor, no_go_people=no_go_people)
         elif namesakes and not want["email"] and not want["linkedin"]:
             out = {"person_id": namesakes[0]["person_id"], "created": False, "refused": None,
                    "flags": ["duplicate", "name_only_match"],
@@ -260,6 +294,7 @@ TOOLS = (
              "profile, profile text, notes and public source pages when he gave them. Someone already known is "
              "not added again (their id comes back, created false). A no-go company or person is refused.",
              AddPeopleInput, add_people,
-             {"person": Grant(insert=True, update=frozenset({"profile_text", "notes", "updated_at", "revision"})),
+             {"person": Grant(insert=True, update=frozenset({"email", "linkedin_url", "channel", "linkedin_reason",
+                                                             "profile_text", "notes", "updated_at", "revision"})),
               "person_source": Grant(insert=True), "event": Grant(insert=True)}),
 )

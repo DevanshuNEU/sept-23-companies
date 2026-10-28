@@ -93,7 +93,7 @@ export function CompanyPanel({
   row: PlanRow;
   asOf: IsoTime;
   actions: Pick<PanelActions, 'onCarry' | 'onNotNow' | 'onLog' | 'onLogPeople' | 'onSaveSearch' | 'onCopyLine'> & {
-    onPass?: (reason: PassReason | null) => void;
+    onPass?: (reason: PassReason | null, note?: string) => void;
     onCancelPass?: () => void;
   };
   headingId?: string;

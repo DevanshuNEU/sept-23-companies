@@ -316,7 +316,7 @@ describe('Not now (top picks)', () => {
     const chips = within(panel()).getByRole('group', { name: 'Not now for Pylon' });
     expect(chips).toHaveTextContent('It comes back in 14 days, or sooner with a new opening. It is not a no-go.');
     expect(within(chips).getAllByRole('button').map((b) => b.getAttribute('aria-keyshortcuts'))).toEqual(
-      ['1', '2', '3', '4', '5', '6', '7', '8', 'enter', null],
+      ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'enter', null],
     );
     expect(within(chips).getByRole('button', { name: /Not a fit right now/ })).toBeInTheDocument();
     press('2');
@@ -329,7 +329,12 @@ describe('Not now (top picks)', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Cerebrium' })).toBeInTheDocument();
     expect(passed).not.toHaveBeenCalled(); // still inside the undo window
     await leavePage();
-    expect(passed).toHaveBeenCalledWith(pylon.entryId, { reason: 'too_big', idempotencyKey: `plan:${pylon.entryId}:pass` }, pylon.revision, expect.anything());
+    expect(passed).toHaveBeenCalledWith(
+      pylon.entryId,
+      { reason: 'too_big', ...(pylon.queue?.opening ? { postingId: pylon.queue.opening.postingId } : {}), idempotencyKey: `plan:${pylon.entryId}:pass` },
+      pylon.revision,
+      expect.anything(),
+    );
     await waitFor(() => expect(options().some((o) => o.getAttribute('data-provisional'))).toBe(false));
     expect(option(1)).toHaveTextContent('Retell AI');
     expect(option(1)).toHaveTextContent('New opening, 3 hours ago');

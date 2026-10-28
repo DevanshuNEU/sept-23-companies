@@ -234,9 +234,9 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
     if (blocked) return void toast(blocked);
     setPassing((p) => (p === row.entryId ? null : row.entryId));
   };
-  const pass = (row: PlanRow, reason: PassReason | null) => {
+  const pass = (row: PlanRow, reason: PassReason | null, note?: string) => {
     setPassing(null);
-    if (actions.passPick(row, reason)) moveOn(row);
+    if (actions.passPick(row, reason, note)) moveOn(row);
   };
   /** An open edit that differs from the saved note: Copy would copy the saved text, so it waits for Save. */
   const unsavedEdit = (row: PlanRow): boolean => {
@@ -423,7 +423,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
           key={current.entryId}
           row={current}
           asOf={plan.asOf}
-          actions={{ ...a, onPass: (reason) => pass(current, reason), onCancelPass: () => setPassing(null) }}
+          actions={{ ...a, onPass: (reason, note) => pass(current, reason, note), onCancelPass: () => setPassing(null) }}
           headingId={headingId}
           passing={passing === current.entryId}
           peopleOpen={peopleOpen === current.entryId}
@@ -493,7 +493,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
           {showFinish ? <FinishPanel plan={plan} /> : panel}
           {current && current.person !== null && passing === current.entryId ? (
             <div className="mt-4">
-              <PassChips company={current.company.name} onPass={(reason) => pass(current, reason)} onCancel={() => setPassing(null)} />
+              <PassChips company={current.company.name} onPass={(reason, note) => pass(current, reason, note)} onCancel={() => setPassing(null)} />
             </div>
           ) : null}
           {profileRow && !sideProfile ? (

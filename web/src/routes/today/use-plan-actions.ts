@@ -465,7 +465,7 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
    * puts the day back exactly. The API picks the company that comes in from the same bench; if that turned out to be
    * another one, the toast says so once it lands. True when queued.
    */
-  const passPick = (row: PlanRow, reason: PassReason | null): boolean => {
+  const passPick = (row: PlanRow, reason: PassReason | null, note?: string): boolean => {
     const id = passId(row);
     if (isPending(id)) return false;
     const blocked = passRefusal(row);
@@ -477,10 +477,11 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
     const next = bench?.companies.find((b) => !taken.has(b.company.id)) ?? null;
     const company = row.company.name;
     const label = next ? `Passed. Added ${next.company.name}.` : `Passed on ${company}.`;
+    const dataError = reason === 'wrong_company' || reason === 'wrong_location';
     write({
       id,
       label,
-      afterCommit: `${label} It comes back in 14 days, or sooner with a new opening.`,
+      afterCommit: dataError ? `${label} Your flag is in Needs you.` : `${label} It comes back in 14 days, or sooner with a new opening.`,
       patches: [
         {
           key: queryKeys.plan,
@@ -501,7 +502,7 @@ export function usePlanActions(page: Parameters<typeof usePageClient>[0] = 'plan
       ],
       commit: (o) =>
         sendVersioned(queryClient, `plan:${row.entryId}`, row.revision, () => cachedRow(queryClient, row.entryId)?.revision, o, (revision) =>
-          client.passPick(row.entryId, { reason, idempotencyKey: `plan:${row.entryId}:pass` }, revision, o).then(
+          client.passPick(row.entryId, { reason, ...(note ? { note } : {}), ...(row.queue?.opening ? { postingId: row.queue.opening.postingId } : {}), idempotencyKey: `plan:${row.entryId}:pass` }, revision, o).then(
             (res) => {
               // The API chose from the same bench; when another company came in, say which.
               if ((res.added?.company.id ?? null) !== (next?.company.id ?? null)) toast(res.text);

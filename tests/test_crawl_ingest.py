@@ -238,18 +238,64 @@ class DoubtfulBoardTests(IngestTestCase):
         self.assertTrue(item["reason"].startswith("board match doubtful"), item["reason"])
         self.assertIn("301", item["reason"])
         self.assertEqual(item["evidence_key"], f"board-doubtful:{self.board_id}")
-        # 300 jobs is not over 300; and a company with no lca evidence is not held to the size rule.
-        for name, token, lca, n in (("Beta", "beta", True, 300), ("Gamma", "gamma", False, 400)):
+        # 300 jobs is not over 300; and a board found by hand is not held to the size rule.
+        for name, token, how, n in (("Beta", "beta", "stapply_name", 300), ("Gamma", "gamma", "hand", 400)):
             with self.subTest(company=name):
                 cid = seed_company(self.conn, name)
                 bid = seed_board(self.conn, cid, "greenhouse", token)
-                self.set_found_by("stapply_name", bid)
-                if lca:
-                    self.add_lca(cid)
+                self.set_found_by(how, bid)
+                self.add_lca(cid)
                 self.read(ok(many_jobs(n, name)), board_id=bid,
                           url=f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true")
                 self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE board_id = ?",
                                                    (bid,)).fetchone()[0], 0)
+
+    def test_a_name_only_board_of_over_300_jobs_is_doubtful_without_lca_evidence(self):
+        # Cadence (2026-10-28): a name match put a giant's Workday board on a small company with no LCA filings.
+        self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
+        self.set_found_by("stapply_name")
+        self.read(ok(many_jobs(301)))
+        item, = self.items("flagged")
+        self.assertTrue(item["reason"].startswith("board match doubtful"), item["reason"])
+        self.assertIn("301", item["reason"])
+        self.assertEqual(item["evidence_key"], f"board-doubtful:{self.board_id}")
+
+    def size(self, low, high):
+        self.conn.execute(
+            "INSERT INTO evidence(company_id, fact, value, num_low, num_high, confidence, source_kind, recorded_at) "
+            "VALUES (?, 'size', ?, ?, ?, 'estimate', 'builtin', ?)", (self.company, f"{low}-{high}", low, high, T0))
+
+    def test_a_company_already_known_to_be_big_is_not_doubted_for_a_big_board(self):
+        # NVIDIA's Workday board on NVIDIA: right, and the size gate already hides it. 47 such items would be noise.
+        self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
+        self.set_found_by("stapply_name")
+        self.size(501, 2000)
+        self.read(ok(many_jobs(301)))
+        self.assertEqual(self.items("flagged"), [])
+        self.assertEqual(ingest.recheck_big_boards(self.conn, T0), 0)
+
+    def test_a_company_known_to_be_small_with_a_big_board_is_doubtful(self):
+        self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
+        self.set_found_by("stapply_name")
+        self.size(201, 500)  # Cadence (cadence.care): 201 to 500 people, and Cadence Design Systems' 674 jobs
+        self.read(ok(many_jobs(301)))
+        self.assertEqual(len(self.items("flagged")), 1)
+
+    def test_a_board_found_by_hand_is_not_held_to_the_size_rule(self):
+        self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
+        self.set_found_by("hand")
+        self.read(ok(many_jobs(400)))
+        self.assertEqual(self.items("flagged"), [])
+
+    def test_recheck_big_boards_raises_once_and_a_repeat_is_a_noop(self):
+        self.conn.execute("UPDATE company SET name = 'Acme Robotics' WHERE company_id = ?", (self.company,))
+        self.set_found_by("stapply_name")
+        self.read(ok(many_jobs(301)))
+        self.conn.execute("DELETE FROM review_item")  # an item the first read raised before this check existed
+        self.assertEqual(ingest.recheck_big_boards(self.conn, T0), 1)
+        self.assertEqual(ingest.recheck_big_boards(self.conn, T0), 0)
+        item, = self.items("flagged")
+        self.assertEqual(item["evidence_key"], f"board-doubtful:{self.board_id}")
 
     def test_first_read_of_a_slug_probe_board_is_checked_like_a_name_only_board(self):
         # A guessed slug can belong to another company with the same name (Task 26a ruling).

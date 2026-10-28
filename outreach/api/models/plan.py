@@ -206,7 +206,8 @@ class PlanRow(Wire):
     queue: CompanyQueue | None = None  # set only on a company row (no person, not an email row)
 
 
-PassReason = Literal["visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other"]
+PassReason = Literal["visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other",
+                    "wrong_company", "wrong_location"]
 
 
 class PassResult(Wire):

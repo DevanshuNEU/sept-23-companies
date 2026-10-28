@@ -2,7 +2,7 @@
 people search, skip a row, save a note, confirm its reason line."""
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from outreach.api.models.base import WireRequest
 from outreach.api.routers import MAX_ID
@@ -10,6 +10,7 @@ from outreach.api.routers import MAX_ID
 TOUCH_KEY = r"^[A-Za-z0-9:._-]{1,200}$"  # no `#`: an undone touch keeps `<key>#undone-<id>`, never a body key
 NOTE_TEXT_MAX = 3000  # far over any note limit: an over-long note is saved with its block check, not refused
 REASON_MAX = 500
+PASS_NOTE_MAX = 280  # the words he types under Other or Role not for me
 
 
 PERSON_NAME_MAX = 200
@@ -77,13 +78,23 @@ class ConfirmReasonBody(WireRequest):
 
 
 class PassPickBody(WireRequest):
-    """Not now on a pick. `reason` is one of the chips, or none. `idempotencyKey` is the pass's own key
+    """Not now on a pick. `reason` is one of the chips, or none. `note` is what he typed (under Other, Role not for me,
+    or any chip), up to 280 characters, trimmed; Wrong company and Wrong location act on the posting or board. `idempotencyKey` is the pass's own key
     (`plan:<entryId>:pass`): the same key again answers with the first answer and writes nothing. It changes the
     row's state, so a stale `revision` conflicts."""
 
-    reason: Literal["visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other"] | None = None
+    reason: Literal["visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other",
+                    "wrong_company", "wrong_location"] | None = None
+    note: str | None = Field(default=None, max_length=PASS_NOTE_MAX)  # his own words; blank is none
+    # The posting the pick showed him when he flagged it: the lead opening can change before the pass commits.
+    posting_id: int | None = Field(default=None, ge=1, le=MAX_ID)
     idempotency_key: str = Field(pattern=TOUCH_KEY)
     revision: int = Field(ge=1)
+
+    @field_validator("note")
+    @classmethod
+    def _trim(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
 
 
 class AddFromBenchBody(WireRequest):

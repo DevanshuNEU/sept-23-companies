@@ -11,6 +11,9 @@ transaction:
   so no reader shows it, counts it or carries it, and the MCP bridge does not offer it;
 - the next best company of the bench (`picks.bench_picks`, the same order the page shows) takes its rank as a new
   company row with an id above every row there is;
+- Wrong company and Wrong location are data errors, not opinions about the company: `apply_flag`
+  (`outreach.api.services.pick_flags`) closes the posting or detaches the board, raises a Needs-you item, and the
+  pass gives no cooldown (`load_passes` skips them). Role not for me keeps the posting out of every later pick;
 - one `pick_passed` event (entity company, actor devanshu) is the record the cooldown reads, with the reason chip,
   the list date, the rank, the company that came in and a snapshot of the signals (stage, size band, fresh, the
   sponsorship line).
@@ -36,6 +39,7 @@ from outreach.api.queries import plan as queries
 from outreach.api.queries.bench import pending_picks, room_today
 from outreach.api.queries.company import merge_parents, survivor_of
 from outreach.api.queries.outcomes import NOT_SAVED, company_refs
+from outreach.api.services.pick_flags import apply_flag
 from outreach.api.revisions import bump
 from outreach.insights.bands import default_bands, size_band
 from outreach.outcomes.windows import ny_day
@@ -95,6 +99,12 @@ def _snapshot(conn: sqlite3.Connection, survivor: int, row: PlanRow) -> dict:
             "sponsorship": row.queue.sponsorship_line if row.queue is not None else None}
 
 
+def _is_company_posting(conn: sqlite3.Connection, posting_id: int, survivor: int) -> bool:
+    """The posting belongs to this company (or one merged into it): a client cannot flag another company's posting."""
+    row = conn.execute("SELECT company_id FROM posting WHERE posting_id = ?", (posting_id,)).fetchone()
+    return row is not None and survivor_of(merge_parents(conn), row["company_id"]) == survivor
+
+
 def pass_pick(ctx: WriteCtx, entry_id: int, body: PassPickBody, cfg: PlanConfig) -> PassResult:
     conn = ctx.conn
     key = f"pick-passed:{body.idempotency_key}"
@@ -127,6 +137,12 @@ def pass_pick(ctx: WriteCtx, entry_id: int, body: PassPickBody, cfg: PlanConfig)
               "company_id": survivor, "added_entry_id": added_id,
               "added_company_id": picks[0].prospect.company_id if picks else None,
               "signals": _snapshot(conn, survivor, row) if row is not None else {}}
+    # Wrong company, Wrong location and a typed reason act on the pick's posting or board, never on the company.
+    shown = row.queue.opening.posting_id if row is not None and row.queue is not None and row.queue.opening else None
+    named = body.posting_id if body.posting_id is not None and _is_company_posting(conn, body.posting_id, survivor) \
+        else shown
+    detail.update(apply_flag(conn, reason=body.reason, note=body.note, company_id=survivor, posting_id=named,
+                             now=ctx.now))
     append_event(conn, entity="company", entity_id=survivor, company_id=survivor, kind=PASSED, actor="devanshu",
                  at=ctx.now, detail=detail, idempotency_key=key)
     return _pass_answer(conn, detail, cfg, ctx.now)

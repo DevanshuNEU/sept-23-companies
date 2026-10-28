@@ -19,7 +19,7 @@ from outreach.sources.boards import add_board
 from outreach.store import append_event
 from outreach.store.timefmt import iso_utc
 
-__all__ = ["edit_board"]
+__all__ = ["edit_board", "detach_board"]
 
 _EXAMPLE = "Paste the board's own address, for example https://jobs.ashbyhq.com/company."
 
@@ -34,6 +34,21 @@ def _owner(conn: sqlite3.Connection, ats: str, token: str) -> int | None:
     row = row or conn.execute("SELECT company_id FROM company_alias WHERE alias_key = lower(?)",
                               (f"{ats}:{token}",)).fetchone()
     return row[0] if row else None
+
+
+def detach_board(conn: sqlite3.Connection, board_id: int, *, now: str, actor: str = "devanshu") -> int:
+    """The board belongs to another company with a like name (Cadence, 2026-10-28): stop reading it and close its open
+    postings by hand (the crawler never reopens a hand close). The caller owns the transaction. Returns how many
+    postings it closed; a board already off closes nothing and writes no event."""
+    row = conn.execute("SELECT company_id, active FROM board WHERE board_id = ?", (board_id,)).fetchone()
+    if row is None or not row["active"]:
+        return 0
+    conn.execute("UPDATE board SET active = 0 WHERE board_id = ?", (board_id,))
+    closed = conn.execute("UPDATE posting SET closed_at = ?, close_reason = 'hand' "
+                          "WHERE board_id = ? AND closed_at IS NULL", (now, board_id)).rowcount
+    append_event(conn, entity="board", entity_id=board_id, company_id=row["company_id"], kind="board_detached",
+                 actor=actor, at=now, detail={"closed": closed, "why": "wrong company"})
+    return closed
 
 
 def edit_board(conn: sqlite3.Connection, item_row: sqlite3.Row, url: str, source: str, *, now: str,

@@ -52,6 +52,9 @@ class RefusalTests(unittest.TestCase):
     def test_probe_refuses_outside_the_live_checkout(self):
         self.refuses(["probe", "greenhouse", "acme"])
 
+    def test_recheck_boards_refuses_outside_the_live_checkout(self):
+        self.refuses(["recheck-boards"])
+
 
 class CommandTests(unittest.TestCase):
     """The commands run when `root` is the live root: here a temp folder stands for both, on a scratch store."""

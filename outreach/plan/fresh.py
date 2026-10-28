@@ -36,13 +36,16 @@ from outreach.rules.rebuild import stored_decision
 from outreach.ranking.roles import EARLY_CAREER_MAX_YEARS, early_career_fit as _shared_fit
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
-__all__ = ["PASSED", "PASS_REASONS", "EARLY_TIERS", "Opening", "early_career_fit", "level_words", "opened",
+__all__ = ["PASSED", "PASS_REASONS", "DATA_ERRORS", "load_passed_postings", "without_turned_down", "EARLY_TIERS", "Opening", "early_career_fit", "level_words", "opened",
            "hours_old", "is_fresh", "visa_clear", "age_words", "fresh_tag", "plan_moment", "as_utc", "load_openings",
            "load_level_roles", "load_visa_facts", "load_passes", "load_applied"]
 
 PASSED = "pick_passed"  # event kind: Not now on a pick (entity company, actor devanshu)
-# The reasons of Not now, in the order of the chips (keys 1 to 8). None of them is a no-go.
-PASS_REASONS = ("visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other")
+# The reasons of Not now, in the order of the chips (keys 1 to 8, then 9 and 0). None of them is a no-go. The last two
+# are data errors (the posting or board is wrong, not the company): they give no cooldown (`DATA_ERRORS`).
+PASS_REASONS = ("visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other",
+                "wrong_company", "wrong_location")
+DATA_ERRORS = ("wrong_company", "wrong_location")
 EARLY_TIERS = ("new_grad", "early_career", "swe1")
 EARLY_MAX_YEARS = EARLY_CAREER_MAX_YEARS
 _LEVEL_WORDS = {"new_grad": "New grad role", "early_career": "Early career role", "swe1": "SWE I role",
@@ -211,9 +214,10 @@ def _build(conn: sqlite3.Connection, rows: list[sqlite3.Row], canon: dict[int, i
     role_lanes = set(cfg.get("lanes", "role"))
     doubtful = doubtful_board_ids(conn)
     stale = load_stale(conn, now.astimezone(ZoneInfo(tz)).date(), posting_ids=[r["posting_id"] for r in rows])
+    turned_down = load_passed_postings(conn)
     out: dict[int, list[Opening]] = {}
     for r in rows:
-        if r["board_id"] in doubtful or r["posting_id"] in stale:
+        if r["board_id"] in doubtful or r["posting_id"] in stale or r["posting_id"] in turned_down:
             continue
         d = stored_decision(r)
         if not posting_visible(d):
@@ -282,11 +286,28 @@ def load_passes(conn: sqlite3.Connection, canon: dict[int, int], today: date, cf
     first = today - timedelta(days=cfg.get("queue", "pass_cooldown_days") - 1)
     out: dict[int, datetime] = {}
     for r in conn.execute("SELECT company_id, at FROM event WHERE kind = ? AND entity = 'company' "
-                          "AND company_id IS NOT NULL AND at >= ? ORDER BY at, event_id",
+                          "AND company_id IS NOT NULL AND at >= ? "
+                          "AND coalesce(json_extract(detail, '$.reason'), '') NOT IN ('wrong_company', 'wrong_location') "
+                          "ORDER BY at, event_id",
                           (PASSED, _iso(_start_of(first, tz)))):
         if ny_date(r["at"], tz) <= today:
             out[canon.get(r["company_id"], r["company_id"])] = as_utc(r["at"])
     return out
+
+
+def load_passed_postings(conn: sqlite3.Connection) -> frozenset[int]:
+    """The postings he turned down with Not now, Role not for me (a `pick_passed` event whose reason is `role` and that
+    names its posting). A role that does not fit his skills is never an opening again: not after the cooldown, not in
+    the fresh lane. The company stays eligible for its other openings."""
+    return frozenset(r[0] for r in conn.execute(
+        "SELECT json_extract(detail, '$.posting_id') FROM event WHERE kind = ? AND entity = 'company' "
+        "AND json_extract(detail, '$.reason') = 'role' AND json_extract(detail, '$.posting_id') IS NOT NULL", (PASSED,)))
+
+
+def without_turned_down(conn: sqlite3.Connection, posting_id: int | None) -> int | None:
+    """`posting_id`, or None when he turned that posting down with Role not for me: the ranker's best posting must not
+    bring a rejected role back as a company's role."""
+    return None if posting_id is None or posting_id in load_passed_postings(conn) else posting_id
 
 
 def load_applied(conn: sqlite3.Connection, canon: dict[int, int], tz: str) -> dict[int, date]:

@@ -2693,15 +2693,20 @@ export interface components {
         };
         /**
          * PassPickBody
-         * @description Not now on a pick. `reason` is one of the chips, or none. `idempotencyKey` is the pass's own key
+         * @description Not now on a pick. `reason` is one of the chips, or none. `note` is what he typed (under Other, Role not for me,
+         *     or any chip), up to 280 characters, trimmed; Wrong company and Wrong location act on the posting or board. `idempotencyKey` is the pass's own key
          *     (`plan:<entryId>:pass`): the same key again answers with the first answer and writes nothing. It changes the
          *     row's state, so a stale `revision` conflicts.
          */
         PassPickBody: {
             /** Idempotencykey */
             idempotencyKey: string;
+            /** Note */
+            note?: string | null;
+            /** Postingid */
+            postingId?: number | null;
             /** Reason */
-            reason?: ("visa" | "too_big" | "too_early" | "role" | "product" | "know_it" | "not_a_fit" | "other") | null;
+            reason?: ("visa" | "too_big" | "too_early" | "role" | "product" | "know_it" | "not_a_fit" | "other" | "wrong_company" | "wrong_location") | null;
             /** Revision */
             revision: number;
         };

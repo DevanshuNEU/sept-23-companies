@@ -113,7 +113,7 @@ _CHECKED = {"lanes": ("role", "reason", "fill", "role_share", "reason_share"),
             "queue": ("companies_per_day", "requests_per_company", "fresh_slots", "fresh_hours", "fresh_pool_top_n",
                       "pass_cooldown_days", "bench_size"), "prepare": ("enabled", "deny_rule_checked"),
             "email": ("email_max_headcount", "email_companies_per_day"),
-            "route": ("prefer_ic_in_role",), "bridge": ("log_back_days",)}
+            "route": ("prefer_ic_in_role",), "bridge": ("log_back_days", "connect_email_after_days")}
 # The on and off switches, each checked to be a boolean. `prepare.enabled` and `plan.propose_people` are the
 # company-first switches (#9, 2026-10-26); `prepare.deny_rule_checked` records the one-time LinkedIn deny check.
 _SWITCHES = (("prepare", "enabled"), ("prepare", "deny_rule_checked"), ("plan", "propose_people"))

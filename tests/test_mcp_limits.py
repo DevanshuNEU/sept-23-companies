@@ -33,9 +33,10 @@ from tests.test_mcp_write_grants import table_hashes
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "tests" / "fixtures"
-NINETEEN = ("ranked_companies", "company", "person", "followups_due", "record_research", "flag_review", "mark_no_go",
+TWENTY = ("ranked_companies", "company", "person", "followups_due", "record_research", "flag_review", "mark_no_go",
             "save_draft", "save_followup", "save_linkedin_note", "add_people", "reader_next", "reader_submit",
-            "prepare_targets", "submit_candidates", "knock_status", "contact_check", "intake", "log_sent")
+            "prepare_targets", "submit_candidates", "knock_status", "contact_check", "intake", "log_sent",
+            "connect_followups")
 BODY = ("Hi Lee,\n\nI read your post on the queue rewrite at Acme and how the team moved billing off a nightly batch. "
         "I build backend systems in Go and Python, and last year I shipped a queue that handled thousands of "
         "requests a minute without a page. I would like to help your team keep that kind of work calm, and I am "
@@ -143,6 +144,7 @@ class SweepCase(McpCase):
                 "sources": [{"kind": "team", "url": "https://bolt.example/team",
                              "quote": "Grace Hopper, Software Engineer at Bolt Robotics"}]}]}, None),
             "knock_status": ({}, None),
+            "connect_followups": ({}, None),
             "contact_check": ({"company": "Acme", "people": [{"name": "Lin Kedin"}]}, None),
             "intake": ({"people": [{"name": "Ida Intake", "title": "Software Engineer", "company": "Acme",
                                     "linkedin_url": "https://www.linkedin.com/in/ida-intake"}]}, None),
@@ -160,10 +162,10 @@ class SweepCase(McpCase):
 
 
 class ToolListTest(unittest.TestCase):
-    def test_the_tool_list_is_exactly_the_nineteen(self):
+    def test_the_tool_list_is_exactly_the_twenty(self):
         names = [s.name for s in server.tool_specs()]
-        self.assertEqual(sorted(names), sorted(NINETEEN))
-        self.assertEqual(len(names), 19)
+        self.assertEqual(sorted(names), sorted(TWENTY))
+        self.assertEqual(len(names), 20)
 
 
 class SweepTest(SweepCase):
@@ -172,8 +174,8 @@ class SweepTest(SweepCase):
                           for m in self.states.values()},
                          {"planned", "drafted", "approved", "sending", "sent", "failed", "skipped"})
         calls = self.valid()
-        self.assertEqual(set(calls), set(NINETEEN))
-        for name in NINETEEN:
+        self.assertEqual(set(calls), set(TWENTY))
+        for name in TWENTY:
             args, named = calls[name] if name != "reader_submit" else self.valid()["reader_submit"]
             with self.subTest(tool=name):
                 never, before = never_rows(self.db, name), messages(self.db)
@@ -197,7 +199,7 @@ class SweepTest(SweepCase):
                   for mid in self.states.values()}
         calls = self.valid()
         before = table_hashes(self.db)  # the reader_next inside valid() leased a posting; start after it
-        for name in NINETEEN:
+        for name in TWENTY:
             args, _named = calls[name]
             for extra in HOSTILE:
                 with self.subTest(tool=name, extra=extra):
@@ -236,7 +238,7 @@ class RawStoreTest(SweepCase):
     def test_no_write_tools_connection_can_approve_skip_or_send_on_the_raw_store(self):
         calls = self.valid()
         statements = self.statements()
-        writers = [name for name in NINETEEN if spec(name).grants]
+        writers = [name for name in TWENTY if spec(name).grants]
         self.assertEqual(len(writers), 12)
         for name in writers:
             args, _named = calls[name] if name != "reader_submit" else self.valid()["reader_submit"]

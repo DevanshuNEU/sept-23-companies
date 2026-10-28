@@ -11,6 +11,10 @@ on LinkedIn and writes his own notes; Knock picks the companies and keeps the re
 - `intake` (write: people only): the people he pasted, recorded through `add_people`'s own door
   (`record_people`: same matching, same no-go and said-no refusals) with the role kind read from the title, so
   the dashboard shows them as found, not contacted. Each gets a route. A second identical call writes nothing.
+- `connect_followups` (read): the people he sent a LinkedIn request who have not accepted or replied after
+  `bridge.connect_email_after_days` days and who have an email on record, with no draft or email yet and no real stop:
+  connect first, email second (#9 ruling 2026-10-28, #136). Claude drafts each into the Outbox; `knock_status` counts
+  them.
 - `log_sent` (write: the one widening of the guard): after he says he sent them, each LinkedIn request through
   `outreach.outcomes.requests.record_request`, the write the plan row and the LinkedIn page use, so the 7-day
   windows, plan or own source and the company's state stay in one place. Key: person, New York day, note hash.
@@ -41,7 +45,8 @@ from outreach.importer.records import SourceError
 from outreach.mcp.guard import Grant
 from outreach.mcp.tools import SERVER_VERSION, Ctx, Input, ToolError, ToolSpec
 from outreach.mcp.tools.people import PersonIn, SourceIn, clean_people, record_people, said_no_ids
-from outreach.mcp.tools.reads import MAX_ID, UNTRUSTED, Family, clip, company_row, marks, open_postings, role_to_name
+from outreach.mcp.tools.reads import (MAX_ID, UNTRUSTED, Family, clip, company_row, marks, open_postings,
+                                      role_to_name, why_not_email)
 from outreach.mcp.tools.research import HTTPS, is_linkedin
 from outreach.outcomes.requests import own_context, plan_context, record_request
 from outreach.outcomes.windows import ny_day
@@ -381,12 +386,81 @@ def knock_status(ctx: Ctx, args: StatusInput) -> dict:
     return {
         "reachable": True, "server_version": SERVER_VERSION, "today": ctx.today.isoformat(),
         "linkedin_week": _week(conn, canon, ctx.today, cfg),
+        "connects_ready_for_email": len(_connects_ready(conn, canon, family, ctx.today, cfg)),
         "companies_in_flight": flight,
         "today_queue": {"date": ctx.today.isoformat(), "size": len(queue),
                         "reached": sum(1 for s in queue if s in reached)},
         "contacted_txt": {"path": str(_contacted_path(cfg)), "readable": legacy.readable,
                           "gaps": len(legacy.gaps), "message": legacy.message},
     }
+
+
+# ---------------------------------------------------------------------------------------------- connect_followups
+
+FOLLOWUPS_SHOWN = 20
+
+
+def _connects_ready(conn: sqlite3.Connection, canon: dict[int, int], family: Family, today: date,
+                    cfg: PlanConfig) -> list[tuple[sqlite3.Row, date]]:
+    """(person, the day the newest request went out), oldest request first: people whose LinkedIn request has had no
+    accept, reply or progress for `bridge.connect_email_after_days`, who have an email on record and no email draft,
+    thread or sent mail, and who are not on a real stop (person or company no-go, said no, closed or removed
+    company, anything `person.can_draft_email` refuses)."""
+    after = cfg.get("bridge", "connect_email_after_days")
+    outbound = load_outbound(conn, canon, tz=cfg.get("plan", "timezone"))
+    newest: dict[int, date] = {}
+    answered: set[int] = set()
+    mailed: set[int] = set()
+    for o in outbound:
+        if o.person_id is None:
+            continue
+        if o.channel == "email":
+            mailed.add(o.person_id)
+        elif o.channel in ("linkedin_request", "linkedin_message"):
+            if o.accepted or o.replied or o.progressed:
+                answered.add(o.person_id)
+            if o.channel == "linkedin_request":
+                newest[o.person_id] = max(newest.get(o.person_id, o.sent_on), o.sent_on)
+    due = {pid: day for pid, day in newest.items()
+           if pid not in answered and pid not in mailed and (today - day).days >= after}
+    if not due:
+        return []
+    rows = conn.execute(f"SELECT * FROM person WHERE person_id IN ({marks(list(due))}) AND email IS NOT NULL",
+                        list(due)).fetchall()
+    stopped = said_no_ids(conn, [r["person_id"] for r in rows])
+    drafted = {r[0] for r in conn.execute(f"SELECT person_id FROM touch WHERE person_id IN ({marks(list(due))})",
+                                          list(due))}
+    out = []
+    for r in rows:
+        if r["person_id"] in stopped or r["person_id"] in drafted:
+            continue
+        if why_not_email(r, company_row(conn, family.survivor(r["company_id"])), family, conn, None, None):
+            continue
+        out.append((r, due[r["person_id"]]))
+    return sorted(out, key=lambda x: (x[1], x[0]["person_id"]))
+
+
+class ConnectFollowupsInput(Input):
+    pass
+
+
+def connect_followups(ctx: Ctx, args: ConnectFollowupsInput) -> dict:
+    conn, cfg = ctx.conn, _cfg()
+    family = Family(conn)
+    ready = _connects_ready(conn, canonical_ids(conn), family, ctx.today, cfg)
+    items = []
+    for r, day in ready[:FOLLOWUPS_SHOWN]:
+        company = company_row(conn, family.survivor(r["company_id"]))
+        items.append({
+            "person": {"id": r["person_id"], "name": clip(r["name"]), "title": clip(r["title"]),
+                       "role_kind": r["role_kind"], "email": r["email"], **UNTRUSTED},
+            "company": {"id": company["company_id"], "name": clip(company["name"])},
+            "request_sent_on": day.isoformat(), "days_waiting": (ctx.today - day).days})
+    return {"today": ctx.today.isoformat(), "after_days": cfg.get("bridge", "connect_email_after_days"),
+            "total": len(ready), "more": len(ready) - len(items), "items": items,
+            "next": "Draft each one into the Outbox through the cold-email steps (person, then save_draft); do not "
+                    "ask first. Never say the request went unanswered. Someone who accepted is not on this list: "
+                    "that is a LinkedIn message, not an email."}
 
 
 # ---------------------------------------------------------------------------------------------- contact_check
@@ -813,6 +887,10 @@ TOOLS = (
              "reason. Someone already on record at the company (same name, nothing conflicting) is filled in "
              "place, never added twice. Never sends. A second identical call writes nothing.",
              IntakeInput, intake, _PEOPLE_GRANTS),
+    ToolSpec("connect_followups",
+             "People he sent a LinkedIn request who have not accepted or replied after 7 days and have an email on "
+             "record, no draft yet and no real stop: connect first, email second. Draft each into the Outbox. Read "
+             "only.", ConnectFollowupsInput, connect_followups),
     ToolSpec("log_sent",
              "Call only after Devanshu says he sent these LinkedIn requests. Records each request he sent (who, "
              "the exact note, when); never sends, never records an accept, reply or email. Counts toward the "

@@ -115,6 +115,11 @@ company or stops email on its own.
   - `wait` and `find_someone_else` are a one-line heads-up (a full wave, a paused company, a reply elsewhere, a role
     outside engineering), never a reason to skip someone. Only `stop` ends a person, and it means a no-go, said no or
     already asked.
+- **`connect_followups`** when `knock_status` shows `connects_ready_for_email` above zero, or when he asks for
+  follow-ups. LinkedIn goes first; these are people he sent a request who have not accepted or replied after 7 days
+  and who have an email on record. Say how many are ready, then draft each one through the steps above and queue it
+  in the Outbox, without asking first. The email stands on its own hook: never say the request went unanswered or
+  refer to it as ignored. Someone who accepted is not on the list; that is a LinkedIn message.
 - **`log_sent`** only after he says he sent LinkedIn requests: each person, the exact note he sent (empty if
   none) and `at` when it was not just now. It records requests only, never an email, accept, reply or undo.
 

@@ -238,11 +238,17 @@ class RealToolsTest(unittest.TestCase):
 
     def test_instructions_state_the_limits_point_at_the_skill_and_use_no_dashes(self):
         text = server.INSTRUCTIONS
-        self.assertLessEqual(len(text), 1700)
+        self.assertLessEqual(len(text), 1800)
         for phrase in ("never approves", "Outbox", ".claude/skills/cold-email/SKILL.md", "data", "refusal",
                        "log_sent records LinkedIn requests Devanshu says he sent", "only after he says so"):
             self.assertIn(phrase, text)
         self.assertFalse(any(c in text for c in (chr(0x2013), chr(0x2014))))
+
+    def test_instructions_name_draft_brief_before_save_draft(self):
+        text = server.INSTRUCTIONS
+        self.assertIn("draft_brief", text)
+        self.assertLess(text.index("draft_brief"), text.index("save_draft"))
+        self.assertIn("brief_id", text)
 
     def test_the_server_carries_the_instructions_and_a_name(self):
         srv = server.build_server(path="unused.db")

@@ -31,7 +31,15 @@ get past.
    when you hold one exact role title (with req ID when the posting shows one), or know none is open, which makes
    the ask a referral for future new-grad roles. If `can_draft_email` is false, report `why_not` and move on.
 3. **Hook.** Work this out silently; never show it to him.
-   - **Explore.** List at least five candidate hooks from his paste, each a true fact with its source: Northeastern or
+   - **Research (engineers, managers, founders; skip recruiters).** Run one or two web searches on the name with the
+     company, then open the pages. Look for their own footprint: a blog post, talk or podcast, a GitHub repo, a
+     company or launch post, press that quotes them. Confirm it is the same person (same company and role) or drop
+     it. Keep a fact only if you can quote it from a page you opened, with its URL and date. Never use LinkedIn
+     pages, contact-data sites (RocketReach and the like), or a search engine's AI summary, and never use a
+     location, age, family or any private detail. Pass each kept fact as a `sources` entry (kind, URL, label, quote,
+     `observed_on`) when you add the person; for someone already added, name the page and quote it in the report. No
+     good fact found is fine: go on with his paste.
+   - **Explore.** List at least five candidate hooks from his paste or the Research facts, each a true fact with its source: Northeastern or
      the Dhirubhai Ambani Institute of ICT; India or a shared past employer; their team owns the product area of the
      role; something specific they posted, shipped or wrote; a move or change in their own career the paste states. Every
      hook is a fact about the person, never a guess about their product or needs. Do not take the most obvious LinkedIn connection by default.
@@ -140,7 +148,7 @@ When he is asked for the resume after a reply, he attaches it himself.
 to 7 calm, lowercase words. A first email never starts with "Re:" and never names his own product. Recruiters
 get a clear one: role title plus "on OPT".
 
-**Truth.** Every fact about him comes from `mail/me.md`; every fact about the person comes from his paste. Keep
+**Truth.** Every fact about him comes from `mail/me.md`; every fact about the person comes from his paste or a public page quoted in Research. Keep
 me.md's qualifiers with its numbers ("simulated" for CallBudget, "research eval" for OpenCodeIntel). tool-crowding
 is being built and has no results. A line under "Needs Devanshu" is an open question, never a fact. When a draft
 needs a fact neither source has, leave it out and ask him.

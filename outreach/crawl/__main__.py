@@ -14,6 +14,9 @@
   slugs their names suggest on Greenhouse, Lever and Ashby and add each `ok` hit as a `slug_probe` board (at most 12
   requests a company). Takes the crawl lock, so it never overlaps a tick. The tick runs the same pass once a day, so
   this is for a first run or a larger batch by hand.
+- `recheck-boards`: raise the doubtful-board item (Needs you) for every active board found by a name match or a guessed
+  slug that lists over 300 open postings and has none yet. Store only, no requests; run it once after a deploy that
+  widens the check.
 
 Every command calls `live_checkout.require_live` before it opens anything: they send real requests (and `tick` and
 `read` write the live store), so they run only from the live checkout. Exit code: 0 when the run was `ok`, 1 when it
@@ -49,6 +52,7 @@ def _parser() -> argparse.ArgumentParser:
     probe.add_argument("token")
     slugs = sub.add_parser("probe-slugs", help="guess board slugs for companies with no board")
     slugs.add_argument("--limit", type=_positive, default=PROBE_LIMIT, metavar="N")
+    sub.add_parser("recheck-boards", help="raise the doubtful item for big boards matched by name only (store only)")
     return p
 
 
@@ -175,6 +179,19 @@ def _probe(ats: str, token: str, client: HttpClient | None) -> int:
     return 1 if result.result == "error" else 0
 
 
+def _recheck_boards() -> int:
+    from outreach.crawl.ingest import recheck_big_boards
+    from outreach.store import utcnow
+
+    conn = connect(db_path())
+    try:
+        raised = recheck_big_boards(conn, utcnow())
+    finally:
+        conn.close()
+    print(f"recheck-boards: raised {raised} doubtful board item{'' if raised == 1 else 's'}")
+    return 0
+
+
 def _probe_slugs(limit: int, client: HttpClient | None) -> int:
     from outreach.crawl.config import load_crawl_config
     from outreach.crawl.probe import probe_slugs
@@ -207,7 +224,7 @@ def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_roo
     root = root or live_checkout.REPO_ROOT
     live_root = live_root or live_checkout.LIVE_ROOT
     what = {"tick": "the crawl tick", "read": "reading boards", "probe": "probing a board",
-            "probe-slugs": "probing company slugs"}[args.command]
+            "probe-slugs": "probing company slugs", "recheck-boards": "rechecking boards"}[args.command]
     live_checkout.require_live(what, root, live_root)
     try:
         if args.command == "tick":
@@ -216,6 +233,8 @@ def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_roo
             return _read(args.company, client)
         if args.command == "probe-slugs":
             return _probe_slugs(args.limit, client)
+        if args.command == "recheck-boards":
+            return _recheck_boards()
         return _probe(args.ats, args.token, client)
     except _EXPECTED as err:
         _say(f"error: {describe_error(err)}")

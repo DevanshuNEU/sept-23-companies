@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
 from outreach.crawl.bodies import BODY_LANES, fetch_bodies, missing_body_ids, refetch_body_ids, save_body, stored_sha
-from outreach.crawl.boardstate import BoardRow, write_board_state
+from outreach.crawl.boardstate import BoardRow, load_board, write_board_state
 from outreach.crawl.cadence import add_seconds, error_backoff_s, last_new_age_s, next_interval_s
 from outreach.crawl.config import CrawlConfig
 from outreach.crawl.decisions import decide_postings
@@ -232,7 +232,8 @@ def _company_name_keys(conn: sqlite3.Connection, company_id: int) -> set[str]:
 
 def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResult, now: str) -> None:
     """Ruling 8: raise one `flagged` item when the board's org name is none of the company's names, or a company with
-    LCA evidence (a filer of 25 or fewer) has a board of over DOUBTFUL_JOBS jobs. A `slug_probe` board whose read
+    LCA evidence (a filer of 25 or fewer) or a board found by a name match or a guessed slug has over DOUBTFUL_JOBS
+    jobs (Cadence, 2026-10-28: a giant's board matched by name to a small company). A `slug_probe` board whose read
     names no org is always doubtful (Task 26a). Once per board: a repeat is a no-op, so a resolved item stays
     resolved."""
     company = conn.execute("SELECT name FROM company WHERE company_id = ?", (board.company_id,)).fetchone()[0]
@@ -245,10 +246,13 @@ def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResul
     if result.board_name and name_key(result.board_name) not in _company_name_keys(conn, board.company_id):
         why.append(f'the board calls itself "{result.board_name}", which is none of the names of "{company}"')
     jobs = len({j.native_id for j in result.jobs})
-    if jobs > DOUBTFUL_JOBS and conn.execute(
-            "SELECT 1 FROM evidence WHERE company_id = ? AND fact = 'lca' LIMIT 1", (board.company_id,)).fetchone():
-        why.append(f"it lists {jobs} jobs, more than {DOUBTFUL_JOBS} for a company that files 25 or "
-                   "fewer LCAs")
+    if jobs > DOUBTFUL_JOBS:
+        if conn.execute("SELECT 1 FROM evidence WHERE company_id = ? AND fact = 'lca' LIMIT 1",
+                        (board.company_id,)).fetchone():
+            why.append(f"it lists {jobs} jobs, more than {DOUBTFUL_JOBS} for a company that files 25 or "
+                       "fewer LCAs")
+        elif board.found_by in GUESSED_BOARDS:
+            why.append(f"it lists {jobs} jobs, more than {DOUBTFUL_JOBS} for a company matched by name only")
     if not why:
         return
     reason = (f"board match doubtful: the {board.ats} board {board.token} was matched to \"{company}\" "
@@ -256,12 +260,33 @@ def _check_doubtful(conn: sqlite3.Connection, board: BoardRow, result: ReadResul
     _raise_doubtful(conn, board, now, reason)
 
 
-def _raise_doubtful(conn: sqlite3.Connection, board: BoardRow, now: str, reason: str) -> None:
+def _raise_doubtful(conn: sqlite3.Connection, board: BoardRow, now: str, reason: str) -> bool:
+    """Raise the item; True when it was new (a repeat on the same board is a no-op)."""
     with atomic(conn, "board_doubtful"):
-        conn.execute(
+        return conn.execute(
             "INSERT INTO review_item(kind, company_id, board_id, reason, evidence_key, raised_by, created_at) "
             "VALUES ('flagged', ?, ?, ?, ?, 'crawler', ?) ON CONFLICT DO NOTHING",
-            (board.company_id, board.board_id, reason, f"board-doubtful:{board.board_id}", now))
+            (board.company_id, board.board_id, reason, f"board-doubtful:{board.board_id}", now)).rowcount == 1
+
+
+def recheck_big_boards(conn: sqlite3.Connection, now: str) -> int:
+    """Raise the doubtful item for every active board found by a name match or a guessed slug that lists over
+    DOUBTFUL_JOBS open postings and has none yet (boards read before the size rule covered them). Returns how many
+    items it raised. Store only, no requests."""
+    marks = ", ".join("?" for _ in GUESSED_BOARDS)
+    rows = conn.execute(
+        f"SELECT b.board_id, b.company_id, b.ats, b.token, b.found_by, c.name, count(*) AS jobs FROM board b "
+        f"JOIN company c ON c.company_id = b.company_id JOIN posting p ON p.board_id = b.board_id "
+        f"AND p.closed_at IS NULL WHERE b.active = 1 AND b.found_by IN ({marks}) "
+        f"GROUP BY b.board_id HAVING count(*) > ? ORDER BY b.board_id", (*GUESSED_BOARDS, DOUBTFUL_JOBS)).fetchall()
+    raised = 0
+    for r in rows:
+        board = load_board(conn, r["board_id"])
+        reason = (f"board match doubtful: the {r['ats']} board {r['token']} was matched to \"{r['name']}\" "
+                  f"{'by a guessed slug' if r['found_by'] == 'slug_probe' else 'by name only'}, and it lists "
+                  f"{r['jobs']} jobs, more than {DOUBTFUL_JOBS} for a company matched by name only.")
+        raised += _raise_doubtful(conn, board, now, reason)
+    return raised
 
 
 def _open_ids(conn: sqlite3.Connection, board: BoardRow) -> list[int]:

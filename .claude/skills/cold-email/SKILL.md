@@ -18,6 +18,13 @@ get past.
 
 ## Steps
 
+0. **Read his voice first.** Once at the start of every batch, before any drafting, read these DevVault files in full:
+   `~/Desktop/DevVault/skills/human-voice.md` (the Posture section above all), `~/Desktop/DevVault/lens/voice.md`,
+   and `~/Desktop/DevVault/lens/contexts/context_outreach.md` (the overlay for the reader's kind). They are his
+   rules for how he sounds. They are voice only: where they disagree with #9 or with this file on a limit or a
+   format (one draft, not versions; no authorship gate; 80 to 120 words; 2 links; OPT line for recruiters only;
+   no `lint_draft.sh`), #9 and this file win. If a file cannot be read, say so in the report and go on with the Voice
+   rules below.
 1. **Inputs.** Per person: name, company, title, the pasted LinkedIn text, and an email address only if he gave
    one (used exactly as given, never guessed). Set `role_kind` from the title: engineer, manager (engineering
    manager, tech lead, head of, VP), founder (founder, CEO, CTO at a small startup), recruiter (recruiter, talent,

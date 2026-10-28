@@ -247,6 +247,81 @@ class IntakeTest(BridgeCase):
         self.assertEqual(out["people"][0]["route"]["key"], "linkedin.plan_quota")
 
 
+class ConnectFollowupsTest(BridgeCase):
+    """Connect first, email after 7 quiet days (#9 ruling 2026-10-28, #136). Today is 2026-11-10."""
+
+    def setUp(self):
+        super().setUp()
+        self.ann = seed.person(self.db, self.acme, "Ann Quiet", channel="email", email="ann@acme.example")
+
+    def ready(self) -> dict:
+        return self.ok("connect_followups")
+
+    def ids(self) -> list[int]:
+        return [i["person"]["id"] for i in self.ready()["items"]]
+
+    def test_a_quiet_request_with_an_email_on_record_is_due_after_seven_days(self):
+        self.request_touch(self.ann, self.acme, "2026-11-02T15:00:00Z")  # 8 days ago
+        before = fingerprint(self.db)
+        out = self.ready()
+        self.assertEqual(fingerprint(self.db), before)
+        (item,) = out["items"]
+        self.assertEqual((item["person"]["id"], item["person"]["email"], item["company"]["id"]),
+                         (self.ann, "ann@acme.example", self.acme))
+        self.assertEqual((item["request_sent_on"], item["days_waiting"]), ("2026-11-02", 8))
+        self.assertEqual(self.ok("knock_status")["connects_ready_for_email"], 1)
+
+    def test_it_waits_until_the_seventh_day(self):
+        six = seed.person(self.db, self.acme, "Sia Six", email="sia@acme.example")
+        self.request_touch(six, self.acme, "2026-11-04T15:00:00Z")  # 6 days ago
+        self.assertEqual(self.ids(), [])
+        self.assertEqual(self.ok("knock_status")["connects_ready_for_email"], 0)
+        self.request_touch(self.ann, self.acme, "2026-11-03T15:00:00Z")  # exactly 7 days ago
+        self.assertEqual(self.ids(), [self.ann])
+
+    def test_someone_with_no_email_or_who_answered_is_not_listed(self):
+        self.request_touch(self.lin, self.acme, "2026-11-01T15:00:00Z")  # linkedin only, no email
+        ben = seed.person(self.db, self.acme, "Ben Accepted", email="ben@acme.example")
+        cy = seed.person(self.db, self.acme, "Cy Replied", email="cy@acme.example")
+        for pid in (ben, cy):
+            self.request_touch(pid, self.acme, "2026-11-01T15:00:00Z")
+        self.db.execute("UPDATE outreach_touch SET accepted_at = '2026-11-02T15:00:00Z' WHERE person_id = ?", (ben,))
+        self.db.execute("UPDATE outreach_touch SET replied_at = '2026-11-03T15:00:00Z', reply_kind = 'interested' "
+                        "WHERE person_id = ?", (cy,))
+        self.assertEqual(self.ids(), [])
+
+    def test_a_taken_back_request_or_someone_already_drafted_is_not_listed(self):
+        undone = seed.person(self.db, self.acme, "Una Undone", email="una@acme.example")
+        self.request_touch(undone, self.acme, "2026-11-01T15:00:00Z")
+        self.db.execute("UPDATE outreach_touch SET undone_at = '2026-11-02T15:00:00Z' WHERE person_id = ?", (undone,))
+        self.db.execute("INSERT INTO linkedin_log(person_id, kind, at, recorded_at, undoes) VALUES "
+                        "(?, 'undo', '2026-11-02T15:00:00Z', '2026-11-02T15:00:00Z', "
+                        "(SELECT entry_id FROM linkedin_log WHERE person_id = ? AND kind = 'request_sent'))",
+                        (undone, undone))
+        self.request_touch(self.ann, self.acme, "2026-11-01T15:00:00Z")
+        self.assertEqual(self.ids(), [self.ann])
+        seed.message(self.db, seed.touch(self.db, self.ann), 0, subject="Ann and the queue", body="Hi Ann")
+        self.assertEqual(self.ids(), [])
+
+    def test_a_real_stop_removes_them(self):
+        self.request_touch(self.ann, self.acme, "2026-11-01T15:00:00Z")
+        bolt = seed.company(self.db, "Bolt Robotics", "working")
+        bea = seed.person(self.db, bolt, "Bea Bolt", email="bea@bolt.example")
+        self.request_touch(bea, bolt, "2026-11-01T15:00:00Z")
+        self.assertEqual(sorted(self.ids()), sorted([self.ann, bea]))
+        self.db.execute("INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'said_no', 'reply', ?)",
+                        (self.ann, NOW))
+        self.db.execute("INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'other', 'devanshu', ?)",
+                        (bolt, NOW))
+        self.assertEqual(self.ids(), [])
+
+    def test_oldest_request_first(self):
+        late = seed.person(self.db, self.acme, "Lou Late", email="lou@acme.example")
+        self.request_touch(late, self.acme, "2026-11-02T15:00:00Z")
+        self.request_touch(self.ann, self.acme, "2026-10-30T15:00:00Z")
+        self.assertEqual(self.ids(), [self.ann, late])
+
+
 class LogSentTest(BridgeCase):
     def log(self, **request):
         return self.ok("log_sent", {"requests": [{"channel": "linkedin_request", **request}]})

@@ -27,7 +27,7 @@ from tests.test_mcp_boundary import forbidden
 
 ROOT = Path(__file__).resolve().parent.parent
 READ_TOOLS = {"ranked_companies", "company", "person", "followups_due", "prepare_targets", "knock_status",
-              "contact_check"}
+              "contact_check", "connect_followups"}
 WRITE_TOOLS = {"record_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people",
                "save_linkedin_note", "reader_next", "reader_submit", "submit_candidates", "intake", "log_sent"}
 PINNED_TOOLS = READ_TOOLS | WRITE_TOOLS
@@ -203,8 +203,8 @@ class RealToolsTest(unittest.TestCase):
     def test_tool_list_is_pinned(self):
         names = [s.name for s in server.tool_specs()]
         self.assertEqual(set(names), PINNED_TOOLS)
-        self.assertEqual(len(names), 19)
-        self.assertEqual(len(set(names)), 19)
+        self.assertEqual(len(names), 20)
+        self.assertEqual(len(set(names)), 20)
 
     def test_only_the_write_tools_declare_grants(self):
         self.assertEqual({s.name for s in server.tool_specs() if s.grants}, WRITE_TOOLS)

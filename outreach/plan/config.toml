@@ -115,3 +115,4 @@ title_exceptions = ["member of technical staff"]   # read as a plain IC, not as 
 # lines the store lacks. A missing file is fine.
 contacted_txt = "~/Desktop/DevVault/job-search/outreach/contacted.txt"
 log_back_days = 3             # log_sent takes a request sent today or up to this many days back
+connect_email_after_days = 7  # #9 (2026-10-28): a connect with no accept or reply after this many days is due an email

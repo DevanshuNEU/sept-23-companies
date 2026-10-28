@@ -18,13 +18,12 @@ get past.
 
 ## Steps
 
-0. **Read his voice first.** Once at the start of every batch, before any drafting, read these DevVault files in full:
-   `~/Desktop/DevVault/skills/human-voice.md` (the Posture section above all), `~/Desktop/DevVault/lens/voice.md`,
-   and `~/Desktop/DevVault/lens/contexts/context_outreach.md` (the overlay for the reader's kind). They are his
-   rules for how he sounds. They are voice only: where they disagree with #9 or with this file on a limit or a
-   format (one draft, not versions; no authorship gate; 80 to 120 words; 2 links; OPT line for recruiters only;
-   no `lint_draft.sh`), #9 and this file win. If a file cannot be read, say so in the report and go on with the Voice
-   rules below.
+0. **Get the brief.** After step 1 gives each person a `person_id`, call `draft_brief` for that person before any
+   drafting, and write from what it returns: his DevVault voice files (the Posture section above all), the me.md
+   evidence, the person's facts and the limits, assembled by code. Do not read those files yourself. They are voice
+   only: where they disagree with #9 or with this file on a limit or a format (one draft, not versions; no authorship
+   gate; 80 to 120 words; 2 links; OPT line for recruiters only; no `lint_draft.sh`), #9 and this file win. If
+   `draft_brief` refuses (`voice_unreadable`), say so and stop; nothing is drafted without it. Keep its `brief_id`.
 1. **Inputs.** Per person: name, company, title, the pasted LinkedIn text, and an email address only if he gave
    one (used exactly as given, never guessed). Set `role_kind` from the title: engineer, manager (engineering
    manager, tech lead, head of, VP), founder (founder, CEO, CTO at a small startup), recruiter (recruiter, talent,
@@ -83,7 +82,8 @@ get past.
      line he would not say. No corporate phrasing, no big claims, no cleverness for its own sake.
    - **Decide alone.** Never show him the other drafts, the angles or any ranking, and never ask him to pick. Only the
      one final email goes to `save_draft`. Done when every rule below holds for it.
-6. **Save.** `save_draft` with `person_id`, `subject`, `body`, `hook`, `hook_on` (events only) and `project`. It
+6. **Save.** `save_draft` with `person_id`, `brief_id`, `subject`, `body`, `hook`, `hook_on` (events only) and
+   `project`. A missing or stale `brief_id` is refused and nothing is stored; call `draft_brief` again. It
    runs the #9 checks. Fix every `blocks` entry and save again; a block still saves, so he sees the draft either
    way. Fix each `warns` entry you can and carry the rest to the report. Done when `blocks` is empty. A person who
    cannot be emailed (no address, no-go, said no, company closed, already emailed) is refused and nothing is

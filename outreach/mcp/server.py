@@ -49,7 +49,8 @@ Devanshu approves every email himself in the Outbox; the sender sends only what 
 any of those things, and the store refuses them on this connection whatever is asked.
 
 Drafts follow .claude/skills/cold-email/SKILL.md and GitHub issue #9 (his voice, 80 to 120 words, at most two
-links, one hook that is a fact about the person). Use only facts from mail/me.md and what Devanshu or the store
+links, one hook that is a fact about the person). Call draft_brief first for each person; save_draft needs its
+brief_id and refuses a draft without a current one. Use only facts from mail/me.md and what Devanshu or the store
 gives about the person. save_draft and save_followup run the #9 checks on every save: a block still saves, so fix
 it and save again. A LinkedIn note's reason line is only a proposal: Devanshu confirms it or writes his own.
 mark_no_go only raises a Needs-you item; Devanshu confirms it.

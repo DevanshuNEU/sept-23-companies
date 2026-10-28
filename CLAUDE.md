@@ -150,6 +150,12 @@ deleted.
 - Conductor workspaces: `.conductor/settings.toml` sets each new workspace up (uv env, web packages). The web app's run script serves on that workspace's `CONDUCTOR_PORT`; run e2e there with `WEB_PORT=$CONDUCTOR_PORT pnpm e2e` so workspaces never fight over 5173. Never use 3001, 3002, 3011, 3013 or 3100.
 - Test first: write the test, watch it go red for the right reason, then make it green. Every bug fix starts
   with a test that reproduces it. Tests never run a real refresh, a real send, or a crawl.
+- **Drafting harness (#135): code before and after the model.** The drafter never chooses what it reads. The
+  `draft_brief` tool builds its whole input in code: the person, his DevVault voice files, me.md above its open
+  questions, and the limits. `save_draft` refuses a draft without a current `brief_id` (the hash of those files and the
+  person), so a draft cannot be saved without a brief made from the current voice files (the id proves the pack was current, not that it was read). After the model, the voice checks in `outreach/drafting` and the
+  #9 checks run on every save. The package makes no model calls. His voice rules live in DevVault and in
+  `outreach/drafting`, never copied into the skill. A change that lets a draft skip the brief breaks this rule.
 - The old code (`mail/`, `refresh/`, `dashboard/`) is standard library only and frozen. The platform lives in the
   `outreach/` package and `web/`; its dependencies are pinned (see #4 and #12).
 - One issue per branch and PR; the PR body says which issue it closes.

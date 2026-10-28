@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from outreach.drafting.voice_checks import voice_checks
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 
 __all__ = ["DEFAULT_BANNED_PHRASES", "MX_TTL", "DraftInput", "load_banned", "normalise_domain", "email_domain",
@@ -64,7 +65,8 @@ STOP_REPLIES = ("said_no", "asked_to_stop")
 BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "too_many_links", "link_shortener", "followup_subject",
                "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
 WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused", "link_count",
-              "recruiter", "mail_server_unknown")
+              "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
+              "voice_recital", "voice_rhythm", "voice_opt_line", "voice_ungrounded")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _RANK = {"block": 0, "warn": 1, "pass": 2}
 
@@ -460,9 +462,10 @@ def _followup_subject(conn, d: DraftInput) -> Check | None:
 
 
 def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tuple[str, re.Pattern]],
-               now: str) -> list[Check]:
+               now: str, ground: str | None = None) -> list[Check]:
     """Every check of one draft on the store as it is now: blocks, then warns, then the passes, each group in a
     fixed code order. `banned` is what `load_banned` returned; an empty list blocks (`banned_list_missing`).
+    `ground` is the text a number in the body must come from (the voice checks, #135); None skips that one check.
     Read only: it writes nothing and leaves the caller's transaction as it found it."""
     companies = company_map(conn)
     if d.company_id not in companies:
@@ -479,6 +482,7 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         _stale_hook(d, now),
         _subject_wording(d),
         _recruiter(d),
+        *voice_checks(d.body, d.role_kind, ground=ground),
         _followup_subject(conn, d),
         _near_identical(conn, d, family),
         _subject_reused(conn, d),

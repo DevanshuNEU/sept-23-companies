@@ -9,6 +9,8 @@ import sqlite3
 import unittest
 from unittest import mock
 
+from outreach.drafting.brief import brief_id, read_evidence
+from outreach.drafting.voice import load_voice_pack
 from outreach.mcp import server
 from outreach.mcp.guard import BRIDGE_TABLES, Grant, open_guarded
 from tests import apiseed as seed
@@ -206,6 +208,11 @@ class GrantsCase(McpCase):
 
     def test_save_draft_cannot_write_beyond_its_grants(self):
         lee = seed.person(self.db, self.acme, "Lee New", email="lee@acme.example")
+        with mock.patch.dict(os.environ, {"OUTREACH_MAIL_HOME": str(FIXTURE_BANNED.parent / "plan")}):
+            brief = brief_id(load_voice_pack(), read_evidence(), lee)
+            self.save_draft_grants(lee, brief)
+
+    def save_draft_grants(self, lee, brief):
         self.check_tool("save_draft", [
             ("UPDATE message SET state = 'drafted', subject = 'Re: x', body = 'y' WHERE message_id = ?",
              (self.planned,)),
@@ -221,7 +228,7 @@ class GrantsCase(McpCase):
             ("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
              "VALUES ('flagged', ?, 'x', 'k4', 'claude', ?)", (self.acme, NOW)),
         ], {"person_id": lee, "subject": "Your queue rewrite", "body": BODY, "hook": "His post on the queue",
-            "project": "runner"})
+            "project": "runner", "brief_id": brief})
 
     def test_save_followup_cannot_write_beyond_its_grants(self):
         self.check_tool("save_followup", [

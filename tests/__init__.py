@@ -8,6 +8,8 @@ import os, tempfile
 for _var, _prefix in (("OUTREACH_MAIL_HOME", "outreach-mail-test-"), ("OUTREACH_GMAIL_DIR", "outreach-gmail-test-"),
                        ("OUTREACH_SOURCES_DIR", "outreach-sources-test-")):
     os.environ[_var] = tempfile.mkdtemp(prefix=_prefix)
+# The drafting harness reads his DevVault voice files; no test reads the real ones (#135).
+os.environ["OUTREACH_VOICE_DIR"] = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "devvault")
 os.environ["OUTREACH_DB"] = os.path.join(tempfile.mkdtemp(prefix="outreach-db-test-"), "outreach.db")
 # The bridge reads the frozen contacted.txt; no test reads DevVault's. A missing file is what most tests want.
 os.environ["OUTREACH_CONTACTED_TXT"] = os.path.join(tempfile.mkdtemp(prefix="outreach-contacted-test-"), "none.txt")

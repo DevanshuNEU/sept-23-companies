@@ -6,14 +6,20 @@ content block still saves and says what to fix; a precondition (no address, no-g
 removed, already emailed, his edit, approved) refuses and stores nothing. Nothing here approves."""
 import json
 import os
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
+from outreach.drafting import brief as drafting_brief
+from outreach.drafting.voice import load_voice_pack
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase, fingerprint
 from tests.test_drafts_checks import BODY, FIXTURE_BANNED, PORTFOLIO, PROJECT
 from tests.test_mcp_reads import no_go
 
+FIXTURE_MAIL = Path(__file__).parent / "fixtures" / "plan"  # its me.md is the evidence the brief reads
 SUBJECT = "Your queue rewrite and the new grad backend role"
 HOOK = "His post on the queue rewrite"
 HIS_WORDS = "He has edited this one. Leave it."
@@ -23,7 +29,8 @@ FOLLOW = "Hi Sam, one more note on the ledger idea from my last email. Happy to 
 class DraftCase(McpCase):
     def setUp(self):
         super().setUp()
-        patcher = mock.patch.dict(os.environ, {"OUTREACH_BANNED_PHRASES": str(FIXTURE_BANNED)})
+        patcher = mock.patch.dict(os.environ, {"OUTREACH_BANNED_PHRASES": str(FIXTURE_BANNED),
+                                               "OUTREACH_MAIL_HOME": str(FIXTURE_MAIL)})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.acme = seed.company(self.db, "Acme", "working")
@@ -35,11 +42,17 @@ class DraftCase(McpCase):
                         "DO UPDATE SET status = excluded.status, checked_at = excluded.checked_at",
                         (domain, status, at))
 
-    def draft_args(self, **changes) -> dict:
+    def draft_args(self, *, brief: bool = True, **changes) -> dict:
         args = {"person_id": self.pat, "subject": SUBJECT, "body": BODY, "hook": HOOK, "hook_on": "2026-11-02",
                 "project": "runner"}
         args.update(changes)
+        if brief and "brief_id" not in args:
+            args["brief_id"] = self.brief_id(args["person_id"])
         return {k: v for k, v in args.items() if v is not None}
+
+    def brief_id(self, person_id=None) -> str:
+        """What draft_brief gives for this person now, computed here so an unknown person id can be saved too."""
+        return drafting_brief.brief_id(load_voice_pack(), drafting_brief.read_evidence(), person_id or self.pat)
 
     def first(self, person_id=None):
         return self.db.execute(
@@ -208,6 +221,80 @@ class SaveDraftTest(DraftCase):
     def test_a_banned_phrase_warns(self):
         got = self.ok("save_draft", self.draft_args(body=BODY.replace("I build", "I am passionate about building")))
         self.assertIn("banned_phrase", self.codes(got["warns"]))
+
+
+class BriefGateTest(DraftCase):
+    """save_draft refuses a draft made without a current brief (#135): nothing is stored."""
+
+    def args_with(self, brief_id, **changes):
+        return self.draft_args(brief_id=brief_id, **changes)
+
+    def test_save_without_a_brief_id_is_refused_by_the_schema(self):
+        err = self.error("save_draft", self.draft_args(brief=False))
+        self.assertEqual(err["code"], "bad_input")
+        self.assertIsNone(self.first())
+
+    def test_a_wrong_brief_id_is_refused_and_stores_nothing(self):
+        before = fingerprint(self.db)
+        err = self.error("save_draft", self.args_with("0" * 16))
+        self.assertEqual(err["code"], "stale_brief")
+        self.assertIn("draft_brief", err["fix"])
+        self.assertEqual(fingerprint(self.db), before)
+
+    def test_another_persons_brief_is_refused(self):
+        other = seed.person(self.db, self.acme, "Quinn Ray", email="quinn@acme.example")
+        err = self.error("save_draft", self.args_with(self.brief_id(other)))
+        self.assertEqual(err["code"], "stale_brief")
+        self.assertIsNone(self.first())
+
+    def test_a_voice_file_changed_after_the_brief_makes_it_stale(self):
+        copy = tempfile.mkdtemp(prefix="voice-copy-")
+        self.addCleanup(shutil.rmtree, copy, ignore_errors=True)
+        shutil.copytree(os.environ["OUTREACH_VOICE_DIR"], copy, dirs_exist_ok=True)
+        with mock.patch.dict(os.environ, {"OUTREACH_VOICE_DIR": copy}):
+            brief = self.brief_id()
+            with open(Path(copy) / "lens" / "voice.md", "a", encoding="utf-8") as f:
+                f.write("\nnew rule")
+            err = self.error("save_draft", self.args_with(brief))
+        self.assertEqual(err["code"], "stale_brief")
+        self.assertIsNone(self.first())
+
+    def test_an_unreadable_voice_folder_refuses_with_voice_unreadable(self):
+        brief = self.brief_id()
+        empty = tempfile.mkdtemp(prefix="voice-empty-")
+        self.addCleanup(shutil.rmtree, empty, ignore_errors=True)
+        with mock.patch.dict(os.environ, {"OUTREACH_VOICE_DIR": empty}):
+            err = self.error("save_draft", self.args_with(brief))
+        self.assertEqual(err["code"], "voice_unreadable")
+        self.assertIsNone(self.first())
+
+    def test_the_saved_checks_record_the_brief(self):
+        brief = self.brief_id()
+        self.ok("save_draft", self.args_with(brief))
+        stored = {c["code"]: c for c in json.loads(self.first()["checks"])}
+        self.assertEqual(stored["voice_brief"]["severity"], "pass")
+        self.assertIn(brief, stored["voice_brief"]["detail"])
+
+    def test_voice_warns_come_back_and_the_draft_still_saves(self):
+        brief = self.brief_id()
+        body = BODY.replace("I can send anything", "I'd love to send anything")
+        got = self.ok("save_draft", self.args_with(brief, body=body))
+        self.assertIn("voice_eager", [w["code"] for w in got["warns"]])
+        self.assertEqual(self.first()["state"], "drafted")
+
+    def test_a_number_not_in_me_md_or_the_profile_warns_as_ungrounded(self):
+        brief = self.brief_id()
+        body = BODY.replace("forty thousand", "40,000")
+        got = self.ok("save_draft", self.args_with(brief, body=body))
+        self.assertIn("voice_ungrounded", [w["code"] for w in got["warns"]])
+
+
+class GroundCase(DraftCase):
+    def test_a_number_only_in_the_models_own_hook_is_still_ungrounded(self):
+        brief = self.brief_id()
+        body = BODY.replace("forty thousand", "777")
+        got = self.ok("save_draft", self.draft_args(brief_id=brief, body=body, hook="His post on 777 queues"))
+        self.assertIn("voice_ungrounded", [w["code"] for w in got["warns"]])
 
 
 class SaveFollowupTest(DraftCase):

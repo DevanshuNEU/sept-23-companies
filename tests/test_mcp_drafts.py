@@ -289,6 +289,14 @@ class BriefGateTest(DraftCase):
         self.assertIn("voice_ungrounded", [w["code"] for w in got["warns"]])
 
 
+class GroundCase(DraftCase):
+    def test_a_number_only_in_the_models_own_hook_is_still_ungrounded(self):
+        brief = self.brief_id()
+        body = BODY.replace("forty thousand", "777")
+        got = self.ok("save_draft", self.draft_args(brief_id=brief, body=body, hook="His post on 777 queues"))
+        self.assertIn("voice_ungrounded", [w["code"] for w in got["warns"]])
+
+
 class SaveFollowupTest(DraftCase):
     def setUp(self):
         super().setUp()

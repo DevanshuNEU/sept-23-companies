@@ -237,7 +237,7 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
             raise stale(args.revision)
         found = checks_of(ctx, p, message_id=first["message_id"] if first else None, seq=0, subject=subject,
                           body=body, hook=hook, banned=banned,
-                          ground="\n".join((evidence, p["profile_text"], p["notes"], hook)))
+                          ground="\n".join((evidence, p["profile_text"], p["notes"])))
         found.append({"code": "voice_brief", "severity": "pass", "title": "Voice pack read",
                       "detail": f"brief {args.brief_id}, voice {digest[:12]}", "fix": None, "spans": []})
         if first is not None and (first["subject"], first["body"], first["hook"], first["project"]) == (

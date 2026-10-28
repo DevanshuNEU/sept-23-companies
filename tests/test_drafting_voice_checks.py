@@ -88,6 +88,20 @@ class VoiceChecksCase(unittest.TestCase):
     def test_no_digits_passes_ungrounded(self):
         self.assertEqual(one("voice_ungrounded", "No numbers at all here.", ground="")["severity"], "pass")
 
+    def test_a_number_that_is_only_part_of_a_bigger_ground_number_is_ungrounded(self):
+        c = one("voice_ungrounded", "It had 66 queries and 20 people.", ground="665-query eval since 2025")
+        self.assertEqual(c["severity"], "warn")
+        self.assertIn("66", c["detail"])
+        self.assertIn("20", c["detail"])
+
+    def test_a_thousands_comma_matches_the_plain_number_in_the_ground(self):
+        self.assertEqual(one("voice_ungrounded", "1,808 tests.", ground="1808 Vitest tests")["severity"], "pass")
+        self.assertEqual(one("voice_ungrounded", "1808 tests.", ground="1,808 Vitest tests")["severity"], "pass")
+
+    def test_a_percent_matches_its_number_on_a_boundary(self):
+        self.assertEqual(one("voice_ungrounded", "94% first.", ground="94% Hit@1")["severity"], "pass")
+        self.assertEqual(one("voice_ungrounded", "9% first.", ground="94% Hit@1")["severity"], "warn")
+
     def test_ground_none_skips_ungrounded(self):
         self.assertNotIn("voice_ungrounded", [c["code"] for c in voice_checks("It handled 99999 users.", "engineer")])
 

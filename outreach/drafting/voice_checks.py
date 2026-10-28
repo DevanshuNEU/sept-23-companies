@@ -63,11 +63,19 @@ def _rhythm(text: str) -> dict:
     return _check("voice_rhythm", "pass", "Rhythm varies", "No model rhythm found.")
 
 
+def _plain(number: str) -> str:
+    """A number without its thousands commas or its percent sign: '1,808' is '1808', '94%' is '94'."""
+    return re.sub(r"(?<=\d),(?=\d{3}\b)", "", number).rstrip("%")
+
+
 def _ungrounded(text: str, ground: str) -> dict:
-    missing = []
+    plain_ground, missing = _plain(ground), []
     for raw in NUMBER.findall(text):
         n = raw.rstrip(".,")
-        if n and not YEAR.match(n) and n not in ground and n not in missing:
+        if not n or YEAR.match(n) or n in missing:
+            continue
+        # A whole number only: '66' is not found inside '665' or '2012', and '94' is not found inside '94.5'.
+        if not re.search(rf"(?<![\d.,]){re.escape(_plain(n))}(?!\d|\.\d)", plain_ground):
             missing.append(n)
     if missing:
         return _check("voice_ungrounded", "warn", "Number without a source",

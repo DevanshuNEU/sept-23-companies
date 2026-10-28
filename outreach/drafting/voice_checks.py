@@ -21,7 +21,7 @@ SYSTEM = ("lane", "wave")  # his system's words; a reader never says them (req I
 RECITAL = re.compile(r"\byour (?:resume|profile|linkedin|bio) (?:lists|says|shows|mentions)\b|"
                      r"\bi (?:saw|noticed|read) that you\b", re.I)
 NOT_BUT = re.compile(r"\bnot (?:just |only )?[^.,]{1,50}, (?:it's|its|but)\b", re.I)
-OPT = re.compile(r"F-1|\bOPT\b|STEM OPT|sponsor", re.I)
+OPT = re.compile(r"F-1|\bOPT\b", re.I)  # sponsorship wording belongs to outreach/rules, so only the OPT line here
 NUMBER = re.compile(r"\d[\d,.]*%?")
 YEAR = re.compile(r"^(?:19|20)\d\d$")
 SENTENCE_ENDS = re.compile(r"(?<=[.!?])\s+")

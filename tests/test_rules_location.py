@@ -91,6 +91,24 @@ class UsStatusTest(unittest.TestCase):
             with self.subTest(title=title, location=loc, country=country):
                 self.assertEqual(us_status(loc, country, self.cfg, title=title), expected)
 
+    def test_brazilian_and_nearby_cities_read_no(self):
+        # Cadence's Application Engineer I came in as a bare "BELO HORIZONTE" and read unknown (2026-10-28).
+        for loc in ("BELO HORIZONTE", "Sao Paulo", "S\u00e3o Paulo, Brazil", "Rio de Janeiro", "Curitiba", "Porto Alegre",
+                    "Campinas", "Florianopolis", "Buenos Aires", "Montevideo", "Mexico City"):
+            with self.subTest(location=loc):
+                self.assertEqual(us_status(loc, None, self.cfg), "no")
+
+    def test_us_places_next_to_the_new_cities_still_read_yes(self):
+        for loc in ("Lima, OH", "Remote - US or Sao Paulo", "Remote - USA"):
+            with self.subTest(location=loc):
+                self.assertEqual(us_status(loc, None, self.cfg), "yes")
+
+    def test_a_place_the_lists_do_not_know_stays_unknown(self):
+        # A false positive is cheap and his flag teaches the list; no rule hides what it cannot place.
+        for loc in ("Remote", "Wakanda City"):
+            with self.subTest(location=loc):
+                self.assertEqual(us_status(loc, None, self.cfg), "unknown")
+
     def test_without_a_title_nothing_changes(self):
         self.assertEqual(us_status("Remote", None, self.cfg), "unknown")
         self.assertEqual(us_status("Remote", None, self.cfg, title=None), "unknown")

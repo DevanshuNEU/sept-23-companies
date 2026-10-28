@@ -234,6 +234,10 @@ non_us_cities = [
   "oslo", "helsinki", "istanbul", "dubai", "abu dhabi", "cairo", "lagos", "nairobi", "jakarta", "bangkok",
   "auckland", "santiago", "belgrade", "sofia", "bogota", "medellin", "mexicali", "tijuana", "monterrey",
   "guadalajara", "juarez", "queretaro",
+  # 2026-10-28: Cadence's Belo Horizonte posting read unknown and came through as a pick
+  "belo horizonte", "sao paulo", "s\u00e3o paulo", "rio de janeiro", "curitiba", "porto alegre", "campinas",
+  "florianopolis", "florian\u00f3polis", "recife", "brasilia", "bras\u00edlia", "buenos aires", "montevideo",
+  "mexico city",
 ]
 # #4 follow-up 2026-10-23: words that may sit beside a country in one title segment ("Remote - Canada"); they are
 # dropped before the segment is compared with non_us_countries

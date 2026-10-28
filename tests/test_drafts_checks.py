@@ -27,13 +27,14 @@ BODY = (
     "with retries and clean shutdowns, and I want to bring that to your team.\n\n"
     f"My work is at {PORTFOLIO} and the runner is at {PROJECT}.\n\n"
     "Would you be open to referring me for the role, or pointing me to the right person? "
-    "I'm happy to send anything that helps, and I can keep it short.\n\n"
+    "I can send anything that helps, and I can keep it short.\n\n"
     "Thanks,\nDevanshu"
 )
 CLEAN_CODES = [
     "no_mail_server", "placeholder", "too_many_links", "link_shortener", "near_identical", "no_go_person", "said_no",
     "closed_no_sponsorship", "banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused",
-    "link_count", "recruiter",
+    "link_count", "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
+    "voice_rhythm", "voice_opt_line",
 ]
 NO_GO_REASONS = ("no_sponsorship", "citizenship", "over_300", "defence_contractor", "agency", "said_no",
                  "stop_reply", "not_a_fit", "other")
@@ -496,6 +497,18 @@ class Shape(ChecksCase):
         self.assertEqual([c["code"] for c in found], CLEAN_CODES)
         self.assertEqual({c["severity"] for c in found}, {"pass"})
         self.assertEqual(self.run_on(), found)
+
+    def test_voice_checks_run_with_the_draft_checks(self):
+        found = self.run_on(body=BODY.replace("I can send anything", "I'd love to send anything"))
+        self.assertEqual(self.one(found, "voice_eager")["severity"], "warn")
+
+    def test_ground_adds_the_ungrounded_check_and_none_skips_it(self):
+        body = BODY.replace("forty thousand", "40,000")
+        self.assertNotIn("voice_ungrounded", [c["code"] for c in self.run_on(body=body)])
+        bare = run_checks(self.conn, self.draft(body=body), banned=self.banned, now=NOW, ground="")
+        self.assertEqual(self.one(bare, "voice_ungrounded")["severity"], "warn")
+        backed = run_checks(self.conn, self.draft(body=body), banned=self.banned, now=NOW, ground="moved 40,000 tasks")
+        self.assertEqual(self.one(backed, "voice_ungrounded")["severity"], "pass")
 
     def test_order_is_blocks_then_warns_then_passes(self):
         body = BODY.replace(", and your post", " \u2014 your post") + "\nacme.com"

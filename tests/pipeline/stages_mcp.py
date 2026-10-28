@@ -16,6 +16,8 @@ import os
 from pathlib import Path
 from unittest import mock
 
+from outreach.drafting.brief import brief_id, read_evidence
+from outreach.drafting.voice import load_voice_pack
 from outreach.mcp import server
 from outreach.mcp.guard import BRIDGE_TABLES, NEVER_TABLES
 
@@ -89,7 +91,8 @@ class McpStage:
             self.engineer, self.manager = (r["person_id"] for r in added["results"])
             self.message = self.call("save_draft", {
                 "person_id": self.engineer, "subject": "Your ledger post and a new grad backend role", "body": BODY,
-                "hook": "Her post on the ledger rewrite", "hook_on": "2026-11-02", "project": "queue"})["message_id"]
+                "hook": "Her post on the ledger rewrite", "hook_on": "2026-11-02", "project": "queue",
+                "brief_id": brief_id(load_voice_pack(), read_evidence(), self.engineer)})["message_id"]
             self.note = self.call("save_linkedin_note", {
                 "person_id": self.manager, "body": NOTE, "reason_line": REASON,
                 "facts": [{"text": "ledger rewrite", "label": "Blog", "url": "https://draftwell.example/blog/ledger",

@@ -24,7 +24,7 @@ from datetime import date
 
 from pydantic import Field
 
-from outreach.drafting.brief import brief_id, read_evidence
+from outreach.drafting.brief import brief_id, check_brief, read_evidence
 from outreach.drafting.voice import VoiceUnreadable, load_voice_pack
 from outreach.drafts.checks import (DEFAULT_BANNED_PHRASES, DEFAULT_WORDS, HOOK_DATE, MAX_LINKS, URL, WORDS, DraftInput,
                                     cached_mx, email_domain, load_banned, run_checks)
@@ -97,13 +97,13 @@ def banned_list() -> list:
 
 
 def checks_of(ctx: Ctx, person: sqlite3.Row, *, message_id: int | None, seq: int, subject: str, body: str,
-              hook: str, banned: list) -> list[dict]:
+              hook: str, banned: list, ground: str | None = None) -> list[dict]:
     domain = email_domain(person["email"])
     d = DraftInput(message_id=message_id, seq=seq, subject=subject, body=body, hook=hook,
                    role_kind=person["role_kind"], person_name=person["name"], person_email=person["email"],
                    person_id=person["person_id"], company_id=person["company_id"],
                    mx=cached_mx(ctx.conn, domain, ctx.now) if domain else "none")
-    return run_checks(ctx.conn, d, banned=banned, now=ctx.now)
+    return run_checks(ctx.conn, d, banned=banned, now=ctx.now, ground=ground)
 
 
 def person_row(conn: sqlite3.Connection, person_id: int) -> sqlite3.Row:
@@ -176,6 +176,9 @@ class SaveDraftInput(Input):
                                             "tell an old hook.")
     project: str = Field(min_length=1, max_length=PROJECT_CHARS, description="The project the second link points at.")
     revision: int | None = Field(None, ge=1, le=MAX_ID, description="The revision you read; a newer one refuses.")
+    brief_id: str = Field(min_length=1, max_length=64,
+                          description="The brief_id draft_brief returned for this person. A draft made without a "
+                                      "current one is refused.")
 
 
 def stored_hook(args: SaveDraftInput, today: date) -> str:
@@ -196,10 +199,25 @@ def stored_hook(args: SaveDraftInput, today: date) -> str:
     return f"{hook} ({on.isoformat()})"
 
 
+def require_brief(brief: str, person_id: int) -> tuple[str, str]:
+    """(evidence, voice digest) when `brief` is the id draft_brief gives for this person now: the voice files and
+    me.md are read again here, so an edit since the brief makes it stale. Anything else refuses (#135)."""
+    try:
+        pack, evidence = load_voice_pack(), read_evidence()
+    except VoiceUnreadable as caught:
+        raise voice_unreadable(caught) from None
+    if not check_brief(brief, pack, evidence, person_id):
+        raise ToolError("stale_brief", "This draft was not made from a current brief for this person.",
+                        "Call draft_brief for this person again, write from what it returns, then save. "
+                        "Nothing was written.")
+    return evidence, pack.digest
+
+
 def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
     conn = ctx.conn
     subject, body, project = text(args.subject, "subject"), text(args.body, "body"), text(args.project, "project")
     hook = stored_hook(args, ctx.today)
+    evidence, digest = require_brief(args.brief_id, args.person_id)
     banned = banned_list()
     with transaction(conn):
         p = person_row(conn, args.person_id)
@@ -218,7 +236,10 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
         if first is not None and args.revision is not None and args.revision != first["revision"]:
             raise stale(args.revision)
         found = checks_of(ctx, p, message_id=first["message_id"] if first else None, seq=0, subject=subject,
-                          body=body, hook=hook, banned=banned)
+                          body=body, hook=hook, banned=banned,
+                          ground="\n".join((evidence, p["profile_text"], p["notes"], hook)))
+        found.append({"code": "voice_brief", "severity": "pass", "title": "Voice pack read",
+                      "detail": f"brief {args.brief_id}, voice {digest[:12]}", "fix": None, "spans": []})
         if first is not None and (first["subject"], first["body"], first["hook"], first["project"]) == (
                 subject, body, hook, project):
             return result(first["message_id"], first["revision"], created=False, unchanged=True, body=body,
@@ -427,7 +448,8 @@ TOOLS = (
     ToolSpec("save_draft",
              "Save the first email to a person as a draft for Devanshu to review. It runs the #9 checks and returns "
              "blocks, warns and a count of passes; a block still saves, so fix it and save again. It never "
-             "approves. A message he saved or approved is refused.", SaveDraftInput, save_draft,
+             "approves. Call draft_brief first and pass its brief_id: a draft made without a current one is refused. A "
+             "message he saved or approved is refused.", SaveDraftInput, save_draft,
              {"touch": Grant(insert=True),
               "message": Grant(insert=True, update=frozenset({"subject", "body", "hook", "project", "checks",
                                                               "saved_by", "updated_at", "revision"})),

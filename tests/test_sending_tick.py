@@ -869,10 +869,12 @@ class DryRunTest(Base):
         for i in range(10):
             person = seed_email_person(self.db, company, f"B{i}", f"b{i}@many.example")
             seed_sent(self.db, person, at=MON - timedelta(days=1, minutes=i))
-        self.db.execute("UPDATE touch SET state = 'bounced', bounced_at = ? WHERE touch_id = "
-                        "(SELECT max(touch_id) FROM touch)", (iso(MON - timedelta(hours=1)),))
+        # Two "asked to stop" replies in a week: a hard block the tick raises from the store alone.
+        self.db.execute("UPDATE touch SET state = 'replied', replied_at = ?, reply_kind = 'asked_to_stop' "
+                        "WHERE touch_id IN (SELECT touch_id FROM touch ORDER BY touch_id DESC LIMIT 2)",
+                        (iso(MON - timedelta(hours=1)),))
         before = self.dump()
-        self.tick(dry_run=True)  # a real tick would pause on this bounce rate and tell him
+        self.tick(dry_run=True)  # a real tick would pause on these stop replies and tell him
         self.assertEqual(self.notices, [])
         self.assertEqual(self.dump(), before)
         self.tick()
@@ -993,32 +995,29 @@ class CrashTest(Base):
 
 
 class SignalTest(Base):
-    def test_hard_bounce_rate_from_any_path_pauses(self):
+    def test_a_high_bounce_rate_from_any_path_never_pauses(self):
         company = seed_company(self.db, "Many")
         touches = []
         for i in range(10):
             person = seed_email_person(self.db, company, f"B{i}", f"b{i}@many.example")
             seed_sent(self.db, person, at=MON - timedelta(days=1, minutes=i))
             touches.append(self.db.execute("SELECT touch_id FROM touch WHERE person_id = ?", (person,)).fetchone()[0])
-        # A bounce recorded by another path (not Gmail inbound): the tick still sees the rate.
+        # A bounce recorded by another path (not Gmail inbound): 1 in 10 first emails, and the tick does not pause.
         self.db.execute("UPDATE touch SET state = 'bounced', bounced_at = ? WHERE touch_id = ?",
                         (iso(MON - timedelta(hours=1)), touches[0]))
         self.tick()
-        self.assertEqual((self.sender()["paused"], self.sender()["pause_kind"]), (1, "hard_block"))
-        self.assertEqual([json.loads(e["detail"])["kind"] for e in self.events("hard_block")], ["hard_bounce_rate"])
-        self.resume()
-        mid = self.approve()
-        self.clock.advance(minutes=2)
-        self.assertEqual(self.tick().sent, (mid,))  # the same bounces never pause twice
         self.assertEqual(self.sender()["paused"], 0)
+        self.assertEqual(self.events("hard_block"), [])
 
     def test_a_notice_from_a_rolled_back_step_is_never_shown(self):
         company = seed_company(self.db, "Many")
         for i in range(10):
             person = seed_email_person(self.db, company, f"B{i}", f"b{i}@many.example")
             seed_sent(self.db, person, at=MON - timedelta(days=1, minutes=i))
-        self.db.execute("UPDATE touch SET state = 'bounced', bounced_at = ? WHERE touch_id = "
-                        "(SELECT max(touch_id) FROM touch)", (iso(MON - timedelta(hours=1)),))
+        # Two "asked to stop" replies in a week: a hard block the tick raises from the store alone.
+        self.db.execute("UPDATE touch SET state = 'replied', replied_at = ?, reply_kind = 'asked_to_stop' "
+                        "WHERE touch_id IN (SELECT touch_id FROM touch ORDER BY touch_id DESC LIMIT 2)",
+                        (iso(MON - timedelta(hours=1)),))
         # The pause and its notice are raised, then a later step of the same transaction fails: all rolled back.
         with mock.patch("outreach.sending.followups.lapse_followups", side_effect=RuntimeError("a later step")):
             for _ in range(2):

@@ -506,8 +506,8 @@ class _Tick:
         self._prune()
 
     def _bounce_rules(self) -> None:
-        """The bounce rules on whatever wrote the bounces (Gmail inbound or another path): today's 3-day rate when a
-        bounce is dated today, and the hard rate every tick. Their keys match inbound's, so a rule fires once."""
+        """The bounce rule on whatever wrote the bounces (Gmail inbound or another path): today's 3-day rate when a
+        bounce is dated today. Its key matches inbound's, so the warning fires once. A bounce rate never pauses."""
         conn, cfg = self.conn, self.cfg
         signal = {"cfg": cfg, "notify": self.notify, "now": self.now, "at": self.stamp}
         start, end = cal.ny_day_bounds(self.today, cfg)
@@ -517,12 +517,6 @@ class _Tick:
             if signals.bounce_rate_warns(rate, cfg):
                 ramp.note_signal(conn, "bounce_warning", detail={"rate": rate, "source": "tick"},
                                  key=f"bounce_warning:{self.today.isoformat()}", **signal)
-        if signals.hard_bounce_tripped(conn, cfg):
-            rate, count = signals.hard_bounce_rate(conn, cfg)
-            bounced = conn.execute("SELECT COUNT(*) FROM touch WHERE bounced_at IS NOT NULL").fetchone()[0]
-            ramp.note_signal(conn, "hard_bounce_rate",
-                             detail={"rate": rate, "first_emails": count, "bounced": bounced, "source": "tick"},
-                             key=f"hard_bounce_rate:{bounced}", **signal)
 
     def _prune(self) -> None:
         """Once a New York day: delete this job's `ok` no-op runs older than `prune_noop_after_days`."""

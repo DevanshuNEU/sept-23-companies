@@ -13,12 +13,12 @@ from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
 __all__ = ["WARNING_KINDS", "HARD_KINDS", "record_signal", "signal_day", "sends_on", "bounce_rate_3d",
-           "bounce_rate_warns", "hard_bounce_rate", "hard_bounce_tripped", "stop_tags_in", "as_datetime"]
+           "bounce_rate_warns", "stop_tags_in", "as_datetime"]
 
 # A warning: the day is not clean, today's limit drops one level at once, the next day starts from there.
 WARNING_KINDS = ("bounce_warning", "policy_rejection", "stop_reply")
 # A hard block: the sender is paused and Devanshu is told.
-HARD_KINDS = ("gmail_limit", "gmail_policy", "hard_bounce_rate", "stop_replies_hard")
+HARD_KINDS = ("gmail_limit", "gmail_policy", "stop_replies_hard")
 
 
 def as_datetime(at: datetime | str) -> datetime:
@@ -86,25 +86,6 @@ def bounce_rate_3d(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> float:
 def bounce_rate_warns(rate: float, cfg: SendConfig) -> bool:
     """A day is clean only when bounces are under `clean_bounce_rate`: exactly 2% is a warning."""
     return rate >= cfg.clean_bounce_rate - 1e-12
-
-
-def hard_bounce_rate(conn: sqlite3.Connection, cfg: SendConfig) -> tuple[float, int]:
-    """The share of the last `cfg.hard_bounce_last_n` sent first emails whose touch bounced, and how many first
-    emails that is (0.0 and 0 when none)."""
-    rows = conn.execute(
-        "SELECT t.bounced_at IS NOT NULL FROM message m JOIN touch t ON t.touch_id = m.touch_id "
-        "WHERE m.seq = 0 AND m.state = 'sent' ORDER BY m.sent_at DESC, m.message_id DESC LIMIT ?",
-        (cfg.hard_bounce_last_n,)).fetchall()
-    if not rows:
-        return 0.0, 0
-    return sum(r[0] for r in rows) / len(rows), len(rows)
-
-
-def hard_bounce_tripped(conn: sqlite3.Connection, cfg: SendConfig) -> bool:
-    """True when at least `hard_bounce_min_sends` first emails are in the window and more than
-    `hard_bounce_rate` of them bounced."""
-    rate, count = hard_bounce_rate(conn, cfg)
-    return count >= cfg.hard_bounce_min_sends and rate > cfg.hard_bounce_rate
 
 
 def stop_tags_in(conn: sqlite3.Connection, now: datetime | str, days: int) -> int:

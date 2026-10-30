@@ -24,9 +24,6 @@ class SendConfig:
     ramp_floor: int
     clean_bounce_rate: float
     bounce_days: int
-    hard_bounce_rate: float
-    hard_bounce_last_n: int
-    hard_bounce_min_sends: int
     stop_replies_hard: int
     stop_replies_days: int
     window_start: time
@@ -48,13 +45,13 @@ class SendConfig:
 
 
 # Whole numbers that count things, so zero or less makes no sense.
-COUNT_KEYS = ("ramp_step", "bounce_days", "hard_bounce_last_n", "hard_bounce_min_sends", "stop_replies_hard",
+COUNT_KEYS = ("ramp_step", "bounce_days", "stop_replies_hard",
               "stop_replies_days", "per_company_daily", "followup_lapse_business_days", "close_after_business_days",
               "reconcile_after_minutes", "max_send_attempts", "rethread_days", "inbound_meta_cap",
               "prune_noop_after_days")
 # Whole numbers that may be zero.
 WHOLE_KEYS = ("ramp_start", "ramp_ceiling", "ramp_floor", "per_company_gap_minutes")
-RATE_KEYS = ("clean_bounce_rate", "hard_bounce_rate")
+RATE_KEYS = ("clean_bounce_rate",)
 TEXT_KEYS = ("from_address", "from_name", "day_tz", "old_sender_label")
 
 

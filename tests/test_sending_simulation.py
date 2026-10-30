@@ -203,19 +203,16 @@ class StopRulesTest(unittest.TestCase):
     def test_stop_bounce_rate_warning(self):
         r = self.run_scenario(short(2, [morning(1, 40), morning(2, 40), Event(ny(D[2], "11:00"), "bounce", {"nth": 0})]))
         self.assertIn("bounce_warning", self.kinds(r))
-        self.assertNotIn("hard_bounce_rate", self.kinds(r))
         self.assertEqual(self.paused(r)["paused"], 0)
         day = r.days[1]
         self.assertEqual((day.outcome, day.effective_limit), ("warning", 20))
         self.assertEqual(self.after(r, ny(D[2], "11:04")), [], "the day is already past its lowered limit")
 
-    def test_stop_hard_bounce_rate_pauses(self):
+    def test_a_high_bounce_rate_never_pauses(self):
         r = self.run_scenario(short(1, [morning(1, 40), Event(ny(D[1], "10:00"), "bounce", {"nth": 0})]))
-        self.assertIn("hard_bounce_rate", self.kinds(r))
-        self.assertEqual(tuple(self.paused(r)), (1, "hard_block"))
-        self.assertEqual(r.days[0].outcome, "hard_block")
-        self.assertEqual(len(r.notices), 1)
-        self.assertEqual(self.after(r, ny(D[1], "10:04")), [])
+        self.assertNotIn("hard_bounce_rate", self.kinds(r))
+        self.assertEqual(self.paused(r)["paused"], 0)
+        self.assertEqual(r.notices, [])
 
     def test_stop_policy_rejection_warning(self):
         r = self.run_scenario(short(3, [morning(1, 40), morning(2, 50), morning(3, 60),
@@ -223,7 +220,6 @@ class StopRulesTest(unittest.TestCase):
         kinds = self.kinds(r)
         self.assertIn("policy_rejection", kinds)
         self.assertNotIn("bounce_warning", kinds)
-        self.assertNotIn("hard_bounce_rate", kinds)
         self.assertEqual(self.paused(r)["paused"], 0)
         self.assertEqual((r.days[2].outcome, r.days[2].start_limit, r.days[2].effective_limit),
                          ("warning", 40, 30))

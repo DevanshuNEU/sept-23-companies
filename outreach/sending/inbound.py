@@ -311,12 +311,6 @@ def _apply_bounce(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, fo
     if signals.bounce_rate_warns(rate, cfg):
         note_signal(conn, "bounce_warning", detail={**detail, "rate": rate}, key=f"bounce_warning:{day.isoformat()}",
                     **signal)
-    if signals.hard_bounce_tripped(conn, cfg):
-        hard_rate, count = signals.hard_bounce_rate(conn, cfg)
-        # Keyed by how many touches have bounced, so resuming after this pause never pauses again on the same ones.
-        bounced = conn.execute("SELECT COUNT(*) FROM touch WHERE bounced_at IS NOT NULL").fetchone()[0]
-        note_signal(conn, "hard_bounce_rate", detail={**detail, "rate": hard_rate, "first_emails": count},
-                    key=f"hard_bounce_rate:{bounced}", **signal)
 
 
 def _limit_notice(conn: sqlite3.Connection, touch_id: int | None, meta: MessageMeta, received: str, *,

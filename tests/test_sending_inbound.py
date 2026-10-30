@@ -350,7 +350,6 @@ class BounceTest(Base):
         self.assertEqual(self.planned(touch_id), [])
         stopped = self.events("touch", "skipped_by_sender", touch_id)
         self.assertEqual(json.loads(stopped[0]["detail"])["reason"], "bounced")
-        self.assertEqual(signals.hard_bounce_rate(self.db, CFG), (1.0, 1))
         self.assertEqual(signals.bounce_rate_3d(self.db, self.clock().date(), CFG), 1.0)
         self.assertEqual(len(self.events("touch", "bounced", touch_id)), 1)
 
@@ -382,8 +381,7 @@ class BounceTest(Base):
         self.assertEqual(len(self.events("sender", "policy_rejection")), 1)
         day = self.db.execute("SELECT outcome FROM send_day WHERE day = '2026-11-02'").fetchone()
         self.assertEqual(day["outcome"], "warning")
-        self.assertEqual(self.sender()["paused"], 0)  # one bounce in one first email is over 3%, but under 10 sends
-        self.assertEqual(self.events("sender", "hard_bounce_rate"), [])
+        self.assertEqual(self.sender()["paused"], 0)
 
     def test_bounce_pushing_the_rate_to_two_percent_is_one_warning_for_the_day(self):
         for _ in range(97):
@@ -401,19 +399,19 @@ class BounceTest(Base):
         warnings = self.events("sender", "bounce_warning")
         self.assertEqual(len(warnings), 1)
         self.assertEqual(warnings[0]["idempotency_key"], "bounce_warning:2026-11-02")
-        self.assertEqual(self.events("sender", "hard_bounce_rate"), [])  # 3 in 100 is not over 3%
         self.assertEqual(self.sender()["paused"], 0)
 
-    def test_hard_bounce_rate_pauses(self):
+    def test_a_high_bounce_rate_never_pauses(self):
+        # 2026-10-30 ruling (#9): Apollo's addresses are not guaranteed, so bounces are normal. 1 in 10 is 10%.
         for _ in range(9):
             seed_sent(self.db, self.person(), at=MON - timedelta(hours=1))
-        _, _, sent = self.send_first()
+        _, touch_id, sent = self.send_first()
         self.gmail.deliver_bounce(sent)
         self.sync()
-        self.assertEqual(len(self.events("sender", "hard_bounce_rate")), 1)
-        sender = self.sender()
-        self.assertEqual((sender["paused"], sender["pause_kind"]), (1, "hard_block"))
-        self.assertEqual(len(self.notices), 1)
+        self.assertEqual(self.touch(touch_id)["state"], "bounced")
+        self.assertEqual(self.events("sender", "hard_bounce_rate"), [])
+        self.assertEqual(self.sender()["paused"], 0)
+        self.assertEqual(self.notices, [])
 
     def test_a_limit_notice_pauses_and_never_marks_the_touch_bounced(self):
         from outreach.sending import signals
@@ -426,7 +424,6 @@ class BounceTest(Base):
         self.assertEqual(len(self.events("sender", "gmail_limit")), 1)
         sender = self.sender()
         self.assertEqual((sender["paused"], sender["pause_kind"]), (1, "hard_block"))
-        self.assertEqual(signals.hard_bounce_rate(self.db, CFG), (0.0, 1))
         self.assertEqual([(r["kind"], r["dsn_class"]) for r in self.inbound_rows()], [("bounce", "limit")])
 
     def test_an_unmatched_limit_notice_still_pauses(self):

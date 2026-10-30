@@ -42,9 +42,8 @@ class SendConfigTest(unittest.TestCase):
     def test_every_other_default_matches_the_plan(self):
         cfg = load_config()
         self.assertEqual(
-            (cfg.hard_bounce_rate, cfg.hard_bounce_last_n, cfg.hard_bounce_min_sends,
-             cfg.stop_replies_hard, cfg.stop_replies_days),
-            (0.03, 100, 10, 2, 7))
+            (cfg.stop_replies_hard, cfg.stop_replies_days),
+            (2, 7))
         self.assertEqual(
             (cfg.followup_lapse_business_days, cfg.close_after_business_days, cfg.reconcile_after_minutes,
              cfg.max_send_attempts, cfg.rethread_days, cfg.inbound_meta_cap, cfg.prune_noop_after_days),
@@ -56,7 +55,7 @@ class SendConfigTest(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             cfg.ramp_start = 50
         self.assertIsInstance(cfg, SendConfig)
-        self.assertEqual(len(dataclasses.fields(SendConfig)), 30)
+        self.assertEqual(len(dataclasses.fields(SendConfig)), 27)
 
     def test_holidays_load_as_dates(self):
         cfg = load_config(config_with(holidays='["2026-11-26", "2026-12-25"]'))
@@ -97,7 +96,7 @@ class SendConfigTest(unittest.TestCase):
         self.refused("weekdays", weekdays="[]")
 
     def test_counts_must_be_at_least_one(self):
-        for key in ("bounce_days", "per_company_daily", "ramp_step", "hard_bounce_last_n", "hard_bounce_min_sends",
+        for key in ("bounce_days", "per_company_daily", "ramp_step",
                     "stop_replies_hard", "stop_replies_days", "followup_lapse_business_days",
                     "close_after_business_days", "max_send_attempts", "rethread_days", "inbound_meta_cap",
                     "prune_noop_after_days", "reconcile_after_minutes"):
@@ -106,7 +105,7 @@ class SendConfigTest(unittest.TestCase):
                 self.refused(key, **{key: "-1"})
 
     def test_rates_sit_strictly_between_0_and_1(self):
-        for key in ("clean_bounce_rate", "hard_bounce_rate"):
+        for key in ("clean_bounce_rate",):
             for bad in ("0", "0.0", "1", "1.5", "-0.1"):
                 with self.subTest(key=key, bad=bad):
                     self.refused(key, **{key: bad})
@@ -135,7 +134,7 @@ class SendConfigTest(unittest.TestCase):
             load_config(config_with(bounce_days="0"))
         self.assertIn("at least 1", str(cm.exception))
         with self.assertRaises(ValueError) as cm:
-            load_config(config_with(hard_bounce_rate="1.5"))
+            load_config(config_with(clean_bounce_rate="1.5"))
         self.assertIn("between 0 and 1", str(cm.exception))
 
     def test_from_address_is_the_one_sender(self):

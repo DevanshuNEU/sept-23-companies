@@ -18,11 +18,7 @@ ramp_floor = 20
 clean_bounce_rate = 0.02
 bounce_days = 3
 
-# Hard block: more than 3% of the last 100 first emails bounced, once at least 10 are sent (the old mailer's live
-# pauseIfBounceRate 0.03 and minSendsForBounceCheck 10).
-hard_bounce_rate = 0.03
-hard_bounce_last_n = 100
-hard_bounce_min_sends = 10
+# No hard block on the bounce rate (#9, 2026-10-30): Apollo's addresses are not guaranteed, so bounces are normal.
 
 # Hard block: two "asked to stop" tags within 7 days.
 stop_replies_hard = 2

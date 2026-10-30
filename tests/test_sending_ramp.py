@@ -313,39 +313,6 @@ class BounceRateTest(Base):
         self.assertEqual(signals.sends_on(self.db, d(0), CFG), 0)
         self.assertEqual(signals.sends_on(self.db, d(1), CFG), 1)
 
-    def test_hard_bounce_rate_needs_ten_sends_and_over_three_percent(self):
-        def fresh(sent, bounced):
-            self.setUp()
-            touches = [self.send(ny(0, 10) + timedelta(minutes=i)) for i in range(sent)]
-            for t in touches[:bounced]:
-                bounce(self.db, t, ny(1, 10))
-
-        fresh(9, 1)
-        rate, count = signals.hard_bounce_rate(self.db, CFG)
-        self.assertEqual((round(rate, 4), count), (round(1 / 9, 4), 9))
-        self.assertFalse(signals.hard_bounce_tripped(self.db, CFG))  # under 10 sends: not judged
-        fresh(34, 1)
-        rate, count = signals.hard_bounce_rate(self.db, CFG)
-        self.assertEqual((round(rate, 3), count), (0.029, 34))
-        self.assertFalse(signals.hard_bounce_tripped(self.db, CFG))
-        fresh(40, 2)
-        rate, count = signals.hard_bounce_rate(self.db, CFG)
-        self.assertEqual((rate, count), (0.05, 40))
-        self.assertTrue(signals.hard_bounce_tripped(self.db, CFG))
-
-    def test_hard_bounce_rate_looks_at_the_last_100_first_emails_only(self):
-        old = [self.send(ny(0, 10) + timedelta(minutes=i)) for i in range(20)]
-        for t in old:
-            bounce(self.db, t, ny(1, 10))
-        self.sends(ny(2, 10), 100)
-        self.assertEqual(signals.hard_bounce_rate(self.db, CFG), (0.0, 100))
-
-    def test_hard_bounce_rate_ignores_follow_ups(self):
-        person = seed_email_person(self.db, self.company, "Fo", "fo@acme.co")
-        seed_sent(self.db, person, at=ny(0, 10))
-        seed_sent(self.db, person, at=ny(1, 10), seq=1)
-        self.assertEqual(signals.hard_bounce_rate(self.db, CFG), (0.0, 1))
-
 
 class HardBlockTest(Base):
     def test_hard_kind_pauses_with_a_reason_and_notifies_once(self):

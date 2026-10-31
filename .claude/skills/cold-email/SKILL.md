@@ -199,8 +199,9 @@ Northeastern". Commas, colons and full stops carry the rhythm; every dash is a p
 
 ## Follow-ups
 
-#9: one follow-up, about 7 business days after the first email, in the same thread. It is short and adds one new
-thing (a result, a link, a narrower ask). A reply from anyone at the company stops all queued email there.
+#9: up to 4 follow-ups, at 3, 7, 14 and 21 business days after the first email, in the same thread. Each is short
+and adds one new thing (a result, a link, a narrower ask) that the earlier ones did not; the fourth is a polite
+close. A reply from anyone at the company stops all queued email there.
 
 `followups_due` lists the follow-ups due today (or within `days_ahead`, 0 to 7): person, company, `seq`, the
 first email's subject. For each, write a body of 25 to 80 words that greets by first name and says the one new

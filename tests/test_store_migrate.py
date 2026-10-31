@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.sendtest import seed_email_person, seed_message, seed_sent
+from tests.storetest import seed_company
 from outreach.store.migrate import (
     MIGRATIONS_DIR,
     latest_version,
@@ -177,3 +179,37 @@ class ImportRecordMigrationTest(unittest.TestCase):
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE tbl_name = 'import_record'")}
         self.assertTrue({"import_record_no_update", "import_record_no_delete", "import_record_run"} <= names)
         self.assertIn(4, [r[0] for r in conn.execute("SELECT version FROM schema_migration")])
+
+
+class FourFollowupsMigrationTest(unittest.TestCase):
+    """0005 rebuilds message so seq may be 4 (#141); rows, ids, indexes and triggers come through unchanged."""
+
+    def test_migration_0005_keeps_messages_and_allows_seq_4(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        old = Path(tmp.name)
+        for version, _name, path in migration_files():
+            if version <= 4:
+                shutil.copy(path, old / path.name)
+        conn = sqlite3.connect(":memory:", isolation_level=None)
+        self.addCleanup(conn.close)
+        conn.execute("PRAGMA foreign_keys = ON")
+        self.assertEqual(migrate(conn, old), 4)
+        conn.row_factory = sqlite3.Row
+        person = seed_email_person(conn, seed_company(conn), "Ana", "ana@acme.co")
+        seed_sent(conn, person, at="2026-10-19T14:00:00Z")
+        seed_message(conn, person, state="planned", seq=1, due_on="2026-10-22")
+        at = "2026-10-19T12:00:00Z"
+        objects = "SELECT type, name, sql FROM sqlite_master WHERE tbl_name = 'message' AND type <> 'table' ORDER BY name"
+        before_rows = [tuple(r) for r in conn.execute("SELECT * FROM message ORDER BY message_id")]
+        before_objects = [tuple(r) for r in conn.execute(objects)]
+        self.assertEqual(len([o for o in before_objects if o[0] == "trigger"]), 8)
+        self.assertEqual(migrate(conn), latest_version())
+        self.assertEqual([tuple(r) for r in conn.execute("SELECT * FROM message ORDER BY message_id")], before_rows)
+        self.assertEqual([tuple(r) for r in conn.execute(objects)], before_objects)
+        conn.execute("INSERT INTO message(touch_id, seq, state, due_on, saved_by, created_at, updated_at) "
+                     "VALUES (1, 4, 'planned', '2026-11-20', 'sender', ?, ?)", (at, at))
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO message(touch_id, seq, state, due_on, saved_by, created_at, updated_at) "
+                         "VALUES (1, 5, 'planned', '2026-11-27', 'sender', ?, ?)", (at, at))
+        self.assertIn(5, [r[0] for r in conn.execute("SELECT version FROM schema_migration")])

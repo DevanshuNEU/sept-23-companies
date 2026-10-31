@@ -13,6 +13,9 @@ import { useStableOrder } from '@/lib/stable-order';
 import { messageStatus, touchStatus, type Status } from '@/lib/status';
 import { cn } from '@/lib/utils';
 
+/** Follow-ups a thread can have (#9, 2026-10-31: 3, 7, 14 and 21 business days). */
+export const FOLLOWUP_COUNT = 4;
+
 /** Spec 5.3, "List groups, in order". */
 const GROUPS: { group: OutboxGroup; label: string }[] = [
   { group: 'replied', label: 'Replied' },
@@ -41,7 +44,7 @@ export function rowStatus(item: OutboxItem): Status {
   if (item.state !== 'drafted' && item.state !== 'planned') return messageStatus[item.state];
   if (item.blockCount > 0) return { label: 'Blocked', tone: 'bad' };
   if (item.warnCount > 0) return { label: item.warnCount === 1 ? '1 warning' : `${item.warnCount} warnings`, tone: 'warn' };
-  if (item.seq > 0) return { label: `Follow-up ${item.seq} of 3`, tone: 'idle' };
+  if (item.seq > 0) return { label: `Follow-up ${item.seq} of ${FOLLOWUP_COUNT}`, tone: 'idle' };
   return messageStatus.drafted;
 }
 

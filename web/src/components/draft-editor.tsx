@@ -85,7 +85,7 @@ export function DraftEditor({
   savedBy: SavedBy;
   savedAt: IsoTime;
   kind: RoleKind;
-  seq: 0 | 1 | 2 | 3;
+  seq: 0 | 1 | 2 | 3 | 4;
   dirty: boolean;
 }) {
   const subjectId = useId();

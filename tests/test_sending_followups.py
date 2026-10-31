@@ -20,6 +20,9 @@ from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()
 STAMP = "2026-11-20T15:00:00Z"
+ONE = dataclasses.replace(CFG, followup_business_days=(7,))  # one follow-up, for the tests about lapses and closes
+# A first email on Monday 2026-11-02: follow-ups at 3, 7, 14 and 21 business days (#9, 2026-10-31).
+FROM_MON = [(1, "2026-11-05"), (2, "2026-11-11"), (3, "2026-11-20"), (4, "2026-12-01")]
 
 
 class Base(unittest.TestCase):
@@ -71,15 +74,16 @@ class Base(unittest.TestCase):
 
 
 class PlanTest(Base):
-    def test_followup_due_seven_business_days_later(self):
-        self.assertEqual(self.send_at(MON), [(1, "2026-11-11")])
+    def test_four_follow_ups_at_3_7_14_and_21_business_days(self):
+        self.assertEqual(self.send_at(MON), FROM_MON)
 
-    def test_friday_send_follow_up_lands_seven_business_days_later(self):
-        self.assertEqual(self.send_at(datetime(2026, 11, 6, 14, 0, tzinfo=UTC)), [(1, "2026-11-17")])
+    def test_friday_send_follow_ups_skip_the_weekends(self):
+        self.assertEqual(self.send_at(datetime(2026, 11, 6, 14, 0, tzinfo=UTC)),
+                         [(1, "2026-11-11"), (2, "2026-11-17"), (3, "2026-11-26"), (4, "2026-12-07")])
 
     def test_evening_utc_send_uses_the_new_york_date(self):
         # 02:00 UTC on Tuesday is 21:00 on Monday in New York.
-        self.assertEqual(self.send_at(datetime(2026, 11, 3, 2, 0, tzinfo=UTC)), [(1, "2026-11-11")])
+        self.assertEqual(self.send_at(datetime(2026, 11, 3, 2, 0, tzinfo=UTC)), FROM_MON)
 
     def test_three_configured_follow_ups_make_seq_1_to_3(self):
         cfg = dataclasses.replace(CFG, followup_business_days=(3, 7, 15))
@@ -91,18 +95,18 @@ class PlanTest(Base):
     def test_planning_twice_adds_nothing(self):
         _, touch_id = self.sent_touch()
         with transaction(self.db):
-            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON)), 1)
+            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON)), 4)
             self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON)), 0)
-        self.assertEqual(self.planned(touch_id), [(1, "2026-11-11")])
+        self.assertEqual(self.planned(touch_id), FROM_MON)
         planned_events = self.db.execute("SELECT COUNT(*) FROM event WHERE kind = 'followup_planned'").fetchone()[0]
-        self.assertEqual(planned_events, 1)
+        self.assertEqual(planned_events, 4)
 
 
 class LapseTest(Base):
     def planned_touch(self):
         _, touch_id = self.sent_touch()
         with transaction(self.db):
-            plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON))  # due Wednesday 2026-11-11
+            plan_followups(self.db, touch_id, date(2026, 11, 2), ONE, now=iso(MON))  # due Wednesday 2026-11-11
         return touch_id
 
     def lapse(self, today):
@@ -149,7 +153,7 @@ class LapseTest(Base):
         touch_id = self.planned_touch()
         self.lapse(date(2026, 11, 20))
         with transaction(self.db):
-            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 20), CFG, now=STAMP), 1)
+            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 20), ONE, now=STAMP), 1)
         row = self.db.execute("SELECT message_id, state, due_on FROM message WHERE touch_id = ? AND seq = 1",
                               (touch_id,)).fetchone()
         self.assertEqual((row["state"], row["due_on"]), ("planned", "2026-12-01"))

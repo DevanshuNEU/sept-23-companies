@@ -33,7 +33,7 @@ class SendConfigTest(unittest.TestCase):
         self.assertEqual((cfg.window_start, cfg.window_end), (time(8, 30), time(16, 30)))
         self.assertEqual(cfg.weekdays, (0, 1, 2, 3, 4))
         self.assertEqual((cfg.per_company_daily, cfg.per_company_gap_minutes), (3, 60))
-        self.assertEqual(cfg.followup_business_days, (7,))
+        self.assertEqual(cfg.followup_business_days, (3, 7, 14, 21))
         self.assertEqual(cfg.gap_minutes, (4, 9))
         self.assertEqual(cfg.holidays, ())
         self.assertEqual(cfg.day_tz, "America/New_York")
@@ -71,8 +71,8 @@ class SendConfigTest(unittest.TestCase):
         self.refused("ramp_floor", ramp_floor="110")
         self.assertEqual(load_config(config_with(ramp_floor="10")).ramp_floor, 10)
 
-    def test_four_follow_ups_are_refused(self):
-        self.refused("followup_business_days", followup_business_days="[3, 7, 15, 20]")
+    def test_five_follow_ups_are_refused(self):
+        self.refused("followup_business_days", followup_business_days="[3, 7, 14, 21, 28]")
 
     def test_no_follow_ups_is_refused(self):
         self.refused("followup_business_days", followup_business_days="[]")

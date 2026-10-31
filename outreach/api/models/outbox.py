@@ -23,8 +23,8 @@ ScheduleReason = Literal[
     "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread", "company_closed", "no_go",
     "reply_stop", "touch_done",
 ]
-Seq = Literal[0, 1, 2, 3]
-FollowupSeq = Literal[1, 2, 3]
+Seq = Literal[0, 1, 2, 3, 4]
+FollowupSeq = Literal[1, 2, 3, 4]
 
 
 # ---------------------------------------------------------------------------------------------- sending

@@ -16,7 +16,7 @@ from tests.importtest import all_marks, fixture_manifest
 from tests.storetest import fresh_store
 
 NOW = "2026-10-20T12:00:00Z"
-CFG = load_config()
+CFG = dataclasses.replace(load_config(), followup_business_days=(7,))  # built for one follow-up at 7 business days; the 4-follow-up schedule is tested in test_sending_followups
 
 
 def overrides(**kw) -> Overrides:

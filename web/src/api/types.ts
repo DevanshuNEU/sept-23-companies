@@ -135,24 +135,24 @@ export interface Schedule { // derived: the sender's verdict for an approved ema
   text: string; companySentToday: number; companySlotsLeft: number;
 }
 export interface OutboxItem {
-  touchId: Id; messageId: Id; seq: 0 | 1 | 2 | 3; state: MessageState; touchState: TouchState;
+  touchId: Id; messageId: Id; seq: 0 | 1 | 2 | 3 | 4; state: MessageState; touchState: TouchState;
   group: OutboxGroup; sortKey: string; person: PersonRef; company: CompanyRef;
   subject: string; preview: string; summary: string; worst: CheckSeverity | null; blockCount: number; warnCount: number;
-  at: IsoTime; schedule: Schedule | null; nextDue: { seq: 1 | 2 | 3; on: IsoDate } | null; revision: Revision;
+  at: IsoTime; schedule: Schedule | null; nextDue: { seq: 1 | 2 | 3 | 4; on: IsoDate } | null; revision: Revision;
 }
 export interface OutboxCounts { replied: number; review: number; approved: number; sending: number; checking: number; sent: number; paused: number; closed: number }
 export interface OutboxView {
   asOf: IsoTime; sending: SendingStatus; items: OutboxItem[]; counts: OutboxCounts;
   closedBreakdown: { bounced: number; skipped: number; companyClosed: number };
 }
-export interface ThreadMessage { seq: 0 | 1 | 2 | 3 | null; direction: 'out' | 'in'; subject: string; body: string; at: IsoTime; from: string } // in: inbound_message
+export interface ThreadMessage { seq: 0 | 1 | 2 | 3 | 4 | null; direction: 'out' | 'in'; subject: string; body: string; at: IsoTime; from: string } // in: inbound_message
 export interface OutboxDetail {
   asOf: IsoTime; item: OutboxItem; body: string; hook: { text: string; on: IsoDate | null }; project: string; role: RoleToName | null;
   checks: Check[]; savedBy: SavedBy; savedAt: IsoTime;
-  followups: { seq: 1 | 2 | 3; dueOn: IsoDate; sentAt: IsoTime | null; state: MessageState }[];
+  followups: { seq: 1 | 2 | 3 | 4; dueOn: IsoDate; sentAt: IsoTime | null; state: MessageState }[];
   firstSentAt: IsoTime | null; gmailThreadUrl: string | null; // derived from touch.gmail_thread_id
   reply: { from: string; at: IsoTime; text: string; kind: ReplyKind } | null; touchRevision: Revision;
-  held: { touchId: Id; personName: string; state: MessageState; seq: 0 | 1 | 2 | 3; dueOn: IsoDate | null }[];
+  held: { touchId: Id; personName: string; state: MessageState; seq: 0 | 1 | 2 | 3 | 4; dueOn: IsoDate | null }[];
   thread: ThreadMessage[]; bounceReason: string | null;
 }
 export interface DraftCompare {

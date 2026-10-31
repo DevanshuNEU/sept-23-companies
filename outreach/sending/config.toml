@@ -38,8 +38,8 @@ per_company_gap_minutes = 60
 # Random gap between any two sends, in minutes (the deliverability research's pacing range).
 gap_minutes = [4, 9]
 
-# Follow-ups (#9): one, at about 7 business days; up to 3 entries because message.seq is 0 to 3.
-followup_business_days = [7]
+# Follow-ups (#9, 2026-10-31): 4, at 3, 7, 14 and 21 business days after the first email; at most 4 (message.seq 0 to 4).
+followup_business_days = [3, 7, 14, 21]
 # A follow-up still planned this many business days after it was due lapses.
 followup_lapse_business_days = 5
 # An open touch with nothing queued closes no_reply this many business days after its last sent message.

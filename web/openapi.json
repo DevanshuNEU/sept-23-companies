@@ -2490,7 +2490,8 @@
               0,
               1,
               2,
-              3
+              3,
+              4
             ],
             "title": "Seq",
             "type": "integer"
@@ -3525,7 +3526,8 @@
             "enum": [
               1,
               2,
-              3
+              3,
+              4
             ],
             "title": "Seq",
             "type": "integer"
@@ -4182,7 +4184,8 @@
             "enum": [
               1,
               2,
-              3
+              3,
+              4
             ],
             "title": "Seq",
             "type": "integer"
@@ -4303,7 +4306,8 @@
               0,
               1,
               2,
-              3
+              3,
+              4
             ],
             "title": "Seq",
             "type": "integer"
@@ -7746,7 +7750,8 @@
                   0,
                   1,
                   2,
-                  3
+                  3,
+                  4
                 ],
                 "type": "integer"
               },

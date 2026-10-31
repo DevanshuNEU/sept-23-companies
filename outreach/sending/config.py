@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 HARD_CEILING = 100  # #9; also the send_day.send_limit CHECK
 DEFAULT_PATH = Path(__file__).with_name("config.toml")
-MAX_FOLLOWUPS = 3  # message.seq is 0 to 3
+MAX_FOLLOWUPS = 4  # message.seq is 0 to 4
 
 
 @dataclass(frozen=True)

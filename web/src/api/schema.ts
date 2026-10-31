@@ -1975,7 +1975,7 @@ export interface components {
              * Seq
              * @enum {integer}
              */
-            seq: 0 | 1 | 2 | 3;
+            seq: 0 | 1 | 2 | 3 | 4;
             /**
              * State
              * @enum {string}
@@ -2343,7 +2343,7 @@ export interface components {
              * Seq
              * @enum {integer}
              */
-            seq: 1 | 2 | 3;
+            seq: 1 | 2 | 3 | 4;
         };
         /** NextSend */
         NextSend: {
@@ -2582,7 +2582,7 @@ export interface components {
              * Seq
              * @enum {integer}
              */
-            seq: 1 | 2 | 3;
+            seq: 1 | 2 | 3 | 4;
             /**
              * State
              * @enum {string}
@@ -2621,7 +2621,7 @@ export interface components {
              * Seq
              * @enum {integer}
              */
-            seq: 0 | 1 | 2 | 3;
+            seq: 0 | 1 | 2 | 3 | 4;
             /** Sortkey */
             sortKey: string;
             /**
@@ -3770,7 +3770,7 @@ export interface components {
             /** From */
             from: string;
             /** Seq */
-            seq: (0 | 1 | 2 | 3) | null;
+            seq: (0 | 1 | 2 | 3 | 4) | null;
             /** Subject */
             subject: string;
         };

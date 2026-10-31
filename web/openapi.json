@@ -6910,6 +6910,7 @@
               "window",
               "bad_timezone",
               "followup_not_due",
+              "earlier_followup",
               "company_paused",
               "company_held",
               "per_company_limit",

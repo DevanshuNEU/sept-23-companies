@@ -127,7 +127,7 @@ export interface Check {
 // The sender's own reason an approved email waits, goes now (`ready`) or never goes (a stop): the queue's REASONS.
 export type ScheduleReason =
   | 'ready' | 'sender_paused' | 'signed_out' | 'old_sender_running' | 'message_id_unproven' | 'not_business_day'
-  | 'daily_limit' | 'spacing' | 'window' | 'bad_timezone' | 'followup_not_due' | 'company_paused' | 'company_held'
+  | 'daily_limit' | 'spacing' | 'window' | 'bad_timezone' | 'followup_not_due' | 'earlier_followup' | 'company_paused' | 'company_held'
   | 'per_company_limit' | 'per_company_gap' | 'recruiter_waits' | 'no_address' | 'no_thread'
   | 'company_closed' | 'no_go' | 'reply_stop' | 'touch_done';
 export interface Schedule { // derived: the sender's verdict for an approved email (a draft has none)

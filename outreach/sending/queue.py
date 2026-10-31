@@ -24,8 +24,8 @@ __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "
 
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
-           "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "company_paused", "company_held",
-           "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread") + STOP_REASONS
+           "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
+           "company_held", "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread") + STOP_REASONS
 # The waits that end by themselves: their verdict carries the time they end.
 TIME_REASONS = frozenset({"not_business_day", "daily_limit", "spacing", "window", "followup_not_due",
                           "per_company_limit", "per_company_gap"})
@@ -46,6 +46,7 @@ REASON_TEXT = {
     "bad_timezone": "This person's time zone is not one the sender knows, so their sending hours are unknown. "
                     "Fix the time zone.",
     "followup_not_due": "This follow-up is not due yet.",
+    "earlier_followup": "An earlier follow-up in this thread has not gone out yet. This one goes after it.",
     "company_paused": "This company is paused. Unpause it to send.",
     "company_held": "This company is held because someone there replied. Release the hold to send.",
     "per_company_limit": "The daily limit for this company is used up. This goes out on the next sending day.",
@@ -82,6 +83,9 @@ class Verdict:
     reason: str
     earliest_at: datetime | None
 
+
+# The states of a message that has not gone out and may still: an earlier follow-up in one of them holds a later one.
+_UNSENT = ("planned", "drafted", "approved", "sending", "send_unknown", "failed")
 
 _APPROVED = (
     "SELECT m.message_id, m.touch_id, m.seq, m.revision, m.approved_at, m.due_on, t.person_id, t.state AS touch_state, "
@@ -169,8 +173,9 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     `old_sender_running`, `message_id_unproven`) is a reason the whole tick knows; it applies to every message that
     is not a stop.
     Order of reasons: stops; the gate; company paused; company held (a hold on any company merged into the
-    survivor counts); no address; a follow-up with no Gmail thread; follow-up not due; bad time zone; not a
-    business day; daily limit; per-company limit; per-company gap; recipient's window; recruiter waits; spacing."""
+    survivor counts); no address; a follow-up with no Gmail thread; follow-up not due; an earlier follow-up in the
+    thread not gone out; bad time zone; not a business day; daily limit; per-company limit; per-company gap;
+    recipient's window; recruiter waits; spacing."""
     rows, companies = _rows(conn)
     items = {row["message_id"]: _queued(row, companies) for row in rows}
     queue = _sorted(list(items.values()), cfg)
@@ -179,10 +184,15 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     stops = _stop_reasons(rows, companies, conn)
     # A follow-up goes only in its touch's Gmail thread; without one it would start a new thread, so it waits.
     no_thread = {row["message_id"] for row in rows if row["seq"] >= 1 and not row["gmail_thread_id"]}
+    # Follow-ups in one thread go out in order (#141): one waits while an earlier one has not gone out.
+    behind = {row[0] for row in conn.execute(
+        "SELECT m.message_id FROM message m WHERE m.state = 'approved' AND m.seq >= 2 AND EXISTS (SELECT 1 FROM "
+        "message e WHERE e.touch_id = m.touch_id AND e.seq BETWEEN 1 AND m.seq - 1 "
+        f"AND e.state IN ({','.join('?' * len(_UNSENT))}))", _UNSENT)}
     now = now.astimezone(timezone.utc)
     # A message that blocks a recruiter is one that could go out: not a stop, with an address and a thread, due.
     live_others = {q.company_id for q in queue if q.role_kind != "recruiter" and q.message_id not in stops
-                   and q.message_id not in no_thread
+                   and q.message_id not in no_thread and q.message_id not in behind
                    and q.to and not (q.due_on is not None
                                      and now < _due_start(q.due_on, cal.recipient_zone(q.tz), cfg))}
     held = held_survivors(companies)
@@ -207,7 +217,8 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     for q in queue:
         reason, earliest = _decide(q, stops, gate, companies[q.company_id], q.company_id in held, now, cfg, today,
                                    sent_today >= limit, sends.get(q.company_id, []), day_begins, gap, tomorrow,
-                                   next_send, q.company_id in live_others, no_thread=q.message_id in no_thread)
+                                   next_send, q.company_id in live_others, no_thread=q.message_id in no_thread,
+                                   behind=q.message_id in behind)
         out.append(Verdict(q.message_id, reason, earliest))
     return out
 
@@ -215,7 +226,7 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
 def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held: bool, now: datetime, cfg: SendConfig,
             today: date, day_full: bool, sends: list[datetime], day_begins: datetime, gap: timedelta,
             tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
-            no_thread: bool = False) -> tuple[str, datetime | None]:
+            no_thread: bool = False, behind: bool = False) -> tuple[str, datetime | None]:
     if q.message_id in stops:
         return stops[q.message_id], None
     if gate is not None:
@@ -233,6 +244,8 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
         due = _due_start(q.due_on, zone, cfg)
         if now < due:
             return "followup_not_due", cal.next_window_start(due, zone or ZoneInfo(cfg.day_tz), cfg)
+    if behind:
+        return "earlier_followup", None
     if zone is None:
         return "bad_timezone", None
     if not cal.is_business_day(today, cfg):

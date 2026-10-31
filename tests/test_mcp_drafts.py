@@ -343,6 +343,11 @@ class SaveFollowupTest(DraftCase):
         self.assertEqual(self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": "Other",
                                                       "revision": 1})["code"], "stale_revision")
 
+    def test_the_fourth_follow_up_can_be_drafted(self):
+        fourth = self.planned_row(self.sam_touch, 4, "2026-11-10")
+        got = self.ok("save_followup", {"person_id": self.sam, "seq": 4, "body": FOLLOW})
+        self.assertEqual((got["message_id"], got["state"]), (fourth, "drafted"))
+
     def test_a_missing_planned_row_is_no_such_followup(self):
         err = self.error("save_followup", {"person_id": self.sam, "seq": 2, "body": FOLLOW})
         self.assertEqual(err["code"], "no_such_followup")
@@ -392,7 +397,7 @@ class SaveFollowupTest(DraftCase):
                                  "not_a_draft")
 
     def test_seq_bounds_and_a_subject_or_due_on_property_are_bad_input(self):
-        for args in ({"seq": 0}, {"seq": 4}, {"seq": "1"}, {"subject": "Re: x"}, {"due_on": "2026-11-12"},
+        for args in ({"seq": 0}, {"seq": 5}, {"seq": "1"}, {"subject": "Re: x"}, {"due_on": "2026-11-12"},
                      {"state": "drafted"}, {"body": ""}):
             with self.subTest(args=args):
                 self.assertEqual(self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW,

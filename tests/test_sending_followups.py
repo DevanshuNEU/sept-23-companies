@@ -149,6 +149,16 @@ class LapseTest(Base):
         self.assertEqual(events, [{"seq": 1, "due_on": "2026-11-11", "reason": "lapsed"}])
         self.assertEqual(self.lapse(date(2026, 11, 30)), 0)
 
+    def test_a_drafted_follow_up_changed_late_gets_five_business_days_from_the_change(self):
+        person, _ = self.sent_touch()
+        drafted = seed_message(self.db, person, state="drafted", seq=1, due_on="2026-11-11")
+        # He unapproved it on Tuesday 2026-11-17, past its due date, to fix a word.
+        self.db.execute("UPDATE message SET updated_at = '2026-11-17T15:00:00Z' WHERE message_id = ?", (drafted,))
+        self.assertEqual(self.lapse(date(2026, 11, 23)), 0)  # four business days after the change
+        self.assertEqual(self.state(drafted), "drafted")
+        self.assertEqual(self.lapse(date(2026, 11, 24)), 1)  # five
+        self.assertEqual(self.state(drafted), "skipped")
+
     def test_an_approved_follow_up_never_lapses(self):
         person, _ = self.sent_touch()
         approved = seed_message(self.db, person, state="approved", seq=1, due_on="2026-11-11")
@@ -213,7 +223,7 @@ class SyncTest(Base):
         with transaction(self.db):
             stop_planned(self.db, mid, reason="replied", now=STAMP)
         self.sync()
-        self.assertEqual(self.planned(touch_id), FROM_MON[1:])
+        self.assertEqual(self.planned(touch_id), [])  # a stop ends the thread's queue, not just its seq
 
     def test_a_drafted_follow_up_keeps_its_date(self):
         person, touch_id = self.sent_touch()
@@ -233,6 +243,21 @@ class SyncTest(Base):
                 self.db.execute(f"UPDATE touch SET state = ?, {extra} WHERE touch_id = ?", (state, touch_id))
                 self.sync()
                 self.assertEqual(self.planned(touch_id), [])
+
+    def test_a_stopped_thread_gets_nothing_new(self):
+        # A company close or a stop elsewhere deletes the planned rows and leaves the touch open.
+        _, touch_id = self.old_touch()
+        mid = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1", (touch_id,)).fetchone()[0]
+        with transaction(self.db):
+            stop_planned(self.db, mid, reason="company_closed", now=STAMP)
+        self.assertEqual(self.sync(), 0)
+        self.assertEqual(self.planned(touch_id), [])
+
+    def test_an_imported_thread_keeps_what_the_import_gave_it(self):
+        _, touch_id = self.sent_touch()
+        self.db.execute("UPDATE touch SET origin = 'import' WHERE touch_id = ?", (touch_id,))
+        self.assertEqual(self.sync(), 0)
+        self.assertEqual(self.planned(touch_id), [])
 
     def test_a_thread_whose_first_email_has_not_gone_out_gets_nothing(self):
         person = self.person()

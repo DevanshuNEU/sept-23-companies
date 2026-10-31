@@ -25,7 +25,8 @@ __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
            "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
-           "company_held", "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread") + STOP_REASONS
+           "company_held", "per_company_limit", "per_company_gap", "recruiter_waits", "no_address",
+           "no_thread") + STOP_REASONS
 # The waits that end by themselves: their verdict carries the time they end.
 TIME_REASONS = frozenset({"not_business_day", "daily_limit", "spacing", "window", "followup_not_due",
                           "per_company_limit", "per_company_gap"})
@@ -135,6 +136,29 @@ def load_queue(conn: sqlite3.Connection, cfg: SendConfig | None = None) -> list[
     return _sorted([_queued(row, companies) for row in rows], cfg)
 
 
+def _gap(seq: int, cfg: SendConfig) -> int:
+    """Business days between follow-up `seq - 1` and follow-up `seq` in the schedule (seq 2 and up)."""
+    days = cfg.followup_business_days
+    if len(days) < 2:
+        return days[0]
+    i = min(seq, len(days)) - 1
+    return days[i] - days[i - 1]
+
+
+def _not_before(conn: sqlite3.Connection, cfg: SendConfig) -> dict[int, date]:
+    """For each approved follow-up from seq 2, the first day it may go: its schedule gap after the New York date of
+    the latest earlier message sent in its thread."""
+    out = {}
+    for row in conn.execute(
+            "SELECT m.message_id, m.seq, (SELECT max(e.sent_at) FROM message e WHERE e.touch_id = m.touch_id "
+            "AND e.seq BETWEEN 1 AND m.seq - 1 AND e.state = 'sent') AS prev FROM message m "
+            "WHERE m.state = 'approved' AND m.seq >= 2"):
+        if row["prev"]:
+            out[row["message_id"]] = cal.add_business_days(cal.ny_date(_utc(row["prev"]), cfg), _gap(row["seq"], cfg),
+                                                            cfg)
+    return out
+
+
 def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], conn: sqlite3.Connection) -> dict:
     """Message id to its stop reason, for the messages that have one."""
     no_go_people, no_go_companies = no_go_sets(conn, companies)
@@ -184,7 +208,9 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     stops = _stop_reasons(rows, companies, conn)
     # A follow-up goes only in its touch's Gmail thread; without one it would start a new thread, so it waits.
     no_thread = {row["message_id"] for row in rows if row["seq"] >= 1 and not row["gmail_thread_id"]}
-    # Follow-ups in one thread go out in order (#141): one waits while an earlier one has not gone out.
+    # Follow-ups in one thread go out in order (#141): one waits while an earlier one has not gone out, and then
+    # keeps the schedule's gap after it (an earlier one sent late does not pull the next one right behind it).
+    not_before = _not_before(conn, cfg)
     behind = {row[0] for row in conn.execute(
         "SELECT m.message_id FROM message m WHERE m.state = 'approved' AND m.seq >= 2 AND EXISTS (SELECT 1 FROM "
         "message e WHERE e.touch_id = m.touch_id AND e.seq BETWEEN 1 AND m.seq - 1 "
@@ -218,7 +244,7 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
         reason, earliest = _decide(q, stops, gate, companies[q.company_id], q.company_id in held, now, cfg, today,
                                    sent_today >= limit, sends.get(q.company_id, []), day_begins, gap, tomorrow,
                                    next_send, q.company_id in live_others, no_thread=q.message_id in no_thread,
-                                   behind=q.message_id in behind)
+                                   behind=q.message_id in behind, not_before=not_before.get(q.message_id))
         out.append(Verdict(q.message_id, reason, earliest))
     return out
 
@@ -226,7 +252,8 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
 def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held: bool, now: datetime, cfg: SendConfig,
             today: date, day_full: bool, sends: list[datetime], day_begins: datetime, gap: timedelta,
             tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
-            no_thread: bool = False, behind: bool = False) -> tuple[str, datetime | None]:
+            no_thread: bool = False, behind: bool = False,
+            not_before: date | None = None) -> tuple[str, datetime | None]:
     if q.message_id in stops:
         return stops[q.message_id], None
     if gate is not None:
@@ -240,8 +267,9 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
     if no_thread:
         return "no_thread", None
     zone = cal.recipient_zone(q.tz)
-    if q.due_on is not None:
-        due = _due_start(q.due_on, zone, cfg)
+    due_on = max((d for d in (q.due_on, not_before) if d is not None), default=None)
+    if due_on is not None:
+        due = _due_start(due_on, zone, cfg)
         if now < due:
             return "followup_not_due", cal.next_window_start(due, zone or ZoneInfo(cfg.day_tz), cfg)
     if behind:

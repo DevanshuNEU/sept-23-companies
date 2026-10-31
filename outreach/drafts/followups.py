@@ -6,13 +6,17 @@ it, so there is one copy of "which follow-ups are due".
 import sqlite3
 from datetime import date, timedelta
 
-__all__ = ["RELEASE_KIND", "canonical_company", "company_map", "resolve_company", "company_reply_held",
+__all__ = ["MAX_FOLLOWUPS", "RELEASE_KIND", "canonical_company", "company_map", "resolve_company", "company_reply_held",
            "held_survivors", "no_go_sets", "replied_people", "due_followups"]
 
 # The `company` event that releases a hold (#11 Task 19's release-hold action appends one on every company of the
 # merged family, beside clearing `held_by_touch`). A company's reply recorded before its newest release no longer
 # holds it.
 RELEASE_KIND = "hold_released"
+
+# Follow-ups a thread may have (#9, 2026-10-31): message.seq is 0 to 4. The sender's config and the MCP tools both
+# read it here.
+MAX_FOLLOWUPS = 4
 
 # Each company row with three derived marks, each an event_id (the order things were recorded in, never a date a
 # person typed): the newest recorded reply on its outreach touches, the newest on its email touches, and its newest

@@ -85,3 +85,11 @@
 
 - [ ] Full suite, web checks, `git push`, PR to `master` closing #141; `gh pr view --json baseRefName,mergeStateStatus` shows `master` and `CLEAN`.
 - [ ] Deploy after his merge (CLAUDE.md "Deploy"): pull, `uv sync`, tests, `uv run python -m outreach.install` (schema changed), web build, kickstart the API. The sender picks up the new config on its next run; the first tick re-plans the 23 open threads.
+
+## Review fixes (one fresh review of the whole branch)
+
+- `save_followup` takes seq 1 to `MAX_FOLLOWUPS` (it said 3, so follow-up 4 could never be drafted). The constant moved to `outreach/drafts/followups.py`, since the MCP server never imports `outreach.sending`.
+- A drafted follow-up lapses 5 business days after the later of its due date and its last change, so a draft he unapproved late to fix is not skipped at once.
+- From seq 2 on, a follow-up also waits its schedule gap (4, 7 and 7 business days) after the earlier one in its thread went out, so a late one never pulls the next right behind it (reason `followup_not_due`, with its time).
+- `sync_followups` plans only the sender's own threads (an imported one keeps what the import gave it), and a thread with any `skipped_by_sender` touch event (a stop) gets nothing new.
+- The Outbox's follow-up track shows 4 follow-ups; the last is the polite close.

@@ -8,9 +8,10 @@ from datetime import date, time
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from outreach.drafts.followups import MAX_FOLLOWUPS
+
 HARD_CEILING = 100  # #9; also the send_day.send_limit CHECK
 DEFAULT_PATH = Path(__file__).with_name("config.toml")
-MAX_FOLLOWUPS = 4  # message.seq is 0 to 4
 
 
 @dataclass(frozen=True)

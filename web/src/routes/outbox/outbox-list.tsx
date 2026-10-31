@@ -8,13 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAnnounce, useHotkeys, useLiveSelection } from '@/keyboard/hotkeys';
 import { ageDays, formatDay, formatLocalTime } from '@/lib/format';
+import { FOLLOWUP_COUNT } from '@/lib/followups';
 import { byKey, isBlocked, slotOf, type Slot } from './outbox-order';
 import { useStableOrder } from '@/lib/stable-order';
 import { messageStatus, touchStatus, type Status } from '@/lib/status';
 import { cn } from '@/lib/utils';
-
-/** Follow-ups a thread can have (#9, 2026-10-31: 3, 7, 14 and 21 business days). */
-export const FOLLOWUP_COUNT = 4;
 
 /** Spec 5.3, "List groups, in order". */
 const GROUPS: { group: OutboxGroup; label: string }[] = [

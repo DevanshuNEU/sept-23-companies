@@ -626,9 +626,21 @@ class FollowupOrderTest(Base):
 
     def test_a_sent_earlier_one_lets_it_go(self):
         person = self.thread()
-        seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=3), seq=1)
+        seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=6), seq=1)  # Tuesday: 4 business days ago
         second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
         self.assertEqual(self.reason(second), "ready")
+
+    def test_it_keeps_its_gap_after_the_earlier_one_went_out_late(self):
+        # Follow-up 1 went out late, on Friday 2026-10-30; follow-up 2 is due by the first email's clock but waits
+        # 4 business days (7 minus 3) after follow-up 1: Thursday 2026-11-05 at the window start.
+        person = self.thread()
+        seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=3), seq=1)
+        second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
+        verdict = self.verdicts_at()[second]
+        self.assertEqual(verdict.reason, "followup_not_due")
+        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 5, 8, 30, tzinfo=ZoneInfo("America/New_York")))
+        self.assertEqual(self.reason(second, now=datetime(2026, 11, 5, 9, 0, tzinfo=ZoneInfo("America/New_York"))),
+                         "ready")
 
     def test_the_reason_has_words(self):
         self.assertIn("earlier_followup", queue.REASONS)

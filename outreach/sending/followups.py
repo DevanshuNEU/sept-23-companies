@@ -2,8 +2,8 @@
 messages.
 
 `plan_followups` runs when a first email goes out; `sync_followups`, `lapse_followups`, `close_quiet_touches` and
-`sweep_stopped` run on every tick; `stop_touch_messages` is what a reply or a bounce does to the touch's queue. Every function runs
-inside the caller's transaction and opens none.
+`sweep_stopped` run on every tick; `stop_touch_messages` is what a reply or a bounce does to the touch's queue. Every
+function runs inside the caller's transaction and opens none.
 
 A `planned` row holds no text, and the `message` CHECK refuses an empty subject or body in every state but
 `planned`, so a planned row that will never be drafted is deleted (with an event on its touch), never moved to
@@ -20,8 +20,8 @@ from outreach.sending.signals import as_datetime
 from outreach.store.timefmt import iso_utc, utcnow
 from outreach.store.writes import append_event
 
-__all__ = ["plan_followups", "sync_followups", "stop_planned", "stop_touch_messages", "lapse_followups", "close_quiet_touches",
-           "sweep_stopped", "STOPPABLE"]
+__all__ = ["plan_followups", "sync_followups", "stop_planned", "stop_touch_messages", "lapse_followups",
+           "close_quiet_touches", "sweep_stopped", "STOPPABLE"]
 
 # The states of a message that has not gone out and is not in flight: what a stop removes from the queue. A
 # `sending` or `send_unknown` row may already be out, so the sender settles it by Message-ID instead.
@@ -67,12 +67,15 @@ def sync_followups(conn: sqlite3.Connection, cfg: SendConfig, *, now: str) -> in
     so a schedule change reaches the threads already sent. A seq with no row is planned (`_plan_one`) unless its
     touch has a `followup_lapsed` or `skipped_by_sender` event for that seq: a stopped follow-up never comes back. A
     `planned` row (it holds no text) whose `due_on` differs is re-dated, with a touch event `followup_replanned`
-    `{seq, from, to}`. Every other row is left as it is. Returns how many rows were added or re-dated."""
+    `{seq, from, to}`. Every other row is left as it is. Only the sender's own threads (`origin = 'sender'`): an
+    imported thread keeps what the import gave it. A thread with a `skipped_by_sender` touch event (a reply, a
+    bounce, a company closed, a no-go: every stop but a lapse ends the thread's queue) gets nothing new. Returns how
+    many rows were added or re-dated."""
     stamp = iso_utc(now)
     changed = 0
     for touch in conn.execute(
-            "SELECT touch_id, first_sent_at FROM touch WHERE state = 'open' AND first_sent_at IS NOT NULL "
-            "AND gmail_thread_id IS NOT NULL ORDER BY touch_id").fetchall():
+            "SELECT touch_id, first_sent_at FROM touch WHERE state = 'open' AND origin = 'sender' "
+            "AND first_sent_at IS NOT NULL AND gmail_thread_id IS NOT NULL ORDER BY touch_id").fetchall():
         touch_id = touch["touch_id"]
         first = cal.ny_date(as_datetime(touch["first_sent_at"]), cfg)
         rows = {r["seq"]: r for r in conn.execute(
@@ -83,13 +86,16 @@ def sync_followups(conn: sqlite3.Connection, cfg: SendConfig, *, now: str) -> in
                for seq, due in wanted.items()):
             continue
         company_id = _company_of_touch(conn, touch_id)
-        stopped = {r[0] for r in conn.execute(
-            "SELECT json_extract(detail, '$.seq') FROM event WHERE entity = 'touch' AND entity_id = ? "
-            "AND kind IN ('followup_lapsed', 'skipped_by_sender')", (touch_id,))}
+        stops = conn.execute("SELECT kind, json_extract(detail, '$.seq') FROM event WHERE entity = 'touch' "
+                             "AND entity_id = ? AND kind IN ('followup_lapsed', 'skipped_by_sender')",
+                             (touch_id,)).fetchall()
+        thread_stopped = any(kind == "skipped_by_sender" for kind, _ in stops)
+        lapsed = {seq for _, seq in stops}
         for seq, due in wanted.items():
             row = rows.get(seq)
             if row is None:
-                changed += seq not in stopped and _plan_one(conn, touch_id, seq, due, company_id, stamp)
+                if not thread_stopped and seq not in lapsed:
+                    changed += _plan_one(conn, touch_id, seq, due, company_id, stamp)
             elif row["state"] == "planned" and row["due_on"] != due:
                 conn.execute("UPDATE message SET due_on = ?, updated_at = ?, revision = revision + 1 "
                              "WHERE message_id = ? AND state = 'planned'", (due, stamp, row["message_id"]))
@@ -150,15 +156,19 @@ def stop_touch_messages(conn: sqlite3.Connection, touch_id: int, *, reason: str,
 def lapse_followups(conn: sqlite3.Connection, today: date, cfg: SendConfig, *, now: str | None = None) -> int:
     """A follow-up nobody approved or skipped `followup_lapse_business_days` (5) business days after its due date
     lapses (#9, 2026-10-31). A `planned` row (never drafted) is deleted with a `followup_lapsed` event on its touch
-    (`stop_planned`); a `drafted` row moves to `skipped` with a `followup_lapsed` event on the message. An `approved`
-    one never lapses. A lapsed follow-up is not revived; a re-plan is a new row. Returns how many lapsed. `now`
-    stamps the events (default the clock)."""
+    (`stop_planned`); a `drafted` row moves to `skipped` with a `followup_lapsed` event on the message, counting from
+    the later of its due date and its last change (a draft he unapproved late to fix gets 5 business days from that
+    change). An `approved` one never lapses. A lapsed follow-up is not revived; a re-plan is a new row. Returns how
+    many lapsed. `now` stamps the events (default the clock)."""
     stamp = iso_utc(now) if now else utcnow()
     lapsed = 0
-    for row in conn.execute("SELECT message_id, touch_id, seq, state, due_on, revision FROM message "
+    for row in conn.execute("SELECT message_id, touch_id, seq, state, due_on, updated_at, revision FROM message "
                             "WHERE state IN ('planned', 'drafted') AND seq >= 1 AND due_on IS NOT NULL AND due_on < ? "
                             "ORDER BY due_on, message_id", (today.isoformat(),)).fetchall():
-        if cal.business_days_between(date.fromisoformat(row["due_on"]), today, cfg) < cfg.followup_lapse_business_days:
+        since = date.fromisoformat(row["due_on"])
+        if row["state"] == "drafted":
+            since = max(since, cal.ny_date(as_datetime(row["updated_at"]), cfg))
+        if cal.business_days_between(since, today, cfg) < cfg.followup_lapse_business_days:
             continue
         if row["state"] == "planned":
             stop_planned(conn, row["message_id"], reason="lapsed", now=stamp)

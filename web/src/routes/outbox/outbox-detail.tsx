@@ -32,13 +32,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Skeleton } from '@/components/ui/skeleton';
 import { useHotkeys } from '@/keyboard/hotkeys';
 import { ageDays, formatAge, formatDueDay } from '@/lib/format';
+import { FOLLOWUP_COUNT } from '@/lib/followups';
 import { useEdits, type Edit } from '@/pending/edits';
 import { usePendingControls, usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { newestRevision, noteRevision, withRevision } from '@/pending/revisions';
 import { safeHref } from '@/lib/safe-href';
 import { CompareDialog } from './compare-dialog';
 import { heldLine, useCompanyActions } from './company-actions';
-import { FOLLOWUP_COUNT, rowStatus } from './outbox-list';
+import { rowStatus } from './outbox-list';
 import { fewerDrafts, patchDetailItem, patchRow } from './outbox-patches';
 import { ReplyDetail, Thread, type ReplyChoice } from './reply-detail';
 

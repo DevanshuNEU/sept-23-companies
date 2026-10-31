@@ -13,7 +13,7 @@ from outreach.sending import claim, queue
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import (close_quiet_touches, lapse_followups, plan_followups, stop_planned,
-                                        sweep_stopped)
+                                        sweep_stopped, sync_followups)
 from outreach.store import transaction
 from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent
 from tests.storetest import fresh_store, seed_company
@@ -136,11 +136,24 @@ class LapseTest(Base):
         self.assertEqual(len(self.touch_events(touch_id, "followup_lapsed")), 1)
         self.assertEqual(self.touch_events(touch_id, "skipped_by_sender"), [])
 
-    def test_a_drafted_follow_up_never_lapses(self):
-        person, touch_id = self.sent_touch()
+    def test_a_drafted_follow_up_nobody_acts_on_lapses_after_five_business_days(self):
+        person, _ = self.sent_touch()
         drafted = seed_message(self.db, person, state="drafted", seq=1, due_on="2026-11-11")
-        self.assertEqual(self.lapse(date(2026, 11, 30)), 0)
+        self.assertEqual(self.lapse(date(2026, 11, 17)), 0)  # four business days after it was due
         self.assertEqual(self.state(drafted), "drafted")
+        self.assertEqual(self.lapse(date(2026, 11, 18)), 1)  # five
+        self.assertEqual(self.state(drafted), "skipped")
+        events = [json.loads(r["detail"]) for r in self.db.execute(
+            "SELECT detail FROM event WHERE entity = 'message' AND entity_id = ? AND kind = 'followup_lapsed'",
+            (drafted,))]
+        self.assertEqual(events, [{"seq": 1, "due_on": "2026-11-11", "reason": "lapsed"}])
+        self.assertEqual(self.lapse(date(2026, 11, 30)), 0)
+
+    def test_an_approved_follow_up_never_lapses(self):
+        person, _ = self.sent_touch()
+        approved = seed_message(self.db, person, state="approved", seq=1, due_on="2026-11-11")
+        self.assertEqual(self.lapse(date(2026, 11, 30)), 0)
+        self.assertEqual(self.state(approved), "approved")
 
     def test_stop_planned_refuses_a_drafted_row(self):
         person, _ = self.sent_touch()
@@ -161,6 +174,70 @@ class LapseTest(Base):
                          [{"seq": 1, "due_on": "2026-11-11", "reason": "lapsed"}])  # the lapse stays on record
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM event WHERE kind = 'followup_planned'").fetchone()[0],
                          2)
+
+
+class SyncTest(Base):
+    """Every open thread follows the schedule in the config (#141): missing follow-ups are planned, planned ones are
+    re-dated, and one that lapsed or was stopped never comes back."""
+
+    def old_touch(self):
+        """A thread sent Monday 2026-11-02 under the old rule: one follow-up planned at 7 business days."""
+        person, touch_id = self.sent_touch()
+        with transaction(self.db):
+            plan_followups(self.db, touch_id, date(2026, 11, 2), ONE, now=iso(MON))
+        return person, touch_id
+
+    def sync(self):
+        with transaction(self.db):
+            return sync_followups(self.db, CFG, now=STAMP)
+
+    def test_an_old_thread_gets_the_new_schedule_once(self):
+        _, touch_id = self.old_touch()
+        self.assertEqual(self.sync(), 4)  # seq 1 re-dated, 2 to 4 added
+        self.assertEqual(self.planned(touch_id), FROM_MON)
+        self.assertEqual(self.touch_events(touch_id, "followup_replanned"),
+                         [{"seq": 1, "from": "2026-11-11", "to": "2026-11-05"}])
+        self.assertEqual(self.sync(), 0)
+
+    def test_a_lapsed_follow_up_never_comes_back(self):
+        _, touch_id = self.old_touch()
+        mid = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1", (touch_id,)).fetchone()[0]
+        with transaction(self.db):
+            stop_planned(self.db, mid, reason="lapsed", now=STAMP)
+        self.sync()
+        self.assertEqual(self.planned(touch_id), FROM_MON[1:])
+
+    def test_a_stopped_follow_up_never_comes_back(self):
+        _, touch_id = self.old_touch()
+        mid = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1", (touch_id,)).fetchone()[0]
+        with transaction(self.db):
+            stop_planned(self.db, mid, reason="replied", now=STAMP)
+        self.sync()
+        self.assertEqual(self.planned(touch_id), FROM_MON[1:])
+
+    def test_a_drafted_follow_up_keeps_its_date(self):
+        person, touch_id = self.sent_touch()
+        drafted = seed_message(self.db, person, state="drafted", seq=1, due_on="2026-11-11")
+        self.sync()
+        self.assertEqual(self.db.execute("SELECT state, due_on FROM message WHERE message_id = ?",
+                                         (drafted,)).fetchone()[:], ("drafted", "2026-11-11"))
+        self.assertEqual(self.planned(touch_id), FROM_MON[1:])
+
+    def test_a_thread_that_is_not_open_gets_nothing(self):
+        for state in ("replied", "bounced", "closed"):
+            with self.subTest(state=state):
+                _, touch_id = self.sent_touch()
+                extra = {"replied": "replied_at = '2026-11-03T15:00:00Z', reply_kind = 'interested'",
+                         "bounced": "bounced_at = '2026-11-03T15:00:00Z'",
+                         "closed": "closed_at = '2026-11-03T15:00:00Z', close_reason = 'no_reply'"}[state]
+                self.db.execute(f"UPDATE touch SET state = ?, {extra} WHERE touch_id = ?", (state, touch_id))
+                self.sync()
+                self.assertEqual(self.planned(touch_id), [])
+
+    def test_a_thread_whose_first_email_has_not_gone_out_gets_nothing(self):
+        person = self.person()
+        seed_message(self.db, person, state="drafted")
+        self.assertEqual(self.sync(), 0)
 
 
 class CloseTest(Base):

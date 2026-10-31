@@ -31,7 +31,7 @@ from tests.test_drafts_checks import FIXTURE_BANNED
 from tests.test_sending_precheck import body
 
 CFG = load_config()
-COUNTS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skipped", "lapsed", "closed")
+COUNTS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skipped", "planned", "lapsed", "closed")
 IMPORTED_RFC = "<old.1@devanshu.local>"
 
 

@@ -76,7 +76,7 @@ __all__ = ["LOCK_NAME", "BUSY_LINE", "STALE_RUN", "COUNT_KEYS", "WAIT_TITLE", "S
 LOCK_NAME = ".sender.lock"
 BUSY_LINE = "another tick is running"
 STALE_RUN = "the tick stopped before it finished"
-COUNT_KEYS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skipped", "lapsed", "closed")
+COUNT_KEYS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skipped", "planned", "lapsed", "closed")
 WAIT_TITLE = "Outreach sending waits"
 STOP_TITLE = "Outreach sending stopped"
 BANNED_TEXT = "Sending waits: the banned phrases list could not be read. Fix it to resume."
@@ -499,6 +499,7 @@ class _Tick:
         inbound.observe_stop_tags(conn, now=now, cfg=cfg, notify=self.notify)
         self.day = ramp.open_day(conn, now, cfg)
         self._bounce_rules()
+        self.counts["planned"] = followups.sync_followups(conn, cfg, now=stamp)
         self.counts["lapsed"] = followups.lapse_followups(conn, self.today, cfg, now=stamp)
         self.counts["closed"] = followups.close_quiet_touches(conn, self.today, cfg, now=stamp)
         verdicts = queue.verdicts(conn, now, cfg, day=self.day, gate=None)

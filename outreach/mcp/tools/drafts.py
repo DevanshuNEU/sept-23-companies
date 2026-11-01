@@ -268,6 +268,9 @@ class SaveFollowupInput(Input):
     person_id: int = Field(ge=1, le=MAX_ID)
     seq: int = Field(ge=1, le=MAX_FOLLOWUPS, description="Which follow-up (followups_due gives it).")
     body: str = Field(min_length=1, max_length=3000, description="The follow-up text; the subject is set for you.")
+    brief_id: str = Field(min_length=1, max_length=64,
+                          description="The brief_id draft_brief returned for this person. A follow-up made without a "
+                                      "current brief is refused (#142).")
     revision: int | None = Field(None, ge=1, le=MAX_ID, description="The revision you read; a newer one refuses.")
 
 
@@ -297,6 +300,7 @@ def stopped(conn: sqlite3.Connection, p: sqlite3.Row, touch: sqlite3.Row) -> Too
 def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
     conn = ctx.conn
     body = text(args.body, "body")
+    require_brief(args.brief_id, args.person_id)
     banned = banned_list()
     with transaction(conn):
         p = person_row(conn, args.person_id)
@@ -444,7 +448,8 @@ def save_linkedin_note(ctx: Ctx, args: SaveNoteInput) -> dict:
 TOOLS = (
     ToolSpec("draft_brief",
              "Call this first for each person you will draft: it returns the person's facts, Devanshu's DevVault voice "
-             "files, the me.md evidence and the limits, plus the brief_id that save_draft requires. Reads only. "
+             "files, the me.md evidence and the limits, plus the brief_id that save_draft and save_followup require. "
+             "Reads only. "
              "Write from what it returns.", PersonInput, draft_brief),
     ToolSpec("save_draft",
              "Save the first email to a person as a draft for Devanshu to review. It runs the #9 checks and returns "
@@ -457,7 +462,8 @@ TOOLS = (
               "event": Grant(insert=True)}),
     ToolSpec("save_followup",
              "Fill a planned follow-up that followups_due lists, as a draft. The subject is 'Re: ' plus the first "
-             "email's subject; give only the body. Runs the same checks as save_draft. It never approves.",
+             "email's subject; give only the body. Call draft_brief first and pass its brief_id: a follow-up made "
+             "without a current one is refused. Runs the same checks as save_draft. It never approves.",
              SaveFollowupInput, save_followup,
              {"message": Grant(update=frozenset({"state", "subject", "body", "checks", "saved_by", "updated_at",
                                                  "revision"})),

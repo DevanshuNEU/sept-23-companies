@@ -318,7 +318,7 @@ class SaveFollowupTest(DraftCase):
     def test_fills_a_due_planned_follow_up_with_the_re_subject_as_drafted_by_claude(self):
         listed = self.ok("followups_due")
         self.assertEqual([i["message_id"] for i in listed["items"]], [self.planned])
-        got = self.ok("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW})
+        got = self.ok("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": FOLLOW})
         self.assertEqual((got["message_id"], got["state"], got["revision"], got["created"], got["unchanged"]),
                          (self.planned, "drafted", 2, True, False))
         row = self.row()
@@ -329,32 +329,32 @@ class SaveFollowupTest(DraftCase):
         self.assertEqual(self.message_events(), [("drafted", "claude")])
 
     def test_a_follow_up_over_80_words_warns(self):
-        got = self.ok("save_followup", {"person_id": self.sam, "seq": 1, "body": "Hi Sam, " + "word " * 90})
+        got = self.ok("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": "Hi Sam, " + "word " * 90})
         self.assertIn("length", self.codes(got["warns"]))
 
     def test_a_resave_replaces_claudes_follow_up_and_an_identical_one_changes_nothing(self):
-        self.ok("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW})
-        got = self.ok("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW + " P.S.", "revision": 2})
+        self.ok("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": FOLLOW})
+        got = self.ok("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": FOLLOW + " P.S.", "revision": 2})
         self.assertEqual((got["revision"], got["created"]), (3, False))
         before = fingerprint(self.db)
-        again = self.ok("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW + " P.S."})
+        again = self.ok("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": FOLLOW + " P.S."})
         self.assertTrue(again["unchanged"])
         self.assertEqual(fingerprint(self.db), before)
-        self.assertEqual(self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": "Other",
+        self.assertEqual(self.error("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": "Other",
                                                       "revision": 1})["code"], "stale_revision")
 
     def test_the_fourth_follow_up_can_be_drafted(self):
         fourth = self.planned_row(self.sam_touch, 4, "2026-11-10")
-        got = self.ok("save_followup", {"person_id": self.sam, "seq": 4, "body": FOLLOW})
+        got = self.ok("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 4, "body": FOLLOW})
         self.assertEqual((got["message_id"], got["state"]), (fourth, "drafted"))
 
     def test_a_missing_planned_row_is_no_such_followup(self):
-        err = self.error("save_followup", {"person_id": self.sam, "seq": 2, "body": FOLLOW})
+        err = self.error("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 2, "body": FOLLOW})
         self.assertEqual(err["code"], "no_such_followup")
 
     def test_before_the_first_email_is_sent_it_is_refused_in_plain_words(self):
         self.ok("save_draft", self.draft_args())
-        err = self.error("save_followup", {"person_id": self.pat, "seq": 1, "body": FOLLOW})
+        err = self.error("save_followup", {"brief_id": self.brief_id(self.pat), "person_id": self.pat, "seq": 1, "body": FOLLOW})
         self.assertEqual(err["code"], "first_email_not_sent")
         self.assertNotIn("trigger", err["message"])
 
@@ -362,50 +362,64 @@ class SaveFollowupTest(DraftCase):
         before = fingerprint(self.db)
         self.db.execute("UPDATE touch SET state = 'replied', replied_at = ?, reply_kind = 'interested' "
                         "WHERE touch_id = ?", (NOW, self.sam_touch))
-        self.assertEqual(self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW})["code"],
+        self.assertEqual(self.error("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": FOLLOW})["code"],
                          "replied")
         self.db.execute("UPDATE touch SET state = 'open', replied_at = NULL, reply_kind = NULL WHERE touch_id = ?",
                         (self.sam_touch,))
         self.db.execute("UPDATE company SET held_by_touch = ?, held_at = ? WHERE company_id = ?",
                         (self.sam_touch, NOW, self.acme))
-        self.assertEqual(self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW})["code"],
+        self.assertEqual(self.error("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": FOLLOW})["code"],
                          "company_held")
         self.db.execute("UPDATE company SET held_by_touch = NULL, held_at = NULL WHERE company_id = ?", (self.acme,))
         no_go(self.db, person_id=self.sam)
-        self.assertEqual(self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW})["code"],
+        self.assertEqual(self.error("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": FOLLOW})["code"],
                          "person_no_go")
         self.assertEqual(self.row()["state"], "planned")
 
     def test_a_follow_up_due_more_than_a_week_out_is_not_due_yet(self):
         later = self.planned_row(self.sam_touch, 2, "2026-11-30")
-        err = self.error("save_followup", {"person_id": self.sam, "seq": 2, "body": FOLLOW})
+        err = self.error("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 2, "body": FOLLOW})
         self.assertEqual(err["code"], "not_due")
         self.assertIn("2026-11-30", err["message"])
         self.assertEqual(self.row(later)["state"], "planned")
 
     def test_his_edit_approved_skipped_and_sent_follow_ups_refuse(self):
-        self.ok("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW})
+        self.ok("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": FOLLOW})
         self.db.execute("UPDATE message SET saved_by = 'devanshu' WHERE message_id = ?", (self.planned,))
-        err = self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": "Mine"})
+        err = self.error("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": "Mine"})
         self.assertEqual((err["code"], err["message"]), ("edited_by_devanshu", HIS_WORDS))
         for state, extra in (("approved", ", approved_at = '2026-11-10T15:00:00Z'"), ("skipped", "")):
             with self.subTest(state=state):
                 self.db.execute(f"UPDATE message SET state = 'drafted', saved_by = 'claude', approved_at = NULL "
                                 f"WHERE message_id = ?", (self.planned,))
                 self.db.execute(f"UPDATE message SET state = ?{extra} WHERE message_id = ?", (state, self.planned))
-                self.assertEqual(self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": "x"})["code"],
+                self.assertEqual(self.error("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": "x"})["code"],
                                  "not_a_draft")
+
+    def test_save_without_a_brief_id_is_refused_by_the_schema(self):
+        err = self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW})
+        self.assertEqual(err["code"], "bad_input")
+        self.assertEqual(self.row()["state"], "planned")
+
+    def test_a_stale_brief_is_refused_and_stores_nothing(self):
+        # #142: a follow-up is written from a current brief, like a first email (#135).
+        err = self.error("save_followup", {"brief_id": self.brief_id(self.pat), "person_id": self.sam, "seq": 1,
+                                           "body": FOLLOW})
+        self.assertEqual(err["code"], "stale_brief")
+        self.assertIn("draft_brief", err["fix"])
+        self.assertEqual(self.row()["state"], "planned")
 
     def test_seq_bounds_and_a_subject_or_due_on_property_are_bad_input(self):
         for args in ({"seq": 0}, {"seq": 5}, {"seq": "1"}, {"subject": "Re: x"}, {"due_on": "2026-11-12"},
                      {"state": "drafted"}, {"body": ""}):
             with self.subTest(args=args):
-                self.assertEqual(self.error("save_followup", {"person_id": self.sam, "seq": 1, "body": FOLLOW,
+                self.assertEqual(self.error("save_followup", {"brief_id": self.brief_id(self.sam), "person_id": self.sam, "seq": 1, "body": FOLLOW,
                                                               **args})["code"], "bad_input")
         self.assertEqual(self.row()["state"], "planned")
 
     def test_unknown_person_is_not_found(self):
-        self.assertEqual(self.error("save_followup", {"person_id": 999, "seq": 1, "body": FOLLOW})["code"],
+        self.assertEqual(self.error("save_followup", {"brief_id": self.brief_id(999), "person_id": 999, "seq": 1,
+                                                      "body": FOLLOW})["code"],
                          "not_found")
 
 

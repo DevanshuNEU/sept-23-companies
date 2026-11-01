@@ -31,6 +31,7 @@ Live means real contacts and real sends.
 | Sources (daily 06:30) | live checkout, `python -m outreach.sources run-due` | `com.devanshu.outreach-sources` |
 | Reader night job (daily 02:30) | live checkout, `python -m outreach.reader night` | `com.devanshu.outreach-reader-night` |
 | Profile judge (daily 06:10, off by default) | live checkout, `python -m outreach.judge run` | `com.devanshu.outreach-judge` |
+| Follow-up drafter (daily 04:30) | live checkout, `python -m outreach.followup_drafter run` | `com.devanshu.outreach-followup-drafter` |
 
 Live checkout: `~/Desktop/Sept 23 Companies`. The deploy tool renders each job from `launchd/<label>.plist.template`.
 The Needs-you, prepare and plan jobs (#16, #15) install when their templates land. The prepare job (05:30) is off by
@@ -58,7 +59,8 @@ email touch or undo, and no update or delete of either table is allowed (#9, com
 **Only in the live checkout:** `python -m outreach.sending run` (with or without `--dry-run`: a dry run still reads
 Gmail) and `python -m outreach.sending auth` (writes the real token), `python -m outreach.crawl` (every command sends
 real requests), `python -m outreach.reader night` and `eval --run` (they call a model), `python -m outreach.judge run`
-(it reads company pages and calls a model; `--dry-run` runs anywhere) and the judging half of `python -m outreach.judge
+(it reads company pages and calls a model; `--dry-run` runs anywhere), `python -m outreach.followup_drafter run` (it
+calls a model and writes drafts; `--dry-run` runs anywhere) and the judging half of `python -m outreach.judge
 eval` (elsewhere it scores only what is stored), `python -m outreach.mcp`
 (the server's tools work only here), `python -m outreach.deploy install`, `retire-old` and `rollback` (they change
 launchd), and `python -m outreach.importer run`, `reconcile` and `rehearse` on real data.

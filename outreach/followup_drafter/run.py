@@ -12,14 +12,15 @@ The model is text in, text out (`claude -p` with no tools, no MCP, no skills and
 neutral folder, as the judge runs it). Its reply must be exactly one JSON object `{"body": "..."}`.
 
 How each follow-up ends:
-- drafted: saved as `drafted` by `claude`, for his click in the Outbox. A save with blocks gets one more call with the
-  blocks shown; whatever that gives is saved too (a block still saves, so he sees it), counted `with_blocks`.
+- drafted: saved as `drafted` by `claude`, for his click in the Outbox. A save with a problem the model can fix
+  (`FIXABLE`: a block in the text, or a number with no source) gets one more call with the problems shown; the
+  better of the two drafts is kept (a block still saves, so he sees it), counted `with_blocks` when blocks remain.
 - refused: `save_followup` or `draft_brief` refused it (a reply came in, the company closed): nothing is written.
 - failed: the call failed or the reply was not one JSON body. The row stays `planned`; the next run tries again,
   and the sender's lapse rule ends it 5 business days after it was due.
 A session limit or a login problem stops the run at once; `max_consecutive_failures` failed calls in a row stop it
-too. Unreadable voice files stop it (nothing can be drafted without them). Off touches nothing; a dry run lists what
-is due and calls and writes nothing.
+too, and so does a store that cannot list what is due (busy, unreadable). Unreadable voice files stop it (nothing
+can be drafted without them). Off touches nothing; a dry run lists what is due and calls and writes nothing.
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from outreach.drafts.checks import FOLLOWUP_MAX_WORDS
 from outreach.followup_drafter.config import DrafterConfig
 from outreach.judge.validate import Refused, parse_reply
 from outreach.mcp.server import run_tool, tool_specs
@@ -46,6 +48,11 @@ OFF_LINE = ("followup drafter is off; set [drafter] enabled = true in outreach/f
             "to turn it on")
 _SPECS = {spec.name: spec for spec in tool_specs()}
 _MAX_DETAIL = 300
+# The checks a second call can fix: blocks in the text itself, and a number with no source in me.md or his paste. A
+# block about the store (no mail server, a no-go, the banned list unreadable) is the same whatever the model writes.
+FIXABLE = frozenset({"placeholder", "link_shortener", "too_many_links", "near_identical", "voice_ungrounded"})
+# What the model is held to: a follow-up's length, not a first email's (the brief's own limits are a first email's).
+FOLLOWUP_LIMITS = {"words": [25, FOLLOWUP_MAX_WORDS], "max_links": 2}
 
 
 def load_prompt() -> str:
@@ -83,6 +90,16 @@ def _short(text: str) -> str:
     return text if len(text) <= _MAX_DETAIL else text[:_MAX_DETAIL - 3] + "..."
 
 
+class _Stop(Exception):
+    """The store could not list what is due: the run ends, failed, with what it did so far."""
+
+
+def _fixable(saved: dict) -> list[dict]:
+    """The problems a second call could fix, as the model is shown them."""
+    return [{"title": c["title"], "detail": c["detail"]} for c in (*saved["blocks"], *saved["warns"])
+            if c["code"] in FIXABLE]
+
+
 class _Run:
     def __init__(self, runner: Runner, cfg: DrafterConfig, *, now: str, path: str | None):
         self.runner, self.cfg, self.now, self.path = runner, cfg, now, path
@@ -99,7 +116,7 @@ class _Run:
     def due(self) -> list[dict]:
         is_error, payload = self.tool("followups_due", {"days_ahead": self.days_ahead})
         if is_error:
-            raise RuntimeError(f"followups_due failed: {payload.get('code')}: {payload.get('message')}")
+            raise _Stop(f"followups_due failed: {payload.get('code')}: {_short(payload.get('message'))}")
         self.summary.due = max(self.summary.due, payload["total"])
         return payload["items"]
 
@@ -137,8 +154,9 @@ class _Run:
             self.summary.lines.append(f"{label}: brief refused ({brief.get('code')})")
             return None
         brief_id = brief.pop("brief_id")
+        brief["limits"] = FOLLOWUP_LIMITS
         message = {"followup": {"seq": seq, "of": self.of, "last": seq >= self.of}, "brief": brief}
-        saved = None
+        saved, first_body = None, None
         for attempt in (1, 2):
             outcome, body = self.ask(message)
             if outcome in ("session_limit", "auth", "cli_broken"):
@@ -157,21 +175,27 @@ class _Run:
                     return f"{self.in_a_row} failed calls in a row"
                 return None
             self.in_a_row = 0
-            is_error, saved_now = self.tool("save_followup", {"person_id": person, "seq": seq, "body": body,
-                                                              "brief_id": brief_id})
+            is_error, saved_now = self.save(person, seq, body, brief_id)
             if is_error:
                 if saved is not None:
                     break
                 self.summary.refused += 1
                 self.summary.lines.append(f"{label}: save refused ({saved_now.get('code')}); nothing written")
                 return None
+            if saved is not None and len(_fixable(saved_now)) >= len(_fixable(saved)):
+                # The retry is no better: put the first draft back.
+                is_error, again = self.save(person, seq, first_body, brief_id)
+                saved_now = saved if is_error else again
             saved = saved_now
-            if not saved["blocks"] or attempt == 2:
+            if attempt == 2 or not _fixable(saved):
                 break
-            message = {**message, "previous_body": body,
-                       "blocks": [{"title": b["title"], "detail": b["detail"]} for b in saved["blocks"]]}
+            first_body = body
+            message = {**message, "previous_body": body, "blocks": _fixable(saved)}
         self.counted(label, saved)
         return None
+
+    def save(self, person: int, seq: int, body: str, brief_id: str) -> tuple[bool, dict]:
+        return self.tool("save_followup", {"person_id": person, "seq": seq, "body": body, "brief_id": brief_id})
 
     def counted(self, label: str, saved: dict) -> None:
         self.summary.drafted += 1
@@ -182,7 +206,12 @@ class _Run:
 
     def loop(self, cap: int) -> None:
         while self.summary.drafted + self.summary.refused + self.summary.failed < cap:
-            item = next((i for i in self.due() if i["message_id"] not in self.tried), None)
+            try:
+                items = self.due()
+            except _Stop as err:
+                self.summary.status, self.summary.reason = "failed", str(err)
+                return
+            item = next((i for i in items if i["message_id"] not in self.tried), None)
             if item is None:
                 break
             self.tried.add(item["message_id"])
@@ -202,7 +231,11 @@ def run_drafter(runner: Runner, cfg: DrafterConfig, *, now: str, path: str | Non
         return DrafterSummary(status="off")
     run = _Run(runner, cfg, now=now, path=path)
     cap = min(cfg.max_per_run, limit) if limit else cfg.max_per_run
-    items = run.due()
+    try:
+        items = run.due()
+    except _Stop as err:
+        run.summary.status, run.summary.reason = "failed", str(err)
+        return run.summary
     if dry_run:
         run.summary.status = "dry_run"
         run.summary.lines = [f"{i['person']['name']} at {i['company']['name']}: follow-up {i['seq']}, due {i['due_on']}"

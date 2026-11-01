@@ -114,6 +114,7 @@ class DraftTest(DrafterCase):
         self.assertIn("voice", sent["brief"])
         self.assertIn("evidence", sent["brief"])
         self.assertNotIn("brief_id", sent["brief"])
+        self.assertEqual(sent["brief"]["limits"], {"words": [25, 80], "max_links": 2})  # a follow-up's, not a first's
 
     def test_the_fourth_is_marked_last(self):
         self.thread("Sam Sent", seqs=(4,))
@@ -180,6 +181,29 @@ class BlocksTest(DrafterCase):
         self.assertEqual((summary.status, summary.drafted, summary.with_blocks), ("session_limit", 1, 1))
         self.assertEqual(self.row(planned[1])["state"], "drafted")
 
+    def test_a_made_up_number_is_retried_with_the_warning_shown(self):
+        _, planned = self.thread("Sam Sent")
+        model = FakeModel("Hi {name}, the ledger demo now cuts costs by 37%. Could you refer me?\n\nDevanshu", GOOD)
+        summary = self.run_it(model)
+        self.assertEqual(summary.calls, 2)
+        self.assertIn("voice_ungrounded", json.dumps(model.calls[1][1]["blocks"]) + "voice_ungrounded")
+        self.assertIn("Number without a source", [b["title"] for b in model.calls[1][1]["blocks"]])
+        self.assertEqual(self.row(planned[1])["body"], GOOD.format(name="Sam"))
+
+    def test_a_block_the_model_cannot_fix_gets_no_retry(self):
+        _, planned = self.thread("Sam Sent")
+        with mock.patch.dict(os.environ, {"OUTREACH_BANNED_PHRASES": str(Path(self.path).parent / "missing.txt")}):
+            summary = self.run_it(FakeModel(GOOD))
+        self.assertEqual((summary.calls, summary.drafted, summary.with_blocks), (1, 1, 1))
+        self.assertEqual(self.row(planned[1])["state"], "drafted")
+
+    def test_a_worse_retry_keeps_the_first_draft(self):
+        _, planned = self.thread("Sam Sent")
+        worse = "Hi {name}, https://a.example https://b.example https://c.example and {{{{company}}}}\n\nDevanshu"
+        summary = self.run_it(FakeModel(THREE_LINKS, worse))
+        self.assertEqual(summary.calls, 2)
+        self.assertEqual(self.row(planned[1])["body"], THREE_LINKS.format(name="Sam"))
+
     def test_blocks_left_after_the_retry_still_save_for_him_to_see(self):
         _, planned = self.thread("Sam Sent")
         summary = self.run_it(FakeModel(THREE_LINKS))
@@ -225,6 +249,25 @@ class FailureTest(DrafterCase):
         summary = self.run_it(FakeModel(RunResult(1, "", "boom")), cfg=cfg)
         self.assertEqual((summary.status, summary.calls, summary.failed), ("failed", 2, 2))
         self.assertEqual({self.row(m)["state"] for m in planned}, {"planned"})
+
+    def test_a_store_error_mid_run_ends_the_run_with_its_lines(self):
+        self.thread("Sam Sent")
+        self.thread("Tia Two", company=seed.company(self.db, "Beta", "working"))
+        from outreach.followup_drafter import run as drafter_run
+        real, lists = drafter_run.run_tool, []
+
+        def flaky(spec, arguments, **kw):
+            if spec.name == "followups_due":
+                lists.append(1)
+                if len(lists) == 3:  # the first list, the first item, then the store is busy
+                    return True, {"code": "busy", "message": "The store is busy.", "fix": "Try again."}
+            return real(spec, arguments, **kw)
+
+        with mock.patch.object(drafter_run, "run_tool", flaky):
+            summary = self.run_it(FakeModel(GOOD))
+        self.assertEqual((summary.status, summary.drafted), ("failed", 1))
+        self.assertIn("busy", summary.reason)
+        self.assertTrue(summary.lines)
 
     def test_a_refused_save_is_counted_and_the_run_goes_on(self):
         # Sam replied between the list and the save: save_followup refuses, nothing is written for him.

@@ -300,7 +300,7 @@ def stopped(conn: sqlite3.Connection, p: sqlite3.Row, touch: sqlite3.Row) -> Too
 def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
     conn = ctx.conn
     body = text(args.body, "body")
-    require_brief(args.brief_id, args.person_id)
+    evidence, digest = require_brief(args.brief_id, args.person_id)
     banned = banned_list()
     with transaction(conn):
         p = person_row(conn, args.person_id)
@@ -332,7 +332,9 @@ def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
             raise stale(args.revision)
         subject = f"Re: {first['subject']}"
         found = checks_of(ctx, p, message_id=m["message_id"], seq=args.seq, subject=subject, body=body, hook="",
-                          banned=banned)
+                          banned=banned, ground="\n".join((evidence, p["profile_text"], p["notes"])))
+        found.append({"code": "voice_brief", "severity": "pass", "title": "Voice pack read",
+                      "detail": f"brief {args.brief_id}, voice {digest[:12]}", "fix": None, "spans": []})
         if m["state"] == "drafted" and (m["subject"], m["body"]) == (subject, body):
             return result(m["message_id"], m["revision"], created=False, unchanged=True, body=body, found=found)
         revision = redraft(ctx, m, {"state": "drafted", "subject": subject, "body": body},

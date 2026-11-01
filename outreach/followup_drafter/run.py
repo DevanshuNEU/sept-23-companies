@@ -13,7 +13,8 @@ neutral folder, as the judge runs it). Its reply must be exactly one JSON object
 
 How each follow-up ends:
 - drafted: saved as `drafted` by `claude`, for his click in the Outbox. A save with a problem the model can fix
-  (`FIXABLE`: a block in the text, or a number with no source) gets one more call with the problems shown; the
+  (`FIXABLE`: a block in the text, or a number with no source) or that repeats an earlier email of the thread
+  (`_repeats` against `said`, the earlier emails sent or waiting to go) gets one more call with the problems shown; the
   better of the two drafts is kept (a block still saves, so he sees it), counted `with_blocks` when blocks remain.
 - refused: `save_followup` or `draft_brief` refused it (a reply came in, the company closed): nothing is written.
 - failed: the call failed or the reply was not one JSON body. The row stays `planned`; the next run tries again,
@@ -24,7 +25,9 @@ can be drafted without them). Off touches nothing; a dry run lists what is due a
 """
 from __future__ import annotations
 
+import difflib
 import json
+import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -100,6 +103,36 @@ def _fixable(saved: dict) -> list[dict]:
             if c["code"] in FIXABLE]
 
 
+# An earlier email in the thread counts as said when it went out or is waiting to go: he approves it, then the
+# queue sends it before this one (`earlier_followup`). A skipped or still-planned one is unsaid.
+SAID_STATES = ("sent", "sending", "send_unknown", "approved", "drafted")
+# Word-sequence similarity at or above this, against any said email, is a repeat.
+REPEAT_RATIO = 0.6
+
+
+def _said(brief: dict, seq: int) -> list[dict]:
+    """The thread's earlier emails that count as said, oldest first, worked out in code so the model never has to
+    judge which drafts will go out."""
+    thread = brief.get("person", {}).get("email", {}).get("messages", [])
+    return [{"seq": m["seq"], "state": m["state"], "body": m["body"]} for m in sorted(thread, key=lambda m: m["seq"])
+            if m["seq"] < seq and m["state"] in SAID_STATES and m["body"].strip()]
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9']+", text.lower())
+
+
+def _repeats(body: str, said: list[dict]) -> list[dict]:
+    """A problem for each said email this draft is too close to (the save checks only compare colleagues)."""
+    out = []
+    for m in said:
+        if difflib.SequenceMatcher(None, _words(body), _words(m["body"])).ratio() >= REPEAT_RATIO:
+            which = "the first email" if m["seq"] == 0 else f"follow-up {m['seq']}"
+            out.append({"title": "Repeats an earlier email",
+                        "detail": f"This draft says nearly what {which} says. Say something new instead."})
+    return out
+
+
 class _Run:
     def __init__(self, runner: Runner, cfg: DrafterConfig, *, now: str, path: str | None):
         self.runner, self.cfg, self.now, self.path = runner, cfg, now, path
@@ -155,8 +188,9 @@ class _Run:
             return None
         brief_id = brief.pop("brief_id")
         brief["limits"] = FOLLOWUP_LIMITS
-        message = {"followup": {"seq": seq, "of": self.of, "last": seq >= self.of}, "brief": brief}
-        saved, first_body = None, None
+        said = _said(brief, seq)
+        message = {"followup": {"seq": seq, "of": self.of, "last": seq >= self.of}, "said": said, "brief": brief}
+        saved, first = None, None  # first: the first draft's (body, saved result, problems) while a retry runs
         for attempt in (1, 2):
             outcome, body = self.ask(message)
             if outcome in ("session_limit", "auth", "cli_broken"):
@@ -182,15 +216,16 @@ class _Run:
                 self.summary.refused += 1
                 self.summary.lines.append(f"{label}: save refused ({saved_now.get('code')}); nothing written")
                 return None
-            if saved is not None and len(_fixable(saved_now)) >= len(_fixable(saved)):
+            problems = _fixable(saved_now) + _repeats(body, said)
+            if first is not None and len(problems) >= len(first[2]):
                 # The retry is no better: put the first draft back.
-                is_error, again = self.save(person, seq, first_body, brief_id)
-                saved_now = saved if is_error else again
+                is_error, again = self.save(person, seq, first[0], brief_id)
+                saved_now, problems = (first[1] if is_error else again), first[2]
             saved = saved_now
-            if attempt == 2 or not _fixable(saved):
+            if attempt == 2 or not problems:
                 break
-            first_body = body
-            message = {**message, "previous_body": body, "blocks": _fixable(saved)}
+            first = (body, saved, problems)
+            message = {**message, "previous_body": body, "blocks": problems}
         self.counted(label, saved)
         return None
 

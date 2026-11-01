@@ -124,12 +124,38 @@ class DraftTest(DrafterCase):
 
     def test_two_follow_ups_in_one_thread_go_in_order_and_the_second_sees_the_first(self):
         _, planned = self.thread("Sam Sent", seqs=(1, 2))
-        model = FakeModel("Hi {name}, the first follow-up.\n\nDevanshu", "Hi {name}, the second follow-up.\n\nDevanshu")
+        model = FakeModel("Hi {name}, the first follow-up.\n\nDevanshu",
+                          "Hi {name}, a different point entirely about search speed and who owns the req.\n\nDevanshu")
         self.run_it(model)
         self.assertEqual([c[1]["followup"]["seq"] for c in model.calls], [1, 2])
         bodies = [m["body"] for m in model.calls[1][1]["brief"]["person"]["email"]["messages"]]
         self.assertIn("Hi Sam, the first follow-up.\n\nDevanshu", bodies)
+        self.assertIn("Hi Sam, the first follow-up.\n\nDevanshu", [m["body"] for m in model.calls[1][1]["said"]])
         self.assertEqual(self.row(planned[2])["state"], "drafted")
+
+    def test_said_lists_every_earlier_email_sent_or_waiting_and_leaves_out_a_skipped_one(self):
+        _, planned = self.thread("Sam Sent", seqs=(1, 2, 3))
+        self.db.execute("UPDATE message SET state = 'drafted', subject = 'Re: x', body = 'Hi Sam, the waiting one.', "
+                        "saved_by = 'claude' WHERE message_id = ?", (planned[1],))
+        self.db.execute("UPDATE message SET state = 'drafted', subject = 'Re: x', body = 'Hi Sam, a skipped one.' "
+                        "WHERE message_id = ?", (planned[2],))
+        self.db.execute("UPDATE message SET state = 'skipped' WHERE message_id = ?", (planned[2],))
+        model = FakeModel(GOOD)
+        self.run_it(model)
+        said = model.calls[0][1]["said"]
+        self.assertEqual([(m["seq"], m["body"]) for m in said],
+                         [(0, "Hi Sam Sent, the first email body."), (1, "Hi Sam, the waiting one.")])
+        self.assertEqual(model.calls[0][1]["followup"]["seq"], 3)
+
+    def test_a_draft_that_repeats_an_earlier_email_is_retried_and_the_new_one_kept(self):
+        _, planned = self.thread("Sam Sent", seqs=(1, 2))
+        self.db.execute("UPDATE message SET state = 'drafted', subject = 'Re: x', body = ?, saved_by = 'claude' "
+                        "WHERE message_id = ?", (GOOD.format(name="Sam"), planned[1]))
+        model = FakeModel(GOOD, OTHER)
+        summary = self.run_it(model)
+        self.assertEqual(summary.calls, 2)
+        self.assertIn("Repeats an earlier email", [b["title"] for b in model.calls[1][1]["blocks"]])
+        self.assertEqual(self.row(planned[2])["body"], OTHER.format(name="Sam"))
 
     def test_a_follow_up_he_saved_or_one_already_drafted_is_never_touched(self):
         _, planned = self.thread("Sam Sent")

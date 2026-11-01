@@ -137,7 +137,8 @@ class SweepCase(McpCase):
                             "hook": "His post on the queue rewrite", "project": "queue",
                             "brief_id": brief_id(load_voice_pack(), read_evidence(), self.lee)}, None),
             "save_followup": ({"person_id": self.sam, "seq": 1, "body": "Hi Sam, one more note on the ledger idea. "
-                                                                        "Thanks, Devanshu"}, self.planned),
+                                                                        "Thanks, Devanshu",
+                               "brief_id": brief_id(load_voice_pack(), read_evidence(), self.sam)}, self.planned),
             "save_linkedin_note": ({"person_id": self.lin, "body": "Hi Lin, I read your post on the queue rewrite.",
                                     "reason_line": "I read your post on the queue rewrite"}, None),
             "reader_next": ({"limit": 1}, None),

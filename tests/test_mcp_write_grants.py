@@ -231,6 +231,10 @@ class GrantsCase(McpCase):
             "project": "runner", "brief_id": brief})
 
     def test_save_followup_cannot_write_beyond_its_grants(self):
+        with mock.patch.dict(os.environ, {"OUTREACH_MAIL_HOME": str(FIXTURE_BANNED.parent / "plan")}):
+            self.save_followup_grants(brief_id(load_voice_pack(), read_evidence(), self.sam))
+
+    def save_followup_grants(self, brief):
         self.check_tool("save_followup", [
             ("INSERT INTO message(touch_id, seq, state, subject, body, created_at, updated_at) "
              "VALUES (?, 0, 'drafted', 'Hi', 'Hello', ?, ?)", (self.touch, NOW, NOW)),
@@ -241,7 +245,8 @@ class GrantsCase(McpCase):
             ("UPDATE message SET state = 'skipped' WHERE message_id = ?", (self.planned,)),
             ("UPDATE message SET state = 'drafted', body = 'y' WHERE message_id = ?", (self.his,)),
             ("UPDATE person SET notes = 'x' WHERE person_id = ?", (self.sam,)),
-        ], {"person_id": self.sam, "seq": 1, "body": "Hi Sam, one more note on the ledger idea. Thanks, Devanshu"})
+        ], {"person_id": self.sam, "seq": 1, "body": "Hi Sam, one more note on the ledger idea. Thanks, Devanshu",
+            "brief_id": brief})
 
     def test_add_people_cannot_write_beyond_its_grants(self):
         self.check_tool("add_people", [

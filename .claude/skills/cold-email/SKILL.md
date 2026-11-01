@@ -203,8 +203,10 @@ Northeastern". Commas, colons and full stops carry the rhythm; every dash is a p
 and adds one new thing (a result, a link, a narrower ask) that the earlier ones did not; the fourth is a polite
 close. A reply from anyone at the company stops all queued email there.
 
-`followups_due` lists the follow-ups due today (or within `days_ahead`, 0 to 7): person, company, `seq`, the
-first email's subject. For each, write a body of 25 to 80 words that greets by first name and says the one new
-thing, then `save_followup` with `person_id`, `seq` and `body`. The subject is set by code ("Re: " plus the first
+A nightly job drafts every follow-up due the next business day into the Outbox the same way (#142), so by hand
+this is only for one he asks for. `followups_due` lists the follow-ups due today (or within `days_ahead`, 0 to 7):
+person, company, `seq`, the first email's subject. For each, call `draft_brief` for the person (it shows the thread
+so far), write a body of 25 to 80 words that greets by first name and says the one new thing, then `save_followup`
+with `person_id`, `seq`, `body` and the brief's `brief_id`. The subject is set by code ("Re: " plus the first
 subject), so never give one. Fix `blocks` and save again, as in step 6. Done when `blocks` is empty. Then point him
 to the Outbox.

@@ -151,6 +151,31 @@ Where coverage is lost today:
 - In the live checkout after deploy, the scorecard's coverage of software listings moves from 32% toward 80% over
   the following two weeks (checked by Devanshu; not a test).
 
+### 5.2 How we know it stays the best
+
+There is no guarantee that Knock finds every job; some are never posted, some live only on LinkedIn, some sites
+block readers. What this design guarantees instead: no silent failure, numbers instead of opinions, and every miss
+turned into a fix.
+
+1. **Two outside yardsticks, not one.** SimplifyJobs, plus a second source the pipeline does not ingest for postings
+   (my call: Hacker News "Who is hiring" new grad posts, and a weekly sample of VC board jobs checked against Knock),
+   so Knock cannot look good just by copying SimplifyJobs.
+2. **A miss log.** Any job he finds somewhere else (LinkedIn, a friend, a newsletter) that Knock did not show, he
+   pastes in one place (an MCP tool and a field in the app). Each miss records why Knock missed it: no company, no
+   board, board not read yet, read but judged wrong level, wrong tech call, hidden by visa, or wrong date. Each cause
+   that repeats becomes an issue, and each fix starts with a test built from that miss.
+3. **Alarms.** A reader whose boards error on most reads for 2 days, a scorecard number that drops by a quarter
+   week over week, or a source that fails twice in a row raises one Needs you item. (Today every BambooHR read has
+   been failing and nothing said so.)
+4. **A weekly accuracy check.** 20 postings from the job list, chosen at random, that he marks right or wrong on
+   level and tech in under 5 minutes. Together with his passes this measures precision; the yardsticks measure
+   recall.
+5. **The final test is outcomes.** The monthly findings (`outreach/insights`) split replies and interviews by where a
+   job came from and how fresh it was when he reached out, so the pipeline is judged by what gets him interviews.
+
+**Done when:** the miss log accepts a pasted URL and stores its cause; the scorecard shows both yardsticks; a seeded
+reader failure raises one alarm and a second run does not raise a second.
+
 ## 6. The parts
 
 Six parts, each its own issue and PR. Section 11 gives the order.
@@ -487,7 +512,7 @@ Likely needs, each the builder's call on shape:
 
 | Order | Work | Depends on | Why this order |
 |---|---|---|---|
-| 1 | The scorecard (5.1 item 5) | nothing | Every later change is judged by it, so it comes first |
+| 1 | The scorecard (5.1 item 5), the miss log, alarms and the second yardstick (5.2) | nothing | Every later change is judged by them, so they come first |
 | 2 | C, postings Knock can trust, with the level recall fixes (5.1 item 4) | #9 edits 1 and 2 | Right job and right time rest on true levels and dates |
 | 3 | F and 5.1 items 1 to 3: SimplifyJobs, dark readers, faster reads of fit boards, YC, VC boards, Form D date | C (dates) | Coverage is the biggest loss today (32%) |
 | 4 | D, the job list | C | Where he uses all of it |
@@ -521,6 +546,8 @@ PR; F and 5.1 split into one PR per source or reader.
     target 85% (5.0).
 20. Fit boards are read at least every 6 hours (5.1 item 3).
 21. A SimplifyJobs listing on a board Knock cannot read becomes a `url:` posting dated by SimplifyJobs (5.1 item 1).
+22. The second yardstick is HN new grad posts plus a weekly VC board sample; alarms fire at 2 days of reader errors or a
+    25% week-over-week drop; the accuracy check is 20 postings a week (5.2).
 
 **Open, his call:** which data and ML titles count as the right job. Today "scientist" is off lane, so Data
 Scientist, ML Research Scientist and "AI/ML Researcher" never show, and titles with no engineering word ("Applied AI

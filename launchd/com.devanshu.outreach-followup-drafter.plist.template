@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The follow-up drafter (#142): daily at 04:30, draft every follow-up due by the next business day (the Friday
+  run covers Monday) into the Outbox, one call each to Devanshu's Claude Code seat, through the MCP tools' own code so
+  every draft gets the #9 checks. He approves each one in the Outbox; the job never approves or sends. One line per
+  follow-up and one summary line per run in the log.
+
+  On as shipped ([drafter] enabled = true in outreach/followup_drafter/config.toml); false makes it print "is off" and
+  exit 0, with no call and no write. The run command starts /usr/bin/caffeinate -i -w <its pid>, so the Mac stays
+  awake until it ends. The claude CLI is found on PATH or at ~/.local/bin/claude.
+
+  StartCalendarInterval (not StartInterval), so a run missed while the Mac sleeps fires on wake. A rerun is safe: only
+  planned follow-ups are drafted, so a drafted one is never written again.
+
+  It follows the deploy tool's one convention (#17, outreach/deploy/jobs.py): WorkingDirectory is the live checkout,
+  the program is the checkout's venv python run as a module, and both streams go to the log. Placeholders, filled by
+  the deploy tool: {{LIVE_CHECKOUT}} is the live checkout, {{LOG_PATH}} the log file. Nothing else is filled; the
+  store is the default.
+
+  Not installed by the repo, and never loaded from a worktree. Installing it goes through the deploy tool
+  (python -m outreach.deploy plan, then install). To remove it:
+    launchctl bootout gui/$(id -u)/com.devanshu.outreach-followup-drafter
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-followup-drafter</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.followup_drafter</string>
+    <string>run</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

@@ -20,7 +20,7 @@ from outreach.sending.ramp import DayState
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "Verdict", "canonical_company",
-           "load_queue", "verdicts", "first_only", "pick"]
+           "load_queue", "Prepared", "prepare", "decide_all", "verdicts", "first_only", "pick"]
 
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
@@ -192,6 +192,78 @@ def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
     return sends
 
 
+@dataclass(frozen=True)
+class Prepared:
+    """What one pass over the approved queue reads from the store, so a projection can decide the same queue at many
+    moments without reading it again. Nothing here depends on the moment decided, except `sends`, which holds every
+    company send since the start of today or an hour before `now`, whichever is earlier."""
+    queue: list[Queued]
+    stops: dict[int, str]
+    no_thread: frozenset[int]
+    behind: frozenset[int]
+    not_before: dict[int, date]
+    companies: dict[int, sqlite3.Row]
+    held: frozenset[int]
+    sends: dict[int, list[tuple[datetime, bool]]]
+    sent_today: int
+    limit: int
+    next_send: datetime | None
+
+
+def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: DayState | None) -> Prepared:
+    """The queue and the facts around it, read once. `day` is the tick's snapshot of today (see `verdicts`)."""
+    rows, companies = _rows(conn)
+    now = now.astimezone(timezone.utc)
+    today = cal.ny_date(now, cfg)
+    day_start, _ = cal.ny_day_bounds(today, cfg)
+    gap = timedelta(minutes=cfg.per_company_gap_minutes)
+    limit = ramp.effective_limit(conn, today, cfg)
+    if day is not None and day.day == today:
+        limit = min(limit, day.effective_limit)  # the tick's snapshot can only be older, so it can only be higher
+    # The ramp counts only what is sent; the limit also counts a claimed message that may have gone out.
+    sent_today = signals.sends_on(conn, today, cfg) + conn.execute(
+        "SELECT COUNT(*) FROM message WHERE state IN ('sending', 'send_unknown') AND claimed_at >= ? "
+        "AND claimed_at < ?", cal.ny_day_bounds(today, cfg)).fetchone()[0]
+    next_send = conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()["next_send_at"]
+    return Prepared(
+        queue=_sorted([_queued(row, companies) for row in rows], cfg), stops=_stop_reasons(rows, companies, conn),
+        # A follow-up goes only in its touch's Gmail thread; without one it would start a new thread, so it waits.
+        no_thread=frozenset(row["message_id"] for row in rows if row["seq"] >= 1 and not row["gmail_thread_id"]),
+        # Follow-ups in one thread go out in order (#141): one waits while an earlier one has not gone out, and then
+        # keeps the schedule's gap after it (an earlier one sent late does not pull the next one right behind it).
+        behind=frozenset(row[0] for row in conn.execute(
+            "SELECT m.message_id FROM message m WHERE m.state = 'approved' AND m.seq >= 2 AND EXISTS (SELECT 1 FROM "
+            "message e WHERE e.touch_id = m.touch_id AND e.seq BETWEEN 1 AND m.seq - 1 "
+            f"AND e.state IN ({','.join('?' * len(_UNSENT))}))", _UNSENT)),
+        not_before=_not_before(conn, cfg), companies=companies, held=frozenset(held_survivors(companies)),
+        sends=_company_sends(conn, companies, min(day_start, (now - gap).strftime(ISO_FMT))),
+        sent_today=sent_today, limit=limit, next_send=_utc(next_send) if next_send else None)
+
+
+def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None, pending: list[Queued],
+               sends: dict[int, list[tuple[datetime, bool]]], sent_by_day: dict[date, int],
+               next_send: datetime | None, limit: int) -> list[Verdict]:
+    """One verdict per message of `pending` (in its order) as of `now`, with `sends`, the day's sent count
+    (`sent_by_day`, by New York date) and the sender's next free moment as given. `verdicts` passes what the store
+    says; a projection passes what it has placed so far."""
+    now = now.astimezone(timezone.utc)
+    # A message that blocks a recruiter is one that could go out: not a stop, with an address and a thread, due.
+    live_others = {q.company_id for q in pending if q.role_kind != "recruiter" and q.message_id not in p.stops
+                   and q.message_id not in p.no_thread and q.message_id not in p.behind
+                   and q.to and not (q.due_on is not None
+                                     and now < _due_start(q.due_on, cal.recipient_zone(q.tz), cfg))}
+    today = cal.ny_date(now, cfg)
+    day_begins = _utc(cal.ny_day_bounds(today, cfg)[0])
+    gap = timedelta(minutes=cfg.per_company_gap_minutes)
+    tomorrow = _local(cal.add_business_days(today, 1, cfg), cfg.window_start, ZoneInfo(cfg.day_tz))
+    day_full = sent_by_day.get(today, 0) >= limit
+    return [Verdict(q.message_id, *_decide(
+        q, p.stops, gate, p.companies[q.company_id], q.company_id in p.held, now, cfg, today, day_full,
+        sends.get(q.company_id, []), day_begins, gap, tomorrow, next_send, q.company_id in live_others,
+        no_thread=q.message_id in p.no_thread, behind=q.message_id in p.behind,
+        not_before=p.not_before.get(q.message_id))) for q in pending]
+
+
 def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: DayState | None,
              gate: str | None) -> list[Verdict]:
     """One verdict per approved message, in queue order. `gate` (`sender_paused`, `signed_out`,
@@ -201,53 +273,12 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     survivor counts); no address; a follow-up with no Gmail thread; follow-up not due; an earlier follow-up in the
     thread not gone out; bad time zone; not a business day; daily limit; per-company limit; per-company gap;
     recipient's window; recruiter waits; spacing."""
-    rows, companies = _rows(conn)
-    items = {row["message_id"]: _queued(row, companies) for row in rows}
-    queue = _sorted(list(items.values()), cfg)
-    if not queue:
+    p = prepare(conn, now, cfg, day=day)
+    if not p.queue:
         return []
-    stops = _stop_reasons(rows, companies, conn)
-    # A follow-up goes only in its touch's Gmail thread; without one it would start a new thread, so it waits.
-    no_thread = {row["message_id"] for row in rows if row["seq"] >= 1 and not row["gmail_thread_id"]}
-    # Follow-ups in one thread go out in order (#141): one waits while an earlier one has not gone out, and then
-    # keeps the schedule's gap after it (an earlier one sent late does not pull the next one right behind it).
-    not_before = _not_before(conn, cfg)
-    behind = {row[0] for row in conn.execute(
-        "SELECT m.message_id FROM message m WHERE m.state = 'approved' AND m.seq >= 2 AND EXISTS (SELECT 1 FROM "
-        "message e WHERE e.touch_id = m.touch_id AND e.seq BETWEEN 1 AND m.seq - 1 "
-        f"AND e.state IN ({','.join('?' * len(_UNSENT))}))", _UNSENT)}
-    now = now.astimezone(timezone.utc)
-    # A message that blocks a recruiter is one that could go out: not a stop, with an address and a thread, due.
-    live_others = {q.company_id for q in queue if q.role_kind != "recruiter" and q.message_id not in stops
-                   and q.message_id not in no_thread and q.message_id not in behind
-                   and q.to and not (q.due_on is not None
-                                     and now < _due_start(q.due_on, cal.recipient_zone(q.tz), cfg))}
-    held = held_survivors(companies)
-    ny_zone = ZoneInfo(cfg.day_tz)
-    today = cal.ny_date(now, cfg)
-    day_start, _ = cal.ny_day_bounds(today, cfg)
-    gap = timedelta(minutes=cfg.per_company_gap_minutes)
-    sends = _company_sends(conn, companies, min(day_start, (now - gap).strftime(ISO_FMT)))
-    day_begins = _utc(day_start)
-    limit = ramp.effective_limit(conn, today, cfg)
-    if day is not None and day.day == today:
-        limit = min(limit, day.effective_limit)  # the tick's snapshot can only be older, so it can only be higher
-    # The ramp counts only what is sent; the limit also counts a claimed message that may have gone out.
-    sent_today = signals.sends_on(conn, today, cfg) + conn.execute(
-        "SELECT COUNT(*) FROM message WHERE state IN ('sending', 'send_unknown') AND claimed_at >= ? "
-        "AND claimed_at < ?", cal.ny_day_bounds(today, cfg)).fetchone()[0]
-    next_send = conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()["next_send_at"]
-    next_send = _utc(next_send) if next_send else None
-    tomorrow = _local(cal.add_business_days(today, 1, cfg), cfg.window_start, ny_zone)
-
-    out = []
-    for q in queue:
-        reason, earliest = _decide(q, stops, gate, companies[q.company_id], q.company_id in held, now, cfg, today,
-                                   sent_today >= limit, sends.get(q.company_id, []), day_begins, gap, tomorrow,
-                                   next_send, q.company_id in live_others, no_thread=q.message_id in no_thread,
-                                   behind=q.message_id in behind, not_before=not_before.get(q.message_id))
-        out.append(Verdict(q.message_id, reason, earliest))
-    return out
+    return decide_all(p, now, cfg, gate=gate, pending=p.queue, sends=p.sends,
+                      sent_by_day={cal.ny_date(now.astimezone(timezone.utc), cfg): p.sent_today},
+                      next_send=p.next_send, limit=p.limit)
 
 
 def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held: bool, now: datetime, cfg: SendConfig,

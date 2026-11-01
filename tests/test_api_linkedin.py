@@ -298,7 +298,7 @@ class Order(LinkedInCase):
 
 
 class Replies(LinkedInCase):
-    def test_replied_said_no_adds_person_no_go_and_hides_the_person_from_to_reach(self):
+    def test_replied_said_no_adds_person_no_go_and_the_reply_stays_listed(self):
         other = self.person("Owen Clarke")
         self.assertEqual(set(self.people()), {"Lena Ortiz", "Owen Clarke"})
         self.assertEqual(self.view()["counts"]["toReach"], 2)
@@ -314,11 +314,12 @@ class Replies(LinkedInCase):
         self.assertEqual(self.conn.execute("SELECT state FROM message WHERE message_id = ?", (planned,)).fetchone()[0],
                          "skipped")
         view = self.view()
-        self.assertEqual(set(self.people()), {"Owen Clarke"})
-        self.assertEqual(view["counts"], {"toReach": 1, "waiting": 0, "replied": 0, "all": 1})
+        self.assertEqual({n: p["tab"] for n, p in self.people().items()},
+                         {"Lena Ortiz": "replied", "Owen Clarke": "to_reach"})  # the no-go stops offers, not history
+        self.assertEqual(view["counts"], {"toReach": 1, "waiting": 0, "replied": 1, "all": 2})
         self.assertEqual(self.conn.execute("SELECT replied_at, reply_kind FROM outreach_touch WHERE touch_id = 1")
                          .fetchone()[:], (T3, "said_no"))
-        self.assertEqual(other, view["groups"][0]["people"][0]["person"]["id"])
+        self.assertEqual(other, next(p for p in self.people().values() if p["tab"] == "to_reach")["person"]["id"])
 
     def test_asked_to_stop_is_a_stop_reply_no_go(self):
         self.walk(self.lena, "request_sent", "accepted")
@@ -434,7 +435,7 @@ class Undo(LinkedInCase):
                                    (self.lena,)).fetchone()[0]
         self.assertEqual(active, 1)  # the safe direction: lift it from the No-go page if the click was a mistake
         self.assertEqual(self.message_state(drafted), "skipped")  # nothing un-stops a follow-up
-        self.assertNotIn("Lena Ortiz", self.people())
+        self.assertEqual(self.people()["Lena Ortiz"]["tab"], "waiting")  # still recorded: he did send the request
 
     def test_taking_back_a_step_that_has_no_touch_only_hides_it(self):
         s.linkedin(self.conn, self.lena, "request_sent", "2026-10-01T12:00:00Z")  # a log row nothing else backs
@@ -649,20 +650,110 @@ class Reads(LinkedInCase):
         self.assertEqual(week["count"], 2)
 
 
-class RepliedCountUsesTheSendersNoGoSets(ApiCase):
-    def test_replied_count_reads_the_no_go_sets_the_sender_reads(self):
-        from unittest import mock
-        from outreach.api.queries import linkedin as queries
-        company = s.company(self.conn, "Acme", "candidate")
-        pat = s.person(self.conn, company, "Pat", channel="linkedin")
-        s.person(self.conn, company, "Quiet", channel="linkedin")
-        s.linkedin(self.conn, pat, "request_sent", "2026-11-03T12:00:00Z")
-        s.linkedin(self.conn, pat, "replied", "2026-11-04T12:00:00Z", reply_kind="interested")
-        self.assertEqual(queries.replied_count(self.conn), 1)
-        with mock.patch.object(queries, "no_go_sets", return_value=(set(), {company})):
-            self.assertEqual(queries.replied_count(self.conn), 0)
-        with mock.patch.object(queries, "no_go_sets", return_value=({pat}, set())):
-            self.assertEqual(queries.replied_count(self.conn), 0)
+class History(LinkedInCase):
+    """Everyone he has messaged on LinkedIn stays listed, whatever channel the store filed them under and whatever
+    happened to their company or to them since. Only a person he has not reached yet is ever filtered (offered)."""
+
+    def imported(self, name: str, company: int | None = None, reply: str | None = None) -> int:
+        """Someone the import found in his old record with no address and no profile link: the store files them
+        under email, and their LinkedIn request (and reply) came from the old record."""
+        who = s._insert(self.conn, "person", {
+            "company_id": company or self.acme, "name": name, "title": "", "role_kind": "other", "email": None,
+            "linkedin_url": None, "channel": "email", "added_by": "import", "created_at": s.T0, "updated_at": s.T0})
+        self.plan_touch(who, company)
+        if reply is not None:
+            s.linkedin(self.conn, who, "accepted", NOW)
+            s.linkedin(self.conn, who, "replied", NOW, reply_kind=reply)
+        return who
+
+    def no_go(self, **cols) -> None:
+        s._insert(self.conn, "no_go", {"reason": "other", "source": "devanshu", "created_at": s.T0, **cols})
+
+    def shell_replied(self) -> int:
+        return self.ok(self.get("/api/shell"))["linkedinReplied"]
+
+    def test_a_person_the_import_filed_under_email_who_replied_is_listed(self):
+        self.imported("Unnamed other (imported)", reply="interested")
+        view = self.view()
+        shown = self.people()["Unnamed other (imported)"]
+        self.assertEqual((shown["tab"], shown["replyKind"]), ("replied", "interested"))
+        self.assertEqual(view["counts"]["replied"], 1)
+        self.assertEqual(view["activity"]["repliedTotal"], 1)
+        self.assertEqual(self.shell_replied(), 1)
+
+    def test_a_person_the_import_filed_under_email_who_never_answered_is_waiting_not_missing(self):
+        self.imported("Unnamed other (imported)")
+        self.assertEqual(self.people()["Unnamed other (imported)"]["tab"], "waiting")
+        self.assertEqual(self.view()["activity"]["messagedTotal"], 1)
+
+    def test_a_reply_stays_listed_after_the_person_or_their_company_went_on_the_no_go_list(self):
+        said_no = self.person("Sam Said No")
+        self.walk(said_no, "request_sent", "accepted")
+        self.ok(self.log(said_no, "replied", "said_no"))  # the reply adds the person's no-go on the spot
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM no_go WHERE person_id = ?", (said_no,)).fetchone()[0], 1)
+        blocked = s.company(self.conn, "Blocked", "candidate")
+        at_blocked = self.imported("At Blocked", blocked, reply="not_now")
+        self.no_go(company_id=blocked, reason="defence_contractor")
+        gone = s.company(self.conn, "Gone", "removed")
+        self.imported("At Gone", gone, reply="interested")
+        done = s.company(self.conn, "Done", "closed", close_reason="no_sponsorship")
+        self.imported("At Done", done, reply="interested")
+        shown = self.people()
+        for name in ("Sam Said No", "At Blocked", "At Gone", "At Done"):
+            self.assertEqual(shown[name]["tab"], "replied", name)
+        self.assertEqual(self.view()["counts"]["replied"], 4)
+        self.assertEqual(self.shell_replied(), 4)
+        self.assertEqual(shown["Sam Said No"]["replyKind"], "said_no")
+        self.assertIn(at_blocked, [p["person"]["id"] for p in shown.values()])
+
+    def test_a_request_he_sent_to_someone_now_on_the_no_go_list_is_still_recorded(self):
+        waiting = self.person("Wes Waiting")
+        self.walk(waiting, "request_sent")
+        self.no_go(person_id=waiting)
+        self.assertEqual(self.people()["Wes Waiting"]["tab"], "waiting")
+
+    def test_nobody_new_is_offered_from_the_import_or_from_a_no_go_company(self):
+        blocked = s.company(self.conn, "Blocked", "candidate")
+        self.person("Fresh At Blocked", blocked)
+        self.no_go(company_id=blocked)
+        emailer = s.person(self.conn, self.acme, "Mail Only")  # an email person with no LinkedIn step
+        self.assertEqual(set(self.people()), {"Lena Ortiz"})
+        self.assertNotIn(emailer, [p["person"]["id"] for p in self.people().values()])
+
+    def test_an_email_person_whose_only_request_was_taken_back_is_not_listed(self):
+        who = self.imported("Unnamed other (imported)")
+        self.conn.execute("UPDATE outreach_touch SET undone_at = ? WHERE person_id = ?", (NOW, who))
+        entry = self.conn.execute("SELECT entry_id FROM linkedin_log WHERE person_id = ?", (who,)).fetchone()[0]
+        s.linkedin(self.conn, who, "undo", NOW, undoes=entry)
+        self.assertNotIn("Unnamed other (imported)", self.people())
+        self.assertEqual(self.view()["activity"]["messagedTotal"], 0)
+
+    def test_the_list_the_counts_line_and_the_sidebar_always_agree(self):
+        """The bug on the page: the counts line said 4 replied while the list was empty. Every number comes from the
+        people the list holds, so a mix of channels, no-gos and company states cannot pull them apart."""
+        blocked = s.company(self.conn, "Blocked", "candidate")
+        gone = s.company(self.conn, "Gone", "removed")
+        done = s.company(self.conn, "Done", "closed", close_reason="not_now")
+        self.imported("Imp A", reply="interested")
+        self.imported("Imp B")
+        self.imported("Imp C", blocked, reply="not_now")
+        self.imported("Imp D", gone, reply="interested")
+        self.imported("Imp E", done)
+        self.no_go(company_id=blocked)
+        for name, steps in (("Lin A", ("request_sent",)), ("Lin B", ("request_sent", "accepted", "replied")),
+                            ("Lin C", ()), ("Lin D", ("request_sent", "accepted", "message_sent", "replied"))):
+            self.walk(self.person(name), *steps)
+        self.no_go(person_id=self.people()["Lin B"]["person"]["id"])
+        view = self.view()
+        everyone = [p for g in view["groups"] for p in g["people"]]
+        replied = [p for p in everyone if p["tab"] == "replied"]
+        messaged = [p for p in everyone if any(x["step"] == "request_sent" for x in p["steps"])]
+        self.assertEqual(len(replied), 5)
+        self.assertEqual(view["counts"]["replied"], len(replied))
+        self.assertEqual(view["activity"]["repliedTotal"], len(replied))
+        self.assertEqual(view["activity"]["messagedTotal"], len(messaged))
+        self.assertEqual(view["counts"]["waiting"] + view["counts"]["replied"], len(messaged))
+        self.assertEqual(self.shell_replied(), len(replied))
 
 
 class Activity(LinkedInCase):

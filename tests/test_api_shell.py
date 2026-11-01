@@ -169,7 +169,7 @@ class Shell(ApiCase):
         s.message(conn, s.touch(conn, s.person(conn, closed, "D3")), 0, "drafted")
         body = self.shell()
         self.assertEqual(body["linkedinReplied"], self.get("/api/linkedin").json()["counts"]["replied"])
-        self.assertEqual(body["linkedinReplied"], 2)  # at the closed company and on the duplicate; not at the no-go
+        self.assertEqual(body["linkedinReplied"], 3)  # a reply is history: at the closed company, the no-go and the duplicate
         self.assertEqual(body["openReviewItems"], len(self.get("/api/needs-you").json()["open"]))
         self.assertEqual(body["draftsToReview"], self.get("/api/outbox").json()["counts"]["review"])
         self.assertEqual(body["draftsToReview"], 2)

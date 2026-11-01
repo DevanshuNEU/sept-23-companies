@@ -137,6 +137,7 @@ class ClosedBreakdown(Wire):
     bounced: int = 0
     skipped: int = 0
     company_closed: int = 0
+    no_go: int = 0
 
 
 class OutboxView(Wire):

@@ -2,8 +2,9 @@
 
 A row shows the thread's newest message that is not a bare planned follow-up (a skipped follow-up gives way to the
 message before it). The group follows the web fixture's `deriveGroup`: a bounced or closed thread is Closed, then a
-reply wins, then an unsent email at a paused company is Paused, then the message state decides. One more rule
-stands in for the fixture's closing of touches: an unsent email at a closed or removed company is Closed. Every
+reply wins, then an unsent email at a paused company is Paused, then the message state decides. Two more rules
+stand in for the fixture's closing of touches: an unsent email at a closed or removed company is Closed, and so is
+one to a person or company with an active no-go (#149: the sender never sends it, so it leaves the working lists). Every
 company is read as its survivor (`merged_into` to its end), with the sender's own hold (`company_holds`).
 
 An approved row's `schedule` is the sender's own verdict (`outreach.sending.status.queue_schedule`): its reason is
@@ -29,7 +30,7 @@ from outreach.api.queries.company import CLOSE_WORDS, Holds, company_holds, pers
 from outreach.api.queries.outcomes import company_refs, people_by_ids
 from outreach.api.queries.sending import moment, sending_status
 from outreach.drafts.checks import HOOK_DATE
-from outreach.drafts.followups import company_map, resolve_company
+from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
 from outreach.sending import proof
@@ -50,14 +51,14 @@ COMPARE_MIN_MATCH = 12  # shorter shared stretches are words in common, not copi
 NOT_SHOWN = "planned"
 
 
-def derive_group(state: str, touch_state: str, company: CompanyRef) -> str:
-    """The fixture's `deriveGroup`, with the closed-company rule above."""
+def derive_group(state: str, touch_state: str, company: CompanyRef, *, no_go: bool = False) -> str:
+    """The fixture's `deriveGroup`, with the closed-company and no-go rules above."""
     if touch_state in ("bounced", "closed"):
         return "closed"
     if touch_state == "replied":
         return "replied"
     unsent = state in UNSENT
-    if unsent and company.status in ("closed", "removed"):
+    if unsent and (no_go or company.status in ("closed", "removed")):
         return "closed"
     if unsent and company.paused_at:
         return "paused"
@@ -157,6 +158,7 @@ class _Outbox:
         self.close_reasons = dict(conn.execute(
             "SELECT company_id, close_reason FROM company WHERE close_reason IS NOT NULL").fetchall())
         self.survivor = {t["touch_id"]: resolve_company(self.companies, t["company_id"])[-1] for t in self.touches}
+        self.no_go_people, self.no_go_companies = no_go_sets(conn, self.companies)
         self.holds: Holds = company_holds(conn, self.companies)
         self.refs = company_refs(conn, set(self.survivor.values()), holds=self.holds)
         self.people = people_by_ids(conn, {t["person_id"] for t in self.touches})
@@ -230,6 +232,9 @@ class _Outbox:
             if company.status == "removed":
                 return "Company removed"
             return f"Company closed: {CLOSE_WORDS.get(self.close_reasons.get(company.id, ''), 'closed')}"
+        no_go = self.no_go_of(touch)
+        if no_go is not None and m["state"] in UNSENT:
+            return f"{no_go.capitalize()} on the no-go list"
         if touch["state"] == "closed":
             return f"Closed: {people_queries.CLOSE_WORDS.get(touch['close_reason'], 'closed')}"
         if m["state"] == "skipped":
@@ -247,6 +252,12 @@ class _Outbox:
             return touch["bounced_at"] or touch["closed_at"]
         return m["sent_at"] or m["updated_at"]
 
+    def no_go_of(self, touch: sqlite3.Row) -> str | None:
+        """`person` or `company` when the touch's person or company has an active no-go, else None."""
+        if touch["person_id"] in self.no_go_people:
+            return "person"
+        return "company" if self.survivor[touch["touch_id"]] in self.no_go_companies else None
+
     def _next_due(self, touch_id: int, seq: int) -> NextDue | None:
         later = [m for m in self.messages[touch_id] if m["seq"] > seq and m["state"] in UNSENT and m["due_on"]]
         return NextDue(seq=later[0]["seq"], on=later[0]["due_on"]) if later else None
@@ -257,7 +268,8 @@ class _Outbox:
             return None
         survivor = self.survivor[touch["touch_id"]]
         company = self.refs[survivor]
-        group = derive_group(m["state"], touch["state"], company)
+        no_go = self.no_go_of(touch)
+        group = derive_group(m["state"], touch["state"], company, no_go=no_go is not None)
         checks = stored_checks(m["checks"])
         schedule = self._schedule(m, survivor)
         next_due = self._next_due(touch["touch_id"], m["seq"]) if group == "sent" else None
@@ -366,11 +378,14 @@ def outbox_view(conn: sqlite3.Connection, now: str, cfg: SendConfig, *, old_send
         setattr(counts, item.group, getattr(counts, item.group) + 1)
         if item.group != "closed":
             continue
-        touch_close = next(t["close_reason"] for t in box.touches if t["touch_id"] == item.touch_id)
+        touch = next(t for t in box.touches if t["touch_id"] == item.touch_id)
+        touch_close = touch["close_reason"]
         if item.touch_state == "bounced":
             breakdown.bounced += 1
         elif item.company.status in ("closed", "removed") or touch_close == "company_closed":
             breakdown.company_closed += 1
+        elif item.state in UNSENT and box.no_go_of(touch) is not None:
+            breakdown.no_go += 1
         elif item.state == "skipped" or touch_close in ("skipped", "no_go"):
             breakdown.skipped += 1
     return OutboxView(as_of=now, sending=sending_status(conn, now, cfg, old_sender_loaded=old_sender_loaded),

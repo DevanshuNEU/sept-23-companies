@@ -101,7 +101,7 @@ describe('FixtureClient reads: default scenario', () => {
   it('outbox has the sending strip, counts and rows', async () => {
     const o = await client().outbox();
     expect(o.counts).toEqual({ replied: 1, review: 7, approved: 3, sending: 1, checking: 1, sent: 64, paused: 2, closed: 17 });
-    expect(o.closedBreakdown).toEqual({ bounced: 1, skipped: 4, companyClosed: 12 });
+    expect(o.closedBreakdown).toEqual({ bounced: 1, skipped: 4, companyClosed: 12, noGo: 0 });
     expect(o.sending.rampLevel).toBe(2);
     expect(o.sending.rampLevels).toEqual([20, 30, 40, 50, 60, 70, 80, 90, 100]);
     expect(o.sending.nextLimitIfClean).toBe(40);

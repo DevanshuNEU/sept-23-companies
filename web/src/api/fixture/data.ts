@@ -766,7 +766,7 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
     similarity: 0.92, matches: sharedParagraphs(BODY_KENJI, BODY_AVA),
   };
 
-  return { view: { asOf: AS_OF, sending: sendingStatus(), items, counts: countGroups(items), closedBreakdown: { bounced: 1, skipped: 4, companyClosed: 12 } }, details, compares: [compare] };
+  return { view: { asOf: AS_OF, sending: sendingStatus(), items, counts: countGroups(items), closedBreakdown: { bounced: 1, skipped: 4, companyClosed: 12, noGo: 0 } }, details, compares: [compare] };
 }
 
 function sharedParagraphs(a: string, b: string): DraftCompare['matches'] {
@@ -1412,7 +1412,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
   } else if (scenario === 'empty') {
     db.searchIndex.companies = []; db.searchIndex.people = []; db.postings = [];
     db.today.proposed = []; db.today.backlog = []; db.today.stillEmailing = []; db.today.picked = 0;
-    db.outbox.items = []; db.outbox.counts = countGroups([]); db.outbox.closedBreakdown = { bounced: 0, skipped: 0, companyClosed: 0 };
+    db.outbox.items = []; db.outbox.counts = countGroups([]); db.outbox.closedBreakdown = { bounced: 0, skipped: 0, companyClosed: 0, noGo: 0 };
     s.sentToday = 0; s.nextSend = null; s.noneReason = 'Nothing is approved.';
     db.details = {}; db.compares = []; db.companies = {};
     db.linkedin.groups = []; db.linkedin.counts = { toReach: 0, waiting: 0, replied: 0, all: 0 }; db.linkedin.requestsThisWeek = 0;

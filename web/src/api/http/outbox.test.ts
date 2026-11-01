@@ -11,7 +11,7 @@ const EMPTY: OutboxView = {
     nextSend: null, noneReason: 'Nothing is approved and waiting to send.', revision: 1,
   },
   items: [], counts: { replied: 0, review: 0, approved: 0, sending: 0, checking: 0, sent: 0, paused: 0, closed: 0 },
-  closedBreakdown: { bounced: 0, skipped: 0, companyClosed: 0 },
+  closedBreakdown: { bounced: 0, skipped: 0, companyClosed: 0, noGo: 0 },
 };
 
 const reader = (answer: unknown) => {

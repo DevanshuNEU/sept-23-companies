@@ -172,7 +172,7 @@ function ContextRow({ detail }: { detail: OutboxDetail }) {
         ) : (
           <Cell
             k={`${item.company.name} today`}
-            v={`${schedule.companySentToday} sent, ${plural(schedule.companySlotsLeft, 'slot', 'slots')} left`}
+            v={`${plural(schedule.companySentToday, 'first email', 'first emails')} sent, ${plural(schedule.companySlotsLeft, 'slot', 'slots')} left`}
             s={schedule.text}
           />
         )

@@ -178,16 +178,17 @@ def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], co
 
 
 def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
-                   since: str) -> dict[int, list[datetime]]:
-    """When each surviving company was last sent to, from `since` on. A claimed message that may have gone out
+                   since: str) -> dict[int, list[tuple[datetime, bool]]]:
+    """When each surviving company was sent to from `since` on, each send with whether it was a first email (the
+    per-company limit counts only those; the gap counts every send). A claimed message that may have gone out
     (`sending`, `send_unknown`) counts at its claim time: better one wait too many than one send too many."""
-    sends: dict[int, list[datetime]] = {}
+    sends: dict[int, list[tuple[datetime, bool]]] = {}
     for row in conn.execute(
-            "SELECT p.company_id, CASE m.state WHEN 'sent' THEN m.sent_at ELSE m.claimed_at END AS at "
+            "SELECT p.company_id, m.seq, CASE m.state WHEN 'sent' THEN m.sent_at ELSE m.claimed_at END AS at "
             "FROM message m JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
             "WHERE m.state IN ('sent', 'sending', 'send_unknown') AND at >= ?", (since,)):
         survivor = resolve_company(companies, row["company_id"])[-1]
-        sends.setdefault(survivor, []).append(_utc(row["at"]))
+        sends.setdefault(survivor, []).append((_utc(row["at"]), row["seq"] == 0))
     return sends
 
 
@@ -250,7 +251,7 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
 
 
 def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held: bool, now: datetime, cfg: SendConfig,
-            today: date, day_full: bool, sends: list[datetime], day_begins: datetime, gap: timedelta,
+            today: date, day_full: bool, sends: list[tuple[datetime, bool]], day_begins: datetime, gap: timedelta,
             tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
             no_thread: bool = False, behind: bool = False,
             not_before: date | None = None) -> tuple[str, datetime | None]:
@@ -280,10 +281,12 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
         return "not_business_day", tomorrow
     if day_full:
         return "daily_limit", tomorrow
-    if sum(1 for at in sends if at >= day_begins) >= cfg.per_company_daily:
+    # #9, 2026-10-31: the per-company limit is first emails only; a follow-up neither counts nor waits for it.
+    if q.seq == 0 and sum(1 for at, first in sends if first and at >= day_begins) >= cfg.per_company_daily:
         return "per_company_limit", tomorrow
-    if sends and now < max(sends) + gap:
-        return "per_company_gap", max(sends) + gap
+    last = max((at for at, _ in sends), default=None)
+    if last is not None and now < last + gap:
+        return "per_company_gap", last + gap
     if not cal.in_window(now, zone, cfg):
         return "window", cal.next_window_start(now, zone, cfg)
     if q.role_kind == "recruiter" and others_queued:

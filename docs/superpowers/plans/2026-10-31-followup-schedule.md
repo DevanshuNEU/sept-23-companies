@@ -93,3 +93,7 @@
 - From seq 2 on, a follow-up also waits its schedule gap (4, 7 and 7 business days) after the earlier one in its thread went out, so a late one never pulls the next right behind it (reason `followup_not_due`, with its time).
 - `sync_followups` plans only the sender's own threads (an imported one keeps what the import gave it), and a thread with any `skipped_by_sender` touch event (a stop) gets nothing new.
 - The Outbox's follow-up track shows 4 follow-ups; the last is the polite close.
+
+## Per-company limit counts first emails only (Devanshu, 2026-10-31)
+
+The 3-a-day per-company limit counts first emails only: a follow-up neither takes a slot nor waits for one (`queue._decide`, and the Outbox's "N first emails sent, M slots left"). The 60-minute company gap and the daily send limit still count every email.

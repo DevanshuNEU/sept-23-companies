@@ -167,6 +167,18 @@ class ViewTest(OutboxBase):
         self.assertTrue(waiting["earliestAt"] > NOW)
         self.assertEqual((ready["companySentToday"], ready["companySlotsLeft"]), (0, 3))
 
+    def test_company_slots_count_first_emails_only(self):
+        # #9, 2026-10-31: the per-company limit counts first emails; a follow-up sent today takes no slot.
+        cid = seed.company(self.conn, "Acme", status="working")
+        earlier = self.thread(cid, "Ed Earlier")
+        seed.send_first(self.conn, earlier, at="2026-11-03T15:00:00Z")
+        seed.message(self.conn, earlier, 1, "sent", sent_at="2026-11-10T13:00:00Z")
+        seed.send_first(self.conn, self.thread(cid, "Tia Today"), at="2026-11-10T12:00:00Z")
+        t = self.thread(cid, "Nell Next")
+        seed.message(self.conn, t, 0, "approved")
+        schedule = self.by_touch(self.outbox())[t]["schedule"]
+        self.assertEqual((schedule["companySentToday"], schedule["companySlotsLeft"]), (1, 2))
+
     def test_an_approved_row_waits_with_the_senders_own_reason(self):
         cid = seed.company(self.conn, "Acme", status="working")
         first, second = self.thread(cid, "Una Unproven"), self.thread(cid, "Otto Other")

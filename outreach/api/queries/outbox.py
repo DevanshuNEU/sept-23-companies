@@ -97,13 +97,14 @@ def schedule_text(reason: str, when: str | None, now: str, cfg: SendConfig, stag
 
 
 def _company_sends_today(conn: sqlite3.Connection, companies: dict, now: str, cfg: SendConfig) -> dict[int, int]:
-    """Emails out to each surviving company today (New York), counting a claimed one that may have gone out."""
+    """First emails out to each surviving company today (New York), counting a claimed one that may have gone out.
+    Follow-ups take no slot (#9, 2026-10-31: the per-company limit counts first emails only)."""
     start, end = cal.ny_day_bounds(cal.ny_date(moment(now), cfg), cfg)
     out: dict[int, int] = defaultdict(int)
     for row in conn.execute(
             "SELECT p.company_id FROM message m JOIN touch t ON t.touch_id = m.touch_id "
-            "JOIN person p ON p.person_id = t.person_id WHERE (m.state = 'sent' AND m.sent_at >= ? AND m.sent_at < ?) "
-            "OR (m.state IN ('sending', 'send_unknown') AND m.claimed_at >= ? AND m.claimed_at < ?)",
+            "JOIN person p ON p.person_id = t.person_id WHERE m.seq = 0 AND ((m.state = 'sent' AND m.sent_at >= ? "
+            "AND m.sent_at < ?) OR (m.state IN ('sending', 'send_unknown') AND m.claimed_at >= ? AND m.claimed_at < ?))",
             (start, end, start, end)):
         out[resolve_company(companies, row["company_id"])[-1]] += 1
     return out

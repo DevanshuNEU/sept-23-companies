@@ -619,7 +619,7 @@ describe('checks', () => {
     expect(screen.getByText('Posted 4 days ago, Remote US')).toBeInTheDocument();
     expect(screen.getByText('His post on retries without double work')).toBeInTheDocument();
     expect(screen.getByText('Oct 28, 13 days old')).toBeInTheDocument();
-    expect(screen.getByText('1 sent, 2 slots left')).toBeInTheDocument();
+    expect(screen.getByText('1 first email sent, 2 slots left')).toBeInTheDocument();
     expect(screen.getByText('Sends after 11:05 ET')).toBeInTheDocument();
   });
 });

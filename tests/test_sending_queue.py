@@ -178,6 +178,26 @@ class LimitsTest(Base):
         self.assertEqual(verdict.reason, "per_company_limit")
         self.assertEqual(verdict.earliest_at, ny(3, 8, 30))
 
+    def test_a_follow_up_never_waits_for_the_company_limit(self):
+        # #9, 2026-10-31: the per-company limit counts first emails only.
+        for hour in (5, 6, 7):
+            self.sent_at(self.company, ny(2, hour))
+        _, followup = self.approve_followup("2026-11-02")
+        self.assertEqual(self.reason(followup), "ready")
+
+    def test_follow_ups_sent_today_do_not_count_toward_the_company_limit(self):
+        for hour in (5, 6, 7):
+            person = self.person()
+            seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=7))
+            seed_sent(self.db, person, at=ny(2, hour), seq=1)
+        _, message = self.approve()
+        self.assertEqual(self.reason(message), "ready")
+
+    def test_a_follow_up_still_keeps_the_60_minute_company_gap(self):
+        self.sent_at(self.company, MON - timedelta(minutes=30))
+        _, followup = self.approve_followup("2026-11-02")
+        self.assertEqual(self.reason(followup), "per_company_gap")
+
     def test_third_send_at_one_company_is_still_ready(self):
         _, message = self.approve()
         self.sent_at(self.company, ny(2, 5))
@@ -603,12 +623,12 @@ class FollowupOrderTest(Base):
         self.assertEqual(self.reason(second), "earlier_followup")
         self.assertIsNone(self.verdicts_at()[second].earliest_at)
 
-    def test_it_waits_while_the_earlier_one_is_blocked_by_the_company_limit(self):
+    def test_it_waits_while_the_earlier_one_waits_out_the_company_gap(self):
         person = self.thread()
-        self.sent_at(self.company, ny(2, 8) - timedelta(hours=3), n=CFG.per_company_daily)
+        self.sent_at(self.company, MON - timedelta(minutes=30))
         first = seed_message(self.db, person, seq=1, due_on="2026-10-28")
         second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
-        self.assertEqual(self.reason(first), "per_company_limit")
+        self.assertEqual(self.reason(first), "per_company_gap")
         self.assertEqual(self.reason(second), "earlier_followup")
 
     def test_a_planned_earlier_one_holds_it_too(self):

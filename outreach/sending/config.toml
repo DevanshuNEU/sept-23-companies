@@ -31,7 +31,8 @@ weekdays = [0, 1, 2, 3, 4]
 # Dates ("2026-11-26") that are not business days. Empty by default.
 holidays = []
 
-# People per company (#9): at most 3 a day, at least 60 minutes apart.
+# People per company (#9): at most 3 first emails a day (a follow-up takes no slot, 2026-10-31);
+# every email to a company, follow-ups too, at least 60 minutes apart.
 per_company_daily = 3
 per_company_gap_minutes = 60
 

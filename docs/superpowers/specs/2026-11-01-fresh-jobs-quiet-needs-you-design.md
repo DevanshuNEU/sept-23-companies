@@ -6,7 +6,7 @@ newest first by the real posted date. Anything that does not serve one of the th
 below is unclear, decide it by this rule.
 
 Status: draft for Devanshu's review, 2026-11-01. Nothing here is built. When approved, #9 is edited first (section
-9), then each part gets its own issue and plan.
+10), then each part gets its own issue and plan.
 
 ## 1. Why
 
@@ -91,11 +91,69 @@ Everything in `CLAUDE.md` holds. The ones this work touches most:
 - No em dashes or en dashes in UI copy, docs, commits or PR bodies.
 - UI work goes through the `craft` skill and finishes with its gate. The page reuses the app's existing visual
   system (`docs/design/`).
-- #9 is edited before code whenever a rule changes (section 9).
+- #9 is edited before code whenever a rule changes (section 10).
 
-## 5. The parts
+## 5. The pipeline comes first
 
-Six parts, each its own issue and PR. Section 10 gives the order.
+Devanshu, 2026-11-01: "most time I want you to spend on this pipeline itself". The pipeline is everything between
+the outside world and the job list: finding companies and boards (sources), reading boards (crawler), deciding what
+a posting is (rules), and dating it. Parts C, F and the scorecard below are the core of this design. Parts A, B and E
+are small side jobs.
+
+### 5.0 The pipeline scorecard
+
+The pipeline is judged by four numbers, measured every day by a read-only command and shown as one line in the app.
+SimplifyJobs' public new grad list is the outside yardstick: it is curated for new grads and dated by discovery.
+
+Baseline, measured read-only on 2026-11-01 (`.context/scratch/coverage.py`, `pipeline1.sql` in the `sydney`
+workspace):
+
+| Number | What it means | Today | Target |
+|---|---|---|---|
+| **Coverage** | Of SimplifyJobs' active US software and AI/ML/data new grad listings posted in the last 30 days, the share whose exact posting is in Knock | 135 of 422 (32%). Knock knows 61% of the companies but has the board for only 36%. Where it has the board it has the posting 88% of the time | 80% of the software listings |
+| **Detection time** | Hours from a posting's real posted date to Knock first seeing it, on boards Knock already watches | Greenhouse, Ashby, Lever: 72% the same day, 99.5% within a day. But 248 boards are read only every 1 to 7 days, so a quiet small company's new role can wait up to a week | 95% of new his-level postings within 12 hours |
+| **Level recall** | Of SimplifyJobs new grad listings Knock has, the share Knock counts as his level | 69 of 135 (51%). Some rejections are right (analyst, data annotation), some are wrong ("Junior AI Engineer" read as no level, "Applied AI New Grad" rejected for having no engineering word, plain "Software Engineer") | 85% of the software listings, with his passes as the check on precision |
+| **Date truth** | Share of listed postings whose date is the ATS's own first-posted date or a real watch date | Not measured yet (Part C adds the date source) | 90% |
+
+Where coverage is lost today:
+
+- **No board for the company** (64% of the gap). 100 of the 422 listings are on companies' own careers sites, not a
+  known ATS; others are on Workday tenants, Workable, Oracle, iCIMS and Rippling boards Knock does not have.
+- **Dark readers.** BambooHR (48 of 48 boards erroring), JazzHR (54 of 56 erroring); iCIMS, Gem, Eightfold and
+  join.com boards are never read (no reader); SmartRecruiters is off by its robots.txt.
+
+### 5.1 What the pipeline work adds (on top of Parts C and F)
+
+1. **SimplifyJobs as a source and a yardstick** (extends F1). Its listings add companies and boards. When Knock
+   cannot read a listing's board (a custom careers site, an unreadable ATS), the listing itself becomes a posting
+   (`url:` source key, which the store already allows), dated by SimplifyJobs' `date_posted` (its discovery time,
+   which never resets) and decided by the same rules on its title. Its body is fetched once where the page allows.
+2. **Fix the dark readers.** Find why every BambooHR and JazzHR read errors and fix or switch them off with a
+   reason. Check whether iCIMS, Gem, Eightfold and join.com have public reads that robots.txt allows; add the ones
+   that do and appear in the coverage gap.
+3. **Read the right boards more often.** A board whose company is a likely fit (tech, 300 people or fewer or unknown,
+   not no-go) and that posted a his-level role in the last 90 days, or that SimplifyJobs or YC changes just pointed
+   at, is read at least every 6 hours. Other boards keep today's cadence (6 hours to 7 days by how often they
+   change). The polite per-host spacing is unchanged.
+4. **Level recall fixes** (extends C2 and C3): find why a title with "junior" came out as no level; count AI titles
+   without the word engineer ("Applied AI New Grad", "AI Resident"); and settle which data and ML titles are his
+   (section 12 asks).
+5. **The scorecard command.** `python -m outreach.<module> scorecard` prints the four numbers and the top companies
+   in the coverage gap; the daily sources job runs it after `run-due` and stores the result, and the app shows the
+   newest line. It reads the store only (and the SimplifyJobs file the source already downloaded).
+
+**Done when**
+
+- The scorecard runs on a scratch store with saved SimplifyJobs and board fixtures and prints all four numbers.
+- On those fixtures, a listing on an unreadable careers site becomes a dated `url:` posting, and a second run adds
+  nothing.
+- A fit board that posted a his-level role last month is due again within 6 hours of its last read.
+- In the live checkout after deploy, the scorecard's coverage of software listings moves from 32% toward 80% over
+  the following two weeks (checked by Devanshu; not a test).
+
+## 6. The parts
+
+Six parts, each its own issue and PR. Section 11 gives the order.
 
 ### Part A: Fast pages
 
@@ -362,7 +420,8 @@ for 24 hours.
 ### Part F: More small companies, with real dates
 
 Each source follows `outreach/sources/` (fetch, discover, resolve, find boards) and the identity rule (one company
-per domain). Dates always come from the ATS read in Part C, never from the source.
+per domain). Dates come from the ATS read in Part C, never from the source, with one exception: a
+SimplifyJobs listing whose board Knock cannot read is dated by its `date_posted` (5.1 item 1).
 
 1. **SimplifyJobs.** Read `.github/scripts/listings.json` from the public GitHub repo (not `README.md`, which hides
    81% of listings). Poll with an ETag so an unchanged file costs nothing. Use only listings whose category is
@@ -382,7 +441,7 @@ per domain). Dates always come from the ATS read in Part C, never from the sourc
   nothing, and none of them ever sets a posted date.
 - Just funded lists a seeded company with a Form D first sale 20 days ago and none from 120 days ago.
 
-## 6. What Knock does not change
+## 7. What Knock does not change
 
 - Today's company queue, the wave of up to 4, the 14 day rule and the plan job. Today still prefers small
   companies; the size gate keeps hiding companies over 300 from Today's picks (but never from the job list). The
@@ -390,7 +449,7 @@ per domain). Dates always come from the ATS read in Part C, never from the sourc
 - The drafting harness, the cold-email skill and every approve check.
 - LinkedIn: the week counter stays as a count he can look at and never blocks him. Nothing new is built for LinkedIn.
 
-## 7. Data and schema (for the builder)
+## 8. Data and schema (for the builder)
 
 Likely needs, each the builder's call on shape:
 
@@ -401,7 +460,7 @@ Likely needs, each the builder's call on shape:
 - Sending: the ramp's columns and the `send_day` ceiling `CHECK` change with E1; one migration.
 - The job list may want an index on open postings by posted date.
 
-## 8. Success, in his terms
+## 9. Success, in his terms
 
 - He opens the job list and every row on the first screen is a tech role at his level posted this month.
 - Needs you is empty most days.
@@ -409,7 +468,7 @@ Likely needs, each the builder's call on shape:
 - He never wonders whether a posting date is real: it is a date, a lower bound, or "date unknown".
 - When his mail starts landing in spam, Knock tells him before a week of sends is wasted.
 
-## 9. Edits to #9 before any code
+## 10. Edits to #9 before any code
 
 1. **Hidden:** "a posting that says we don't sponsor" leaves the hidden list; it, "no H-1B" and future sponsorship
    wording become flags. ITAR or EAR "US person" joins citizenship and clearance, each hiding the posting only.
@@ -424,21 +483,20 @@ Likely needs, each the builder's call on shape:
 6. **Needs you:** only items that hold up an Outbox email, a pick today or a reply thread; import leftovers and
    duplicate guesses live in Data gaps.
 
-## 10. Order
+## 11. Order
 
-| Order | Part | Depends on | Why this order |
+| Order | Work | Depends on | Why this order |
 |---|---|---|---|
-| 1 | A, fast pages | nothing | He feels it on every click |
-| 2 | B, quiet Needs you | nothing | Small, and it removes daily noise |
-| 3 | C, postings Knock can trust | #9 edits 1 and 2 | The job list is only as good as its dates and levels |
-| 4 | D, the job list | C | The main ask |
-| 5 | E, smarter sending | #9 edits 3 and 4 | Independent; can run beside C or D |
-| 6 | F, new sources | C (dates), D (Just funded) | More rows once the list is right |
+| 1 | The scorecard (5.1 item 5) | nothing | Every later change is judged by it, so it comes first |
+| 2 | C, postings Knock can trust, with the level recall fixes (5.1 item 4) | #9 edits 1 and 2 | Right job and right time rest on true levels and dates |
+| 3 | F and 5.1 items 1 to 3: SimplifyJobs, dark readers, faster reads of fit boards, YC, VC boards, Form D date | C (dates) | Coverage is the biggest loss today (32%) |
+| 4 | D, the job list | C | Where he uses all of it |
+| side | A, fast pages; B, quiet Needs you; E, smarter sending | E needs #9 edits 3 and 4 | Small; built beside the pipeline work, never ahead of it |
 
-A and B can be built in either order or at the same time in separate workspaces. Each part is one issue, one branch
-from `origin/master`, one PR.
+Pipeline work gets most of the time. Each row is one or more issues, each one branch from `origin/master` and one
+PR; F and 5.1 split into one PR per source or reader.
 
-## 11. Calls I made (please check)
+## 12. Calls I made (please check)
 
 1. Go ahead always puts the company on today's list as his own pick, stopped only by a real duplicate (D).
    Internships and co-ops are left out of the job list (D).
@@ -450,21 +508,29 @@ from `origin/master`, one PR.
 7. The 30 day view offers 60 days when fewer than 20 unchecked postings are left (D).
 8. A company with several postings in view shows the newest with "N more" (D).
 9. Plain titles with no years stated count as his level only at companies of 300 or fewer or of unknown size (D).
-10. Today keeps hiding companies over 300 from its picks; only the job list shows them (section 6).
+10. Today keeps hiding companies over 300 from its picks; only the job list shows them (section 7).
 11. No-go rows the ranker already wrote for "no sponsorship" stay until he lifts them (C4).
 12. Reposts: same company and normalized title within 120 days (C5).
 13. When two dates disagree the older wins; "30+ days" postings stay out of the 7 and 30 day windows (C1).
-14. Today stops hiding companies that say "no sponsorship", like the job list (C4, section 6).
+14. Today stops hiding companies that say "no sponsorship", like the job list (C4, section 7).
 15. A 4th follow-up he already approved still sends; planned or drafted ones are skipped (E2).
 16. The reply rate baseline is his own 29 to 180 day rate, else 6.7% (E3).
 17. "Check first" marks every address without a source page; no new intake field (E4).
 18. Plain titles with no years at companies over 300, and any title asking 3 or more years, go to Higher levels (D).
+19. Coverage target 80% of SimplifyJobs software listings; detection target 95% within 12 hours; level recall
+    target 85% (5.0).
+20. Fit boards are read at least every 6 hours (5.1 item 3).
+21. A SimplifyJobs listing on a board Knock cannot read becomes a `url:` posting dated by SimplifyJobs (5.1 item 1).
 
-## 12. Left to the builder
+**Open, his call:** which data and ML titles count as the right job. Today "scientist" is off lane, so Data
+Scientist, ML Research Scientist and "AI/ML Researcher" never show, and titles with no engineering word ("Applied AI
+New Grad", "Programmer Analyst", "Data Analyst") are dropped.
+
+## 13. Left to the builder
 
 - How the API learns a job finished and how background recomputes are scheduled (A2).
 - Profiling and fixing Today's compute (A4).
 - The exact word lists and regexes for C2 and C3, as long as the "Done when" cases pass.
-- Schema shapes and migrations (section 7).
+- Schema shapes and migrations (section 8).
 - The job list's layout, within `docs/design/` and the craft gate.
 - How each new source module is laid out inside `outreach/sources/`.

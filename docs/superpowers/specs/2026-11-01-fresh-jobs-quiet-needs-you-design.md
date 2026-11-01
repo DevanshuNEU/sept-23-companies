@@ -1,5 +1,10 @@
 # Fresh jobs, a quiet Needs you, fast pages and smarter sending
 
+**The one rule (Devanshu, 2026-11-01): find the right job, at the right company, at the right time.** Right job:
+a tech role at his level. Right company: one he can take on OPT, small ones first, big ones still shown. Right time:
+newest first by the real posted date. Anything that does not serve one of the three is out of scope. When a detail
+below is unclear, decide it by this rule.
+
 Status: draft for Devanshu's review, 2026-11-01. Nothing here is built. When approved, #9 is edited first (section
 9), then each part gets its own issue and plan.
 
@@ -251,7 +256,10 @@ the ranked list, so the ranker's size gate never hides a job here.
 - **Higher levels:** everything above his level that is not a senior title: SDE 2, any title asking 3 or more
   years, and plain titles with no years stated at companies over 300. One click away, never mixed into the default.
   The `open` tier (Member of Technical Staff, Forward Deployed Engineer) is treated as a plain title.
-- Every listed role lands in exactly one view; a test checks that no tech, US, non-senior posting falls in neither.
+- Internships and co-ops are not listed: they are not the right job for him now. SimplifyJobs is read from the
+  New-Grad repo only.
+- Every listed role lands in exactly one view; a test checks that no tech, US, non-senior, non-intern posting falls
+  in neither.
 
 **Order and window**
 
@@ -280,8 +288,11 @@ not contacted yet, and a company name search.
 - **Pass:** the posting never shows again. A new posting at the same company still can. It is a posting pass only:
   it never counts as a Not now for the company and puts nothing on Today's cooldown (`plan/fresh.load_passes` must
   not read it). It joins the set `load_passed_postings` reads, so the plan never offers that role either.
-- **Go ahead:** the company joins today's list as his own pick, ready for him to find people (my call; see section
-  11).
+- **Go ahead:** the company joins today's list as his own pick, ready for him to find people. It always works
+  except for a real duplicate: the company is no-go, already on today's list, or someone there is already contacted
+  and waiting (the #131 intake rule). The size gate, the 7 day room and a Not now cooldown never stop it. Before the
+  08:00 plan is built, the pick is stored and the plan keeps it. This is a new write next to the bench add, not
+  `picks.add_from_bench`.
 - Keys: next and previous row, open the posting, go ahead, pass. The exact keys follow `docs/design/` section 16.6
   and the craft gate.
 
@@ -429,7 +440,8 @@ from `origin/master`, one PR.
 
 ## 11. Calls I made (please check)
 
-1. Go ahead puts the company on today's list as his own pick.
+1. Go ahead always puts the company on today's list as his own pick, stopped only by a real duplicate (D).
+   Internships and co-ops are left out of the job list (D).
 2. An answer older than 5 minutes is recomputed before it is served (A1).
 3. A warning doubles the send gap for 2 sending days (E1); the daily ceiling is 400 (E1).
 4. The follow-ups are at 3, 7 and 14 business days (E2).

@@ -54,7 +54,7 @@ describe('outbox writes', () => {
     const omar = await itemFor(c, 'Omar Haddad');
     const detail = await c.approve(omar.messageId, omar.revision, opt());
     expect(detail.item).toMatchObject({ state: 'approved', group: 'approved', revision: omar.revision + 1 });
-    expect(detail.item.schedule?.text).toBe('Sends after 10:55 ET');
+    expect(detail.item.schedule?.text).toBe('Sends about 10:55 ET');
     const after = await itemFor(c, 'Omar Haddad');
     expect(after).toMatchObject({ state: 'approved', group: 'approved', revision: omar.revision + 1 });
     const outbox = await c.outbox();

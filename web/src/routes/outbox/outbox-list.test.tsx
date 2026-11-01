@@ -140,9 +140,9 @@ describe('OutboxList', () => {
     expect(within(row('Dana Whitcomb')).getByText('1 warning')).toBeInTheDocument();
     expect(within(row('Marcus Feld')).getByText('Follow-up 2 of 4')).toBeInTheDocument();
     expect(within(row('Omar Haddad')).getByText('Draft')).toBeInTheDocument();
-    expect(within(row('Jordan Price')).getByText('10:42 ET')).toBeInTheDocument();
-    expect(within(row('Arjun Mehta')).getByText('after 11:05 ET')).toBeInTheDocument();
-    expect(within(row('Felix Graham')).getByText('tomorrow')).toBeInTheDocument();
+    expect(within(row('Jordan Price')).getByText('about 10:40 ET')).toBeInTheDocument();
+    expect(within(row('Arjun Mehta')).getByText('about 11:05 ET')).toBeInTheDocument();
+    expect(within(row('Felix Graham')).getByText('about 8:30 ET')).toBeInTheDocument();
     expect(within(row('Nina Kovac')).getByText('Follow-up 1 due Fri Nov 13')).toBeInTheDocument();
     expect(within(row('Theo Brandt')).getByText('Nov 5')).toBeInTheDocument();
 
@@ -362,5 +362,54 @@ describe('Outbox filtered to a company', () => {
     expect(screen.queryByText('No drafts to review.')).toBeNull();
     fireEvent.click(screen.getAllByRole('button', { name: 'Show all companies' })[0] as HTMLElement);
     expect(row('Kenji Watanabe')).toBeInTheDocument();
+  });
+});
+
+describe('Approved rows by send day', () => {
+  const parts = () =>
+    [...document.querySelectorAll<HTMLElement>('[data-group="approved"] [data-day-part]')].map((el) => ({
+      key: el.getAttribute('data-day-part'),
+      label: el.querySelector('[data-label]')?.textContent,
+      count: el.querySelector('.tabular-nums')?.textContent,
+      rows: [...el.querySelectorAll('[role="option"] b')].map((b) => b.textContent),
+    }));
+
+  it('splits the Approved group by send day with a count each', async () => {
+    await outbox();
+    expect(parts().map(({ label, count, rows }) => [label, count, rows])).toEqual([
+      ['Today', '2', ['Jordan Price', 'Arjun Mehta']],
+      ['Tomorrow', '1', ['Felix Graham']],
+    ]);
+  });
+
+  it('shows the time on each row and leaves the day to the part', async () => {
+    await outbox();
+    expect(within(row('Felix Graham')).getByText('about 8:30 ET')).toBeInTheDocument();
+    expect(within(row('Felix Graham')).queryByText(/tomorrow/i, { selector: 'span.ml-auto' })).toBeNull();
+  });
+
+  it('puts a row with no projected day last, in Not scheduled', async () => {
+    const db = buildFixture('default');
+    const arjun = db.outbox.items.find((i) => i.person.name === 'Arjun Mehta');
+    if (!arjun?.schedule) throw new Error('fixture changed');
+    arjun.schedule = { ...arjun.schedule, projectedAt: null, projectedDay: null, projectedClock: null, reason: 'no_address', text: 'No email address for this person.' };
+    await outbox({ db });
+    expect(parts().map(({ label, rows }) => [label, rows])).toEqual([
+      ['Today', ['Jordan Price']],
+      ['Tomorrow', ['Felix Graham']],
+      ['Not scheduled', ['Arjun Mehta']],
+    ]);
+  });
+
+  it('says how many days the queue spans in the group head', async () => {
+    await outbox();
+    const head = document.querySelector('button[data-group-head="approved"]');
+    expect(head?.textContent).toContain('over 2 days');
+  });
+
+  it('keeps the part heads out of the row list', async () => {
+    await outbox();
+    const approved = document.querySelector('[data-group="approved"]');
+    expect(within(approved as HTMLElement).getAllByRole('option')).toHaveLength(3);
   });
 });

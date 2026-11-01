@@ -114,7 +114,7 @@ describe('approve', () => {
     await settle();
     expect(within(row('Omar Haddad')).getByText('Approved')).toBeInTheDocument();
     expect(sidebarOutbox()).toHaveAccessibleName('Outbox, 1 reply to handle, 6 drafts to review');
-    expect(toastText()).toContain('Approved Omar Haddad. Sends after 10:55 ET.');
+    expect(toastText()).toContain('Approved Omar Haddad. Sends about 10:55 ET.');
     expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
     // Approving moves on to the next draft; it is not approved by that.
     expect(row('Sara Lindqvist')).toHaveAttribute('aria-selected', 'true');
@@ -232,7 +232,7 @@ describe('approve', () => {
     expect(save.mock.calls[0]?.[0]).toBe(messageOf(T.omar));
     expect(save.mock.calls[0]?.[1]).toMatchObject({ revision: 1 });
     expect((save.mock.calls[0]?.[1] as { body: string }).body.endsWith(' Thanks again.')).toBe(true);
-    expect(toastText()).toContain('Approved Omar Haddad. Sends after 10:55 ET.');
+    expect(toastText()).toContain('Approved Omar Haddad. Sends about 10:55 ET.');
     expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
     expect(approve).not.toHaveBeenCalled();
     await settle(8000);
@@ -620,7 +620,7 @@ describe('checks', () => {
     expect(screen.getByText('His post on retries without double work')).toBeInTheDocument();
     expect(screen.getByText('Oct 28, 13 days old')).toBeInTheDocument();
     expect(screen.getByText('1 first email sent, 2 slots left')).toBeInTheDocument();
-    expect(screen.getByText('Sends after 11:05 ET')).toBeInTheDocument();
+    expect(screen.getByText('Sends about 11:05 ET')).toBeInTheDocument();
   });
 });
 

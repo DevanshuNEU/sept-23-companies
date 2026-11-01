@@ -3472,6 +3472,12 @@ export interface components {
             companySlotsLeft: number;
             /** Earliestat */
             earliestAt: string | null;
+            /** Projectedat */
+            projectedAt: string | null;
+            /** Projectedclock */
+            projectedClock: string | null;
+            /** Projectedday */
+            projectedDay: string | null;
             /**
              * Reason
              * @enum {string}

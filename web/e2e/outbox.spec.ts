@@ -49,7 +49,7 @@ test('a approves a clean draft with Undo, and z takes it back', async ({ page, c
   await page.goto('/outbox/2006');
   await expect(page.getByRole('heading', { level: 2, name: 'Omar Haddad' })).toBeVisible();
   await page.keyboard.press('a');
-  await expect(page.getByText('Approved Omar Haddad. Sends after 10:55 ET.')).toBeVisible();
+  await expect(page.getByText('Approved Omar Haddad. Sends about 10:55 ET.')).toBeVisible();
   // Approving moves on to the next draft (Sara); Omar settles into Approved.
   await expect(page.getByRole('option', { selected: true })).toContainText('Sara Lindqvist');
   const omar = page.getByRole('option').filter({ hasText: 'Omar Haddad' });

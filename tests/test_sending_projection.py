@@ -5,7 +5,8 @@ from datetime import date, datetime, timedelta
 from outreach.sending import calendar as cal
 from outreach.sending import projection, queue, ramp
 from outreach.sending.config import load_config
-from tests.sendtest import put_day
+from outreach.sending import status
+from tests.sendtest import prove, put_day
 from tests.storetest import seed_company
 from tests.test_sending_queue import LA, NY, Base, ny, stamp
 
@@ -101,6 +102,26 @@ class ProjectionTest(Base):
         got = self.project()
         self.assertTrue(0 < len(got) < 100)
         self.assertLessEqual(max(got.values()), FRI + timedelta(days=projection.MAX_DAYS))
+
+
+class StatusProjectionTest(Base):
+    def setUp(self):
+        super().setUp()
+        prove(self.db)
+        _, self.mid = self.approve()
+
+    def test_a_pause_still_projects_and_says_so(self):
+        self.db.execute("UPDATE sender SET paused = 1, pause_kind = 'by_you', paused_reason = 'by you', "
+                        "paused_at = '2026-11-06T12:00:00Z' WHERE sender_id = 1")
+        got, paused = status.queue_projection(self.db, FRI, CFG)
+        self.assertEqual((got, paused), ({self.mid: FRI}, True))
+
+    def test_signed_out_projects_nothing(self):
+        self.db.execute("UPDATE sender SET auth_state = 'signed_out' WHERE sender_id = 1")
+        self.assertEqual(status.queue_projection(self.db, FRI, CFG), ({}, False))
+
+    def test_the_old_sender_running_projects_nothing(self):
+        self.assertEqual(status.queue_projection(self.db, FRI, CFG, old_sender_loaded=True), ({}, False))
 
 
 if __name__ == "__main__":

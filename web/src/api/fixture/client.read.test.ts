@@ -122,7 +122,7 @@ describe('FixtureClient reads: default scenario', () => {
     const c = client();
     const omar = await itemFor(c, 'Omar Haddad');
     expect(omar.state).toBe('drafted');
-    expect(omar.schedule?.text).toBe('Sends after 10:55 ET');
+    expect(omar.schedule?.text).toBe('Sends about 10:55 ET');
     const dana = await itemFor(c, 'Dana Whitcomb');
     expect(dana.schedule?.text).toBe('Sends Wed Nov 11');
   });

@@ -87,6 +87,13 @@ export function formatDue(on: IsoDate, asOf: IsoTime): string {
   return `Due ${formatDueDay(on)}`;
 }
 
+/** "Today", "Tomorrow" or "Mon Nov 9" for the New York day an email is expected to send, counted from `asOf`. */
+export function formatSendDay(on: IsoDate, asOf: IsoTime): string {
+  const n = dayNumber(parseIsoDate(on)) - dayNumber(appDate(asOf));
+  if (n <= 0) return 'Today';
+  return n === 1 ? 'Tomorrow' : formatDueDay(on);
+}
+
 /** "Fri Nov 6": the day of an instant, read in the app's zone. */
 export function formatDay(at: IsoTime): string {
   const p = partsOf(at, { timeZone: APP_ZONE, weekday: 'short', month: 'short', day: 'numeric' });

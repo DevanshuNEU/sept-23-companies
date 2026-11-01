@@ -6897,6 +6897,39 @@
             ],
             "title": "Earliestat"
           },
+          "projectedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectedat"
+          },
+          "projectedClock": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectedclock"
+          },
+          "projectedDay": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectedday"
+          },
           "reason": {
             "enum": [
               "ready",
@@ -6937,6 +6970,9 @@
         },
         "required": [
           "earliestAt",
+          "projectedAt",
+          "projectedDay",
+          "projectedClock",
           "tz",
           "reason",
           "text",

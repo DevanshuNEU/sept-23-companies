@@ -101,7 +101,7 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await expect(omar).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('heading', { level: 2, name: 'Omar Haddad' })).toBeVisible();
   await page.keyboard.press('a');
-  await expect(page.getByText('Approved Omar Haddad. Sends after 10:55 ET.')).toBeVisible();
+  await expect(page.getByText('Approved Omar Haddad. Sends about 10:55 ET.')).toBeVisible();
   await page.clock.runFor(8000);
   await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
   await expect(outboxLink(page)).toHaveAccessibleName('Outbox, 1 reply to handle, 6 drafts to review');

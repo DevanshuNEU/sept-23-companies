@@ -494,8 +494,17 @@ const CLEAN_TITLES = [
 ];
 const clean = (): Check[] => passes(CLEAN_TITLES);
 
-const sched = (earliestAt: IsoTime | null, reason: Schedule['reason'], text: string, sent: number, left: number): Schedule =>
-  ({ earliestAt, tz: TZ, reason, text, companySentToday: sent, companySlotsLeft: left });
+const nyDay = (at: IsoTime): IsoDate => new Date(at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+/** "about 10:40 ET": the estimate's clock, to the nearest 5 minutes as the API writes it. */
+const nyClock = (at: IsoTime): string => {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(at));
+  const hm = (t: string) => Number(p.find((x) => x.type === t)?.value);
+  const minutes = Math.round((hm('hour') * 60 + hm('minute')) / 5) * 5;
+  return `about ${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')} ET`;
+};
+/** The estimate defaults to the moment the wait ends; a row the sender will not send as it stands has none. */
+const sched = (earliestAt: IsoTime | null, reason: Schedule['reason'], text: string, sent: number, left: number, projected: IsoTime | null = earliestAt): Schedule =>
+  ({ earliestAt, projectedAt: projected, projectedDay: projected ? nyDay(projected) : null, projectedClock: projected ? nyClock(projected) : null, tz: TZ, reason, text, companySentToday: sent, companySlotsLeft: left });
 
 /** Follow-up due dates for a first email sent on `firstDate` (3, 7 and 15 business days). Due on or before today means sent. */
 function track(firstDate: IsoDate) {
@@ -620,7 +629,7 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   const kenjiRole = c.role('Trigger.dev', 'Software Engineer I', 'swe1', RM, 4);
   add({
     touch: T.kenji, person: kenji, company: 'Trigger.dev', group: 'review', state: 'drafted', subject: 'your post on safe task retries', summary: "Near-identical to Ava Moreno's draft",
-    at: et(TODAY, '09:58'), schedule: sched(et(TODAY, '11:05'), 'spacing', 'Sends after 11:05 ET', 1, 2), body: BODY_KENJI,
+    at: et(TODAY, '09:58'), schedule: sched(et(TODAY, '11:05'), 'spacing', 'Sends about 11:05 ET', 1, 2), body: BODY_KENJI,
     checks: [
       ck('near_identical', 'block', "Near-identical to Ava Moreno's draft (92% the same)", 'Two people at one company comparing notes is the fastest way to lose both. Change the middle paragraph or the ask.', { kind: 'compare', otherMessageId: messageOf(T.ava) }),
       ...passes([
@@ -633,7 +642,7 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   add({
     touch: T.rafael, person: c.person('Rafael Ortiz', 'Software Engineer', 'engineer', 'Graphite', { email: 'rafael@graphtie.example' }), company: 'Graphite', group: 'review', state: 'drafted',
     subject: 'your stacked diffs launch post', summary: 'No mail server for graphtie.example', at: et(TODAY, '09:51'),
-    schedule: sched(et('2026-11-11', '08:30'), 'per_company_limit', 'Sends tomorrow', 3, 0),
+    schedule: sched(et('2026-11-11', '08:30'), 'per_company_limit', 'Sends tomorrow about 8:30 ET', 3, 0),
     checks: [
       ck('no_mail_server', 'block', 'No mail server for graphtie.example', 'The domain on file looks mistyped. Check graphite.example, then correct it on the company page.'),
       ...passes(CLEAN_TITLES.slice(1)),
@@ -656,7 +665,7 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   const marcusFirstAt = pt('2026-10-30', '10:02');
   add({
     touch: T.marcus, person: c.person('Marcus Feld', 'Software Engineer', 'engineer', 'Mintlify'), company: 'Mintlify', group: 'review', state: 'drafted', seq: 2,
-    subject: marcusSubject, summary: 'Due today', at: et(TODAY, '09:40'), schedule: sched(et('2026-11-11', '08:30'), 'per_company_limit', 'Sends tomorrow', 3, 0), body: BODY_MARCUS,
+    subject: marcusSubject, summary: 'Due today', at: et(TODAY, '09:40'), schedule: sched(et('2026-11-11', '08:30'), 'per_company_limit', 'Sends tomorrow about 8:30 ET', 3, 0), body: BODY_MARCUS,
     checks: passes(['Adds one new thing: you confirm that when you read it', 'Same thread as the first email', '1 link, no shortener, no attachment', 'Not on the no-go or said-no list',
       'No banned phrases', 'No em or en dashes', '59 words (40 to 80)']),
     d: {
@@ -674,29 +683,29 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   });
   add({
     touch: T.omar, person: c.person('Omar Haddad', 'Co-founder and CTO', 'founder', 'Resend'), company: 'Resend', group: 'review', state: 'drafted', subject: 'your batch api rate limits post',
-    summary: 'All checks passed', at: et(TODAY, '09:36'), schedule: sched(et(TODAY, '10:55'), 'spacing', 'Sends after 10:55 ET', 0, 3), body: BODY_OMAR,
+    summary: 'All checks passed', at: et(TODAY, '09:36'), schedule: sched(et(TODAY, '10:55'), 'spacing', 'Sends about 10:55 ET', 0, 3), body: BODY_OMAR,
     checks: passes(['98 words (80 to 120)', ...CLEAN_TITLES.slice(0, 6), 'Hook 7 days old (30 at most)', 'Subject unique to him, no "Re:"', 'Plain text']),
     d: { project: 'Saar', role: c.role('Resend', 'Software Engineer, New Grad', 'new_grad', SF, 2), hook: { text: 'His write-up on how the batch API paces sends', on: '2026-11-03' } },
   });
   add({
     touch: T.sara, person: c.person('Sara Lindqvist', 'Staff Engineer', 'engineer', 'Resend'), company: 'Resend', group: 'review', state: 'drafted', subject: 'your talk on email deliverability',
-    summary: 'Hook is 41 days old', at: et(TODAY, '09:33'), schedule: sched(et(TODAY, '11:55'), 'spacing', 'Sends after 11:55 ET', 0, 3),
+    summary: 'Hook is 41 days old', at: et(TODAY, '09:33'), schedule: sched(et(TODAY, '11:55'), 'spacing', 'Sends about 11:55 ET', 0, 3),
     checks: [ck('hook_old', 'warn', 'Hook is 41 days old', 'A hook over 30 days old reads as stale. Pick a newer one, or keep it if it still fits.'), ...passes(CLEAN_TITLES.filter((t) => !t.startsWith('Hook')))],
     d: { project: 'Saar', hook: { text: 'Her talk on email deliverability', on: '2026-09-30' } },
   });
   add({
     touch: T.ava, person: c.person('Ava Moreno', 'Software Engineer', 'engineer', 'Trigger.dev'), company: 'Trigger.dev', group: 'review', state: 'drafted', subject: 'your post on durable queues',
-    summary: 'All checks passed', at: et(TODAY, '09:30'), schedule: sched(et(TODAY, '11:05'), 'spacing', 'Sends after 11:05 ET', 1, 2), body: BODY_AVA,
+    summary: 'All checks passed', at: et(TODAY, '09:30'), schedule: sched(et(TODAY, '11:05'), 'spacing', 'Sends about 11:05 ET', 1, 2), body: BODY_AVA,
     checks: clean(), d: { role: kenjiRole, hook: { text: 'Her post on durable queues', on: '2026-11-01' } },
   });
 
   /* Approved: waiting for a slot. */
   add({ touch: T.jordan, person: c.person('Jordan Price', 'Software Engineer', 'engineer', 'Mintlify'), company: 'Mintlify', group: 'approved', state: 'approved', subject: 'your docs search rewrite',
-    summary: 'Next send. Third Mintlify email today', at: et(TODAY, '10:42'), schedule: sched(et(TODAY, '10:42'), 'ready', 'Sends 10:42 ET', 2, 1), checks: clean() });
+    summary: 'Next send. Third Mintlify email today', at: et(TODAY, '10:42'), schedule: sched(et(TODAY, '10:42'), 'ready', 'Sends about 10:40 ET', 2, 1), checks: clean() });
   add({ touch: T.arjun, person: c.person('Arjun Mehta', 'Software Engineer', 'engineer', 'Graphite'), company: 'Graphite', group: 'approved', state: 'approved', subject: 'your merge queue post',
-    summary: '60 minutes after the last Graphite email', at: et(TODAY, '11:05'), schedule: sched(et(TODAY, '11:05'), 'spacing', 'Sends after 11:05 ET', 2, 1), checks: clean() });
+    summary: '60 minutes after the last Graphite email', at: et(TODAY, '11:05'), schedule: sched(et(TODAY, '11:05'), 'spacing', 'Sends about 11:05 ET', 2, 1), checks: clean() });
   add({ touch: T.felix, person: c.person('Felix Graham', 'Engineering Manager', 'manager', 'Graphite'), company: 'Graphite', group: 'approved', state: 'approved', subject: "graphite's early career role",
-    summary: 'Graphite has 3 today already', at: et('2026-11-11', '08:30'), schedule: sched(et('2026-11-11', '08:30'), 'per_company_limit', 'Sends tomorrow', 3, 0), checks: clean() });
+    summary: 'Graphite has 3 today already', at: et('2026-11-11', '08:30'), schedule: sched(et('2026-11-11', '08:30'), 'per_company_limit', 'Sends tomorrow about 8:30 ET', 3, 0), checks: clean() });
 
   /* Sending and checking. */
   add({ touch: T.chloe, person: c.person('Chloe Martin', 'Software Engineer', 'engineer', 'Supabase'), company: 'Supabase', group: 'sending', state: 'sending', subject: 'your realtime at scale talk',

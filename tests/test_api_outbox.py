@@ -222,6 +222,70 @@ class ViewTest(OutboxBase):
         self.assertEqual((item["company"]["id"], item["company"]["name"], item["group"]), (keep, "Keep", "paused"))
 
 
+class ProjectionTest(OutboxBase):
+    """#145: an approved row says when it is expected to go (an estimate), not just the next moment it could."""
+
+    def approved(self, cid: int, *names: str) -> list[int]:
+        out = []
+        for name in names:
+            t = self.thread(cid, name)
+            seed.message(self.conn, t, 0, "approved")
+            out.append(t)
+        return out
+
+    def test_approved_rows_carry_a_projected_time_and_day(self):
+        self.prove()
+        cid = seed.company(self.conn, "Acme", status="working")
+        ts = self.approved(cid, "A One", "B Two", "C Three", "D Four")
+        rows = self.by_touch(self.outbox())
+        self.assertEqual([rows[t]["schedule"]["projectedDay"] for t in ts],
+                         ["2026-11-10", "2026-11-10", "2026-11-10", "2026-11-11"])
+        self.assertEqual(rows[ts[0]]["schedule"]["projectedAt"], NOW)
+        self.assertEqual([rows[t]["schedule"]["projectedClock"] for t in (ts[0], ts[3])],
+                         ["about 10:15 ET", "about 8:30 ET"])
+        self.assertEqual([rows[t]["schedule"]["text"] for t in (ts[0], ts[3])],
+                         ["Sends about 10:15 ET", "Sends tomorrow about 8:30 ET"])
+        self.assertEqual(rows[ts[3]]["summary"], "Sends tomorrow about 8:30 ET")
+        self.assertEqual(rows[ts[3]]["at"], rows[ts[3]]["schedule"]["projectedAt"])
+
+    def test_a_later_day_reads_as_a_date(self):
+        self.prove()
+        cid = seed.company(self.conn, "Acme", status="working")
+        ts = self.approved(cid, *[f"P{i}" for i in range(7)])
+        self.assertEqual(self.by_touch(self.outbox())[ts[6]]["schedule"]["text"], "Sends Thu Nov 12, about 8:30 ET")
+
+    def test_approved_rows_sort_by_projected_time(self):
+        self.prove()
+        busy, quiet = (seed.company(self.conn, n, status="working") for n in ("Busy", "Quiet"))
+        ts = self.approved(busy, "A One", "B Two", "C Three", "D Four")
+        [other] = self.approved(quiet, "Q One")
+        order = [i["touchId"] for i in sorted(self.outbox()["items"], key=lambda i: i["sortKey"])]
+        self.assertEqual(order, [ts[0], other, ts[1], ts[2], ts[3]])
+
+    def test_a_paused_sender_still_projects_and_says_so(self):
+        self.prove()
+        self.conn.execute("UPDATE sender SET paused = 1, pause_kind = 'by_you', paused_reason = 'by you', "
+                          "paused_at = '2026-11-10T14:00:00Z' WHERE sender_id = 1")
+        [t] = self.approved(seed.company(self.conn, "Acme", status="working"), "A One")
+        schedule = self.by_touch(self.outbox())[t]["schedule"]
+        self.assertEqual((schedule["reason"], schedule["text"]), ("sender_paused", "Sends about 10:15 ET once resumed"))
+
+    def test_a_row_with_no_projection_keeps_the_queue_sentence(self):
+        self.prove()
+        cid = seed.company(self.conn, "Acme", status="working", paused_at="2026-11-09T12:00:00Z")
+        [t] = self.approved(cid, "A One")
+        schedule = self.by_touch(self.outbox())[t]["schedule"]
+        self.assertEqual((schedule["reason"], schedule["projectedAt"], schedule["projectedDay"]),
+                         ("company_paused", None, None))
+        self.assertEqual(schedule["text"], "This company is paused. Unpause it to send.")
+
+    def test_nothing_is_projected_before_gmail_is_proven(self):
+        cid = seed.company(self.conn, "Acme", status="working")
+        first, second = self.approved(cid, "A One", "B Two")
+        rows = self.by_touch(self.outbox())
+        self.assertIsNone(rows[second]["schedule"]["projectedAt"])
+
+
 class DetailTest(OutboxBase):
     def test_detail_thread_interleaves_replies_in_time_order(self):
         cid = seed.company(self.conn, "Acme", status="working")

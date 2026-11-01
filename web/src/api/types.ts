@@ -131,7 +131,8 @@ export type ScheduleReason =
   | 'per_company_limit' | 'per_company_gap' | 'recruiter_waits' | 'no_address' | 'no_thread'
   | 'company_closed' | 'no_go' | 'reply_stop' | 'touch_done';
 export interface Schedule { // derived: the sender's verdict for an approved email (a draft has none)
-  earliestAt: IsoTime | null; tz: string; reason: ScheduleReason;
+  earliestAt: IsoTime | null; projectedAt: IsoTime | null; projectedDay: IsoDate | null; projectedClock: string | null; // the sender's estimate, and its New York day
+  tz: string; reason: ScheduleReason;
   text: string; companySentToday: number; companySlotsLeft: number;
 }
 export interface OutboxItem {

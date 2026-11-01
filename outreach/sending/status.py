@@ -16,12 +16,12 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.sending import calendar as cal
-from outreach.sending import proof, queue, ramp, signals
+from outreach.sending import projection, proof, queue, ramp, signals
 from outreach.sending.config import SendConfig
 from outreach.sending.queue import REASON_TEXT, STOP_REASONS, Verdict
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["SendingSnapshot", "sending_snapshot", "queue_schedule", "reason_text", "OLD_SENDER_TEXT",
+__all__ = ["SendingSnapshot", "sending_snapshot", "queue_schedule", "queue_projection", "reason_text", "OLD_SENDER_TEXT",
            "NOTHING_APPROVED"]
 
 OLD_SENDER_TEXT = "The old mail sender is still running, so the new one waits until it is stopped."
@@ -57,11 +57,12 @@ def _stamp(at: datetime) -> str:
     return at.astimezone(timezone.utc).strftime(ISO_FMT)
 
 
-def _gate(conn: sqlite3.Connection, old_sender_loaded: bool) -> str | None:
+def _gate(conn: sqlite3.Connection, old_sender_loaded: bool, *, ignore_pause: bool = False) -> str | None:
     """The reason the whole tick would give for sending nothing, in the tick's own order. A fresh store's
-    `unknown` sign-in is not a block: the first tick finds out."""
+    `unknown` sign-in is not a block: the first tick finds out. `ignore_pause` leaves his pause out, to ask what
+    would block the sender once he resumes."""
     row = conn.execute("SELECT paused, auth_state FROM sender WHERE sender_id = 1").fetchone()
-    if row["paused"]:
+    if row["paused"] and not ignore_pause:
         return "sender_paused"
     if row["auth_state"] in ("signed_out", "wrong_account"):
         return "signed_out"
@@ -91,6 +92,18 @@ def queue_schedule(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *,
     if gate is None and proof.phase(conn) == proof.FIRST_SEND:
         found = queue.first_only(found)
     return {v.message_id: v for v in found}
+
+
+def queue_projection(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *,
+                     old_sender_loaded: bool = False) -> tuple[dict[int, datetime], bool]:
+    """When each approved message is expected to send (`projection.project`), and whether the sender is paused.
+    A pause is not a reason to show nothing: the projection runs as if he resumed now. A sign-in problem, the old
+    sender and an unproven Gmail marker (the first email goes alone) are: the queue's own sentence says what is wrong, so nothing is projected."""
+    paused = bool(conn.execute("SELECT paused FROM sender WHERE sender_id = 1").fetchone()["paused"])
+    if _gate(conn, old_sender_loaded, ignore_pause=True) is not None or proof.phase(conn) == proof.FIRST_SEND:
+        return {}, paused
+    prepared = queue.prepare(conn, now, cfg, day=ramp.today_state(conn, now, cfg))
+    return projection.project(prepared, now, cfg), paused
 
 
 def _state(row: sqlite3.Row, now: datetime, cfg: SendConfig, old_sender_loaded: bool) -> tuple[str, str]:

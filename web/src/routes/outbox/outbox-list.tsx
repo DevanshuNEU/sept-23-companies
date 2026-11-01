@@ -7,7 +7,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAnnounce, useHotkeys, useLiveSelection } from '@/keyboard/hotkeys';
-import { ageDays, formatDay, formatLocalTime } from '@/lib/format';
+import { ageDays, formatDay, formatLocalTime, formatSendDay } from '@/lib/format';
 import { FOLLOWUP_COUNT } from '@/lib/followups';
 import { byKey, isBlocked, slotOf, type Slot } from './outbox-order';
 import { useStableOrder } from '@/lib/stable-order';
@@ -46,10 +46,30 @@ export function rowStatus(item: OutboxItem): Status {
   return messageStatus.drafted;
 }
 
-/** The right of the first line: when an approved email sends ("after 11:05 ET"), else the row's time or day. */
+/** The right of the first line: when an approved email is expected to send ("about 11:05 ET"), else the row's time or day. */
 function when(item: OutboxItem, asOf: IsoTime): string {
-  if (item.state === 'approved' && item.schedule) return item.schedule.text.replace(/^Sends /, '');
+  if (item.state === 'approved' && item.schedule) return item.schedule.projectedClock ?? item.schedule.text.replace(/^Sends /, '');
   return ageDays(item.at, asOf) === 0 ? formatLocalTime(item.at) : formatDay(item.at).replace(/^\S+ /, '');
+}
+
+type DayPart = { key: string; label: string; rows: OutboxItem[] };
+
+/**
+ * The Approved rows split by the New York day the sender expects to send them, in day order. A row the sender will
+ * not send as it stands (a paused company, no address) has no day and goes last, in its own part.
+ */
+function dayParts(rows: OutboxItem[], asOf: IsoTime): DayPart[] {
+  const byDay = new Map<string, OutboxItem[]>();
+  const unscheduled: OutboxItem[] = [];
+  for (const r of rows) {
+    const day = r.schedule?.projectedDay;
+    if (day) byDay.set(day, [...(byDay.get(day) ?? []), r]);
+    else unscheduled.push(r);
+  }
+  const parts = [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([day, list]) => ({ key: day, label: formatSendDay(day, asOf), rows: list }));
+  return unscheduled.length > 0 ? [...parts, { key: 'unscheduled', label: 'Not scheduled', rows: unscheduled }] : parts;
 }
 
 type Extra = { asOf: IsoTime; counts: OutboxCounts; closedBreakdown: OutboxView['closedBreakdown']; sentToday: number };
@@ -59,8 +79,10 @@ function groupNote(group: OutboxGroup, rows: OutboxItem[], x: Extra): string | n
   switch (group) {
     case 'replied':
       return 'holds the company';
-    case 'approved':
-      return 'waiting for a slot';
+    case 'approved': {
+      const days = new Set(rows.map((i) => i.schedule?.projectedDay).filter(Boolean)).size;
+      return days > 1 ? `over ${days} days` : null;
+    }
     case 'sent':
       return `${x.sentToday} today`;
     case 'paused': {
@@ -181,11 +203,13 @@ export function OutboxList({
 
   const buckets = GROUPS.map(({ group, label }) => {
     const all = ordered.filter((i) => (slot(i) === 'blocked' ? 'review' : slot(i)) === group && matches(i));
-    const shown = all.filter((i) => !isFresh(i));
+    const fresh = all.filter(isFresh);
+    // Approved rows read in day order, with the ones that have no day last, so j and k follow what is on screen.
+    const shown = (group === 'approved' ? dayParts(all.filter((i) => !isFresh(i)), extra.asOf).flatMap((p) => p.rows) : all.filter((i) => !isFresh(i)));
     // Ready first, blocked after, each in list order. A selected row keeps its held slot, so it does not jump between them.
     const ready = shown.filter((i) => slot(i) !== 'blocked');
     const blocked = shown.filter((i) => slot(i) === 'blocked');
-    return { group, label, ready, blocked, rows: [...ready, ...blocked], fresh: all.filter(isFresh).length };
+    return { group, label, ready, blocked, rows: [...ready, ...blocked], fresh: fresh.length };
   });
   const open = (group: OutboxGroup) => !collapsed.has(group);
   const visible = buckets.flatMap((b) => (open(b.group) ? b.rows : []));
@@ -375,6 +399,16 @@ export function OutboxList({
                           });
                         })}
                       </div>
+                    ) : b.group === 'approved' ? (
+                      dayParts(b.rows, extra.asOf).map((part) => (
+                        <div key={part.key} data-day-part={part.key}>
+                          <div className="flex h-7 items-center gap-1.5 border-b bg-subtle/60 px-3 text-xs font-medium text-muted-foreground">
+                            <span data-label>{part.label}</span>
+                            <span className="tabular-nums">{part.rows.length}</span>
+                          </div>
+                          {part.rows.map((item) => row(item))}
+                        </div>
+                      ))
                     ) : (
                       (b.group === 'review' ? b.ready : b.rows).map((item) => row(item))
                     )}

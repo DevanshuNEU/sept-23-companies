@@ -85,6 +85,9 @@ class ResumeSendingBody(WireRequest):
 
 class Schedule(Wire):
     earliest_at: str | None
+    projected_at: str | None  # when the sender is expected to send it (an estimate), and that New York day
+    projected_day: str | None
+    projected_clock: str | None  # `about 14:10 ET`: the time part of `text`, rounded to 5 minutes
     tz: str
     reason: ScheduleReason
     text: str

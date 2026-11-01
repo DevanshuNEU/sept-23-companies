@@ -34,7 +34,7 @@ from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
 from outreach.sending import proof
 from outreach.sending.queue import TIME_REASONS, load_queue
-from outreach.sending.status import queue_schedule, reason_text
+from outreach.sending.status import queue_projection, queue_schedule, reason_text
 from outreach.store.timefmt import ISO_FMT
 
 GROUPS = ("replied", "review", "approved", "sending", "checking", "sent", "paused", "closed")
@@ -96,6 +96,23 @@ def schedule_text(reason: str, when: str | None, now: str, cfg: SendConfig, stag
     return f"Sends {at:%a %b} {at.day}"
 
 
+def projection_words(at: datetime, now: str, cfg: SendConfig, *, paused: bool) -> tuple[str, str]:
+    """`(clock, text)` for an estimated send: `about 14:10 ET` and `Sends about 14:10 ET` today,
+    `Sends tomorrow about 8:30 ET`, `Sends Thu Nov 12, about 8:30 ET`; with the sender paused the text ends
+    `once resumed`. The minute is rounded to 5: it is an estimate."""
+    local = at.astimezone(ZoneInfo(cfg.day_tz))
+    rounded = (local + timedelta(minutes=2, seconds=30)).replace(second=0, microsecond=0)
+    rounded = rounded.replace(minute=rounded.minute - rounded.minute % 5)
+    clock, today = f"about {rounded.hour}:{rounded.minute:02d} ET", _ny(now, cfg).date()
+    if rounded.date() == today:
+        text = f"Sends {clock}"
+    elif rounded.date() == today + timedelta(days=1):
+        text = f"Sends tomorrow {clock}"
+    else:
+        text = f"Sends {rounded:%a %b} {rounded.day}, {clock}"
+    return clock, f"{text} once resumed" if paused else text
+
+
 def _company_sends_today(conn: sqlite3.Connection, companies: dict, now: str, cfg: SendConfig) -> dict[int, int]:
     """First emails out to each surviving company today (New York), counting a claimed one that may have gone out.
     Follow-ups take no slot (#9, 2026-10-31: the per-company limit counts first emails only)."""
@@ -144,6 +161,7 @@ class _Outbox:
         self.refs = company_refs(conn, set(self.survivor.values()), holds=self.holds)
         self.people = people_by_ids(conn, {t["person_id"] for t in self.touches})
         self.schedule = queue_schedule(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded)
+        self.projection, self.paused = queue_projection(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded)
         self.proof_stage = proof.phase(conn)
         self.queue_order = {mid: n for n, mid in enumerate(self.schedule)}
         self.tz = {q.message_id: q.tz for q in load_queue(conn, cfg)}
@@ -171,8 +189,13 @@ class _Outbox:
         when = self.now if verdict.reason == "ready" else (
             verdict.earliest_at.strftime(ISO_FMT) if verdict.earliest_at is not None else None)
         sent = self.sends_today.get(survivor, 0)
+        projected = self.projection.get(m["message_id"])
+        clock, text = (projection_words(projected, self.now, self.cfg, paused=self.paused) if projected is not None
+                       else (None, schedule_text(verdict.reason, when, self.now, self.cfg, self.proof_stage)))
         return Schedule(earliest_at=when, tz=self.tz.get(m["message_id"], self.cfg.day_tz), reason=verdict.reason,
-                        text=schedule_text(verdict.reason, when, self.now, self.cfg, self.proof_stage),
+                        projected_at=projected.strftime(ISO_FMT) if projected is not None else None,
+                        projected_day=cal.ny_date(projected, self.cfg).isoformat() if projected is not None else None,
+                        projected_clock=clock, text=text,
                         company_sent_today=sent,
                         company_slots_left=max(0, self.cfg.per_company_daily - sent))
 
@@ -216,8 +239,8 @@ class _Outbox:
     def _at(self, group: str, touch, m, schedule) -> str:
         if group == "replied" and touch["replied_at"]:
             return touch["replied_at"]
-        if group == "approved" and schedule is not None and schedule.earliest_at:
-            return schedule.earliest_at
+        if group == "approved" and schedule is not None and (schedule.projected_at or schedule.earliest_at):
+            return schedule.projected_at or schedule.earliest_at
         if m["state"] in CLAIMED and m["claimed_at"]:
             return m["claimed_at"]
         if group == "closed" and (touch["bounced_at"] or touch["closed_at"]):
@@ -263,7 +286,9 @@ class _Outbox:
         def key(pair):
             item, m = pair
             if item.group == "approved":
-                when = item.schedule.earliest_at if item.schedule is not None and item.schedule.earliest_at else far
+                sched = item.schedule
+                when = (sched.projected_at or sched.earliest_at) if sched is not None else None
+                when = when or far
                 return GROUP_INDEX[item.group], when, self.queue_order.get(m["message_id"], len(self.queue_order))
             return GROUP_INDEX[item.group], "", 0
 

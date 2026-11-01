@@ -63,6 +63,24 @@ class Base(unittest.TestCase):
         return self.verdicts_at(now, **kw)[message].reason
 
 
+class PrepareTest(Base):
+    def test_decide_all_equals_verdicts_for_the_whole_queue(self):
+        other = seed_company(self.db, "Other")
+        for _ in range(3):
+            self.approve()
+        for _ in range(3):
+            self.approve(company=other)
+        self.sent_at(self.company, MON - timedelta(minutes=30))
+        day = ramp.open_day(self.db, MON, CFG)
+        expected = queue.verdicts(self.db, MON, CFG, day=day, gate=None)
+        p = queue.prepare(self.db, MON, CFG, day=day)
+        got = queue.decide_all(p, MON, CFG, gate=None, pending=p.queue, sends=p.sends,
+                               sent_by_day={queue.cal.ny_date(MON, CFG): p.sent_today}, next_send=p.next_send,
+                               limit=p.limit)
+        self.assertEqual(got, expected)
+        self.assertEqual(len(got), 6)
+
+
 class QueueOrderTest(Base):
     def test_queue_is_first_approved_first(self):
         _, late = self.approve(approved_at="2026-11-02T14:00:00Z")

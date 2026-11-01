@@ -131,7 +131,7 @@ class CompanyEvent(Wire):
 
 
 class ThreadMessage(Wire):
-    seq: Literal[0, 1, 2, 3] | None
+    seq: Literal[0, 1, 2, 3, 4] | None
     direction: Literal["out", "in"]
     subject: str
     body: str

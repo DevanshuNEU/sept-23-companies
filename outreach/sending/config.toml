@@ -31,16 +31,17 @@ weekdays = [0, 1, 2, 3, 4]
 # Dates ("2026-11-26") that are not business days. Empty by default.
 holidays = []
 
-# People per company (#9): at most 3 a day, at least 60 minutes apart.
+# People per company (#9): at most 3 first emails a day (a follow-up takes no slot, 2026-10-31);
+# every email to a company, follow-ups too, at least 60 minutes apart.
 per_company_daily = 3
 per_company_gap_minutes = 60
 
 # Random gap between any two sends, in minutes (the deliverability research's pacing range).
 gap_minutes = [4, 9]
 
-# Follow-ups (#9): one, at about 7 business days; up to 3 entries because message.seq is 0 to 3.
-followup_business_days = [7]
-# A follow-up still planned this many business days after it was due lapses.
+# Follow-ups (#9, 2026-10-31): 4, at 3, 7, 14 and 21 business days after the first email; at most 4 (message.seq 0 to 4).
+followup_business_days = [3, 7, 14, 21]
+# A follow-up nobody approved or skipped this many business days after it was due lapses (planned or drafted).
 followup_lapse_business_days = 5
 # An open touch with nothing queued closes no_reply this many business days after its last sent message.
 close_after_business_days = 7

@@ -14,7 +14,7 @@ from outreach.sending.config import load_config
 from tests.importtest import fixture_manifest
 
 NOW = "2026-10-20T12:00:00Z"
-CFG = load_config()
+CFG = dataclasses.replace(load_config(), followup_business_days=(7,))  # built for one follow-up at 7 business days; the 4-follow-up schedule is tested in test_sending_followups
 
 
 def overrides(**kw) -> Overrides:

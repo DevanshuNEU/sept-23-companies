@@ -502,20 +502,20 @@ function track(firstDate: IsoDate) {
   const followups = ([3, 7, 15] as const).map((n, i) => {
     const dueOn = addBusinessDays(firstDate, n);
     const sent = dueOn <= TODAY;
-    return { seq: (i + 1) as 1 | 2 | 3, dueOn, sentAt: sent ? et(dueOn, '09:30') : null, state: (sent ? 'sent' : 'planned') as MessageState };
+    return { seq: (i + 1) as 1 | 2 | 3 | 4, dueOn, sentAt: sent ? et(dueOn, '09:30') : null, state: (sent ? 'sent' : 'planned') as MessageState };
   });
   const last = [...followups].reverse().find((f) => f.sentAt);
   const next = followups.find((f) => !f.sentAt);
   const nextText = next ? `Follow-up ${next.seq} due ${dayName(next.dueOn)}` : 'No more follow-ups';
   return {
-    followups, seq: (last?.seq ?? 0) as 0 | 1 | 2 | 3,
+    followups, seq: (last?.seq ?? 0) as 0 | 1 | 2 | 3 | 4,
     nextDue: next ? { seq: next.seq, on: next.dueOn } : null,
     summary: last ? `Follow-up ${last.seq} sent ${monthDay(last.dueOn)}. ${nextText}` : nextText,
   };
 }
 
 interface ItemSpec {
-  touch: number; person: PersonRef; company: string; group: OutboxGroup; state: MessageState; touchState?: TouchState; seq?: 0 | 1 | 2 | 3;
+  touch: number; person: PersonRef; company: string; group: OutboxGroup; state: MessageState; touchState?: TouchState; seq?: 0 | 1 | 2 | 3 | 4;
   subject: string; preview?: string; summary: string; at: IsoTime; schedule?: Schedule | null; nextDue?: OutboxItem['nextDue'];
   checks?: Check[]; body?: string; d?: Partial<OutboxDetail>;
 }
@@ -540,7 +540,7 @@ function buildItem(c: Ctx, s: ItemSpec, rank: number): { item: OutboxItem; detai
   return { item, detail };
 }
 
-const out = (seq: 0 | 1 | 2 | 3, subject: string, body: string, at: IsoTime): ThreadMessage => ({ seq, direction: 'out', subject, body, at, from: ME });
+const out = (seq: 0 | 1 | 2 | 3 | 4, subject: string, body: string, at: IsoTime): ThreadMessage => ({ seq, direction: 'out', subject, body, at, from: ME });
 
 const FIRSTS = ['Aiko', 'Bram', 'Calla', 'Dov', 'Elio', 'Fenna', 'Gideon', 'Hana', 'Ivo', 'Jaya', 'Kasia', 'Leif', 'Mireille', 'Nico', 'Odalys', 'Pavel', 'Quinn', 'Rahel', 'Soren', 'Talia', 'Uriel', 'Vesna', 'Wren', 'Xavi', 'Yara', 'Zane', 'Alder', 'Bexley', 'Cosima', 'Dashiell', 'Eluned', 'Florian', 'Greer', 'Halina', 'Idris', 'Jocasta', 'Kendrick'];
 const LASTS = ['Aldous', 'Brannigan', 'Castellan', 'Delacroix', 'Esterhazy', 'Fairweather', 'Gallo', 'Hartigan', 'Imbrie', 'Jessup', 'Kowalczyk', 'Marchetti', 'Novak', 'Okafor', 'Pellegrino', 'Quigley', 'Rasmussen', 'Sandoval', 'Thackeray', 'Underhill', 'Vasquez', 'Whitlock', 'Yamashita', 'Zielinski', 'Ashdown', 'Blackwood', 'Calloway', 'Dunmore', 'Everhart', 'Fontaine', 'Grimaldi'];

@@ -24,8 +24,9 @@ __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "
 
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
-           "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "company_paused", "company_held",
-           "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread") + STOP_REASONS
+           "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
+           "company_held", "per_company_limit", "per_company_gap", "recruiter_waits", "no_address",
+           "no_thread") + STOP_REASONS
 # The waits that end by themselves: their verdict carries the time they end.
 TIME_REASONS = frozenset({"not_business_day", "daily_limit", "spacing", "window", "followup_not_due",
                           "per_company_limit", "per_company_gap"})
@@ -46,6 +47,7 @@ REASON_TEXT = {
     "bad_timezone": "This person's time zone is not one the sender knows, so their sending hours are unknown. "
                     "Fix the time zone.",
     "followup_not_due": "This follow-up is not due yet.",
+    "earlier_followup": "An earlier follow-up in this thread has not gone out yet. This one goes after it.",
     "company_paused": "This company is paused. Unpause it to send.",
     "company_held": "This company is held because someone there replied. Release the hold to send.",
     "per_company_limit": "The daily limit for this company is used up. This goes out on the next sending day.",
@@ -82,6 +84,9 @@ class Verdict:
     reason: str
     earliest_at: datetime | None
 
+
+# The states of a message that has not gone out and may still: an earlier follow-up in one of them holds a later one.
+_UNSENT = ("planned", "drafted", "approved", "sending", "send_unknown", "failed")
 
 _APPROVED = (
     "SELECT m.message_id, m.touch_id, m.seq, m.revision, m.approved_at, m.due_on, t.person_id, t.state AS touch_state, "
@@ -131,6 +136,29 @@ def load_queue(conn: sqlite3.Connection, cfg: SendConfig | None = None) -> list[
     return _sorted([_queued(row, companies) for row in rows], cfg)
 
 
+def _gap(seq: int, cfg: SendConfig) -> int:
+    """Business days between follow-up `seq - 1` and follow-up `seq` in the schedule (seq 2 and up)."""
+    days = cfg.followup_business_days
+    if len(days) < 2:
+        return days[0]
+    i = min(seq, len(days)) - 1
+    return days[i] - days[i - 1]
+
+
+def _not_before(conn: sqlite3.Connection, cfg: SendConfig) -> dict[int, date]:
+    """For each approved follow-up from seq 2, the first day it may go: its schedule gap after the New York date of
+    the latest earlier message sent in its thread."""
+    out = {}
+    for row in conn.execute(
+            "SELECT m.message_id, m.seq, (SELECT max(e.sent_at) FROM message e WHERE e.touch_id = m.touch_id "
+            "AND e.seq BETWEEN 1 AND m.seq - 1 AND e.state = 'sent') AS prev FROM message m "
+            "WHERE m.state = 'approved' AND m.seq >= 2"):
+        if row["prev"]:
+            out[row["message_id"]] = cal.add_business_days(cal.ny_date(_utc(row["prev"]), cfg), _gap(row["seq"], cfg),
+                                                            cfg)
+    return out
+
+
 def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], conn: sqlite3.Connection) -> dict:
     """Message id to its stop reason, for the messages that have one."""
     no_go_people, no_go_companies = no_go_sets(conn, companies)
@@ -150,16 +178,17 @@ def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], co
 
 
 def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
-                   since: str) -> dict[int, list[datetime]]:
-    """When each surviving company was last sent to, from `since` on. A claimed message that may have gone out
+                   since: str) -> dict[int, list[tuple[datetime, bool]]]:
+    """When each surviving company was sent to from `since` on, each send with whether it was a first email (the
+    per-company limit counts only those; the gap counts every send). A claimed message that may have gone out
     (`sending`, `send_unknown`) counts at its claim time: better one wait too many than one send too many."""
-    sends: dict[int, list[datetime]] = {}
+    sends: dict[int, list[tuple[datetime, bool]]] = {}
     for row in conn.execute(
-            "SELECT p.company_id, CASE m.state WHEN 'sent' THEN m.sent_at ELSE m.claimed_at END AS at "
+            "SELECT p.company_id, m.seq, CASE m.state WHEN 'sent' THEN m.sent_at ELSE m.claimed_at END AS at "
             "FROM message m JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
             "WHERE m.state IN ('sent', 'sending', 'send_unknown') AND at >= ?", (since,)):
         survivor = resolve_company(companies, row["company_id"])[-1]
-        sends.setdefault(survivor, []).append(_utc(row["at"]))
+        sends.setdefault(survivor, []).append((_utc(row["at"]), row["seq"] == 0))
     return sends
 
 
@@ -169,8 +198,9 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     `old_sender_running`, `message_id_unproven`) is a reason the whole tick knows; it applies to every message that
     is not a stop.
     Order of reasons: stops; the gate; company paused; company held (a hold on any company merged into the
-    survivor counts); no address; a follow-up with no Gmail thread; follow-up not due; bad time zone; not a
-    business day; daily limit; per-company limit; per-company gap; recipient's window; recruiter waits; spacing."""
+    survivor counts); no address; a follow-up with no Gmail thread; follow-up not due; an earlier follow-up in the
+    thread not gone out; bad time zone; not a business day; daily limit; per-company limit; per-company gap;
+    recipient's window; recruiter waits; spacing."""
     rows, companies = _rows(conn)
     items = {row["message_id"]: _queued(row, companies) for row in rows}
     queue = _sorted(list(items.values()), cfg)
@@ -179,10 +209,17 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     stops = _stop_reasons(rows, companies, conn)
     # A follow-up goes only in its touch's Gmail thread; without one it would start a new thread, so it waits.
     no_thread = {row["message_id"] for row in rows if row["seq"] >= 1 and not row["gmail_thread_id"]}
+    # Follow-ups in one thread go out in order (#141): one waits while an earlier one has not gone out, and then
+    # keeps the schedule's gap after it (an earlier one sent late does not pull the next one right behind it).
+    not_before = _not_before(conn, cfg)
+    behind = {row[0] for row in conn.execute(
+        "SELECT m.message_id FROM message m WHERE m.state = 'approved' AND m.seq >= 2 AND EXISTS (SELECT 1 FROM "
+        "message e WHERE e.touch_id = m.touch_id AND e.seq BETWEEN 1 AND m.seq - 1 "
+        f"AND e.state IN ({','.join('?' * len(_UNSENT))}))", _UNSENT)}
     now = now.astimezone(timezone.utc)
     # A message that blocks a recruiter is one that could go out: not a stop, with an address and a thread, due.
     live_others = {q.company_id for q in queue if q.role_kind != "recruiter" and q.message_id not in stops
-                   and q.message_id not in no_thread
+                   and q.message_id not in no_thread and q.message_id not in behind
                    and q.to and not (q.due_on is not None
                                      and now < _due_start(q.due_on, cal.recipient_zone(q.tz), cfg))}
     held = held_survivors(companies)
@@ -207,15 +244,17 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
     for q in queue:
         reason, earliest = _decide(q, stops, gate, companies[q.company_id], q.company_id in held, now, cfg, today,
                                    sent_today >= limit, sends.get(q.company_id, []), day_begins, gap, tomorrow,
-                                   next_send, q.company_id in live_others, no_thread=q.message_id in no_thread)
+                                   next_send, q.company_id in live_others, no_thread=q.message_id in no_thread,
+                                   behind=q.message_id in behind, not_before=not_before.get(q.message_id))
         out.append(Verdict(q.message_id, reason, earliest))
     return out
 
 
 def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held: bool, now: datetime, cfg: SendConfig,
-            today: date, day_full: bool, sends: list[datetime], day_begins: datetime, gap: timedelta,
+            today: date, day_full: bool, sends: list[tuple[datetime, bool]], day_begins: datetime, gap: timedelta,
             tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
-            no_thread: bool = False) -> tuple[str, datetime | None]:
+            no_thread: bool = False, behind: bool = False,
+            not_before: date | None = None) -> tuple[str, datetime | None]:
     if q.message_id in stops:
         return stops[q.message_id], None
     if gate is not None:
@@ -229,20 +268,25 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
     if no_thread:
         return "no_thread", None
     zone = cal.recipient_zone(q.tz)
-    if q.due_on is not None:
-        due = _due_start(q.due_on, zone, cfg)
+    due_on = max((d for d in (q.due_on, not_before) if d is not None), default=None)
+    if due_on is not None:
+        due = _due_start(due_on, zone, cfg)
         if now < due:
             return "followup_not_due", cal.next_window_start(due, zone or ZoneInfo(cfg.day_tz), cfg)
+    if behind:
+        return "earlier_followup", None
     if zone is None:
         return "bad_timezone", None
     if not cal.is_business_day(today, cfg):
         return "not_business_day", tomorrow
     if day_full:
         return "daily_limit", tomorrow
-    if sum(1 for at in sends if at >= day_begins) >= cfg.per_company_daily:
+    # #9, 2026-10-31: the per-company limit is first emails only; a follow-up neither counts nor waits for it.
+    if q.seq == 0 and sum(1 for at, first in sends if first and at >= day_begins) >= cfg.per_company_daily:
         return "per_company_limit", tomorrow
-    if sends and now < max(sends) + gap:
-        return "per_company_gap", max(sends) + gap
+    last = max((at for at, _ in sends), default=None)
+    if last is not None and now < last + gap:
+        return "per_company_gap", last + gap
     if not cal.in_window(now, zone, cfg):
         return "window", cal.next_window_start(now, zone, cfg)
     if q.role_kind == "recruiter" and others_queued:

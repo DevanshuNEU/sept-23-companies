@@ -1,5 +1,6 @@
 import type { IsoTime, OutboxDetail } from '@/api';
 import { formatDay, formatDue, formatDueDay } from '@/lib/format';
+import { FOLLOWUP_COUNT } from '@/lib/followups';
 import { cn } from '@/lib/utils';
 
 type Stage = { key: string; title: string; when: string; done: boolean; live: boolean };
@@ -14,8 +15,8 @@ function stages(firstSentAt: IsoTime | null, followups: OutboxDetail['followups'
       live: true,
     },
   ];
-  for (const seq of [1, 2, 3] as const) {
-    const title = seq === 3 ? 'Follow-up 3, polite close' : `Follow-up ${seq}`;
+  for (let seq = 1; seq <= FOLLOWUP_COUNT; seq++) {
+    const title = seq === FOLLOWUP_COUNT ? `Follow-up ${seq}, polite close` : `Follow-up ${seq}`;
     const f = followups.find((x) => x.seq === seq);
     if (!f) out.push({ key: String(seq), title, when: 'Not scheduled', done: false, live: false });
     else if (f.sentAt) out.push({ key: String(seq), title, when: `Sent ${formatDay(f.sentAt)}`, done: true, live: true });
@@ -28,7 +29,7 @@ function stages(firstSentAt: IsoTime | null, followups: OutboxDetail['followups'
   return out;
 }
 
-/** The first email and its three follow-ups: sent ones filled, the next one outlined, the rest plain. */
+/** The first email and its follow-ups: sent ones filled, the next one outlined, the rest plain. */
 export function FollowupTrack({
   firstSentAt,
   followups,
@@ -41,7 +42,7 @@ export function FollowupTrack({
   const all = stages(firstSentAt, followups, asOf);
   const nowKey = all.find((s) => !s.done && s.live)?.key;
   return (
-    <div role="group" aria-label="Follow-up schedule" className="grid grid-cols-4 gap-2">
+    <div role="group" aria-label="Follow-up schedule" className="grid grid-cols-5 gap-2">
       {all.map((s) => {
         const state = s.done ? 'done' : s.key === nowKey ? 'now' : 'next';
         return (

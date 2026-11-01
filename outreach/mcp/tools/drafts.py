@@ -28,7 +28,8 @@ from outreach.drafting.brief import brief_id, check_brief, read_evidence
 from outreach.drafting.voice import VoiceUnreadable, load_voice_pack
 from outreach.drafts.checks import (DEFAULT_BANNED_PHRASES, DEFAULT_WORDS, HOOK_DATE, MAX_LINKS, URL, WORDS, DraftInput,
                                     cached_mx, email_domain, load_banned, run_checks)
-from outreach.drafts.followups import company_map, due_followups, held_survivors, no_go_sets, resolve_company
+from outreach.drafts.followups import (MAX_FOLLOWUPS, company_map, due_followups, held_survivors, no_go_sets,
+                                       resolve_company)
 from outreach.mcp.guard import Grant
 from outreach.mcp.tools import PREPARED_BY, Ctx, Input, ToolError, ToolSpec
 from outreach.mcp.tools.people import said_no_ids
@@ -265,7 +266,7 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
 
 class SaveFollowupInput(Input):
     person_id: int = Field(ge=1, le=MAX_ID)
-    seq: int = Field(ge=1, le=3, description="Which follow-up (followups_due gives it).")
+    seq: int = Field(ge=1, le=MAX_FOLLOWUPS, description="Which follow-up (followups_due gives it).")
     body: str = Field(min_length=1, max_length=3000, description="The follow-up text; the subject is set for you.")
     revision: int | None = Field(None, ge=1, le=MAX_ID, description="The revision you read; a newer one refuses.")
 

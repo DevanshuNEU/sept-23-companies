@@ -3,6 +3,7 @@
 Everything runs the real `run_tick` on a temporary store with FakeGmail and the fake clock; nothing sleeps. The two
 weeks are simulated once for the whole module (about 20 seconds) and every test of them reads that one result.
 """
+import dataclasses
 import json
 import unittest
 from collections import Counter, defaultdict
@@ -12,7 +13,7 @@ from zoneinfo import ZoneInfo
 from outreach.sending.config import load_config
 from outreach.sending.simulate import TWO_WEEKS, Event, Scenario, format_table, ny, simulate
 
-CFG = load_config()
+CFG = dataclasses.replace(load_config(), followup_business_days=(7,))  # built for one follow-up at 7 business days; the 4-follow-up schedule is tested in test_sending_followups
 NY = ZoneInfo("America/New_York")
 MON = date(2026, 11, 2)
 D = {n: date(2026, 11, 2) + timedelta(days=d) for n, d in
@@ -22,7 +23,7 @@ RESULT = None
 
 def setUpModule():
     global RESULT
-    RESULT = simulate(TWO_WEEKS)
+    RESULT = simulate(TWO_WEEKS, cfg=CFG)
 
 
 def tearDownModule():
@@ -186,7 +187,7 @@ def morning(n: int, count: int) -> Event:
 
 class StopRulesTest(unittest.TestCase):
     def run_scenario(self, scenario: Scenario):
-        result = simulate(scenario)
+        result = simulate(scenario, cfg=CFG)
         self.addCleanup(result.close)
         return result
 

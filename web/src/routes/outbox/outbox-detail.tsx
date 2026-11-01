@@ -32,6 +32,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Skeleton } from '@/components/ui/skeleton';
 import { useHotkeys } from '@/keyboard/hotkeys';
 import { ageDays, formatAge, formatDueDay } from '@/lib/format';
+import { FOLLOWUP_COUNT } from '@/lib/followups';
 import { useEdits, type Edit } from '@/pending/edits';
 import { usePendingControls, usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { newestRevision, noteRevision, withRevision } from '@/pending/revisions';
@@ -111,7 +112,7 @@ function DetailHeader({ detail }: { detail: OutboxDetail }) {
   const { person, company } = item;
   const status = rowStatus(item);
   // The badge repeats what the kind badge or the plain Draft state already says.
-  const showStatus = status.label !== 'Draft' && status.label !== `Follow-up ${item.seq} of 3`;
+  const showStatus = status.label !== 'Draft' && status.label !== `Follow-up ${item.seq} of ${FOLLOWUP_COUNT}`;
   return (
     <header className="flex flex-none items-start gap-3 border-b px-5 py-4">
       <Avatar size="lg">
@@ -136,7 +137,7 @@ function DetailHeader({ detail }: { detail: OutboxDetail }) {
       </div>
       <div className="flex flex-none flex-wrap justify-end gap-1.5">
         <Badge variant={person.roleKind === 'recruiter' ? 'warn' : 'outline'}>{ROLE_BADGE[person.roleKind]}</Badge>
-        {item.touchState !== 'replied' ? <Badge variant="outline">{item.seq === 0 ? 'First email' : `Follow-up ${item.seq} of 3`}</Badge> : null}
+        {item.touchState !== 'replied' ? <Badge variant="outline">{item.seq === 0 ? 'First email' : `Follow-up ${item.seq} of ${FOLLOWUP_COUNT}`}</Badge> : null}
         {showStatus ? <StatusBadge status={status} dot /> : null}
       </div>
     </header>
@@ -171,7 +172,7 @@ function ContextRow({ detail }: { detail: OutboxDetail }) {
         ) : (
           <Cell
             k={`${item.company.name} today`}
-            v={`${schedule.companySentToday} sent, ${plural(schedule.companySlotsLeft, 'slot', 'slots')} left`}
+            v={`${plural(schedule.companySentToday, 'first email', 'first emails')} sent, ${plural(schedule.companySlotsLeft, 'slot', 'slots')} left`}
             s={schedule.text}
           />
         )

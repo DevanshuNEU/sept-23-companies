@@ -178,6 +178,26 @@ class LimitsTest(Base):
         self.assertEqual(verdict.reason, "per_company_limit")
         self.assertEqual(verdict.earliest_at, ny(3, 8, 30))
 
+    def test_a_follow_up_never_waits_for_the_company_limit(self):
+        # #9, 2026-10-31: the per-company limit counts first emails only.
+        for hour in (5, 6, 7):
+            self.sent_at(self.company, ny(2, hour))
+        _, followup = self.approve_followup("2026-11-02")
+        self.assertEqual(self.reason(followup), "ready")
+
+    def test_follow_ups_sent_today_do_not_count_toward_the_company_limit(self):
+        for hour in (5, 6, 7):
+            person = self.person()
+            seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=7))
+            seed_sent(self.db, person, at=ny(2, hour), seq=1)
+        _, message = self.approve()
+        self.assertEqual(self.reason(message), "ready")
+
+    def test_a_follow_up_still_keeps_the_60_minute_company_gap(self):
+        self.sent_at(self.company, MON - timedelta(minutes=30))
+        _, followup = self.approve_followup("2026-11-02")
+        self.assertEqual(self.reason(followup), "per_company_gap")
+
     def test_third_send_at_one_company_is_still_ready(self):
         _, message = self.approve()
         self.sent_at(self.company, ny(2, 5))
@@ -584,3 +604,66 @@ class ReasonsTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FollowupOrderTest(Base):
+    """Follow-ups in one thread go out in order (#141): a follow-up waits while an earlier one has not gone out."""
+
+    def thread(self):
+        """A person whose first email went out a week before Monday. Returns the person id."""
+        person = self.person()
+        seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=7))
+        return person
+
+    def test_a_follow_up_waits_for_an_approved_earlier_one(self):
+        person = self.thread()
+        first = seed_message(self.db, person, seq=1, due_on="2026-10-28")
+        second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
+        self.assertEqual(self.reason(first), "ready")
+        self.assertEqual(self.reason(second), "earlier_followup")
+        self.assertIsNone(self.verdicts_at()[second].earliest_at)
+
+    def test_it_waits_while_the_earlier_one_waits_out_the_company_gap(self):
+        person = self.thread()
+        self.sent_at(self.company, MON - timedelta(minutes=30))
+        first = seed_message(self.db, person, seq=1, due_on="2026-10-28")
+        second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
+        self.assertEqual(self.reason(first), "per_company_gap")
+        self.assertEqual(self.reason(second), "earlier_followup")
+
+    def test_a_planned_earlier_one_holds_it_too(self):
+        person = self.thread()
+        seed_message(self.db, person, state="planned", seq=1, due_on="2026-10-28")
+        second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
+        self.assertEqual(self.reason(second), "earlier_followup")
+
+    def test_a_skipped_earlier_one_lets_it_go(self):
+        person = self.thread()
+        first = seed_message(self.db, person, state="drafted", seq=1, due_on="2026-10-28")
+        self.db.execute("UPDATE message SET state = 'skipped' WHERE message_id = ?", (first,))
+        second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
+        self.assertEqual(self.reason(second), "ready")
+
+    def test_a_sent_earlier_one_lets_it_go(self):
+        person = self.thread()
+        seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=6), seq=1)  # Tuesday: 4 business days ago
+        second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
+        self.assertEqual(self.reason(second), "ready")
+
+    def test_it_keeps_its_gap_after_the_earlier_one_went_out_late(self):
+        # Follow-up 1 went out late, on Friday 2026-10-30; follow-up 2 is due by the first email's clock but waits
+        # 4 business days (7 minus 3) after follow-up 1: Thursday 2026-11-05 at the window start.
+        person = self.thread()
+        seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=3), seq=1)
+        second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
+        verdict = self.verdicts_at()[second]
+        self.assertEqual(verdict.reason, "followup_not_due")
+        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 5, 8, 30, tzinfo=ZoneInfo("America/New_York")))
+        self.assertEqual(self.reason(second, now=datetime(2026, 11, 5, 9, 0, tzinfo=ZoneInfo("America/New_York"))),
+                         "ready")
+
+    def test_the_reason_has_words(self):
+        self.assertIn("earlier_followup", queue.REASONS)
+        self.assertNotIn("earlier_followup", queue.TIME_REASONS)
+        self.assertEqual(queue.REASON_TEXT["earlier_followup"],
+                         "An earlier follow-up in this thread has not gone out yet. This one goes after it.")

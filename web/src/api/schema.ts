@@ -1975,7 +1975,7 @@ export interface components {
              * Seq
              * @enum {integer}
              */
-            seq: 0 | 1 | 2 | 3;
+            seq: 0 | 1 | 2 | 3 | 4;
             /**
              * State
              * @enum {string}
@@ -2343,7 +2343,7 @@ export interface components {
              * Seq
              * @enum {integer}
              */
-            seq: 1 | 2 | 3;
+            seq: 1 | 2 | 3 | 4;
         };
         /** NextSend */
         NextSend: {
@@ -2582,7 +2582,7 @@ export interface components {
              * Seq
              * @enum {integer}
              */
-            seq: 1 | 2 | 3;
+            seq: 1 | 2 | 3 | 4;
             /**
              * State
              * @enum {string}
@@ -2621,7 +2621,7 @@ export interface components {
              * Seq
              * @enum {integer}
              */
-            seq: 0 | 1 | 2 | 3;
+            seq: 0 | 1 | 2 | 3 | 4;
             /** Sortkey */
             sortKey: string;
             /**
@@ -3476,7 +3476,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "ready" | "sender_paused" | "signed_out" | "old_sender_running" | "message_id_unproven" | "not_business_day" | "daily_limit" | "spacing" | "window" | "bad_timezone" | "followup_not_due" | "company_paused" | "company_held" | "per_company_limit" | "per_company_gap" | "recruiter_waits" | "no_address" | "no_thread" | "company_closed" | "no_go" | "reply_stop" | "touch_done";
+            reason: "ready" | "sender_paused" | "signed_out" | "old_sender_running" | "message_id_unproven" | "not_business_day" | "daily_limit" | "spacing" | "window" | "bad_timezone" | "followup_not_due" | "earlier_followup" | "company_paused" | "company_held" | "per_company_limit" | "per_company_gap" | "recruiter_waits" | "no_address" | "no_thread" | "company_closed" | "no_go" | "reply_stop" | "touch_done";
             /** Text */
             text: string;
             /** Tz */
@@ -3770,7 +3770,7 @@ export interface components {
             /** From */
             from: string;
             /** Seq */
-            seq: (0 | 1 | 2 | 3) | null;
+            seq: (0 | 1 | 2 | 3 | 4) | null;
             /** Subject */
             subject: string;
         };

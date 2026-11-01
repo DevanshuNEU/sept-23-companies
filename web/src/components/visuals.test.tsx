@@ -129,6 +129,7 @@ describe('FollowupTrack', () => {
     { seq: 1 as const, dueOn: '2026-11-04', sentAt: '2026-11-04T15:00:00Z', state: 'sent' as const },
     { seq: 2 as const, dueOn: '2026-11-10', sentAt: null, state: 'drafted' as const },
     { seq: 3 as const, dueOn: '2026-11-20', sentAt: null, state: 'planned' as const },
+    { seq: 4 as const, dueOn: '2026-12-01', sentAt: null, state: 'planned' as const },
   ];
 
   it('shows sent steps, today as due today with the day, and a later due date', () => {
@@ -138,8 +139,10 @@ describe('FollowupTrack', () => {
     expect(within(track).getByText('Sent Fri Oct 30')).toBeInTheDocument();
     expect(within(track).getByText('Sent Wed Nov 4')).toBeInTheDocument();
     expect(within(track).getByText('Due today, Tue Nov 10')).toBeInTheDocument();
-    expect(within(track).getByText('Follow-up 3, polite close')).toBeInTheDocument();
+    expect(within(track).getByText('Follow-up 3')).toBeInTheDocument();
     expect(within(track).getByText('Due Fri Nov 20')).toBeInTheDocument();
+    expect(within(track).getByText('Follow-up 4, polite close')).toBeInTheDocument();
+    expect(within(track).getByText('Due Tue Dec 1')).toBeInTheDocument();
   });
 
   it('marks done and the next due step', () => {
@@ -149,13 +152,14 @@ describe('FollowupTrack', () => {
       'done',
       'now',
       'next',
+      'next',
     ]);
   });
 
   it('copes with nothing sent and a missing follow-up', () => {
     render(<FollowupTrack firstSentAt={null} followups={[]} asOf={ASOF} />);
     expect(screen.getByText('Not sent yet')).toBeInTheDocument();
-    expect(screen.getAllByText('Not scheduled')).toHaveLength(3);
+    expect(screen.getAllByText('Not scheduled')).toHaveLength(4);
   });
 });
 

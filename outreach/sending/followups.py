@@ -1,8 +1,9 @@
-"""Follow-ups (#9: one, at about 7 business days), their lapse, closing quiet touches and stopping messages.
+"""Follow-ups (#9, 2026-10-31: 4, at 3, 7, 14 and 21 business days), their lapse, closing quiet touches and stopping
+messages.
 
-`plan_followups` runs when a first email goes out; `lapse_followups`, `close_quiet_touches` and `sweep_stopped` run
-on every tick; `stop_touch_messages` is what a reply or a bounce does to the touch's queue. Every function runs
-inside the caller's transaction and opens none.
+`plan_followups` runs when a first email goes out; `sync_followups`, `lapse_followups`, `close_quiet_touches` and
+`sweep_stopped` run on every tick; `stop_touch_messages` is what a reply or a bounce does to the touch's queue. Every
+function runs inside the caller's transaction and opens none.
 
 A `planned` row holds no text, and the `message` CHECK refuses an empty subject or body in every state but
 `planned`, so a planned row that will never be drafted is deleted (with an event on its touch), never moved to
@@ -19,8 +20,8 @@ from outreach.sending.signals import as_datetime
 from outreach.store.timefmt import iso_utc, utcnow
 from outreach.store.writes import append_event
 
-__all__ = ["plan_followups", "stop_planned", "stop_touch_messages", "lapse_followups", "close_quiet_touches",
-           "sweep_stopped", "STOPPABLE"]
+__all__ = ["plan_followups", "sync_followups", "stop_planned", "stop_touch_messages", "lapse_followups",
+           "close_quiet_touches", "sweep_stopped", "STOPPABLE"]
 
 # The states of a message that has not gone out and is not in flight: what a stop removes from the queue. A
 # `sending` or `send_unknown` row may already be out, so the sender settles it by Message-ID instead.
@@ -41,20 +42,69 @@ def plan_followups(conn: sqlite3.Connection, touch_id: int, first_sent_on: date,
     (default the real clock; the sender passes the send time)."""
     stamp = iso_utc(now) if now else utcnow()
     company_id = _company_of_touch(conn, touch_id)
-    added = 0
-    for seq, days in enumerate(cfg.followup_business_days, start=1):
-        due_on = cal.add_business_days(first_sent_on, days, cfg).isoformat()
-        cur = conn.execute(
-            "INSERT INTO message(touch_id, seq, state, due_on, saved_by, created_at, updated_at) "
-            "VALUES (?, ?, 'planned', ?, 'sender', ?, ?) ON CONFLICT(touch_id, seq) DO NOTHING",
-            (touch_id, seq, due_on, stamp, stamp))
-        if cur.rowcount:
-            added += 1
-            append_event(conn, entity="message", entity_id=cur.lastrowid, company_id=company_id,
-                         kind="followup_planned", actor="sender", at=stamp,
-                         detail={"touch_id": touch_id, "seq": seq, "due_on": due_on},
-                         idempotency_key=f"followup-planned:{touch_id}:{seq}:{due_on}")
-    return added
+    return sum(_plan_one(conn, touch_id, seq, cal.add_business_days(first_sent_on, days, cfg).isoformat(),
+                         company_id, stamp)
+               for seq, days in enumerate(cfg.followup_business_days, start=1))
+
+
+def _plan_one(conn: sqlite3.Connection, touch_id: int, seq: int, due_on: str, company_id: int, stamp: str) -> bool:
+    """One `planned` row with a `followup_planned` event, unless the seq already has a row."""
+    cur = conn.execute(
+        "INSERT INTO message(touch_id, seq, state, due_on, saved_by, created_at, updated_at) "
+        "VALUES (?, ?, 'planned', ?, 'sender', ?, ?) ON CONFLICT(touch_id, seq) DO NOTHING",
+        (touch_id, seq, due_on, stamp, stamp))
+    if not cur.rowcount:
+        return False
+    append_event(conn, entity="message", entity_id=cur.lastrowid, company_id=company_id,
+                 kind="followup_planned", actor="sender", at=stamp,
+                 detail={"touch_id": touch_id, "seq": seq, "due_on": due_on},
+                 idempotency_key=f"followup-planned:{touch_id}:{seq}:{due_on}")
+    return True
+
+
+def sync_followups(conn: sqlite3.Connection, cfg: SendConfig, *, now: str) -> int:
+    """Every `open` touch whose first email went out in a Gmail thread follows `cfg.followup_business_days` (#141),
+    so a schedule change reaches the threads already sent. A seq with no row is planned (`_plan_one`) unless its
+    touch has a `followup_lapsed` or `skipped_by_sender` event for that seq: a stopped follow-up never comes back. A
+    `planned` row (it holds no text) whose `due_on` differs is re-dated, with a touch event `followup_replanned`
+    `{seq, from, to}`. Every other row is left as it is. Only the sender's own threads (`origin = 'sender'`): an
+    imported thread keeps what the import gave it. A thread with a `skipped_by_sender` touch event (a reply, a
+    bounce, a company closed, a no-go: every stop but a lapse ends the thread's queue) gets nothing new. Returns how
+    many rows were added or re-dated."""
+    stamp = iso_utc(now)
+    changed = 0
+    for touch in conn.execute(
+            "SELECT touch_id, first_sent_at FROM touch WHERE state = 'open' AND origin = 'sender' "
+            "AND first_sent_at IS NOT NULL AND gmail_thread_id IS NOT NULL ORDER BY touch_id").fetchall():
+        touch_id = touch["touch_id"]
+        first = cal.ny_date(as_datetime(touch["first_sent_at"]), cfg)
+        rows = {r["seq"]: r for r in conn.execute(
+            "SELECT message_id, seq, state, due_on FROM message WHERE touch_id = ? AND seq >= 1", (touch_id,))}
+        wanted = {seq: cal.add_business_days(first, days, cfg).isoformat()
+                  for seq, days in enumerate(cfg.followup_business_days, start=1)}
+        if all(seq in rows and (rows[seq]["state"] != "planned" or rows[seq]["due_on"] == due)
+               for seq, due in wanted.items()):
+            continue
+        company_id = _company_of_touch(conn, touch_id)
+        stops = conn.execute("SELECT kind, json_extract(detail, '$.seq') FROM event WHERE entity = 'touch' "
+                             "AND entity_id = ? AND kind IN ('followup_lapsed', 'skipped_by_sender')",
+                             (touch_id,)).fetchall()
+        thread_stopped = any(kind == "skipped_by_sender" for kind, _ in stops)
+        lapsed = {seq for _, seq in stops}
+        for seq, due in wanted.items():
+            row = rows.get(seq)
+            if row is None:
+                if not thread_stopped and seq not in lapsed:
+                    changed += _plan_one(conn, touch_id, seq, due, company_id, stamp)
+            elif row["state"] == "planned" and row["due_on"] != due:
+                conn.execute("UPDATE message SET due_on = ?, updated_at = ?, revision = revision + 1 "
+                             "WHERE message_id = ? AND state = 'planned'", (due, stamp, row["message_id"]))
+                append_event(conn, entity="touch", entity_id=touch_id, company_id=company_id,
+                             kind="followup_replanned", actor="sender", at=stamp,
+                             detail={"seq": seq, "from": row["due_on"], "to": due},
+                             idempotency_key=f"followup-replanned:{touch_id}:{seq}:{due}")
+                changed += 1
+    return changed
 
 
 def stop_planned(conn: sqlite3.Connection, message_id: int, *, reason: str, now: str, actor: str = "sender") -> None:
@@ -104,16 +154,34 @@ def stop_touch_messages(conn: sqlite3.Connection, touch_id: int, *, reason: str,
 
 
 def lapse_followups(conn: sqlite3.Connection, today: date, cfg: SendConfig, *, now: str | None = None) -> int:
-    """A follow-up still `planned` (never drafted) `followup_lapse_business_days` (5) business days after its due
-    date lapses: the row is deleted with a `followup_lapsed` event on its touch (`stop_planned`). A lapsed follow-up
-    is not revived; a re-plan is a new row. Returns how many lapsed. `now` stamps the events (default the clock)."""
+    """A follow-up nobody approved or skipped `followup_lapse_business_days` (5) business days after its due date
+    lapses (#9, 2026-10-31). A `planned` row (never drafted) is deleted with a `followup_lapsed` event on its touch
+    (`stop_planned`); a `drafted` row moves to `skipped` with a `followup_lapsed` event on the message, counting from
+    the later of its due date and its last change (a draft he unapproved late to fix gets 5 business days from that
+    change). An `approved` one never lapses. A lapsed follow-up is not revived; a re-plan is a new row. Returns how
+    many lapsed. `now` stamps the events (default the clock)."""
     stamp = iso_utc(now) if now else utcnow()
     lapsed = 0
-    for row in conn.execute("SELECT message_id, due_on FROM message WHERE state = 'planned' AND due_on IS NOT NULL "
-                            "AND due_on < ? ORDER BY due_on, message_id", (today.isoformat(),)).fetchall():
-        if cal.business_days_between(date.fromisoformat(row["due_on"]), today, cfg) >= cfg.followup_lapse_business_days:
+    for row in conn.execute("SELECT message_id, touch_id, seq, state, due_on, updated_at, revision FROM message "
+                            "WHERE state IN ('planned', 'drafted') AND seq >= 1 AND due_on IS NOT NULL AND due_on < ? "
+                            "ORDER BY due_on, message_id", (today.isoformat(),)).fetchall():
+        since = date.fromisoformat(row["due_on"])
+        if row["state"] == "drafted":
+            since = max(since, cal.ny_date(as_datetime(row["updated_at"]), cfg))
+        if cal.business_days_between(since, today, cfg) < cfg.followup_lapse_business_days:
+            continue
+        if row["state"] == "planned":
             stop_planned(conn, row["message_id"], reason="lapsed", now=stamp)
             lapsed += 1
+            continue
+        if not conn.execute("UPDATE message SET state = 'skipped', updated_at = ?, revision = revision + 1 "
+                            "WHERE message_id = ? AND state = 'drafted'", (stamp, row["message_id"])).rowcount:
+            continue
+        append_event(conn, entity="message", entity_id=row["message_id"],
+                     company_id=_company_of_touch(conn, row["touch_id"]), kind="followup_lapsed", actor="sender",
+                     at=stamp, detail={"seq": row["seq"], "due_on": row["due_on"], "reason": "lapsed"},
+                     idempotency_key=f"followup-lapsed:{row['message_id']}:{row['revision'] + 1}")
+        lapsed += 1
     return lapsed
 
 

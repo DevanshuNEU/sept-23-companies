@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAnnounce, useHotkeys, useLiveSelection } from '@/keyboard/hotkeys';
 import { ageDays, formatDay, formatLocalTime } from '@/lib/format';
+import { FOLLOWUP_COUNT } from '@/lib/followups';
 import { byKey, isBlocked, slotOf, type Slot } from './outbox-order';
 import { useStableOrder } from '@/lib/stable-order';
 import { messageStatus, touchStatus, type Status } from '@/lib/status';
@@ -41,7 +42,7 @@ export function rowStatus(item: OutboxItem): Status {
   if (item.state !== 'drafted' && item.state !== 'planned') return messageStatus[item.state];
   if (item.blockCount > 0) return { label: 'Blocked', tone: 'bad' };
   if (item.warnCount > 0) return { label: item.warnCount === 1 ? '1 warning' : `${item.warnCount} warnings`, tone: 'warn' };
-  if (item.seq > 0) return { label: `Follow-up ${item.seq} of 3`, tone: 'idle' };
+  if (item.seq > 0) return { label: `Follow-up ${item.seq} of ${FOLLOWUP_COUNT}`, tone: 'idle' };
   return messageStatus.drafted;
 }
 

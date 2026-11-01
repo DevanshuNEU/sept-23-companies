@@ -13,13 +13,16 @@ from outreach.sending import claim, queue
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import (close_quiet_touches, lapse_followups, plan_followups, stop_planned,
-                                        sweep_stopped)
+                                        sweep_stopped, sync_followups)
 from outreach.store import transaction
 from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent
 from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()
 STAMP = "2026-11-20T15:00:00Z"
+ONE = dataclasses.replace(CFG, followup_business_days=(7,))  # one follow-up, for the tests about lapses and closes
+# A first email on Monday 2026-11-02: follow-ups at 3, 7, 14 and 21 business days (#9, 2026-10-31).
+FROM_MON = [(1, "2026-11-05"), (2, "2026-11-11"), (3, "2026-11-20"), (4, "2026-12-01")]
 
 
 class Base(unittest.TestCase):
@@ -71,15 +74,16 @@ class Base(unittest.TestCase):
 
 
 class PlanTest(Base):
-    def test_followup_due_seven_business_days_later(self):
-        self.assertEqual(self.send_at(MON), [(1, "2026-11-11")])
+    def test_four_follow_ups_at_3_7_14_and_21_business_days(self):
+        self.assertEqual(self.send_at(MON), FROM_MON)
 
-    def test_friday_send_follow_up_lands_seven_business_days_later(self):
-        self.assertEqual(self.send_at(datetime(2026, 11, 6, 14, 0, tzinfo=UTC)), [(1, "2026-11-17")])
+    def test_friday_send_follow_ups_skip_the_weekends(self):
+        self.assertEqual(self.send_at(datetime(2026, 11, 6, 14, 0, tzinfo=UTC)),
+                         [(1, "2026-11-11"), (2, "2026-11-17"), (3, "2026-11-26"), (4, "2026-12-07")])
 
     def test_evening_utc_send_uses_the_new_york_date(self):
         # 02:00 UTC on Tuesday is 21:00 on Monday in New York.
-        self.assertEqual(self.send_at(datetime(2026, 11, 3, 2, 0, tzinfo=UTC)), [(1, "2026-11-11")])
+        self.assertEqual(self.send_at(datetime(2026, 11, 3, 2, 0, tzinfo=UTC)), FROM_MON)
 
     def test_three_configured_follow_ups_make_seq_1_to_3(self):
         cfg = dataclasses.replace(CFG, followup_business_days=(3, 7, 15))
@@ -91,18 +95,18 @@ class PlanTest(Base):
     def test_planning_twice_adds_nothing(self):
         _, touch_id = self.sent_touch()
         with transaction(self.db):
-            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON)), 1)
+            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON)), 4)
             self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON)), 0)
-        self.assertEqual(self.planned(touch_id), [(1, "2026-11-11")])
+        self.assertEqual(self.planned(touch_id), FROM_MON)
         planned_events = self.db.execute("SELECT COUNT(*) FROM event WHERE kind = 'followup_planned'").fetchone()[0]
-        self.assertEqual(planned_events, 1)
+        self.assertEqual(planned_events, 4)
 
 
 class LapseTest(Base):
     def planned_touch(self):
         _, touch_id = self.sent_touch()
         with transaction(self.db):
-            plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON))  # due Wednesday 2026-11-11
+            plan_followups(self.db, touch_id, date(2026, 11, 2), ONE, now=iso(MON))  # due Wednesday 2026-11-11
         return touch_id
 
     def lapse(self, today):
@@ -132,11 +136,34 @@ class LapseTest(Base):
         self.assertEqual(len(self.touch_events(touch_id, "followup_lapsed")), 1)
         self.assertEqual(self.touch_events(touch_id, "skipped_by_sender"), [])
 
-    def test_a_drafted_follow_up_never_lapses(self):
-        person, touch_id = self.sent_touch()
+    def test_a_drafted_follow_up_nobody_acts_on_lapses_after_five_business_days(self):
+        person, _ = self.sent_touch()
         drafted = seed_message(self.db, person, state="drafted", seq=1, due_on="2026-11-11")
-        self.assertEqual(self.lapse(date(2026, 11, 30)), 0)
+        self.assertEqual(self.lapse(date(2026, 11, 17)), 0)  # four business days after it was due
         self.assertEqual(self.state(drafted), "drafted")
+        self.assertEqual(self.lapse(date(2026, 11, 18)), 1)  # five
+        self.assertEqual(self.state(drafted), "skipped")
+        events = [json.loads(r["detail"]) for r in self.db.execute(
+            "SELECT detail FROM event WHERE entity = 'message' AND entity_id = ? AND kind = 'followup_lapsed'",
+            (drafted,))]
+        self.assertEqual(events, [{"seq": 1, "due_on": "2026-11-11", "reason": "lapsed"}])
+        self.assertEqual(self.lapse(date(2026, 11, 30)), 0)
+
+    def test_a_drafted_follow_up_changed_late_gets_five_business_days_from_the_change(self):
+        person, _ = self.sent_touch()
+        drafted = seed_message(self.db, person, state="drafted", seq=1, due_on="2026-11-11")
+        # He unapproved it on Tuesday 2026-11-17, past its due date, to fix a word.
+        self.db.execute("UPDATE message SET updated_at = '2026-11-17T15:00:00Z' WHERE message_id = ?", (drafted,))
+        self.assertEqual(self.lapse(date(2026, 11, 23)), 0)  # four business days after the change
+        self.assertEqual(self.state(drafted), "drafted")
+        self.assertEqual(self.lapse(date(2026, 11, 24)), 1)  # five
+        self.assertEqual(self.state(drafted), "skipped")
+
+    def test_an_approved_follow_up_never_lapses(self):
+        person, _ = self.sent_touch()
+        approved = seed_message(self.db, person, state="approved", seq=1, due_on="2026-11-11")
+        self.assertEqual(self.lapse(date(2026, 11, 30)), 0)
+        self.assertEqual(self.state(approved), "approved")
 
     def test_stop_planned_refuses_a_drafted_row(self):
         person, _ = self.sent_touch()
@@ -149,7 +176,7 @@ class LapseTest(Base):
         touch_id = self.planned_touch()
         self.lapse(date(2026, 11, 20))
         with transaction(self.db):
-            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 20), CFG, now=STAMP), 1)
+            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 20), ONE, now=STAMP), 1)
         row = self.db.execute("SELECT message_id, state, due_on FROM message WHERE touch_id = ? AND seq = 1",
                               (touch_id,)).fetchone()
         self.assertEqual((row["state"], row["due_on"]), ("planned", "2026-12-01"))
@@ -157,6 +184,85 @@ class LapseTest(Base):
                          [{"seq": 1, "due_on": "2026-11-11", "reason": "lapsed"}])  # the lapse stays on record
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM event WHERE kind = 'followup_planned'").fetchone()[0],
                          2)
+
+
+class SyncTest(Base):
+    """Every open thread follows the schedule in the config (#141): missing follow-ups are planned, planned ones are
+    re-dated, and one that lapsed or was stopped never comes back."""
+
+    def old_touch(self):
+        """A thread sent Monday 2026-11-02 under the old rule: one follow-up planned at 7 business days."""
+        person, touch_id = self.sent_touch()
+        with transaction(self.db):
+            plan_followups(self.db, touch_id, date(2026, 11, 2), ONE, now=iso(MON))
+        return person, touch_id
+
+    def sync(self):
+        with transaction(self.db):
+            return sync_followups(self.db, CFG, now=STAMP)
+
+    def test_an_old_thread_gets_the_new_schedule_once(self):
+        _, touch_id = self.old_touch()
+        self.assertEqual(self.sync(), 4)  # seq 1 re-dated, 2 to 4 added
+        self.assertEqual(self.planned(touch_id), FROM_MON)
+        self.assertEqual(self.touch_events(touch_id, "followup_replanned"),
+                         [{"seq": 1, "from": "2026-11-11", "to": "2026-11-05"}])
+        self.assertEqual(self.sync(), 0)
+
+    def test_a_lapsed_follow_up_never_comes_back(self):
+        _, touch_id = self.old_touch()
+        mid = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1", (touch_id,)).fetchone()[0]
+        with transaction(self.db):
+            stop_planned(self.db, mid, reason="lapsed", now=STAMP)
+        self.sync()
+        self.assertEqual(self.planned(touch_id), FROM_MON[1:])
+
+    def test_a_stopped_follow_up_never_comes_back(self):
+        _, touch_id = self.old_touch()
+        mid = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1", (touch_id,)).fetchone()[0]
+        with transaction(self.db):
+            stop_planned(self.db, mid, reason="replied", now=STAMP)
+        self.sync()
+        self.assertEqual(self.planned(touch_id), [])  # a stop ends the thread's queue, not just its seq
+
+    def test_a_drafted_follow_up_keeps_its_date(self):
+        person, touch_id = self.sent_touch()
+        drafted = seed_message(self.db, person, state="drafted", seq=1, due_on="2026-11-11")
+        self.sync()
+        self.assertEqual(self.db.execute("SELECT state, due_on FROM message WHERE message_id = ?",
+                                         (drafted,)).fetchone()[:], ("drafted", "2026-11-11"))
+        self.assertEqual(self.planned(touch_id), FROM_MON[1:])
+
+    def test_a_thread_that_is_not_open_gets_nothing(self):
+        for state in ("replied", "bounced", "closed"):
+            with self.subTest(state=state):
+                _, touch_id = self.sent_touch()
+                extra = {"replied": "replied_at = '2026-11-03T15:00:00Z', reply_kind = 'interested'",
+                         "bounced": "bounced_at = '2026-11-03T15:00:00Z'",
+                         "closed": "closed_at = '2026-11-03T15:00:00Z', close_reason = 'no_reply'"}[state]
+                self.db.execute(f"UPDATE touch SET state = ?, {extra} WHERE touch_id = ?", (state, touch_id))
+                self.sync()
+                self.assertEqual(self.planned(touch_id), [])
+
+    def test_a_stopped_thread_gets_nothing_new(self):
+        # A company close or a stop elsewhere deletes the planned rows and leaves the touch open.
+        _, touch_id = self.old_touch()
+        mid = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1", (touch_id,)).fetchone()[0]
+        with transaction(self.db):
+            stop_planned(self.db, mid, reason="company_closed", now=STAMP)
+        self.assertEqual(self.sync(), 0)
+        self.assertEqual(self.planned(touch_id), [])
+
+    def test_an_imported_thread_keeps_what_the_import_gave_it(self):
+        _, touch_id = self.sent_touch()
+        self.db.execute("UPDATE touch SET origin = 'import' WHERE touch_id = ?", (touch_id,))
+        self.assertEqual(self.sync(), 0)
+        self.assertEqual(self.planned(touch_id), [])
+
+    def test_a_thread_whose_first_email_has_not_gone_out_gets_nothing(self):
+        person = self.person()
+        seed_message(self.db, person, state="drafted")
+        self.assertEqual(self.sync(), 0)
 
 
 class CloseTest(Base):

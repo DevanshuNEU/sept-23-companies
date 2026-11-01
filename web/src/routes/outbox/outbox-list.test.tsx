@@ -138,7 +138,7 @@ describe('OutboxList', () => {
     expect(within(row('Priya Natarajan')).getByText('Holding 2 queued emails at Browserbase')).toBeInTheDocument();
     expect(within(row('Kenji Watanabe')).getByText('Blocked')).toBeInTheDocument();
     expect(within(row('Dana Whitcomb')).getByText('1 warning')).toBeInTheDocument();
-    expect(within(row('Marcus Feld')).getByText('Follow-up 2 of 3')).toBeInTheDocument();
+    expect(within(row('Marcus Feld')).getByText('Follow-up 2 of 4')).toBeInTheDocument();
     expect(within(row('Omar Haddad')).getByText('Draft')).toBeInTheDocument();
     expect(within(row('Jordan Price')).getByText('10:42 ET')).toBeInTheDocument();
     expect(within(row('Arjun Mehta')).getByText('after 11:05 ET')).toBeInTheDocument();

@@ -4,6 +4,7 @@ is unclear).
 Every test uses FakeGmail. Its probe runs at the start of every client call and checks that the sender holds no
 transaction and that another connection could write at that moment.
 """
+import dataclasses
 import json
 import random
 import sqlite3
@@ -205,12 +206,15 @@ class RecordSentTest(Base):
         self.assertEqual(self.message(mid)["state"], "sent")
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM outreach_touch").fetchone()[0], 1)
 
-    def test_first_send_plans_one_follow_up_seven_business_days_later(self):
+    def test_first_send_plans_four_follow_ups(self):
         person, mid = self.approve()
         self.send(mid)
         rows = self.db.execute("SELECT seq, state, due_on, saved_by, subject FROM message WHERE touch_id = ? "
                                "AND seq > 0", (self.touch(person)["touch_id"],)).fetchall()
-        self.assertEqual([tuple(r) for r in rows], [(1, "planned", "2026-11-11", "sender", "")])
+        self.assertEqual([tuple(r) for r in rows], [(1, "planned", "2026-11-05", "sender", ""),
+                                                    (2, "planned", "2026-11-11", "sender", ""),
+                                                    (3, "planned", "2026-11-20", "sender", ""),
+                                                    (4, "planned", "2026-12-01", "sender", "")])
 
     def test_next_send_at_is_four_to_nine_minutes_later(self):
         _, mid = self.approve()
@@ -592,8 +596,9 @@ class FollowupsStubTest(Base):
         seed_sent(self.db, person, at="2026-11-02T14:00:00Z")
         touch_id = self.touch(person)["touch_id"]
         with transaction(self.db):
-            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON)), 1)
-            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), CFG, now=iso(MON)), 0)
+            one = dataclasses.replace(CFG, followup_business_days=(7,))
+            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), one, now=iso(MON)), 1)
+            self.assertEqual(plan_followups(self.db, touch_id, date(2026, 11, 2), one, now=iso(MON)), 0)
         mid = self.db.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = 1",
                               (touch_id,)).fetchone()[0]
         with transaction(self.db):

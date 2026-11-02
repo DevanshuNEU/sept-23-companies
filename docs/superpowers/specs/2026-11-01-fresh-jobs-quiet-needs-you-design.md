@@ -201,6 +201,75 @@ X, Reddit and Discord feeds; copying SimplifyJobs' postings.
   and counts as 0.
 - The scorecard shows Knock's lead over SimplifyJobs (below).
 
+### 5.1b Round 5: the red team (ArkenOS, 2026-11-02), checked against the code
+
+Source: `.context/research/arkenos-round5-results.md`. ArkenOS read the code and the store read-only. Claude checked
+its main code claims on 2026-11-02 and they hold: `rules/decide.py` `_level` ends by rejecting a plain title that
+names no years; `rules/title.py` treats "III" and "3" as senior before reading the body; `crawl/polite.py` waits
+with a blocking sleep in one thread, so a Workday pause stalls every other host; the reader queue holds 62,956
+postings against 1,868 read. **Where this section and 5.1 differ, this section wins.**
+
+**Changes it brings, each accepted unless marked otherwise:**
+
+1. **Two yardsticks, small companies first.** SimplifyJobs leans to big companies (about half its listings are on
+   Workday) and lists 1.4% of active YC companies under 50 people, while 9 of his 11 interview companies were under
+   300. The scorecard gets a second coverage number for small companies, built from VC portfolio lists (Consider,
+   Getro), yc-oss and HN, and that one is the headline. SimplifyJobs coverage stays as the second number.
+2. **Rules give three answers: fit, reject, or uncertain.** A plain title with no years is uncertain, never rejected.
+   "III" or "3" in a title is ambiguous: fit only when the body asks 2 years or fewer (or 2 for a master's) or has
+   entry wording. Years are read per degree tier (the master's figure counts) and a range counts as its low end.
+   Title nouns widen to AI, ML, data, applied scientist, quant, platform, SRE and similar (subject to his answer on
+   data and ML titles). ArkenOS measured on 33 real postings: today's rules 94% precision and 54% recall; rule fixes
+   alone 79% and 88% (they let senior roles described only in prose through); rules plus a model on the uncertain
+   ones 96% and 92%. 33 postings is a small sample, so these are leads until the labeled set exists.
+3. **The model reads uncertain postings within the tick, not at night.** Fresh uncertain postings at fit companies
+   (open, US, tech, posted in the last 30 days) are read in small batches through his Claude Code seat during the
+   crawl, so an alert never waits for the night. The reader queue is cut to that slice; the 62,956 backlog is not
+   worked. A published study's 86.9% precision came from a set that was about half graduate roles; on raw boards
+   (4 to 8% at his level) a model alone would drop to roughly 28% precision, which is why the rules run first.
+4. **A crawler that does not wait on itself.** One worker per host bucket, each keeping today's spacing, so hosts
+   are read in parallel and each host sees exactly the same load. Greenhouse list polls drop `content=true` (much
+   smaller) and fetch a body only for a new job id.
+5. **Tiers and time of day.** Fit boards every 15 minutes in US business hours (08:00 to 19:00 New York, weekdays)
+   and every 90 minutes otherwise; active tech boards every 2 hours (8 at night); quiet boards daily; dead boards
+   weekly. ArkenOS measured 87% of postings published 07:00 to 20:00 Eastern on weekdays. A board that opens 3 or more
+   engineering roles in 14 days, or that ever posted an internship or a role at his level, is a fit board (ArkenOS
+   measured 3.4 times and 4.8 times the usual chance of an early career posting following).
+6. **Workday done right.** A fast poll reads only the first page with an empty search (ArkenOS reports it is newest
+   first; a test on saved responses confirms before relying on it) and stops at the first job already seen. A board
+   over 2,000 rows splits by family and then by a second facet instead of failing. `myworkdaysite.com` URLs are read.
+   Requisition numbers spot old jobs with new dates. 16 of the 19 misses on boards Knock already watches were Workday.
+7. **stapply boards imported with a gate.** Each new board is read once; it enters the crawl only if it has at least
+   one open US engineering role (as a tier 2 board), else it waits as quiet or dead. This keeps 80,000 unchecked
+   boards and their non-tech postings out of the store.
+8. **Identity from the board itself.** The company's website domain is taken from the ATS board (Workable, Lever,
+   Greenhouse and others publish it) and from the employer contact email in DOL LCA rows (ignoring law firms), so
+   names like "Loop" or "Front" stop colliding and LCA companies get domains.
+9. **More discovery, terms checked first:** Workable's cross-company search (`jobs.workable.com`), the Wayback
+   Machine's URL index for board slugs, VC portfolio feeds, and the sitemaps iCIMS, Teamtailor and Recruitee publish.
+   Passive DNS services (RapidDNS, AlienVault OTX, urlscan, CertSpotter) are used only where their terms allow it.
+10. **Application form visa questions.** Greenhouse (`questions=true`), Ashby (application form) and Rippling
+    (knockout questions) carry "will you need sponsorship now or in the future" as a form question. It becomes a flag
+    on the row, like the other future sponsorship wording; it does not hide.
+11. **Big company portals:** TikTok and ByteDance, Amazon, Tesla and Microsoft readers ported from stapply's MIT code
+    (34 of the 100 custom site misses), and `gh_jid=`, `ashby_jid=` and `applytojob.com` detection (21 more).
+
+**Dropped or not taken:**
+
+- ambicuity/New-Grad-Jobs: refreshes every 6 hours, not 30 minutes, and draws from SimplifyJobs and Jobright; it added
+  4 boards beyond stapply and SimplifyJobs on the gap file. Dropped.
+- Fantastic.jobs: its date can be the ATS update time or its own crawl time, and direct reads do better for free.
+  Not trialed unless the scorecard later shows a gap only it fills.
+- GitHub commit emails to find managers: GitHub's terms forbid using them for outreach, and he finds people himself.
+  Not taken.
+- One person per company first, and 2 follow-ups: his own numbers lean that way (18% replies emailing one person vs 7
+  to 8% for more), but he chose up to 4 people and 3 follow-ups. His decisions stand; the scorecard's outcome split
+  will keep showing this.
+- Bluesky search for founder hiring posts: allowed by its public API, but low priority; parked.
+
+**Offered, his call:** reading his own LinkedIn data export (a file he downloads; Knock never touches LinkedIn) so a
+job row can say "you know 2 people here". All 5 of his referrals came from people he already knew on LinkedIn.
+
 ### 5.2 How we know it stays the best
 
 There is no guarantee that Knock finds every job; some are never posted, some live only on LinkedIn, some sites
@@ -567,7 +636,8 @@ Likely needs, each the builder's call on shape:
 
 | Order | Work | Depends on | Why this order |
 |---|---|---|---|
-| 1 | The scorecard (5.1 item 5), the miss log, alarms and the second yardstick (5.2) | nothing | Every later change is judged by them, so they come first |
+| 1 | The scorecard with both yardsticks, the miss log and alarms (5.0, 5.1b item 1, 5.2) | nothing | Every later change is judged by them |
+| 1b | The crawler that does not wait on itself, and tiers (5.1b items 4 and 5) | nothing | Every coverage gain needs read capacity |
 | 2 | C, postings Knock can trust, with the level recall fixes (5.1 item 4) | #9 edits 1 and 2 | Right job and right time rest on true levels and dates |
 | 3 | F and 5.1 items 1 to 3: SimplifyJobs, dark readers, faster reads of fit boards, YC, VC boards, Form D date | C (dates) | Coverage is the biggest loss today (32%) |
 | 4 | D, the job list | C | Where he uses all of it |
@@ -609,7 +679,7 @@ PR; F and 5.1 split into one PR per source or reader.
 
 1. The first crawl of stapply's boards for US companies (a large run on his laptop, spread over days at polite
    spacing).
-2. A Fantastic.jobs trial (free tier first, scored against the gap file; $45 a month only if it earns it).
+2. Reading his LinkedIn data export to show people he already knows at a company (5.1b, offered).
 3. Which data and ML titles count as the right job.
    Claude's recommendation: count ML Engineer, AI Engineer, Applied AI, Data Engineer and ML or AI Research
    Engineer titles; count Data Scientist and AI or ML Researcher only when the posting asks for software or ML

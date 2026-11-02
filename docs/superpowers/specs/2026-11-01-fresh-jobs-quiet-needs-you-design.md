@@ -267,8 +267,8 @@ postings against 1,868 read. **Where this section and 5.1 differ, this section w
   will keep showing this.
 - Bluesky search for founder hiring posts: allowed by its public API, but low priority; parked.
 
-**Offered, his call:** reading his own LinkedIn data export (a file he downloads; Knock never touches LinkedIn) so a
-job row can say "you know 2 people here". All 5 of his referrals came from people he already knew on LinkedIn.
+**Declined by Devanshu on 2026-11-02:** reading his LinkedIn data export, and any referral feature. Keep the system
+simple.
 
 ### 5.2 How we know it stays the best
 
@@ -519,6 +519,9 @@ this tab).
 - The page loads 50 rows in one response under 80 KB.
 
 ### Part E: Smarter sending
+
+**Parked by Devanshu on 2026-11-02:** the Outbox is done and stays as it is. This part waits until the pipeline
+work is finished.
 
 **E1. Pacing without a daily number.** Following decision 7, the ramp (20 a day, +10 per clean day, up to 100)
 retires.

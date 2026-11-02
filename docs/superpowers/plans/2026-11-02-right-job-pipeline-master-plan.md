@@ -129,13 +129,16 @@ __main__.py` (a `profile` command), `crawl/config.toml`.
 2. **Explain the churn.** From stored data, find which ATS and boards close and re-add postings every tick, and why
    (a listing that is not complete, ids that change, pagination that is not stable). Fix the cause in that reader, or
    mark such a read as partial so it closes nothing. The finding is written into the PR body.
-3. **Cut the cost the measurement shows.** Expected, to confirm by measurement: Greenhouse lists without
-   `content=true` and one detail call only for new engineering postings; bodies only for new US engineering postings,
-   never for a posting already holding a body unless `body_refetch_days` says so; the 100-posting decide step runs
-   before the write transaction opens, not inside it (`ingest.py:337-344` holds the write lock while deciding).
+3. **Cut the cost.** Measured on 2026-11-02: 56 boards with 1,000 or more open postings hold 167,020 of the
+   315,243 open postings, only 6% of them US engineering, and they cause most of the churn (Workday and Oracle
+   portals of GE Vernova, Abbott, GSK, Caterpillar and others). So: a big board (200 or more open postings) whose US
+   engineering share is under 10% and that has had no new US engineering posting at his level or with no stated level
+   in 30 days is read at most once a day; bodies are fetched only for US engineering postings; Greenhouse lists are
+   read without `content=true`, with one detail call per new engineering posting. Deciding stays inside the write
+   unit (it keeps a posting and its decision atomic); PR 7 splits computing from writing when threads arrive.
 
 **Done when:** `test_profile_reports_per_ats_seconds`, `test_greenhouse_list_without_content_fetches_new_bodies_only`,
-`test_decide_runs_outside_write_transaction`, a test that reproduces the churn cause found in step 2, and in the live
+`test_low_yield_big_board_waits_a_day`, `test_bodies_only_for_us_postings`, a test that reproduces the churn cause found in step 2, and in the live
 checkout over 2 days: no tick ends with boards overdue by more than their interval, and a full pass over today's
 boards takes under 60 minutes with today's per-host spacing.
 
@@ -295,7 +298,9 @@ in the live checkout the BambooHR and JazzHR alarms clear and Workday's share of
    connection. Workers pull the next due board for their bucket from a shared queue until the tick budget ends, so a
    board that comes due during the tick is read in that tick. One shared stop event (set on `RulesetNotCurrent` or a
    tripped breaker policy) and one shared set of tripped buckets. The `PoliteClient` lock guards only its timing
-   bookkeeping, never a sleep or a request. Per-worker counts are summed at the end.
+   bookkeeping, never a sleep or a request. Per-worker counts are summed at the end. Each posting's decision is computed
+   before its write unit opens (`decide()` on the stored inputs) and written inside it, checked against unchanged
+   inputs, so a worker never holds the write lock while deciding.
 2. Tick timing: the crawl job runs every 600 seconds and the tick budget is 540 seconds, so ticks do not overlap.
 3. Tiers (`tiers.assign(conn, now)`, cheap SQL at tick start, rows in `board_tier`): hot when the company is not
    no-go and not hidden and it posted a fit role in the last 12 months, any new grad or early career role ever, 3 or

@@ -111,7 +111,8 @@ workspace):
 | Number | What it means | Today | Target |
 |---|---|---|---|
 | **Coverage** | Of SimplifyJobs' active US software and AI/ML/data new grad listings posted in the last 30 days, the share whose exact posting is in Knock | 135 of 422 (32%). Knock knows 61% of the companies but has the board for only 36%. Where it has the board it has the posting 88% of the time | 80% of the software listings |
-| **Detection time** | Hours from a posting's real posted date to Knock first seeing it, on boards Knock already watches | Greenhouse, Ashby, Lever: 72% the same day, 99.5% within a day. But 248 boards are read only every 1 to 7 days, so a quiet small company's new role can wait up to a week | 95% of new his-level postings within 12 hours |
+| **Detection time** | Hours from a posting's real posted date to Knock first seeing it, on boards Knock already watches | Greenhouse, Ashby, Lever: 72% the same day, 99.5% within a day. But 248 boards are read only every 1 to 7 days, so a quiet small company's new role can wait up to a week | 95% of new his-level postings on fit boards within 1 hour |
+| **Lead over SimplifyJobs** | For listings both have, the share Knock saw first (the SimplifyJobs source records when each listing first appears in its file) | Not measured yet | 90% |
 | **Level recall** | Of SimplifyJobs new grad listings Knock has, the share Knock counts as his level | 69 of 135 (51%). Some rejections are right (analyst, data annotation), some are wrong ("Junior AI Engineer" read as no level, "Applied AI New Grad" rejected for having no engineering word, plain "Software Engineer") | 85% of the software listings, with his passes as the check on precision |
 | **Date truth** | Share of listed postings whose date is the ATS's own first-posted date or a real watch date | Not measured yet (Part C adds the date source) | 90% |
 
@@ -122,34 +123,83 @@ Where coverage is lost today:
 - **Dark readers.** BambooHR (48 of 48 boards erroring), JazzHR (54 of 56 erroring); iCIMS, Gem, Eightfold and
   join.com boards are never read (no reader); SmartRecruiters is off by its robots.txt.
 
-### 5.1 What the pipeline work adds (on top of Parts C and F)
+### 5.1 How the pipeline gets there (round 4 research, 2026-11-01)
 
-1. **SimplifyJobs as a source and a yardstick** (extends F1). Its listings add companies and boards. When Knock
-   cannot read a listing's board (a custom careers site, an unreadable ATS), the listing itself becomes a posting
-   (`url:` source key, which the store already allows), dated by SimplifyJobs' `date_posted` (its discovery time,
-   which never resets) and decided by the same rules on its title. Its body is fetched once where the page allows.
-2. **Fix the dark readers.** Find why every BambooHR and JazzHR read errors and fix or switch them off with a
-   reason. Check whether iCIMS, Gem, Eightfold and join.com have public reads that robots.txt allows; add the ones
-   that do and appear in the coverage gap.
-3. **Read the right boards more often.** A board whose company is a likely fit (tech, 300 people or fewer or unknown,
-   not no-go) and that posted a his-level role in the last 90 days, or that SimplifyJobs or YC changes just pointed
-   at, is read at least every 6 hours. Other boards keep today's cadence (6 hours to 7 days by how often they
-   change). The polite per-host spacing is unchanged.
-4. **Level recall fixes** (extends C2 and C3): find why a title with "junior" came out as no level; count AI titles
-   without the word engineer ("Applied AI New Grad", "AI Resident"); and settle which data and ML titles are his
-   (section 12 asks).
-5. **The scorecard command.** `python -m outreach.<module> scorecard` prints the four numbers and the top companies
-   in the coverage gap; the daily sources job runs it after `run-due` and stores the result, and the app shows the
-   newest line. It reads the store only (and the SimplifyJobs file the source already downloaded).
+Four research passes on 2026-11-01, in the `sydney` workspace's `.context/research/`: `r4-speed-and-discovery.md`,
+`r4-repos-and-datasets.md`, `r4-apis-and-feeds.md`, `r4-signals-and-classification.md`. The gap file they tested
+against is `coverage_gap_2026-11-01.json` (the 287 SimplifyJobs listings Knock lacked).
+
+**Speed: seeing a job before SimplifyJobs does.**
+
+- Measured from SimplifyJobs' git history: a listing appears a median of about 7 hours after the ATS posts it
+  (Greenhouse alone: 2.8 hours), with a slow tail (p90 about 6.5 days), mostly in an evening batch.
+- Greenhouse, Ashby, Lever and Teamtailor answer an unchanged board cheaply (checked live); Workday and Oracle can be
+  read newest first. One polite pass over Knock's 2,000 boards at today's per-host spacing takes about 21 minutes.
+- So: **fit boards are read every 30 minutes**, which means a new posting is seen in 15 minutes on average. A fit
+  board: a company that is not no-go and not hidden, and that posted a role at his level in the last 12 months, came
+  from a new grad feed below, or has a fresh Form D or YC signal. The strongest predictor found: 66.5% of companies
+  posting a new grad role in October had posted one between March and September. Other boards keep today's
+  cadence. The 6 hour floor (`floor_s`) is what holds Knock back today.
+
+**Coverage: finding the boards.** 268 of the 287 misses were at companies whose board Knock did not have.
+
+1. **stapply's company lists, used directly.** Knock already downloads them (80,390 companies across 64 ATSs, MIT)
+   but only looks a company up after another source names it. They hold 115 of the 168 missed ATS boards (Workday
+   51 of 62, Workable 21 of 34). Add their boards for US companies at a slow cadence; a board that shows a role at
+   his level becomes a fit board. This is a large first crawl (section 12 asks before it runs).
+2. **New grad lists as board feeds.** Take only the board link from each listing and let Knock read and date the
+   job itself:
+   - SimplifyJobs `listings.json` (no license on the repo, so board names only, never its postings). 72% of the
+     misses had appeared there more than a day earlier.
+   - ambicuity/New-Grad-Jobs (`jobs.json`, every 30 minutes, MIT code, its terms allow automated access): 8,398
+     live roles, about 680 not in Knock.
+   - speedyapply 2027 SWE list (daily): about 200 not in Knock.
+3. **The ATS behind custom careers sites.** A `gh_jid=` link is a Greenhouse board; an `applytojob.com` link is
+   JazzHR; iCIMS sites have a public JSON feed that robots.txt allows. 54 misses.
+4. **Readers.** Fix BambooHR (it has a JSON job list) and JazzHR (both broke on page format changes). Port iCIMS and
+   SuccessFactors readers, and the stapply and ambicuity Workday approach (one keyword search per new grad term,
+   because a big tenant's plain list is ordered by relevance and buries new grad roles), from their MIT code.
+5. **Workable discovery** through `jobs.workable.com` searches for US software and data titles, if its terms allow
+   (34 misses).
+6. **Optional paid check:** Fantastic.jobs (from about $0 to $45 a month) crawls 58 ATSs hourly with an entry level
+   filter. One 30 day trial pull is scored against the gap file and Knock's own dates before any money is spent
+   past the free tier (section 12 asks).
+
+**Early signals: watching before the job exists.**
+
+- A watch list of every company that ever posted a role at his level; its boards are fit boards.
+- yc-oss daily changes (a company turns hiring or grows), Form D first sale dates (Knock measures its own lag from
+  raise to first posting), Hacker News job ads (free, exact times; Knock's HN source reads only the monthly thread).
+- H-1B LCA filings at wage level I or II become a "has sponsored entry level" fact on the row, not a timing signal.
+- The Northeastern career fair employer list, copied by hand twice a year.
+
+**Classification: reading a posting like an expert.**
+
+- **Rule bugs first** (measured on the live store): 294 open postings are tagged senior only because the title says
+  "III" while asking 3 years or fewer (mostly Google "Software Engineer III": 2 years, or 1 with an advanced
+  degree); "up to 5 years" is read as asking 5; the largest number wins in postings with several levels or degree
+  tiers; about 1,073 tech titles a week are dropped for having no engineering word.
+- **Then the reader on what rules cannot settle.** 48% of new grad listings have no level word in the title. The
+  nightly reader (#32, his Claude Code seat, no API cost) reads only the postings the rules mark uncertain and
+  answers two questions: can an MS graduate with no full time experience get this role, and how many years does it
+  ask of an MS holder. The closest published study found a language model at 86.9% precision and 97% recall on
+  "suitable for a graduate", ahead of a fine tuned model and keyword rules. The nightly cap rises from 400 to 600.
+- **Measured, not assumed:** a labeled set of about 300 postings (at least 100 at his level), built from the weekly
+  accuracy check (5.2), with ambicuity's visa flags and other public labels as extra test sets.
+
+**Not doing:** JobSpy or anything that scrapes LinkedIn, Indeed or Glassdoor (their terms forbid it; JobSpy offers
+proxies to get around blocks); mining emails from GitHub commits (GitHub's terms forbid using them for outreach);
+X, Reddit and Discord feeds; copying SimplifyJobs' postings.
 
 **Done when**
 
-- The scorecard runs on a scratch store with saved SimplifyJobs and board fixtures and prints all four numbers.
-- On those fixtures, a listing on an unreadable careers site becomes a dated `url:` posting, and a second run adds
-  nothing.
-- A fit board that posted a his-level role last month is due again within 6 hours of its last read.
-- In the live checkout after deploy, the scorecard's coverage of software listings moves from 32% toward 80% over
-  the following two weeks (checked by Devanshu; not a test).
+- A fit board is due again 30 minutes after its last read; a non-fit board keeps today's cadence.
+- Each feed adds boards and companies through the identity rule, never a posting or a posted date, and a second run
+  adds nothing.
+- A `gh_jid=` link resolves to its Greenhouse board; an `applytojob.com` link to JazzHR.
+- "Software Engineer III" asking "2 years, or 1 with an advanced degree" is his level; "up to 5 years" asks 0 to 5
+  and counts as 0.
+- The scorecard shows Knock's lead over SimplifyJobs (below).
 
 ### 5.2 How we know it stays the best
 
@@ -173,7 +223,7 @@ turned into a fix.
 5. **The final test is outcomes.** The monthly findings (`outreach/insights`) split replies and interviews by where a
    job came from and how fresh it was when he reached out, so the pipeline is judged by what gets him interviews.
 
-**Done when:** the miss log accepts a pasted URL and stores its cause; the scorecard shows both yardsticks; a seeded
+**Done when:** the miss log accepts a pasted URL and stores its cause; the scorecard shows both yardsticks and the lead over SimplifyJobs; a seeded
 reader failure raises one alarm and a second run does not raise a second.
 
 ## 6. The parts
@@ -445,8 +495,8 @@ for 24 hours.
 ### Part F: More small companies, with real dates
 
 Each source follows `outreach/sources/` (fetch, discover, resolve, find boards) and the identity rule (one company
-per domain). Dates come from the ATS read in Part C, never from the source, with one exception: a
-SimplifyJobs listing whose board Knock cannot read is dated by its `date_posted` (5.1 item 1).
+per domain). Dates come from the ATS read in Part C, never from the source. Feeds give boards and companies,
+never postings (5.1).
 
 1. **SimplifyJobs.** Read `.github/scripts/listings.json` from the public GitHub repo (not `README.md`, which hides
    81% of listings). Poll with an ETag so an unchanged file costs nothing. Use only listings whose category is
@@ -544,12 +594,18 @@ PR; F and 5.1 split into one PR per source or reader.
 18. Plain titles with no years at companies over 300, and any title asking 3 or more years, go to Higher levels (D).
 19. Coverage target 80% of SimplifyJobs software listings; detection target 95% within 12 hours; level recall
     target 85% (5.0).
-20. Fit boards are read at least every 6 hours (5.1 item 3).
-21. A SimplifyJobs listing on a board Knock cannot read becomes a `url:` posting dated by SimplifyJobs (5.1 item 1).
+21. Feeds (SimplifyJobs, ambicuity, speedyapply) give board links only; Knock reads and dates every job itself (5.1).
+23. Fit boards are read every 30 minutes; a fit board is one whose company posted a role at his level in the last
+    12 months, came from a new grad feed, or has a fresh Form D or YC signal (5.1).
 22. The second yardstick is HN new grad posts plus a weekly VC board sample; alarms fire at 2 days of reader errors or a
     25% week-over-week drop; the accuracy check is 20 postings a week (5.2).
 
-**Open, his call:** which data and ML titles count as the right job. Today "scientist" is off lane, so Data
+**Open, his call:**
+
+1. The first crawl of stapply's boards for US companies (a large run on his laptop, spread over days at polite
+   spacing).
+2. A Fantastic.jobs trial (free tier first, scored against the gap file; $45 a month only if it earns it).
+3. Which data and ML titles count as the right job. Today "scientist" is off lane, so Data
 Scientist, ML Research Scientist and "AI/ML Researcher" never show, and titles with no engineering word ("Applied AI
 New Grad", "Programmer Analyst", "Data Analyst") are dropped.
 

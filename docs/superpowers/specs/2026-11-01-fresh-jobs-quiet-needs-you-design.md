@@ -429,6 +429,11 @@ not contacted yet, and a company name search.
 - Keys: next and previous row, open the posting, go ahead, pass. The exact keys follow `docs/design/` section 16.6
   and the craft gate.
 
+**New job alerts.** Seeing a job 15 minutes after it posts only helps if he hears about it. When a new posting
+lands in the default view (his level, tech, not hidden, real date today), Knock shows a macOS notification within
+minutes: company, title, size, "posted N minutes ago", and a click opens the row. Quiet hours (my call: 10 pm to 8 am
+New York) and a cap of one grouped notification per 15 minutes keep it calm. On by default.
+
 **Just funded** (a second tab): companies with a recent raise, with or without an open role. A tech Form D (round 1:
 industry groups Other Technology, Computers, Telecommunications; pooled funds and 3C exemptions excluded) whose first
 sale was in the last 90 days, or a YC company that turned hiring or grew in the last 30 days (Part F). Newest first.
@@ -605,7 +610,10 @@ PR; F and 5.1 split into one PR per source or reader.
 1. The first crawl of stapply's boards for US companies (a large run on his laptop, spread over days at polite
    spacing).
 2. A Fantastic.jobs trial (free tier first, scored against the gap file; $45 a month only if it earns it).
-3. Which data and ML titles count as the right job. Today "scientist" is off lane, so Data
+3. Which data and ML titles count as the right job.
+   Claude's recommendation: count ML Engineer, AI Engineer, Applied AI, Data Engineer and ML or AI Research
+   Engineer titles; count Data Scientist and AI or ML Researcher only when the posting asks for software or ML
+   engineering work and no PhD (the reader decides); leave out Data Analyst, BI and annotation roles. Today "scientist" is off lane, so Data
 Scientist, ML Research Scientist and "AI/ML Researcher" never show, and titles with no engineering word ("Applied AI
 New Grad", "Programmer Analyst", "Data Analyst") are dropped.
 

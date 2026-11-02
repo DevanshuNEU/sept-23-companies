@@ -392,6 +392,10 @@ and `foreign_key_check` after, with its own tests.
 
 ## Order
 
+Issues: design and plan #151; PR 1 #152, PR 2 #153, PR 3 #154, PR 4 #155, PR 5 #156, PR 6 #157, PR 7 #158, PR 8 #159,
+PR 9 #160, PR 10 #161, PR 11 #162, PR 12 #163 (milestone "Right job pipeline"). PR 0 is done: #9 rulings of
+2026-11-01 and 2026-11-02.
+
 | Order | PR | Depends on |
 |---|---|---|
 | 0 | #9 edits and issues | nothing |

@@ -9,12 +9,14 @@ const GROUPS: OutboxGroup[] = ['replied', 'review', 'approved', 'sending', 'chec
  */
 export function recount(view: OutboxView): OutboxView {
   const counts = Object.fromEntries(GROUPS.map((g) => [g, 0])) as unknown as OutboxCounts;
-  const closed = { bounced: 0, skipped: 0, companyClosed: 0 };
+  const closed = { bounced: 0, skipped: 0, companyClosed: 0, noGo: 0 };
   for (const i of view.items) {
     counts[i.group] += 1;
     if (i.group !== 'closed') continue;
     if (i.touchState === 'bounced') closed.bounced += 1;
     else if (i.state === 'skipped') closed.skipped += 1;
+    // The API words a no-go row "Person on the no-go list" or "Company on the no-go list"; nothing else ends so.
+    else if (i.summary.endsWith('on the no-go list')) closed.noGo += 1;
     else closed.companyClosed += 1;
   }
   return { ...view, counts, closedBreakdown: closed };

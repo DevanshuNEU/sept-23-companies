@@ -91,7 +91,7 @@ function groupNote(group: OutboxGroup, rows: OutboxItem[], x: Extra): string | n
     }
     case 'closed': {
       const b = x.closedBreakdown;
-      return `bounced ${b.bounced}, skipped ${b.skipped}, company closed ${b.companyClosed}`;
+      return `bounced ${b.bounced}, skipped ${b.skipped}, company closed ${b.companyClosed}, no-go ${b.noGo}`;
     }
     default:
       return null;

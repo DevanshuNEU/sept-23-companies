@@ -60,7 +60,7 @@ class ViewTest(OutboxBase):
         self.assertEqual(view["asOf"], NOW)
         self.assertEqual(view["items"], [])
         self.assertEqual(view["counts"], {g: 0 for g in GROUPS})
-        self.assertEqual(view["closedBreakdown"], {"bounced": 0, "skipped": 0, "companyClosed": 0})
+        self.assertEqual(view["closedBreakdown"], {"bounced": 0, "skipped": 0, "companyClosed": 0, "noGo": 0})
         self.assertEqual(view["sending"]["state"], "running")
 
     def test_group_per_state_and_touch_state(self):
@@ -112,7 +112,7 @@ class ViewTest(OutboxBase):
         self.assertEqual(got, cases)
         self.assertEqual(view["counts"], {"replied": 2, "review": 1, "approved": 1, "sending": 1, "checking": 1,
                                           "sent": 1, "paused": 1, "closed": 4})
-        self.assertEqual(view["closedBreakdown"], {"bounced": 1, "skipped": 1, "companyClosed": 1})
+        self.assertEqual(view["closedBreakdown"], {"bounced": 1, "skipped": 1, "companyClosed": 1, "noGo": 0})
         self.assertEqual(set(GROUPS), {i["group"] for i in view["items"]})
 
     def test_the_row_shows_the_newest_message_and_the_next_follow_up(self):
@@ -220,6 +220,69 @@ class ViewTest(OutboxBase):
         seed.message(self.conn, t, 0, "approved")
         [item] = self.outbox()["items"]
         self.assertEqual((item["company"]["id"], item["company"]["name"], item["group"]), (keep, "Keep", "paused"))
+
+
+class NoGoTest(OutboxBase):
+    """#149: an unsent email to a no-go person or company is Closed, so it leaves Drafts to review and Approved."""
+
+    def no_go(self, *, company: int | None = None, person: int | None = None, lifted: bool = False):
+        self.conn.execute(
+            "INSERT INTO no_go(company_id, person_id, reason, source, created_at, lifted_at, lift_reason) "
+            "VALUES (?, ?, 'no_sponsorship', 'devanshu', '2026-11-01T12:00:00Z', ?, ?)",
+            (company, person, "2026-11-02T12:00:00Z" if lifted else None, "changed my mind" if lifted else None))
+
+    def row(self, touch: int) -> dict:
+        return self.by_touch(self.outbox())[touch]
+
+    def test_a_draft_at_a_no_go_company_is_closed(self):
+        cid = seed.company(self.conn, "Acme", status="working")
+        t = self.thread(cid, "Dee Draft")
+        seed.message(self.conn, t, 0, "drafted")
+        self.no_go(company=cid)
+        view = self.outbox()
+        row = self.by_touch(view)[t]
+        self.assertEqual((row["group"], row["summary"]), ("closed", "Company on the no-go list"))
+        self.assertEqual((view["counts"]["closed"], view["counts"]["review"]), (1, 0))
+        self.assertEqual(view["closedBreakdown"]["noGo"], 1)
+
+    def test_a_draft_to_a_no_go_person_is_closed_and_says_person(self):
+        cid = seed.company(self.conn, "Acme", status="working")
+        t = self.thread(cid, "Dee Draft")
+        seed.message(self.conn, t, 0, "drafted")
+        self.no_go(person=self.conn.execute("SELECT person_id FROM touch WHERE touch_id = ?", (t,)).fetchone()[0])
+        row = self.row(t)
+        self.assertEqual((row["group"], row["summary"]), ("closed", "Person on the no-go list"))
+
+    def test_an_approved_email_at_a_no_go_company_is_closed_with_no_schedule_text_in_approved(self):
+        self.prove()
+        cid = seed.company(self.conn, "Acme", status="working")
+        t = self.thread(cid, "Al Approved")
+        seed.message(self.conn, t, 0, "approved")
+        self.no_go(company=cid)
+        view = self.outbox()
+        self.assertEqual((self.by_touch(view)[t]["group"], view["counts"]["approved"]), ("closed", 0))
+
+    def test_a_lifted_no_go_changes_nothing(self):
+        cid = seed.company(self.conn, "Acme", status="working")
+        t = self.thread(cid, "Dee Draft")
+        seed.message(self.conn, t, 0, "drafted")
+        self.no_go(company=cid, lifted=True)
+        self.assertEqual(self.row(t)["group"], "review")
+
+    def test_a_no_go_on_a_merged_duplicate_closes_the_survivors_drafts(self):
+        keep = seed.company(self.conn, "Keep", status="working")
+        lose = seed.company(self.conn, "Lose", status="removed", merged_into=keep)
+        t = self.thread(keep, "Kay Keeper")
+        seed.message(self.conn, t, 0, "drafted")
+        self.no_go(company=lose)
+        self.assertEqual(self.row(t)["group"], "closed")
+
+    def test_a_sent_email_at_a_no_go_company_stays_where_it_is(self):
+        cid = seed.company(self.conn, "Acme", status="working")
+        t = self.thread(cid, "Sam Sent")
+        seed.send_first(self.conn, t)
+        self.no_go(company=cid)
+        self.assertEqual(self.row(t)["group"], "sent")
 
 
 class ProjectionTest(OutboxBase):

@@ -144,7 +144,7 @@ export interface OutboxItem {
 export interface OutboxCounts { replied: number; review: number; approved: number; sending: number; checking: number; sent: number; paused: number; closed: number }
 export interface OutboxView {
   asOf: IsoTime; sending: SendingStatus; items: OutboxItem[]; counts: OutboxCounts;
-  closedBreakdown: { bounced: number; skipped: number; companyClosed: number };
+  closedBreakdown: { bounced: number; skipped: number; companyClosed: number; noGo: number };
 }
 export interface ThreadMessage { seq: 0 | 1 | 2 | 3 | 4 | null; direction: 'out' | 'in'; subject: string; body: string; at: IsoTime; from: string } // in: inbound_message
 export interface OutboxDetail {

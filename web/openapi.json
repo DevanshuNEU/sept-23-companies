@@ -506,6 +506,11 @@
             "title": "Companyclosed",
             "type": "integer"
           },
+          "noGo": {
+            "default": 0,
+            "title": "Nogo",
+            "type": "integer"
+          },
           "skipped": {
             "default": 0,
             "title": "Skipped",
@@ -515,7 +520,8 @@
         "required": [
           "bounced",
           "skipped",
-          "companyClosed"
+          "companyClosed",
+          "noGo"
         ],
         "title": "ClosedBreakdown",
         "type": "object"

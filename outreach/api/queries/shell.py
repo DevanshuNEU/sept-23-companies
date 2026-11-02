@@ -19,22 +19,32 @@ from outreach.api.queries.sending import read_sender, summary_of
 from outreach.outcomes.windows import ny_day
 
 _DRAFTS = (
-    "SELECT p.company_id FROM touch t JOIN person p ON p.person_id = t.person_id JOIN ("
+    "SELECT p.company_id, p.person_id FROM touch t JOIN person p ON p.person_id = t.person_id JOIN ("
     "SELECT touch_id, state, ROW_NUMBER() OVER (PARTITION BY touch_id ORDER BY seq DESC) AS n FROM message "
     "WHERE state NOT IN ('planned', 'skipped')) m ON m.touch_id = t.touch_id AND m.n = 1 "
     "WHERE t.state = 'open' AND m.state = 'drafted'")
 
 
 def drafts_to_review(conn: sqlite3.Connection) -> int:
-    ids = [r[0] for r in conn.execute(_DRAFTS)]
-    if not ids:
+    """Drafts the Outbox lists under Drafts to review: not at a closed, removed or paused company, and not to a
+    person or company on the no-go list (those are Closed there, #149)."""
+    drafts = [(r[0], r[1]) for r in conn.execute(_DRAFTS)]
+    if not drafts:
         return 0
     parents = merge_parents(conn)
-    owners = {survivor_of(parents, c) for c in ids}
+    owners = {survivor_of(parents, c) for c, _ in drafts}
     open_company = {r["company_id"] for r in by_ids(
         conn, "SELECT company_id FROM company WHERE status NOT IN ('closed', 'removed') AND paused_at IS NULL "
               "AND company_id IN ({ids})", owners)}
-    return sum(1 for c in ids if survivor_of(parents, c) in open_company)
+    no_go_people, no_go_companies = set(), set()
+    for r in conn.execute("SELECT person_id, company_id FROM no_go WHERE lifted_at IS NULL"):
+        if r["person_id"] is not None:
+            no_go_people.add(r["person_id"])
+        else:
+            no_go_companies.add(survivor_of(parents, r["company_id"]))
+    return sum(1 for c, p in drafts
+               if survivor_of(parents, c) in open_company and survivor_of(parents, c) not in no_go_companies
+               and p not in no_go_people)
 
 
 def shell_summary(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sender_loaded: bool) -> ShellSummary:

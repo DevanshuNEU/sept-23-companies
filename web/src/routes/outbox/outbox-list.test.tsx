@@ -131,7 +131,7 @@ describe('OutboxList', () => {
     const closed = document.querySelector('button[data-group-head="closed"]');
     expect(closed).toHaveAttribute('aria-expanded', 'false');
     expect(closed).toHaveTextContent('17');
-    expect(closed).toHaveTextContent('bounced 1, skipped 4, company closed 12');
+    expect(closed).toHaveTextContent('bounced 1, skipped 4, company closed 12, no-go 0');
     expect(findRow('Rosa Diaz')).toBeNull();
 
     expect(groupOf('Priya Natarajan')).toBe('replied');
@@ -411,5 +411,14 @@ describe('Approved rows by send day', () => {
     await outbox();
     const approved = document.querySelector('[data-group="approved"]');
     expect(within(approved as HTMLElement).getAllByRole('option')).toHaveLength(3);
+  });
+});
+
+describe('No-go rows in Closed', () => {
+  it('counts them in the Closed note', async () => {
+    const db = buildFixture('default');
+    db.outbox.closedBreakdown = { ...db.outbox.closedBreakdown, noGo: 3 };
+    await outbox({ db });
+    expect(document.querySelector('button[data-group-head="closed"]')).toHaveTextContent('no-go 3');
   });
 });

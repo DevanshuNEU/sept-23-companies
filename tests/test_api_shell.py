@@ -120,6 +120,21 @@ class Shell(ApiCase):
         self.conn.execute("INSERT INTO win_seen(touch_id, kind, seen_at) VALUES (?, 'accepted', ?)", (ids["wins"][0], NOW))
         self.assertEqual(self.shell()["winsUnseen"], 1)
 
+    def test_a_draft_to_a_no_go_person_or_company_is_not_counted_as_a_draft_to_review(self):
+        # #149: such a draft is in the Outbox's Closed group, and the badge says the same.
+        cid = s.company(self.conn, "Acme", status="working")
+        person, other = s.person(self.conn, cid, "Pat"), s.person(self.conn, s.company(self.conn, "Beta", status="working"), "Bo")
+        for p in (person, other):
+            s.message(self.conn, s.touch(self.conn, p), 0, "drafted")
+        self.assertEqual(self.shell()["draftsToReview"], 2)
+        self.conn.execute("INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'said_no', 'devanshu', ?)",
+                          (person, NOW))
+        self.assertEqual(self.shell()["draftsToReview"], 1)
+        self.conn.execute("INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'no_sponsorship', 'devanshu', ?)",
+                          (self.conn.execute("SELECT company_id FROM person WHERE person_id = ?", (other,)).fetchone()[0], NOW))
+        self.assertEqual(self.shell()["draftsToReview"], 0)
+        self.assertEqual(self.shell()["draftsToReview"], self.get("/api/outbox").json()["counts"]["review"])
+
     def test_shell_agrees_with_the_views_it_summarizes(self):
         self.seed()
         body = self.shell()

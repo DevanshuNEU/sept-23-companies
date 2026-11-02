@@ -1354,6 +1354,11 @@ export interface components {
              */
             companyClosed: number;
             /**
+             * Nogo
+             * @default 0
+             */
+            noGo: number;
+            /**
              * Skipped
              * @default 0
              */

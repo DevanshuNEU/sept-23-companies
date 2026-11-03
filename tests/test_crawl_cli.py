@@ -122,6 +122,13 @@ class CommandTests(unittest.TestCase):
         self.assertIn("feed failed: HTTP 500", failed)
         self.assertIn("alarm check failed: ValueError: bad toml", failed)
 
+    def test_the_tick_line_names_the_job_alert_count_or_error(self):
+        from outreach.crawl.tick import TickReport
+        base = dict(run_id=1, rebuilt=False)
+        self.assertNotIn("job alert", cli._line(TickReport(**base)))
+        self.assertIn("job alert: 3 new", cli._line(TickReport(**base, alerted=3)))
+        self.assertIn("job alert failed: boom", cli._line(TickReport(**base, alert_error="boom")))
+
     def test_tick_exits_0_when_another_tick_holds_the_lock(self):
         seed_board(self.conn, seed_company(self.conn, "Acme"))
         client = FakeClient({})

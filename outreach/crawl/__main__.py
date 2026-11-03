@@ -123,6 +123,10 @@ def _line(report) -> str:
         text += f"; feed failed: {report.feed_error}"
     if report.alarm_error:
         text += f"; alarm check failed: {report.alarm_error}"
+    if report.alert_error:
+        text += f"; job alert failed: {report.alert_error}"
+    elif report.alerted:
+        text += f"; job alert: {report.alerted} new"
     return text
 
 

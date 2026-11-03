@@ -41,6 +41,7 @@ __all__ = ["PASSED", "PASS_REASONS", "DATA_ERRORS", "load_passed_postings", "wit
            "load_level_roles", "load_visa_facts", "load_passes", "load_applied"]
 
 PASSED = "pick_passed"  # event kind: Not now on a pick (entity company, actor devanshu)
+POSTING_PASSED = "posting_passed"  # event kind: Pass on the job list (entity posting, actor devanshu)
 # The reasons of Not now, in the order of the chips (keys 1 to 8, then 9 and 0). None of them is a no-go. The last two
 # are data errors (the posting or board is wrong, not the company): they give no cooldown (`DATA_ERRORS`).
 PASS_REASONS = ("visa", "too_big", "too_early", "role", "product", "know_it", "not_a_fit", "other",
@@ -296,12 +297,18 @@ def load_passes(conn: sqlite3.Connection, canon: dict[int, int], today: date, cf
 
 
 def load_passed_postings(conn: sqlite3.Connection) -> frozenset[int]:
-    """The postings he turned down with Not now, Role not for me (a `pick_passed` event whose reason is `role` and that
-    names its posting). A role that does not fit his skills is never an opening again: not after the cooldown, not in
-    the fresh lane. The company stays eligible for its other openings."""
-    return frozenset(r[0] for r in conn.execute(
+    """The postings he turned down: Not now, Role not for me (a `pick_passed` event whose reason is `role` and that
+    names its posting) and Pass on the job list (a `posting_passed` event). A role that does not fit his skills is
+    never an opening again: not after the cooldown, not in the fresh lane. The company stays eligible for its other
+    openings, and a Pass on the job list is never a Not now: `load_passes` does not read it."""
+    out = {r[0] for r in conn.execute(
         "SELECT json_extract(detail, '$.posting_id') FROM event WHERE kind = ? AND entity = 'company' "
-        "AND json_extract(detail, '$.reason') = 'role' AND json_extract(detail, '$.posting_id') IS NOT NULL", (PASSED,)))
+        "AND json_extract(detail, '$.reason') = 'role' AND json_extract(detail, '$.posting_id') IS NOT NULL", (PASSED,))}
+    out |= {r[0] for r in conn.execute(
+        "SELECT coalesce(json_extract(detail, '$.posting_id'), entity_id) FROM event WHERE kind = ? "
+        "AND entity = 'posting' AND coalesce(json_extract(detail, '$.posting_id'), entity_id) IS NOT NULL",
+        (POSTING_PASSED,))}
+    return frozenset(out)
 
 
 def without_turned_down(conn: sqlite3.Connection, posting_id: int | None) -> int | None:

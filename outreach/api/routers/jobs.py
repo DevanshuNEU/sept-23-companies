@@ -1,12 +1,19 @@
-"""The job list (#156): `GET /api/jobs`, open engineering postings, newest first, one page at a time
-(`outreach.pipeline.joblist` decides which and in which order)."""
+"""The job list (#156): `GET /api/jobs` and its two writes.
+
+`GET /api/jobs` is open engineering postings, newest first, one page at a time (`outreach.pipeline.joblist` decides
+which and in which order). `POST /api/jobs/{postingId}/pass` hides one posting and never its company;
+`POST /api/jobs/{postingId}/go-ahead` adds its company to today's list as his own pick. Each write is one `run_write`.
+"""
 from fastapi import APIRouter, Query, Request, Response
 
 from outreach.api import views
 from outreach.api.db import read_conn
 from outreach.api.errors import ApiProblem
-from outreach.api.models.jobs import JobSize, JobsView, JobView, JobWindow
+from outreach.api.idempotency import run_write
+from outreach.api.models.jobs import GoAheadResult, JobSize, JobsView, JobView, JobWindow, JobWriteBody, PassJobResult
 from outreach.api.queries import jobs_list as queries
+from outreach.api.routers import row_id
+from outreach.api.services import jobs as service
 from outreach.pipeline.joblist import JobFilters
 
 router = APIRouter(tags=["jobs"])
@@ -30,3 +37,13 @@ async def jobs(request: Request, view: JobView = "your_level", window: JobWindow
                 raise ApiProblem("bad_request", f"after: {err}") from None
 
     return await views.serve(request, JobsView, compute)
+
+
+@router.post("/jobs/{posting_id}/pass", response_model=PassJobResult)
+def pass_job(body: JobWriteBody, request: Request, posting_id: int = row_id()) -> Response:
+    return run_write(request, lambda ctx: service.pass_job(ctx, posting_id))
+
+
+@router.post("/jobs/{posting_id}/go-ahead", response_model=GoAheadResult)
+def go_ahead(body: JobWriteBody, request: Request, posting_id: int = row_id()) -> Response:
+    return run_write(request, lambda ctx: service.go_ahead(ctx, posting_id))

@@ -313,6 +313,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/{posting_id}/go-ahead": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Go Ahead */
+        post: operations["go_ahead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{posting_id}/pass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pass Job */
+        post: operations["pass_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/linkedin": {
         parameters: {
             query?: never;
@@ -1995,6 +2029,24 @@ export interface components {
             /** Listings */
             listings: number;
         };
+        /** GoAheadResult */
+        GoAheadResult: {
+            /** Companyid */
+            companyId: number;
+            /** Entryid */
+            entryId: number | null;
+            /** Postingid */
+            postingId: number;
+            /** Rank */
+            rank: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "added" | "requested";
+            /** Text */
+            text: string;
+        };
         /** HealthBoards */
         HealthBoards: {
             /** Active */
@@ -2181,6 +2233,11 @@ export interface components {
              */
             status: "running" | "ok" | "partial" | "failed";
         };
+        /**
+         * JobWriteBody
+         * @description The body of Pass and Go ahead: nothing. The page's `Idempotency-Key` header is the write's key.
+         */
+        JobWriteBody: Record<string, never>;
         /** JobsView */
         JobsView: {
             /** Asof */
@@ -2841,6 +2898,15 @@ export interface components {
             asOf: string;
             /** Touches */
             touches: components["schemas"]["PromptTouch"][];
+        };
+        /** PassJobResult */
+        PassJobResult: {
+            /** Companyid */
+            companyId: number;
+            /** Passed */
+            passed: boolean;
+            /** Postingid */
+            postingId: number;
         };
         /**
          * PassPickBody
@@ -5636,6 +5702,184 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    go_ahead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                posting_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoAheadResult"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    pass_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                posting_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PassJobResult"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

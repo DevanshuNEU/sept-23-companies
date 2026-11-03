@@ -2389,6 +2389,62 @@
         "title": "GapCompany",
         "type": "object"
       },
+      "GoAheadResult": {
+        "properties": {
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "entryId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entryid"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "state": {
+            "enum": [
+              "added",
+              "requested"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "postingId",
+          "companyId",
+          "state",
+          "rank",
+          "entryId",
+          "text"
+        ],
+        "title": "GoAheadResult",
+        "type": "object"
+      },
       "HealthBoards": {
         "properties": {
           "active": {
@@ -2914,6 +2970,13 @@
           "late"
         ],
         "title": "JobRunSummary",
+        "type": "object"
+      },
+      "JobWriteBody": {
+        "additionalProperties": false,
+        "description": "The body of Pass and Go ahead: nothing. The page's `Idempotency-Key` header is the write's key.",
+        "properties": {},
+        "title": "JobWriteBody",
         "type": "object"
       },
       "JobsView": {
@@ -4799,6 +4862,29 @@
           "touches"
         ],
         "title": "OutcomePromptView",
+        "type": "object"
+      },
+      "PassJobResult": {
+        "properties": {
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "postingId",
+          "companyId",
+          "passed"
+        ],
+        "title": "PassJobResult",
         "type": "object"
       },
       "PassPickBody": {
@@ -10885,6 +10971,234 @@
           }
         },
         "summary": "Jobs",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{posting_id}/go-ahead": {
+      "post": {
+        "operationId": "go_ahead",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "posting_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Posting Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobWriteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoAheadResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Go Ahead",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{posting_id}/pass": {
+      "post": {
+        "operationId": "pass_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "posting_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Posting Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobWriteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassJobResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Pass Job",
         "tags": [
           "jobs"
         ]

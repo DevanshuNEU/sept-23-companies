@@ -106,6 +106,31 @@ class CrawlConfigTests(unittest.TestCase):
         self.assertEqual(cfg.host_interval_s["workable.com"], 2.0)
         self.assertEqual(len(cfg.host_interval_s), 14)
 
+    def test_shipped_big_board_values(self):
+        big = load_crawl_config().big_board
+        self.assertEqual((big.min_open, big.max_share, big.quiet_days, big.interval_s), (200, 0.10, 30, 86400))
+
+    def test_big_board_ranges_are_checked(self):
+        for key, bad in (("min_open", 0), ("min_open", "1.5"), ("max_share", 0), ("max_share", "1.5"),
+                         ("max_share", "-0.1"), ("max_share", "nan"), ("quiet_days", 0), ("quiet_days", 366),
+                         ("interval_s", 21599), ("interval_s", 604801)):
+            with self.assertRaisesRegex(ValueError, f"big_board.{key}"):
+                _load_with(**{key: bad})
+
+    def test_big_board_edges_are_allowed(self):
+        self.assertEqual(_load_with(min_open=1).big_board.min_open, 1)
+        self.assertEqual(_load_with(max_share=1).big_board.max_share, 1.0)
+        self.assertEqual(_load_with(quiet_days=365).big_board.quiet_days, 365)
+        self.assertEqual(_load_with(interval_s=21600).big_board.interval_s, 21600)
+        self.assertEqual(_load_with(interval_s=604800).big_board.interval_s, 604800)
+
+    def test_a_missing_big_board_table_is_named(self):
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        broken = re.sub(r"(?ms)^\[big_board\]\n.*?(?=^\[|\Z)", "", text)
+        self.assertNotEqual(broken, text)
+        with self.assertRaisesRegex(KeyError, "big_board"):
+            _load_text(broken)
+
     def test_floor_above_ceiling_is_refused(self):
         with self.assertRaisesRegex(ValueError, "floor_s"):
             _load_with(floor_s=700000)

@@ -1,11 +1,13 @@
 """Cadence, backoff and due-board selection (issue #21, Task 10)."""
+import dataclasses
 import unittest
 
 from outreach.crawl.boardstate import BoardRow, load_board
 from outreach.crawl.cadence import (
-    add_seconds, due_boards, error_backoff_s, last_new_age_s, next_interval_s, plan_company_ids)
+    add_seconds, due_boards, error_backoff_s, last_new_age_s, low_yield, next_interval_s, plan_company_ids)
 from outreach.crawl.config import load_crawl_config
 from outreach.crawl.postings import source_key
+from tests.ranking_store import decision, posting
 from tests.storetest import fresh_store, seed_board, seed_company
 
 CFG = load_crawl_config()
@@ -249,6 +251,129 @@ class DueBoardTests(StoreTestCase):
         c = self.company()
         b = self.board(c)
         self.assertEqual(self.due(plan_ids=set(range(100000, 140000)) | {c}), [b])
+
+
+class LowYieldTests(StoreTestCase):
+    """`low_yield`: a board with 200 or more open postings, under 10% of them US engineering, and nothing new at his
+    level in the last 30 days."""
+    OLD = "2026-08-01T00:00:00Z"
+
+    def fill(self, board, other=0, us_eng=0, **fields):
+        """`us_eng` US engineering postings (first seen long ago unless `first_seen_at` is given) and `other`
+        sales postings, all open on `board`, each with a decision."""
+        c = self.conn.execute("SELECT company_id FROM board WHERE board_id = ?", (board,)).fetchone()[0]
+        first = fields.pop("first_seen_at", self.OLD)
+        for _ in range(us_eng):
+            decision(self.conn, posting(self.conn, c, board_id=board, first_seen_at=first, last_seen_at=NOW), **fields)
+        for _ in range(other):
+            decision(self.conn, posting(self.conn, c, "Account Executive", board_id=board, first_seen_at=self.OLD,
+                                        last_seen_at=NOW),
+                     lane="not_engineering", level_tier="not_stated")
+
+    def big(self, other=240, us_eng=10, **fields):
+        b = self.board(self.company())
+        self.fill(b, other, us_eng, **fields)
+        return b
+
+    def test_a_big_board_with_few_us_engineering_jobs_and_none_fresh_is_low_yield(self):
+        self.assertTrue(low_yield(self.conn, self.big(), NOW, CFG))
+
+    def test_small_board_never_low_yield(self):
+        self.assertFalse(low_yield(self.conn, self.big(other=140, us_eng=10), NOW, CFG))  # 150 open
+
+    def test_exactly_min_open_is_big_enough(self):
+        self.assertTrue(low_yield(self.conn, self.big(other=190, us_eng=10), NOW, CFG))
+        self.assertFalse(low_yield(self.conn, self.big(other=189, us_eng=10), NOW, CFG))
+
+    def test_a_board_with_no_postings_is_not_low_yield(self):
+        self.assertFalse(low_yield(self.conn, self.board(self.company()), NOW, CFG))
+
+    def test_a_share_of_ten_percent_or_more_is_not_low_yield(self):
+        self.assertFalse(low_yield(self.conn, self.big(other=180, us_eng=20), NOW, CFG))  # 20 of 200 = 10%
+        self.assertTrue(low_yield(self.conn, self.big(other=181, us_eng=19), NOW, CFG))  # 19 of 200 = 9.5%
+
+    def test_share_counts_us_engineering_only(self):
+        # 30 engineering postings, 20 of them outside the US: 10 of 250 count, so the board is still low yield.
+        b = self.big(other=220, us_eng=10)
+        self.fill(b, us_eng=20, us="no")
+        self.assertTrue(low_yield(self.conn, b, NOW, CFG))
+        # The same 30 all in the US is 12%: not low yield.
+        b = self.big(other=220, us_eng=10)
+        self.fill(b, us_eng=20, us="unknown")
+        self.assertFalse(low_yield(self.conn, b, NOW, CFG))
+
+    def test_a_fresh_us_engineering_posting_at_his_level_restores_the_interval(self):
+        b = self.big()
+        self.fill(b, us_eng=1, first_seen_at=ago(DAY))  # new_grad, level_ok = 1
+        self.assertFalse(low_yield(self.conn, b, NOW, CFG))
+
+    def test_a_fresh_posting_with_no_stated_level_counts(self):
+        for tier in ("not_stated", "open"):
+            b = self.big()
+            self.fill(b, us_eng=1, first_seen_at=ago(DAY), level_tier=tier)
+            self.assertFalse(low_yield(self.conn, b, NOW, CFG), tier)
+
+    def test_a_fresh_posting_that_is_not_his_level_does_not_count(self):
+        b = self.big()
+        self.fill(b, us_eng=1, first_seen_at=ago(DAY), level_tier="senior")
+        self.assertTrue(low_yield(self.conn, b, NOW, CFG))
+
+    def test_a_fresh_non_us_or_non_engineering_posting_does_not_count(self):
+        b = self.big()
+        self.fill(b, us_eng=1, first_seen_at=ago(DAY), us="no")
+        self.fill(b, us_eng=1, first_seen_at=ago(DAY), lane="intern")
+        self.assertTrue(low_yield(self.conn, b, NOW, CFG))
+
+    def test_a_fit_posting_older_than_quiet_days_is_not_fresh(self):
+        b = self.big()
+        self.fill(b, us_eng=1, first_seen_at=ago(31 * DAY))
+        self.assertTrue(low_yield(self.conn, b, NOW, CFG))
+        self.fill(b, us_eng=1, first_seen_at=ago(29 * DAY))
+        self.assertFalse(low_yield(self.conn, b, NOW, CFG))
+
+    def test_closed_postings_and_other_boards_do_not_count(self):
+        b = self.big(other=100, us_eng=10)  # 110 open
+        c = self.conn.execute("SELECT company_id FROM board WHERE board_id = ?", (b,)).fetchone()[0]
+        for _ in range(150):
+            posting(self.conn, c, board_id=b, closed=True)
+        self.fill(self.board(c), other=300)
+        self.assertFalse(low_yield(self.conn, b, NOW, CFG))
+
+    def test_an_undecided_posting_is_open_but_not_us_engineering(self):
+        b = self.big(other=189, us_eng=10)
+        c = self.conn.execute("SELECT company_id FROM board WHERE board_id = ?", (b,)).fetchone()[0]
+        posting(self.conn, c, board_id=b, first_seen_at=ago(DAY), last_seen_at=NOW)  # no decision: nothing fresh at his level
+        self.assertTrue(low_yield(self.conn, b, NOW, CFG))
+
+    def test_only_the_current_ruleset_counts(self):
+        b = self.big()
+        self.conn.execute("INSERT INTO ruleset(ruleset_version, config_toml, created_at, is_current) "
+                          "VALUES ('r-0000000000b2', '', ?, 0)", (NOW,))
+        pid = self.conn.execute("SELECT max(posting_id) FROM posting WHERE board_id = ?", (b,)).fetchone()[0]
+        self.conn.execute("UPDATE posting SET first_seen_at = ? WHERE posting_id = ?", (ago(DAY), pid))
+        self.conn.execute("UPDATE decision SET ruleset_version = 'r-0000000000b2' WHERE posting_id = ?", (pid,))
+        self.assertTrue(low_yield(self.conn, b, NOW, CFG))  # the fit row is under an old ruleset: undecided now
+
+    def test_the_thresholds_come_from_the_config(self):
+        b = self.big(other=100, us_eng=10)  # 110 open, 9%
+        self.assertFalse(low_yield(self.conn, b, NOW, CFG))
+        small = dataclasses.replace(CFG, big_board=dataclasses.replace(CFG.big_board, min_open=100))
+        self.assertTrue(low_yield(self.conn, b, NOW, small))
+        strict = dataclasses.replace(small, big_board=dataclasses.replace(small.big_board, max_share=0.05))
+        self.assertFalse(low_yield(self.conn, b, NOW, strict))
+
+
+class LowYieldDueTests(StoreTestCase):
+    def test_plan_company_board_never_slowed(self):
+        # A low-yield board of a company on today's list: next_read_at is a day out, yet the plan floor reads it.
+        plan = self.company()
+        b = self.board(plan, last_read="ok", last_read_at=ago(7 * 3600), next_read_at=add_seconds(NOW, DAY))
+        for _ in range(250):
+            decision(self.conn, posting(self.conn, plan, "Account Executive", board_id=b, first_seen_at=ago(60 * DAY)),
+                     lane="not_engineering", level_tier="not_stated")
+        self.assertTrue(low_yield(self.conn, b, NOW, CFG))
+        self.assertEqual(self.due(plan_ids={plan}), [b])
+        self.assertEqual(self.due(), [])  # a company off the plan waits the day
 
 
 if __name__ == "__main__":

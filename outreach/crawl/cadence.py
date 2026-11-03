@@ -16,7 +16,7 @@ from outreach.crawl.boardstate import BoardRow
 from outreach.crawl.config import CrawlConfig
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["next_interval_s", "error_backoff_s", "add_seconds", "last_new_age_s", "plan_company_ids", "due_boards",
+__all__ = ["next_interval_s", "error_backoff_s", "add_seconds", "last_new_age_s", "low_yield", "plan_company_ids", "due_boards",
            "switched_off_boards"]
 
 # Ruling 5: an erroring board waits 6, 12, then 24 hours and stays at 24. The 7-day ceiling is for quiet boards only.
@@ -55,6 +55,26 @@ def last_new_age_s(conn: sqlite3.Connection, board: BoardRow, now: str) -> float
     row = conn.execute("SELECT max(first_seen_at) FROM posting WHERE board_id = ?", (board.board_id,)).fetchone()
     since = row[0] or board.created_at
     return max(0.0, (_parse(now) - _parse(since)).total_seconds())
+
+
+def low_yield(conn: sqlite3.Connection, board_id: int, now: str, cfg: CrawlConfig) -> bool:
+    """True for a big board that yields little (#152): at least `big_board.min_open` open postings, fewer than
+    `big_board.max_share` of them US engineering (lane `engineering`, `us` not `no`, in the current decision), and none
+    of those at his level or with no stated level first seen in the last `big_board.quiet_days` days. One query over the
+    board's open postings through `posting_board_open`; the decision is joined by its key, as `ingest._undecided` does,
+    never through the `current_decision` view. A posting with no current decision is open but not US engineering."""
+    big = cfg.big_board
+    fresh_since = add_seconds(now, -big.quiet_days * 86400)
+    us_eng = "d.lane = 'engineering' AND d.us != 'no'"
+    row = conn.execute(
+        f"SELECT COUNT(*), COALESCE(SUM({us_eng}), 0), "
+        f"COALESCE(SUM({us_eng} AND (d.level_ok = 1 OR d.level_tier IN ('not_stated', 'open')) "
+        "AND p.first_seen_at >= :fresh), 0) "
+        "FROM posting p LEFT JOIN decision d ON d.posting_id = p.posting_id "
+        "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
+        "WHERE p.board_id = :board AND p.closed_at IS NULL", {"board": board_id, "fresh": fresh_since}).fetchone()
+    open_n, us_eng_n, fresh_n = row
+    return open_n >= big.min_open and us_eng_n / open_n < big.max_share and fresh_n == 0
 
 
 def plan_company_ids(conn: sqlite3.Connection, today: str) -> frozenset[int]:

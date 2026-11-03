@@ -845,5 +845,67 @@ class CadenceTests(IngestTestCase):
             self.assertEqual(board["change_interval_s"], FLOOR)  # an error leaves the interval alone
 
 
+def big_board_jobs(n_eng: int, n_other: int, *, extra_eng: int = 0) -> bytes:
+    """A Greenhouse list: `n_eng` US software engineer postings, `n_other` sales ones and `extra_eng` more engineers
+    with later ids (the new ones of a later read)."""
+    def job(i, title):
+        return {"id": 7000000 + i, "title": title, "absolute_url": f"https://x.example/{i}",
+                "location": {"name": "San Francisco, CA"}, "company_name": "Acme Robotics",
+                "content": "&lt;p&gt;Work with us.&lt;/p&gt;"}
+    jobs = [job(i, f"Software Engineer {i}") for i in range(n_eng)]
+    jobs += [job(1000 + i, f"Account Executive {i}") for i in range(n_other)]
+    jobs += [job(2000 + i, f"Backend Engineer {i}") for i in range(extra_eng)]
+    return json.dumps({"jobs": jobs, "meta": {"total": len(jobs)}}).encode("utf-8")
+
+
+class LowYieldReadTests(IngestTestCase):
+    """A big board with few US engineering jobs and nothing fresh at his level is read at most once a day (#152)."""
+    DAY = 86400
+
+    def aged_board(self):
+        """250 open postings, 10 of them US engineering, all first seen 60 days ago."""
+        self.read(ok(big_board_jobs(10, 240)), at(0))
+        self.conn.execute("UPDATE posting SET first_seen_at = ?", (at(-60),))
+
+    def second_read(self, jobs, now=1):
+        """A later read that sees one new sales posting, so the normal interval is the floor, and `jobs`."""
+        data = json.loads(jobs)
+        data["jobs"].append({"id": 9000001, "title": "Sales Lead", "absolute_url": "https://x.example/s",
+                             "location": {"name": "Remote"}, "company_name": "Acme Robotics", "content": "&lt;p&gt;Sell.&lt;/p&gt;"})
+        data["meta"]["total"] = len(data["jobs"])
+        return self.read(ok(json.dumps(data).encode("utf-8"), '"B"'), at(now))
+
+    def test_low_yield_big_board_waits_a_day(self):
+        self.aged_board()
+        out = self.second_read(big_board_jobs(10, 240))
+        self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), self.DAY))
+
+    def test_the_stored_interval_stays_the_normal_one(self):
+        self.aged_board()
+        out = self.second_read(big_board_jobs(10, 240))
+        self.assertEqual((out.interval_s, self.board()["change_interval_s"]), (FLOOR, FLOOR))
+
+    def test_fresh_fit_posting_restores_interval(self):
+        self.aged_board()
+        out = self.second_read(big_board_jobs(10, 240, extra_eng=1))  # a new engineer, first seen now
+        self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), FLOOR))
+
+    def test_a_board_that_waits_longer_than_a_day_already_keeps_it(self):
+        self.aged_board()
+        out = self.read(ok(big_board_jobs(10, 240), '"B"'), at(40))  # nothing new for 100 days: the ceiling
+        self.assertEqual(self.board()["next_read_at"], add_seconds(at(40), self.cfg.ceiling_s))
+
+    def test_small_board_is_not_slowed(self):
+        self.read(ok(big_board_jobs(10, 140)), at(0))
+        self.conn.execute("UPDATE posting SET first_seen_at = ?", (at(-60),))
+        self.second_read(big_board_jobs(10, 140))
+        self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), FLOOR))
+
+    def test_an_error_read_keeps_its_own_backoff(self):
+        self.aged_board()
+        self.read(status_response(500), at(1))
+        self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), FLOOR))
+
+
 if __name__ == "__main__":
     unittest.main()

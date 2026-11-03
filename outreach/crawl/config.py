@@ -6,7 +6,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["ATS_HOSTS", "CONFIG_PATH", "CrawlConfig", "load_crawl_config"]
+__all__ = ["ATS_HOSTS", "BigBoardConfig", "CONFIG_PATH", "CrawlConfig", "load_crawl_config"]
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
 
@@ -25,6 +25,17 @@ _INT_KEYS = ("floor_s", "ceiling_s", "age_divisor", "defer_s", "max_bytes", "max
              "watch_interval_s", "watch_per_tick", "watch_min_text_chars", "stale_after_months", "body_refetch_days",
              "outage_grace_s")
 _NUM_KEYS = ("timeout_s", "default_host_interval_s")
+
+
+@dataclass(frozen=True)
+class BigBoardConfig:
+    """When a big board with few US engineering jobs waits a day (#152): at least `min_open` open postings, under
+    `max_share` of them US engineering, none at his level first seen in the last `quiet_days`; then it is read at
+    most every `interval_s` seconds."""
+    min_open: int
+    max_share: float
+    quiet_days: int
+    interval_s: int
 
 
 @dataclass(frozen=True, eq=False)  # eq=False: host_interval_s is a dict, identity hashing is enough
@@ -53,6 +64,7 @@ class CrawlConfig:
     body_refetch_days: int
     outage_grace_s: int
     ats_off: dict[str, str]  # ATS name -> why its reader is switched off (#46)
+    big_board: BigBoardConfig
 
     def reads(self, ats: str) -> bool:
         """False for an ATS whose reader is switched off: its boards are never read, probed or slug-probed."""
@@ -76,10 +88,31 @@ def _is_positive(v: object) -> bool:
     return _is_number(v) and math.isfinite(v) and v > 0
 
 
+def _load_big_board(table: object, floor_s: int, ceiling_s: int) -> BigBoardConfig:
+    if not isinstance(table, dict):
+        raise ValueError("big_board must be a table")
+    for key in ("min_open", "max_share", "quiet_days", "interval_s"):
+        if key not in table:
+            raise KeyError(f"big_board.{key} is missing from the config")
+
+    def whole(key: str, low: int, high: int | None = None) -> int:
+        v = table[key]
+        if not isinstance(v, int) or isinstance(v, bool) or v < low or (high is not None and v > high):
+            span = f"at least {low}" if high is None else f"{low} to {high}"
+            raise ValueError(f"big_board.{key} must be a whole number {span}, got {v!r}")
+        return v
+
+    share = table["max_share"]
+    if not _is_number(share) or not math.isfinite(share) or not 0 < share <= 1:
+        raise ValueError(f"big_board.max_share must be a number above 0 and at most 1, got {share!r}")
+    return BigBoardConfig(min_open=whole("min_open", 1), max_share=float(share), quiet_days=whole("quiet_days", 1, 365),
+                          interval_s=whole("interval_s", floor_s, ceiling_s))
+
+
 def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     path = Path(path)
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s", "ats_off"):
+    for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s", "ats_off", "big_board"):
         if key not in data:
             raise KeyError(f"{key} is missing from {path.name}")
     for key in _INT_KEYS:
@@ -120,7 +153,10 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
         if not _is_positive(data[key]):
             raise ValueError(f"{key} must be a finite number above 0, got {data[key]!r}")
 
+    big = _load_big_board(data["big_board"], data["floor_s"], data["ceiling_s"])
+
     kwargs = {k: data[k] for k in (*_INT_KEYS, *_NUM_KEYS, "user_agent")}
     kwargs["host_interval_s"] = {k.lower(): float(v) for k, v in hosts.items()}
     kwargs["ats_off"] = {ats: reason.strip() for ats, reason in off.items()}
+    kwargs["big_board"] = big
     return CrawlConfig(**kwargs)

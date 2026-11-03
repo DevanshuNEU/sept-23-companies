@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
 from outreach.crawl.bodies import BODY_LANES, fetch_bodies, missing_body_ids, refetch_body_ids, save_body, stored_sha
 from outreach.crawl.boardstate import BoardRow, load_board, write_board_state
-from outreach.crawl.cadence import add_seconds, error_backoff_s, last_new_age_s, next_interval_s
+from outreach.crawl.cadence import add_seconds, error_backoff_s, last_new_age_s, low_yield, next_interval_s
 from outreach.crawl.config import CrawlConfig
 from outreach.crawl.decisions import decide_postings
 from outreach.crawl.polite import HostTripped
@@ -153,7 +153,12 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
         next_read_at = add_seconds(now, error_backoff_s(streaks.error_streak, cfg))
     else:
         interval_s = next_interval_s(last_new_age_s(conn, board, now), board.change_interval_s, any_change, cfg)
-        next_read_at = add_seconds(now, interval_s)
+        # A big board with few US engineering jobs waits at least a day (#152). Only the next read moves: the stored
+        # interval stays the normal one, so the board returns to its rhythm the day it stops being low yield.
+        wait_s = interval_s
+        if low_yield(conn, board.board_id, now, cfg):
+            wait_s = max(interval_s, cfg.big_board.interval_s)
+        next_read_at = add_seconds(now, wait_s)
     open_now = len(_open_ids(conn, board)) if result.result == "unchanged" else 0  # used for unchanged only
     write_board_state(conn, board, result, run_id=run_id, now=now, open_postings=open_now,
                       next_read_at=next_read_at, interval_s=interval_s, bucket=bucket)

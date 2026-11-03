@@ -9,7 +9,8 @@ listing is upserted (`first_seen_at` only on insert, `last_seen_at` and `active 
 listing the file no longer keeps goes inactive. The rows in the file when the poll first ran carry `backfill = 1`:
 they have no honest first-seen time.
 
-Kept: `active` and `is_visible`, a configured category, and a US location (`is_us_location`).
+Kept: `active` and `is_visible`, a configured category, and a US location (`is_us_location`). The request has its
+own response cap, `MAX_BYTES`, because the file grows past the crawl client's.
 """
 from __future__ import annotations
 
@@ -25,18 +26,40 @@ from outreach.pipeline.urls import board_key
 from outreach.store import atomic
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["ETAG_KEY", "FAIL_STREAK_KEY", "FeedError", "FeedPoll", "SOURCE", "is_us_location", "note_streak", "poll"]
+__all__ = ["ETAG_KEY", "FAIL_STREAK_KEY", "FeedError", "FeedPoll", "MAX_BYTES", "SOURCE", "is_us_location", "note_streak", "poll"]
 
 SOURCE = "simplify"
 ETAG_KEY = "simplify_etag"
 FAIL_STREAK_KEY = "simplify_fail_streak"
 BATCH = 500
+# The feed's own response cap (#153): the file is 13 MB and growing, the crawl client's cap is 20 MB.
+MAX_BYTES = 60_000_000
 
 _STATES = ("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH "
            "OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC").split()
-_US_INITIALS = re.compile(r"\b(?:US|USA)\b")  # capitals only: "us" is a word in any sentence
+_STATE_NAMES = (
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida",
+    "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland",
+    "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
+    "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma",
+    "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
+    "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming", "District of Columbia")
+# Places that make a US-looking string not US: "Tel Aviv, IL" ends in Illinois's code, "Remote in Mexico" is not "New
+# Mexico". A small explicit list, as ruled; the Israeli cities stand in for the country because "IL" is the one code a
+# feed uses for them without naming Israel.
+_NON_US = ("Israel", "Tel Aviv", "Tel-Aviv", "Jerusalem", "Haifa", "Canada", "India", "UK", "United Kingdom", "Germany",
+           "France", "Mexico", "Brazil", "Ireland", "Netherlands", "Singapore", "Japan", "China", "Australia", "Poland",
+           "Spain")
+# Capitals only for the short forms: "us", "sf" and "la" are words or noise in any other case.
+_US_INITIALS = re.compile(r"\b(?:US|USA)\b")
 _US_NAME = re.compile(r"\bUnited States\b", re.IGNORECASE)
-_US_STATE_END = re.compile(r",\s*(?:%s)$" % "|".join(_STATES))
+_STATE_END = re.compile(r",\s*(?:%s)$" % "|".join(_STATES))
+_STATE_NAME = re.compile(r"\b(?:%s)\b" % "|".join(_STATE_NAMES), re.IGNORECASE)
+# "UK" is matched in capitals only, the rest in any case.
+_NON_US_PLACE = re.compile(r"\b(?:UK|(?i:%s))\b" % "|".join(re.escape(p) for p in _NON_US if p != "UK"))
+_HUB = re.compile(r"\b(?:San Francisco|Bay Area|Los Angeles|Seattle|Boston|Austin|Chicago|Denver|Washington,? D\.?C\.?"
+                  r"|New York)\b", re.IGNORECASE)
+_HUB_INITIALS = re.compile(r"\b(?:SF|NYC|LA)\b")
 
 _UPSERT = (
     "INSERT INTO feed_listing (source, listing_id, url, ats, token, native_id, company_name, title, posted_hint, "
@@ -61,10 +84,20 @@ class FeedPoll:
 
 
 def is_us_location(location: str) -> bool:
-    """True for a location naming the US, USA or United States ("Remote in USA") or ending in a US state code or DC
-    after a comma ("Austin, TX"). The words are matched as whole words: "US" only in capitals."""
+    """True for a location in the US. In order:
+    1. it names the US, USA or United States (capitals for the first two): yes, whatever else it names;
+    2. it names a place in `_NON_US` ("Toronto, ON, Canada", "Tel Aviv, IL", "Remote in Mexico"): no;
+    3. it is exactly "Remote", ends in ", XX" for a US state code or DC, names a state in full, or names one of the
+       hubs (San Francisco, SF, Bay Area, New York, NYC, Los Angeles, LA, Seattle, Boston, Austin, Chicago, Denver,
+       Washington DC): yes.
+    "New Mexico" is not read as Mexico."""
     text = location.strip()
-    return bool(_US_INITIALS.search(text) or _US_NAME.search(text) or _US_STATE_END.search(text))
+    if _US_INITIALS.search(text) or _US_NAME.search(text):
+        return True
+    if _NON_US_PLACE.search(text.replace("New Mexico", "")):
+        return False
+    return bool(text.lower() == "remote" or _STATE_END.search(text) or _STATE_NAME.search(text)
+                or _HUB.search(text) or _HUB_INITIALS.search(text))
 
 
 def _kept(row: object, categories: frozenset[str]) -> bool:
@@ -116,7 +149,7 @@ def poll(conn: sqlite3.Connection, client: HttpClient, now: str, *, cfg: Pipelin
     is not a JSON list, or a failed request raises and writes nothing; the tick turns that into `feed_error`."""
     simplify = (cfg or load_pipeline_config()).simplify
     etag = _meta(conn, ETAG_KEY)
-    response = client.get(simplify.url, {"If-None-Match": etag} if etag else None)
+    response = client.get(simplify.url, {"If-None-Match": etag} if etag else None, max_bytes=MAX_BYTES)
     if response.status == 304:
         return FeedPoll(False, 0, 0, 0)
     if response.status != 200:

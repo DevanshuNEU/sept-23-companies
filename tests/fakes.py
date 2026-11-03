@@ -63,6 +63,7 @@ class FakeClient:
         self.calls: list[tuple[str, str, dict, bytes | None]] = []
         self.requests: list[str] = []
         self.unrouted: list[str] = []
+        self.max_bytes_seen: list[int | None] = []  # the per-request cap of each get (None: not given)
 
     def _answer(self, method: str, url: str, headers: Mapping[str, str] | None, body: bytes | None) -> Response:
         headers = dict(headers or {})
@@ -96,8 +97,15 @@ class FakeClient:
             return value(method, url, headers, body)
         raise TypeError(f"unusable route value {type(value).__name__}")
 
-    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
-        return self._answer("GET", url, headers, None)
+    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False,
+            max_bytes: int | None = None) -> Response:
+        """`max_bytes` is recorded in `max_bytes_seen` and enforced like the real client: a body over it is a
+        `too_large` FetchError."""
+        self.max_bytes_seen.append(max_bytes)
+        r = self._answer("GET", url, headers, None)
+        if max_bytes is not None and len(r.body) > max_bytes:
+            raise FetchError("too_large", f"over {max_bytes} bytes")
+        return r
 
     def post(self, url: str, body: bytes, headers: Mapping[str, str] | None = None) -> Response:
         return self._answer("POST", url, headers, body)

@@ -124,20 +124,23 @@ class PoliteClient:
         else:
             self._failed(bucket)
 
-    def _get_once(self, url: str, headers: Mapping[str, str] | None) -> Response:
+    def _get_once(self, url: str, headers: Mapping[str, str] | None, max_bytes: int | None = None) -> Response:
         bucket = self._begin(url)
+        extra = {} if max_bytes is None else {"max_bytes": max_bytes}
         try:
-            r = self.inner.get(url, self._headers(headers))
+            r = self.inner.get(url, self._headers(headers), **extra)
         except FetchError as e:
             self._failed_fetch(bucket, e)
             raise
         self._judge(bucket, r.status)
         return r
 
-    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
+    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False,
+            max_bytes: int | None = None) -> Response:
         """Redirects are followed here, never by the inner client, so each hop is spaced and counted in its own
-        host's bucket. A hop to another host does not carry the caller's headers (the User-Agent is added again)."""
-        r = self._get_once(url, headers)
+        host's bucket. A hop to another host does not carry the caller's headers (the User-Agent is added again).
+        `max_bytes` caps each response of this call only (#153); None keeps the inner client's own cap."""
+        r = self._get_once(url, headers, max_bytes)
         hops = 0
         while follow_redirects and r.status in _REDIRECTS and r.headers.get("location") and hops < self.cfg.max_redirects:
             hops += 1
@@ -145,7 +148,7 @@ class PoliteClient:
             if _host(target) != _host(url):
                 headers = {}
             url = target
-            r = self._get_once(url, headers)
+            r = self._get_once(url, headers, max_bytes)
         return r
 
     def post(self, url: str, body: bytes, headers: Mapping[str, str] | None = None) -> Response:

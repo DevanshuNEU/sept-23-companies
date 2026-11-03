@@ -44,6 +44,18 @@ class PoliteClientTests(unittest.TestCase):
         self.assertNotIn("@", agents[0])
         self.assertEqual(headers["Accept"], "application/json")
 
+    def test_polite_passes_a_cap_on_only_when_given(self):
+        polite, inner, _ = make({GH: [json_response({}), json_response({})]})
+        polite.get(GH)
+        polite.get(GH, max_bytes=77)
+        self.assertEqual(inner.max_bytes_seen, [None, 77])
+
+    def test_polite_keeps_the_cap_across_a_redirect(self):
+        hop = Response(302, "", b"", {"location": GH2})
+        polite, inner, _ = make({GH: hop, GH2: json_response({})})
+        polite.get(GH, follow_redirects=True, max_bytes=77)
+        self.assertEqual(inner.max_bytes_seen, [77, 77])
+
     def test_polite_spaces_requests_to_one_bucket(self):
         polite, _, clock = make({GH: [json_response({}), json_response({})]})
         polite.get(GH)

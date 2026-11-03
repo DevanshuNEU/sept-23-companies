@@ -184,10 +184,12 @@ class _TickClient:
         if bucket in self.down:
             raise HostTripped(bucket)
 
-    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
+    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False,
+            max_bytes: int | None = None) -> Response:
         self._check(url)
         self.requests += 1
-        return self.polite.get(url, headers, follow_redirects=follow_redirects)
+        extra = {} if max_bytes is None else {"max_bytes": max_bytes}
+        return self.polite.get(url, headers, follow_redirects=follow_redirects, **extra)
 
     def post(self, url: str, body: bytes, headers: Mapping[str, str] | None = None) -> Response:
         self._check(url)
@@ -443,10 +445,14 @@ def _probe_step(conn: sqlite3.Connection, run: _Pass, cfg: CrawlConfig, now_fn, 
     return report, ""
 
 
-def _feed_step(conn: sqlite3.Connection, run: _Pass, now_fn) -> tuple[dict[str, int] | None, str]:
+def _feed_step(conn: sqlite3.Connection, run: _Pass, cfg: CrawlConfig, now_fn, clock, started: float
+               ) -> tuple[dict[str, int] | None, str]:
     """The SimplifyJobs feed poll (#153): once per tick, after the boards, through the tick's client. Whatever it
     raises is returned as text and never touches the board reads; `simplify_fail_streak` counts the errors in a row.
-    A switched-off feed (`[simplify] enabled = false`) sends nothing and changes nothing."""
+    Like the probe, it is skipped once the pass stopped or the budget is spent. A switched-off feed
+    (`[simplify] enabled = false`) sends nothing and changes nothing."""
+    if run.stopped or clock() - started >= cfg.tick_budget_s:
+        return None, ""
     try:
         cfg = load_pipeline_config()
         if not cfg.simplify.enabled:
@@ -511,7 +517,7 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
             report = replace(report, watch_error=describe_error(e))
-        feed, feed_error = _feed_step(conn, run, now_fn)
+        feed, feed_error = _feed_step(conn, run, cfg, now_fn, clock, started)
         report = replace(report, feed=feed, feed_error=feed_error)
         _add_passes(conn, report)
         return report

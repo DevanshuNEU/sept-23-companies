@@ -5,6 +5,7 @@ A fresh store and a `FakeClient`: nothing here reaches the network or the live s
 import dataclasses
 import json
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -16,7 +17,7 @@ from outreach.crawl.tick import run_tick
 from outreach.net import FetchError, Response
 from outreach.pipeline import simplify_feed
 from outreach.pipeline.config import PipelineConfig, SimplifyConfig, load_pipeline_config
-from outreach.pipeline.simplify_feed import FeedPoll, is_us_location, note_streak, poll
+from outreach.pipeline.simplify_feed import MAX_BYTES, FeedPoll, is_us_location, note_streak, poll
 from tests.fakes import FakeClient, json_response, status_response
 from tests.storetest import fresh_store
 
@@ -27,7 +28,7 @@ T2 = "2026-11-03T08:30:00Z"
 KEPT = {"L-keep-gh", "L-keep-lever", "L-keep-site", "L-keep-multi", "L-keep-dc"}
 
 
-def rows(conn, *where):
+def rows(conn):
     cur = conn.execute("SELECT * FROM feed_listing WHERE source = 'simplify' ORDER BY listing_id")
     return {r["listing_id"]: dict(r) for r in cur}
 
@@ -119,10 +120,18 @@ class PollTests(PollCase):
         # a listing the file still carries but no longer keeps (turned inactive) closes too, and a return reopens it
         gone = [dict(x, active=False) if x["id"] == "L-keep-gh" else x for x in LISTINGS]
         result, _ = self.poll(now=T2, etag='"v3"', listings=gone)
-        self.assertEqual((result.closed), 1)  # L-keep-lever returned, L-keep-gh closed
+        self.assertEqual(result.closed, 1)  # L-keep-lever returned, L-keep-gh closed
         stored = rows(self.conn)
         self.assertEqual((stored["L-keep-gh"]["active"], stored["L-keep-lever"]["active"]), (0, 1))
         self.assertEqual(stored["L-keep-lever"]["first_seen_at"], T1)
+
+    def test_the_feed_request_has_its_own_60_mb_cap(self):
+        self.assertEqual(MAX_BYTES, 60_000_000)
+        _, client = self.poll()
+        self.assertEqual(client.max_bytes_seen, [60_000_000])
+        big = Response(200, "", b"[" + b" " * 100 + b"]", {})
+        with mock.patch.object(simplify_feed, "MAX_BYTES", 50), self.assertRaises(FetchError):
+            poll(self.conn, FakeClient({URL: big}), T1)
 
     def test_poll_updates_a_changed_listing(self):
         self.poll(now=T1)
@@ -158,15 +167,37 @@ class PollTests(PollCase):
 
 
 class UsLocationTests(unittest.TestCase):
-    def test_us_rule(self):
-        yes = ["Remote in USA", "San Francisco, CA", "Washington, DC", "New York, United States", "USA", "Remote, US",
-               "Austin, TX "]
-        no = ["London, UK", "Toronto, ON, Canada", "Remote in Canada", "Berlin, Germany", "Remote", "Australia",
-              "Cairo, Egypt", "Bus Station", "Sydney, NSW"]
+    def check(self, yes=(), no=()):
         for loc in yes:
             self.assertTrue(is_us_location(loc), loc)
         for loc in no:
             self.assertFalse(is_us_location(loc), loc)
+
+    def test_us_words_and_state_codes(self):
+        self.check(yes=["Remote in USA", "San Francisco, CA", "Washington, DC", "New York, United States", "USA",
+                        "Remote, US", "Austin, TX ", "Remote - US"],
+                   no=["London, UK", "Toronto, ON, Canada", "Remote in Canada", "Berlin, Germany", "Australia",
+                       "Cairo, Egypt", "Bus Station", "Sydney, NSW", "Join us", ""])
+
+    def test_full_state_names(self):
+        self.check(yes=["California", "Texas", "New Mexico", "Albuquerque, New Mexico", "West Virginia", "Alaska",
+                        "District of Columbia", "texas"])
+
+    def test_remote(self):
+        self.check(yes=["Remote", "remote", " Remote "], no=["Remote in Canada", "Remote in UK", "Remote in Germany",
+                                                              "Remote, Europe"])
+
+    def test_hub_names(self):
+        self.check(yes=["San Francisco", "SF", "Bay Area", "San Francisco Bay Area", "New York", "NYC",
+                        "Los Angeles", "LA", "Seattle", "Boston", "Austin", "Chicago", "Denver", "Washington DC",
+                        "Washington D.C.", "Greater Boston Area", "Remote, SF"],
+                   no=["sf", "la", "Bristol, UK", "Lausanne"])
+
+    def test_a_state_code_beside_a_non_us_country_is_not_us(self):
+        self.check(no=["Tel Aviv, IL", "Toronto, ON, Canada", "Tel Aviv, IL, Israel", "Bangalore, KA, India",
+                       "Dublin, Ireland", "Mexico City, Mexico", "Berlin, DE, Germany", "Austin, Australia",
+                       "London, United Kingdom", "Remote in Mexico"])
+        self.check(yes=["New York, NY, USA", "Remote in USA", "Albuquerque, NM", "Boston, MA"])
 
 
 class ConfigTests(unittest.TestCase):
@@ -251,6 +282,28 @@ class TickFeedTests(unittest.TestCase):
         report, _ = self.tick(status_response(304))
         self.assertEqual(report.feed, {"changed": 0, "seen": 0, "new": 0})
         self.assertEqual(meta(self.conn, "simplify_fail_streak"), "0")
+
+    def test_the_feed_is_skipped_once_the_tick_budget_is_used_up(self):
+        ticks = iter(range(0, 10_000_000, 1_000_000))  # every reading of the clock is a million seconds later
+        cfg = dataclasses.replace(self.cfg, tick_budget_s=60)
+        client = FakeClient({})
+        report = run_tick(self.conn, client, cfg=cfg, now_fn=lambda: T1, clock=lambda: next(ticks),
+                          sleep=lambda s: None)
+        self.assertEqual(client.requests, [])
+        self.assertIsNone(report.feed)
+        self.assertEqual(report.feed_error, "")
+        self.assertIsNone(meta(self.conn, "simplify_fail_streak"))
+
+    def test_the_feed_is_skipped_when_the_pass_stopped(self):
+        client = FakeClient({})
+        run = types.SimpleNamespace(stopped=True, client=lambda: client)
+        result = tick._feed_step(self.conn, run, self.cfg, lambda: T1, lambda: 0.0, 0.0)
+        self.assertEqual(result, (None, ""))
+        self.assertEqual(client.requests, [])
+
+    def test_the_tick_client_passes_the_cap_on(self):
+        _, client = self.tick(json_response(LISTINGS, etag='"v1"'))
+        self.assertEqual(client.max_bytes_seen, [60_000_000])
 
     def test_a_disabled_feed_sends_nothing(self):
         off = PipelineConfig(SimplifyConfig(url=URL, categories=("Software",), enabled=False))

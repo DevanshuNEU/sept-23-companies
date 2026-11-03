@@ -164,6 +164,17 @@ class UrllibClientTests(unittest.TestCase):
                 UrllibClient(max_bytes=1000).get(s.base + "/big")
         self.assertEqual(cm.exception.kind, "too_large")
 
+    def test_urllib_client_takes_a_cap_for_one_request(self):
+        with _Server() as s:
+            small = UrllibClient(max_bytes=1000)
+            self.assertEqual(len(small.get(s.base + "/big", max_bytes=10_000).body), 5000)  # raised for this call
+            with self.assertRaises(FetchError) as cm:
+                small.get(s.base + "/big")  # the client's own cap is untouched
+            self.assertEqual(cm.exception.kind, "too_large")
+            with self.assertRaises(FetchError) as cm:
+                UrllibClient().get(s.base + "/big", max_bytes=100)  # and a call can lower it
+            self.assertEqual(cm.exception.kind, "too_large")
+
     def test_urllib_client_raises_fetch_error_when_nothing_listens(self):
         with self.assertRaises(FetchError) as cm:
             UrllibClient(timeout_s=2).get(_dead_port_url())
@@ -296,6 +307,12 @@ class SpacedClientTests(unittest.TestCase):
         c.get("https://b.com/1")
         self.assertEqual(sum(self.sleeps[before:]), 0)
         self.assertEqual(inner.requests, ["https://a.com/1", "https://a.com/2", "https://b.com/1"])
+
+    def test_spaced_client_passes_a_cap_on_only_when_given(self):
+        inner, c = self._spaced()
+        c.get("https://a.com/1")
+        c.get("https://a.com/2", max_bytes=77)
+        self.assertEqual(inner.max_bytes_seen, [None, 77])
 
     def test_spaced_client_does_not_sleep_when_time_has_passed(self):
         _, c = self._spaced()

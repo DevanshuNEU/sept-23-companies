@@ -52,9 +52,16 @@ def _read_part(part: str, p: _Patterns) -> str:
     return "unknown"
 
 
+# ISO codes of the US and its territories (#172); any other two-letter country code is a non-US country.
+_US_COUNTRY_CODES = frozenset({"US", "PR", "GU", "VI", "AS", "MP", "UM"})
+
+
 def _read_country(country: str, p: _Patterns) -> str | None:
-    """yes for a country that names the US ("US-Remote", "United States (Remote)", "Puerto Rico"), no for a known
-    non-US country, None for anything else ("North America", "Georgia", a country the lists do not know)."""
+    """yes for a country that names the US ("US-Remote", "United States (Remote)", "Puerto Rico", "PR"), no for a
+    known non-US country or any other two-letter code ("GB", "VN"), None for anything else ("North America",
+    "Georgia", a country the lists do not know)."""
+    if len(country) == 2 and country.isalpha():
+        return "yes" if country.upper() in _US_COUNTRY_CODES else "no"
     if p.country_marks.fullmatch(country) or p.us_marks.search(country) or p.us_bare.search(country):
         return "yes"
     if p.non_us.search(country):

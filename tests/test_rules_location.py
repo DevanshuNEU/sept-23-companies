@@ -118,6 +118,21 @@ class UsStatusTest(unittest.TestCase):
             with self.subTest(location=loc, country=country):
                 self.assertEqual(us_status(loc, country, self.cfg), expected)
 
+    def test_two_letter_country_codes(self):
+        for code in ("GB", "VN", "DE", "in", " ca ", "XX"):
+            with self.subTest(code=code):
+                self.assertEqual(us_status("Remote", code, self.cfg), "no")
+                self.assertEqual(us_status("", code, self.cfg), "no")
+        for code in ("US", "PR", "GU", "VI", "AS", "MP", "UM", "us", " pr "):
+            with self.subTest(code=code):
+                self.assertEqual(us_status("Remote", code, self.cfg), "yes")
+                self.assertEqual(us_status("", code, self.cfg), "yes")
+        # a US place in the text still beats a non-US country
+        self.assertEqual(us_status("Austin, TX", "GB", self.cfg), "yes")
+        self.assertEqual(us_status("Remote - US or Canada", "CA", self.cfg), "yes")
+        # a longer country is not a code
+        self.assertEqual(us_status("", "North America", self.cfg), "unknown")
+
     def test_a_us_location_in_the_text_beats_a_non_us_country(self):
         for loc, country, expected in TEXT_BEATS_COUNTRY:
             with self.subTest(location=loc, country=country):

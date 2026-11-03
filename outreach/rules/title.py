@@ -85,13 +85,17 @@ def _lane(title: str, cfg: Config, body: str | None = None) -> tuple[str, str]:
         return "off_lane", f"Title says {m.group(0)}, outside his lane"
     if (m := phrases(t["off_lane_unless_software"]).search(title)) and not phrases(t["software_titles"]).search(title):
         return "off_lane", f"Title says {m.group(0)}, outside his lane"
-    # #154: could be software or physical work, so the body decides. With no body yet the title stays in the lane:
-    # the crawler fetches bodies only for engineering and intern lanes, so it waits for its body.
-    # A title that names software work ("Software Systems Engineer") is not ambiguous.
-    if ((m := phrases(t["ambiguous"]).search(title)) and (body or "").strip()
-            and not phrases(t["software_titles"]).search(title)):
-        if _software_lead(body, cfg) < t["ambiguous_margin"]:
+    # A title that names software work ("Software Systems Engineer", "Founding Engineer") is engineering outright.
+    if phrases(t["software_titles"]).search(title):
+        return "engineering", ""
+    # #172: any other engineering title is decided by its body (#154 did this for the `ambiguous` titles). A body
+    # under `min_body_chars` counts as no body, and with no body the title stays in the lane: the crawler fetches
+    # bodies only for engineering and intern lanes, so the posting is decided again when its body arrives.
+    text = (body or "").strip()
+    if len(text) >= t["min_body_chars"] and _software_lead(text, cfg) < t["ambiguous_margin"]:
+        if m := phrases(t["ambiguous"]).search(title):
             return "off_lane", f"Title says {m.group(0)} and the posting is not clearly software work"
+        return "off_lane", "Title names no software work and the posting is not clearly software work"
     return "engineering", ""
 
 
@@ -122,10 +126,10 @@ def _tier(title: str, cfg: Config) -> tuple[str | None, str]:
 
 
 def classify_title(title: str, cfg: Config, body: str | None = None) -> TitleResult:
-    """The title's lane and tier. `body` is read only for an ambiguous title (`title.ambiguous`): a title like "Systems
-    Engineer" is software work only when the body says so. With no body yet it stays engineering (the crawler fetches
-    bodies only for engineering and intern lanes), and a title that names software work (`title.software_titles`)
-    skips the body altogether."""
+    """The title's lane and tier. `body` is read for every engineering title that does not name software work
+    (`title.software_titles`): "Systems Engineer" or "Stationary Engineer" is tech only when the body says so. With no
+    body yet, or a body under `title.min_body_chars`, it stays engineering (the crawler fetches bodies only for
+    engineering and intern lanes), and a title that names software work skips the body altogether."""
     title = title or ""
     lane, basis = _lane(title, cfg, body)
     if lane != "engineering":

@@ -374,11 +374,18 @@ about 2.5 days of polite reads, longer if the gate share is used up.
 in the live checkout coverage rises toward the research's measure (stapply held 115 of the 168 missed boards). Tell
 Devanshu when the seed starts.
 
+## PR 2b: YC companies (#167)
+
+The public yc-oss directory (`companies/hiring.json`, daily, one conditional request) adds hiring US YC companies
+with domain, team size and batch through the identity rule, and the existing find-boards step finds their Greenhouse,
+Ashby or Lever boards. Work at a Startup itself is never read (YC's terms). Uses today's sources path, so it does not
+wait for the funnel (PR 9). Done when lines are in #167.
+
 ## PR 11: Company feeds, the small-company yardstick, Just funded
 
 **Depends on:** PR 9.
 
-**Files:** `outreach/sources/yc.py`, `sources/vcboards.py` (Consider and Getro company lists, weekly),
+**Files:** `sources/vcboards.py` (Consider and Getro company lists, weekly),
 `sources/workable_search.py` (only if Workable's terms allow it), `sources/formd.py` (first sale date),
 `sources/hn.py` (also the HN job ads), `pipeline/scorecard.py` (small-company coverage), `pipeline/tiers.py` (Form D
 and YC hot reasons), the job list's Just funded tab.
@@ -398,7 +405,7 @@ and `foreign_key_check` after, with its own tests.
 ## Order
 
 Issues: design and plan #151; PR 1 #152, PR 2 #153, PR 3 #154, PR 4 #155, PR 5 #156, PR 6 #157, PR 7 #158, PR 8 #159,
-PR 9 #160, PR 10 #161, PR 11 #162, PR 12 #163 (milestone "Right job pipeline"). PR 0 is done: #9 rulings of
+PR 9 #160, PR 10 #161, PR 11 #162, PR 12 #163, PR 2b #167 (YC companies, split out of PR 11) (milestone "Right job pipeline"). PR 0 is done: #9 rulings of
 2026-11-01 and 2026-11-02.
 
 | Order | PR | Depends on |
@@ -406,6 +413,7 @@ PR 9 #160, PR 10 #161, PR 11 #162, PR 12 #163 (milestone "Right job pipeline"). 
 | 0 | #9 edits and issues | nothing |
 | 1 | A healthy crawler | nothing |
 | 2 | Scorecard, yardstick, miss log, alarms | nothing |
+| 2b | YC companies from yc-oss with their boards (#167, moved up 2026-11-02) | nothing |
 | 3 | Rules that find his level | PR 0 |
 | 4 | True dates and reposts | nothing |
 | 5 | Job list and alerts | PR 3, PR 4 |

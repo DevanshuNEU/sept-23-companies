@@ -115,6 +115,7 @@ class GoAheadTest(WritesCase):
         body = res.json()
         self.assertEqual((body["state"], body["rank"], body["postingId"], body["companyId"]),
                          ("added", 4, pid, titan))
+        self.assertEqual(body["listDate"], DAY)
         self.assertIn("Titan", body["text"])
         rows = self.view()["rows"]
         row = next(r for r in rows if r["company"]["name"] == "Titan")
@@ -220,6 +221,25 @@ class BeforeThePlanTest(WritesCase):
         self.assertEqual(self.count("SELECT count(*) FROM daily_list"), 0)
         self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind = 'own_pick_requested' "
                                     "AND json_extract(detail, '$.list_date') = ?", DAY), 1)
+
+    def test_go_ahead_on_a_saturday_is_kept_for_monday(self):
+        self.set_now("2026-11-14T15:14:00Z")  # Saturday 10:14 in New York
+        body = self.go(self.job("Ember")).json()
+        self.assertEqual((body["state"], body["listDate"]), ("requested", "2026-11-16"))
+        self.assertIn("Monday, Nov 16", body["text"])
+        self.assertNotIn("today", body["text"])
+        self.assertEqual(self.count("SELECT json_extract(detail, '$.list_date') FROM event "
+                                    "WHERE kind = 'own_pick_requested'"), "2026-11-16")
+
+    def test_go_ahead_on_a_sunday_is_kept_for_monday(self):
+        self.set_now("2026-11-15T15:14:00Z")
+        body = self.go(self.job("Ember")).json()
+        self.assertEqual((body["state"], body["listDate"]), ("requested", "2026-11-16"))
+
+    def test_a_weekday_request_says_today(self):
+        body = self.go(self.job("Ember")).json()
+        self.assertEqual(body["listDate"], DAY)
+        self.assertIn("today's list", body["text"])
 
     def test_a_second_go_ahead_before_the_plan_is_refused(self):
         self.go(self.job("Ember"))

@@ -19,11 +19,12 @@ import json
 import sqlite3
 from collections.abc import Collection
 from dataclasses import dataclass, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Literal
 
 from outreach.plan.config import PlanConfig, default_plan_config
 from outreach.plan.contact import load_contact_states
+from outreach.plan.dates import is_weekday
 from outreach.plan.email_fit import email_fit, email_lane, load_email_facts
 from outreach.plan.fresh import without_turned_down
 from outreach.plan.outbound import load_outbound
@@ -114,6 +115,7 @@ class OwnPick:
     state: Literal["added", "requested"]  # added: a row on today's list; requested: the plan job adds it
     rank: int | None  # the row's rank on today's list; None until the plan is built
     entry_id: int | None = None  # the row's id, None until the plan is built
+    list_date: date | None = None  # the day's list it is on, or for: the next weekday when asked on a weekend
 
 
 def own_pick_requests(conn: sqlite3.Connection, day: date, canon: dict[int, int]) -> list[tuple[int, int | None]]:
@@ -144,7 +146,7 @@ def _refusal(conn: sqlite3.Connection, survivor: int, name: str, day: date, cano
             return f"{name} is already on today's list." if row["state"] != "removed" \
                 else f"{name} was on today's list earlier. It can come back from tomorrow."
         if any(c == survivor for c, _ in own_pick_requests(conn, day, canon)):
-            return f"{name} is already asked for today. It goes on today's list when the plan is built."
+            return f"{name} is already asked for. It goes on the list when the plan is built."
     state = load_contact_states(conn, [survivor], canon, day, cfg)[survivor]
     if state.status in ("waiting", "engaged"):
         return f"{name} is in flight: {state.reason}."
@@ -194,17 +196,21 @@ def add_own_pick(conn: sqlite3.Connection, company_id: int, today: date, now: st
                  key: str | None = None, cfg: PlanConfig | None = None) -> OwnPick:
     """Go ahead on a company (job list, #156), inside the caller's transaction. With today's list built it adds the
     company at the next free rank and answers `added`; without it, it records the request for the plan job and
-    answers `requested`. Raises `OwnPickRefused` for a no-go company, one on (or asked for on) today's list, or one
-    with someone contacted and waiting. `posting_id` is the posting he chose; `key` makes the event idempotent."""
+    answers `requested`. The plan job never builds a weekend, so a request made on a Saturday or Sunday is kept for
+    the next weekday's list (`OwnPick.list_date`). Raises `OwnPickRefused` for a no-go company, one on (or asked for
+    on) the list, or one with someone contacted and waiting. `posting_id` is the posting he chose; `key` makes the event idempotent."""
     cfg = cfg or default_plan_config()
     canon = canonical_ids(conn)
     survivor = canon.get(company_id, company_id)
     name = conn.execute("SELECT name FROM company WHERE company_id = ?", (survivor,)).fetchone()["name"]
-    why_not = _refusal(conn, survivor, name, today, canon, cfg)
+    built = conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (today.isoformat(),)).fetchone() is not None
+    day = today
+    while not built and not is_weekday(day):  # no build reads a weekend date: keep it for the next weekday
+        day += timedelta(days=1)
+    why_not = _refusal(conn, survivor, name, day, canon, cfg)
     if why_not is not None:
         raise OwnPickRefused(why_not)
-    built = conn.execute("SELECT 1 FROM daily_list WHERE list_date = ?", (today.isoformat(),)).fetchone() is not None
-    detail: dict = {"list_date": today.isoformat(), "posting_id": posting_id}
+    detail: dict = {"list_date": day.isoformat(), "posting_id": posting_id}
     entry_id = rank = None
     if built:
         pick, stored = _own_pick(conn, survivor, name, posting_id, today, canon, cfg)
@@ -215,4 +221,4 @@ def add_own_pick(conn: sqlite3.Connection, company_id: int, today: date, now: st
     append_event(conn, entity="company", entity_id=survivor, company_id=survivor, kind=OWN_REQUESTED,
                  actor="devanshu", at=now, detail={**detail, "state": "added" if built else "requested"},
                  idempotency_key=key)
-    return OwnPick("added" if built else "requested", rank, entry_id)
+    return OwnPick("added" if built else "requested", rank, entry_id, day)

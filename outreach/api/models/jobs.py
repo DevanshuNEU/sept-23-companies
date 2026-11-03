@@ -60,4 +60,5 @@ class GoAheadResult(Wire):
     state: GoAheadState  # added: on today's list now; requested: the 08:00 plan puts it first
     rank: int | None  # the pick's rank on today's list, None until the plan is built
     entry_id: int | None  # the plan row's id (`GET /api/plan`), None until the plan is built
+    list_date: str  # YYYY-MM-DD, the list it is on or for: the next weekday when asked on a weekend
     text: str

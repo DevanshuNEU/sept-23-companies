@@ -11,6 +11,7 @@ from tests.plan_seed import seed_daily_entry, seed_outbound, seed_person, seed_s
 from tests.storetest import fresh_store
 
 TUE = date(2026, 11, 10)
+SAT, SUN, MON = date(2026, 11, 14), date(2026, 11, 15), date(2026, 11, 16)
 NOW = "2026-11-10T15:14:00Z"
 
 
@@ -131,7 +132,7 @@ class RefusedTest(OwnPickCase):
 class RequestedTest(OwnPickCase):
     def test_before_the_plan_it_records_the_request_and_writes_no_list(self):
         co = seed_scored_company(self.conn, "Acme", 80, ["level_role"])
-        self.assertEqual(self.add(co, key="own:1"), OwnPick("requested", None, None))
+        self.assertEqual(self.add(co, key="own:1"), OwnPick("requested", None, None, TUE))
         self.assertEqual(count(self.conn, "SELECT count(*) FROM daily_list"), 0)
         row = self.conn.execute("SELECT * FROM event WHERE kind = 'own_pick_requested'").fetchone()
         self.assertEqual((row["entity"], row["company_id"], row["actor"], row["idempotency_key"]),
@@ -159,6 +160,55 @@ class RequestedTest(OwnPickCase):
         self.assertEqual(len(set(got)), len(got))
         job = json.loads(self.conn.execute("SELECT summary FROM job_run WHERE job = 'plan'").fetchone()[0])
         self.assertEqual(job["own_rows"], 1)
+
+    def test_a_saturday_and_a_sunday_request_waits_for_monday(self):
+        for day, name in ((SAT, "Sat Co"), (SUN, "Sun Co")):
+            with self.subTest(day=day):
+                co = seed_scored_company(self.conn, name, 80, ["level_role"])
+                got = add_own_pick(self.conn, co, day, NOW)
+                self.assertEqual((got.state, got.rank, got.entry_id, got.list_date), ("requested", None, None, MON))
+                self.assertEqual(count(self.conn, "SELECT json_extract(detail, '$.list_date') FROM event "
+                                       "WHERE kind = 'own_pick_requested' AND company_id = ?", co), "2026-11-16")
+                self.assertIn(co, [c for c, _ in own_pick_requests(self.conn, MON, canonical_ids(self.conn))])
+                self.assertEqual(own_pick_requests(self.conn, day, canonical_ids(self.conn)), [])
+
+    def test_a_weekday_request_names_its_own_day(self):
+        co = seed_scored_company(self.conn, "Acme", 80, ["level_role"])
+        self.assertEqual(self.add(co).list_date, TUE)
+
+    def test_the_monday_build_keeps_a_weekend_request_first(self):
+        mine = seed_scored_company(self.conn, "Zed", 1, [], with_posting=True)
+        for i in range(6):
+            seed_scored_company(self.conn, f"Co{i}", 90 - i, ["level_role"])
+        add_own_pick(self.conn, mine, SAT, "2026-11-14T15:14:00Z")
+        self.assertEqual(build_plan(self.conn, today=SAT, read_boards=False).status, "weekend")
+        self.assertEqual(build_plan(self.conn, today=MON, read_boards=False).status, "built")
+        self.assertEqual(count(self.conn, "SELECT company_id FROM daily_list_entry WHERE rank = 1 "
+                                          "AND list_date = '2026-11-16'"), mine)
+
+    def test_a_second_weekend_request_for_the_same_company_is_refused(self):
+        co = seed_scored_company(self.conn, "Acme", 80, ["level_role"])
+        add_own_pick(self.conn, co, SAT, NOW)
+        with self.assertRaises(OwnPickRefused):
+            add_own_pick(self.conn, co, SUN, NOW)
+
+    def test_a_forced_weekend_list_that_is_built_still_takes_the_row_at_once(self):
+        co = seed_scored_company(self.conn, "Acme", 80, ["level_role"])
+        self.conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES ('2026-11-14', "
+                          "'2026-11-14T13:00:00Z', 8)")
+        got = add_own_pick(self.conn, co, SAT, NOW)
+        self.assertEqual((got.state, got.list_date), ("added", SAT))
+
+    def test_the_built_plan_counts_his_own_picks_in_its_rows(self):
+        mine = seed_scored_company(self.conn, "Zed", 1, [], with_posting=True)
+        for i in range(6):
+            seed_scored_company(self.conn, f"Co{i}", 90 - i, ["level_role"])
+        self.add(mine)
+        build_plan(self.conn, today=TUE, read_boards=False)
+        total = count(self.conn, "SELECT count(*) FROM daily_list_entry")
+        summary = json.loads(count(self.conn, "SELECT summary FROM job_run WHERE job = 'plan'"))
+        built = json.loads(count(self.conn, "SELECT detail FROM event WHERE kind = 'built'"))
+        self.assertEqual((summary["rows"], built["rows"], summary["own_rows"]), (total, total, 1))
 
     def test_a_dry_run_writes_nothing(self):
         co = seed_scored_company(self.conn, "Acme", 80, ["level_role"])

@@ -2035,6 +2035,8 @@ export interface components {
             companyId: number;
             /** Entryid */
             entryId: number | null;
+            /** Listdate */
+            listDate: string;
             /** Postingid */
             postingId: number;
             /** Rank */

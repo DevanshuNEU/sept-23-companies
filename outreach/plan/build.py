@@ -177,7 +177,7 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
 
     now = utcnow()
     summary = {"date": today.isoformat(), "capacity": capacity, "linkedin": linkedin.today, "email": email.slots,
-               "rows": len(chosen), "people_rows": sum(1 for r in chosen if r.person_id is not None),
+               "rows": len(chosen) + len(own), "people_rows": sum(1 for r in chosen if r.person_id is not None),
                "find_someone_rows": sum(1 for r in chosen if r.person_id is None),
                "carried_rows": sum(1 for r in chosen if r.carried_from is not None),
                "email_rows": sum(1 for r in chosen if r.channel == "email"), "own_rows": len(own), "boards": boards,
@@ -217,7 +217,7 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
         if old is not None:
             append_event(conn, entity="daily_list", kind="plan_replaced", actor="system",
                          detail={"date": today.isoformat(), "replaced_rows": len(old), "reason": reason,
-                                 "rows": len(chosen), "capacity": capacity, "run_id": run_id,
+                                 "rows": len(chosen) + len(own), "capacity": capacity, "run_id": run_id,
                                  "old_companies": [r.company_id for r in old]},
                          idempotency_key=f"plan-replaced:{today.isoformat()}:{run_id}")
         finish_job(conn, run_id, "ok", summary)

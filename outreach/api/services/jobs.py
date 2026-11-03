@@ -47,12 +47,18 @@ def pass_job(ctx: WriteCtx, posting_id: int) -> PassJobResult:
 def go_ahead(ctx: WriteCtx, posting_id: int) -> GoAheadResult:
     conn = ctx.conn
     company_id, name = _posting(conn, posting_id)
+    today = date.fromisoformat(ny_day(ctx.now))
     try:
-        own = add_own_pick(conn, company_id, date.fromisoformat(ny_day(ctx.now)), ctx.now, posting_id=posting_id,
+        own = add_own_pick(conn, company_id, today, ctx.now, posting_id=posting_id,
                            key=ctx.event_key(0))
     except OwnPickRefused as err:
         raise ApiProblem("not_allowed", f"{err} {NOT_SAVED}") from None
-    text = f"Added {name} to today's list." if own.state == "added" \
-        else f"{name} is asked for. It goes first on today's list when the plan is built."
+    day = own.list_date
+    if own.state == "added":
+        text = f"Added {name} to today's list."
+    elif day == today:
+        text = f"{name} is asked for. It goes first on today's list when the plan is built."
+    else:  # asked on a weekend: no plan is built before the next weekday
+        text = f"{name} is kept for {day:%A}, {day:%b} {day.day}. It goes first on that day's list."
     return GoAheadResult(posting_id=posting_id, company_id=company_id, state=own.state, rank=own.rank,
-                         entry_id=own.entry_id, text=text)
+                         entry_id=own.entry_id, list_date=day.isoformat(), text=text)

@@ -2406,6 +2406,10 @@
             ],
             "title": "Entryid"
           },
+          "listDate": {
+            "title": "Listdate",
+            "type": "string"
+          },
           "postingId": {
             "title": "Postingid",
             "type": "integer"
@@ -2440,6 +2444,7 @@
           "state",
           "rank",
           "entryId",
+          "listDate",
           "text"
         ],
         "title": "GoAheadResult",

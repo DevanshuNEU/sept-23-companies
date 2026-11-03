@@ -130,9 +130,10 @@ def own_pick_requests(conn: sqlite3.Connection, day: date, canon: dict[int, int]
 
 
 def _refusal(conn: sqlite3.Connection, survivor: int, name: str, day: date, canon: dict[int, int],
-             cfg: PlanConfig, *, listed: bool = True) -> str | None:
+             cfg: PlanConfig, *, listed: bool = True, built: bool = False) -> str | None:
     """Why Go ahead cannot add the company, in a plain sentence, or None. `listed` False skips the check for a row on
-    the day's list (the plan job, which builds the list itself)."""
+    the day's list (the plan job, which builds the list itself). `built` True (the day's list exists) skips the check
+    for an earlier request: the build already used or dropped it, so only the row, no-go and flight say no."""
     nogo = {canon.get(r[0], r[0]) for r in conn.execute(
         "SELECT company_id FROM no_go WHERE company_id IS NOT NULL AND lifted_at IS NULL")}
     if survivor in nogo:
@@ -145,7 +146,7 @@ def _refusal(conn: sqlite3.Connection, survivor: int, name: str, day: date, cano
         if row is not None:
             return f"{name} is already on today's list." if row["state"] != "removed" \
                 else f"{name} was on today's list earlier. It can come back from tomorrow."
-        if any(c == survivor for c, _ in own_pick_requests(conn, day, canon)):
+        if not built and any(c == survivor for c, _ in own_pick_requests(conn, day, canon)):
             return f"{name} is already asked for. It goes on the list when the plan is built."
     state = load_contact_states(conn, [survivor], canon, day, cfg)[survivor]
     if state.status in ("waiting", "engaged"):
@@ -207,7 +208,7 @@ def add_own_pick(conn: sqlite3.Connection, company_id: int, today: date, now: st
     day = today
     while not built and not is_weekday(day):  # no build reads a weekend date: keep it for the next weekday
         day += timedelta(days=1)
-    why_not = _refusal(conn, survivor, name, day, canon, cfg)
+    why_not = _refusal(conn, survivor, name, day, canon, cfg, built=built)
     if why_not is not None:
         raise OwnPickRefused(why_not)
     detail: dict = {"list_date": day.isoformat(), "posting_id": posting_id}

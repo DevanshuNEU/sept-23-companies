@@ -214,7 +214,7 @@ export default function BrowsePage() {
     queryFn: ({ pageParam }) => client.jobs({ ...params, after: pageParam }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextAfter ?? undefined,
-    // Rows of the last ask stay on screen, dimmed, while a new ask loads. The pulse refetches it when anything is written.
+    // Rows of the last ask stay on screen, dimmed, while a new ask loads. The 60 s refetchInterval brings in anything written since.
     placeholderData: keepPreviousData,
     refetchInterval: pollMs.default,
   });

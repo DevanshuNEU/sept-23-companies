@@ -127,7 +127,9 @@ class BadParameterTest(JobsCase):
         self.bad(q="x" * 101)
 
     def test_a_malformed_cursor_is_a_400(self):
-        self.assertIn("cursor", self.bad(after="not-a-cursor")["message"])
+        body = self.bad(after="not-a-cursor")
+        self.assertEqual(body["message"], "That page link is out of date. Reload the list.")
+        self.assertNotIn("not-a-cursor", body["message"])
 
 
 class CacheTest(JobsCase):

@@ -57,7 +57,7 @@ def go_ahead(ctx: WriteCtx, posting_id: int) -> GoAheadResult:
     if own.state == "added":
         text = f"Added {name} to today's list."
     elif day == today:
-        text = f"{name} is asked for. It goes first on today's list when the plan is built."
+        text = f"{name} is kept for today's list. It goes first when the plan is built."
     else:  # asked on a weekend: no plan is built before the next weekday
         text = f"{name} is kept for {day:%A}, {day:%b} {day.day}. It goes first on that day's list."
     return GoAheadResult(posting_id=posting_id, company_id=company_id, state=own.state, rank=own.rank,

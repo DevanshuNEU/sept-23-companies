@@ -34,7 +34,7 @@ async def jobs(request: Request, view: JobView = "your_level", window: JobWindow
             try:
                 return queries.jobs_view(conn, now, f, after, limit)
             except ValueError as err:
-                raise ApiProblem("bad_request", f"after: {err}") from None
+                raise ApiProblem("bad_request", "That page link is out of date. Reload the list.") from None
 
     return await views.serve(request, JobsView, compute)
 

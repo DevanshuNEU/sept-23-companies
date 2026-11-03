@@ -147,6 +147,24 @@ class RequestedTest(OwnPickCase):
             self.add(co)
         self.assertIn("already asked for", str(err.exception))
 
+    def test_a_request_the_build_dropped_does_not_block_a_later_go_ahead(self):
+        co = seed_scored_company(self.conn, "Acme", 80, ["level_role"])
+        self.add(co, key="own:1")
+        self.built()  # the plan was built and dropped the request: no row for the company
+        got = self.add(co, key="own:2")
+        self.assertEqual((got.state, got.rank), ("added", 1))
+
+    def test_a_dropped_request_for_a_company_now_in_flight_says_in_flight(self):
+        co = seed_scored_company(self.conn, "Acme", 80, ["level_role"])
+        self.add(co, key="own:1")
+        self.built()
+        person = seed_person(self.conn, co, "Ana Bell")
+        seed_outbound(self.conn, person, co, "linkedin_request", date(2026, 11, 8))
+        with self.assertRaises(OwnPickRefused) as err:
+            self.add(co, key="own:2")
+        self.assertIn("is in flight", str(err.exception))
+        self.assertNotIn("already asked for", str(err.exception))
+
     def test_the_build_puts_requests_first_and_keeps_the_rest(self):
         mine = seed_scored_company(self.conn, "Zed", 1, [], with_posting=True)  # no lane, lowest score
         ranked = [seed_scored_company(self.conn, f"Co{i}", 90 - i, ["level_role"]) for i in range(6)]

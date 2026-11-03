@@ -414,7 +414,7 @@ export type JobsSize = 'any' | 'small' | 'big' | 'unknown';
 export interface JobsParams { view: JobsTab; window: JobsWindow; size: JobsSize; notContacted: boolean; q: string; after?: string | null; limit?: number }
 /** Pass: the posting is hidden; the company is untouched. */
 export interface PassJobResult { postingId: Id; companyId: Id; passed: boolean }
-/** Go ahead: the company is on today's list as his own pick ('added') or asked for and put first when the plan is built ('requested'). `text` is the sentence to show. */
+/** Go ahead: the company is on today's list as his own pick ('added') or kept for today's list and put first when the plan is built ('requested'). `text` is the sentence to show. */
 export interface GoAheadResult {
   postingId: Id; companyId: Id; entryId: Id | null; state: 'added' | 'requested'; rank: number | null; listDate: IsoDate; text: string;
 }

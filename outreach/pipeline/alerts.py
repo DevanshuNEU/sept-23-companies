@@ -32,7 +32,7 @@ QUIET_START, QUIET_END = 22, 8  # New York hours: quiet from 22:00 up to 08:00
 MIN_GAP = timedelta(minutes=15)
 SHOWN = 3  # postings named in one notice
 _NY = ZoneInfo("America/New_York")
-_PAGE = 50
+_LIMIT = 10_000  # one page holds a whole day: a day is never walked in pages
 
 
 def _moment(stamp: str) -> datetime:
@@ -53,19 +53,16 @@ def _too_soon(conn: sqlite3.Connection, moment: datetime) -> bool:
 
 
 def _todays(conn: sqlite3.Connection, now: str, today: str) -> list[JobRow]:
-    """Today's rows of "your level", newest first (every row of today: the list is ordered by date, so the walk stops
-    at the first older one)."""
+    """Today's rows of "your level", newest first, from one query. A row dated after today (an ATS date in UTC can be
+    tomorrow in New York) is skipped, not a stop: it heads the list and must not hide today's rows. The list is
+    ordered by date, so the walk stops at the first row dated before today."""
     out: list[JobRow] = []
-    after = None
-    while True:
-        page = query(conn, now, JobFilters(view="your_level", window_days=7), after, _PAGE)
-        for row in page.rows:
-            if row.date != today:
-                return out
+    for row in query(conn, now, JobFilters(view="your_level", window_days=7), None, _LIMIT).rows:
+        if row.date < today:
+            break
+        if row.date == today:
             out.append(row)
-        if page.next_after is None:
-            return out
-        after = page.next_after
+    return out
 
 
 def _level_ok(conn: sqlite3.Connection, ids: list[int]) -> set[int]:

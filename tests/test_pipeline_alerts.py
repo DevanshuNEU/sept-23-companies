@@ -79,6 +79,21 @@ class OncePerPostingTests(AlertCase):
         self.assertEqual(self.events(), [])
         self.assertIsNone(self.last_alert())
 
+    def test_a_future_dated_row_does_not_silence_todays_alerts(self):
+        # An ATS date in UTC can be tomorrow's date in New York: it heads the list, and must not hide today's rows.
+        self.job("Tomorrow", posted="2026-11-04")
+        today = self.job("Today", company=seed_company(self.conn, "Acme"))
+        self.assertEqual(self.alert(), 1)
+        self.assertEqual(self.notices, [("New jobs at your level", "Today at Acme")])
+        self.assertEqual([e["entity_id"] for e in self.events()], [today])
+
+    def test_a_big_day_is_one_query_per_tick(self):
+        for n in range(120):
+            self.job(f"Role {n}", company=seed_company(self.conn, f"Co {n}"))
+        with mock.patch.object(alerts, "query", wraps=alerts.query) as q:
+            self.assertEqual(self.alert(), 120)
+        self.assertEqual(q.call_count, 1)
+
     def test_a_posting_with_no_posted_date_uses_the_day_it_was_seen(self):
         cid = seed_company(self.conn, "Seen Co")
         pid = posting(self.conn, cid, "Seen Engineer", first_seen_at="2026-11-03T14:00:00Z",

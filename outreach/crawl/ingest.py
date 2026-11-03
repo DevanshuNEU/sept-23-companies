@@ -23,6 +23,8 @@ lists the board again and every phase reruns without writing anything twice. The
 from __future__ import annotations
 
 import sqlite3
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
@@ -59,7 +61,8 @@ class ReadOutcome:
     """What one read did. `interval_s` is the new read interval, None after an `error` read (it keeps the old one).
     `tripped` is the host bucket whose breaker opened during the body fetches (the read itself still counts), so the
     tick defers that bucket's other boards. The plan's `queued` field is gone: the crawler writes no queue row
-    (ruling 2)."""
+    (ruling 2). `body_requests` and `body_ms` are the body fetches the read asked for and the time they took, the
+    stored-and-decided work between them included (#152)."""
     board_id: int
     result: str
     new: int
@@ -70,10 +73,13 @@ class ReadOutcome:
     bodies: int
     interval_s: int | None
     tripped: str | None = None
+    body_requests: int = 0
+    body_ms: int = 0
 
 
 def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, run_id: int, now: str,
-               cfg: CrawlConfig, rules_cfg=None, combiner=None, bucket: str | None = None) -> ReadOutcome:
+               cfg: CrawlConfig, rules_cfg=None, combiner=None, bucket: str | None = None,
+               clock: Callable[[], float] = time.monotonic) -> ReadOutcome:
     """Read `board` once and write what the read says, in the phase order of this module's docstring.
 
     `board` is the row from `load_board`; the closing step and the board state both work from it, never from a reload.
@@ -81,6 +87,7 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     `RulesetNotCurrent` propagate with the board state unwritten, so the caller can defer the board with no streak
     change; `HostTripped` during the body fetches ends them and is reported in `ReadOutcome.tripped`. `bucket` is the
     host bucket the list request went to (the tick knows it); it goes to the board state for the host ruling.
+    `clock` times the body fetches (`ReadOutcome.body_ms`).
     """
     if conn.in_transaction:
         raise ValueError("read_board sends requests, so it must start with no transaction open")
@@ -131,8 +138,10 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     # Phase 6: bodies the list did not carry, one request at a time, each stored as it arrives. An empty board lists
     # nothing to fetch, and an error read says nothing about its postings.
     tripped = None
+    body_requests = body_ms = 0
     if result.result in ("ok", "unchanged"):
-        fill = _backfill(conn, adapter, board, cfg, now, changed_ids, listed_with_body, rules_cfg, combiner)
+        fill = _backfill(conn, adapter, board, cfg, now, changed_ids, listed_with_body, rules_cfg, combiner, clock)
+        body_requests, body_ms = fill.requests, fill.ms
         bodies += fill.stored
         decided += fill.decided
         any_change = any_change or fill.replaced
@@ -149,7 +158,8 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     write_board_state(conn, board, result, run_id=run_id, now=now, open_postings=open_now,
                       next_read_at=next_read_at, interval_s=interval_s, bucket=bucket)
     return ReadOutcome(board_id=board.board_id, result=result.result, new=new, changed=changed, reopened=reopened,
-                       closed=closed, decided=decided, bodies=bodies, interval_s=interval_s, tripped=tripped)
+                       closed=closed, decided=decided, bodies=bodies, interval_s=interval_s, tripped=tripped,
+                       body_requests=body_requests, body_ms=body_ms)
 
 
 def full_read_due(conn: sqlite3.Connection, board: BoardRow, now: str) -> bool:
@@ -351,10 +361,13 @@ class _Backfill:
     replaced: bool  # one of them replaced a stored body
     decided: int
     tripped: str | None  # the bucket whose breaker opened, when one did
+    requests: int = 0  # bodies asked the adapter for, a tripped one included
+    ms: int = 0  # time the fetches took, in milliseconds
 
 
 def _backfill(conn: sqlite3.Connection, adapter: Adapter, board: BoardRow, cfg: CrawlConfig, now: str,
-              changed_ids: list[int], listed_with_body: set[int], rules_cfg, combiner) -> _Backfill:
+              changed_ids: list[int], listed_with_body: set[int], rules_cfg, combiner,
+              clock: Callable[[], float] = time.monotonic) -> _Backfill:
     """Fetch up to `cfg.detail_per_read` bodies: missing ones first, then the re-fetches of ruling 6 (a changed
     listing, or a level-fit engineering body `body_refetch_days` old). A body the list carried this read is not
     fetched again. Each body that is new or different is stored and decided in one unit as it arrives. A tripped host
@@ -379,8 +392,21 @@ def _backfill(conn: sqlite3.Connection, adapter: Adapter, board: BoardRow, cfg: 
         stored += 1
         replaced = replaced or before is not None
 
+    asked = 0
+
+    class _Counting:
+        """The adapter as `fetch_bodies` sees it: the same bodies, and a count of the ones it asked for."""
+
+        @staticmethod
+        def body(token: str, job: JobRef) -> str | None:
+            nonlocal asked
+            asked += 1
+            return adapter.body(token, job)
+
+    started = clock()
+    tripped = None
     try:
-        fetch_bodies(conn, adapter, board, wanted, on_body=keep)
+        fetch_bodies(conn, _Counting(), board, wanted, on_body=keep)
     except HostTripped as e:
-        return _Backfill(stored, replaced, decided, e.bucket)
-    return _Backfill(stored, replaced, decided, None)
+        tripped = e.bucket
+    return _Backfill(stored, replaced, decided, tripped, asked, round((clock() - started) * 1000))

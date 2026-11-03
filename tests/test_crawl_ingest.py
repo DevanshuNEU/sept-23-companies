@@ -448,7 +448,8 @@ class GreenhouseFlowTests(IngestTestCase):
     def test_greenhouse_fixture_end_to_end(self):
         out = self.read(ok())
         self.assertEqual(out, ReadOutcome(board_id=self.board_id, result="ok", new=3, changed=0, reopened=0,
-                                          closed=0, decided=3, bodies=1, interval_s=FLOOR))
+                                          closed=0, decided=3, bodies=1, interval_s=FLOOR,
+                                          body_requests=1))  # asked the adapter once; Greenhouse sends nothing
         rows = self.conn.execute("SELECT * FROM posting WHERE board_id = ? ORDER BY source_key",
                                  (self.board_id,)).fetchall()
         self.assertEqual([r["source_key"] for r in rows], [f"greenhouse:acme:{i}" for i in (SWE, SALES, DATA)])

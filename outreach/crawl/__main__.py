@@ -17,6 +17,9 @@
 - `recheck-boards`: raise the doubtful-board item (Needs you) for every active board found by a name match or a guessed
   slug that lists over 300 open postings and has none yet. Store only, no requests; run it once after a deploy that
   widens the check.
+- `profile [--runs N] [--json]`: where the tick time goes (#152). Sums the `by_ats` summaries of the newest N finished
+  `read_boards` runs (default 20; a run without `by_ats` is skipped) and prints, per ATS, boards, seconds, seconds per
+  board, share of the ticks' time, list and body requests, and new, closed and reopened postings. Store only, no requests.
 
 Every command calls `live_checkout.require_live` before it opens anything: they send real requests (and `tick` and
 `read` write the live store), so they run only from the live checkout. Exit code: 0 when the run was `ok`, 1 when it
@@ -39,6 +42,7 @@ __all__ = ["main"]
 
 _EXPECTED = (ValueError, OSError, FetchError, StoreError, sqlite3.Error)
 _TITLES_SHOWN = 5
+PROFILE_RUNS = 20
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -53,6 +57,9 @@ def _parser() -> argparse.ArgumentParser:
     slugs = sub.add_parser("probe-slugs", help="guess board slugs for companies with no board")
     slugs.add_argument("--limit", type=_positive, default=PROBE_LIMIT, metavar="N")
     sub.add_parser("recheck-boards", help="raise the doubtful item for big boards matched by name only (store only)")
+    prof = sub.add_parser("profile", help="where the tick time goes, per ATS, from the newest read_boards runs")
+    prof.add_argument("--runs", type=_positive, default=PROFILE_RUNS, metavar="N")
+    prof.add_argument("--json", action="store_true", help="print the numbers as JSON")
     return p
 
 
@@ -192,6 +199,33 @@ def _recheck_boards() -> int:
     return 0
 
 
+def _profile(runs: int, as_json: bool) -> int:
+    import dataclasses
+    import json
+
+    from outreach.crawl.profile import profile
+
+    conn = connect(db_path())
+    try:
+        result = profile(conn, runs)
+    finally:
+        conn.close()
+    if as_json:
+        print(json.dumps(dataclasses.asdict(result), indent=2))
+        return 0
+    if not result.runs:
+        print("profile: no read_boards runs with a per ATS summary yet")
+        return 0
+    print(f"profile: {result.runs} run{'' if result.runs == 1 else 's'}, {result.seconds:.1f} s of tick time")
+    print(f"{'ats':<18}{'boards':>7}{'seconds':>10}{'s/board':>9}{'share':>8}{'lists':>7}{'bodies':>8}"
+          f"{'new':>6}{'closed':>8}{'reopened':>9}")
+    for r in result.rows:
+        print(f"{r.ats:<18}{r.boards:>7}{r.seconds:>10.1f}{r.seconds_per_board:>9.2f}{r.share * 100:>7.1f}%"
+              f"{r.list_requests:>7}{r.body_requests:>8}{r.new:>6}{r.closed:>8}{r.reopened:>9}")
+    print("seconds = list calls + bodies (fetch and store) + ingest; lists and bodies are request counts")
+    return 0
+
+
 def _probe_slugs(limit: int, client: HttpClient | None) -> int:
     from outreach.crawl.config import load_crawl_config
     from outreach.crawl.probe import probe_slugs
@@ -224,7 +258,8 @@ def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_roo
     root = root or live_checkout.REPO_ROOT
     live_root = live_root or live_checkout.LIVE_ROOT
     what = {"tick": "the crawl tick", "read": "reading boards", "probe": "probing a board",
-            "probe-slugs": "probing company slugs", "recheck-boards": "rechecking boards"}[args.command]
+            "probe-slugs": "probing company slugs", "recheck-boards": "rechecking boards",
+            "profile": "profiling the crawl"}[args.command]
     live_checkout.require_live(what, root, live_root)
     try:
         if args.command == "tick":
@@ -235,6 +270,8 @@ def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_roo
             return _probe_slugs(args.limit, client)
         if args.command == "recheck-boards":
             return _recheck_boards()
+        if args.command == "profile":
+            return _profile(args.runs, args.json)
         return _probe(args.ats, args.token, client)
     except _EXPECTED as err:
         _say(f"error: {describe_error(err)}")

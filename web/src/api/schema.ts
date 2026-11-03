@@ -293,6 +293,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Jobs
+         * @description The job list: open engineering postings at his level (or the higher levels), newest first, 50 a page.
+         */
+        get: operations["jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/linkedin": {
         parameters: {
             query?: never;
@@ -2091,6 +2111,51 @@ export interface components {
             /** Value */
             value: number;
         };
+        /** JobCounts */
+        JobCounts: {
+            /** Higher */
+            higher: number;
+            /** Yourlevel */
+            yourLevel: number;
+        };
+        /** JobRowWire */
+        JobRowWire: {
+            /** Agedays */
+            ageDays: number;
+            /** Big */
+            big: boolean;
+            /** Companyid */
+            companyId: number;
+            /** Companyname */
+            companyName: string;
+            /** Contactedon */
+            contactedOn: string | null;
+            /** Date */
+            date: string;
+            /**
+             * Datekind
+             * @enum {string}
+             */
+            dateKind: "posted" | "seen";
+            /** Everify */
+            everify: boolean;
+            /** Leveltag */
+            levelTag: string;
+            /** Location */
+            location: string;
+            /** Postingid */
+            postingId: number;
+            /** Saysnosponsorship */
+            saysNoSponsorship: boolean;
+            /** Size */
+            size: number | null;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+            /** Yc */
+            yc: boolean;
+        };
         /** JobRunSummary */
         JobRunSummary: {
             /** Counts */
@@ -2115,6 +2180,18 @@ export interface components {
              * @enum {string}
              */
             status: "running" | "ok" | "partial" | "failed";
+        };
+        /** JobsView */
+        JobsView: {
+            /** Asof */
+            asOf: string;
+            counts: components["schemas"]["JobCounts"];
+            /** Nextafter */
+            nextAfter: string | null;
+            /** Rows */
+            rows: components["schemas"]["JobRowWire"][];
+            /** Total */
+            total: number;
         };
         /** LiftNoGoBody */
         LiftNoGoBody: {
@@ -5464,6 +5541,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobRunSummary"][];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    jobs: {
+        parameters: {
+            query?: {
+                view?: "your_level" | "higher";
+                window?: "7" | "30" | "60" | "90" | "any";
+                size?: "any" | "small" | "big" | "unknown";
+                notContacted?: boolean;
+                q?: string;
+                after?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobsView"];
                 };
             };
             /** @description bad_request: the request was not valid */

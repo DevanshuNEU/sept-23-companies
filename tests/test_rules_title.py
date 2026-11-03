@@ -549,6 +549,16 @@ class BodyDecidesNonSoftwareTitleTests(unittest.TestCase):
         self.assertEqual(classify_title("Developer", self.cfg, "").lane, "engineering")
         self.assertEqual(classify_title("Programmer", self.cfg, FOOTWEAR_BODY).lane, "off_lane")
 
+    def test_programmer_analyst_and_apps_dev_titles_count_as_software(self):
+        # Citi's software roles: "programmer" alone is not a software title, these phrases are
+        for title in ("Apps Dev Intmd Programmer Analyst - C11 - TAMPA", "Apps Dev Intmd Programmer Analyst - Officer",
+                      "Applications Development Engineer", "Application Development Engineer"):
+            for body in (HVAC_BODY, FOOTWEAR_BODY):
+                with self.subTest(title=title):
+                    self.assertGreaterEqual(len(body.strip()), 300)
+                    self.assertEqual(classify_title(title, self.cfg, body).lane, "engineering")
+        self.assertEqual(classify_title("Programmer", self.cfg, FOOTWEAR_BODY).lane, "off_lane")  # control
+
     def test_bi_developer_is_off_lane(self):
         for title in ("BI Report Developer 1", "Business Intelligence Engineer", "BI Developer", "Power BI Developer",
                       "Tableau Developer", "Reporting Developer", "Software Engineer, Business Intelligence",
@@ -562,7 +572,7 @@ class BodyDecidesNonSoftwareTitleTests(unittest.TestCase):
         self.assertEqual(classify_title("Data Center Engineer", self.cfg, NIX_BODY).lane, "off_lane")
         self.assertEqual(classify_title("Software Engineer, Data Center Automation", self.cfg).lane, "engineering")
 
-    def test_the_new_title_words_compile(self):
+    def test_config_lists_after_the_change(self):
         for key in ("software_titles", "off_lane", "off_lane_unless_software"):
             self.assertTrue(self.cfg.title[key])
         self.assertNotIn("developer", self.cfg.title["software_titles"])

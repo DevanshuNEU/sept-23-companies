@@ -75,7 +75,7 @@ software_titles = [
   "javascript", "react", "gpu", "research engineer", "database", "data platform", "data infrastructure",
   "analytics engineer", "software developer", "web developer", "full stack developer", "frontend developer",
   "backend developer", "mobile developer", "ios developer", "android developer", "application developer",
-  "applications developer",
+  "applications developer", "programmer analyst", "apps dev", "application development", "applications development",
 ]
 # #154: titles that can name a software or a physical role (their basis wording is kept; #172 sends every other
 # non-software title to the same scorer). The body decides: `software_words` against

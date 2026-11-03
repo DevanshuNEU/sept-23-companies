@@ -92,6 +92,36 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(client.requests, [ACME])
         self.assertEqual(self.conn.execute("SELECT last_read FROM board").fetchone()[0], "ok")
 
+    def test_tick_passes_the_mac_notifier_and_run_tick_defaults_to_none(self):
+        import inspect
+        from outreach.crawl import tick as tick_module
+        seen = {}
+
+        def fake_tick(conn, polite, **kwargs):
+            seen.update(kwargs)
+            return tick_module.TickReport(run_id=None, rebuilt=False)
+
+        with mock.patch("outreach.crawl.tick.run_tick", fake_tick):
+            self.run_cli(["tick"], FakeClient({}))
+        self.assertIs(seen["notifier"], cli.mac_notifier)
+        default = inspect.signature(tick_module.run_tick).parameters["notifier"].default
+        self.assertIsNot(default, cli.mac_notifier)
+        self.assertIsNone(default("title", "text"))
+
+    def test_the_tick_line_names_the_feed_and_the_alarm_error(self):
+        from outreach.crawl.tick import TickReport
+        base = dict(run_id=1, rebuilt=False)
+        quiet = cli._line(TickReport(**base))
+        self.assertNotIn("feed", quiet)
+        self.assertNotIn("alarm", quiet)
+        ran = cli._line(TickReport(**base, feed={"changed": 1, "seen": 120, "new": 7}))
+        self.assertIn("feed: 7 new of 120", ran)
+        unchanged = cli._line(TickReport(**base, feed={"changed": 0, "seen": 0, "new": 0}))
+        self.assertIn("feed: unchanged", unchanged)
+        failed = cli._line(TickReport(**base, feed_error="HTTP 500", alarm_error="ValueError: bad toml"))
+        self.assertIn("feed failed: HTTP 500", failed)
+        self.assertIn("alarm check failed: ValueError: bad toml", failed)
+
     def test_tick_exits_0_when_another_tick_holds_the_lock(self):
         seed_board(self.conn, seed_company(self.conn, "Acme"))
         client = FakeClient({})

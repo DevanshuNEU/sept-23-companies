@@ -28,24 +28,24 @@ class LogMissTests(LogMissCase):
 
     def test_a_known_job_is_found_and_stored(self):
         out = self.ok("log_miss", {"url": "https://jobs.ashbyhq.com/acme/ok-1", "note": "saw it on a friend's post"})
-        self.assertEqual(set(out), {"missId", "cause", "causeText", "postingId", "companyId", "boardId"})
-        self.assertEqual((out["cause"], out["causeText"]), ("found", CAUSE_TEXT["found"]))
-        self.assertEqual((out["postingId"], out["companyId"], out["boardId"]), (self.posting, self.acme, self.board))
+        self.assertEqual(set(out), {"miss_id", "cause", "cause_text", "posting_id", "company_id", "board_id"})
+        self.assertEqual((out["cause"], out["cause_text"]), ("found", CAUSE_TEXT["found"]))
+        self.assertEqual((out["posting_id"], out["company_id"], out["board_id"]), (self.posting, self.acme, self.board))
         row = self.db.execute("SELECT * FROM miss").fetchone()
         self.assertEqual((row["miss_id"], row["note"], row["pasted_at"], row["cause"]),
-                         (out["missId"], "saw it on a friend's post", NOW, "found"))
+                         (out["miss_id"], "saw it on a friend's post", NOW, "found"))
 
     def test_an_unknown_site_is_stored_with_null_ids(self):
         out = self.ok("log_miss", {"url": "https://example.com/jobs/9"})
-        self.assertEqual((out["cause"], out["postingId"], out["companyId"], out["boardId"]),
+        self.assertEqual((out["cause"], out["posting_id"], out["company_id"], out["board_id"]),
                          ("unknown_site", None, None, None))
-        self.assertEqual(out["causeText"], CAUSE_TEXT["unknown_site"])
+        self.assertEqual(out["cause_text"], CAUSE_TEXT["unknown_site"])
         self.assertEqual(self.db.execute("SELECT note FROM miss").fetchone()[0], "")
 
     def test_the_same_link_twice_is_one_row(self):
         first = self.ok("log_miss", {"url": "https://example.com/jobs/9"})
         second = self.ok("log_miss", {"url": "https://example.com/jobs/9", "note": "again"})
-        self.assertEqual(second["missId"], first["missId"])
+        self.assertEqual(second["miss_id"], first["miss_id"])
         self.assertEqual(self.db.execute("SELECT count(*) FROM miss").fetchone()[0], 1)
 
     def test_a_cause_is_given_for_a_company_without_a_board(self):

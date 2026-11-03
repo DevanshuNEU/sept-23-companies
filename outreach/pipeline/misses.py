@@ -89,7 +89,7 @@ class Miss:
 
 # ----------------------------------------------------------------------------------------------------- the posting
 
-_POSTING_SQL = ("SELECT p.posting_id, p.company_id, p.board_id, p.source_key, p.first_seen_at, d.* "
+_POSTING_SQL = ("SELECT p.posting_id, p.company_id, p.board_id, p.source_key, p.first_seen_at, p.closed_at, d.* "
                 "FROM posting p LEFT JOIN decision d ON d.posting_id = p.posting_id AND d.ruleset_version = "
                 "(SELECT ruleset_version FROM ruleset WHERE is_current = 1) WHERE ")
 
@@ -201,7 +201,7 @@ def diagnose(conn: sqlite3.Connection, url: str) -> Diagnosis:
     if posting is not None:
         cause, facts = _judge(posting)
         return Diagnosis(cause, posting["posting_id"], posting["company_id"], posting["board_id"],
-                         {**detail, **facts})
+                         {**detail, **facts, "closed_at": posting["closed_at"]})
     board = _board(conn, key)
     if board is not None:
         return Diagnosis("not_read_yet", None, board["company_id"], board["board_id"], detail)

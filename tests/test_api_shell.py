@@ -3,6 +3,7 @@ import dataclasses
 import json
 import os
 import time
+import sqlite3
 import unittest
 from unittest import mock
 
@@ -108,14 +109,18 @@ class Shell(ApiCase):
         self.assertEqual(line["alarms"], ["resolve failed on its last two runs"])
         self.assertEqual(line["text"], "Scorecard not run yet")
 
-    def test_a_bad_config_or_card_leaves_the_line_out_and_the_rest_intact(self):
-        for error in (ValueError("bad toml"), KeyError("[simplify]"), OSError("no config")):
+    def test_a_bad_config_or_card_says_so_and_the_rest_stays_intact(self):
+        for error in (ValueError("bad toml"), KeyError("[simplify]"), OSError("no config"), sqlite3.OperationalError("x")):
             with self.subTest(error=type(error).__name__), mock.patch.object(shell_queries.alarms, "check",
                                                                               side_effect=error):
-                body = self.shell()
-            self.assertIsNone(body["pipeline"])
-            self.assertEqual(set(body), FIELDS)
-            self.assertEqual(body["asOf"], NOW)
+                line = shell_queries.pipeline_line(self.conn, NOW)
+            self.assertEqual(line.model_dump(), {"text": "Scorecard unavailable", "alarms": [type(error).__name__],
+                                                 "tone": "bad"})
+        with mock.patch.object(shell_queries.alarms, "check", side_effect=ValueError("bad toml")):
+            body = self.shell()  # the whole summary still answers, and the line is there
+        self.assertEqual(body["pipeline"], {"text": "Scorecard unavailable", "alarms": ["ValueError"], "tone": "bad"})
+        self.assertEqual(set(body), FIELDS)
+        self.assertEqual(body["asOf"], NOW)
 
     def test_empty_store_shell_is_all_zero_and_valid(self):
         body = self.shell()

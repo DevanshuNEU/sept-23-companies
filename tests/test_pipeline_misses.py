@@ -131,6 +131,15 @@ class DiagnoseTests(MissCase):
         conn.execute("UPDATE posting SET closed_at = ?, close_reason = 'gone_from_board' WHERE posting_id = ?", (NOW, pid))
         got = diagnose(conn, ashby("acme", "gone"))
         self.assertEqual((got.cause, got.posting_id), ("found", pid))
+        self.assertEqual(got.detail["closed_at"], NOW)
+
+    def test_an_open_posting_has_a_null_closed_at_in_its_detail(self):
+        conn = self.conn
+        board = seed_board(conn, seed_company(conn, "Acme"), "ashby", "acme")
+        store_posting(conn, "ashby:acme:open", board_id=board, level=dict(level_tier="new_grad", level_ok=1))
+        got = diagnose(conn, ashby("acme", "open"))
+        self.assertIn("closed_at", got.detail)
+        self.assertIsNone(got.detail["closed_at"])
 
     def test_the_link_is_matched_in_any_letter_case(self):
         conn = self.conn

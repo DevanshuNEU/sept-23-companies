@@ -27,8 +27,8 @@ def log_miss(ctx: Ctx, args: LogMissInput) -> dict:
         raise ToolError("bad_input", "The link is empty.", "Send the job link he pasted. Nothing was written.")
     with transaction(ctx.conn):
         miss = store_miss(ctx.conn, args.url, args.note, ctx.now)
-    return {"missId": miss.miss_id, "cause": miss.cause, "causeText": miss.cause_text, "postingId": miss.posting_id,
-            "companyId": miss.company_id, "boardId": miss.board_id}
+    return {"miss_id": miss.miss_id, "cause": miss.cause, "cause_text": miss.cause_text, "posting_id": miss.posting_id,
+            "company_id": miss.company_id, "board_id": miss.board_id}
 
 
 TOOLS = (

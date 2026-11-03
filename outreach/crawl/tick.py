@@ -63,7 +63,7 @@ from outreach.pipeline.config import load_pipeline_config
 from outreach.pipeline.simplify_feed import note_streak, poll as poll_simplify_feed
 from outreach.rules import RulesetNotCurrent, rebuild, ruleset_version
 from outreach.store import append_event, atomic, describe_error, finish_job, start_job, utcnow
-from outreach.sending.notify import Notifier, mac_notifier, notify_once
+from outreach.sending.notify import Notifier, notify_once
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["TickReport", "AlreadyRunning", "LOCK_NAME", "tick_lock", "ensure_ruleset_current", "resolve_combiner",
@@ -505,10 +505,15 @@ def _add_passes(conn: sqlite3.Connection, report: TickReport) -> None:
                                                                           report.run_id))
 
 
+def _no_notice(title: str, text: str) -> None:
+    """The default notifier: says nothing. The crawl command passes `mac_notifier`; a caller that passes none gets no
+    notice, so a test or a script can never pop one by accident."""
+
+
 def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig | None = None, rules_cfg=None,
              combiner=None, now_fn: Callable[[], str] = utcnow, clock: Callable[[], float] = time.monotonic,
              sleep: Callable[[float], None] = time.sleep, limit: int | None = None,
-             notifier: Notifier = mac_notifier) -> TickReport:
+             notifier: Notifier = _no_notice) -> TickReport:
     """One tick: the ruleset check, the due boards (at most `limit or cfg.boards_per_tick`, within the budget), then
     the daily slug probe (Task 26a, `probe`), then the watched-page pass (Task 14), then the SimplifyJobs feed poll
     (#153, `feed`), all through the same client and breaker; the watch pass is its own `watch_pages` run. A failed

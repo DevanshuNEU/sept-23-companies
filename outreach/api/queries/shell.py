@@ -49,16 +49,17 @@ def drafts_to_review(conn: sqlite3.Connection) -> int:
                and p not in no_go_people)
 
 
-def pipeline_line(conn: sqlite3.Connection, now: str) -> PipelineLine | None:
+def pipeline_line(conn: sqlite3.Connection, now: str) -> PipelineLine:
     """The sidebar's scorecard line: the newest stored card in words, and the alarms that hold now. Reads only. A store
-    that cannot answer, a config file that does not load or a card that does not parse leaves the line out rather than
-    failing the whole summary."""
+    that cannot answer, a config file that does not load or a card that does not parse gives a bad line, "Scorecard
+    unavailable", with the error's kind in `alarms`: an error is not an empty line, and it does not fail the whole
+    summary either."""
     try:
         found = alarms.check(conn, now)
         return PipelineLine(text=alarms.scorecard_line(conn), alarms=[a.text for a in found],
                             tone="bad" if found else "idle")
-    except (sqlite3.Error, ValueError, KeyError, OSError):
-        return None
+    except (sqlite3.Error, ValueError, KeyError, OSError) as e:
+        return PipelineLine(text="Scorecard unavailable", alarms=[type(e).__name__], tone="bad")
 
 
 def shell_summary(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sender_loaded: bool) -> ShellSummary:

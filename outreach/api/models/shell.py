@@ -24,4 +24,4 @@ class ShellSummary(Wire):
     jobs: list[JobRunSummary]
     plan: PlanProgress  # today's plan: rows done of rows planned
     wins_unseen: int
-    pipeline: PipelineLine | None  # the scorecard line; null when the store could not be read for it
+    pipeline: PipelineLine | None  # the scorecard line; "Scorecard unavailable" (bad) when it could not be built

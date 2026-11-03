@@ -276,10 +276,10 @@ function BoardsRead({ jobs }: { jobs: JobRunSummary[] }) {
 
 /**
  * The scorecard line under "Boards read": the newest coverage and level numbers. With no alarm it is plain text; with
- * one it turns red, takes the alert icon (so the signal is not the colour alone) and opens the alarm texts.
+ * one (`tone` bad) it turns red, takes the alert icon (so the signal is not the colour alone) and opens the alarm texts.
  */
 function PipelineScore({ line }: { line: PipelineLine }) {
-  if (line.alarms.length === 0) {
+  if (line.tone !== 'bad') {
     return (
       <div className="flex h-5 items-center gap-2">
         <Gauge aria-hidden className="size-3.5" />

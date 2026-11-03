@@ -1,6 +1,7 @@
 """The pipeline alarms (#153, Task 5): each kind fires past its threshold and stays quiet below it, and the tick
 sends one Mac notice a day. A fresh store and fake notifiers: nothing here reaches the network or the live store."""
 import dataclasses
+import json
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -297,6 +298,21 @@ class NoticeOnceADay(unittest.TestCase):
             report = self.tick(NOW)
         self.assertIsNotNone(report.run_id)
         self.assertEqual(self.notices, [])
+
+    def test_a_failing_alarm_check_is_named_in_the_tick_summary(self):
+        with mock.patch.object(tick.alarms, "check", side_effect=RuntimeError("boom")):
+            report = self.tick(NOW)
+        self.assertIn("boom", report.alarm_error)
+        summary = json.loads(self.conn.execute("SELECT summary FROM job_run WHERE run_id = ?",
+                                               (report.run_id,)).fetchone()[0])
+        self.assertIn("boom", summary["alarm_error"])
+
+    def test_a_clean_tick_has_an_empty_alarm_error(self):
+        report = self.tick(NOW)
+        self.assertEqual(report.alarm_error, "")
+        summary = json.loads(self.conn.execute("SELECT summary FROM job_run WHERE run_id = ?",
+                                               (report.run_id,)).fetchone()[0])
+        self.assertEqual(summary["alarm_error"], "")
 
     def test_a_good_poll_records_the_time_for_the_24_hour_alarm(self):
         from tests.fakes import json_response

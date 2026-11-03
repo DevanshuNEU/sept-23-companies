@@ -218,6 +218,14 @@ describe('AppShell sidebar', () => {
     expect(within(pop).getByText('resolve failed on its last two runs')).toBeInTheDocument();
   });
 
+  it('follows the tone the API sends: an idle line is plain text', async () => {
+    const db = buildFixture();
+    db.shell = { ...db.shell, pipeline: { text: 'Coverage 32%, level 51%', alarms: ['stale text'], tone: 'idle' } };
+    await shell('/today', new FixtureClient(db));
+    expect(screen.getByText('Coverage 32%, level 51%')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Coverage/ })).toBeNull();
+  });
+
   it('leaves the line out when the summary has none', async () => {
     const db = buildFixture();
     db.shell = { ...db.shell, pipeline: null };

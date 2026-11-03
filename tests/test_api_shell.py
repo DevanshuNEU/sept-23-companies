@@ -4,7 +4,9 @@ import json
 import os
 import time
 import unittest
+from unittest import mock
 
+from outreach.api.queries import shell as shell_queries
 from outreach.pipeline import scorecard
 from outreach.pipeline.scorecard import Scorecard
 from tests import apiseed as s
@@ -105,6 +107,15 @@ class Shell(ApiCase):
         self.assertEqual(line["tone"], "bad")
         self.assertEqual(line["alarms"], ["resolve failed on its last two runs"])
         self.assertEqual(line["text"], "Scorecard not run yet")
+
+    def test_a_bad_config_or_card_leaves_the_line_out_and_the_rest_intact(self):
+        for error in (ValueError("bad toml"), KeyError("[simplify]"), OSError("no config")):
+            with self.subTest(error=type(error).__name__), mock.patch.object(shell_queries.alarms, "check",
+                                                                              side_effect=error):
+                body = self.shell()
+            self.assertIsNone(body["pipeline"])
+            self.assertEqual(set(body), FIELDS)
+            self.assertEqual(body["asOf"], NOW)
 
     def test_empty_store_shell_is_all_zero_and_valid(self):
         body = self.shell()

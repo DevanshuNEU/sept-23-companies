@@ -50,13 +50,14 @@ def drafts_to_review(conn: sqlite3.Connection) -> int:
 
 
 def pipeline_line(conn: sqlite3.Connection, now: str) -> PipelineLine | None:
-    """The sidebar's scorecard line: the newest stored card in words, and the alarms that hold now. Reads only, and a
-    store that cannot answer leaves the line out rather than failing the whole summary."""
+    """The sidebar's scorecard line: the newest stored card in words, and the alarms that hold now. Reads only. A store
+    that cannot answer, a config file that does not load or a card that does not parse leaves the line out rather than
+    failing the whole summary."""
     try:
         found = alarms.check(conn, now)
         return PipelineLine(text=alarms.scorecard_line(conn), alarms=[a.text for a in found],
                             tone="bad" if found else "idle")
-    except sqlite3.Error:
+    except (sqlite3.Error, ValueError, KeyError, OSError):
         return None
 
 

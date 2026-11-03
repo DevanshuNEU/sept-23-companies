@@ -25,7 +25,7 @@ import { useLivePulse } from './use-pulse';
 const VIEW_TITLE: Record<string, string> = {
   today: 'Today',
   proposals: 'All proposed companies',
-  browse: 'Browse companies',
+  browse: 'Jobs',
   outbox: 'Outbox',
   linkedin: 'LinkedIn replies',
   'needs-you': 'Needs you',
@@ -44,7 +44,7 @@ const GO: [key: string, path: string, name: string][] = [
   ['d', '/done', 'Done'],
   ['p', '/progress', 'Progress'],
   ['w', '/wins', 'Wins'],
-  ['b', '/browse', 'Browse companies'],
+  ['b', '/browse', 'Jobs'],
 ];
 
 /** The first path segment names the view: `/outbox/12?sel=12` is the `outbox` view. */

@@ -105,9 +105,9 @@ describe('AppShell sidebar', () => {
     expect(within(nav(/^Done/)).getByText('4')).toBeInTheDocument();
   });
 
-  it('Browse companies is a link in Lists to its own page, marked current there', async () => {
+  it('Jobs is a link in Lists to its own page, marked current there', async () => {
     await shell('/browse');
-    const link = nav(/^Browse companies/);
+    const link = nav(/^Jobs/);
     expect(link).toHaveAttribute('href', '/browse');
     expect(within(sidebar()).getByRole('navigation', { name: 'Lists' })).toContainElement(link);
     expect(link).toHaveAttribute('aria-current', 'page');

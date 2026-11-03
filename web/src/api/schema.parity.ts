@@ -87,8 +87,13 @@ export const _parity: [
   Same<T.SwapResult, S['SwapResult']>,
   Same<T.PassReason, NonNullable<S['PassPickBody']['reason']>>,
   Same<T.InFlightCompany, S['InFlightCompany']>,
+  Same<T.JobRow, S['JobRowWire']>,
+  Same<T.JobCounts, S['JobCounts']>,
+  Same<T.JobsView, S['JobsView']>,
+  Same<T.PassJobResult, S['PassJobResult']>,
+  Same<T.GoAheadResult, S['GoAheadResult']>,
   Same<T.PlanRow, S['PlanRow']>,
   Same<T.PlanView, S['PlanView']>,
   Same<T.LoggedPerson, S['LoggedPerson']>,
   Same<T.LogPeopleResult, S['LogPeopleResult']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

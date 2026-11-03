@@ -396,6 +396,28 @@ export interface BrowseView { asOf: IsoTime; date: IsoDate; companies: BrowseCom
 export interface BrowseParams { q: string; levelRole: boolean; visaOk: boolean; unworked: boolean; after: number; limit?: number }
 /** A swap: the chosen company took the pick's slot as `row`; the replaced pick is back on the bench (it is not a Not now). */
 export interface SwapResult { replacedEntryId: Id; replaced: CompanyRef; row: PlanRow; text: string }
+/**
+ * The job list (#156): open engineering postings he reads one by one, newest first. `date` is the posting's own date
+ * (`dateKind` 'posted') or the day Knock first saw it ('seen'); `ageDays` counts from it in New York days.
+ */
+export interface JobRow {
+  postingId: Id; title: string; url: string; location: string; levelTag: string; date: IsoDate; dateKind: 'posted' | 'seen'; ageDays: number;
+  companyId: Id; companyName: string; size: number | null; big: boolean;
+  saysNoSponsorship: boolean; everify: boolean; yc: boolean; contactedOn: IsoDate | null;
+}
+export interface JobCounts { yourLevel: number; higher: number }
+export interface JobsView { asOf: IsoTime; rows: JobRow[]; total: number; nextAfter: string | null; counts: JobCounts }
+export type JobsTab = 'your_level' | 'higher';
+export type JobsWindow = '7' | '30' | '60' | '90' | 'any';
+export type JobsSize = 'any' | 'small' | 'big' | 'unknown';
+/** What the job list asks for: a tab, a window in days, a size, the contacted filter, a company search and the cursor (`after`, opaque; none for the first page). */
+export interface JobsParams { view: JobsTab; window: JobsWindow; size: JobsSize; notContacted: boolean; q: string; after?: string | null; limit?: number }
+/** Pass: the posting is hidden; the company is untouched. */
+export interface PassJobResult { postingId: Id; companyId: Id; passed: boolean }
+/** Go ahead: the company is on today's list as his own pick ('added') or kept for today's list and put first when the plan is built ('requested'). `text` is the sentence to show. */
+export interface GoAheadResult {
+  postingId: Id; companyId: Id; entryId: Id | null; state: 'added' | 'requested'; rank: number | null; listDate: IsoDate; text: string;
+}
 export interface InFlightCompany { company: CompanyRef; status: 'in_flight' | 'replied'; text: string; reason: string; freeOn: IsoDate | null }
 export interface PlanRow {
   entryId: Id; position: number; channel: 'linkedin_request' | 'email'; lane: ListGroup;

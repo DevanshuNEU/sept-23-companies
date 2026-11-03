@@ -2389,6 +2389,67 @@
         "title": "GapCompany",
         "type": "object"
       },
+      "GoAheadResult": {
+        "properties": {
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "entryId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entryid"
+          },
+          "listDate": {
+            "title": "Listdate",
+            "type": "string"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "state": {
+            "enum": [
+              "added",
+              "requested"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "postingId",
+          "companyId",
+          "state",
+          "rank",
+          "entryId",
+          "listDate",
+          "text"
+        ],
+        "title": "GoAheadResult",
+        "type": "object"
+      },
       "HealthBoards": {
         "properties": {
           "active": {
@@ -2704,6 +2765,130 @@
         "title": "JobCount",
         "type": "object"
       },
+      "JobCounts": {
+        "properties": {
+          "higher": {
+            "title": "Higher",
+            "type": "integer"
+          },
+          "yourLevel": {
+            "title": "Yourlevel",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "yourLevel",
+          "higher"
+        ],
+        "title": "JobCounts",
+        "type": "object"
+      },
+      "JobRowWire": {
+        "properties": {
+          "ageDays": {
+            "title": "Agedays",
+            "type": "integer"
+          },
+          "big": {
+            "title": "Big",
+            "type": "boolean"
+          },
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "contactedOn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contactedon"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "dateKind": {
+            "enum": [
+              "posted",
+              "seen"
+            ],
+            "title": "Datekind",
+            "type": "string"
+          },
+          "everify": {
+            "title": "Everify",
+            "type": "boolean"
+          },
+          "levelTag": {
+            "title": "Leveltag",
+            "type": "string"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "saysNoSponsorship": {
+            "title": "Saysnosponsorship",
+            "type": "boolean"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "yc": {
+            "title": "Yc",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "postingId",
+          "title",
+          "url",
+          "location",
+          "levelTag",
+          "date",
+          "dateKind",
+          "ageDays",
+          "companyId",
+          "companyName",
+          "size",
+          "big",
+          "saysNoSponsorship",
+          "everify",
+          "yc",
+          "contactedOn"
+        ],
+        "title": "JobRowWire",
+        "type": "object"
+      },
       "JobRunSummary": {
         "properties": {
           "counts": {
@@ -2790,6 +2975,55 @@
           "late"
         ],
         "title": "JobRunSummary",
+        "type": "object"
+      },
+      "JobWriteBody": {
+        "additionalProperties": false,
+        "description": "The body of Pass and Go ahead: nothing. The page's `Idempotency-Key` header is the write's key.",
+        "properties": {},
+        "title": "JobWriteBody",
+        "type": "object"
+      },
+      "JobsView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/JobCounts"
+          },
+          "nextAfter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextafter"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/JobRowWire"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asOf",
+          "rows",
+          "total",
+          "nextAfter",
+          "counts"
+        ],
+        "title": "JobsView",
         "type": "object"
       },
       "LiftNoGoBody": {
@@ -4633,6 +4867,29 @@
           "touches"
         ],
         "title": "OutcomePromptView",
+        "type": "object"
+      },
+      "PassJobResult": {
+        "properties": {
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "postingId",
+          "companyId",
+          "passed"
+        ],
+        "title": "PassJobResult",
         "type": "object"
       },
       "PassPickBody": {
@@ -10550,6 +10807,405 @@
         "summary": "Health Job",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "description": "The job list: open engineering postings at his level (or the higher levels), newest first, 50 a page.",
+        "operationId": "jobs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "default": "your_level",
+              "enum": [
+                "your_level",
+                "higher"
+              ],
+              "title": "View",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "30",
+              "enum": [
+                "7",
+                "30",
+                "60",
+                "90",
+                "any"
+              ],
+              "title": "Window",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": "any",
+              "enum": [
+                "any",
+                "small",
+                "big",
+                "unknown"
+              ],
+              "title": "Size",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "notContacted",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Notcontacted",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Jobs",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{posting_id}/go-ahead": {
+      "post": {
+        "operationId": "go_ahead",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "posting_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Posting Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobWriteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoAheadResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Go Ahead",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{posting_id}/pass": {
+      "post": {
+        "operationId": "pass_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "posting_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Posting Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobWriteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassJobResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Pass Job",
+        "tags": [
+          "jobs"
         ]
       }
     },

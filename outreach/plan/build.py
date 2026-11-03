@@ -28,6 +28,7 @@ from outreach.plan.config import PlanConfig, default_plan_config
 from outreach.plan.dates import is_weekday
 from outreach.plan.fresh import without_turned_down
 from outreach.plan.outbound import load_outbound
+from outreach.plan.picks import own_picks_for_plan, write_pick
 from outreach.plan.prospects import build_why, load_postings, load_prospects
 from outreach.plan.replace import OldRow, ReplaceRefused, blockers, delete_plan, old_rows
 from outreach.plan.select import Caps, Chosen, choose_rows
@@ -148,6 +149,11 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
     prospects = load_prospects(conn, ranked, canon, today, cfg, outbound)
     email_slots = plan_email_slots(email, cfg)  # 0 with people off: company rows only
     chosen = choose_rows(prospects, Caps(linkedin.today, email_slots, role_n, reason_n), cfg)
+    # Go ahead before the plan (job list, #156): his own picks come first, past the capacity and the room, and the
+    # regular rows follow without a second row for the same company.
+    own = [] if dry_run else own_picks_for_plan(conn, today, cfg, canon)
+    taken = {pick.prospect.company_id for pick, _ in own}
+    chosen = [c for c in chosen if c.company_id not in taken]
     capacity = linkedin.today + email_slots
     replaced = None if old is None else len(old)
     if dry_run:
@@ -163,7 +169,7 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
     postings = load_postings(conn, list(best.values()), cfg)
     version = latest_version(conn) or ""
     entries = []
-    for rank, row in enumerate(chosen, 1):
+    for rank, row in enumerate(chosen, len(own) + 1):
         score = stored[row.company_id]
         posting = postings.get(best[row.company_id])
         why = build_why(by_company[row.company_id], row, score, posting, today=today, cfg=cfg, ranker_version=version)
@@ -171,10 +177,11 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
 
     now = utcnow()
     summary = {"date": today.isoformat(), "capacity": capacity, "linkedin": linkedin.today, "email": email.slots,
-               "rows": len(chosen), "people_rows": sum(1 for r in chosen if r.person_id is not None),
+               "rows": len(chosen) + len(own), "people_rows": sum(1 for r in chosen if r.person_id is not None),
                "find_someone_rows": sum(1 for r in chosen if r.person_id is None),
                "carried_rows": sum(1 for r in chosen if r.carried_from is not None),
-               "email_rows": sum(1 for r in chosen if r.channel == "email"), "boards": boards, **notes}
+               "email_rows": sum(1 for r in chosen if r.channel == "email"), "own_rows": len(own), "boards": boards,
+               **notes}
     if old is not None:
         summary["replaced"] = len(old)
     with transaction(conn):
@@ -200,6 +207,8 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
                 "ON CONFLICT(list_date, company_id) DO NOTHING",
                 (None if first_rowid is None else first_rowid + rank - 1, today.isoformat(), row.company_id,
                  row.list_group, rank, posting_id, why, now, row.person_id, row.channel))
+        for rank, (pick, score) in enumerate(own, 1):  # after the rows above, so their ids are the highest
+            write_pick(conn, pick, score, today=today, rank=rank, now_iso=now, cfg=cfg)
         key = f"plan-built:{today.isoformat()}" + ("" if old is None else f":replaced:{run_id}")
         append_event(conn, entity="daily_list", kind="built", actor="daily_list",
                      detail={k: summary[k] for k in ("date", "capacity", "linkedin", "email", "rows", "people_rows",
@@ -208,7 +217,7 @@ def _build(conn: sqlite3.Connection, today: date, cfg: PlanConfig, boards_reader
         if old is not None:
             append_event(conn, entity="daily_list", kind="plan_replaced", actor="system",
                          detail={"date": today.isoformat(), "replaced_rows": len(old), "reason": reason,
-                                 "rows": len(chosen), "capacity": capacity, "run_id": run_id,
+                                 "rows": len(chosen) + len(own), "capacity": capacity, "run_id": run_id,
                                  "old_companies": [r.company_id for r in old]},
                          idempotency_key=f"plan-replaced:{today.isoformat()}:{run_id}")
         finish_job(conn, run_id, "ok", summary)

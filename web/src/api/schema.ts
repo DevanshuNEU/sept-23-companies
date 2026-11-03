@@ -293,6 +293,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Jobs
+         * @description The job list: open engineering postings at his level (or the higher levels), newest first, 50 a page.
+         */
+        get: operations["jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{posting_id}/go-ahead": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Go Ahead */
+        post: operations["go_ahead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{posting_id}/pass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pass Job */
+        post: operations["pass_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/linkedin": {
         parameters: {
             query?: never;
@@ -1975,6 +2029,26 @@ export interface components {
             /** Listings */
             listings: number;
         };
+        /** GoAheadResult */
+        GoAheadResult: {
+            /** Companyid */
+            companyId: number;
+            /** Entryid */
+            entryId: number | null;
+            /** Listdate */
+            listDate: string;
+            /** Postingid */
+            postingId: number;
+            /** Rank */
+            rank: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "added" | "requested";
+            /** Text */
+            text: string;
+        };
         /** HealthBoards */
         HealthBoards: {
             /** Active */
@@ -2091,6 +2165,51 @@ export interface components {
             /** Value */
             value: number;
         };
+        /** JobCounts */
+        JobCounts: {
+            /** Higher */
+            higher: number;
+            /** Yourlevel */
+            yourLevel: number;
+        };
+        /** JobRowWire */
+        JobRowWire: {
+            /** Agedays */
+            ageDays: number;
+            /** Big */
+            big: boolean;
+            /** Companyid */
+            companyId: number;
+            /** Companyname */
+            companyName: string;
+            /** Contactedon */
+            contactedOn: string | null;
+            /** Date */
+            date: string;
+            /**
+             * Datekind
+             * @enum {string}
+             */
+            dateKind: "posted" | "seen";
+            /** Everify */
+            everify: boolean;
+            /** Leveltag */
+            levelTag: string;
+            /** Location */
+            location: string;
+            /** Postingid */
+            postingId: number;
+            /** Saysnosponsorship */
+            saysNoSponsorship: boolean;
+            /** Size */
+            size: number | null;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+            /** Yc */
+            yc: boolean;
+        };
         /** JobRunSummary */
         JobRunSummary: {
             /** Counts */
@@ -2115,6 +2234,23 @@ export interface components {
              * @enum {string}
              */
             status: "running" | "ok" | "partial" | "failed";
+        };
+        /**
+         * JobWriteBody
+         * @description The body of Pass and Go ahead: nothing. The page's `Idempotency-Key` header is the write's key.
+         */
+        JobWriteBody: Record<string, never>;
+        /** JobsView */
+        JobsView: {
+            /** Asof */
+            asOf: string;
+            counts: components["schemas"]["JobCounts"];
+            /** Nextafter */
+            nextAfter: string | null;
+            /** Rows */
+            rows: components["schemas"]["JobRowWire"][];
+            /** Total */
+            total: number;
         };
         /** LiftNoGoBody */
         LiftNoGoBody: {
@@ -2764,6 +2900,15 @@ export interface components {
             asOf: string;
             /** Touches */
             touches: components["schemas"]["PromptTouch"][];
+        };
+        /** PassJobResult */
+        PassJobResult: {
+            /** Companyid */
+            companyId: number;
+            /** Passed */
+            passed: boolean;
+            /** Postingid */
+            postingId: number;
         };
         /**
          * PassPickBody
@@ -5486,6 +5631,257 @@ export interface operations {
             };
             /** @description not_found: no such record */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    jobs: {
+        parameters: {
+            query?: {
+                view?: "your_level" | "higher";
+                window?: "7" | "30" | "60" | "90" | "any";
+                size?: "any" | "small" | "big" | "unknown";
+                notContacted?: boolean;
+                q?: string;
+                after?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobsView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    go_ahead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                posting_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoAheadResult"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    pass_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                posting_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PassJobResult"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

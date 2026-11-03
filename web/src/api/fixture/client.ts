@@ -3,10 +3,11 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult,
+  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobRow, JobsParams, JobsView, PassJobResult, GoAheadResult,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
+import { buildJobs, jobsView } from './jobs-data';
 import { benchOrder, browseView, buildExtras, rowToBench, toBrowse } from './browse-data';
 import { askedToday, benchRoom, benchRoomText, benchToRow, emailCountOf, emailTextOf, laneTextOf, pickOrder } from './queue-data';
 
@@ -112,6 +113,10 @@ export class FixtureClient implements OutreachClient {
   /** Browse companies: the stored position of each company, fixed the first time it is seen, and the 30 below the bench. */
   private readonly browseRanks = new Map<Id, number>();
   private extras: BenchCompany[] | undefined;
+  /** The job list (#156): the sample postings, the ones he passed, and the companies he said Go ahead to (by company id). */
+  private jobList: { rows: JobRow[]; higher: ReadonlySet<number> } | undefined;
+  private readonly passedJobs = new Set<Id>();
+  private readonly wentAhead = new Map<Id, GoAheadResult>();
   /** Prompt touches that got an outcome and left the prompt. A reply on a quiet touch still finds its person here. */
   private readonly leftPrompt = new Map<Id, PromptTouch>();
   /** Touch revisions after an outcome. A touch with no entry is at its own revision, or 1. */
@@ -1147,6 +1152,44 @@ export class FixtureClient implements OutreachClient {
         text: `Swapped in ${target.company.name} for ${row.company.name}.`,
       };
       this.swaps.set(input.idempotencyKey, result);
+      return result;
+    });
+  }
+
+  private jobPool(): { rows: JobRow[]; higher: ReadonlySet<number> } {
+    this.jobList ??= buildJobs(this.db.plan.date);
+    return { rows: this.jobList.rows.filter((r) => !this.passedJobs.has(r.postingId)), higher: this.jobList.higher };
+  }
+
+  /** The job list, as the API: tab, window, size, contacted filter and company search, 50 a page by cursor. Never a posting he passed. */
+  jobs(params: JobsParams): Promise<JobsView> {
+    return this.read(() => { const pool = this.jobPool(); return jobsView(pool.rows, pool.higher, params, this.db.plan.asOf, params.limit); });
+  }
+
+  /** Pass, as the API: the posting is hidden and nothing else changes. */
+  passJob(postingId: Id, o: WriteOptions): Promise<PassJobResult> {
+    return this.write(o, () => {
+      const row = this.jobPool().rows.find((r) => r.postingId === postingId) ?? this.jobList?.rows.find((r) => r.postingId === postingId);
+      if (!row) throw new ApiError('not_found', `There is no posting ${postingId}.`);
+      this.passedJobs.add(postingId);
+      return { postingId, companyId: row.companyId, passed: true };
+    });
+  }
+
+  /** Go ahead, as the API: the company is on today's list; a company already there, or one on today's list, is refused. */
+  goAhead(postingId: Id, o: WriteOptions): Promise<GoAheadResult> {
+    return this.write(o, () => {
+      const pool = this.jobPool();
+      const row = pool.rows.find((r) => r.postingId === postingId);
+      if (!row) throw new ApiError('not_found', `There is no posting ${postingId}.`);
+      if (this.wentAhead.has(row.companyId) || this.db.plan.rows.some((r) => r.company.id === row.companyId)) throw notAllowed(`${row.companyName} is already on today's list. Nothing was saved.`);
+      if (row.contactedOn !== null) throw notAllowed(`You contacted ${row.companyName} and are waiting for an answer. Nothing was saved.`);
+      const date = this.db.plan.date;
+      const result: GoAheadResult = {
+        postingId, companyId: row.companyId, entryId: this.nextId++, state: 'added', rank: this.db.plan.rows.length + this.wentAhead.size + 1, listDate: date,
+        text: `Added ${row.companyName} to today's list.`,
+      };
+      this.wentAhead.set(row.companyId, result);
       return result;
     });
   }

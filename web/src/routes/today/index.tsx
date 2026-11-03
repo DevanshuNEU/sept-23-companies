@@ -394,7 +394,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
   useHotkeys([
     { keys: 'shift+c', label: isQueue(plan) ? 'Copy every company line for the terminal' : 'Copy every find-someone handoff', group, run: copyAllHandoffs },
     { keys: 'b', label: 'More options (the bench)', group, inDialogs: true, run: () => setBenchOpen((o) => !o) },
-    { keys: 'f', label: 'Browse companies', group, run: () => navigate('/browse') },
+    { keys: 'f', label: 'Jobs', group, run: () => navigate('/browse') },
   ]);
 
   /* ------------------------------------------------------------------ layout */

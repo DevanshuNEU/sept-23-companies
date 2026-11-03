@@ -103,8 +103,6 @@ class DiagnoseTests(MissCase):
     def test_postings_the_rules_hide_for_other_reasons(self):
         conn = self.conn
         board = seed_board(conn, seed_company(conn, "Acme"), "ashby", "acme")
-        store_posting(conn, "ashby:acme:nospons", board_id=board,
-                      level=dict(level_tier="new_grad", level_ok=1, sponsorship="no"))
         store_posting(conn, "ashby:acme:abroad", board_id=board,
                       level=dict(level_tier="new_grad", level_ok=1, us="no"))
         store_posting(conn, "ashby:acme:student", board_id=board,

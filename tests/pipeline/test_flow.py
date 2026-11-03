@@ -811,9 +811,8 @@ class RankFlowTests(HarnessCase):
         self.assertIn(n, self.order(h))
         self.assertEqual(self.no_go(h, "N"), [])
         self.assertIn("postings disagree on sponsorship", self.row(h, "N").signals["flags"])
-        items = _rows(h, "SELECT * FROM review_item WHERE company_id = ? AND kind = 'flagged' AND raised_by = 'ranker' "
-                         "AND state = 'open'", n)
-        self.assertEqual(len(items), 1)
+        items = _rows(h, "SELECT * FROM review_item WHERE company_id = ? AND kind = 'flagged' AND raised_by = 'ranker'", n)
+        self.assertEqual(len(items), 0, "the conflict keeps its flag but opens no Needs-you item (#154)")
         refusals = _rows(h, "SELECT d.provisional FROM posting p JOIN current_decision d USING (posting_id) "
                             "WHERE p.company_id = ? AND d.sponsorship = 'no'", n)
         self.assertEqual([r[0] for r in refusals], [0], "N's refusal is final: the sponsoring posting is what saves it")

@@ -9,7 +9,8 @@ the rotation rules keep out, IS listed, with `blocked_text` as the reason, and c
 Paging is a keyset cursor: `after` is the stored position (the 1-based place in the ranked list) of the last row seen,
 so a write between two pages never skips or repeats a row. Filters narrow the list and never add a company:
 `q` (the store's name keys: `name_key`, matched against `company_name_key` and the company's own name), `level_role`,
-`visa_ok` (the company's sponsorship fact is not `no`) and `unworked` (no outbound touch and no application).
+`visa_ok` (kept for the wire; it narrows nothing since #154, when "no sponsorship" became a flag, not a reason to
+drop a company: the Jobs and company pages show the flag) and `unworked` (no outbound touch and no application).
 
 Reads only. Only the page's companies become full `Prospect`s (`load_prospects(only=...)`).
 """
@@ -23,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from outreach.plan.config import PlanConfig
 from outreach.plan.contact import contact_states
-from outreach.plan.fresh import load_applied, load_visa_facts
+from outreach.plan.fresh import load_applied
 from outreach.plan.outbound import load_outbound
 from outreach.plan.picks import listed_today
 from outreach.plan.prospects import KEPT_STATUSES, load_prospects
@@ -104,9 +105,6 @@ def browse_page(conn: sqlite3.Connection, today: date, now: datetime, cfg: PlanC
         keep = [c for c in keep if c in matches]
     if f.level_role:
         keep = [c for c in keep if "level_role" in stored[c].lanes]
-    if f.visa_ok:
-        visa = load_visa_facts(conn, canon, keep)
-        keep = [c for c in keep if visa[c][1] != "no"]
     if f.unworked:
         keep = [c for c in keep if c not in worked]
 

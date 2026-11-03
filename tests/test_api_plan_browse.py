@@ -126,11 +126,12 @@ class FilterTest(BrowseCase):
         self.assertNotIn("Mist", self.listed(levelRole="true"))
         self.assertEqual(self.listed(levelRole="true"), list(HEAD))
 
-    def test_visa_filter_drops_a_company_whose_sponsorship_is_no(self):
+    def test_visa_filter_keeps_a_company_whose_sponsorship_is_no(self):
+        """#154: "no sponsorship" is a flag, not a reason to drop a company, so visaOk no longer narrows."""
         s.evidence(self.conn, self.ids["Ember"], "sponsorship", "no", locked=True)
-        self.assertIn("Ember", self.listed())
-        self.assertNotIn("Ember", self.listed(visaOk="true"))
-        self.assertEqual(self.browse(visaOk="true")["total"], 4)
+        self.assertIn("Ember", self.listed(visaOk="true"))
+        self.assertEqual(self.listed(visaOk="true"), self.listed())
+        self.assertEqual(self.browse(visaOk="true")["total"], 5)
 
     def test_visa_filter_keeps_an_unstated_or_yes_company(self):
         s.evidence(self.conn, self.ids["Dune"], "sponsorship", "yes", locked=True)
@@ -149,7 +150,8 @@ class FilterTest(BrowseCase):
 
     def test_filters_combine_with_search(self):
         s.evidence(self.conn, self.ids["Ember"], "sponsorship", "no", locked=True)
-        self.assertEqual(self.listed(q="e", visaOk="true"), ["Gale", "Haven", "Dune", "Fable"])
+        self.assertEqual(self.listed(q="e", visaOk="true"), self.listed(q="e"))
+        self.assertEqual(self.listed(q="e", unworked="true"), ["Gale", "Ember", "Dune", "Fable"])
 
 
 class PagingTest(BrowseCase):

@@ -399,7 +399,7 @@ def _sponsorship_shown(best: dict, role, live_postings, evidence_rows) -> str:
     if fact is not None and fact["locked"] and fact["value"] in SPONSORSHIP_SHOWN and fact["value"] != "unclear":
         return SPONSORSHIP_SHOWN[fact["value"]]
     # A yes, opt_only or unclear counts only from an open posting that is not hidden (the role to name). A no counts
-    # from any posting that is not closed: it is the evidence for the hide, and honest to show.
+    # from any posting that is not closed: it is a flag on the company, and honest to show.
     if role is not None and role["sponsorship"] in SPONSORSHIP_SHOWN:
         return SPONSORSHIP_SHOWN[role["sponsorship"]]
     if any(p["sponsorship"] == "no" for p in live_postings):

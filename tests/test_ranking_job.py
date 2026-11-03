@@ -34,7 +34,7 @@ from tests.storetest import fresh_store, seed_company
 TODAY = date(2026, 10, 22)
 T1, T2, T3, T4, T5 = ("2026-10-22T0%d:00:00Z" % h for h in (1, 2, 3, 4, 5))
 REFUSE = "We are unable to sponsor visas for this role."
-SUMMARY_KEYS = {"version", "scored", "hidden", "size_items", "conflict_items", "undecided_postings",
+SUMMARY_KEYS = {"version", "scored", "hidden", "size_items", "undecided_postings",
                 "ignored_postings", "stale_postings", "interview_companies"}
 
 
@@ -214,28 +214,38 @@ class WriteTests(Base):
         self.assertEqual(sorted(self.rows()), [live])
         self.assertEqual([s.company_id for s in got.scored], [live])
 
-    def test_conflict_company_is_listed_unhidden_with_one_flagged_item(self):
+    def test_conflict_company_is_listed_unhidden_with_the_flag_and_no_item(self):
+        """#154: the flag stays on the company, but a sponsorship conflict raises no Needs-you item."""
         cid, board = self.company()
         self.refusal(cid, board, final=True)
         self.role(cid, board, sponsorship="yes", sponsorship_quote="We sponsor H-1B visas.")
-        got = self.rank()
+        self.rank()
         row = self.row(cid)
         self.assertIsNone(row.signals["hide"])
         self.assertIn("postings disagree on sponsorship", row.signals["flags"])
         self.assertIn(cid, [r.company_id for r in ranked_list(self.conn)])
-        items = list(self.conn.execute("SELECT * FROM review_item WHERE kind = 'flagged' AND raised_by = 'ranker'"))
-        self.assertEqual([(i["company_id"], i["state"]) for i in items], [(cid, "open")])
+        self.assertEqual(list(self.conn.execute("SELECT * FROM review_item WHERE raised_by = 'ranker'")), [])
         self.assertEqual(self.all_rows("no_go"), [])
-        self.assertEqual(got.conflict_items, 1)
+
+    def test_an_open_conflict_item_from_an_earlier_run_is_cleared(self):
+        cid, board = self.company()
+        self.refusal(cid, board, final=True)
+        self.role(cid, board, sponsorship="yes", sponsorship_quote="We sponsor H-1B visas.")
+        item = self.conn.execute(
+            "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) VALUES "
+            "('flagged', ?, 'Postings disagree on sponsorship', 'sponsorship-conflict:1', 'ranker', ?)",
+            (cid, T1)).lastrowid
+        self.rank()
+        got = self.conn.execute("SELECT state, resolution FROM review_item WHERE review_id = ?", (item,)).fetchone()
+        self.assertEqual(tuple(got), ("resolved", "cleared"))
 
     def test_a_hidden_company_raises_no_conflict_item(self):
         cid, board = self.company()
         self.refusal(cid, board, final=True)
         self.role(cid, board, sponsorship="yes", sponsorship_quote="We sponsor H-1B visas.")
         rs.no_go(self.conn, cid, "said_no", created_at="2026-10-01T08:00:00Z")
-        got = self.rank()
+        self.rank()
         self.assertEqual(self.row(cid).signals["hide"]["kind"], "no_go")
-        self.assertEqual(got.conflict_items, 0)
         self.assertEqual(list(self.conn.execute("SELECT * FROM review_item WHERE raised_by = 'ranker'")), [])
 
     def test_summary_counts_undecided_postings(self):
@@ -350,7 +360,7 @@ class RerunTests(Base):
         self.seed_everything()
         with self.at(T1):
             first = self.rank()
-        self.assertEqual((first.size_items, first.conflict_items), (1, 1))
+        self.assertEqual(first.size_items, 1)
         rows, no_go = self.stored_rows(), self.all_rows("no_go")
         items, events = self.all_rows("review_item"), self.all_rows("event")
         with self.at(T2):
@@ -360,7 +370,7 @@ class RerunTests(Base):
         self.assertEqual(self.all_rows("no_go"), no_go)
         self.assertEqual(self.all_rows("review_item"), items)
         self.assertEqual(self.all_rows("event"), events)
-        self.assertEqual((second.size_items, second.conflict_items), (0, 0))
+        self.assertEqual(second.size_items, 0)
         self.assertEqual(second.hidden, first.hidden)
         self.assertEqual([j["status"] for j in self.jobs()], ["ok", "ok"])
 

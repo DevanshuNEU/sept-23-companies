@@ -4,9 +4,10 @@
 company) inside one read transaction, so every loader sees the same snapshot and no write lock is held. `run_rank`
 then writes, in one `BEGIN IMMEDIATE` transaction: the version's full set of `company_score` rows (rows of the
 version for companies not in the run are deleted), the ranker's review items, the `weights_changed` event of a
-version change (ruling 8), the prune of old versions and the job's `ok`. Any exception rolls all of it back, closes the run `failed` and re-raises, so the previous rows are
-untouched. A dry run writes nothing, not even a `job_run`. It writes no `no_go` row: a sponsorship refusal is a flag,
-not a hide (#154).
+version change (ruling 8), the prune of old versions and the job's `ok`. Any exception rolls all of it back, closes
+the run `failed` and re-raises, so the previous rows are untouched. A dry run writes nothing, not even a `job_run`.
+It writes no `no_go` row and raises no sponsorship-conflict item: a sponsorship refusal is a flag, not a hide
+(#154). It does close the conflict items earlier runs left open.
 
 The write transaction first re-checks the ruleset (a change since the compute fails the run as a stale one does).
 
@@ -56,7 +57,6 @@ class RankRun:
     scored: tuple[Scored, ...]
     hidden: dict[str, int]      # by hide kind
     size_items: int             # size_guess and size_check items raised or reopened by this run
-    conflict_items: int         # sponsorship-conflict items raised or reopened by this run
     undecided_postings: int     # trusted open postings with no current decision
     ignored_postings: int       # open postings on doubtful boards
     stale_postings: int         # open postings that would have been visible but are stale
@@ -195,7 +195,7 @@ def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: Ranker
     version = ranker_version()
     if dry_run:
         scored, data = compute_rank(conn, today=today, cfg=cfg)
-        return _result(version, scored, data, 0, 0)
+        return _result(version, scored, data, 0)
 
     code_ruleset = ruleset_version()
     known = conn.execute("SELECT 1 FROM ruleset WHERE ruleset_version = ?", (code_ruleset,)).fetchone()
@@ -212,11 +212,11 @@ def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: Ranker
                          "AND company_id NOT IN (SELECT value FROM json_each(?))",
                          (version, json.dumps([s.company_id for s in scored])))
             size_items, _cleared = sync_size_items(conn, scored, data["facts"], data["sizes"], cfg, now=now)
-            conflict_items, _cleared = sync_conflict_items(conn, data["inputs"], scored, cfg, now=now)
+            sync_conflict_items(conn, now=now)  # retired item: closes the old open ones, raises none (#154)
             if before is not None and before != version:
                 _weights_changed(conn, before, version, cfg, run_id)
             prune_versions(conn, cfg.ranker["keep_versions"])
-            run = _result(version, scored, data, size_items, conflict_items)
+            run = _result(version, scored, data, size_items)
             finish_job(conn, run_id, "ok", _summary(run))
     except BaseException as err:
         try:
@@ -229,9 +229,9 @@ def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: Ranker
     return run
 
 
-def _result(version: str, scored: list[Scored], data: dict, size_items: int, conflict_items: int) -> RankRun:
+def _result(version: str, scored: list[Scored], data: dict, size_items: int) -> RankRun:
     return RankRun(version=version, scored=tuple(scored), hidden=_hidden_counts(scored),
-                   size_items=size_items, conflict_items=conflict_items,
+                   size_items=size_items,
                    undecided_postings=data["undecided_postings"], ignored_postings=data["ignored_postings"],
                    stale_postings=data["stale_postings"], interview_companies=data["interview_companies"],
                    interview_confidence=data["interview_confidence"])
@@ -239,6 +239,6 @@ def _result(version: str, scored: list[Scored], data: dict, size_items: int, con
 
 def _summary(run: RankRun) -> dict:
     return {"version": run.version, "scored": len(run.scored), "hidden": run.hidden,
-            "size_items": run.size_items, "conflict_items": run.conflict_items,
+            "size_items": run.size_items,
             "undecided_postings": run.undecided_postings, "ignored_postings": run.ignored_postings,
             "stale_postings": run.stale_postings, "interview_companies": run.interview_companies}

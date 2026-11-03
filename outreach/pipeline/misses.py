@@ -5,9 +5,9 @@
 1. The link names no board Knock reads (`urls.board_key` is None): `unknown_site`.
 2. Knock holds a posting for it (open or closed, matched as the scorecard matches: `match.py`). The posting's decision
    under the current ruleset says which: `read_not_tech` when the lane is not engineering; `hidden_visa` when it asks
-   for citizenship or a clearance (a "no sponsorship" posting is shown with a flag, #154); `read_wrong_level` when his level fails (a tier other than `not_stated` or
-   `open`) or the posting excludes him by eligibility (grad window, current student); `not_us` when only the US rule
-   hides it; else `found`. `found` means the decision passes (`rules.decide.passes`) and Knock shows the job; a posting
+   for citizenship or a clearance (a "no sponsorship" posting is shown with a flag, #154); `read_wrong_level` when
+   his level fails (a tier other than `not_stated` or `open`) or the posting excludes him by eligibility (grad
+   window, current student); `not_us` when only the US rule hides it; else `found`. `found` means the decision passes (`rules.decide.passes`) and Knock shows the job; a posting
    that fails it for several reasons gets the first cause above. A posting with no decision under the current
    ruleset is `not_read_yet`.
 3. Knock has the board (same `(ats, token)`, Workday compared in lower case) but no posting for the job:

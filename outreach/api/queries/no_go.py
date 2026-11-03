@@ -71,8 +71,8 @@ def no_go_view(conn: sqlite3.Connection, now: str) -> NoGoView:
                                       company_name=refs[survivor_of(parents, person["company_id"])].name)
         return NoGoRow(kind="no_go", no_go_id=r["no_go_id"], target=target, reason=r["reason"], quote=r["quote"],
                        note=r["note"], source=r["source"], written_by=WRITTEN_BY[r["source"]],
-                       source_ref=r["source_ref"], source_url=source_url(r["source_ref"]), import_source=import_source(r["source_ref"]),
-                       added_at=r["created_at"])
+                       source_ref=r["source_ref"], source_url=source_url(r["source_ref"]),
+                       import_source=import_source(r["source_ref"]), added_at=r["created_at"])
 
     company_rows = [row_of(r) for r in rows if r["company_id"] is not None]
     person_rows = [row_of(r) for r in rows if r["company_id"] is None]

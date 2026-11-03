@@ -258,6 +258,10 @@ class SchemaTest(unittest.TestCase):
                               "observed_on": TODAY, "recorded_at": NOW},
             "linkedin_draft": {"person_id": self.person, "body": "Hi", "saved_by": "claude",
                                "created_at": NOW, "updated_at": NOW},
+            "feed_listing": {"source": "simplify", "listing_id": "L1", "url": "https://x.co/1",
+                             "company_name": "Acme", "title": "SWE", "first_seen_at": NOW,
+                             "last_seen_at": NOW, "active": 1, "backfill": 0},
+            "miss": {"url": "https://x.co/1", "pasted_at": NOW, "cause": "found", "resolved_at": NOW},
             "api_request": {"request_id": "req-00001", "method": "POST", "path": "/api/x", "fingerprint": "f" * 64,
                             "status": 200, "response": "{}", "created_at": NOW},
             "mx_check": {"domain": "acme.co", "status": "ok", "checked_at": NOW},
@@ -330,7 +334,7 @@ class SchemaTest(unittest.TestCase):
         named = {(t, c) for t in self.tables() for c in self.columns(t)
                  if c == "at" or c.endswith("_at") or c in ("streak_since", "lease_until")}
         self.assertEqual(columns, named)
-        self.assertEqual(len(columns), 85)  # 50 before the pipeline tables (#30), 31 with them, 3 + 1 for #14
+        self.assertEqual(len(columns), 89)  # 50 before the pipeline tables (#30), 31 with them, 3 + 1 for #14, 4 for #153
         for table, column in sorted(columns):
             self.assertTrue(self._has_base(table), f"no base row for {table}")
             self.assert_bad_value_refused(table, column, bad, f"{column} IS strftime(")

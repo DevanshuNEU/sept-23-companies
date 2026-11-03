@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from tests.sendtest import seed_email_person, seed_message, seed_sent
-from tests.storetest import seed_company
+from tests.storetest import fresh_store, seed_company
 from outreach.store.migrate import (
     MIGRATIONS_DIR,
     latest_version,
@@ -213,3 +213,46 @@ class FourFollowupsMigrationTest(unittest.TestCase):
             conn.execute("INSERT INTO message(touch_id, seq, state, due_on, saved_by, created_at, updated_at) "
                          "VALUES (1, 5, 'planned', '2026-11-27', 'sender', ?, ?)", (at, at))
         self.assertIn(5, [r[0] for r in conn.execute("SELECT version FROM schema_migration")])
+
+
+class YardstickMigrationTest(unittest.TestCase):
+    """0006 only adds the three yardstick tables (#153); nothing is rebuilt."""
+
+    def setUp(self):
+        self.conn = fresh_store()
+        self.addCleanup(self.conn.close)
+
+    def test_migration_0006_creates_the_three_tables(self):
+        tables = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        self.assertTrue({"feed_listing", "miss", "pipeline_meta"} <= tables)
+        self.assertIn((6, "yardstick"), [(r[0], r[1]) for r in self.conn.execute("SELECT version, name FROM schema_migration")])
+        strict = {r[1]: r[5] for r in self.conn.execute("PRAGMA table_list")}
+        for name in ("feed_listing", "miss", "pipeline_meta"):
+            self.assertEqual(strict[name], 1, name)
+
+    def test_feed_listing_is_unique_per_source_and_listing_and_checks_its_flags(self):
+        at = "2026-11-03T10:00:00Z"
+        sql = ("INSERT INTO feed_listing(source, listing_id, url, company_name, title, first_seen_at, last_seen_at, "
+               "active, backfill) VALUES ('simplify', ?, 'https://x.co/1', 'Acme', 'SWE', ?, ?, ?, 0)")
+        self.conn.execute(sql, ("a", at, at, 1))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(sql, ("a", at, at, 1))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(sql, ("b", at, at, 2))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(sql, ("c", "2026-11-03 10:00:00", at, 1))
+
+    def test_miss_checks_cause_detail_and_timestamps(self):
+        at = "2026-11-03T10:00:00Z"
+        sql = "INSERT INTO miss(url, pasted_at, cause, detail) VALUES ('https://x.co/1', ?, ?, ?)"
+        self.conn.execute(sql, (at, "no_company", "{}"))
+        for args in ((at, "nope", "{}"), (at, "found", "not json"), ("yesterday", "found", "{}")):
+            with self.subTest(args=args), self.assertRaises(sqlite3.IntegrityError):
+                self.conn.execute(sql, args)
+        row = self.conn.execute("SELECT note, detail, posting_id, resolved_at FROM miss").fetchone()
+        self.assertEqual(tuple(row), ("", "{}", None, None))
+
+    def test_pipeline_meta_is_a_key_value_table(self):
+        self.conn.execute("INSERT INTO pipeline_meta(key, value) VALUES ('feed_etag', 'W/\"1\"')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("INSERT INTO pipeline_meta(key, value) VALUES ('feed_etag', 'x')")

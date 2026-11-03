@@ -25,7 +25,7 @@ from outreach.crawl.probe import ProbeReport, probe_slugs
 from outreach.crawl.tick import read_company_boards, run_tick
 from outreach.crawl.watch import watch_pages
 from outreach.net import Response
-from tests.fakes import FakeClient, status_response
+from tests.fakes import FakeClient, feed_off, status_response
 from tests.storetest import fresh_store, seed_board, seed_company
 
 FIXTURES = Path(__file__).parent / "fixtures" / "crawl"
@@ -137,6 +137,9 @@ def snapshot(conn, board_ids):
 
 class TickTests(unittest.TestCase):
     def setUp(self):
+        feed = feed_off()
+        feed.start()
+        self.addCleanup(feed.stop)
         patch = mock.patch.object(tick, "probe_slugs", return_value=ProbeReport(0, 0, 0, 0, 0, 0))
         patch.start()
         self.addCleanup(patch.stop)

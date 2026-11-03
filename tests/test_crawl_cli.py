@@ -18,7 +18,7 @@ from unittest import mock
 from outreach.crawl import __main__ as cli
 from outreach.crawl.tick import tick_lock
 from outreach.net import Response
-from tests.fakes import FakeClient, status_response
+from tests.fakes import FakeClient, feed_off, status_response
 from tests.storetest import fresh_store, seed_board, seed_company
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,6 +64,9 @@ class CommandTests(unittest.TestCase):
     """The commands run when `root` is the live root: here a temp folder stands for both, on a scratch store."""
 
     def setUp(self):
+        feed = feed_off()
+        feed.start()
+        self.addCleanup(feed.stop)
         self.conn = fresh_store()
         self.addCleanup(self.conn.close)
         self.path = self.conn.execute("PRAGMA database_list").fetchone()["file"]

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from outreach.net import FetchError, Response
 
-__all__ = ["FakeClient", "UnexpectedRequest", "json_response", "text_response", "status_response",
+__all__ = ["FakeClient", "UnexpectedRequest", "feed_off", "json_response", "text_response", "status_response",
            "with_greenhouse_details"]
 
 
@@ -29,6 +29,17 @@ class UnexpectedRequest(AssertionError):
 
 def _lower(headers: Mapping[str, str] | None) -> dict[str, str]:
     return {k.lower(): v for k, v in (headers or {}).items()}
+
+
+def feed_off():
+    """A patch (call `.start()`, or use it as a context) that switches the tick's SimplifyJobs feed poll off, for tests
+    that are about something else and route no feed URL (#153: the poll is test_pipeline_simplify_feed's business)."""
+    from unittest import mock
+
+    from outreach.pipeline.config import PipelineConfig, SimplifyConfig
+    return mock.patch("outreach.crawl.tick.load_pipeline_config",
+                      return_value=PipelineConfig(SimplifyConfig(url="https://example.invalid/off", categories=("x",),
+                                                                 enabled=False)))
 
 
 def json_response(obj: object, *, status: int = 200, etag: str | None = None) -> Response:

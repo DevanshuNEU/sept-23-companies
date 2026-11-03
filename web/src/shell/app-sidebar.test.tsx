@@ -187,6 +187,52 @@ describe('AppShell sidebar', () => {
     expect(screen.getByRole('button', { name: 'Boards read Mon 08:04' })).toBeInTheDocument();
   });
 
+  it('shows the scorecard line under "Boards read", in the same muted style', async () => {
+    await shell();
+    const line = screen.getByText('Coverage 32%, level 51%');
+    expect(line).toHaveClass('flex', 'h-5', 'items-center', 'gap-2');
+    expect(line.closest('[data-slot="sidebar-footer"]')).not.toBeNull();
+    const boards = screen.getByRole('button', { name: 'Boards read Mon 08:04' });
+    expect(boards.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.className).not.toMatch(/text-(bad|warn)/);
+    expect(screen.queryByRole('button', { name: /^Coverage/ })).toBeNull();
+  });
+
+  it('turns the scorecard line red and lists the alarms when there are any', async () => {
+    const db = buildFixture();
+    db.shell = {
+      ...db.shell,
+      pipeline: {
+        text: 'Coverage 21%, level 51%',
+        alarms: ['lever: 3 of 6 boards read in the last 48 hours failed their last read', 'resolve failed on its last two runs'],
+        tone: 'bad',
+      },
+    };
+    await shell('/today', new FixtureClient(db));
+    const line = screen.getByRole('button', { name: 'Coverage 21%, level 51%, 2 alarms' });
+    expect(line).toHaveClass('text-bad');
+    fireEvent.click(line);
+    const pop = await screen.findByRole('dialog');
+    expect(within(pop).getByText('Pipeline alarms')).toBeInTheDocument();
+    expect(within(pop).getByText('lever: 3 of 6 boards read in the last 48 hours failed their last read')).toBeInTheDocument();
+    expect(within(pop).getByText('resolve failed on its last two runs')).toBeInTheDocument();
+  });
+
+  it('follows the tone the API sends: an idle line is plain text', async () => {
+    const db = buildFixture();
+    db.shell = { ...db.shell, pipeline: { text: 'Coverage 32%, level 51%', alarms: ['stale text'], tone: 'idle' } };
+    await shell('/today', new FixtureClient(db));
+    expect(screen.getByText('Coverage 32%, level 51%')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Coverage/ })).toBeNull();
+  });
+
+  it('leaves the line out when the summary has none', async () => {
+    const db = buildFixture();
+    db.shell = { ...db.shell, pipeline: null };
+    await shell('/today', new FixtureClient(db));
+    expect(screen.queryByText(/^Coverage/)).toBeNull();
+  });
+
   it('sends a slow ring out of the sender dot while running, and not otherwise', async () => {
     const view = await shell();
     expect(screen.getByTestId('sender-dot')).toHaveClass('ripple');

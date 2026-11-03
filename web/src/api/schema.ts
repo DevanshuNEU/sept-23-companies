@@ -599,6 +599,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipeline/misses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Log Miss */
+        post: operations["log_miss"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/scorecard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scorecard */
+        get: operations["scorecard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plan": {
         parameters: {
             query?: never;
@@ -1928,6 +1962,19 @@ export interface components {
              */
             stage: "requests" | "accepts" | "replies" | "referrals" | "interviews";
         };
+        /** GapCompany */
+        GapCompany: {
+            /** Ats */
+            ats: string | null;
+            /** Companyname */
+            companyName: string;
+            /** Knockhasboard */
+            knockHasBoard: boolean;
+            /** Knockknowscompany */
+            knockKnowsCompany: boolean;
+            /** Listings */
+            listings: number;
+        };
         /** HealthBoards */
         HealthBoards: {
             /** Active */
@@ -2325,6 +2372,28 @@ export interface components {
         MessageRevisionBody: {
             /** Revision */
             revision: number;
+        };
+        /** MissBody */
+        MissBody: {
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Url */
+            url: string;
+        };
+        /** MissResult */
+        MissResult: {
+            /**
+             * Cause
+             * @enum {string}
+             */
+            cause: "no_company" | "no_board" | "not_read_yet" | "read_wrong_level" | "read_not_tech" | "hidden_visa" | "not_us" | "wrong_date" | "found" | "unknown_site";
+            /** Causetext */
+            causeText: string;
+            /** Missid */
+            missId: number;
         };
         /** NeedsYouView */
         NeedsYouView: {
@@ -2757,6 +2826,22 @@ export interface components {
         Ping: {
             /** Ok */
             ok: boolean;
+        };
+        /**
+         * PipelineLine
+         * @description The sidebar's scorecard line: `text` from the newest card, `alarms` the texts of the alarms that hold, `tone`
+         *     `bad` when there is any alarm, else `idle`.
+         */
+        PipelineLine: {
+            /** Alarms */
+            alarms: string[];
+            /** Text */
+            text: string;
+            /**
+             * Tone
+             * @enum {string}
+             */
+            tone: "bad" | "idle";
         };
         /** PlanCompany */
         PlanCompany: {
@@ -3565,6 +3650,37 @@ export interface components {
             /** Signals */
             signals: components["schemas"]["ScoreSignal"][];
         };
+        /**
+         * ScorecardCard
+         * @description `outreach.pipeline.scorecard.Scorecard`, as stored in the day's event. Shares run from 0 to 1.
+         */
+        ScorecardCard: {
+            /** Datetruth */
+            dateTruth: null;
+            /** Detectionp95Hours */
+            detectionP95Hours: number | null;
+            /** Gaptop */
+            gapTop: components["schemas"]["GapCompany"][];
+            /** Leadoversimplify */
+            leadOverSimplify: number | null;
+            /** Levelrecall */
+            levelRecall: number | null;
+            /** Simplifycoverage */
+            simplifyCoverage: number | null;
+            /** Simplifylistings */
+            simplifyListings: number;
+            /** Smallcompanycoverage */
+            smallCompanyCoverage: null;
+        };
+        /**
+         * ScorecardView
+         * @description The newest stored card and the New York day it was taken; both null before the first one.
+         */
+        ScorecardView: {
+            card: components["schemas"]["ScorecardCard"] | null;
+            /** Day */
+            day: string | null;
+        };
         /** SearchCompany */
         SearchCompany: {
             /** Aliases */
@@ -3698,6 +3814,7 @@ export interface components {
             openReviewItems: number;
             /** Pickedtoday */
             pickedToday: number;
+            pipeline: components["schemas"]["PipelineLine"] | null;
             plan: components["schemas"]["PlanProgress"];
             /** Repliesthismonth */
             repliesThisMonth: number;
@@ -6762,6 +6879,158 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ping"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    log_miss: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MissBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissResult"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    scorecard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScorecardView"];
                 };
             };
             /** @description bad_request: the request was not valid */

@@ -1,0 +1,244 @@
+[
+ {
+  "source": "Simplify",
+  "category": "Software",
+  "company_name": "Acme",
+  "id": "L-keep-gh",
+  "title": "Software Engineer, New Grad",
+  "active": true,
+  "date_updated": 1793000000,
+  "date_posted": 1793000000,
+  "url": "https://job-boards.greenhouse.io/acme/jobs/4012345",
+  "locations": [
+   "San Francisco, CA"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "AI/ML/Data",
+  "company_name": "Birch Labs",
+  "id": "L-keep-lever",
+  "title": "Machine Learning Engineer",
+  "active": true,
+  "date_updated": 1793100000,
+  "date_posted": 1793100000,
+  "url": "https://jobs.lever.co/birch/a1b2c3d4-0000-4111-8222-333344445555",
+  "locations": [
+   "Remote in USA"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Software Engineering",
+  "company_name": "Cedar Co",
+  "id": "L-keep-site",
+  "title": "Backend Engineer",
+  "active": true,
+  "date_updated": 1793200000,
+  "date_posted": 1793200000,
+  "url": "https://www.cedar.example/careers/backend",
+  "locations": [
+   "Austin, TX"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Data Science, AI & Machine Learning",
+  "company_name": "Dune Inc",
+  "id": "L-keep-multi",
+  "title": "Data Scientist",
+  "active": true,
+  "date_updated": 1793300000,
+  "date_posted": 1793300000,
+  "url": "https://jobs.ashbyhq.com/dune/3f2b9c1e-1111-4222-8333-444455556666",
+  "locations": [
+   "Berlin, Germany",
+   "Boston, MA"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Software",
+  "company_name": "Elm Systems",
+  "id": "L-keep-dc",
+  "title": "Platform Engineer",
+  "active": true,
+  "date_updated": 1793400000,
+  "date_posted": 1793400000,
+  "url": "https://jobs.lever.co/elm/b1b2c3d4-0000-4111-8222-333344445555",
+  "locations": [
+   "Washington, DC",
+   "New York, United States"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Hardware",
+  "company_name": "Fir Robotics",
+  "id": "L-drop-hardware",
+  "title": "Firmware Installer",
+  "active": true,
+  "date_updated": 1793000000,
+  "date_posted": 1793000000,
+  "url": "https://job-boards.greenhouse.io/fir/jobs/555",
+  "locations": [
+   "Lubbock, TX"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Quant",
+  "company_name": "Gum Capital",
+  "id": "L-drop-quant",
+  "title": "Quant Trader",
+  "active": true,
+  "date_updated": 1793000000,
+  "date_posted": 1793000000,
+  "url": "https://job-boards.greenhouse.io/gum/jobs/556",
+  "locations": [
+   "New York, NY"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Product",
+  "company_name": "Holly Apps",
+  "id": "L-drop-product",
+  "title": "Product Manager",
+  "active": true,
+  "date_updated": 1793000000,
+  "date_posted": 1793000000,
+  "url": "https://job-boards.greenhouse.io/holly/jobs/557",
+  "locations": [
+   "Seattle, WA"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Software",
+  "company_name": "Ivy Ltd",
+  "id": "L-drop-london",
+  "title": "Software Engineer",
+  "active": true,
+  "date_updated": 1793000000,
+  "date_posted": 1793000000,
+  "url": "https://job-boards.greenhouse.io/ivy/jobs/558",
+  "locations": [
+   "London, UK"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "AI/ML/Data",
+  "company_name": "Juniper",
+  "id": "L-drop-canada",
+  "title": "ML Engineer",
+  "active": true,
+  "date_updated": 1793000000,
+  "date_posted": 1793000000,
+  "url": "https://job-boards.greenhouse.io/juniper/jobs/559",
+  "locations": [
+   "Toronto, ON, Canada"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Software",
+  "company_name": "Kelp",
+  "id": "L-drop-inactive",
+  "title": "Software Engineer",
+  "active": false,
+  "date_updated": 1793000000,
+  "date_posted": 1793000000,
+  "url": "https://job-boards.greenhouse.io/kelp/jobs/560",
+  "locations": [
+   "Boston, MA"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Software",
+  "company_name": "Larch",
+  "id": "L-drop-hidden",
+  "title": "Software Engineer",
+  "active": true,
+  "date_updated": 1793000000,
+  "date_posted": 1793000000,
+  "url": "https://job-boards.greenhouse.io/larch/jobs/561",
+  "locations": [
+   "Boston, MA"
+  ],
+  "company_url": "https://simplify.jobs/c/x",
+  "is_visible": false,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ }
+]

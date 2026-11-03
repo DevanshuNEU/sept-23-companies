@@ -2,6 +2,7 @@
 
 `Notifier` is anything that takes a title and a text; the sender passes `mac_notifier`, tests pass a list's append.
 """
+import os
 import subprocess
 from collections.abc import Callable
 from datetime import date
@@ -21,9 +22,10 @@ def _quote(text: str) -> str:
 
 
 def mac_notifier(title: str, text: str) -> None:
-    """Show a macOS notification. Does nothing outside the live checkout, and never raises: a missing or slow
-    `osascript` must not undo the pause the notice is about."""
-    if not live_checkout.is_live():
+    """Show a macOS notification. Does nothing outside the live checkout or while `OUTREACH_NO_NOTIFY` is set (every
+    test process sets it, so the deploy test run in the live checkout stays quiet), and never raises: a missing or
+    slow `osascript` must not undo the pause the notice is about."""
+    if os.environ.get("OUTREACH_NO_NOTIFY") or not live_checkout.is_live():
         return
     script = f"display notification {_quote(text)} with title {_quote(title)}"
     try:

@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from outreach.net import FetchError, HttpClient, SpacedClient, UrllibClient
+from outreach.pipeline.scorecard import compute as compute_scorecard, record as record_scorecard
 from outreach.sources.base import describe_error
 from outreach.sources.byhand import add_by_hand
 from outreach.sources.careers import CareersChecker
@@ -217,7 +218,7 @@ def _fetch_formd(root: Path, factory: ClientFactory, *, only_if_newer: bool = Fa
 def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict]:
     """Everything that is due: HN's thread for this month (read again on each run, once it is out), freehire's last
     few days (#115; skipped when `enabled = false` in freehire.toml), Form D when SEC has a newer data set, the stapply
-    lists weekly, then resolve and find-boards.
+    lists weekly, then resolve and find-boards, and last the pipeline scorecard (#153).
 
     Every step runs even when an earlier one failed. The exit code is 1 when any step is `partial` or `failed`. LCA is
     not here: it is a by-hand quarterly `fetch lca` and `discover lca`.
@@ -274,8 +275,15 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
         status, payload = _find_boards(conn, factory, RUN_DUE_MAX_CAREERS)
         return {"status": status, "run_id": payload["run_id"]}
 
+    def scorecard_step() -> dict:
+        now = utcnow()
+        card = compute_scorecard(conn, now)
+        record_scorecard(conn, card, now)  # the first run of a New York day stores it; a later one writes nothing
+        return {"status": "ok", "simplify_listings": card.simplify_listings,
+                "simplify_coverage": card.simplify_coverage, "level_recall": card.level_recall}
+
     for name, work in (("hn", hn), ("freehire", freehire), ("formd", formd), ("stapply", stapply),
-                       ("resolve", resolve), ("find_boards", find_boards)):
+                       ("resolve", resolve), ("find_boards", find_boards), ("scorecard", scorecard_step)):
         step(name, work)
     states = {s["status"] for s in steps.values()}
     status = "failed" if "failed" in states else "partial" if "partial" in states else "ok"
@@ -297,7 +305,8 @@ Commands:
   add --name N --reason R [--domain D] [--state ST] [--ats A:T]
   run-due                                    what launchd runs daily: this month's HN thread (once it is out),
                                              freehire, Form D (when SEC has a newer quarterly set), the stapply lists
-                                             (weekly), resolve, then find-boards --max-careers 100
+                                             (weekly), resolve, find-boards --max-careers 100, then
+                                             the pipeline scorecard (read and stored once a New York day)
 
 LCA is by hand, once a quarter when DOL posts a file: `fetch lca`, then `discover lca`, then `resolve` and
 `find-boards`. run-due never runs it. `fetch stapply` refreshes the stapply lists by hand; run-due does it when the last refresh is 7 days old.

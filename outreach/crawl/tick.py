@@ -43,7 +43,7 @@ import time
 import urllib.parse
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -57,8 +57,13 @@ from outreach.crawl.polite import HostTripped, PoliteClient, bucket_for
 from outreach.crawl.probe import PROBE_LIMIT, ProbeReport, probe_slugs
 from outreach.crawl.watch import WatchReport, watch_pages
 from outreach.net import HttpClient, Response
+from outreach.outcomes.windows import ny_day
+from outreach.pipeline import alarms
+from outreach.pipeline.config import load_pipeline_config
+from outreach.pipeline.simplify_feed import note_streak, poll as poll_simplify_feed
 from outreach.rules import RulesetNotCurrent, rebuild, ruleset_version
 from outreach.store import append_event, atomic, describe_error, finish_job, start_job, utcnow
+from outreach.sending.notify import Notifier, notify_once
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["TickReport", "AlreadyRunning", "LOCK_NAME", "tick_lock", "ensure_ruleset_current", "resolve_combiner",
@@ -107,6 +112,9 @@ class TickReport:
     watch_error: str = ""
     probe: ProbeReport | None = None  # the daily slug-probe pass; None when it did not run (or failed: `probe_error`)
     probe_error: str = ""
+    feed: dict[str, int] | None = None  # the SimplifyJobs feed poll (#153): changed (0 or 1), seen, new; None if not run
+    feed_error: str = ""
+    alarm_error: str = ""  # the pipeline alarm check or its notice failed (#153); the tick itself did not
     by_ats: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
@@ -180,10 +188,12 @@ class _TickClient:
         if bucket in self.down:
             raise HostTripped(bucket)
 
-    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
+    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False,
+            max_bytes: int | None = None) -> Response:
         self._check(url)
         self.requests += 1
-        return self.polite.get(url, headers, follow_redirects=follow_redirects)
+        extra = {} if max_bytes is None else {"max_bytes": max_bytes}
+        return self.polite.get(url, headers, follow_redirects=follow_redirects, **extra)
 
     def post(self, url: str, body: bytes, headers: Mapping[str, str] | None = None) -> Response:
         self._check(url)
@@ -407,7 +417,7 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
     report = TickReport(run_id=run_id, rebuilt=rebuilt, **run.counts, switched_off=switched_off,
                         seconds=round(clock() - started, 3), tripped=tuple(sorted(run.down)), by_ats=run.by_ats)
     summary = {k: v for k, v in asdict(report).items()
-               if k not in ("watch", "watch_error", "probe", "probe_error")}
+               if k not in ("watch", "watch_error", "probe", "probe_error", "feed", "feed_error", "alarm_error")}
     if run.failed_ids:
         summary["failed_boards"] = run.failed_ids
     status = "partial" if run.failed_ids or run.stopped else "ok"
@@ -439,11 +449,55 @@ def _probe_step(conn: sqlite3.Connection, run: _Pass, cfg: CrawlConfig, now_fn, 
     return report, ""
 
 
+def _feed_step(conn: sqlite3.Connection, run: _Pass, cfg: CrawlConfig, now_fn, clock, started: float
+               ) -> tuple[dict[str, int] | None, str]:
+    """The SimplifyJobs feed poll (#153): once per tick, after the boards, through the tick's client. Whatever it
+    raises is returned as text and never touches the board reads; `simplify_fail_streak` counts the errors in a row.
+    Like the probe, it is skipped once the pass stopped or the budget is spent. A switched-off feed
+    (`[simplify] enabled = false`) sends nothing and changes nothing."""
+    if run.stopped or clock() - started >= cfg.tick_budget_s:
+        return None, ""
+    try:
+        cfg = load_pipeline_config()
+        if not cfg.simplify.enabled:
+            return None, ""
+        result = poll_simplify_feed(conn, run.client(), now_fn(), cfg=cfg)
+    except Exception as e:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        with contextlib.suppress(sqlite3.Error):  # the streak is a count for an alarm: it must not fail the tick
+            note_streak(conn, ok=False)
+        return None, describe_error(e)
+    with contextlib.suppress(sqlite3.Error):
+        note_streak(conn, ok=True, now=now_fn())
+    return {"changed": int(result.changed), "seen": result.seen, "new": result.new}, ""
+
+
+def _alarm_step(conn: sqlite3.Connection, cfg: CrawlConfig, now_fn, notifier: Notifier) -> str:
+    """The pipeline alarms (#153), after the feed step: at most one Mac notice a New York day, naming the first alarm
+    and how many more there are. A failure here is not the tick's: it is returned as text (`alarm_error`)."""
+    try:
+        now = now_fn()
+        found = alarms.check(conn, now, cfg=cfg)
+        if not found:
+            return ""
+        text = found[0].text + (f" and {len(found) - 1} more" if len(found) > 1 else "")
+        with atomic(conn, "pipeline_alarm"):
+            notify_once(conn, notifier, "pipeline_alarm", date.fromisoformat(ny_day(now)), "Knock pipeline", text,
+                        at=now)
+    except Exception as e:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        return describe_error(e)
+    return ""
+
+
 def _add_passes(conn: sqlite3.Connection, report: TickReport) -> None:
-    """Put the probe and watch passes into the tick's `read_boards` summary, so the health view reads one row: each
-    pass's counts (null when it did not run) and its error text."""
+    """Put the probe, watch, feed and alarm passes into the tick's `read_boards` summary, so the health view reads one row:
+    each pass's counts (null when it did not run) and its error text."""
     passes = {"probe": asdict(report.probe) if report.probe is not None else None, "probe_error": report.probe_error,
-              "watch": asdict(report.watch) if report.watch is not None else None, "watch_error": report.watch_error}
+              "watch": asdict(report.watch) if report.watch is not None else None, "watch_error": report.watch_error,
+              "feed": report.feed, "feed_error": report.feed_error, "alarm_error": report.alarm_error}
     with atomic(conn, "tick_summary"):
         row = conn.execute("SELECT summary FROM job_run WHERE run_id = ?", (report.run_id,)).fetchone()
         summary = {**json.loads(row[0]), **passes}
@@ -451,13 +505,21 @@ def _add_passes(conn: sqlite3.Connection, report: TickReport) -> None:
                                                                           report.run_id))
 
 
+def _no_notice(title: str, text: str) -> None:
+    """The default notifier: says nothing. The crawl command passes `mac_notifier`; a caller that passes none gets no
+    notice, so a test or a script can never pop one by accident."""
+
+
 def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig | None = None, rules_cfg=None,
              combiner=None, now_fn: Callable[[], str] = utcnow, clock: Callable[[], float] = time.monotonic,
-             sleep: Callable[[float], None] = time.sleep, limit: int | None = None) -> TickReport:
+             sleep: Callable[[float], None] = time.sleep, limit: int | None = None,
+             notifier: Notifier = _no_notice) -> TickReport:
     """One tick: the ruleset check, the due boards (at most `limit or cfg.boards_per_tick`, within the budget), then
-    the daily slug probe (Task 26a, `probe`), then the watched-page pass (Task 14), both through the same client and
-    breaker; the watch pass is its own `watch_pages` run. A failed probe or watch pass is reported in `probe_error` or
-    `watch_error` and leaves the board reads as they are. The caller holds `tick_lock`.
+    the daily slug probe (Task 26a, `probe`), then the watched-page pass (Task 14), then the SimplifyJobs feed poll
+    (#153, `feed`), all through the same client and breaker; the watch pass is its own `watch_pages` run. A failed
+    probe, watch or feed pass is reported in `probe_error`, `watch_error` or `feed_error` and leaves the board reads
+    as they are. The pipeline alarms are checked last and may send one Mac notice a day through `notifier`. The caller
+    holds `tick_lock`.
 
     `combiner=None` means `resolve_combiner(conn)`. `clock` and `sleep` drive the budget and the polite spacing.
     """
@@ -485,6 +547,9 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
             report = replace(report, watch_error=describe_error(e))
+        feed, feed_error = _feed_step(conn, run, cfg, now_fn, clock, started)
+        report = replace(report, feed=feed, feed_error=feed_error)
+        report = replace(report, alarm_error=_alarm_step(conn, cfg, now_fn, notifier))
         _add_passes(conn, report)
         return report
     finally:

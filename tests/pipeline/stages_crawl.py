@@ -29,7 +29,7 @@ from outreach.crawl.config import load_crawl_config
 from outreach.crawl.probe import ProbeReport
 from outreach.crawl.tick import TickReport, ensure_ruleset_current, resolve_combiner, run_tick
 from outreach.net import Response
-from tests.fakes import FakeClient
+from tests.fakes import FakeClient, feed_off
 from tests.storetest import seed_board, seed_company
 
 __all__ = ["register", "CrawlStage", "TOKEN", "COMPANY", "FIRST_TICK", "DAY_S", "list_url", "fixture_jobs",
@@ -175,7 +175,8 @@ class CrawlStage:
         routes |= {f"{list_url()}/{native_id}": self.detail(native_id) for native_id in self.content}
         self.client = FakeClient(routes)
         # The daily slug probe (Task 26a) is not this stage: it would ask the three ATSs about every board-less company.
-        with mock.patch("outreach.crawl.tick.probe_slugs", return_value=ProbeReport(0, 0, 0, 0, 0, 0)):
+        # Nor is the SimplifyJobs feed poll (#153).
+        with mock.patch("outreach.crawl.tick.probe_slugs", return_value=ProbeReport(0, 0, 0, 0, 0, 0)), feed_off():
             self.report = run_tick(self.conn, self.client, cfg=self.cfg, now_fn=lambda: now, clock=clock,
                                    sleep=clock.sleep)
         if self.client.unrouted:

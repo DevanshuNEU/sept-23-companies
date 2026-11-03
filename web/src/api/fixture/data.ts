@@ -1342,6 +1342,7 @@ export function computeShell(db: Pick<FixtureDb, 'today' | 'outbox' | 'linkedin'
     doneCount: db.done.companies.length, sending: { state: s.state, sentToday: s.sentToday, limitToday: s.limitToday },
     repliesThisMonth: db.done.metrics.repliesThisMonth, jobs: db.jobs,
     plan: { done: db.plan.done, total: db.plan.total }, winsUnseen: db.wins.unseen,
+    pipeline: { text: 'Coverage 32%, level 51%', alarms: [], tone: 'idle' },
   };
 }
 

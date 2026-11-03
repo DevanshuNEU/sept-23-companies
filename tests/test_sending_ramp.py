@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 from datetime import date, datetime, timedelta
 from unittest import mock
@@ -456,14 +457,26 @@ class NotifyTest(Base):
 
     def test_mac_notifier_runs_osascript_in_the_live_checkout_with_the_text_escaped(self):
         with mock.patch("outreach.sending.notify.live_checkout.is_live", return_value=True), \
+                mock.patch.dict(os.environ, {"OUTREACH_NO_NOTIFY": ""}), \
                 mock.patch("outreach.sending.notify.subprocess.run") as run:
             notify.mac_notifier('Say "hi"', 'back\\slash "quoted"')
         args = run.call_args.args[0]
         self.assertEqual(args[:2], ["osascript", "-e"])
         self.assertEqual(args[2], 'display notification "back\\\\slash \\"quoted\\"" with title "Say \\"hi\\""')
 
+    def test_mac_notifier_sends_nothing_when_the_no_notify_flag_is_set(self):
+        with mock.patch("outreach.sending.notify.live_checkout.is_live", return_value=True), \
+                mock.patch.dict(os.environ, {"OUTREACH_NO_NOTIFY": "1"}), \
+                mock.patch("outreach.sending.notify.subprocess.run") as run:
+            notify.mac_notifier("Paused", "Gmail said stop")
+        run.assert_not_called()
+
+    def test_every_test_process_starts_with_the_no_notify_flag(self):
+        self.assertEqual(os.environ.get("OUTREACH_NO_NOTIFY"), "1")
+
     def test_mac_notifier_survives_a_missing_osascript(self):
         with mock.patch("outreach.sending.notify.live_checkout.is_live", return_value=True), \
+                mock.patch.dict(os.environ, {"OUTREACH_NO_NOTIFY": ""}), \
                 mock.patch("outreach.sending.notify.subprocess.run", side_effect=FileNotFoundError):
             notify.mac_notifier("Paused", "text")
 

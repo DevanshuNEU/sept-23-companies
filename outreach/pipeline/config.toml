@@ -1,0 +1,10 @@
+# The SimplifyJobs feed poll's settings (#153). The poll is one conditional GET per crawl tick; Knock keeps what it
+# needs from the list to measure itself and never shows a listing as a job.
+
+[simplify]
+# The listing file. A change here is a change of feed, not of a setting.
+url = "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json"
+# Listings in any other category are dropped (hardware, quant, product). Names are the feed's own.
+categories = ["Software", "Software Engineering", "AI/ML/Data", "Data Science, AI & Machine Learning"]
+# false skips the poll: no request, no write, no streak change.
+enabled = true

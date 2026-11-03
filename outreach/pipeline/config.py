@@ -1,0 +1,57 @@
+"""Loads outreach/pipeline/config.toml into a validated PipelineConfig (#153).
+
+A missing section or key raises KeyError naming it, an unknown one raises ValueError, as the other packages' loaders
+do, so a typo in the TOML fails at load instead of quietly turning a setting off.
+"""
+from __future__ import annotations
+
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlsplit
+
+__all__ = ["CONFIG_PATH", "PipelineConfig", "SimplifyConfig", "load_pipeline_config"]
+
+CONFIG_PATH = Path(__file__).with_name("config.toml")
+
+_SIMPLIFY_KEYS = ("url", "categories", "enabled")
+
+
+@dataclass(frozen=True)
+class SimplifyConfig:
+    url: str
+    categories: tuple[str, ...]
+    enabled: bool
+
+
+@dataclass(frozen=True)
+class PipelineConfig:
+    simplify: SimplifyConfig
+
+
+def load_pipeline_config(path: Path = CONFIG_PATH) -> PipelineConfig:
+    path = Path(path)
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    unknown = sorted(set(data) - {"simplify"})
+    if unknown:
+        raise ValueError(f"{path.name} has unknown section(s): {', '.join(unknown)}")
+    table = data.get("simplify")
+    if table is None:
+        raise KeyError(f"[simplify] is missing from {path.name}")
+    if not isinstance(table, dict):
+        raise ValueError("simplify must be a table")
+    unknown = sorted(set(table) - set(_SIMPLIFY_KEYS))
+    if unknown:
+        raise ValueError(f"[simplify] has unknown key(s): {', '.join(unknown)}")
+    for key in _SIMPLIFY_KEYS:
+        if key not in table:
+            raise KeyError(f"[simplify] {key} is missing from {path.name}")
+    url, categories, enabled = table["url"], table["categories"], table["enabled"]
+    if not isinstance(url, str) or urlsplit(url).scheme != "https" or not urlsplit(url).hostname:
+        raise ValueError(f"url must be an https link, got {url!r}")
+    if (not isinstance(categories, list) or not categories
+            or not all(isinstance(c, str) and c.strip() for c in categories)):
+        raise ValueError("categories must be a non-empty list of non-empty text")
+    if not isinstance(enabled, bool):
+        raise ValueError(f"enabled must be true or false, got {enabled!r}")
+    return PipelineConfig(SimplifyConfig(url=url, categories=tuple(c.strip() for c in categories), enabled=enabled))

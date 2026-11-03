@@ -71,7 +71,9 @@ class FetchError(Exception):
 
 
 class HttpClient(Protocol):
-    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
+    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False,
+            max_bytes: int | None = None) -> Response:
+        """`max_bytes` caps this response only; None keeps the client's own cap."""
         ...
 
     def post(self, url: str, body: bytes, headers: Mapping[str, str] | None = None) -> Response:
@@ -143,16 +145,17 @@ class UrllibClient:
         except (OSError, http.client.HTTPException, ValueError) as e:
             raise FetchError("timeout" if _is_timeout(e) else "network", f"{req.full_url}: {e}") from e
 
-    def _read(self, resp) -> bytes:
+    def _read(self, resp, cap: int | None = None) -> bytes:
+        cap = self.max_bytes if cap is None else cap
         declared = resp.headers.get("Content-Length")
-        if declared and declared.isdigit() and int(declared) > self.max_bytes:
-            raise FetchError("too_large", f"{declared} bytes over {self.max_bytes}")
+        if declared and declared.isdigit() and int(declared) > cap:
+            raise FetchError("too_large", f"{declared} bytes over {cap}")
         try:
-            data = resp.read(self.max_bytes + 1)
+            data = resp.read(cap + 1)
         except (OSError, http.client.HTTPException) as e:
             raise FetchError("timeout" if _is_timeout(e) else "network", str(e)) from e
-        if len(data) > self.max_bytes:
-            raise FetchError("too_large", f"over {self.max_bytes} bytes")
+        if len(data) > cap:
+            raise FetchError("too_large", f"over {cap} bytes")
         return data
 
     @staticmethod
@@ -177,17 +180,18 @@ class UrllibClient:
                 headers = {}
             req = self._request(target, headers)
 
-    def _do(self, req, follow: bool, headers=None) -> Response:
+    def _do(self, req, follow: bool, headers=None, cap: int | None = None) -> Response:
         resp = self._send(req, follow, headers)
         try:
             status = resp.status if hasattr(resp, "status") else resp.getcode()
-            return Response(status, resp.geturl() if hasattr(resp, "geturl") else req.full_url, self._read(resp),
+            return Response(status, resp.geturl() if hasattr(resp, "geturl") else req.full_url, self._read(resp, cap),
                             self._headers(resp))
         finally:
             resp.close()
 
-    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
-        return self._do(self._request(url, headers), follow_redirects, headers)
+    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False,
+            max_bytes: int | None = None) -> Response:
+        return self._do(self._request(url, headers), follow_redirects, headers, max_bytes)
 
     def post(self, url: str, body: bytes, headers: Mapping[str, str] | None = None) -> Response:
         req = self._request(url, headers)
@@ -259,9 +263,11 @@ class SpacedClient:
             self._sleep(wait)
         self._next_start[host] = max(now, due) + interval
 
-    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
+    def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False,
+            max_bytes: int | None = None) -> Response:
         self._wait(url)
-        return self.inner.get(url, headers, follow_redirects=follow_redirects)
+        extra = {} if max_bytes is None else {"max_bytes": max_bytes}
+        return self.inner.get(url, headers, follow_redirects=follow_redirects, **extra)
 
     def post(self, url: str, body: bytes, headers: Mapping[str, str] | None = None) -> Response:
         self._wait(url)

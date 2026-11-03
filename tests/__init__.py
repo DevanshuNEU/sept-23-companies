@@ -13,6 +13,8 @@ os.environ["OUTREACH_VOICE_DIR"] = os.path.join(os.path.dirname(os.path.abspath(
 os.environ["OUTREACH_DB"] = os.path.join(tempfile.mkdtemp(prefix="outreach-db-test-"), "outreach.db")
 # The bridge reads the frozen contacted.txt; no test reads DevVault's. A missing file is what most tests want.
 os.environ["OUTREACH_CONTACTED_TXT"] = os.path.join(tempfile.mkdtemp(prefix="outreach-contacted-test-"), "none.txt")
+# No test pops a real Mac notification, even in the live checkout during a deploy test run (#153).
+os.environ["OUTREACH_NO_NOTIFY"] = "1"
 SCRATCH = True
 
 

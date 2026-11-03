@@ -349,12 +349,14 @@ class RunDueTest(CliCase):
         self.assertEqual(got, code, f"{out} {err}")
         return json.loads(out)
 
-    def test_run_due_runs_hn_freehire_formd_stapply_resolve_and_find_boards_in_order(self):
+    def test_run_due_runs_hn_freehire_formd_stapply_resolve_find_boards_and_the_scorecard_in_order(self):
         report = self.due()
-        self.assertEqual(list(report["steps"]), ["hn", "freehire", "formd", "stapply", "resolve", "find_boards"])
+        self.assertEqual(list(report["steps"]),
+                         ["hn", "freehire", "formd", "stapply", "resolve", "find_boards", "scorecard"])
         self.assertEqual({k: v["status"] for k, v in report["steps"].items()},
                          {"hn": "ok", "freehire": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok",
-                          "find_boards": "ok"})
+                          "find_boards": "ok", "scorecard": "ok"})
+        self.assertEqual(count(self.conn(), "SELECT count(*) FROM event WHERE kind = 'pipeline_scorecard'"), 1)
         self.assertIn(FREEHIRE_PAGE, self.client.requests)
         self.assertEqual(report["status"], "ok")
         self.assertEqual(self.client.unrouted, [])
@@ -483,7 +485,8 @@ class RunDueTest(CliCase):
         self.assertEqual(report["steps"]["stapply"]["status"], "failed")
         self.assertEqual(self.marker.read_text(encoding="utf-8").strip(), "2026-10-01T06:30:00Z")  # asked again
         self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "stapply"},
-                         {"hn": "ok", "freehire": "ok", "formd": "ok", "resolve": "ok", "find_boards": "ok"})
+                         {"hn": "ok", "freehire": "ok", "formd": "ok", "resolve": "ok", "find_boards": "ok",
+                          "scorecard": "ok"})
 
     def test_formd_is_skipped_until_a_newer_set_is_out(self):
         folder = self.sources / "formd"
@@ -502,7 +505,8 @@ class RunDueTest(CliCase):
         report = self.due(code=1)
         self.assertEqual(report["steps"]["hn"]["status"], "failed")
         self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "hn"},
-                         {"freehire": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok"})
+                         {"freehire": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok",
+                          "scorecard": "ok"})
         self.assertEqual(report["status"], "failed")
 
     def test_a_failed_freehire_step_exits_1_and_every_other_step_still_runs(self):
@@ -512,7 +516,8 @@ class RunDueTest(CliCase):
         report = self.due(code=1)
         self.assertEqual(report["steps"]["freehire"]["status"], "failed")
         self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "freehire"},
-                         {"hn": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok"})
+                         {"hn": "ok", "formd": "ok", "stapply": "skipped", "resolve": "ok", "find_boards": "ok",
+                          "scorecard": "ok"})
 
     def test_freehire_off_is_skipped_and_never_asked(self):
         off = dataclasses.replace(load_freehire_config(), enabled=False)

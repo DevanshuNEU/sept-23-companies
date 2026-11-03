@@ -1,6 +1,7 @@
 """The shell summary: `ShellSummary` as in `web/src/api/types.ts`, with #33's `plan` and `winsUnseen`."""
 from outreach.api.models.base import Wire
 from outreach.api.models.health import JobRunSummary, SenderSummary
+from outreach.api.models.pipeline import PipelineLine
 
 
 class PlanProgress(Wire):
@@ -23,3 +24,4 @@ class ShellSummary(Wire):
     jobs: list[JobRunSummary]
     plan: PlanProgress  # today's plan: rows done of rows planned
     wins_unseen: int
+    pipeline: PipelineLine | None  # the scorecard line; "Scorecard unavailable" (bad) when it could not be built

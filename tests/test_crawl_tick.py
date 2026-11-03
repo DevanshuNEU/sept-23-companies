@@ -25,7 +25,7 @@ from outreach.crawl.tick import (
     AlreadyRunning, TickReport, ensure_ruleset_current, read_company_boards, resolve_combiner, run_tick, tick_lock)
 from outreach.net import Response
 from outreach.rules import ruleset_version
-from tests.fakes import FakeClient, status_response, text_response
+from tests.fakes import FakeClient, feed_off, status_response, text_response
 from tests.storetest import fresh_store, seed_board, seed_company
 
 FIXTURES = Path(__file__).parent / "fixtures" / "crawl"
@@ -72,6 +72,9 @@ class TickCase(unittest.TestCase):
     stub_probe = True  # the daily slug probe is its own tests' business (ProbeStepTests); the rest never see it
 
     def setUp(self):
+        feed = feed_off()  # the feed poll is test_pipeline_simplify_feed's business
+        feed.start()
+        self.addCleanup(feed.stop)
         if self.stub_probe:
             patch = mock.patch.object(tick, "probe_slugs", return_value=ProbeReport(0, 0, 0, 0, 0, 0))
             patch.start()

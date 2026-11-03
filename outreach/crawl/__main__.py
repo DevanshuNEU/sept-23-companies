@@ -41,6 +41,7 @@ from collections.abc import Sequence
 import live_checkout
 from outreach.crawl.probe import PROBE_LIMIT
 from outreach.net import FetchError, HttpClient, UrllibClient
+from outreach.sending.notify import mac_notifier
 from outreach.store import StoreError, connect, db_path, describe_error
 
 __all__ = ["main"]
@@ -115,6 +116,13 @@ def _line(report) -> str:
         text += f"; slug probe failed: {report.probe_error}"
     if report.watch_error:
         text += f"; watched pages failed: {report.watch_error}"
+    if report.feed is not None:
+        f = report.feed
+        text += f"; feed: {f['new']} new of {f['seen']}" if f["changed"] else "; feed: unchanged"
+    if report.feed_error:
+        text += f"; feed failed: {report.feed_error}"
+    if report.alarm_error:
+        text += f"; alarm check failed: {report.alarm_error}"
     return text
 
 
@@ -152,7 +160,8 @@ def _locked_run(what: str, client: HttpClient | None, run, *, lock: bool) -> int
 
 def _tick(client: HttpClient | None) -> int:
     from outreach.crawl.tick import run_tick
-    return _locked_run("tick", client, lambda conn, polite, cfg: run_tick(conn, polite, cfg=cfg), lock=True)
+    return _locked_run("tick", client, lambda conn, polite, cfg: run_tick(conn, polite, cfg=cfg, notifier=mac_notifier),
+                       lock=True)
 
 
 def _read(company_ids: list[int], client: HttpClient | None) -> int:

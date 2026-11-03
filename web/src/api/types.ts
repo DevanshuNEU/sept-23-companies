@@ -74,12 +74,15 @@ export interface HealthView {
 // Shell (spec 13.1)
 /** `GET /api/pulse`: the newest event id. It only grows; a change means something was written (the MCP bridge too). */
 export interface Pulse { revision: number }
+/** The sidebar's scorecard line (#153): `text` from the newest card, `alarms` the texts of the alarms that hold, `tone` bad when any. */
+export interface PipelineLine { text: string; alarms: string[]; tone: 'bad' | 'idle' }
 export interface ShellSummary {
   asOf: IsoTime; pickedToday: number; capacityToday: number; unhandledReplies: number; draftsToReview: number;
   linkedinReplied: number; openReviewItems: number; noGoCount: number; doneCount: number;
   sending: { state: SenderState; sentToday: number; limitToday: number };
   repliesThisMonth: number; jobs: JobRunSummary[];
   plan: { done: number; total: number }; winsUnseen: number; // today's plan rows done of planned, and wins not yet seen (#33)
+  pipeline: PipelineLine | null; // the scorecard line; null when the store could not be read for it
 }
 export interface SearchCompany { id: Id; name: string; aliases: string[]; domain: string | null; status: CompanyStatus; statusLine: string; inProgress: boolean }
 export interface SearchPerson { id: Id; companyId: Id; companyName: string; name: string; title: string; email: string | null; statusLine: string }

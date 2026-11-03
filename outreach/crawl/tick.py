@@ -43,7 +43,7 @@ import time
 import urllib.parse
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -57,10 +57,13 @@ from outreach.crawl.polite import HostTripped, PoliteClient, bucket_for
 from outreach.crawl.probe import PROBE_LIMIT, ProbeReport, probe_slugs
 from outreach.crawl.watch import WatchReport, watch_pages
 from outreach.net import HttpClient, Response
+from outreach.outcomes.windows import ny_day
+from outreach.pipeline import alarms
 from outreach.pipeline.config import load_pipeline_config
 from outreach.pipeline.simplify_feed import note_streak, poll as poll_simplify_feed
 from outreach.rules import RulesetNotCurrent, rebuild, ruleset_version
 from outreach.store import append_event, atomic, describe_error, finish_job, start_job, utcnow
+from outreach.sending.notify import Notifier, mac_notifier, notify_once
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["TickReport", "AlreadyRunning", "LOCK_NAME", "tick_lock", "ensure_ruleset_current", "resolve_combiner",
@@ -465,8 +468,25 @@ def _feed_step(conn: sqlite3.Connection, run: _Pass, cfg: CrawlConfig, now_fn, c
             note_streak(conn, ok=False)
         return None, describe_error(e)
     with contextlib.suppress(sqlite3.Error):
-        note_streak(conn, ok=True)
+        note_streak(conn, ok=True, now=now_fn())
     return {"changed": int(result.changed), "seen": result.seen, "new": result.new}, ""
+
+
+def _alarm_step(conn: sqlite3.Connection, cfg: CrawlConfig, now_fn, notifier: Notifier) -> None:
+    """The pipeline alarms (#153), after the feed step: at most one Mac notice a New York day, naming the first alarm
+    and how many more there are. A failure here is not the tick's: it is swallowed."""
+    try:
+        now = now_fn()
+        found = alarms.check(conn, now, cfg=cfg)
+        if not found:
+            return
+        text = found[0].text + (f" and {len(found) - 1} more" if len(found) > 1 else "")
+        with atomic(conn, "pipeline_alarm"):
+            notify_once(conn, notifier, "pipeline_alarm", date.fromisoformat(ny_day(now)), "Knock pipeline", text,
+                        at=now)
+    except Exception:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
 
 
 def _add_passes(conn: sqlite3.Connection, report: TickReport) -> None:
@@ -484,12 +504,14 @@ def _add_passes(conn: sqlite3.Connection, report: TickReport) -> None:
 
 def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig | None = None, rules_cfg=None,
              combiner=None, now_fn: Callable[[], str] = utcnow, clock: Callable[[], float] = time.monotonic,
-             sleep: Callable[[float], None] = time.sleep, limit: int | None = None) -> TickReport:
+             sleep: Callable[[float], None] = time.sleep, limit: int | None = None,
+             notifier: Notifier = mac_notifier) -> TickReport:
     """One tick: the ruleset check, the due boards (at most `limit or cfg.boards_per_tick`, within the budget), then
     the daily slug probe (Task 26a, `probe`), then the watched-page pass (Task 14), then the SimplifyJobs feed poll
     (#153, `feed`), all through the same client and breaker; the watch pass is its own `watch_pages` run. A failed
     probe, watch or feed pass is reported in `probe_error`, `watch_error` or `feed_error` and leaves the board reads
-    as they are. The caller holds `tick_lock`.
+    as they are. The pipeline alarms are checked last and may send one Mac notice a day through `notifier`. The caller
+    holds `tick_lock`.
 
     `combiner=None` means `resolve_combiner(conn)`. `clock` and `sleep` drive the budget and the polite spacing.
     """
@@ -520,6 +542,7 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
         feed, feed_error = _feed_step(conn, run, cfg, now_fn, clock, started)
         report = replace(report, feed=feed, feed_error=feed_error)
         _add_passes(conn, report)
+        _alarm_step(conn, cfg, now_fn, notifier)
         return report
     finally:
         _checkpoint(conn)

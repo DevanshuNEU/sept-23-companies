@@ -23,14 +23,16 @@ from datetime import datetime, timezone
 from outreach.net import HttpClient
 from outreach.pipeline.config import PipelineConfig, load_pipeline_config
 from outreach.pipeline.urls import board_key
-from outreach.store import atomic
+from outreach.store import atomic, iso_utc
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["ETAG_KEY", "FAIL_STREAK_KEY", "FeedError", "FeedPoll", "MAX_BYTES", "SOURCE", "is_us_location", "note_streak", "poll"]
+__all__ = ["ETAG_KEY", "FAIL_STREAK_KEY", "FeedError", "FeedPoll", "LAST_OK_KEY", "MAX_BYTES", "SOURCE", "is_us_location", "note_streak",
+           "poll"]
 
 SOURCE = "simplify"
 ETAG_KEY = "simplify_etag"
 FAIL_STREAK_KEY = "simplify_fail_streak"
+LAST_OK_KEY = "simplify_last_ok_at"
 BATCH = 500
 # The feed's own response cap (#153): the file is 13 MB and growing, the crawl client's cap is 20 MB.
 MAX_BYTES = 60_000_000
@@ -185,13 +187,17 @@ def poll(conn: sqlite3.Connection, client: HttpClient, now: str, *, cfg: Pipelin
     return FeedPoll(True, len(kept), sum(1 for i in kept if i not in stored), len(gone))
 
 
-def note_streak(conn: sqlite3.Connection, *, ok: bool) -> None:
+def note_streak(conn: sqlite3.Connection, *, ok: bool, now: str | None = None) -> None:
     """The count of polls in a row that failed, in `pipeline_meta`: 0 after a good poll (a 304 is good), one more
-    after an error. The tick writes it; the scorecard's alarm reads it."""
+    after an error. A good poll with `now` also stores the time (`simplify_last_ok_at`, canonical UTC). The tick
+    writes both; the alarms read them."""
     with atomic(conn, "simplify_streak"):
         if ok:
             conn.execute("INSERT INTO pipeline_meta (key, value) VALUES (?, '0') "
                          "ON CONFLICT (key) DO UPDATE SET value = '0'", (FAIL_STREAK_KEY,))
+            if now is not None:
+                conn.execute("INSERT INTO pipeline_meta (key, value) VALUES (?, ?) "
+                             "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (LAST_OK_KEY, iso_utc(now)))
         else:
             conn.execute("INSERT INTO pipeline_meta (key, value) VALUES (?, '1') "
                          "ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)",

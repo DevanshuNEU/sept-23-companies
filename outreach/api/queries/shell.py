@@ -11,12 +11,14 @@ sidebar never disagrees with the page it links to. The ones with no view of thei
 import sqlite3
 
 from outreach.api.config import ApiConfig
+from outreach.api.models.pipeline import PipelineLine
 from outreach.api.models.shell import PlanProgress, ShellSummary
 from outreach.api.queries import done, jobs, linkedin, needs_you, no_go, progress, today
 from outreach.api.queries.company import merge_parents, survivor_of
 from outreach.api.queries.outcomes import by_ids
 from outreach.api.queries.sending import read_sender, summary_of
 from outreach.outcomes.windows import ny_day
+from outreach.pipeline import alarms
 
 _DRAFTS = (
     "SELECT p.company_id, p.person_id FROM touch t JOIN person p ON p.person_id = t.person_id JOIN ("
@@ -47,6 +49,17 @@ def drafts_to_review(conn: sqlite3.Connection) -> int:
                and p not in no_go_people)
 
 
+def pipeline_line(conn: sqlite3.Connection, now: str) -> PipelineLine | None:
+    """The sidebar's scorecard line: the newest stored card in words, and the alarms that hold now. Reads only, and a
+    store that cannot answer leaves the line out rather than failing the whole summary."""
+    try:
+        found = alarms.check(conn, now)
+        return PipelineLine(text=alarms.scorecard_line(conn), alarms=[a.text for a in found],
+                            tone="bad" if found else "idle")
+    except sqlite3.Error:
+        return None
+
+
 def shell_summary(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sender_loaded: bool) -> ShellSummary:
     day = ny_day(now)
     built = conn.execute("SELECT capacity FROM daily_list WHERE list_date = ?", (day,)).fetchone()
@@ -60,4 +73,5 @@ def shell_summary(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sen
         open_review_items=needs_you.open_count(conn, now), no_go_count=no_go.no_go_count(conn),
         done_count=done.done_count(conn), sending=summary_of(sender),
         replies_this_month=done.replies_this_month(conn, now), jobs=jobs.last_runs(conn, now),
-        plan=PlanProgress(done=finished, total=planned), wins_unseen=progress.wins_unseen(conn))
+        plan=PlanProgress(done=finished, total=planned), wins_unseen=progress.wins_unseen(conn),
+        pipeline=pipeline_line(conn, now))

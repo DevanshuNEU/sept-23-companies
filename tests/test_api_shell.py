@@ -1,9 +1,12 @@
 """Task 22: the shell summary (`GET /api/shell`): the sidebar's counts, the sender line, #33's plan and winsUnseen."""
+import dataclasses
 import json
 import os
 import time
 import unittest
 
+from outreach.pipeline import scorecard
+from outreach.pipeline.scorecard import Scorecard
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
 
@@ -11,7 +14,7 @@ TODAY = "2026-11-10"
 CONTEXT = json.dumps({"source": "own", "lane": "own", "roleKind": "engineer", "roleAgeDays": 0, "rankerVersion": "r1",
                       "signals": {}, "roleNamed": False})
 FIELDS = {"asOf", "pickedToday", "capacityToday", "unhandledReplies", "draftsToReview", "linkedinReplied",
-          "openReviewItems", "noGoCount", "doneCount", "sending", "repliesThisMonth", "jobs", "plan", "winsUnseen"}
+          "openReviewItems", "noGoCount", "doneCount", "sending", "repliesThisMonth", "jobs", "plan", "winsUnseen", "pipeline"}
 
 
 def outreach_touch(conn, company, person, channel="linkedin_request", sent_at="2026-11-10T13:00:00Z", **cols) -> int:
@@ -82,6 +85,26 @@ class Shell(ApiCase):
                      ("2026-11-10T08:00:00Z", "2026-11-10T08:05:00Z"))
         ids["wins"] = (a1, a2)
         return ids
+
+    def test_the_pipeline_line_before_any_scorecard(self):
+        self.assertEqual(self.shell()["pipeline"], {"text": "Scorecard not run yet", "alarms": [], "tone": "idle"})
+
+    def test_the_pipeline_line_reads_the_newest_scorecard(self):
+        card = Scorecard(simplify_listings=100, simplify_coverage=0.324, level_recall=0.5, lead_over_simplify=None,
+                         detection_p95_hours=None)
+        scorecard.record(self.conn, card, "2026-11-09T12:00:00Z")
+        scorecard.record(self.conn, dataclasses.replace(card, simplify_coverage=0.32, level_recall=0.511),
+                         "2026-11-10T12:00:00Z")
+        self.assertEqual(self.shell()["pipeline"], {"text": "Coverage 32%, level 51%", "alarms": [], "tone": "idle"})
+
+    def test_an_alarm_makes_the_line_bad_and_is_listed(self):
+        for at in ("2026-11-08T08:00:00Z", "2026-11-09T08:00:00Z"):
+            self.conn.execute("INSERT INTO job_run(job, started_at, finished_at, status) VALUES ('resolve', ?, ?, 'failed')",
+                              (at, at))
+        line = self.shell()["pipeline"]
+        self.assertEqual(line["tone"], "bad")
+        self.assertEqual(line["alarms"], ["resolve failed on its last two runs"])
+        self.assertEqual(line["text"], "Scorecard not run yet")
 
     def test_empty_store_shell_is_all_zero_and_valid(self):
         body = self.shell()

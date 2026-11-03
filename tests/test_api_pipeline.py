@@ -56,3 +56,27 @@ class MissRoute(ApiCase):
 
     def test_the_wire_causes_are_the_stored_causes(self):
         self.assertEqual(set(get_args(MissCause)), set(CAUSES))
+
+
+class ScorecardRoute(ApiCase):
+    def test_no_card_yet(self):
+        res = self.get("/api/pipeline/scorecard")
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json(), {"day": None, "card": None})
+
+    def test_the_newest_stored_card_and_its_day(self):
+        from outreach.pipeline import scorecard
+        from outreach.pipeline.scorecard import GapCompany, Scorecard
+        old = Scorecard(simplify_listings=10, simplify_coverage=0.1, level_recall=0.2, lead_over_simplify=0.3,
+                        detection_p95_hours=4.5)
+        new = Scorecard(simplify_listings=20, simplify_coverage=0.4, level_recall=None, lead_over_simplify=None,
+                        detection_p95_hours=None, gap_top=[GapCompany("Acme", "ashby", 3, True, False)])
+        scorecard.record(self.conn, old, "2026-11-08T12:00:00Z")
+        scorecard.record(self.conn, new, "2026-11-10T03:00:00Z")  # 22:00 on Nov 9 in New York
+        body = self.get("/api/pipeline/scorecard").json()
+        self.assertEqual(body["day"], "2026-11-09")
+        self.assertEqual(body["card"]["simplifyListings"], 20)
+        self.assertEqual(body["card"]["simplifyCoverage"], 0.4)
+        self.assertIsNone(body["card"]["levelRecall"])
+        self.assertEqual(body["card"]["gapTop"], [{"companyName": "Acme", "ats": "ashby", "listings": 3,
+                                                   "knockKnowsCompany": True, "knockHasBoard": False}])

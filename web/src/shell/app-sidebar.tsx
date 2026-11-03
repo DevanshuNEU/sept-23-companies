@@ -1,7 +1,7 @@
 import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { NavLink } from 'react-router';
-import { Activity, Award, Ban, Building2, CalendarCheck, ChartColumn, CircleAlert, CircleCheck, Moon, Search, Send, Sun, Telescope } from 'lucide-react';
-import { pollMs, queryKeys, useClient, type JobRunSummary, type SenderState, type ShellSummary } from '@/api';
+import { Activity, Award, Ban, Building2, CalendarCheck, ChartColumn, CircleAlert, CircleCheck, Gauge, Moon, Search, Send, Sun, Telescope } from 'lucide-react';
+import { pollMs, queryKeys, useClient, type JobRunSummary, type PipelineLine, type SenderState, type ShellSummary } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
@@ -274,6 +274,43 @@ function BoardsRead({ jobs }: { jobs: JobRunSummary[] }) {
   );
 }
 
+/**
+ * The scorecard line under "Boards read": the newest coverage and level numbers. With no alarm it is plain text; with
+ * one it turns red, takes the alert icon (so the signal is not the colour alone) and opens the alarm texts.
+ */
+function PipelineScore({ line }: { line: PipelineLine }) {
+  if (line.alarms.length === 0) {
+    return (
+      <div className="flex h-5 items-center gap-2">
+        <Gauge aria-hidden className="size-3.5" />
+        {line.text}
+      </div>
+    );
+  }
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`${line.text}, ${plural(line.alarms.length, 'alarm', 'alarms')}`}
+          className="flex h-5 items-center gap-2 rounded-md text-left text-xs text-bad outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+        >
+          <CircleAlert aria-hidden className="size-3.5" />
+          {line.text}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="w-80">
+        <p className="mb-3 text-sm font-semibold">Pipeline alarms</p>
+        <ul className="grid gap-2 text-sm">
+          {line.alarms.map((alarm) => (
+            <li key={alarm}>{alarm}</li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function Footer({ s }: { s: ShellSummary | undefined }) {
   if (!s) return null;
   const sender = SENDER[s.sending.state];
@@ -294,6 +331,7 @@ function Footer({ s }: { s: ShellSummary | undefined }) {
         <span className="ml-auto">{`in ${formatMonth(s.asOf)}`}</span>
       </div>
       <BoardsRead jobs={s.jobs} />
+      {s.pipeline ? <PipelineScore line={s.pipeline} /> : null}
     </SidebarFooter>
   );
 }

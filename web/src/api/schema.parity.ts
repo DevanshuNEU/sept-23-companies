@@ -65,6 +65,7 @@ export const _parity: [
   Same<T.DailyEntry, S['DailyEntry']>,
   Same<T.StillEmailing, S['StillEmailing']>,
   Same<T.TodayView, S['TodayView']>,
+  Same<T.PipelineLine, S['PipelineLine']>,
   Same<T.ShellSummary, S['ShellSummary']>,
   Same<T.Pulse, S['Pulse']>,
   Same<T.NoteFact, S['NoteFact']>,
@@ -90,4 +91,4 @@ export const _parity: [
   Same<T.PlanView, S['PlanView']>,
   Same<T.LoggedPerson, S['LoggedPerson']>,
   Same<T.LogPeopleResult, S['LogPeopleResult']>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

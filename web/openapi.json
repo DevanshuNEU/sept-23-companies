@@ -2349,6 +2349,46 @@
         "title": "FunnelStage",
         "type": "object"
       },
+      "GapCompany": {
+        "properties": {
+          "ats": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats"
+          },
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "knockHasBoard": {
+            "title": "Knockhasboard",
+            "type": "boolean"
+          },
+          "knockKnowsCompany": {
+            "title": "Knockknowscompany",
+            "type": "boolean"
+          },
+          "listings": {
+            "title": "Listings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "companyName",
+          "ats",
+          "listings",
+          "knockKnowsCompany",
+          "knockHasBoard"
+        ],
+        "title": "GapCompany",
+        "type": "object"
+      },
       "HealthBoards": {
         "properties": {
           "active": {
@@ -4790,6 +4830,37 @@
           "ok"
         ],
         "title": "Ping",
+        "type": "object"
+      },
+      "PipelineLine": {
+        "description": "The sidebar's scorecard line: `text` from the newest card, `alarms` the texts of the alarms that hold, `tone`\n`bad` when there is any alarm, else `idle`.",
+        "properties": {
+          "alarms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Alarms",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tone": {
+            "enum": [
+              "bad",
+              "idle"
+            ],
+            "title": "Tone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "alarms",
+          "tone"
+        ],
+        "title": "PipelineLine",
         "type": "object"
       },
       "PlanCompany": {
@@ -7251,6 +7322,118 @@
         "title": "ScoreView",
         "type": "object"
       },
+      "ScorecardCard": {
+        "description": "`outreach.pipeline.scorecard.Scorecard`, as stored in the day's event. Shares run from 0 to 1.",
+        "properties": {
+          "dateTruth": {
+            "title": "Datetruth",
+            "type": "null"
+          },
+          "detectionP95Hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detectionp95Hours"
+          },
+          "gapTop": {
+            "items": {
+              "$ref": "#/components/schemas/GapCompany"
+            },
+            "title": "Gaptop",
+            "type": "array"
+          },
+          "leadOverSimplify": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leadoversimplify"
+          },
+          "levelRecall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Levelrecall"
+          },
+          "simplifyCoverage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simplifycoverage"
+          },
+          "simplifyListings": {
+            "title": "Simplifylistings",
+            "type": "integer"
+          },
+          "smallCompanyCoverage": {
+            "title": "Smallcompanycoverage",
+            "type": "null"
+          }
+        },
+        "required": [
+          "simplifyListings",
+          "simplifyCoverage",
+          "levelRecall",
+          "leadOverSimplify",
+          "detectionP95Hours",
+          "dateTruth",
+          "smallCompanyCoverage",
+          "gapTop"
+        ],
+        "title": "ScorecardCard",
+        "type": "object"
+      },
+      "ScorecardView": {
+        "description": "The newest stored card and the New York day it was taken; both null before the first one.",
+        "properties": {
+          "card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScorecardCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day"
+          }
+        },
+        "required": [
+          "day",
+          "card"
+        ],
+        "title": "ScorecardView",
+        "type": "object"
+      },
       "SearchCompany": {
         "properties": {
           "aliases": {
@@ -7646,6 +7829,16 @@
             "title": "Pickedtoday",
             "type": "integer"
           },
+          "pipeline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineLine"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "plan": {
             "$ref": "#/components/schemas/PlanProgress"
           },
@@ -7679,7 +7872,8 @@
           "repliesThisMonth",
           "jobs",
           "plan",
-          "winsUnseen"
+          "winsUnseen",
+          "pipeline"
         ],
         "title": "ShellSummary",
         "type": "object"
@@ -12197,6 +12391,77 @@
           }
         },
         "summary": "Log Miss",
+        "tags": [
+          "pipeline"
+        ]
+      }
+    },
+    "/api/pipeline/scorecard": {
+      "get": {
+        "operationId": "scorecard",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScorecardView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Scorecard",
         "tags": [
           "pipeline"
         ]

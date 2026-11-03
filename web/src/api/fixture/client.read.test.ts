@@ -47,6 +47,7 @@ describe('FixtureClient reads: default scenario', () => {
       repliesThisMonth: 9,
       plan: { done: 2, total: 7 }, // the people plan's own counts (#33), not the picks
       winsUnseen: 0,
+      pipeline: { text: 'Coverage 32%, level 51%', alarms: [], tone: 'idle' },
     });
   });
 

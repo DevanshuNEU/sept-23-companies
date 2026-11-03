@@ -431,6 +431,22 @@ class RecordEvidenceTests(RebuildTestCase):
         row = self.conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
         self.assertEqual(rebuild_module.stored_decision(row), decided)
 
+    def test_stored_decision_fills_level_state_for_a_row_stored_before_0007(self):
+        pid = self.posting()
+        decided = decide_and_store(self.conn, pid)
+        self.conn.execute("UPDATE decision SET level_state = NULL, years_ms = NULL")
+        row = self.conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
+        self.assertIsNone(row["level_state"])
+        self.assertEqual(rebuild_module.stored_decision(row), decided)
+
+    def test_decision_row_stores_level_state_and_years_ms(self):
+        pid = self.posting()
+        decided = decide_and_store(self.conn, pid)
+        row = self.conn.execute("SELECT level_state, years_ms FROM current_decision WHERE posting_id = ?",
+                                (pid,)).fetchone()
+        self.assertEqual((row["level_state"], row["years_ms"]), (decided.level_state, decided.years_ms))
+        self.assertIsNotNone(row["level_state"])
+
     def test_record_evidence_ignores_repeats(self):
         drafts = from_old_dashboard({"sizeWhy": "about 40 people"})
         self.assertEqual(record_evidence(self.conn, self.company, drafts), 1)

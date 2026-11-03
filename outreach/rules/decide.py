@@ -54,6 +54,9 @@ class Decision:
     eligibility_reason: str | None
     eligibility_quote: str
     start_2027: bool
+    # fit, reject or uncertain (#154). The default is only for code that builds a Decision by hand; decide() sets it.
+    level_state: str = "uncertain"
+    years_ms: int | None = None  # years asked of a master's degree holder, None when the posting gives none
 
     def as_row(self) -> dict:
         """The `decision` table's columns (without posting_id, ruleset_version and decided_at), booleans as 0 or 1."""
@@ -64,6 +67,7 @@ class Decision:
             "citizenship": int(self.citizenship), "citizenship_quote": self.citizenship_quote,
             "eligibility": self.eligibility, "eligibility_reason": self.eligibility_reason,
             "eligibility_quote": self.eligibility_quote, "start_2027": int(self.start_2027),
+            "level_state": self.level_state, "years_ms": self.years_ms,
         }
 
 
@@ -94,6 +98,13 @@ def _level(lane: str, tier: str | None, title_basis: str, years: int | None, ent
     return "not_stated", False, "Posting does not state a level"
 
 
+def interim_level_state(lane: str, level_ok: bool) -> str:
+    """Stand-in until the level rules compute the verdict: fit when level_ok, else uncertain for tech, else reject."""
+    if level_ok:
+        return "fit"
+    return "uncertain" if lane == "engineering" else "reject"
+
+
 def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
     cfg = cfg if cfg is not None else default_config()
     title, body, location = _clean(p.title), _clean(p.body), _clean(p.location)
@@ -110,6 +121,7 @@ def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
         us=us_status(location, country, cfg, title), sponsorship=stance, sponsorship_quote=stance_quote,
         citizenship=citizen, citizenship_quote=citizen_quote, eligibility=status, eligibility_reason=reason,
         eligibility_quote=elig_quote, start_2027=starts_2027(title, body, cfg),
+        level_state=interim_level_state(t.lane, ok), years_ms=None,
     )
 
 

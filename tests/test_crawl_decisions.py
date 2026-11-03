@@ -183,9 +183,14 @@ class ResetProvisionalTests(DecisionTestCase):
             "INSERT INTO ruleset(ruleset_version, config_toml, created_at, is_current) "
             "VALUES ('r-000000000001', '', '2026-10-01T00:00:00Z', 0)")
         self.conn.execute(
-            "INSERT INTO decision SELECT posting_id, 'r-000000000001', decided_at, lane, level_tier, level_ok, "
+            "INSERT INTO decision(posting_id, ruleset_version, decided_at, lane, level_tier, level_ok, level_basis, "
+            "years_asked, years_quote, us, sponsorship, sponsorship_quote, citizenship, citizenship_quote, "
+            "eligibility, eligibility_reason, eligibility_quote, start_2027, provisional, reader_version, "
+            "level_state, years_ms) "
+            "SELECT posting_id, 'r-000000000001', decided_at, lane, level_tier, level_ok, "
             "level_basis, years_asked, years_quote, us, sponsorship, sponsorship_quote, citizenship, "
-            "citizenship_quote, eligibility, eligibility_reason, eligibility_quote, start_2027, 0, 'v1' "
+            "citizenship_quote, eligibility, eligibility_reason, eligibility_quote, start_2027, 0, 'v1', "
+            "level_state, years_ms "
             "FROM decision WHERE posting_id = ?", (a,))
         self.assertEqual(reset_provisional(self.conn, [a]), 0)
         old = self.conn.execute("SELECT provisional, reader_version FROM decision WHERE ruleset_version = "

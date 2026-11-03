@@ -176,6 +176,16 @@ class DecideTests(unittest.TestCase):
         self.assertTrue(all(not isinstance(v, bool) for v in row.values()))
         self.assertIn(row["level_ok"], (0, 1))
 
+    def test_as_row_carries_level_state_and_years_ms(self):
+        # Interim rule until the level rules land: fit when level_ok, else uncertain for tech, reject for the rest.
+        for title, body, state in (("Software Engineer, New Grad", "", "fit"),
+                                   ("Senior Software Engineer", "", "uncertain"),
+                                   ("Software Engineer", "", "uncertain"),
+                                   ("Accountant", "", "reject")):
+            row = d(title, body).as_row()
+            self.assertEqual(row["level_state"], state, title)
+            self.assertIsNone(row["years_ms"], title)
+
     def test_as_row_satisfies_the_table_checks(self):
         db = fresh_store()
         version = ruleset_version()
@@ -207,7 +217,8 @@ class DecideTests(unittest.TestCase):
         names = [f.name for f in dataclasses.fields(Decision)]
         self.assertEqual(names, ["lane", "level_tier", "level_ok", "level_basis", "years_asked", "years_quote", "us",
                                  "sponsorship", "sponsorship_quote", "citizenship", "citizenship_quote",
-                                 "eligibility", "eligibility_reason", "eligibility_quote", "start_2027"])
+                                 "eligibility", "eligibility_reason", "eligibility_quote", "start_2027",
+                                 "level_state", "years_ms"])
 
     def test_only_rules_classify(self):
         # Done-when line 2: nothing outside outreach/rules reads titles, locations or sponsorship wording.

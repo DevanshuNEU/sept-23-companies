@@ -154,9 +154,10 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     else:
         interval_s = next_interval_s(last_new_age_s(conn, board, now), board.change_interval_s, any_change, cfg)
         # A big board with few US engineering jobs waits at least a day (#152). Only the next read moves: the stored
-        # interval stays the normal one, so the board returns to its rhythm the day it stops being low yield.
+        # interval stays the normal one, so the board returns to its rhythm the day it stops being low yield. An empty
+        # read keeps the normal wait: its postings are still open, and the second empty read closes them.
         wait_s = interval_s
-        if low_yield(conn, board.board_id, now, cfg):
+        if result.result in ("ok", "unchanged") and low_yield(conn, board.board_id, now, cfg):
             wait_s = max(interval_s, cfg.big_board.interval_s)
         next_read_at = add_seconds(now, wait_s)
     open_now = len(_open_ids(conn, board)) if result.result == "unchanged" else 0  # used for unchanged only

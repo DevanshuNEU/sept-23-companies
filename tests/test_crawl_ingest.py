@@ -938,6 +938,15 @@ class LowYieldReadTests(IngestTestCase):
         self.second_read(big_board_jobs(10, 140))
         self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), FLOOR))
 
+    def test_empty_read_on_big_board_keeps_normal_wait(self):
+        """After a first empty read the postings are still open: the second empty read, which closes them, is not
+        held back a day."""
+        self.aged_board()
+        self.second_read(big_board_jobs(10, 240))  # a fresh sales posting: the normal interval is the floor
+        out = self.read(ok(EMPTY), at(2))
+        self.assertEqual(out.result, "empty")
+        self.assertEqual(self.board()["next_read_at"], add_seconds(at(2), FLOOR))
+
     def test_an_error_read_keeps_its_own_backoff(self):
         self.aged_board()
         self.read(status_response(500), at(1))

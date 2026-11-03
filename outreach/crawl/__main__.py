@@ -20,15 +20,15 @@
 - `profile [--runs N] [--json]`: where the tick time goes (#152). Sums the `by_ats` summaries of the newest N finished
   `read_boards` runs (default 20; a run without `by_ats` is skipped) and prints, per ATS, boards, seconds, seconds per
   board, share of the ticks' time, list and body requests, and new, closed and reopened postings. Store only, no requests.
-
 - `churn [--days N] [--limit N] [--json]`: per board, the postings closed, new and listed again over the last N days
   (default 1; the top 20 boards by closed, #152), with the open count and the open US engineering postings. A posting
   counts as listed again when its board closed one with the same title and location in the 7 days before. Store only,
   no requests.
 
-Every command calls `live_checkout.require_live` before it opens anything: they send real requests (and `tick` and
-`read` write the live store), so they run only from the live checkout. Exit code: 0 when the run was `ok`, 1 when it
-was partial or failed, or the command failed (the message on stderr).
+Every command calls `live_checkout.require_live` before it opens anything, so they all run only from the live
+checkout. The commands that read boards (`tick`, `read`, `probe`, `probe-slugs`) send real requests, and `tick` and
+`read` write the live store; `profile`, `churn` and `recheck-boards` read the store only. Exit code: 0 when the run
+was `ok`, 1 when it was partial or failed, or the command failed (the message on stderr).
 """
 from __future__ import annotations
 

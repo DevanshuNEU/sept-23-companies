@@ -11,9 +11,11 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 
+from outreach.crawl.tick import _PROFILE_KEYS
+
 __all__ = ["AtsProfile", "Profile", "profile"]
 
-_SUMMED = ("boards", "list_requests", "list_ms", "body_requests", "body_ms", "ingest_ms", "new", "closed", "reopened")
+_SUMMED = _PROFILE_KEYS
 
 
 @dataclass(frozen=True)

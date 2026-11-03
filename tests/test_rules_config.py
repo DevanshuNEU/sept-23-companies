@@ -58,7 +58,7 @@ class ConfigTests(unittest.TestCase):
             for key in keys:
                 self.assertIn(key, table, f"{section}.{key}")
                 value = table[key]
-                if section == "candidate":
+                if section == "candidate" or isinstance(value, int):  # numbers (title.ambiguous_margin) are no word list
                     continue
                 lists = value.values() if isinstance(value, dict) else [value]
                 for words in lists:

@@ -199,7 +199,7 @@ def _body_updates(conn: sqlite3.Connection, board: BoardRow, existing: dict[str,
         if job.native_id in seen or not job.body:
             continue
         seen.add(job.native_id)
-        if classify_title(job.title, title_cfg).lane not in BODY_LANES:
+        if classify_title(job.title, title_cfg, job.body).lane not in BODY_LANES:
             continue
         e = existing.get(source_key(board.ats, board.token, job.native_id))
         if e is None:

@@ -14,6 +14,10 @@ max_years_asked = 3
 engineering = [
   "engineer", "engineers", "engineering", "developer", "developers", "programmer", "programmers", "swe", "sde",
   "mts", "fde", "member of technical staff", "member of product staff", "member of engineering staff",
+  # #154: tech roles whose title has no engineering noun ("Data Scientist", "SRE"); "scientist" alone stays out, so a
+  # "Staff Scientist, Biology" names no engineering role
+  "ml", "machine learning", "ai engineer", "applied ai", "data engineer", "analytics engineer", "applied scientist",
+  "research engineer", "data scientist", "research scientist", "sre", "site reliability",
 ]
 # refresh/finalcheck.py:27 INTERN ('co op' also matches co-op and coop)
 intern = [
@@ -24,10 +28,10 @@ off_lane = [
   "gtm", "go to market", "it systems", "it support", "help desk", "desktop support", "technical support",
   "support engineer", "customer support", "sales", "solutions engineer", "solution engineer", "solutions consultant",
   "solution consultant", "solutions architect", "solution architect", "pre sales", "account", "recruit", "recruiter",
-  "recruiters", "recruiting", "recruitment", "designer", "design engineer", "mechanical", "electrical", "hardware",
+  "recruiters", "recruiting", "recruitment", "designer", "mechanical", "electrical", "hardware",
   "firmware", "embedded", "soc", "mechatronic", "mechatronics", "robotics hardware", "analog", "rf", "fpga", "asic",
   "silicon", "manufacturing", "manufacturer", "manufacture", "process engineer", "quality engineer", "qa",
-  "test engineer", "validation", "technician", "scientist", "research engineer, bio", "research engineer, chem",
+  "validation", "technician", "research engineer, bio", "research engineer, chem",
   "actuary", "actuarial", "clinical", "network engineer", "field service", "field technician", "installation",
   "facilities", "construction", "civil", "structural", "signal integrity", "packaging", "documentation",
   "technical writer", "technical writing", "developer advocate", "developer advocacy", "developer relations",
@@ -43,6 +47,27 @@ off_lane = [
   "customer success engineer", "customer success engineers", "customer success manager",
   "customer success managers", "customer success specialist", "customer success architect",
   "robotics field engineer", "field application engineer", "field applications engineer", "cmm", "metrology",
+  # #154: physical, supply chain and non-tech data roles. "scientist" left this list (data and research scientists are
+  # tech); "design engineer" and "test engineer" moved to `ambiguous` below, where the body decides. Data Analyst, BI
+  # and annotation roles are not tech.
+  "supply chain", "procurement", "logistics", "sourcing", "buyer", "planner", "thermal", "optical", "photonics",
+  "laser", "hvac", "chemical", "materials", "data analyst", "business intelligence", "data annotation",
+]
+# #154: titles that can name a software or a physical role. The body decides: `software_words` against
+# `physical_words`, whole words, every mention counted; tech when software leads by `ambiguous_margin` or more, else
+# off lane (no body is off lane too). Checked after `off_lane`, so "Hardware Test Engineer" is off lane whatever it says.
+ambiguous = [
+  "systems engineer", "test engineer", "design engineer", "product engineer", "application engineer",
+  "applications engineer", "project engineer",
+]
+ambiguous_margin = 2
+software_words = [
+  "python", "typescript", "javascript", "java", "golang", "rust", "c++", "react", "sql", "kubernetes", "docker",
+  "aws", "gcp", "pytorch", "tensorflow", "api", "backend", "frontend", "microservices", "ci/cd", "linux",
+]
+physical_words = [
+  "solidworks", "autocad", "catia", "ansys", "fea", "cfd", "gd&t", "pcb", "altium", "oscilloscope", "soldering",
+  "thermodynamics", "hvac", "plc", "scada", "bom", "six sigma", "injection molding", "sheet metal",
 ]
 # #4 follow-up 2026-10-23: academic posts are off lane even when the title also says "internship" or "engineering".
 # Checked apart from off_lane because the intern check comes first ("Assistant Professor ..., Internship Coordinator").

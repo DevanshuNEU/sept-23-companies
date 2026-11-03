@@ -24,7 +24,9 @@ _LEVEL_WORD = re.compile(r"(?<!\w)level[\s" + _DASHES + r"]{0,3}(II|I|2|1)(?!\w|
 
 _SWE1 = {"i", "1", "i/ii", "1/2"}
 _SWE2 = {"ii", "2"}
-_SENIOR_NUMERALS = {"iii", "iv", "v", "3", "4", "5"}
+# #154: "III" and "3" are swe2 for the tier; the body's years decide fit or reject later (decide.py).
+_III = {"iii", "3"}
+_SENIOR_NUMERALS = {"iv", "v", "4", "5"}
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,13 @@ def _levels(title: str, cfg: Config) -> list[tuple[str, str]]:
     return found
 
 
-def _lane(title: str, cfg: Config) -> tuple[str, str]:
+def _software_lead(body: str, cfg: Config) -> int:
+    """How many more software words than physical words the body mentions (every mention counts)."""
+    t = cfg.title
+    return len(phrases(t["software_words"]).findall(body)) - len(phrases(t["physical_words"]).findall(body))
+
+
+def _lane(title: str, cfg: Config, body: str | None = None) -> tuple[str, str]:
     t = cfg.title
     if m := phrases(t["general_application"]).search(title):
         return "general_application", f"Title says {m.group(0)}, a general application"
@@ -69,6 +77,11 @@ def _lane(title: str, cfg: Config) -> tuple[str, str]:
         return "off_lane", f"Title says {academic.group(0)}, an academic post"
     if m := phrases(t["off_lane"]).search(title):
         return "off_lane", f"Title says {m.group(0)}, outside his lane"
+    if m := phrases(t["ambiguous"]).search(title):  # #154: could be software or physical work, so the body decides
+        if not (body or "").strip():
+            return "off_lane", f"Title says {m.group(0)} and the posting has no text to show it is software"
+        if _software_lead(body, cfg) < t["ambiguous_margin"]:
+            return "off_lane", f"Title says {m.group(0)} and the posting is not clearly software work"
     return "engineering", ""
 
 
@@ -91,14 +104,18 @@ def _tier(title: str, cfg: Config) -> tuple[str | None, str]:
         for written, num in levels:
             if num in nums:
                 return tier, f"Title says {written}"
+    if any(num in _III for _, num in levels):
+        return "swe2", "Title says III"
     if m := phrases(t["open_level"]).search(tt):
         return "open", f"{m.group(0)} role, no level in the title"
     return None, "Title states no level"
 
 
-def classify_title(title: str, cfg: Config) -> TitleResult:
+def classify_title(title: str, cfg: Config, body: str | None = None) -> TitleResult:
+    """The title's lane and tier. `body` is read only for an ambiguous title (`title.ambiguous`): a title like "Systems
+    Engineer" is software work only when the body says so, and with no body it is off lane."""
     title = title or ""
-    lane, basis = _lane(title, cfg)
+    lane, basis = _lane(title, cfg, body)
     if lane != "engineering":
         return TitleResult(lane=lane, tier=None, basis=basis)
     tier, basis = _tier(title, cfg)

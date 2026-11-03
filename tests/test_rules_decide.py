@@ -30,6 +30,21 @@ class DecideTests(unittest.TestCase):
         self.assertTrue(r.level_ok)
         self.assertEqual(r.level_basis, "Posting says entry level")
 
+    def test_swe_iii_is_swe2_and_title_based(self):
+        # #154: III used to be senior (level_ok false); it is swe2 now, and years in the body still fail it
+        r = d("Software Engineer III", "")
+        self.assertEqual((r.level_tier, r.level_ok, r.level_basis), ("swe2", True, "Title says III"))
+        r = d("Software Engineer III", "6+ years of experience building backend systems.")
+        self.assertEqual((r.level_tier, r.level_ok, r.level_basis), ("swe2", False, "Asks 6 years"))
+        self.assertEqual(d("Software Engineer IV", "").level_tier, "senior")
+
+    def test_ambiguous_title_reads_the_body(self):
+        tech = d("Systems Engineer", "Build backend services in Python and Go on AWS with Docker.")
+        self.assertEqual(tech.lane, "engineering")
+        physical = d("Systems Engineer", "Model parts in SolidWorks and run FEA in ANSYS.")
+        self.assertEqual(physical.lane, "off_lane")
+        self.assertEqual(d("Systems Engineer", "").lane, "off_lane")
+
     def test_plain_title_is_not_stated(self):
         r = d("Software Engineer", "")
         self.assertEqual((r.level_tier, r.level_ok, r.lane), ("not_stated", False, "engineering"))

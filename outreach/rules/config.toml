@@ -67,6 +67,32 @@ senior = [
 manager = [
   "manager", "managers",
 ]
+# #154: a degree tier ("BS and 2+ years of experience, or MS and 0+ years") gives its own master's figure. Words are
+# read as written; the abbreviations only in capitals, so "10 ms" is not a master's degree. A master's word counts as
+# a tier only when it sits at most 3 words before the number or the number is followed by "with a master's degree";
+# "BS or MS in CS and 5+ years" is an alternative degree (a bachelor's word and "or" right before), not a tier.
+master_words = [
+  "master's", "masters", "master of science", "master degree", "masters degree", "advanced degree",
+  "advanced degrees", "graduate degree", "postgraduate degree",
+]
+master_abbreviations = ["MS", "M.S.", "M.S", "MSc", "M.Sc.", "MEng"]
+bachelor_words = [
+  "bachelor's", "bachelors", "bachelor", "bs", "b.s.", "b.s", "ba", "b.a.", "bsc", "undergraduate",
+]
+# #154: "up to 5 years of experience" asks for nothing (it counts as 0)
+upper_bound = ["up to", "at most", "no more than", "maximum of"]
+# #154: a figure tied to named technologies is not a requirement for the level: "3+ years of experience with
+# Python", "3+ years of Python experience". Read only when what "experience with/in/using" opens, up to the clause
+# end, is nothing but these names and "and", "or", "/" ("in Python or Go building backend systems" says more, so
+# its figure stands). Also tells a version ("Python 3 and 5+ years") from the low end of a range.
+technologies = [
+  "python", "java", "javascript", "typescript", "go", "golang", "rust", "c", "c++", "c#", "ruby", "php", "swift",
+  "kotlin", "scala", "elixir", "react", "react native", "angular", "vue", "node", "node.js", "nodejs", "next.js",
+  "django", "flask", "fastapi", "spring", "spring boot", "rails", "ruby on rails", "sql", "nosql", "postgres",
+  "postgresql", "mysql", "mongodb", "redis", "kafka", "elasticsearch", "graphql", "kubernetes", "k8s", "docker",
+  "terraform", "aws", "gcp", "azure", "linux", "git", "pytorch", "tensorflow", "spark", "hadoop", "airflow", "dbt",
+  "snowflake", "html", "css", "swiftui", "flutter", ".net",
+]
 # refresh/finalcheck.py:42-44 STRONG, plus 'fellow' and 'fellowship' (moved here from senior) and 'graduate' next to a level noun ("Machine Learning Engineer Graduate - Lead Ads" is a graduate role, not a lead; a bare 'graduate' would also clear "Senior Engineer, Graduate Program")
 strong_entry = [
   "engineer graduate", "engineer graduates", "developer graduate", "developer graduates", "graduate engineer",
@@ -154,6 +180,32 @@ candidate_voice = [
   "you have", "you've", "you bring", "you'll have", "you'll bring", "you will have", "you will bring",
   "you should have", "you possess", "you need", "you'd have", "candidate", "candidates", "required", "requirement",
   "requirements", "must", "minimum", "at least", "qualifications",
+]
+# #154: a degree tier ("BS and 2+ years of experience, or MS and 0+ years") gives its own master's figure. Words are
+# read as written; the abbreviations only in capitals, so "10 ms" is not a master's degree. A master's word counts as
+# a tier only when it sits at most 3 words before the number or the number is followed by "with a master's degree";
+# "BS or MS in CS and 5+ years" is an alternative degree (a bachelor's word and "or" right before), not a tier.
+master_words = [
+  "master's", "masters", "master of science", "master degree", "masters degree", "advanced degree",
+  "advanced degrees", "graduate degree", "postgraduate degree",
+]
+master_abbreviations = ["MS", "M.S.", "M.S", "MSc", "M.Sc.", "MEng"]
+bachelor_words = [
+  "bachelor's", "bachelors", "bachelor", "bs", "b.s.", "b.s", "ba", "b.a.", "bsc", "undergraduate",
+]
+# #154: "up to 5 years of experience" asks for nothing (it counts as 0)
+upper_bound = ["up to", "at most", "no more than", "maximum of"]
+# #154: a figure tied to named technologies is not a requirement for the level: "3+ years of experience with
+# Python", "3+ years of Python experience". Read only when what "experience with/in/using" opens, up to the clause
+# end, is nothing but these names and "and", "or", "/" ("in Python or Go building backend systems" says more, so
+# its figure stands). Also tells a version ("Python 3 and 5+ years") from the low end of a range.
+technologies = [
+  "python", "java", "javascript", "typescript", "go", "golang", "rust", "c", "c++", "c#", "ruby", "php", "swift",
+  "kotlin", "scala", "elixir", "react", "react native", "angular", "vue", "node", "node.js", "nodejs", "next.js",
+  "django", "flask", "fastapi", "spring", "spring boot", "rails", "ruby on rails", "sql", "nosql", "postgres",
+  "postgresql", "mysql", "mongodb", "redis", "kafka", "elasticsearch", "graphql", "kubernetes", "k8s", "docker",
+  "terraform", "aws", "gcp", "azure", "linux", "git", "pytorch", "tensorflow", "spark", "hadoop", "airflow", "dbt",
+  "snowflake", "html", "css", "swiftui", "flutter", ".net",
 ]
 # refresh/finalcheck.py:42-44 STRONG and refresh/crawl_boards.py:29-31 BODY_ENTRY
 body_entry = [

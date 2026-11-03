@@ -186,6 +186,12 @@ class DecideTests(unittest.TestCase):
             self.assertEqual(row["level_state"], state, title)
             self.assertIsNone(row["years_ms"], title)
 
+    def test_decision_carries_the_masters_figure(self):
+        r = d("Software Engineer", "BS and 2+ years of experience, or MS and 0+ years.")
+        self.assertEqual((r.years_asked, r.years_ms), (2, 0))
+        self.assertEqual(d("Software Engineer", "3+ years of experience.").years_ms, None)
+        self.assertEqual(d("Software Engineer", "BS and 2+ years of experience, or MS and 0+ years.").as_row()["years_ms"], 0)
+
     def test_as_row_satisfies_the_table_checks(self):
         db = fresh_store()
         version = ruleset_version()

@@ -18,7 +18,7 @@ REQUIRED = {
     "title": ("engineering", "intern", "off_lane", "general_application", "academic", "senior", "manager", "strong_entry",
               "new_grad", "early_career", "open_level", "level_nouns", "level_qualifiers"),
     "years": ("experience_words", "preferred", "degree_alternative", "company_age", "company_voice", "candidate_voice",
-              "body_entry"),
+              "body_entry", "master_words", "master_abbreviations", "bachelor_words", "upper_bound", "technologies"),
     "location": ("us_marks", "us_state_codes", "us_state_names", "us_cities", "non_us_countries", "non_us_cities",
                  "shared_city_names", "title_fillers"),
     "sponsorship": ("topic", "context", "self_context", "benefit", "non_discrimination", "negation", "negation_near",

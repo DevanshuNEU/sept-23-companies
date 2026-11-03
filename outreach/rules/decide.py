@@ -12,7 +12,7 @@ from .location import us_status
 from .sponsorship import citizenship_required, sponsorship_stance
 from .text import strip_invisible
 from .title import classify_title
-from .years import entry_wording, years_asked
+from .years import entry_wording, read_years
 
 
 def _clean(text: str | None) -> str:
@@ -110,7 +110,8 @@ def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
     title, body, location = _clean(p.title), _clean(p.body), _clean(p.location)
     country = None if p.country is None else _clean(p.country)
     t = classify_title(title, cfg)
-    years, years_quote = years_asked(body, cfg)
+    asked = read_years(body, cfg)
+    years, years_quote = asked.general, asked.quote
     tier, ok, basis = _level(t.lane, t.tier, t.basis, years, entry_wording(body, cfg),
                              cfg.candidate["max_years_asked"])
     stance, stance_quote = sponsorship_stance(body, cfg)
@@ -121,7 +122,7 @@ def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
         us=us_status(location, country, cfg, title), sponsorship=stance, sponsorship_quote=stance_quote,
         citizenship=citizen, citizenship_quote=citizen_quote, eligibility=status, eligibility_reason=reason,
         eligibility_quote=elig_quote, start_2027=starts_2027(title, body, cfg),
-        level_state=interim_level_state(t.lane, ok), years_ms=None,
+        level_state=interim_level_state(t.lane, ok), years_ms=asked.ms,
     )
 
 

@@ -133,8 +133,11 @@ class _Sentence:
         s = self.straight
         a, b = self.clause(start, end)
         i = bisect.bisect_right(self.master_ends, start) - 1  # the last master's word ending at or before the number
+        # "A master's degree or 4+ years" is a degree-or-years alternative, not a tier: "or" right before the number
+        # belongs to a tier only when the master's word follows it ("or MS and 0+ years", "or 1 year with an MS")
         if i >= 0 and self.master_starts[i] >= a and start - self.master_ends[i] <= _TIER_CHARS \
-                and len(s[self.master_ends[i]:start].split()) <= TIER_WORDS and not self._alternative_degree(i):
+                and len(s[self.master_ends[i]:start].split()) <= TIER_WORDS and not self._alternative_degree(i) \
+                and not _OR_BEFORE.search(s[max(0, start - 8):start]):
             return True
         j = _WITH_DEGREE.match(s, end)
         if j is None:

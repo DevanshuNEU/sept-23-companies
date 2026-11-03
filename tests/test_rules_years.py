@@ -17,7 +17,7 @@ CASES = [  # (body, years)
     ("1-3 years of professional experience.", 1),
     ("BS in Computer Science or equivalent practical experience. 2+ years of experience with data pipelines.", 2),
     ("Our customers have trusted us for 10 years.", None),
-    ("5+ years of server-side experience. 1+ years of professional experience with Go.", 5),
+    ("5+ years of server-side experience. 1+ years of professional experience with data work.", 5),
     ("BS or MS in Computer Science and 5+ years of professional experience.", 5),
     ("1" + EN + "3 years of professional experience.", 1),
     ("2+ years of experience with data pipelines. 5+ years of experience with payments is a plus.", 2),
@@ -87,7 +87,7 @@ FIX_CASES = [  # (body, years)
     ("2+ years of experience with data pipelines. 5+ years of experience with payments is a plus.", 2),
     # a preference marker that opens the sentence covers all of it
     ("Ideally, you have 5+ years of professional experience.", None),
-    ("Nice to have: 5+ years of experience with Rust.", None),
+    ("Nice to have: 5+ years of experience with payments.", None),
 ]
 
 
@@ -187,6 +187,18 @@ class MasterAndTechnologyTest(unittest.TestCase):
         # "BS or MS ... and 5+ years" asks 5 years of everyone
         self.assertEqual(self.read("BS or MS in Computer Science and 5+ years of professional experience."), (5, None))
         self.assertEqual(self.read("A master" + RQ + "s degree is a plus. 3 years of experience."), (3, None))
+
+    def test_masters_degree_or_years_is_no_tier(self):
+        # a degree-or-years alternative reads like "A degree, or 4+ years": no requirement, and no master's figure
+        for body in ("A Master" + RQ + "s degree or 4+ years of professional experience.",
+                     "MS or 4 years of professional experience.",
+                     "A Master" + RQ + "s degree, or 4+ years of professional experience."):
+            with self.subTest(body=body):
+                self.assertEqual(self.read(body), (None, None))
+
+    def test_or_before_a_tier_whose_masters_word_follows_still_counts(self):
+        self.assertEqual(self.read("BS and 2 years of experience, or MS and 0 years."), (2, 0))
+        self.assertEqual(self.read("2 years of experience, or 1 year with a master" + RQ + "s degree."), (2, 1))
 
     def test_no_master_words_no_ms_figure(self):
         self.assertEqual(self.read("3+ years of professional experience."), (3, None))

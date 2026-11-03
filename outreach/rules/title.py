@@ -56,10 +56,15 @@ def _levels(title: str, cfg: Config) -> list[tuple[str, str]]:
     return found
 
 
+def _distinct(words: list[str], text: str) -> int:
+    """How many of the words the text mentions, each counted once; a simple plural ("apis") counts as the word."""
+    return sum(1 for w in words if phrases([w, w + "s"]).search(text))
+
+
 def _software_lead(body: str, cfg: Config) -> int:
-    """How many more software words than physical words the body mentions (every mention counts)."""
+    """How many more distinct software words than physical words the body mentions."""
     t = cfg.title
-    return len(phrases(t["software_words"]).findall(body)) - len(phrases(t["physical_words"]).findall(body))
+    return _distinct(t["software_words"], body) - _distinct(t["physical_words"], body)
 
 
 def _lane(title: str, cfg: Config, body: str | None = None) -> tuple[str, str]:
@@ -77,9 +82,11 @@ def _lane(title: str, cfg: Config, body: str | None = None) -> tuple[str, str]:
         return "off_lane", f"Title says {academic.group(0)}, an academic post"
     if m := phrases(t["off_lane"]).search(title):
         return "off_lane", f"Title says {m.group(0)}, outside his lane"
-    if m := phrases(t["ambiguous"]).search(title):  # #154: could be software or physical work, so the body decides
-        if not (body or "").strip():
-            return "off_lane", f"Title says {m.group(0)} and the posting has no text to show it is software"
+    if (m := phrases(t["off_lane_unless_software"]).search(title)) and not phrases(t["software_titles"]).search(title):
+        return "off_lane", f"Title says {m.group(0)}, outside his lane"
+    # #154: could be software or physical work, so the body decides. With no body yet the title stays in the lane:
+    # the crawler fetches bodies only for engineering and intern lanes, so it waits for its body.
+    if (m := phrases(t["ambiguous"]).search(title)) and (body or "").strip():
         if _software_lead(body, cfg) < t["ambiguous_margin"]:
             return "off_lane", f"Title says {m.group(0)} and the posting is not clearly software work"
     return "engineering", ""

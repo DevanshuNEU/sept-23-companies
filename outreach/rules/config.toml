@@ -30,7 +30,7 @@ off_lane = [
   "solution consultant", "solutions architect", "solution architect", "pre sales", "account", "recruit", "recruiter",
   "recruiters", "recruiting", "recruitment", "designer", "mechanical", "electrical", "hardware",
   "firmware", "embedded", "soc", "mechatronic", "mechatronics", "robotics hardware", "analog", "rf", "fpga", "asic",
-  "silicon", "manufacturing", "manufacturer", "manufacture", "process engineer", "quality engineer", "qa",
+  "silicon", "manufacturing", "manufacturer", "manufacture", "quality engineer", "qa",
   "validation", "technician", "research engineer, bio", "research engineer, chem",
   "actuary", "actuarial", "clinical", "network engineer", "field service", "field technician", "installation",
   "facilities", "construction", "civil", "structural", "signal integrity", "packaging", "documentation",
@@ -47,15 +47,26 @@ off_lane = [
   "customer success engineer", "customer success engineers", "customer success manager",
   "customer success managers", "customer success specialist", "customer success architect",
   "robotics field engineer", "field application engineer", "field applications engineer", "cmm", "metrology",
-  # #154: physical, supply chain and non-tech data roles. "scientist" left this list (data and research scientists are
-  # tech); "design engineer" and "test engineer" moved to `ambiguous` below, where the body decides. Data Analyst, BI
-  # and annotation roles are not tech.
+  # #154: "scientist" left this list (data and research scientists are tech); "design engineer" and "test engineer"
+  # moved to `ambiguous` below, where the body decides.
+]
+# #154: physical, supply chain and non-tech data roles. Unlike `off_lane`, these do not make a title off lane when it
+# also names software work (`software_titles`): "Software Engineer, Logistics" stays in, "Logistics Engineer" is out.
+# Data Analyst, BI and annotation roles are not tech.
+off_lane_unless_software = [
   "supply chain", "procurement", "logistics", "sourcing", "buyer", "planner", "thermal", "optical", "photonics",
-  "laser", "hvac", "chemical", "materials", "data analyst", "business intelligence", "data annotation",
+  "laser", "process engineer", "hvac", "chemical", "materials", "data analyst", "business intelligence",
+  "data annotation",
+]
+software_titles = [
+  "software", "developer", "programmer", "swe", "sde", "full stack", "backend", "back end", "frontend", "front end",
+  "machine learning", "ml", "ai engineer", "data engineer", "platform", "infrastructure", "devops",
+  "site reliability", "sre",
 ]
 # #154: titles that can name a software or a physical role. The body decides: `software_words` against
-# `physical_words`, whole words, every mention counted; tech when software leads by `ambiguous_margin` or more, else
-# off lane (no body is off lane too). Checked after `off_lane`, so "Hardware Test Engineer" is off lane whatever it says.
+# `physical_words`, whole words (and their plurals), each word counted once; tech when software leads by `ambiguous_margin` or more, else
+# off lane. No body yet is engineering: the crawler fetches bodies only for engineering and intern lanes, so the title
+# waits for its body. Checked after `off_lane`, so "Hardware Test Engineer" is off lane whatever it says.
 ambiguous = [
   "systems engineer", "test engineer", "design engineer", "product engineer", "application engineer",
   "applications engineer", "project engineer",
@@ -133,7 +144,7 @@ open_level = [
 ]
 # refresh/finalcheck.py:39-40 L1_T and L2_T, refresh/final_merge.py:18: a level numeral counts only right after one of these
 level_nouns = [
-  "engineer", "developer", "swe", "sde", "programmer", "mts",
+  "engineer", "developer", "swe", "sde", "programmer", "mts", "scientist",
 ]
 # Task 8: role specialties that may sit between a level noun and its numeral ("Software Engineer Front-End 2",
 # "Software Engineer, Backend II"); technologies and product areas are left out, so "Web 3" and "Python 3" are not levels

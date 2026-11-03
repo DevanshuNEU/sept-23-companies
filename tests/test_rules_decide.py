@@ -43,7 +43,7 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(tech.lane, "engineering")
         physical = d("Systems Engineer", "Model parts in SolidWorks and run FEA in ANSYS.")
         self.assertEqual(physical.lane, "off_lane")
-        self.assertEqual(d("Systems Engineer", "").lane, "off_lane")
+        self.assertEqual(d("Systems Engineer", "").lane, "engineering")  # no body yet: the crawler fetches it
 
     def test_plain_title_is_not_stated(self):
         r = d("Software Engineer", "")

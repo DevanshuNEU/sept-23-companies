@@ -289,8 +289,30 @@ class TechWordTests(unittest.TestCase):
     def test_each_added_non_tech_word_is_off_lane(self):
         for word, title in NON_TECH_TITLES.items():
             with self.subTest(word=word):
-                self.assertIn(word, self.cfg.title["off_lane"])
+                self.assertIn(word, self.cfg.title["off_lane_unless_software"])
                 self.assertEqual(classify_title(title, self.cfg).lane, "off_lane")
+
+    def test_non_tech_words_do_not_hide_a_title_that_names_software_work(self):
+        for title in ("Software Engineer, Logistics", "Backend Engineer, Supply Chain", "Platform Engineer, Procurement",
+                      "Machine Learning Engineer, Materials Discovery", "Frontend Developer, Thermal Dashboards",
+                      "Data Engineer, Planner", "SRE, Optical Networks", "DevOps Engineer, Laser Fabs",
+                      "Full Stack Engineer, HVAC Controls", "Infrastructure Engineer, Sourcing"):
+            with self.subTest(title=title):
+                self.assertEqual(classify_title(title, self.cfg).lane, "engineering")
+
+    def test_non_tech_titles_without_software_words_are_off_lane(self):
+        for title in ("Logistics Engineer", "Thermal Systems Engineer", "Process Engineer", "Materials Engineer II"):
+            with self.subTest(title=title):
+                self.assertEqual(classify_title(title, self.cfg, SOFTWARE_BODY).lane, "off_lane")
+
+    def test_older_off_lane_words_keep_today_s_behavior_beside_software_words(self):
+        for title in ("Software Engineer, Hardware", "Backend Engineer, Mechanical", "Software Support Engineer",
+                      "Embedded Software Engineer"):
+            with self.subTest(title=title):
+                self.assertEqual(classify_title(title, self.cfg).lane, "off_lane")
+
+    def test_software_title_words_come_from_config(self):
+        self.assertTrue(self.cfg.title["software_titles"])
 
     def test_data_analyst_bi_and_annotation_alone_are_not_tech(self):
         for title in ("Data Analyst", "Senior Data Analyst", "Business Intelligence Analyst", "Data Annotation Specialist"):
@@ -303,6 +325,18 @@ class TechWordTests(unittest.TestCase):
                       "Senior Research Scientist"):
             with self.subTest(title=title):
                 self.assertEqual(classify_title(title, self.cfg).lane, "engineering")
+
+    def test_scientist_is_a_level_noun(self):
+        for title, tier, basis in (("Applied Scientist II", "swe2", "Title says Scientist II"),
+                                   ("Research Scientist III", "swe2", "Title says III"),
+                                   ("Data Scientist I", "swe1", "Title says Scientist I"),
+                                   ("Research Scientist IV", "senior", None),
+                                   ("Staff Applied Scientist II", "senior", None)):
+            with self.subTest(title=title):
+                got = classify_title(title, self.cfg)
+                self.assertEqual((got.lane, got.tier), ("engineering", tier))
+                if basis:
+                    self.assertEqual(got.basis, basis)
 
     def test_scientist_without_a_tech_word_names_no_engineering_role(self):
         self.assertEqual(classify_title("Scientist I/II", self.cfg).lane, "not_engineering")
@@ -340,12 +374,21 @@ class AmbiguousTitleTests(unittest.TestCase):
         self.assertIsNone(got.tier)
         self.assertTrue(got.basis.strip())
 
-    def test_ambiguous_title_with_no_body_is_off_lane(self):
+    def test_ambiguous_title_with_no_body_is_engineering_until_its_body_arrives(self):
+        # the crawler fetches bodies only for engineering and intern lanes, so a bodiless ambiguous title stays in
+        # the lane and the scorer decides once the body is there
         for title in AMBIGUOUS_TITLES:
             for body in (None, "", "   "):
                 with self.subTest(title=title, body=body):
-                    self.assertEqual(classify_title(title, self.cfg, body).lane, "off_lane")
-        self.assertEqual(classify_title("Systems Engineer", self.cfg).lane, "off_lane")
+                    got = classify_title(title, self.cfg, body)
+                    self.assertEqual((got.lane, got.tier), ("engineering", None))
+        self.assertEqual(classify_title("Systems Engineer", self.cfg).lane, "engineering")
+
+    def test_the_same_posting_with_a_physical_body_is_off_lane(self):
+        for title in AMBIGUOUS_TITLES:
+            with self.subTest(title=title):
+                self.assertEqual(classify_title(title, self.cfg, "").lane, "engineering")
+                self.assertEqual(classify_title(title, self.cfg, PHYSICAL_BODY).lane, "off_lane")
 
     def test_every_ambiguous_title_follows_its_body(self):
         for title in AMBIGUOUS_TITLES:
@@ -363,6 +406,18 @@ class AmbiguousTitleTests(unittest.TestCase):
 
     def test_a_body_with_neither_kind_of_word_is_off_lane(self):
         self.assertEqual(classify_title("Systems Engineer", self.cfg, "You will join a friendly team.").lane, "off_lane")
+
+    def test_distinct_words_count_once(self):
+        body = "Python Python Python Python Python. Python is our language. PLC."
+        self.assertEqual(classify_title("Systems Engineer", self.cfg, body).lane, "off_lane")
+        self.assertEqual(classify_title("Systems Engineer", self.cfg, body + " Docker and SQL too.").lane,
+                         "engineering")
+
+    def test_simple_plurals_count(self):
+        self.assertEqual(classify_title("Systems Engineer", self.cfg, "You will design APIs and microservices.").lane,
+                         "engineering")
+        self.assertEqual(classify_title("Systems Engineer", self.cfg, "Read PCBs and PLCs; check BOMs and CFDs.").lane,
+                         "off_lane")
 
     def test_words_match_whole_words_only(self):
         # "javascript" is not "java"; "rustic" is not "rust"; "capital" holds no word of either list

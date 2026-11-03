@@ -3469,6 +3469,62 @@
         "title": "MessageRevisionBody",
         "type": "object"
       },
+      "MissBody": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "MissBody",
+        "type": "object"
+      },
+      "MissResult": {
+        "properties": {
+          "cause": {
+            "enum": [
+              "no_company",
+              "no_board",
+              "not_read_yet",
+              "read_wrong_level",
+              "read_not_tech",
+              "hidden_visa",
+              "wrong_date",
+              "found",
+              "unknown_site"
+            ],
+            "title": "Cause",
+            "type": "string"
+          },
+          "causeText": {
+            "title": "Causetext",
+            "type": "string"
+          },
+          "missId": {
+            "title": "Missid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "missId",
+          "cause",
+          "causeText"
+        ],
+        "title": "MissResult",
+        "type": "object"
+      },
       "NeedsYouView": {
         "properties": {
           "asOf": {
@@ -12042,6 +12098,107 @@
           }
         },
         "summary": "Ping"
+      }
+    },
+    "/api/pipeline/misses": {
+      "post": {
+        "operationId": "log_miss",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MissBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Log Miss",
+        "tags": [
+          "pipeline"
+        ]
       }
     },
     "/api/plan": {

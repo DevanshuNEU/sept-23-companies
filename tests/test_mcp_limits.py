@@ -38,7 +38,7 @@ FIX = ROOT / "tests" / "fixtures"
 ALL_TOOLS = ("ranked_companies", "company", "person", "followups_due", "record_research", "flag_review", "mark_no_go",
             "save_draft", "save_followup", "save_linkedin_note", "add_people", "reader_next", "reader_submit",
             "prepare_targets", "submit_candidates", "knock_status", "contact_check", "intake", "log_sent", "draft_brief",
-             "connect_followups")
+             "connect_followups", "log_miss")
 BODY = ("Hi Lee,\n\nI read your post on the queue rewrite at Acme and how the team moved billing off a nightly batch. "
         "I build backend systems in Go and Python, and last year I shipped a queue that handled thousands of "
         "requests a minute without a page. I would like to help your team keep that kind of work calm, and I am "
@@ -153,6 +153,7 @@ class SweepCase(McpCase):
             "contact_check": ({"company": "Acme", "people": [{"name": "Lin Kedin"}]}, None),
             "intake": ({"people": [{"name": "Ida Intake", "title": "Software Engineer", "company": "Acme",
                                     "linkedin_url": "https://www.linkedin.com/in/ida-intake"}]}, None),
+            "log_miss": ({"url": "https://jobs.ashbyhq.com/acme/never-seen", "note": "from a friend"}, None),
             "log_sent": ({"requests": [{"person_id": self.lin, "channel": "linkedin_request",
                                         "note_text": "Hi Lin, I read your post on the queue rewrite."}]}, None),
         }
@@ -170,7 +171,7 @@ class ToolListTest(unittest.TestCase):
     def test_the_tool_list_is_exactly_the_pinned_tools(self):
         names = [s.name for s in server.tool_specs()]
         self.assertEqual(sorted(names), sorted(ALL_TOOLS))
-        self.assertEqual(len(names), 21)
+        self.assertEqual(len(names), 22)
 
 
 class SweepTest(SweepCase):
@@ -244,7 +245,7 @@ class RawStoreTest(SweepCase):
         calls = self.valid()
         statements = self.statements()
         writers = [name for name in ALL_TOOLS if spec(name).grants]
-        self.assertEqual(len(writers), 12)
+        self.assertEqual(len(writers), 13)
         for name in writers:
             args, _named = calls[name] if name != "reader_submit" else self.valid()["reader_submit"]
             self.ok(name, args)

@@ -50,6 +50,7 @@ PINNED = {
     "intake": {"person": Grant(insert=True, update=PERSON_UPDATE),
                "person_source": INSERT, "event": INSERT},
     "log_sent": {"linkedin_log": INSERT, "outreach_touch": INSERT, "event": INSERT},
+    "log_miss": {"miss": INSERT},
 }
 
 
@@ -173,6 +174,21 @@ class GrantsCase(McpCase):
             ("INSERT INTO daily_list(list_date, built_at, capacity) VALUES ('2026-11-10', ?, 5)", (NOW,)),
         ], {"requests": [{"person_id": lin, "channel": "linkedin_request",
                           "note_text": "Hi Lin, I read your post on the queue rewrite."}]})
+
+    def test_log_miss_cannot_write_beyond_its_grants(self):
+        miss = self.db.execute("INSERT INTO miss(url, pasted_at, cause) VALUES ('https://x.example/j', ?, 'no_company')",
+                               (NOW,)).lastrowid
+        self.check_tool("log_miss", [
+            ("UPDATE miss SET cause = 'found' WHERE miss_id = ?", (miss,)),
+            ("UPDATE miss SET resolved_at = ? WHERE miss_id = ?", (NOW, miss)),
+            ("DELETE FROM miss WHERE miss_id = ?", (miss,)),
+            ("INSERT INTO event(at, recorded_at, entity, kind, actor) VALUES (?, ?, 'miss', 'logged', 'claude')",
+             (NOW, NOW)),
+            ("INSERT INTO feed_listing(source, listing_id, url, company_name, title, first_seen_at, last_seen_at, "
+             "active, backfill) VALUES ('simplify', 'L1', 'https://x.example', 'X', 'SWE', ?, ?, 1, 0)", (NOW, NOW)),
+            ("INSERT INTO company(name, status, status_at, created_at) VALUES ('Newco', 'candidate', ?, ?)",
+             (NOW, NOW)),
+        ], {"url": "https://jobs.ashbyhq.com/acme/never-seen", "note": "from a friend"})
 
     def test_record_research_cannot_write_beyond_its_grants(self):
         self.check_tool("record_research", [

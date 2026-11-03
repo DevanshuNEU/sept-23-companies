@@ -27,8 +27,8 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from outreach.crawl.postings import source_key
 from outreach.outcomes.windows import ny_day
+from outreach.pipeline.match import GREENHOUSE_KEYS_SQL, key_candidates, workday_tokens
 from outreach.pipeline.urls import BoardKey, posting_key
 from outreach.store import append_event, iso_utc, name_key
 from outreach.store.timefmt import ISO_FMT
@@ -51,7 +51,6 @@ _FROM = ("FROM posting p LEFT JOIN decision d ON d.posting_id = p.posting_id "
 _COLUMNS = "SELECT p.posting_id, p.source_key, p.first_seen_at, d.level_ok, d.level_tier "
 POSTING_BY_KEY_SQL = _COLUMNS + _FROM + "WHERE p.source_key IN ({marks})"
 POSTING_BY_ID_SQL = _COLUMNS + _FROM + "WHERE p.posting_id IN ({marks})"
-_GREENHOUSE_KEYS_SQL = "SELECT posting_id, source_key FROM posting WHERE source_key >= 'greenhouse:' AND source_key < 'greenhouse;'"
 
 
 @dataclass(frozen=True)
@@ -120,26 +119,6 @@ def _window(conn: sqlite3.Connection, now: str) -> list[_Listing]:
     return [_Listing(*row) for row in rows]
 
 
-def _workday_tokens(conn: sqlite3.Connection) -> dict[str, str]:
-    """Stored Workday board tokens by lower-cased token. A board keeps its site segment's case (`acme.wd5/External`)
-    and a link may spell it another way."""
-    return {token.lower(): token for (token,) in conn.execute("SELECT token FROM board WHERE ats = 'workday'")}
-
-
-def _key_candidates(listing: _Listing, workday: dict[str, str]) -> tuple[str, ...]:
-    """The `source_key` a listing's link names, in the link's case and lower-cased, and for Workday also with the
-    stored board's token; () when the link names no job. The path's case is the link's own: a link whose path case
-    differs from the stored one is not found."""
-    if not listing.ats or not listing.token or not listing.native_id:
-        return ()
-    exact = source_key(listing.ats, listing.token, listing.native_id)
-    found = [exact, exact.lower()]
-    stored = workday.get(listing.token.lower()) if listing.ats == "workday" else None
-    if stored:
-        found.append(source_key("workday", stored, listing.native_id))
-    return tuple(dict.fromkeys(found))
-
-
 def _by_keys(conn: sqlite3.Connection, keys: list[str]) -> dict[str, _Posting]:
     """Postings by lower-cased `source_key`, for the keys asked (in either case)."""
     found: dict[str, _Posting] = {}
@@ -154,7 +133,7 @@ def _greenhouse_by_native(conn: sqlite3.Connection, native_ids: set[str]) -> dic
     """For listings with a `gh_jid` and no board token: the Greenhouse posting ending in `:<native_id>`, by native id.
     The earliest first sight wins when two boards hold the same number."""
     by_id: dict[int, str] = {}
-    for posting_id, key in conn.execute(_GREENHOUSE_KEYS_SQL):
+    for posting_id, key in conn.execute(GREENHOUSE_KEYS_SQL):
         native = key.rsplit(":", 1)[1]
         if native in native_ids:
             by_id[posting_id] = native
@@ -170,8 +149,9 @@ def _greenhouse_by_native(conn: sqlite3.Connection, native_ids: set[str]) -> dic
 
 def _match(conn: sqlite3.Connection, listings: list[_Listing]) -> list[_Posting | None]:
     """The posting each listing is covered by, or None, in order."""
-    workday = _workday_tokens(conn) if any(x.ats == "workday" for x in listings) else {}
-    wanted = list(dict.fromkeys(k for listing in listings for k in _key_candidates(listing, workday)))
+    workday = workday_tokens(conn) if any(x.ats == "workday" for x in listings) else {}
+    wanted = list(dict.fromkeys(
+        k for x in listings for k in key_candidates(x.ats, x.token, x.native_id, workday)))
     by_key = _by_keys(conn, wanted)
     bare = {x.native_id for x in listings if x.ats == "greenhouse" and not x.token and x.native_id}
     by_native = _greenhouse_by_native(conn, bare) if bare else {}

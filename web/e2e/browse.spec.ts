@@ -45,6 +45,14 @@ test('Jobs: the list, the tabs and filters, then pass and go ahead by keyboard',
   const next = await jobs.nth(2).getAttribute('data-job');
   await page.keyboard.press('x');
   await expect(jobs).toHaveCount(19);
+  await expect(page.getByText('Passed.', { exact: true })).toBeVisible();
+
+  // Z takes the pass back inside the window: the row returns and nothing is sent.
+  await page.keyboard.press('z');
+  await expect(jobs).toHaveCount(20);
+  await expect(jobs.nth(1)).toHaveAttribute('data-job', '9001');
+  await page.keyboard.press('x');
+  await expect(jobs).toHaveCount(19);
   await expect(page.getByText('19 at your level in the last 30 days')).toBeVisible();
   await expect(jobs.nth(1)).toHaveAttribute('aria-current', 'true');
   await expect(jobs.nth(1)).toHaveAttribute('data-job', next ?? '');
@@ -53,6 +61,9 @@ test('Jobs: the list, the tabs and filters, then pass and go ahead by keyboard',
   await page.keyboard.press('ArrowDown');
   await expect(jobs.nth(2)).toHaveAttribute('aria-current', 'true');
   await page.keyboard.press('a');
+  await expect(page.getByText('Going ahead with Baseten.')).toBeVisible();
+  await expect(jobs.nth(2)).toContainText('Going ahead');
+  await page.clock.runFor(9000); // the undo window closes and both writes go out
   await expect(jobs.nth(2)).toContainText("Added Baseten to today's list.");
   await expect(jobs).toHaveCount(19);
 
@@ -60,6 +71,7 @@ test('Jobs: the list, the tabs and filters, then pass and go ahead by keyboard',
   await page.getByPlaceholder('Search by company name').fill('cerebrium');
   await expect(jobs.first()).toHaveAttribute('data-company', 'Cerebrium');
   await jobs.first().getByRole('button', { name: /^Go ahead/ }).click();
+  await page.clock.runFor(9000); // the undo window closes
   await expect(page.getByText('You contacted Cerebrium and are waiting for an answer.')).toBeVisible();
   await expect(jobs.first().getByRole('button', { name: /^Go ahead/ })).toBeVisible();
 

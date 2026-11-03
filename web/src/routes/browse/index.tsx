@@ -2,10 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { keepPreviousData, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, SearchX } from 'lucide-react';
-import { toast } from 'sonner';
 import {
-  ApiError,
-  newRequestId,
   pollMs,
   queryKeys,
   usePageClient,
@@ -27,6 +24,7 @@ import { useAnnounce, useHotkeys, type Binding } from '@/keyboard/hotkeys';
 import { formatDueDay } from '@/lib/format';
 import { openExternal, safeHref } from '@/lib/safe-href';
 import { cn } from '@/lib/utils';
+import { usePendingWrite, useViewQuery } from '@/pending/pending';
 
 const GROUP = 'Jobs';
 /** How long typing waits before the search is asked. */
@@ -58,7 +56,13 @@ const ago = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day ago' :
 const sizeLine = (j: JobRow) => (j.size === null ? 'Size not known' : `${j.big ? 'Big company, ' : ''}${plural(j.size, 'person', 'people')}`);
 const windowText = (w: JobsWindow) => (w === 'any' ? '' : ` in the last ${w} days`);
 const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : 'at higher levels');
-const message = (err: unknown) => (err instanceof ApiError ? err.message : 'The change did not go through. Nothing was saved. Try again.');
+
+/**
+ * What he has asked for and the server has not heard yet: postings passed and companies being gone ahead with. It is a
+ * query only so the pending-write overlay can lay these over it (Undo drops them, a commit settles them).
+ */
+interface Marks { hidden: Id[]; ahead: Id[] }
+const NO_MARKS: Marks = { hidden: [], ahead: [] };
 
 /** "Widen the window, clear the search, or turn off Not contacted yet." Names only what is on. */
 function whatToWiden(on: { window: boolean; q: boolean; size: boolean; notContacted: boolean }): string {
@@ -90,7 +94,7 @@ function JobItem({
   job,
   current,
   answer,
-  busy,
+  going,
   onSelect,
   onPass,
   onGoAhead,
@@ -98,7 +102,7 @@ function JobItem({
   job: JobRow;
   current: boolean;
   answer: string | undefined;
-  busy: boolean;
+  going: boolean;
   onSelect: () => void;
   onPass: () => void;
   onGoAhead: () => void;
@@ -138,12 +142,16 @@ function JobItem({
           <Check aria-hidden className="mt-0.5 size-3.5 shrink-0 text-ok" />
           {answer}
         </p>
+      ) : going ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          Going ahead
+        </p>
       ) : (
         <div role="group" aria-label="Your answer" className="flex gap-1.5">
-          <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'x' : undefined} disabled={busy} onClick={onPass}>
+          <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'x' : undefined} onClick={onPass}>
             Pass
           </Button>
-          <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'a' : undefined} disabled={busy} onClick={onGoAhead}>
+          <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'a' : undefined} onClick={onGoAhead}>
             Go ahead
           </Button>
         </div>
@@ -187,9 +195,11 @@ export default function BrowsePage() {
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
   const [active, setActive] = useState<Id | null>(null);
-  const [hidden, setHidden] = useState<ReadonlySet<Id>>(new Set());
   const [answers, setAnswers] = useState<ReadonlyMap<Id, string>>(new Map());
-  const [busy, setBusy] = useState<ReadonlySet<Id>>(new Set());
+  const write = usePendingWrite();
+  const marks = useViewQuery(queryKeys.jobsMarks, () => Promise.resolve(NO_MARKS));
+  const hidden = useMemo(() => new Set(marks.data?.hidden), [marks.data]);
+  const ahead = useMemo(() => new Set(marks.data?.ahead), [marks.data]);
   const list = useRef<HTMLUListElement>(null);
   const searchBox = useRef<HTMLInputElement>(null);
 
@@ -221,6 +231,15 @@ export default function BrowsePage() {
   const total = last ? Math.max(last.total - passed, 0) : undefined;
   const counts = last ? { your_level: last.counts.yourLevel - (tab === 'your_level' ? passed : 0), higher: last.counts.higher - (tab === 'higher' ? passed : 0) } : undefined;
 
+  // A pass taken back (Undo, or it did not go through) puts the row back and puts him back on it. Done while rendering,
+  // so the very next key already acts on that row.
+  const [seenHidden, setSeenHidden] = useState(hidden);
+  if (hidden !== seenHidden) {
+    setSeenHidden(hidden);
+    const back = [...seenHidden].find((id) => !hidden.has(id) && loaded.some((j) => j.postingId === id));
+    if (back !== undefined) setActive(back);
+  }
+
   const current = jobs.find((j) => j.postingId === active) ?? jobs[0] ?? null;
   const index = current ? jobs.indexOf(current) : -1;
 
@@ -234,41 +253,40 @@ export default function BrowsePage() {
     if (next) setActive(next.postingId);
   };
 
-  const mark = <T,>(set: ReadonlySet<T>, item: T, on: boolean): ReadonlySet<T> => {
-    const next = new Set(set);
-    if (on) next.add(item);
-    else next.delete(item);
-    return next;
-  };
-
+  /** Nothing is sent now: the row leaves at once and the toast offers Undo. The pass goes out when the window closes, or when he leaves the page. */
   const pass = (job: JobRow) => {
     const id = job.postingId;
-    if (hidden.has(id) || busy.has(id) || answers.has(id)) return;
+    if (hidden.has(id) || ahead.has(id) || answers.has(id)) return;
     // The row he is on leaves, and the one below it (else the one above) becomes the current one.
     if (current?.postingId === id) setActive((jobs[index + 1] ?? jobs[index - 1])?.postingId ?? null);
-    setHidden((h) => mark(h, id, true));
     announce(`Passed. ${job.title} is off the list.`);
-    client.passJob(id, { requestId: newRequestId() }).then(
-      () => void queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll }),
-      (err: unknown) => {
-        setHidden((h) => mark(h, id, false));
-        toast.error(message(err));
-      },
-    );
+    write({
+      id: `job-pass:${id}`,
+      label: 'Passed.',
+      afterCommit: 'Passed.',
+      patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, hidden: [...m.hidden, id] }) }],
+      // The list is read again before the row's mark is dropped, so the row does not flash back.
+      commit: (o) => client.passJob(id, o).then(() => queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll })),
+    });
   };
 
+  /** The same: the row says "Going ahead" with Undo for the window; the API's own sentence replaces it once it answers. */
   const goAhead = (job: JobRow) => {
     const id = job.postingId;
-    if (hidden.has(id) || busy.has(id) || answers.has(id)) return;
-    setBusy((b) => mark(b, id, true));
-    client.goAhead(id, { requestId: newRequestId() }).then(
-      (res) => {
-        setAnswers((a) => new Map(a).set(id, res.text));
-        announce(res.text);
-        void queryClient.invalidateQueries({ queryKey: queryKeys.plan, exact: true });
-      },
-      (err: unknown) => toast.error(message(err)),
-    ).finally(() => setBusy((b) => mark(b, id, false)));
+    if (hidden.has(id) || ahead.has(id) || answers.has(id)) return;
+    const label = `Going ahead with ${job.companyName}.`;
+    write({
+      id: `job-ahead:${id}`,
+      label,
+      afterCommit: label,
+      patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, ahead: [...m.ahead, id] }) }],
+      commit: (o) =>
+        client.goAhead(id, o).then((res) => {
+          setAnswers((a) => new Map(a).set(id, res.text));
+          announce(res.text);
+          void queryClient.invalidateQueries({ queryKey: queryKeys.plan, exact: true });
+        }),
+    });
   };
 
   const open = current !== null;
@@ -392,7 +410,7 @@ export default function BrowsePage() {
                 job={j}
                 current={j.postingId === current?.postingId}
                 answer={answers.get(j.postingId)}
-                busy={busy.has(j.postingId)}
+                going={ahead.has(j.postingId)}
                 onSelect={() => setActive(j.postingId)}
                 onPass={() => pass(j)}
                 onGoAhead={() => goAhead(j)}

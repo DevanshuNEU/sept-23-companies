@@ -18,6 +18,7 @@ export const queryKeys = {
   browse: (params: object) => ['plan', 'browse', params],
   jobsAll: ['jobs'],
   jobs: (params: object) => ['jobs', params],
+  jobsMarks: ['jobs-marks'],
   outcomePrompt: ['outcome-prompt'],
   wins: ['wins'],
   progress: ['progress'],

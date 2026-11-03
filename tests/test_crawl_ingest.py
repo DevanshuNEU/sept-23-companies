@@ -249,7 +249,10 @@ class ListBodyAmbiguousTitleTests(IngestTestCase):
         return row["body"] if row else None
 
     def test_a_design_engineer_with_a_physical_body_is_off_lane_and_its_body_is_stored(self):
-        body = "Own mechanical design in SolidWorks. Run FEA and tolerance stacks. Release drawings to the machine shop."
+        body = ("Own mechanical design in SolidWorks. Run FEA and tolerance stacks. Release drawings to the machine shop. "
+                "The team shares lunch on Fridays, mentors meet new hires weekly, and the whole group plans its year "
+                "together in the spring. We value kind colleagues, clear writing and steady growth in every role here.")
+        self.assertGreaterEqual(len(body), 300)  # #172: a body under 300 characters counts as no body
         pid = self.read_lever("Design Engineer", body)
         self.assertEqual(self.decision(pid)["lane"], "off_lane")
         self.assertEqual(self.stored_body(pid), body)

@@ -1,6 +1,6 @@
 /**
  * Sample data for the job list (#156), as the API answers it: open engineering postings, newest first, then the
- * smaller company, then the posting id; 50 a page by a cursor. 80 postings from 10 companies: every fourth is at a
+ * smaller company, then the posting id; 50 a page by a cursor. 80 postings from 11 companies: every fourth is at a
  * higher level, every fifth is dated by when Knock saw it, and the oldest is 94 days old, so each tab, window and size
  * has something to show.
  */
@@ -9,7 +9,7 @@ import type { IsoDate, IsoTime, JobRow, JobsParams, JobsView } from '../types';
 /** The API's `name_key` in the small: lower case, letters and digits only. A search with none of either finds nothing. */
 const nameKey = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-interface Company { id: number; name: string; size: number | null; yc?: boolean; everify?: boolean; noSponsor?: boolean; contactedOn?: IsoDate }
+interface Company { id: number; name: string; size: number | null; guessedBig?: boolean; yc?: boolean; everify?: boolean; noSponsor?: boolean; contactedOn?: IsoDate }
 
 const COMPANIES: Company[] = [
   { id: 7001, name: 'Retell AI', size: 45, yc: true, everify: true },
@@ -22,6 +22,7 @@ const COMPANIES: Company[] = [
   { id: 7008, name: 'Juniper', size: 75, noSponsor: true },
   { id: 7009, name: 'Kestrel', size: 1200 },
   { id: 7010, name: 'Lumen', size: 30, yc: true },
+  { id: 7011, name: 'Granite Systems', size: null, guessedBig: true },
 ];
 
 const TITLES = ['Software Engineer, New Grad', 'Software Engineer, Early Career', 'Software Engineer I', 'Software Engineer, Backend'];
@@ -51,11 +52,11 @@ export function buildJobs(today: IsoDate): { rows: JobRow[]; higher: ReadonlySet
       location: PLACES[i % PLACES.length] as string,
       levelTag: up ? 'SDE 2' : (TAGS[i % 4] as string),
       date: dayBefore(today, ageDays), dateKind: i % 5 === 4 ? 'seen' : 'posted', ageDays,
-      companyId: c.id, companyName: c.name, size: c.size, big: c.size !== null && c.size > 300,
+      companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
       saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
     };
   });
-  const rank = (r: JobRow) => (r.size === null ? 10_000_000 : r.big ? 20_000_000 + r.size : r.size);
+  const rank = (r: JobRow) => (r.size === null ? (r.big ? 20_000_000 : 10_000_000) : r.big ? 20_000_000 + r.size : r.size);
   rows.sort((a, b) => b.date.localeCompare(a.date) || rank(a) - rank(b) || a.postingId - b.postingId);
   return { rows, higher };
 }
@@ -64,7 +65,7 @@ export function buildJobs(today: IsoDate): { rows: JobRow[]; higher: ReadonlySet
 export function jobsView(all: JobRow[], higher: ReadonlySet<number>, p: JobsParams, asOf: IsoTime, limit = 50): JobsView {
   const key = nameKey(p.q);
   const days = p.window === 'any' ? Infinity : Number(p.window);
-  const sizeOk = (r: JobRow) => p.size === 'any' || (p.size === 'unknown' ? r.size === null : p.size === 'big' ? r.big : r.size !== null && !r.big);
+  const sizeOk = (r: JobRow) => p.size === 'any' || (p.size === 'unknown' ? r.size === null && !r.big : p.size === 'big' ? r.big : r.size !== null && !r.big);
   const base = all
     .filter((r) => r.ageDays <= days)
     .filter(sizeOk)

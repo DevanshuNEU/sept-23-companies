@@ -11,7 +11,7 @@ from outreach.pipeline.joblist import JobFilters, JobRow, passed_posting_ids, qu
 from outreach.store import append_event
 from outreach.store.timefmt import utcnow
 from tests.plan_seed import seed_outbound, seed_person
-from tests.ranking_store import decision, evidence, merge, no_go, posting
+from tests.ranking_store import board, decision, evidence, merge, no_go, posting
 from tests.storetest import fresh_store, seed_company
 
 NOW = "2026-11-03T15:00:00Z"  # 10:00 on 2026-11-03 in New York
@@ -506,6 +506,128 @@ class PagingTests(JobListCase):
                 self.run_query(**bad)
 
 
+class BigGuessTests(JobListCase):
+    """A company with no size on file is big when it has more than 50 open US postings or a Workday or Oracle board."""
+
+    def us_postings(self, co, n, *, us="yes"):
+        """`n` open postings that are not listed (lane not_engineering) but count as read-US postings."""
+        for _ in range(n):
+            self.job(co, lane="not_engineering", us=us)
+
+    def test_unknown_size_with_many_us_postings_is_big(self):
+        co = self.company()
+        self.us_postings(co, 50)
+        pid = self.job(co, tier="not_stated", ok=0, level_state="uncertain")  # the 51st open US posting
+        self.assertEqual(self.ids(), [])
+        row, = self.run_query(view="higher").rows
+        self.assertEqual((row.posting_id, row.size, row.big), (pid, None, True))
+
+    def test_fifty_us_postings_is_not_yet_big(self):
+        co = self.company()
+        self.us_postings(co, 49)
+        pid = self.job(co, tier="not_stated", ok=0, level_state="uncertain")  # the 50th
+        row, = self.run_query().rows
+        self.assertEqual((row.posting_id, row.size, row.big), (pid, None, False))
+
+    def test_only_open_postings_read_as_us_count(self):
+        co = self.company()
+        self.us_postings(co, 30)
+        self.us_postings(co, 30, us="unknown")
+        for _ in range(30):
+            gone = posting(self.conn, co, posted_on="2026-11-02", closed=True)
+            decision(self.conn, gone, lane="not_engineering")
+        pid = self.job(co, tier="not_stated", ok=0, level_state="uncertain")
+        self.assertEqual(self.ids(), [pid])
+
+    def test_a_known_size_is_never_guessed(self):
+        co = self.company(size=40)
+        self.us_postings(co, 60)
+        board(self.conn, co, ats="workday")
+        pid = self.job(co, tier="not_stated", ok=0, level_state="uncertain")
+        row, = self.run_query().rows
+        self.assertEqual((row.posting_id, row.size, row.big), (pid, 40, False))
+
+    def test_unknown_size_with_workday_board_is_big(self):
+        for ats in ("workday", "oracle_orc"):
+            co = self.company()
+            board(self.conn, co, ats=ats)
+            pid = self.job(co, tier="not_stated", ok=0, level_state="uncertain")
+            row, = [r for r in self.run_query(view="higher").rows if r.posting_id == pid]
+            self.assertEqual((row.size, row.big), (None, True), msg=ats)
+            self.assertNotIn(pid, self.ids())
+
+    def test_an_inactive_enterprise_board_does_not_make_it_big(self):
+        co = self.company()
+        board(self.conn, co, ats="workday", active=0)
+        pid = self.job(co, tier="not_stated", ok=0, level_state="uncertain")
+        self.assertEqual(self.ids(), [pid])
+
+    def test_unknown_size_small_board_stays_your_level(self):
+        co = self.company()
+        board(self.conn, co, ats="greenhouse")
+        board(self.conn, co, ats="lever")
+        pid = self.job(co, tier="not_stated", ok=0, level_state="uncertain")
+        row, = self.run_query().rows
+        self.assertEqual((row.posting_id, row.size, row.big), (pid, None, False))
+
+    def test_fit_at_big_company_needs_us_yes(self):
+        known, guessed = self.company(size=5000), self.company()
+        board(self.conn, guessed, ats="workday")
+        yes = [self.job(c, level_state="fit", us="yes") for c in (known, guessed)]
+        unclear = [self.job(c, level_state="fit", us="unknown") for c in (known, guessed)]
+        self.assertEqual(set(self.ids()), set(yes))
+        self.assertEqual(set(self.ids(view="higher")), set(unclear))
+        self.assertEqual(self.run_query().counts, {"your_level": 2, "higher": 2})
+
+    def test_unknown_us_at_small_company_stays(self):
+        small, unknown = self.company(size=50), self.company()
+        a = self.job(small, level_state="fit", us="unknown")
+        b = self.job(unknown, level_state="fit", us="unknown")
+        c = self.job(unknown, tier="not_stated", ok=0, level_state="uncertain", us="unknown")
+        self.assertEqual(set(self.ids()), {a, b, c})
+        self.assertEqual(self.ids(view="higher"), [])
+
+    def test_an_uncertain_posting_at_a_known_big_company_is_higher_even_with_us_yes(self):
+        pid = self.job(self.company(size=900), tier="not_stated", ok=0, level_state="uncertain", us="yes")
+        self.assertEqual((self.ids(), self.ids(view="higher")), ([], [pid]))
+
+    def test_the_count_and_the_boards_follow_a_merge(self):
+        survivor, dupe, other = self.company("Survivor"), self.company("Survivor Inc"), self.company("Other")
+        self.us_postings(survivor, 30)
+        self.us_postings(dupe, 25)  # 55 over the pair, neither over 50 alone
+        merge(self.conn, dupe, survivor)
+        pid = self.job(survivor, tier="not_stated", ok=0, level_state="uncertain")
+        self.us_postings(other, 25)
+        other_pid = self.job(other, tier="not_stated", ok=0, level_state="uncertain")
+        self.assertEqual(self.ids(), [other_pid])
+        self.assertEqual(self.ids(view="higher"), [pid])
+
+        into, away = self.company("Into"), self.company("Away")
+        board(self.conn, away, ats="workday")
+        merge(self.conn, away, into)
+        via_board = self.job(into, tier="not_stated", ok=0, level_state="uncertain")
+        self.assertIn(via_board, self.ids(view="higher"))
+
+    def test_size_filter_uses_big_guess(self):
+        small, known_big, unknown, guessed = self.company(size=50), self.company(size=900), self.company(), self.company()
+        board(self.conn, guessed, ats="workday")
+        a, b, c, d = (self.job(co) for co in (small, known_big, unknown, guessed))
+        self.assertEqual(self.ids(size="small"), [a])
+        self.assertEqual(sorted(self.ids(size="big")), sorted([b, d]))
+        self.assertEqual(self.ids(size="unknown"), [c])
+        self.assertEqual(self.run_query(size="big").counts, {"your_level": 2, "higher": 0})
+
+    def test_order_puts_guessed_big_before_known_big(self):
+        small, unknown, guessed, known_big = (self.company(size=s) for s in (10, None, None, 5000))
+        board(self.conn, guessed, ats="oracle_orc")
+        on_known, on_guessed, on_unknown, on_small = (self.job(c) for c in (known_big, guessed, unknown, small))
+        page = self.run_query(limit=2)
+        self.assertEqual([r.posting_id for r in page.rows], [on_small, on_unknown])
+        rest = self.run_query(limit=2, after=page.next_after)
+        self.assertEqual([r.posting_id for r in rest.rows], [on_guessed, on_known])
+        self.assertIsNone(rest.next_after)
+
+
 class QueryPlanTests(JobListCase):
     def test_query_plan_starts_from_open_postings(self):
         co = self.company(size=20)
@@ -514,10 +636,10 @@ class QueryPlanTests(JobListCase):
         plans = joblist.explain(self.conn, NOW, JobFilters(), None, 50)
         text = "\n".join(plans)
         # The postings and decisions are read through an index or primary key, never a table scan; the only scans are
-        # of the small JSON lists the query is given and of its own materialized sets (cand, co).
+        # of the small JSON lists the query is given and of its own materialized sets (cand, co, usn, ent).
         for line in plans:
             if line.startswith("SCAN"):
-                self.assertRegex(line, r"SCAN ((json_each|cn|x|c|cand|co|rows|canon)\b|\(subquery-\d+\))", msg=text)
+                self.assertRegex(line, r"SCAN ((json_each|cn|x|c|cand|co|co0|co1|rows|canon|ent|usn)\b|\(subquery-\d+\))", msg=text)
         self.assertRegex(text, r"SEARCH (d USING INDEX decision_version|p USING INDEX posting_)")
         self.assertIn("SEARCH p USING INTEGER PRIMARY KEY", text)
         self.assertNotIn("current_decision", text)
@@ -531,10 +653,11 @@ class ScaleTests(JobListCase):
             self.job(companies[i % 5], posted=f"2026-10-{1 + i % 28:02d}", tier=tier, ok=ok, level_state=state)
         page = self.run_query(window_days=0)
         self.assertEqual(len(page.rows), 50)
-        # fit rows are all his level (1000); uncertain counts at the four small or unknown companies (800 of
-        # 1000); rejected SDE 2 (1000) and uncertain at the big one (200) are higher.
-        self.assertEqual(page.counts, {"your_level": 1800, "higher": 1200})
-        self.assertEqual(page.total, 1800)
+        # fit rows are all his level (1000); uncertain counts at the three small companies (600 of 1000); the
+        # unknown-size one has 600 open US postings, so it is a guessed big company and so, with the 900-person one,
+        # its uncertain rows (400) are higher with the rejected SDE 2 (1000).
+        self.assertEqual(page.counts, {"your_level": 1600, "higher": 1400})
+        self.assertEqual(page.total, 1600)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,11 @@ from tests.storetest import fresh_store
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# #172: a body under title.min_body_chars counts as no body; this neutral text pads a short body past it.
+PAD = (" Our team works from a bright office with snacks, a library and a standing desk for everyone. "
+       "We care about kind colleagues, clear writing and steady growth, and we celebrate small wins together. "
+       "Lunch is shared on Fridays, mentors meet new hires weekly and the whole group plans its year in the spring.")
+
 OLD_FIXTURE = [  # (title, lane, level_ok) of each tests/fixtures/ranking/postings.json row, by index
     ("Research Engineer (New Grad)", "engineering", 1),
     ("Research Scientist (post-training)", "not_engineering", 0),
@@ -100,9 +105,10 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(d("Software Engineer IV", "").level_tier, "senior")
 
     def test_ambiguous_title_reads_the_body(self):
-        tech = d("Systems Engineer", "Build backend services in Python and Go on AWS with Docker.")
+        # #172: a body under 300 characters counts as no body, so both bodies are padded past it
+        tech = d("Systems Engineer", "Build backend services in Python and Go on AWS with Docker." + PAD)
         self.assertEqual(tech.lane, "engineering")
-        physical = d("Systems Engineer", "Model parts in SolidWorks and run FEA in ANSYS.")
+        physical = d("Systems Engineer", "Model parts in SolidWorks and run FEA in ANSYS." + PAD)
         self.assertEqual(physical.lane, "off_lane")
         self.assertEqual(d("Systems Engineer", "").lane, "engineering")  # no body yet: the crawler fetches it
 
@@ -441,7 +447,7 @@ class LevelStateTests(unittest.TestCase):
         for title, body in (("Accountant", "entry-level"), ("Software Engineer Intern", ""),
                             ("Solutions Engineer", ""), ("Data Analyst", "0-1 years of experience."),
                             ("Account Executive, New Grad", ""), ("Staff Scientist, Biology", ""),
-                            ("Systems Engineer", "Model parts in SolidWorks and run FEA in ANSYS.")):
+                            ("Systems Engineer", "Model parts in SolidWorks and run FEA in ANSYS." + PAD)):
             self.assertEqual(self.state(title, body), "reject", title)
 
     def test_every_state_is_one_of_the_three(self):
@@ -460,11 +466,11 @@ class LevelOkUnchangedTests(unittest.TestCase):
         for i, (p, (title, old_lane, old_ok)) in enumerate(zip(postings, OLD_FIXTURE)):
             self.assertNotRegex(title, r"\b(?:III|3)\b")  # the III case changes on purpose
             new = d(title, p.get("body", ""), p.get("location", ""), p.get("country"))
-            if new.lane != old_lane:  # Task 3 moved the lane (scientist titles, systems titles): not a level change
+            if new.lane != old_lane:  # the lane moved (scientist titles, systems titles, #172 body rule): not a level change
                 excluded.append(i)
                 continue
             self.assertEqual(int(new.level_ok), old_ok, (i, title))
-        self.assertEqual(excluded, [1, 2, 24, 26])
+        self.assertEqual(excluded, [1, 2, 17, 24, 26])  # 17: #172, an admin body under a non-software title
         for title, body, old_ok in OLD_SYNTHETIC:
             self.assertEqual(int(d(title, body).level_ok), old_ok, (title, body))
 

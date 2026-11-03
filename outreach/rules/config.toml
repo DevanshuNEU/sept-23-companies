@@ -34,10 +34,13 @@ off_lane = [
   "validation", "technician", "research engineer, bio", "research engineer, chem",
   "actuary", "actuarial", "clinical", "network engineer", "field service", "field technician", "installation",
   "facilities", "construction", "civil", "structural", "signal integrity", "packaging", "documentation",
-  "technical writer", "technical writing", "developer advocate", "developer advocacy", "developer relations",
+  "technical writer", "technical writing", "physical security", "developer advocate", "developer advocacy", "developer relations",
   "devrel", "evangelist", "community", "it engineer", "customer engineer", "customer experience",
   "marketing engineer", "growth marketing", "product operations", "revenue operations", "business operations",
   "technical writers", "developer advocates",
+  # #172: he ruled BI is not tech; hard off lane even with a software word ("Python BI Engineer")
+  "bi developer", "bi engineer", "bi report", "bi analyst", "power bi", "business intelligence", "report developer",
+  "reporting developer", "tableau",
   # #4 follow-up 2026-10-22: postdoctoral roles need a PhD
   "postdoc", "postdocs", "postdoctoral", "post doctoral", "post doc",
   # #4 follow-up 2026-10-23: support, field, metrology roles. Contract roles stay in (he wants contract-to-hire);
@@ -57,15 +60,31 @@ phd_titles = ["scientist", "scientists", "researcher", "researchers"]
 # Data Analyst, BI and annotation roles are not tech.
 off_lane_unless_software = [
   "supply chain", "procurement", "logistics", "sourcing", "buyer", "planner", "thermal", "optical", "photonics",
-  "laser", "process engineer", "hvac", "chemical", "materials", "data analyst", "business intelligence",
-  "data annotation",
+  "laser", "process engineer", "hvac", "chemical", "materials", "data analyst",
+  "data annotation", "data center",
 ]
+# #172: a title that names software work is engineering outright; any other engineering title goes to the body scorer
+# below. A bare "developer" or "programmer" is not on this list ("Materials Developer II, Jordan Footwear").
 software_titles = [
-  "software", "developer", "programmer", "swe", "sde", "full stack", "backend", "back end", "frontend", "front end",
+  "software", "swe", "sde", "full stack", "backend", "back end", "frontend", "front end",
   "machine learning", "ml", "ai engineer", "data engineer", "platform", "infrastructure", "devops",
   "site reliability", "sre", "distributed systems", "data scientist", "research scientist", "applied scientist",
+  "founding", "member of technical staff", "mts", "forward deployed", "forward deploy", "fde", "cloud",
+  "security", "cyber", "cybersecurity", "web", "mobile", "ios", "android", "ai", "algorithm", "algorithms",
+  "computer vision", "nlp", "llm", "genai", "mlops", "devsecops", "python", "java", "golang", "typescript",
+  "javascript", "react", "gpu", "research engineer", "database", "data platform", "data infrastructure",
+  "analytics engineer", "software developer", "web developer", "full stack developer", "frontend developer",
+  "backend developer", "mobile developer", "ios developer", "android developer", "application developer",
+  "applications developer", "programmer analyst", "apps dev", "application development", "applications development",
+  # #172 final review: startup software titles that name no usual software word. Plurals match too ("Founding
+  # Engineers"); `off_lane` is checked first, so "Founding Mechanical Engineer" stays off lane.
+  "inference", "compiler", "kernel", "infra", "deployed", "deployment engineer", "forward deployment", "agent",
+  "agents", "rl", "growth engineer", "developer experience", "open source", "quantitative developer",
+  "game developer", "game programmer", "sql developer", "c#", ".net", "node.js", "rust", "c++",
+  "member of product staff", "tpu", "windows engineer",
 ]
-# #154: titles that can name a software or a physical role. The body decides: `software_words` against
+# #154: titles that can name a software or a physical role (their basis wording is kept; #172 sends every other
+# non-software title to the same scorer). The body decides: `software_words` against
 # `physical_words`, whole words (and their plurals), each word counted once; tech when software leads by `ambiguous_margin` or more, else
 # off lane. No body yet is engineering: the crawler fetches bodies only for engineering and intern lanes, so the title
 # waits for its body. Checked after `off_lane`, so "Hardware Test Engineer" is off lane whatever it says.
@@ -74,9 +93,16 @@ ambiguous = [
   "applications engineer", "project engineer",
 ]
 ambiguous_margin = 2
+# #172: a body shorter than this (after strip) counts as no body, so the title stays engineering until a real body
+# arrives. Applies to the ambiguous titles and to every other non-software title.
+min_body_chars = 300
 software_words = [
   "python", "typescript", "javascript", "java", "golang", "rust", "c++", "react", "sql", "kubernetes", "docker",
   "aws", "gcp", "pytorch", "tensorflow", "api", "backend", "frontend", "microservices", "ci/cd", "linux",
+  # #172 final review: what a startup posting says when it names no language list
+  "llm", "llms", "gpu", "cuda", "inference", "c#", ".net", "node.js", "postgres", "postgresql", "graphql", "git",
+  "github", "terraform", "machine learning", "next.js", "ruby", "rails", "scala", "kotlin", "swift", "kafka", "spark",
+  "airflow", "sdk", "compiler", "kernel",
 ]
 physical_words = [
   "solidworks", "autocad", "catia", "ansys", "fea", "cfd", "gd&t", "pcb", "altium", "oscilloscope", "soldering",

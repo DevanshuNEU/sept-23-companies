@@ -21,6 +21,11 @@
   `read_boards` runs (default 20; a run without `by_ats` is skipped) and prints, per ATS, boards, seconds, seconds per
   board, share of the ticks' time, list and body requests, and new, closed and reopened postings. Store only, no requests.
 
+- `churn [--days N] [--limit N] [--json]`: per board, the postings closed, new and listed again over the last N days
+  (default 1; the top 20 boards by closed, #152), with the open count and the open US engineering postings. A posting
+  counts as listed again when its board closed one with the same title and location in the 7 days before. Store only,
+  no requests.
+
 Every command calls `live_checkout.require_live` before it opens anything: they send real requests (and `tick` and
 `read` write the live store), so they run only from the live checkout. Exit code: 0 when the run was `ok`, 1 when it
 was partial or failed, or the command failed (the message on stderr).
@@ -43,6 +48,8 @@ __all__ = ["main"]
 _EXPECTED = (ValueError, OSError, FetchError, StoreError, sqlite3.Error)
 _TITLES_SHOWN = 5
 PROFILE_RUNS = 20
+CHURN_DAYS = 1
+CHURN_LIMIT = 20
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -60,6 +67,10 @@ def _parser() -> argparse.ArgumentParser:
     prof = sub.add_parser("profile", help="where the tick time goes, per ATS, from the newest read_boards runs")
     prof.add_argument("--runs", type=_positive, default=PROFILE_RUNS, metavar="N")
     prof.add_argument("--json", action="store_true", help="print the numbers as JSON")
+    churn = sub.add_parser("churn", help="postings closed, new and listed again per board over the last N days")
+    churn.add_argument("--days", type=_positive, default=CHURN_DAYS, metavar="N")
+    churn.add_argument("--limit", type=_positive, default=CHURN_LIMIT, metavar="N")
+    churn.add_argument("--json", action="store_true", help="print the numbers as JSON")
     return p
 
 
@@ -226,6 +237,34 @@ def _profile(runs: int, as_json: bool) -> int:
     return 0
 
 
+def _churn(days: int, limit: int, as_json: bool) -> int:
+    import dataclasses
+    import json
+
+    from outreach.crawl.churn import churn
+    from outreach.store import utcnow
+
+    conn = connect(db_path())
+    try:
+        rows = churn(conn, utcnow(), days, limit)
+    finally:
+        conn.close()
+    if as_json:
+        print(json.dumps([dataclasses.asdict(r) for r in rows], indent=2))
+        return 0
+    if not rows:
+        print(f"churn: no postings opened or closed in the last {days} day{'' if days == 1 else 's'}")
+        return 0
+    print(f"churn: the last {days} day{'' if days == 1 else 's'}, top {len(rows)} board{'' if len(rows) == 1 else 's'} "
+          "by closed")
+    print(f"{'board':>7}  {'ats':<16}{'token':<28}{'open':>8}{'closed':>8}{'new':>8}{'relisted':>10}{'us eng open':>13}")
+    for r in rows:
+        print(f"{r.board_id:>7}  {r.ats:<16}{r.token[:26]:<28}{r.open:>8}{r.closed:>8}{r.new:>8}{r.relisted:>10}"
+              f"{r.us_engineering_open:>13}")
+    print("relisted = new postings whose board closed one with the same title and location in the 7 days before")
+    return 0
+
+
 def _probe_slugs(limit: int, client: HttpClient | None) -> int:
     from outreach.crawl.config import load_crawl_config
     from outreach.crawl.probe import probe_slugs
@@ -259,7 +298,7 @@ def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_roo
     live_root = live_root or live_checkout.LIVE_ROOT
     what = {"tick": "the crawl tick", "read": "reading boards", "probe": "probing a board",
             "probe-slugs": "probing company slugs", "recheck-boards": "rechecking boards",
-            "profile": "profiling the crawl"}[args.command]
+            "profile": "profiling the crawl", "churn": "reading the crawl churn"}[args.command]
     live_checkout.require_live(what, root, live_root)
     try:
         if args.command == "tick":
@@ -272,6 +311,8 @@ def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_roo
             return _recheck_boards()
         if args.command == "profile":
             return _profile(args.runs, args.json)
+        if args.command == "churn":
+            return _churn(args.days, args.limit, args.json)
         return _probe(args.ats, args.token, client)
     except _EXPECTED as err:
         _say(f"error: {describe_error(err)}")

@@ -53,7 +53,7 @@ const CHIP = 'h-8 px-3 text-xs max-sm:h-11';
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 const ago = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`);
-const sizeLine = (j: JobRow) => (j.size === null ? 'Size not known' : `${j.big ? 'Big company, ' : ''}${plural(j.size, 'person', 'people')}`);
+const sizeLine = (j: JobRow) => (j.size === null ? (j.big ? 'Big company, size not known' : 'Size not known') : `${j.big ? 'Big company, ' : ''}${plural(j.size, 'person', 'people')}`);
 const windowText = (w: JobsWindow) => (w === 'any' ? '' : ` in the last ${w} days`);
 const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : 'at higher levels');
 

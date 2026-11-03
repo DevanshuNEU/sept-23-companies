@@ -97,6 +97,8 @@ describe('the Jobs page', () => {
     expect(of('Resend')).toHaveTextContent('300 people'); // 300 is not over 300
     expect(of('Resend')).not.toHaveTextContent('Big company');
     expect(of('Axiom')).toHaveTextContent('Size not known');
+    expect(of('Axiom')).not.toHaveTextContent('Big company');
+    expect(of('Granite Systems')).toHaveTextContent('Big company, size not known'); // guessed big: no size on file
     expect(of('Helix')).toHaveTextContent('Says no sponsorship');
     expect(of('Cerebrium')).toHaveTextContent('You contacted them on Tue Nov 3');
     expect(of('Cerebrium')).toHaveTextContent('18 people');
@@ -140,12 +142,13 @@ describe('the Jobs page', () => {
     await open();
     const group = screen.getByRole('group', { name: 'Company size' });
     await user.click(within(group).getByRole('button', { name: 'Big' }));
-    await waitFor(() => expect(new Set(companies())).toEqual(new Set(['Baseten', 'Helix', 'Kestrel'])));
+    await waitFor(() => expect(new Set(companies())).toEqual(new Set(['Baseten', 'Granite Systems', 'Helix', 'Kestrel']))); // Granite is big by the guess
     await user.click(within(group).getByRole('button', { name: 'Not known' }));
     await waitFor(() => expect(new Set(companies())).toEqual(new Set(['Axiom'])));
     await user.click(within(group).getByRole('button', { name: 'Small' }));
     await waitFor(() => expect(companies()).not.toContain('Axiom'));
     expect(companies()).not.toContain('Baseten');
+    expect(companies()).not.toContain('Granite Systems');
     expect(companies()).toContain('Resend');
     await user.click(within(group).getByRole('button', { name: 'Any size' }));
     await waitFor(() => expect(rows()).toHaveLength(20));

@@ -9,15 +9,20 @@ The list reads the decision's columns:
 
 - Listed at all: open, lane `engineering`, `us <> 'no'`, no citizenship rule, eligibility `ok`, tier not `senior`, the
   company not an active no-go, and the posting not passed (`passed_posting_ids`).
-- Your level (#154): `level_state = 'fit'`, or `uncertain` at a company of 300 people or fewer or of unknown size.
-  Higher levels: every other listed posting (`uncertain` at a big company, `reject`). A row from before migration 0007
+- Big (#172): a company is big when its size is over 300, or its size is unknown and either it has more than 50 open
+  postings read as US (counted over the company and every company merged into it) or it has an active Workday or
+  Oracle board (`ENTERPRISE_ATS`). The guess is made once per company, in `co`; the row's `size` stays null for it.
+- Your level (#154, #172): `level_state = 'fit'`, or `uncertain` at a company that is not big; and at a big company
+  (known or guessed) the posting's US read must also be `yes`. Higher levels: every other listed posting (`uncertain`
+  at a big company, `fit` at a big company with no US read of yes, `reject`). A row from before migration 0007
   that the rebuild has not reached has no state yet: it falls back to the v1 rule (`fit` when `level_ok = 1`, else
   `uncertain` for tier `not_stated` or `open`, else `reject`), so such a row is listed as it was before #154 and
   changes only when the rebuild gives it a real state.
 - The level tag: `fit` and `reject` show the tier (new grad, early career, SDE 1, SDE 2); `uncertain` shows "level not
   stated", whatever its tier; a `fit` posting whose tier is `not_stated` or `open` shows "entry level".
 - Date: `posted_on` when there is one (`posted`), else the New York date of the first sighting (`seen`).
-- Order: date newest first, then the smaller company (known sizes by size, then unknown, then big), then posting id.
+- Order: date newest first, then the smaller company (known small sizes by size, then unknown, then guessed big, then
+  known big by size), then posting id.
   `after` is a keyset cursor of `(date, size_rank, posting_id)`, so a write between two pages never repeats a row.
 
 Reads only; the clock comes in as `now`.
@@ -38,15 +43,17 @@ from outreach.ranking.common import canonical_ids
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
 __all__ = ["JobFilters", "JobRow", "JobPage", "query", "passed_posting_ids", "explain", "WINDOWS", "BIG_OVER",
-           "STATE_SQL"]
+           "BIG_BY_POSTINGS", "ENTERPRISE_ATS", "STATE_SQL"]
 
 WINDOWS = (7, 30, 60, 90, 0)  # days back from today, 0 for any
 BIG_OVER = 300  # a company is big above this many people
+BIG_BY_POSTINGS = 50  # a company of unknown size is big above this many open postings read as US
+ENTERPRISE_ATS = ("workday", "oracle_orc")  # an active board on one of these makes a company of unknown size big
 _VIEWS = ("your_level", "higher")
 _SIZES = ("any", "small", "big", "unknown")
 _TZ = "America/New_York"
 _NY = ZoneInfo(_TZ)
-# Size ranks: a small company by its size, then unknown, then big by its size.
+# Size ranks: a small company by its size, then unknown, then guessed big, then known big by its size.
 _UNKNOWN_RANK = 10_000_000
 _BIG_RANK = 20_000_000
 _NOT_STATED = "level not stated"
@@ -124,7 +131,7 @@ _SQL = """
 WITH canon(src, dst) AS (SELECT key, value FROM json_each(:canon)),
 cand AS MATERIALIZED (
   SELECT p.posting_id, p.title, p.url, p.location, COALESCE(cn.dst, p.company_id) AS cid,
-         d.level_tier, {state} AS state, d.sponsorship,
+         d.level_tier, {state} AS state, d.sponsorship, d.us,
          COALESCE(p.posted_on, jl_ny_day(p.first_seen_at)) AS day,
          CASE WHEN p.posted_on IS NULL THEN 'seen' ELSE 'posted' END AS kind
   FROM posting p
@@ -136,7 +143,23 @@ cand AS MATERIALIZED (
     AND p.company_id NOT IN (SELECT value FROM json_each(:nogo))
     AND p.posting_id NOT IN (SELECT value FROM json_each(:passed))
 ),
-co AS MATERIALIZED (
+-- Open postings read as US per company (merged companies counted into their survivor), once, not per posting.
+usn AS MATERIALIZED (
+  SELECT COALESCE(cn.dst, p.company_id) AS cid, COUNT(*) AS n
+  FROM decision d
+  JOIN posting p ON p.posting_id = d.posting_id
+  LEFT JOIN canon cn ON cn.src = p.company_id
+  WHERE d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1)
+    AND d.us = 'yes' AND p.closed_at IS NULL
+  GROUP BY 1
+),
+-- Companies with an active enterprise board (Workday, Oracle), merged companies counted into their survivor.
+ent AS MATERIALIZED (
+  SELECT DISTINCT COALESCE(cn.dst, b.company_id) AS cid
+  FROM board b LEFT JOIN canon cn ON cn.src = b.company_id
+  WHERE b.active = 1 AND b.ats IN (SELECT value FROM json_each(:enterprise))
+),
+co0 AS MATERIALIZED (
   SELECT x.cid, c.name,
          (SELECT COALESCE(f.num_high, f.num_low) FROM company_fact f
            WHERE f.company_id = x.cid AND f.fact = 'size') AS size,
@@ -147,17 +170,30 @@ co AS MATERIALIZED (
   FROM (SELECT DISTINCT cid FROM cand) x JOIN company c ON c.company_id = x.cid
   WHERE x.cid NOT IN (SELECT value FROM json_each(:nogo))
 ),
+-- big_guess: no size on file and either many open US postings or an enterprise board (once per company).
+co1 AS MATERIALIZED (
+  SELECT co0.*,
+         CASE WHEN co0.size IS NULL AND (COALESCE((SELECT n FROM usn WHERE usn.cid = co0.cid), 0) > :big_postings
+                                         OR co0.cid IN (SELECT cid FROM ent)) THEN 1 ELSE 0 END AS big_guess
+  FROM co0
+),
+-- big: over 300 people, or guessed big.
+co AS (
+  SELECT co1.*, CASE WHEN co1.size > :big OR co1.big_guess = 1 THEN 1 ELSE 0 END AS big FROM co1
+),
 rows AS (
   SELECT c.posting_id, c.title, c.url, c.location, c.cid, co.name, co.size, co.everify, co.yc, c.day, c.kind,
          c.level_tier, c.state, c.sponsorship,
-         CASE WHEN c.state = 'fit' OR (c.state = 'uncertain' AND (co.size IS NULL OR co.size <= :big))
+         co.big,
+         CASE WHEN (c.state = 'fit' OR (c.state = 'uncertain' AND NOT co.big))
+                   AND (c.us = 'yes' OR NOT co.big)
               THEN 1 ELSE 0 END AS yl,
-         CASE WHEN co.size IS NULL THEN :unknown_rank WHEN co.size <= :big THEN co.size
-              ELSE :big_rank + co.size END AS rank
+         CASE WHEN co.size IS NULL THEN (CASE WHEN co.big_guess = 1 THEN :big_rank ELSE :unknown_rank END)
+              WHEN co.size <= :big THEN co.size ELSE :big_rank + co.size END AS rank
   FROM cand c JOIN co ON co.cid = c.cid
   WHERE c.day >= :cutoff AND (:q = '' OR lower(co.name) LIKE :like ESCAPE '\\')
-    AND CASE :size WHEN 'small' THEN co.size <= :big WHEN 'big' THEN co.size > :big
-                   WHEN 'unknown' THEN co.size IS NULL ELSE 1 END
+    AND CASE :size WHEN 'small' THEN co.size <= :big WHEN 'big' THEN co.big
+                   WHEN 'unknown' THEN (co.size IS NULL AND co.big_guess = 0) ELSE 1 END
     AND (:not_contacted = 0 OR c.cid NOT IN (SELECT value FROM json_each(:contacted)))
 )
 """.replace("{state}", STATE_SQL)
@@ -219,7 +255,8 @@ def _params(conn: sqlite3.Connection, today: date, f: JobFilters, canon: dict[in
     return {
         "canon": json.dumps({str(src): dst for src, dst in canon.items() if src != dst}),
         "nogo": json.dumps(nogo), "passed": json.dumps(sorted(passed_posting_ids(conn))),
-        "big": BIG_OVER, "unknown_rank": _UNKNOWN_RANK, "big_rank": _BIG_RANK, "cutoff": cutoff,
+        "big": BIG_OVER, "big_postings": BIG_BY_POSTINGS, "enterprise": json.dumps(ENTERPRISE_ATS),
+        "unknown_rank": _UNKNOWN_RANK, "big_rank": _BIG_RANK, "cutoff": cutoff,
         "q": f.q.strip(), "like": _like(f.q), "size": f.size, "not_contacted": int(f.not_contacted),
         "contacted": json.dumps(sorted(contacted)),
     }
@@ -283,7 +320,7 @@ def _row(r: sqlite3.Row, today: date, contacted: dict[int, date]) -> JobRow:
         posting_id=r["posting_id"], title=r["title"], url=r["url"], location=r["location"],
         level_tag=_level_tag(r["state"], r["level_tier"]), date=r["day"], date_kind=r["kind"],
         age_days=max((today - date.fromisoformat(r["day"])).days, 0), company_id=r["cid"], company_name=r["name"],
-        size=size, big=size is not None and size > BIG_OVER, says_no_sponsorship=r["sponsorship"] == "no",
+        size=size, big=bool(r["big"]), says_no_sponsorship=r["sponsorship"] == "no",
         everify=bool(r["everify"]), yc=bool(r["yc"]), contacted_on=when.isoformat() if when else None)
 
 

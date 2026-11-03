@@ -123,7 +123,7 @@ class Misfire7SponsorshipNegation(unittest.TestCase):
                 r = d("Software Engineer, New Grad", sentence)
                 self.assertEqual(r.sponsorship, "no")
                 self.assertEqual(r.sponsorship_quote, sentence)
-                self.assertFalse(passes(r))
+                self.assertTrue(passes(r))  # a flag, not a hide (#154)
 
     def test_sponsoring_elsewhere_is_not_yes(self):
         r = d("Software Engineer, New Grad", "We can sponsor visas to Germany.")

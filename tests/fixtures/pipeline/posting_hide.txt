@@ -6,6 +6,6 @@ What you will do: own a service from design to production, write tests that catc
 
 What we look for: a computer science degree or equivalent experience, one or two years of building web services, and care for correctness when money is involved.
 
-We do not sponsor visas.
+Applicants must be U.S. citizens.
 
 We offer health insurance, a learning budget and four weeks of paid time off.

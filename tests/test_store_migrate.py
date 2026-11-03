@@ -181,6 +181,75 @@ class ImportRecordMigrationTest(unittest.TestCase):
         self.assertIn(4, [r[0] for r in conn.execute("SELECT version FROM schema_migration")])
 
 
+class LevelStateMigrationTest(unittest.TestCase):
+    """0007 adds level_state and years_ms to decision (#154); old rows come through with both empty."""
+
+    VERSION = "r-0123456789ab"
+    AT = "2026-11-03T10:00:00Z"
+    ROW = ("INSERT INTO decision(posting_id, ruleset_version, decided_at, lane, level_tier, level_ok, level_basis, "
+           "us, sponsorship, citizenship, eligibility, start_2027) "
+           "VALUES (1, ?, ?, 'engineering', 'new_grad', 1, 'Title says new grad', 'yes', 'silent', 0, 'ok', 0)")
+
+    def old_store(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        old = Path(tmp.name)
+        for version, _name, path in migration_files():
+            if version <= 6:
+                shutil.copy(path, old / path.name)
+        conn = sqlite3.connect(":memory:", isolation_level=None)
+        self.addCleanup(conn.close)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.row_factory = sqlite3.Row
+        self.assertEqual(migrate(conn, old), 6)
+        company = seed_company(conn)
+        conn.execute("INSERT INTO posting(company_id, source_key, title, location, first_seen_at, last_seen_at) "
+                     "VALUES (?, 'url:1', 'Software Engineer', '', ?, ?)", (company, self.AT, self.AT))
+        conn.execute("INSERT INTO ruleset(ruleset_version, config_toml, created_at, is_current) VALUES (?, '', ?, 1)",
+                     (self.VERSION, self.AT))
+        conn.execute(self.ROW, (self.VERSION, self.AT))
+        return conn
+
+    def test_migration_0007_keeps_decisions_and_adds_empty_columns(self):
+        conn = self.old_store()
+        before = [tuple(r) for r in conn.execute("SELECT * FROM decision")]
+        self.assertEqual(migrate(conn), latest_version())
+        self.assertIn((7, "level_state"), [(r[0], r[1]) for r in conn.execute("SELECT version, name FROM schema_migration")])
+        columns = [r["name"] for r in conn.execute("PRAGMA table_info(decision)")]
+        self.assertEqual(columns[-2:], ["level_state", "years_ms"])
+        after = conn.execute("SELECT * FROM decision").fetchone()
+        self.assertEqual(tuple(after)[:len(before[0])], before[0])
+        self.assertIsNone(after["level_state"])
+        self.assertIsNone(after["years_ms"])
+
+    def test_level_state_check_refuses_other_values(self):
+        db = fresh_store()
+        self.addCleanup(db.close)
+        company = seed_company(db)
+        db.execute("INSERT INTO posting(company_id, source_key, title, location, first_seen_at, last_seen_at) "
+                   "VALUES (?, 'url:1', 'Software Engineer', '', ?, ?)", (company, self.AT, self.AT))
+        db.execute("INSERT INTO ruleset(ruleset_version, config_toml, created_at, is_current) VALUES (?, '', ?, 0)",
+                   (self.VERSION, self.AT))
+        for state in ("fit", "reject", "uncertain", None):
+            db.execute("DELETE FROM decision")
+            db.execute(self.ROW, (self.VERSION, self.AT))
+            db.execute("UPDATE decision SET level_state = ?, years_ms = 2", (state,))
+        for bad in ("maybe", "FIT", ""):
+            with self.assertRaises(sqlite3.IntegrityError, msg=bad):
+                db.execute("UPDATE decision SET level_state = ?", (bad,))
+
+    def test_both_views_expose_the_new_columns(self):
+        conn = self.old_store()
+        migrate(conn)
+        conn.execute("UPDATE decision SET level_state = 'fit', years_ms = 0")
+        for view in ("current_decision", "posting_decision"):
+            names = [r["name"] for r in conn.execute(f"PRAGMA table_info({view})")]
+            self.assertIn("level_state", names, view)
+            self.assertIn("years_ms", names, view)
+            row = conn.execute(f"SELECT level_state, years_ms FROM {view}").fetchone()
+            self.assertEqual((row["level_state"], row["years_ms"]), ("fit", 0), view)
+
+
 class FourFollowupsMigrationTest(unittest.TestCase):
     """0005 rebuilds message so seq may be 4 (#141); rows, ids, indexes and triggers come through unchanged."""
 

@@ -16,6 +16,7 @@ from outreach.api.models.company import (
 from outreach.api.queries import people as people_queries
 from outreach.api.queries.people import scope
 from outreach.drafts.followups import company_map, company_reply_held, held_survivors, resolve_company
+from outreach.rules.decide import row_level_state
 from outreach.sending import calendar
 from outreach.sending.config import load_config
 from outreach.store.timefmt import ISO_FMT
@@ -53,7 +54,7 @@ ATS_URLS = {
     "dover": "https://app.dover.com/apply/{t}",
 }
 HIDDEN_RULES = {
-    "us": "Not a US role", "sponsorship": "Says it will not sponsor", "citizenship": "Needs US citizenship or a clearance",
+    "us": "Not a US role", "citizenship": "Needs US citizenship or a clearance",
     "grad_window": "Open only to a graduation window we are outside", "current_student": "Only for current students",
     "cohort_title": "A cohort or program role",
 }
@@ -216,13 +217,11 @@ def hidden_rule(d: sqlite3.Row) -> tuple[str, str | None]:
         return "out_of_lane", LANE_RULES.get(d["lane"], "Outside the engineering lane")
     if d["us"] == "no":
         return "hidden", HIDDEN_RULES["us"]
-    if d["sponsorship"] == "no":
-        return "hidden", HIDDEN_RULES["sponsorship"]
     if d["citizenship"]:
         return "hidden", HIDDEN_RULES["citizenship"]
     if d["eligibility"] == "excluded":
         return "hidden", HIDDEN_RULES.get(d["eligibility_reason"], "Not open to you")
-    if not d["level_ok"] and (d["level_tier"] != "not_stated" or d["years_asked"] is not None):
+    if row_level_state(d) == "reject":  # the job list's level test (#154): fit and uncertain stay open
         return "out_of_lane", d["level_basis"]
     return "open", None
 
@@ -401,7 +400,7 @@ def _sponsorship_shown(best: dict, role, live_postings, evidence_rows) -> str:
     if fact is not None and fact["locked"] and fact["value"] in SPONSORSHIP_SHOWN and fact["value"] != "unclear":
         return SPONSORSHIP_SHOWN[fact["value"]]
     # A yes, opt_only or unclear counts only from an open posting that is not hidden (the role to name). A no counts
-    # from any posting that is not closed: it is the evidence for the hide, and honest to show.
+    # from any posting that is not closed: it is a flag on the company, and honest to show.
     if role is not None and role["sponsorship"] in SPONSORSHIP_SHOWN:
         return SPONSORSHIP_SHOWN[role["sponsorship"]]
     if any(p["sponsorship"] == "no" for p in live_postings):

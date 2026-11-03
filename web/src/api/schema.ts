@@ -2611,6 +2611,11 @@ export interface components {
             sourceUrl: string | null;
             /** Target */
             target: components["schemas"]["NoGoTargetCompany"] | components["schemas"]["NoGoTargetPerson"];
+            /**
+             * Writtenby
+             * @enum {string}
+             */
+            writtenBy: "you" | "ranker" | "reply" | "import" | "claude";
         };
         /** NoGoTargetCompany */
         NoGoTargetCompany: {

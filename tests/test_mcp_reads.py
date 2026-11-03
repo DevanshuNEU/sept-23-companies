@@ -225,6 +225,24 @@ class CompanyTest(McpCase):
         self.assertEqual(got["open"][0]["posting_id"], best)
         self.assertNotIn(senior, [p["posting_id"] for p in got["open"][:-1]])
 
+    def test_a_posting_is_set_aside_by_its_level_state(self):
+        """posting_state agrees with the job list (#154): fit by the master's figure is open, a PhD-required posting is
+        out of lane, and a row not yet rebuilt reads the v1 rule."""
+        cid = seed.company(self.db)
+        cases = {
+            "Fit by masters": (dict(level_tier="swe2", level_ok=0, level_state="fit"), "open"),
+            "Needs a PhD": (dict(level_tier="open", level_ok=1, level_state="reject"), "out_of_lane"),
+            "Uncertain": (dict(level_tier="not_stated", level_ok=0, level_state="uncertain"), "open"),
+            "Old senior": (dict(level_tier="senior", level_ok=0), "out_of_lane"),
+            "Old not stated": (dict(level_tier="not_stated", level_ok=0), "open"),
+        }
+        ids = {}
+        for title, (cols, _state) in cases.items():
+            ids[title] = seed.posting(self.db, cid, title)
+            seed.decision(self.db, ids[title], **cols)
+        got = {p["title"]: p["state"] for p in self.ok("company", {"company_id": cid})["postings"]["open"]}
+        self.assertEqual(got, {title: state for title, (_cols, state) in cases.items()})
+
     def test_company_id_bounds(self):
         for bad in ({}, {"company_id": 0}, {"company_id": "3"}, {"company_id": 3, "name": "x"}):
             self.assertEqual(self.error("company", bad)["code"], "bad_input")

@@ -528,7 +528,7 @@ export class FixtureClient implements OutreachClient {
       if (quote) existing.quote = quote;
     } else {
       this.db.noGo.people.unshift({
-        kind: 'no_go', noGoId: this.nextId++, target: { kind: 'person', person: { ...person }, companyName }, reason, quote, note: '', source: 'reply',
+        kind: 'no_go', noGoId: this.nextId++, target: { kind: 'person', person: { ...person }, companyName }, reason, quote, note: '', source: 'reply', writtenBy: 'reply',
         sourceRef: `Reply from ${person.name}`, sourceUrl: url, importSource: null, addedAt: this.now,
       });
     }
@@ -641,7 +641,7 @@ export class FixtureClient implements OutreachClient {
     }
     if (noGo) {
       this.db.noGo.companies.unshift({
-        kind: 'no_go', noGoId: this.nextId++, target: { kind: 'company', company: refOf(v.company) }, reason: noGo, quote: '', note, source: 'devanshu', sourceRef: 'You',
+        kind: 'no_go', noGoId: this.nextId++, target: { kind: 'company', company: refOf(v.company) }, reason: noGo, quote: '', note, source: 'devanshu', writtenBy: 'you', sourceRef: 'You',
         sourceUrl: null, importSource: null, addedAt: this.now,
       });
       this.countReason(noGo, 1);

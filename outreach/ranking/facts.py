@@ -41,7 +41,7 @@ class RankFacts(CompanyFacts):
     best_level_tier: str | None = None
     best_level_basis: str = ""           # the rules' level basis ("Title says new grad", "Asks 2 years")
     best_years_asked: int | None = None  # the rules' years asked of the best posting, None when it states none
-    best_sponsorship: str | None = None  # yes, opt_only, unclear or silent; None with no live posting
+    best_sponsorship: str | None = None  # yes, no, opt_only, unclear or silent; None with no live posting
     best_dated: bool = True              # False when the posting has no posted date: its age is from first seen
     pay_basis: str = ""                  # posted, lca or empty
     pay_note: str = ""

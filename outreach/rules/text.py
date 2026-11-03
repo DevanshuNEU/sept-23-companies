@@ -23,6 +23,14 @@ def strip_invisible(text: str) -> str:
     return text.translate(_INVISIBLE)
 
 
+def clean_text(text: str | None) -> str:
+    """The text without NUL bytes or invisible characters: what decide() reads of a title, body or location.
+    SQLite's length() stops at a NUL, so a quote that holds one fails the decision table's CHECKs; a NUL is never part
+    of a word, so dropping it changes no reading. An invisible character inside a word hides it from every word list
+    (`strip_invisible`, #112)."""
+    return strip_invisible((text or "").replace("\x00", ""))
+
+
 # A stop is a . ! or ? run (with any closing quote or bracket) that is followed by a space or the end, or a
 # semicolon, a line break or a bullet character. Dots inside words and numbers ("3.5", "node.js", "$120.5k") are
 # never followed by a space, so they are never stops. Possessive quantifiers and the lookbehind keep it linear.

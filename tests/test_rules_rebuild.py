@@ -24,6 +24,7 @@ rebuild_module = importlib.import_module("outreach.rules.rebuild")
 
 V1, V2, V3 = "r-000000000001", "r-000000000002", "r-000000000003"
 NEW_GRAD = "Software Engineer, New Grad"
+CITIZEN = "Applicants must be U.S. citizens."  # a hide; "no sponsorship" only flags since #154
 
 
 def close(conn, posting_id):
@@ -83,13 +84,12 @@ class RebuildTests(RebuildTestCase):
         pid = self.posting(body="")
         rebuild(self.conn, version=V1)
         self.assertTrue(passes(decide(PostingInput(NEW_GRAD, "", "Boston, MA"))))
-        self.set_body(pid, "We do not sponsor.")
+        self.set_body(pid, CITIZEN)
         report = rebuild(self.conn, version=V2)
         self.assertEqual([f.posting_id for f in report.to_hidden], [pid])
         flip = report.to_hidden[0]
         self.assertEqual((flip.company, flip.title), ("Acme", NEW_GRAD))
-        self.assertIn("sponsorship", flip.change)
-        self.assertIn("silent -> no", flip.change)
+        self.assertEqual(flip.change, "citizenship no -> yes")
         self.assertEqual((report.to_shown, report.level_lost), ([], []))
         self.assertEqual((report.version, report.previous), (V2, V1))
         run = self.conn.execute("SELECT * FROM job_run WHERE job = 'rebuild' ORDER BY run_id DESC").fetchone()
@@ -100,14 +100,14 @@ class RebuildTests(RebuildTestCase):
         self.assertEqual((run["status"], run["ruleset_version"]), ("ok", V2))
 
     def test_flip_to_shown_and_level_lost_are_listed(self):
-        hidden = self.posting(body="We do not sponsor.")
+        hidden = self.posting(body=CITIZEN)
         senior_later = self.posting(body="")
         rebuild(self.conn, version=V1)
         self.set_body(hidden, "")
         self.set_body(senior_later, "5+ years of experience required.")
         report = rebuild(self.conn, version=V2)
         self.assertEqual([f.posting_id for f in report.to_shown], [hidden])
-        self.assertIn("sponsorship no -> silent", report.to_shown[0].change)
+        self.assertEqual(report.to_shown[0].change, "citizenship yes -> no")
         self.assertEqual([f.posting_id for f in report.level_lost], [senior_later])
         self.assertIn("Asks 5 years", report.level_lost[0].change)
         self.assertEqual(report.to_hidden, [])
@@ -137,7 +137,7 @@ class RebuildTests(RebuildTestCase):
     def test_revert_to_an_older_ruleset(self):
         pid = self.posting(body="")
         rebuild(self.conn, version=V1)
-        self.set_body(pid, "We do not sponsor.")
+        self.set_body(pid, CITIZEN)
         rebuild(self.conn, version=V2)
         self.set_body(pid, "")
         report = rebuild(self.conn, version=V1)
@@ -320,7 +320,7 @@ class RebuildTests(RebuildTestCase):
     def test_report_lines_list_each_flip(self):
         pid = self.posting(body="")
         rebuild(self.conn, version=V1)
-        self.set_body(pid, "We do not sponsor.")
+        self.set_body(pid, CITIZEN)
         lines = rebuild(self.conn, version=V2).lines()
         flip_line = next(line for line in lines if NEW_GRAD in line)
         self.assertIn(f"#{pid}", flip_line)
@@ -431,6 +431,43 @@ class RecordEvidenceTests(RebuildTestCase):
         row = self.conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
         self.assertEqual(rebuild_module.stored_decision(row), decided)
 
+    def test_stored_decision_fills_level_state_for_a_row_stored_before_0007(self):
+        pid = self.posting()
+        decided = decide_and_store(self.conn, pid)
+        self.conn.execute("UPDATE decision SET level_state = NULL, years_ms = NULL")
+        row = self.conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
+        self.assertIsNone(row["level_state"])
+        self.assertEqual(rebuild_module.stored_decision(row), decided)
+
+    def test_decision_row_stores_level_state_and_years_ms(self):
+        pid = self.posting()
+        decided = decide_and_store(self.conn, pid)
+        row = self.conn.execute("SELECT level_state, years_ms FROM current_decision WHERE posting_id = ?",
+                                (pid,)).fetchone()
+        self.assertEqual((row["level_state"], row["years_ms"]), (decided.level_state, decided.years_ms))
+        self.assertIsNotNone(row["level_state"])
+
+    def test_rebuild_writes_level_state_for_every_posting(self):
+        cases = [(NEW_GRAD, ""), ("Software Engineer", ""), ("Senior Software Engineer", ""),
+                 ("Accountant", ""), ("Software Engineer Intern", ""), ("Solutions Engineer", ""),
+                 ("Software Engineer III", "2 years of experience, or 1 year with an advanced degree."),
+                 ("Research Scientist", "PhD required."), ("Software Engineer", "BS and 5 years or MS and 0 years."),
+                 ("Software Engineer", "6+ years of experience.")]
+        ids = {self.posting(title, body): (title, body) for title, body in cases}
+        closed = self.posting("Software Engineer II")
+        close(self.conn, closed)
+        ids[closed] = ("Software Engineer II", "")
+        report = rebuild(self.conn, version=V1)
+        self.assertEqual(report.decided, len(ids))
+        rows = self.conn.execute("SELECT posting_id, level_state FROM decision WHERE ruleset_version = ?",
+                                 (V1,)).fetchall()
+        self.assertEqual({r["posting_id"] for r in rows}, set(ids))
+        for r in rows:
+            title, body = ids[r["posting_id"]]
+            self.assertIn(r["level_state"], ("fit", "reject", "uncertain"), title)
+            self.assertEqual(r["level_state"], decide(PostingInput(title, body, "Boston, MA")).level_state, title)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM decision WHERE level_state IS NULL").fetchone()[0], 0)
+
     def test_record_evidence_ignores_repeats(self):
         drafts = from_old_dashboard({"sizeWhy": "about 40 people"})
         self.assertEqual(record_evidence(self.conn, self.company, drafts), 1)
@@ -484,14 +521,14 @@ class CombinerHookTests(RebuildTestCase):
 
         def combiner(conn, posting_id, decision):
             calls.append(posting_id)
-            if relax and decision.sponsorship == "no":
-                decision = dataclasses.replace(decision, sponsorship="unclear")
+            if relax and decision.citizenship:
+                decision = dataclasses.replace(decision, citizenship=False)
             return SimpleNamespace(decision=decision, provisional=False, reader_version=version)
         combiner.calls = calls
         return combiner
 
-    def flags(self, pid):
-        row = self.conn.execute("SELECT provisional, reader_version, sponsorship FROM current_decision "
+    def flags(self, pid, column="sponsorship"):
+        row = self.conn.execute(f"SELECT provisional, reader_version, {column} FROM current_decision "
                                 "WHERE posting_id = ?", (pid,)).fetchone()
         return tuple(row)
 
@@ -505,10 +542,10 @@ class CombinerHookTests(RebuildTestCase):
     def test_the_flip_report_compares_what_the_combiner_returned(self):
         pid = self.posting()
         rebuild(self.conn, version=V1)
-        self.set_body(pid, "We do not sponsor.")
+        self.set_body(pid, CITIZEN)
         report = rebuild(self.conn, combiner=self.final_combiner(relax=True))
         self.assertEqual(report.to_hidden, [])
-        self.assertEqual(self.flags(pid), (0, "rv-0000000000aa", "unclear"))
+        self.assertEqual(self.flags(pid, "citizenship"), (0, "rv-0000000000aa", 0))
 
     def test_rebuild_without_a_combiner_resets_provisional_to_one(self):
         pid = self.posting(body="We do not sponsor.")
@@ -517,12 +554,12 @@ class CombinerHookTests(RebuildTestCase):
         self.assertEqual(self.flags(pid), (1, None, "no"))
 
     def test_decide_and_store_takes_the_combiner_too(self):
-        pid = self.posting(body="We do not sponsor.")
+        pid = self.posting(body=CITIZEN)
         got = decide_and_store(self.conn, pid, combiner=self.final_combiner(relax=True))
-        self.assertEqual(got.sponsorship, "unclear")
-        self.assertEqual(self.flags(pid), (0, "rv-0000000000aa", "unclear"))
+        self.assertFalse(got.citizenship)
+        self.assertEqual(self.flags(pid, "citizenship"), (0, "rv-0000000000aa", 0))
         decide_and_store(self.conn, pid)
-        self.assertEqual(self.flags(pid), (1, None, "no"))
+        self.assertEqual(self.flags(pid, "citizenship"), (1, None, 1))
 
     def test_rebuild_does_not_import_the_reader_and_is_not_a_rule_file(self):
         import ast

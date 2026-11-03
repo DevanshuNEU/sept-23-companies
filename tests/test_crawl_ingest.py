@@ -202,6 +202,66 @@ class DecisionJoinPlanTests(IngestTestCase):
                 self.assertTrue(any(s.startswith("SEARCH d USING") for s in plan), plan)
 
 
+class BodyUpdateLaneTests(unittest.TestCase):
+    """_body_updates reads the same cleaned text decide() reads (#154): an invisible character inside a word must not
+    hide it from the ambiguous-title scorer in one place and not the other."""
+
+    BOARD = mock.Mock(ats="greenhouse", token="acme")
+
+    def job(self, title, body):
+        return JobRef("1", title, "https://x.test/1", "Boston, MA", "US", None, body)
+
+    def test_ambiguous_title_is_scored_on_the_cleaned_body(self):
+        from outreach.rules.config import default_config
+        body = "We use Py\u00adthon and Dock\u200ber every day."  # soft hyphen and zero-width space inside words
+        got = ingest._body_updates(None, self.BOARD, {}, (self.job("Systems Engineer", body),), default_config())
+        self.assertEqual([native for native, _ in got], ["1"])
+
+    def test_an_ambiguous_title_keeps_its_list_body_whatever_it_says(self):
+        """The body decides an ambiguous title, so _body_updates keeps it: classified on the title alone."""
+        from outreach.rules.config import default_config
+        got = ingest._body_updates(None, self.BOARD, {}, (self.job("Systems Engineer", "SolidWorks and FEA drawings."),),
+                                   default_config())
+        self.assertEqual([native for native, _ in got], ["1"])
+
+
+class ListBodyAmbiguousTitleTests(IngestTestCase):
+    """A Lever-style board: the list carries the body and body() returns nothing, so a body not stored from the list
+    is never fetched. An ambiguous title must have its body stored and then be decided on it (#154)."""
+
+    def read_lever(self, title, body):
+        class ListBodies:
+            ats = "lever"
+
+            def list(self, token, validators):
+                job = JobRef("L1", title, "https://jobs.lever.co/acme/L1", "Boston, MA", "US", None, body)
+                return ReadResult("ok", (job,), Validators('"A"', ids_fingerprint(["L1"])))
+
+            def body(self, token, job):
+                return None
+
+        self.read(None, adapter=ListBodies())
+        posting = self.conn.execute("SELECT posting_id FROM posting WHERE source_key = 'greenhouse:acme:L1'").fetchone()
+        return posting["posting_id"]
+
+    def stored_body(self, posting_id):
+        row = self.conn.execute("SELECT body FROM posting_body WHERE posting_id = ?", (posting_id,)).fetchone()
+        return row["body"] if row else None
+
+    def test_a_design_engineer_with_a_physical_body_is_off_lane_and_its_body_is_stored(self):
+        body = "Own mechanical design in SolidWorks. Run FEA and tolerance stacks. Release drawings to the machine shop."
+        pid = self.read_lever("Design Engineer", body)
+        self.assertEqual(self.decision(pid)["lane"], "off_lane")
+        self.assertEqual(self.stored_body(pid), body)
+
+    def test_a_design_engineer_with_a_software_body_is_engineering(self):
+        body = ("Build React and TypeScript interfaces on a Python and PostgreSQL backend. Deploy with Docker on AWS. "
+                "Write code, review code and ship features with the web team.")
+        pid = self.read_lever("Design Engineer", body)
+        self.assertEqual(self.decision(pid)["lane"], "engineering")
+        self.assertEqual(self.stored_body(pid), body)
+
+
 class DoubtfulBoardTests(IngestTestCase):
     company_name = "Acme"
 

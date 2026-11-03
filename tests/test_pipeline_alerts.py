@@ -170,6 +170,28 @@ class LevelTests(AlertCase):
         self.job("Big company SDE 2", tier="swe2", ok=0, company=self.big())
         self.assertEqual(self.alert(), 0)
 
+    def test_only_fit_alerts_not_uncertain_at_a_small_company(self):
+        small = seed_company(self.conn, "Tiny")
+        evidence(self.conn, small, "size", num_low=5, num_high=5)
+        self.job("Not stated", company=small, tier="not_stated", ok=0, level_state="uncertain")
+        fit = self.job("Fits", company=small, tier="swe1", level_state="fit")
+        self.assertEqual(self.alert(), 1)
+        self.assertEqual([e["entity_id"] for e in self.events()], [fit])
+        self.assertEqual(self.notices, [("New jobs at your level", "Fits at Tiny")])
+
+    def test_a_reject_does_not_alert_even_with_level_ok(self):
+        self.job("Years over three", tier="new_grad", ok=1, level_state="reject")
+        self.assertEqual(self.alert(), 0)
+
+    def test_a_row_with_no_state_alerts_by_level_ok(self):
+        # Before the rebuild fills `level_state`, the v1 rule decides: fit when level_ok.
+        small = seed_company(self.conn, "Tiny")
+        evidence(self.conn, small, "size", num_low=5, num_high=5)
+        self.job("Unsure", company=small, tier="not_stated", ok=0)
+        pid = self.job("Fits", company=small)
+        self.assertEqual(self.alert(), 1)
+        self.assertEqual(self.events()[0]["entity_id"], pid)
+
 
 class TickTests(unittest.TestCase):
     def setUp(self):

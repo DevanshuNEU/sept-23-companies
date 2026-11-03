@@ -381,6 +381,21 @@ class RulesetTests(TickCase):
             with self.assertRaises(ModuleNotFoundError):
                 resolve_combiner(self.conn)
 
+    def test_tick_skips_deciding_on_stale_ruleset(self):
+        # The store's current ruleset is not this code's and the tick's own rebuild did not run (another writer is
+        # mid-switch): deciding is skipped, so no decision is written under the wrong rules, and the board is
+        # deferred, not failed.
+        self.board("acme")
+        self.make_other_ruleset_current()
+        decisions = self.count("decision")
+        with mock.patch.object(tick, "ensure_ruleset_current", return_value=False):
+            report = self.tick({gh("acme"): ok()})
+        self.assertEqual(self.count("decision"), decisions)
+        self.assertEqual((report.ok, report.deferred, report.failed, report.error), (0, 1, 0, 0))
+        acme = self.conn.execute("SELECT * FROM board WHERE token = 'acme'").fetchone()
+        self.assertEqual((acme["last_read"], acme["error_streak"]), (None, 0))
+        self.assertEqual(self.current(), "r-000000000000")  # nothing switched it back
+
     def test_a_ruleset_change_during_the_tick_stops_it(self):
         for t in ("a1", "a2", "a3"):
             self.board(t)

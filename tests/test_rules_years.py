@@ -3,7 +3,7 @@ import time
 import unittest
 
 from outreach.rules.config import load_config
-from outreach.rules.years import entry_wording, years_asked
+from outreach.rules.years import YearsAsked, entry_wording, read_years, years_asked
 
 EN = chr(0x2013)  # an en dash, built from its code point so this file has no literal one
 RQ = chr(0x2019)  # a curly apostrophe
@@ -15,12 +15,12 @@ CASES = [  # (body, years)
     ("3+ years of experience building backend systems in production.", 3),
     ("5+ years of experience with distributed systems.", 5),
     ("1-3 years of professional experience.", 1),
-    ("BS in Computer Science or equivalent practical experience. 2+ years of experience with Python.", 2),
+    ("BS in Computer Science or equivalent practical experience. 2+ years of experience with data pipelines.", 2),
     ("Our customers have trusted us for 10 years.", None),
-    ("5+ years of server-side experience. 1+ years of professional experience with Go.", 5),
+    ("5+ years of server-side experience. 1+ years of professional experience with data work.", 5),
     ("BS or MS in Computer Science and 5+ years of professional experience.", 5),
     ("1" + EN + "3 years of professional experience.", 1),
-    ("2+ years of experience with Python. 5+ years of experience with Rust is a plus.", 2),
+    ("2+ years of experience with data pipelines. 5+ years of experience with payments is a plus.", 2),
     ("", None),
 ]
 
@@ -45,18 +45,18 @@ MORE_CASES = [  # (body, years)
     ("We have 5 years of runway in the bank, so we can keep hiring slowly and with care through 2028, and we love "
      "experience design.", None),  # the experience word is too far away
     ("Fun team. 3+ years of experience.\nBenefits include 401k.", 3),
-    ("- 4+ years of experience with React", 4),
+    ("- 4+ years of experience with web apps", 4),
 ]
 
 # Review fix round 1 (rulings R10 and R11)
 FIX_CASES = [  # (body, years)
     # R10: the company's own years, in the company's voice, are not a requirement
-    ("Our founding team has 20+ years of industry experience. You have 2+ years of experience with Python.", 2),
+    ("Our founding team has 20+ years of industry experience. You have 2+ years of experience with data pipelines.", 2),
     ("Our founders bring 15 years of experience building developer tools. 1+ years of professional experience.", 1),
     ("For over 10 years, we have helped engineering teams ship faster.", None),
     ("You will join a team with 20 years of combined experience; you have 2+ years of experience.", 2),
     # control: both voices in one sentence, each number takes the voice of its own clause
-    ("Our founding team has 20+ years of industry experience, and you have 2+ years of experience with Go.", 2),
+    ("Our founding team has 20+ years of industry experience, and you have 2+ years of experience with data work.", 2),
     # control: candidate voice in its clause keeps the number even after company voice
     ("We have high standards, and candidates must have 5+ years of professional experience.", 5),
     # company voice after the number does not touch it
@@ -65,9 +65,9 @@ FIX_CASES = [  # (body, years)
     # round 2: company words that do not own the years leave a requirement standing
     ("Our company is hiring a Staff Engineer with 8+ years of experience.", 8),
     ("Our team is looking for engineers with 5+ years of experience.", 5),
-    ("Our team needs someone with 5+ years of experience in Go.", 5),
+    ("Our team needs someone with 5+ years of experience in backend work.", 5),
     ("We have openings for engineers with 5+ years of experience.", 5),
-    ("We have a small team and want 5+ years of experience with Go.", 5),
+    ("We have a small team and want 5+ years of experience with data work.", 5),
     ("We have high standards: 5+ years of professional experience.", 5),
     ("Our team has openings for engineers with 5+ years of experience.", 5),  # voice too far from the number
     # round 2: the company owning the years, close before the number
@@ -82,12 +82,12 @@ FIX_CASES = [  # (body, years)
     ("Python 3 and 5+ years of experience.", 5),
     # R11: a preference rules out only its own clause
     ("3+ years of professional experience (5+ preferred).", 3),
-    ("3+ years of experience with Go, Python preferred.", 3),
+    ("3+ years of experience with data work, Python preferred.", 3),
     ("3+ years of professional experience, but 5+ years of industry experience preferred.", 3),
-    ("2+ years of experience with Python. 5+ years of experience with Rust is a plus.", 2),
+    ("2+ years of experience with data pipelines. 5+ years of experience with payments is a plus.", 2),
     # a preference marker that opens the sentence covers all of it
     ("Ideally, you have 5+ years of professional experience.", None),
-    ("Nice to have: 5+ years of experience with Rust.", None),
+    ("Nice to have: 5+ years of experience with payments.", None),
 ]
 
 
@@ -154,6 +154,134 @@ class YearsAskedTest(unittest.TestCase):
             start = time.process_time()
             years_asked(body, self.cfg)
             entry_wording(body, self.cfg)
+            self.assertLess(time.process_time() - start, 2.0)
+
+
+class MasterAndTechnologyTest(unittest.TestCase):
+    """Task 2 of #154: a master's figure, "up to N", "N and M" and a figure tied to one technology."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = load_config()
+
+    def read(self, body):
+        r = read_years(body, self.cfg)
+        return r.general, r.ms
+
+    def test_ms_tier_gives_zero(self):
+        self.assertEqual(self.read("BS and 2+ years of experience, or MS and 0+ years."), (2, 0))
+        self.assertEqual(self.read("BS and 2 years of experience or MS and 0 years of experience."), (2, 0))
+
+    def test_advanced_degree_one_year(self):
+        body = "2 years of experience with software development, or 1 year with an advanced degree."
+        self.assertEqual(self.read(body), (2, 1))
+
+    def test_masters_degree_with_two_years(self):
+        body = "Bachelor" + RQ + "s degree with 4 years of experience, or Master" + RQ + "s degree with 2 years."
+        self.assertEqual(self.read(body), (4, 2))
+
+    def test_masters_tier_is_not_a_general_figure(self):
+        self.assertEqual(self.read("MS with 2 years of experience."), (None, 2))
+
+    def test_degree_alternatives_are_not_a_tier(self):
+        # "BS or MS ... and 5+ years" asks 5 years of everyone
+        self.assertEqual(self.read("BS or MS in Computer Science and 5+ years of professional experience."), (5, None))
+        self.assertEqual(self.read("A master" + RQ + "s degree is a plus. 3 years of experience."), (3, None))
+
+    def test_masters_degree_or_years_is_no_tier(self):
+        # a degree-or-years alternative reads like "A degree, or 4+ years": no requirement, and no master's figure
+        for body in ("A Master" + RQ + "s degree or 4+ years of professional experience.",
+                     "MS or 4 years of professional experience.",
+                     "A Master" + RQ + "s degree, or 4+ years of professional experience."):
+            with self.subTest(body=body):
+                self.assertEqual(self.read(body), (None, None))
+
+    def test_or_before_a_tier_whose_masters_word_follows_still_counts(self):
+        self.assertEqual(self.read("BS and 2 years of experience, or MS and 0 years."), (2, 0))
+        self.assertEqual(self.read("2 years of experience, or 1 year with a master" + RQ + "s degree."), (2, 1))
+
+    def test_no_master_words_no_ms_figure(self):
+        self.assertEqual(self.read("3+ years of professional experience."), (3, None))
+        self.assertEqual(self.read("We cut latency to 10 ms with 3 years of experience."), (3, None))
+
+    def test_years_asked_keeps_its_tuple_and_ignores_the_tier(self):
+        body = "BS and 2+ years of experience, or MS and 0+ years."
+        self.assertEqual(years_asked(body, self.cfg), (2, body))
+        self.assertEqual(read_years(body, self.cfg), YearsAsked(2, 0, body))
+
+    def test_up_to_five_years_is_zero(self):
+        self.assertEqual(self.read("Up to 5 years of experience."), (0, None))
+        self.assertEqual(self.read("You have up to 5 years of professional experience."), (0, None))
+
+    def test_n_and_m_years_is_low_end(self):
+        self.assertEqual(self.read("1 and 3 years of professional experience."), (1, None))
+        self.assertEqual(self.read("Between 1 and 3 years of experience."), (1, None))
+        self.assertEqual(self.read("Python 3 and 5+ years of experience."), (5, None))  # "3" is a version
+
+    def test_years_with_one_technology_does_not_count(self):
+        for body in (
+            "3+ years of experience with Python.",
+            "3+ years of Python experience.",
+            "3+ years experience using React.",
+            "3+ years of experience in Node.js, building services.",
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(self.read(body), (None, None))
+
+    def test_years_with_several_technologies_still_count(self):
+        # The ruling: tied only when the tail names exactly one technology (and the words before "experience" are
+        # empty or technologies), so a list of them reads as a general requirement.
+        for body, years in (
+            ("4 years of professional experience with Node.js, AWS and Docker.", 4),
+            ("You have 5+ years of experience in Java, Spring and AWS, ideally at a startup.", 5),
+            ("3+ years of experience in Python or Go.", 3),
+            ("3+ years experience using React and TypeScript.", 3),
+            ("3+ years of Python experience with AWS and Docker.", 3),
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(self.read(body), (years, None))
+
+    def test_years_of_general_work_with_a_technology_still_count(self):
+        # words other than technologies before "experience" make it general work, whatever follows
+        for body, years in (
+            ("5+ years of software engineering experience with Python.", 5),
+            ("3+ years of professional experience with Python.", 3),
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(self.read(body), (years, None))
+
+    def test_years_of_professional_experience_counts(self):
+        self.assertEqual(self.read("3+ years of professional experience."), (3, None))
+        self.assertEqual(self.read("3+ years of professional software experience."), (3, None))
+
+    def test_technology_figure_leaves_the_other_figure(self):
+        self.assertEqual(self.read("5+ years of experience with Rust. 2+ years of professional experience."), (2, None))
+
+    def test_a_long_run_of_technology_names_is_read_in_linear_time(self):
+        # The old joiner backtracked: 24 names took 20 seconds. 40 names, single and double spaced, then a word that
+        # is no technology (so the whole run is tried and given up), each read in under 50 ms.
+        from outreach.rules.years import _Patterns
+        p = _Patterns(self.cfg)
+        names = ["python", "java", "go", "rust", "sql", "docker", "react", "kafka"]
+        for gap in (" ", "  "):
+            run = gap.join(names[i % len(names)] for i in range(40))
+            for text in (run + gap + "building", run + " and " + gap + "building"):
+                with self.subTest(gap=len(gap), text=text[-20:]):
+                    start = time.perf_counter()
+                    self.assertIsNone(p.tech_only.match(text))
+                    read_years("3+ years of experience with " + text + ".", self.cfg)
+                    read_years("3+ years of " + text + " experience.", self.cfg)
+                    self.assertLess(time.perf_counter() - start, 0.05)
+
+    def test_pathological_bodies_stay_fast(self):
+        bodies = [
+            ("3 years of experience with python and go, " * 40_000),
+            ("MS and 3 years of experience or " * 40_000),
+            ("master" + RQ + "s with 2 years " * 60_000),
+        ]
+        for body in bodies:
+            start = time.process_time()
+            read_years(body, self.cfg)
             self.assertLess(time.process_time() - start, 2.0)
 
 

@@ -1,4 +1,5 @@
-"""The review items the ranker raises: size_guess, size_check and the sponsorship conflict (#6, Task 10).
+"""The review items the ranker raises: size_guess and size_check (#6, Task 10), and the clearing of the retired
+sponsorship conflict item (#154).
 
 An item asks Devanshu to look at something; it never changes a score, a hide or the list. Each is raised with
 `ON CONFLICT DO NOTHING` on the review item's unique index, so a resolved item stays resolved until its evidence key
@@ -9,12 +10,12 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.confidence import scrub_text
 from outreach.ranking.facts import SHARED_DOMAIN_FLAG, RankFacts
-from outreach.ranking.hide import HideInputs, SizeEvidence
+from outreach.ranking.hide import SizeEvidence
 from outreach.ranking.score import Scored, list_order
 from outreach.store import atomic, utcnow
 
@@ -115,26 +116,14 @@ def _postings(ids: list[int], one: str, many: str) -> str:
     return f"postings {', '.join(str(i) for i in ids[:-1])} and {ids[-1]} {many}"
 
 
-def sync_conflict_items(conn: sqlite3.Connection, inputs: Mapping[int, HideInputs], scored: Iterable[Scored],
-                        cfg: RankerConfig, *, now: str | None = None) -> tuple[int, int]:
-    """One `flagged` item per scored, listed company whose postings disagree on sponsorship (ruling 9); returns
-    (raised, cleared). A company that is not scored (closed, removed, merged away) or is hidden (a no-go, say)
-    gets none, and an open item of one is cleared.
+def sync_conflict_items(conn: sqlite3.Connection, *, now: str | None = None) -> int:
+    """Closes the ranker's open sponsorship-conflict items; returns how many it cleared.
 
-    The key is `sponsorship-conflict:` and the sorted refusal posting ids; the item points at the first refusal. It
-    names every posting that disagrees and hides nothing.
+    Sponsorship is a flag, not a hide (#154), so a refusal next to a sponsoring posting no longer asks anything of
+    him: the company keeps its "postings disagree on sponsorship" flag (`job.CONFLICT_FLAG`) and the ranker raises no
+    item. Items of this family opened by earlier runs are resolved `cleared` here, the same way a size item whose
+    condition went away is. One he resolved himself is never touched, nor is any other raiser's or kind's item.
     """
-    now = now or utcnow()
-    wanted: _Wanted = {}
-    listed = {s.company_id for s in scored if s.hide is None}
-    for company_id, hi in inputs.items():
-        if company_id not in listed or not hi.conflict:
-            continue
-        refusals = sorted(r.posting_id for r in hi.refusals)
-        sponsors = sorted(hi.sponsors)
-        reason = (f"Postings disagree on sponsorship: {_postings(refusals, 'refuses', 'refuse')} and "
-                  f"{_postings(sponsors, 'says it sponsors', 'say they sponsor')}. The company stays visible.")
-        key = CONFLICT_PREFIX + ",".join(str(i) for i in refusals)
-        wanted[("flagged", company_id, key)] = (refusals[0], scrub_text(reason))
-    return _sync(conn, "kind = 'flagged' AND substr(evidence_key, 1, ?) = ?", (len(CONFLICT_PREFIX), CONFLICT_PREFIX),
-                 wanted, now)
+    _raised, cleared = _sync(conn, "kind = 'flagged' AND substr(evidence_key, 1, ?) = ?",
+                             (len(CONFLICT_PREFIX), CONFLICT_PREFIX), {}, now or utcnow())
+    return cleared

@@ -14,6 +14,10 @@ max_years_asked = 3
 engineering = [
   "engineer", "engineers", "engineering", "developer", "developers", "programmer", "programmers", "swe", "sde",
   "mts", "fde", "member of technical staff", "member of product staff", "member of engineering staff",
+  # #154: tech roles whose title has no engineering noun ("Data Scientist", "SRE"); "scientist" alone stays out, so a
+  # "Staff Scientist, Biology" names no engineering role
+  "ml", "machine learning", "ai engineer", "applied ai", "data engineer", "analytics engineer", "applied scientist",
+  "research engineer", "data scientist", "research scientist", "sre", "site reliability",
 ]
 # refresh/finalcheck.py:27 INTERN ('co op' also matches co-op and coop)
 intern = [
@@ -24,10 +28,10 @@ off_lane = [
   "gtm", "go to market", "it systems", "it support", "help desk", "desktop support", "technical support",
   "support engineer", "customer support", "sales", "solutions engineer", "solution engineer", "solutions consultant",
   "solution consultant", "solutions architect", "solution architect", "pre sales", "account", "recruit", "recruiter",
-  "recruiters", "recruiting", "recruitment", "designer", "design engineer", "mechanical", "electrical", "hardware",
+  "recruiters", "recruiting", "recruitment", "designer", "mechanical", "electrical", "hardware",
   "firmware", "embedded", "soc", "mechatronic", "mechatronics", "robotics hardware", "analog", "rf", "fpga", "asic",
-  "silicon", "manufacturing", "manufacturer", "manufacture", "process engineer", "quality engineer", "qa",
-  "test engineer", "validation", "technician", "scientist", "research engineer, bio", "research engineer, chem",
+  "silicon", "manufacturing", "manufacturer", "manufacture", "quality engineer", "qa",
+  "validation", "technician", "research engineer, bio", "research engineer, chem",
   "actuary", "actuarial", "clinical", "network engineer", "field service", "field technician", "installation",
   "facilities", "construction", "civil", "structural", "signal integrity", "packaging", "documentation",
   "technical writer", "technical writing", "developer advocate", "developer advocacy", "developer relations",
@@ -43,6 +47,40 @@ off_lane = [
   "customer success engineer", "customer success engineers", "customer success manager",
   "customer success managers", "customer success specialist", "customer success architect",
   "robotics field engineer", "field application engineer", "field applications engineer", "cmm", "metrology",
+  # #154: "scientist" left this list (data and research scientists are tech); "design engineer" and "test engineer"
+  # moved to `ambiguous` below, where the body decides.
+]
+# #154: titles whose body may require a PhD (`years.phd_cues`): such a posting is out of his band
+phd_titles = ["scientist", "scientists", "researcher", "researchers"]
+# #154: physical, supply chain and non-tech data roles. Unlike `off_lane`, these do not make a title off lane when it
+# also names software work (`software_titles`, which also keeps an `ambiguous` title from the body scorer): "Software Engineer, Logistics" stays in, "Logistics Engineer" is out.
+# Data Analyst, BI and annotation roles are not tech.
+off_lane_unless_software = [
+  "supply chain", "procurement", "logistics", "sourcing", "buyer", "planner", "thermal", "optical", "photonics",
+  "laser", "process engineer", "hvac", "chemical", "materials", "data analyst", "business intelligence",
+  "data annotation",
+]
+software_titles = [
+  "software", "developer", "programmer", "swe", "sde", "full stack", "backend", "back end", "frontend", "front end",
+  "machine learning", "ml", "ai engineer", "data engineer", "platform", "infrastructure", "devops",
+  "site reliability", "sre", "distributed systems", "data scientist", "research scientist", "applied scientist",
+]
+# #154: titles that can name a software or a physical role. The body decides: `software_words` against
+# `physical_words`, whole words (and their plurals), each word counted once; tech when software leads by `ambiguous_margin` or more, else
+# off lane. No body yet is engineering: the crawler fetches bodies only for engineering and intern lanes, so the title
+# waits for its body. Checked after `off_lane`, so "Hardware Test Engineer" is off lane whatever it says.
+ambiguous = [
+  "systems engineer", "test engineer", "design engineer", "product engineer", "application engineer",
+  "applications engineer", "project engineer",
+]
+ambiguous_margin = 2
+software_words = [
+  "python", "typescript", "javascript", "java", "golang", "rust", "c++", "react", "sql", "kubernetes", "docker",
+  "aws", "gcp", "pytorch", "tensorflow", "api", "backend", "frontend", "microservices", "ci/cd", "linux",
+]
+physical_words = [
+  "solidworks", "autocad", "catia", "ansys", "fea", "cfd", "gd&t", "pcb", "altium", "oscilloscope", "soldering",
+  "thermodynamics", "hvac", "plc", "scada", "bom", "six sigma", "injection molding", "sheet metal",
 ]
 # #4 follow-up 2026-10-23: academic posts are off lane even when the title also says "internship" or "engineering".
 # Checked apart from off_lane because the intern check comes first ("Assistant Professor ..., Internship Coordinator").
@@ -108,7 +146,7 @@ open_level = [
 ]
 # refresh/finalcheck.py:39-40 L1_T and L2_T, refresh/final_merge.py:18: a level numeral counts only right after one of these
 level_nouns = [
-  "engineer", "developer", "swe", "sde", "programmer", "mts",
+  "engineer", "developer", "swe", "sde", "programmer", "mts", "scientist",
 ]
 # Task 8: role specialties that may sit between a level noun and its numeral ("Software Engineer Front-End 2",
 # "Software Engineer, Backend II"); technologies and product areas are left out, so "Web 3" and "Python 3" are not levels
@@ -154,6 +192,45 @@ candidate_voice = [
   "you have", "you've", "you bring", "you'll have", "you'll bring", "you will have", "you will bring",
   "you should have", "you possess", "you need", "you'd have", "candidate", "candidates", "required", "requirement",
   "requirements", "must", "minimum", "at least", "qualifications",
+]
+# #154: a degree tier ("BS and 2+ years of experience, or MS and 0+ years") gives its own master's figure. Words are
+# read as written; the abbreviations only in capitals, so "10 ms" is not a master's degree. A master's word counts as
+# a tier only when it sits at most 3 words before the number or the number is followed by "with a master's degree";
+# "BS or MS in CS and 5+ years" is an alternative degree (a bachelor's word and "or" right before), not a tier.
+master_words = [
+  "master's", "masters", "master of science", "master degree", "masters degree", "advanced degree",
+  "advanced degrees", "graduate degree", "postgraduate degree",
+]
+master_abbreviations = ["MS", "M.S.", "M.S", "MSc", "M.Sc.", "MEng"]
+bachelor_words = [
+  "bachelor's", "bachelors", "bachelor", "bs", "b.s.", "b.s", "ba", "b.a.", "bsc", "undergraduate",
+]
+# #154: a scientist or researcher title (title.phd_titles) whose body requires a PhD is out of his band. A sentence
+# counts when it names a PhD (phd_words) and says it is required (phd_cues), unless it softens it (phd_softeners) or
+# names a lower degree beside it (master_words, bachelor_words and master_abbreviations above: "MS or PhD").
+phd_words = ["phd", "ph.d", "doctorate", "doctoral degree"]
+phd_cues = [
+  "required", "requires", "require", "must have", "must hold", "must possess", "mandatory", "need a",
+  "needs a", "minimum",
+]
+phd_softeners = [
+  "preferred", "nice to have", "a plus", "bonus", "ideally", "desired", "desirable", "helpful", "or equivalent",
+  "equivalent experience", "equivalent practical experience", "or related experience",
+]
+# #154: "up to 5 years of experience" asks for nothing (it counts as 0)
+upper_bound = ["up to", "at most", "no more than", "maximum of"]
+# #154: a figure tied to one named technology is not a requirement for the level: "3+ years of experience with
+# Python", "3+ years of Python experience". Tied only when the words before "experience" are empty or only these
+# names and what "experience with/in/using" opens (to the first comma) is exactly one of them, with no name opening
+# what follows ("in Java, Spring and AWS" is a list, so its figure stands). Also tells a version ("Python 3 and 5+
+# years") from the low end of a range.
+technologies = [
+  "python", "java", "javascript", "typescript", "go", "golang", "rust", "c", "c++", "c#", "ruby", "php", "swift",
+  "kotlin", "scala", "elixir", "react", "react native", "angular", "vue", "node", "node.js", "nodejs", "next.js",
+  "django", "flask", "fastapi", "spring", "spring boot", "rails", "ruby on rails", "sql", "nosql", "postgres",
+  "postgresql", "mysql", "mongodb", "redis", "kafka", "elasticsearch", "graphql", "kubernetes", "k8s", "docker",
+  "terraform", "aws", "gcp", "azure", "linux", "git", "pytorch", "tensorflow", "spark", "hadoop", "airflow", "dbt",
+  "snowflake", "html", "css", "swiftui", "flutter", ".net",
 ]
 # refresh/finalcheck.py:42-44 STRONG and refresh/crawl_boards.py:29-31 BODY_ENTRY
 body_entry = [

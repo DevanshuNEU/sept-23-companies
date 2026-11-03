@@ -10,16 +10,9 @@ from .config import Config, default_config
 from .eligibility import eligibility, starts_2027
 from .location import us_status
 from .sponsorship import citizenship_required, sponsorship_stance
-from .text import strip_invisible
-from .title import classify_title
-from .years import entry_wording, years_asked
-
-
-def _clean(text: str | None) -> str:
-    """The text without NUL bytes or invisible characters. SQLite's length() stops at a NUL, so a quote that holds one
-    fails the decision table's CHECKs; a NUL is never part of a word, so dropping it changes no reading. An invisible
-    character inside a word hides it from every word list (`strip_invisible`, #112)."""
-    return strip_invisible((text or "").replace("\x00", ""))
+from .text import clean_text
+from .title import III_BASIS, classify_title
+from .years import YearsAsked, entry_wording, read_years, requires_phd
 
 
 @dataclass(frozen=True)
@@ -54,6 +47,8 @@ class Decision:
     eligibility_reason: str | None
     eligibility_quote: str
     start_2027: bool
+    level_state: str  # fit, reject or uncertain (#154): every builder states it
+    years_ms: int | None = None  # years asked of a master's degree holder, None when the posting gives none
 
     def as_row(self) -> dict:
         """The `decision` table's columns (without posting_id, ruleset_version and decided_at), booleans as 0 or 1."""
@@ -64,19 +59,21 @@ class Decision:
             "citizenship": int(self.citizenship), "citizenship_quote": self.citizenship_quote,
             "eligibility": self.eligibility, "eligibility_reason": self.eligibility_reason,
             "eligibility_quote": self.eligibility_quote, "start_2027": int(self.start_2027),
+            "level_state": self.level_state, "years_ms": self.years_ms,
         }
 
 
-def _level(lane: str, tier: str | None, title_basis: str, years: int | None, entry: str,
-           max_years: int) -> tuple[str, bool, str]:
+def _level_ok(lane: str, tier: str | None, title_basis: str, years: int | None, entry: str, max_years: int,
+              limit_years: int | None) -> tuple[str, bool, str]:
     """(tier, ok, basis): the title's tier and the body's years combined, in this order (port of
-    refresh/finalcheck.py:91-100)."""
+    refresh/finalcheck.py:91-100). `limit_years` is the figure the over-the-limit test reads (the general figure,
+    except for a III title)."""
     if lane != "engineering":
         return tier or "not_stated", False, title_basis
     if tier == "senior":
         return "senior", False, title_basis
-    if years is not None and years > max_years:
-        return tier or "not_stated", False, f"Asks {years} years"
+    if limit_years is not None and limit_years > max_years:
+        return tier or "not_stated", False, f"Asks {limit_years} years"
     if tier == "new_grad":
         return "new_grad", True, title_basis
     if tier == "early_career":
@@ -94,14 +91,55 @@ def _level(lane: str, tier: str | None, title_basis: str, years: int | None, ent
     return "not_stated", False, "Posting does not state a level"
 
 
+def _state(lane: str, tier: str, his_years: int | None, entry: str, max_years: int, phd: bool) -> str:
+    """fit, reject or uncertain (#154). `his_years` is the master's figure when the body gives one, else the general
+    figure. Reject: not tech, tier senior, a PhD required of a scientist, or more years than his band. Fit: a tier for
+    new graduates (swe1 too), entry wording, or at most 2 years. Everything else is uncertain."""
+    if lane != "engineering" or tier == "senior" or phd:
+        return "reject"
+    if his_years is not None and his_years > max_years:
+        return "reject"
+    if tier in ("new_grad", "early_career", "swe1") or entry or (his_years is not None and his_years <= 2):
+        return "fit"
+    return "uncertain"
+
+
+def _level(lane: str, tier: str | None, title_basis: str, years: YearsAsked, entry: str, max_years: int,
+           phd: bool = False) -> tuple[str, bool, str, str]:
+    """(tier, ok, basis, state). `ok` reads the general figure exactly as before, except that a III title (tier swe2,
+    "Title says III") reads the master's figure first for the over-the-limit test, as the state does."""
+    his = years.ms if years.ms is not None else years.general
+    limit = his if title_basis == III_BASIS else years.general
+    out_tier, ok, basis = _level_ok(lane, tier, title_basis, years.general, entry, max_years, limit)
+    return out_tier, ok, basis, _state(lane, out_tier, his, entry, max_years, phd)
+
+
+def interim_level_state(level_ok: bool, level_tier: str | None) -> str:
+    """The state of a row stored before 0007 and not yet rebuilt (the rebuild at deploy fills every row): the v1 job
+    list rule. Fit when level_ok; uncertain when the tier is not_stated or open; else reject. The job list's
+    `STATE_SQL` is this same rule in SQL, so a page that reads a row in Python and one that reads it in SQL agree.
+    decide() computes the real state."""
+    if level_ok:
+        return "fit"
+    return "uncertain" if level_tier in ("not_stated", "open") else "reject"
+
+
+def row_level_state(d) -> str:
+    """The level state of a decision row (a mapping with level_state, level_ok and level_tier): the stored state, or the
+    v1 rule while the row waits for the rebuild. The company page and the MCP read postings through this."""
+    return d["level_state"] or interim_level_state(bool(d["level_ok"]), d["level_tier"])
+
+
 def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
     cfg = cfg if cfg is not None else default_config()
-    title, body, location = _clean(p.title), _clean(p.body), _clean(p.location)
-    country = None if p.country is None else _clean(p.country)
-    t = classify_title(title, cfg)
-    years, years_quote = years_asked(body, cfg)
-    tier, ok, basis = _level(t.lane, t.tier, t.basis, years, entry_wording(body, cfg),
-                             cfg.candidate["max_years_asked"])
+    title, body, location = clean_text(p.title), clean_text(p.body), clean_text(p.location)
+    country = None if p.country is None else clean_text(p.country)
+    t = classify_title(title, cfg, body)
+    asked = read_years(body, cfg)
+    years, years_quote = asked.general, asked.quote
+    phd = t.lane == "engineering" and requires_phd(title, body, cfg)
+    tier, ok, basis, state = _level(t.lane, t.tier, t.basis, asked, entry_wording(body, cfg),
+                                    cfg.candidate["max_years_asked"], phd)
     stance, stance_quote = sponsorship_stance(body, cfg)
     citizen, citizen_quote = citizenship_required(body, cfg)
     status, reason, elig_quote = eligibility(title, body, cfg)
@@ -110,6 +148,7 @@ def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
         us=us_status(location, country, cfg, title), sponsorship=stance, sponsorship_quote=stance_quote,
         citizenship=citizen, citizenship_quote=citizen_quote, eligibility=status, eligibility_reason=reason,
         eligibility_quote=elig_quote, start_2027=starts_2027(title, body, cfg),
+        level_state=state, years_ms=asked.ms,
     )
 
 
@@ -117,7 +156,8 @@ def passes(d: Decision) -> bool:
     """The posting-level half of #9's hidden list: false when the posting is hidden for its own sake.
 
     This is hide policy, not a classification. #6 calls it and adds the company-level half (size over 300 with
-    evidence, no-go); it must not restate it. OPT-only sponsorship and a failed level are not hidden here.
+    evidence, no-go); it must not restate it. Sponsorship is a flag, never a hide (#9, 2026-11-01: he wants F-1 OPT
+    and STEM OPT, not H-1B), so "no sponsorship", OPT-only wording and a failed level are not hidden here. Citizenship,
+    clearance and ITAR "US person" wording are, and hide the posting only.
     """
-    return (d.lane == "engineering" and d.us != "no" and d.sponsorship != "no" and not d.citizenship
-            and d.eligibility == "ok")
+    return d.lane == "engineering" and d.us != "no" and not d.citizenship and d.eligibility == "ok"

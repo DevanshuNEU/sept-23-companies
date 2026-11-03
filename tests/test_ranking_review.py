@@ -1,4 +1,4 @@
-"""Size and sponsorship-conflict review items (issue #6, Task 10; rulings 9 and 11; design 5.4).
+"""Size review items, and the retired sponsorship-conflict item (issue #6, Task 10; rulings 9 and 11; #154).
 
 An item only asks Devanshu to look. It never changes a score, a hide or the list."""
 import dataclasses
@@ -6,7 +6,7 @@ import unittest
 
 from outreach.ranking.config import default_ranker_config
 from outreach.ranking.facts import SHARED_DOMAIN_FLAG
-from outreach.ranking.hide import Hide, HideInputs, Refusal, SizeEvidence
+from outreach.ranking.hide import Hide, SizeEvidence
 from outreach.ranking.review import sync_conflict_items, sync_size_items
 from outreach.ranking.score import list_order, score_company, to_columns
 from outreach.ranking.signals import build_signals
@@ -234,98 +234,41 @@ class SizeLifecycleTests(Store):
         self.assertEqual(got, {mine: "open", kinds: "open"})
 
 
-def conflict(company_id: int, refuse=(5,), sponsors=(8,)) -> HideInputs:
-    return HideInputs(company_id, None, "", tuple(Refusal(p, False, "We cannot sponsor.") for p in refuse),
-                      tuple(sponsors), None)
+def conflict_item(conn, company_id: int, key: str = "sponsorship-conflict:5,6", raised_by: str = "ranker") -> int:
+    return conn.execute(
+        "INSERT INTO review_item(kind, company_id, posting_id, reason, evidence_key, raised_by, created_at) "
+        "VALUES ('flagged', ?, NULL, 'Postings disagree on sponsorship: posting 5 refuses and posting 8 says it "
+        "sponsors. The company stays visible.', ?, ?, ?)", (company_id, key, raised_by, NOW)).lastrowid
 
 
 class ConflictTests(Store):
-    def sync(self, inputs, now=NOW, hidden=(), omit=()):
-        """Every company in `inputs` is scored and listed, except those in `hidden` (a no-go) or `omit` (not scored)."""
-        gone = Hide("no_go", "On the no-go list", False)
-        scored = [self.company(cid, 10.0, hide=gone if cid in hidden else None)[0]
-                  for cid in {self.a, self.b, self.c, *inputs} if cid not in omit]
-        return sync_conflict_items(self.conn, inputs, scored, CFG, now=now)
+    """#154: sponsorship is a flag, so a conflict no longer asks anything of him. The company keeps its
+    "postings disagree on sponsorship" flag (job.py); the ranker raises no item and closes the old open ones."""
 
-    def test_sponsorship_conflict_raises_one_flagged_item_and_the_company_stays_listed(self):
-        inputs = {self.a: conflict(self.a, refuse=(6, 5), sponsors=(8,)), self.b: conflict(self.b, (), (3,)),
-                  self.c: conflict(self.c, (4,), ())}
-        self.assertEqual(self.sync(inputs), (1, 0))
-        (item,) = self.items()
-        self.assertEqual((item["kind"], item["company_id"], item["posting_id"], item["raised_by"], item["state"]),
-                         ("flagged", self.a, 5, "ranker", "open"))
-        self.assertEqual(item["evidence_key"], "sponsorship-conflict:5,6")
-        self.assertIn("posting", item["reason"])
-        self.assertEqual(item["reason"], "Postings disagree on sponsorship: postings 5 and 6 refuse and posting 8 "
-                                         "says it sponsors. The company stays visible.")
-        scored, _facts = self.company(self.a, 12.0)
-        self.assertEqual([s.company_id for s in list_order([scored])], [self.a])
+    def states(self):
+        return [(r["state"], r["resolution"]) for r in self.items()]
 
-    def test_a_hidden_or_unscored_company_gets_no_conflict_item(self):
-        inputs = {self.a: conflict(self.a), self.b: conflict(self.b, (1,), (2,)), self.c: conflict(self.c, (3,), (4,))}
-        self.assertEqual(self.sync(inputs, hidden=(self.a,), omit=(self.b,)), (1, 0))  # b: closed, never scored
-        self.assertEqual([r["company_id"] for r in self.items()], [self.c])
+    def test_an_open_conflict_item_from_before_is_cleared(self):
+        conflict_item(self.conn, self.a)
+        conflict_item(self.conn, self.b, "sponsorship-conflict:1")
+        self.assertEqual(sync_conflict_items(self.conn, now=LATER), 2)
+        self.assertEqual(self.states(), [("resolved", "cleared")] * 2)
+        self.assertEqual(sync_conflict_items(self.conn, now=LATER), 0)
 
-    def test_a_company_that_becomes_hidden_has_its_open_item_cleared(self):
-        self.sync({self.a: conflict(self.a)})
-        self.assertEqual(self.sync({self.a: conflict(self.a)}, now=LATER, hidden=(self.a,)), (0, 1))
-        self.assertEqual([(r["state"], r["resolution"]) for r in self.items()], [("resolved", "cleared")])
+    def test_a_conflict_item_he_resolved_is_left_alone(self):
+        rs.resolve(self.conn, conflict_item(self.conn, self.a), "marked_ok")
+        self.assertEqual(sync_conflict_items(self.conn, now=LATER), 0)
+        self.assertEqual(self.states(), [("resolved", "marked_ok")])
 
-    def test_the_reason_names_both_postings_when_there_is_one_of_each(self):
-        self.sync({self.a: conflict(self.a, (5,), (8,))})
-        self.assertEqual(self.items()[0]["reason"], "Postings disagree on sponsorship: posting 5 refuses and "
-                                                    "posting 8 says it sponsors. The company stays visible.")
-
-    def test_many_sponsoring_postings_are_all_named(self):
-        self.sync({self.a: conflict(self.a, (5,), (9, 8))})
-        self.assertIn("postings 8 and 9 say they sponsor", self.items()[0]["reason"])
-
-    def test_conflict_item_clears_when_the_condition_goes_away(self):
-        self.sync({self.a: conflict(self.a)})
-        self.assertEqual(self.sync({self.a: conflict(self.a, (5,), ())}, now=LATER), (0, 1))
-        self.assertEqual([(r["state"], r["resolution"]) for r in self.items()], [("resolved", "cleared")])
-        self.assertEqual(self.sync({}, now=LATER), (0, 0))
-
-    def test_a_company_gone_from_the_inputs_is_cleared(self):
-        self.sync({self.a: conflict(self.a)})
-        self.assertEqual(self.sync({self.b: conflict(self.b, (1,), (2,))}, now=LATER), (1, 1))
-
-    def test_a_resolved_conflict_item_stays_resolved_until_the_key_changes(self):
-        self.sync({self.a: conflict(self.a)})
-        rs.resolve(self.conn, self.items()[0]["review_id"], "marked_ok")
-        self.assertEqual(self.sync({self.a: conflict(self.a)}, now=LATER), (0, 0))
-        self.assertEqual([r["state"] for r in self.items()], ["resolved"])
-        self.assertEqual(self.sync({self.a: conflict(self.a, (5, 7), (8,))}, now=LATER), (1, 0))
-        self.assertEqual([(r["evidence_key"], r["state"]) for r in self.items()],
-                         [("sponsorship-conflict:5", "resolved"), ("sponsorship-conflict:5,7", "open")])
-
-    def test_a_cleared_conflict_opens_again_when_it_comes_back(self):
-        self.sync({self.a: conflict(self.a)})
-        self.sync({}, now=LATER)
-        self.assertEqual(self.sync({self.a: conflict(self.a)}, now="2026-10-24T09:00:00Z"), (1, 0))
-        self.assertEqual([(r["state"], r["resolution"]) for r in self.items()], [("open", None)])
-
-    def test_the_reason_follows_a_changed_sponsor_set_without_a_new_item(self):
-        self.sync({self.a: conflict(self.a, (5,), (8,))})
-        self.assertEqual(self.sync({self.a: conflict(self.a, (5,), (9,))}, now=LATER), (0, 0))
-        (item,) = self.items()
-        self.assertIn("posting 9 says it sponsors", item["reason"])
-
-    def test_a_rerun_changes_nothing(self):
-        inputs = {self.a: conflict(self.a), self.b: conflict(self.b, (1,), (2,))}
-        self.assertEqual(self.sync(inputs), (2, 0))
-        before = [tuple(r) for r in self.conn.execute("SELECT * FROM review_item ORDER BY review_id")]
-        self.assertEqual(self.sync(inputs, now=LATER), (0, 0))
-        self.assertEqual([tuple(r) for r in self.conn.execute("SELECT * FROM review_item ORDER BY review_id")], before)
-
-    def test_other_flagged_items_are_left_alone(self):
+    def test_only_the_rankers_conflict_items_are_cleared(self):
         doubtful = rs.flag_board(self.conn, self.a, rs.board(self.conn, self.a))
         theirs = self.conn.execute(
             "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
-            "VALUES ('flagged', ?, 'ranker note', 'something-else', 'ranker', ?)", (self.a,  NOW)).lastrowid
-        self.assertEqual(self.sync({}), (0, 0))
+            "VALUES ('flagged', ?, 'ranker note', 'something-else', 'ranker', ?)", (self.a, NOW)).lastrowid
+        imported = conflict_item(self.conn, self.b, raised_by="import")
+        self.assertEqual(sync_conflict_items(self.conn, now=NOW), 0)
         got = {r["review_id"]: r["state"] for r in self.conn.execute("SELECT review_id, state FROM review_item")}
-        self.assertEqual(got, {doubtful: "open", theirs: "open"})
+        self.assertEqual(got, {doubtful: "open", theirs: "open", imported: "open"})
 
 
 class NeverHidesTests(Store):
@@ -337,7 +280,7 @@ class NeverHidesTests(Store):
         before = [(s.score, s.hide, to_columns(s)) for s in scored]
         order = [s.company_id for s in list_order(scored)]
         self.size_sync(rows, {self.b: guess(500, 4)})
-        sync_conflict_items(self.conn, {self.a: conflict(self.a)}, scored, CFG, now=NOW)
+        sync_conflict_items(self.conn, now=NOW)
         self.assertEqual([(s.score, s.hide, to_columns(s)) for s in scored], before)
         self.assertEqual([s.company_id for s in list_order(scored)], order)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM no_go").fetchone()[0], 0)

@@ -17,8 +17,8 @@ from outreach.ranking.config import default_ranker_config
 from outreach.ranking.facts import load_facts
 from outreach.ranking.pay import load_wages
 from outreach.ranking.roles import load_roles
-from outreach.ranking.hide import (Hide, HideInputs, Refusal, decide_hide, load_hide_inputs, posting_visible,
-                                   write_no_go)
+import outreach.ranking.hide as hide_module
+from outreach.ranking.hide import Hide, HideInputs, Refusal, decide_hide, load_hide_inputs, posting_visible
 from outreach.rules import Decision
 from tests import ranking_store as rs
 from tests.storetest import fresh_store, seed_company
@@ -32,7 +32,7 @@ def make_decision(**kw) -> Decision:
     base = dict(lane="engineering", level_tier="new_grad", level_ok=True, level_basis="Title says new grad",
                 years_asked=None, years_quote="", us="yes", sponsorship="silent", sponsorship_quote="",
                 citizenship=False, citizenship_quote="", eligibility="ok", eligibility_reason=None,
-                eligibility_quote="", start_2027=False)
+                eligibility_quote="", start_2027=False, level_state="fit")
     base.update(kw)
     return Decision(**base)
 
@@ -57,6 +57,10 @@ class Store(unittest.TestCase):
                     **fields)
         return pid
 
+    def refused(self, company_id=None, stale=None) -> list[int]:
+        """The postings the ranker counts as refusing sponsorship (they flag; none hides)."""
+        return [r.posting_id for r in self.inputs(stale)[company_id or self.co].refusals]
+
     def count(self, table: str) -> int:
         return self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
@@ -71,8 +75,9 @@ class PostingVisibleTests(unittest.TestCase):
         self.assertFalse(posting_visible(student))
         self.assertFalse(posting_visible(make_decision(lane="off_lane", level_ok=False)))
         self.assertFalse(posting_visible(make_decision(lane="not_engineering", level_ok=False)))
-        self.assertFalse(posting_visible(make_decision(sponsorship="no", sponsorship_quote=REFUSE)))
-        self.assertFalse(posting_visible(dataclasses.replace(intern, sponsorship="no", sponsorship_quote=REFUSE)))
+        # "No sponsorship" is a flag, not a hide (#154): the posting stays visible, interns included.
+        self.assertTrue(posting_visible(make_decision(sponsorship="no", sponsorship_quote=REFUSE)))
+        self.assertTrue(posting_visible(dataclasses.replace(intern, sponsorship="no", sponsorship_quote=REFUSE)))
         with mock.patch("outreach.ranking.hide.passes", return_value=False) as fake:
             for d in (make_decision(), intern):
                 self.assertFalse(posting_visible(d))
@@ -137,35 +142,7 @@ class SizeTests(Store):
 
 
 class RefusalTests(Store):
-    def test_final_refusal_hides_and_writes_no_go_once(self):
-        pid = rs.posting(self.conn, self.co, body=REFUSE, posted_on="2026-10-10")
-        rs.decide_all(self.conn)  # the real rules read the refusal
-        rs.make_final(self.conn, pid)
-        hide = self.hide_for()
-        self.assertEqual((hide.kind, hide.provisional, hide.posting_id), ("no_sponsorship", False, pid))
-        self.assertEqual(hide.quote, REFUSE)
-        self.assertTrue(write_no_go(self.conn, self.co, hide))
-        self.assertFalse(write_no_go(self.conn, self.co, hide))
-        rows = self.conn.execute("SELECT company_id, reason, source, source_ref, quote, lifted_at FROM no_go").fetchall()
-        self.assertEqual([tuple(r) for r in rows], [(self.co, "no_sponsorship", "rules", str(pid), REFUSE, None)])
-        events = self.conn.execute("SELECT entity, kind, actor, company_id FROM event WHERE entity = 'no_go'").fetchall()
-        self.assertEqual([tuple(e) for e in events], [("no_go", "added", "rules", self.co)])
-        self.assertEqual(self.hide_for().kind, "no_go")  # the written row now hides by itself
-
-    def test_provisional_refusal_hides_provisionally_and_writes_nothing(self):
-        self.refusal(final=False)
-        hide = self.hide_for()
-        self.assertEqual((hide.kind, hide.provisional), ("no_sponsorship", True))
-        self.assertIn("hidden, pending reader", hide.reason)
-        self.assertFalse(write_no_go(self.conn, self.co, hide))
-        self.assertEqual(self.count("no_go"), 0)
-        self.assertEqual(self.count("event"), 0)
-
-    def test_one_final_refusal_among_provisional_ones_is_final(self):
-        self.refusal(final=False)
-        pid = self.refusal(final=True)
-        hide = self.hide_for()
-        self.assertEqual((hide.provisional, hide.posting_id), (False, pid))
+    """Refusals are still collected (the sponsorship-conflict item and flag read them); none hides (#154)."""
 
     def test_refusals_that_say_nothing_about_his_roles_never_count(self):
         for fields in (dict(lane="intern", level_tier="not_stated"), dict(lane="off_lane", level_tier="not_stated"),
@@ -179,18 +156,41 @@ class RefusalTests(Store):
                 self.assertIsNone(decide_hide(got, CFG))
         self.assertEqual(self.count("no_go"), 0)
 
-    def test_a_hide_that_is_not_a_final_refusal_is_never_written(self):
-        for hide in (Hide("over_size", "Size 400", False), Hide("no_go", "On the no-go list", False),
-                     Hide("no_sponsorship", "hidden, pending reader", True, posting_id=1, quote="x")):
-            with self.subTest(kind=hide.kind):
-                self.assertFalse(write_no_go(self.conn, self.co, hide))
-        self.assertEqual(self.count("no_go"), 0)
-
     def test_closed_and_undecided_postings_never_refuse(self):
         pid = rs.posting(self.conn, self.co, closed=True)
         rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote=REFUSE, provisional=0)
         rs.posting(self.conn, self.co, body=REFUSE)  # no decision row
         self.assertIsNone(self.hide_for())
+
+
+class SponsorshipIsAFlagTests(Store):
+    """#154 (#9, 2026-11-01): he wants OPT and STEM OPT, not H-1B, so a refusal to sponsor is a flag on the posting,
+    never a hide on the company and never a no-go row. Citizenship, clearance and ITAR hide the posting only."""
+
+    def test_no_sponsorship_is_flag_not_hide(self):
+        pid = rs.posting(self.conn, self.co, body=REFUSE, posted_on="2026-10-10")
+        rs.decide_all(self.conn)  # the real rules read the refusal
+        rs.make_final(self.conn, pid)
+        got = self.inputs()[self.co]
+        self.assertEqual([r.posting_id for r in got.refusals], [pid])  # still known: the Jobs page flags it
+        self.assertIsNone(decide_hide(got, CFG))
+        provisional = self.refusal(final=False)
+        self.assertIsNotNone(provisional)
+        self.assertIsNone(self.hide_for())
+        self.assertEqual(self.count("no_go"), 0)
+        self.assertFalse(hasattr(hide_module, "write_no_go"))  # ranking writes no row for a refusal any more
+
+    def test_clearance_hides_posting_not_company(self):
+        pid = rs.posting(self.conn, self.co, "Software Engineer, New Grad",
+                         body="Applicants must hold an active TS/SCI clearance and be a U.S. citizen.",
+                         posted_on="2026-10-10")
+        rs.decide_all(self.conn)
+        rs.make_final(self.conn, pid)
+        d = self.conn.execute("SELECT citizenship FROM decision WHERE posting_id = ?", (pid,)).fetchone()
+        self.assertEqual(d["citizenship"], 1)
+        self.assertFalse(posting_visible(make_decision(citizenship=True, citizenship_quote="U.S. citizen")))
+        self.assertIsNone(self.hide_for())  # the company stays: only the posting is hidden
+        self.assertEqual(self.count("no_go"), 0)
 
 
 class NoGoTests(Store):
@@ -200,8 +200,6 @@ class NoGoTests(Store):
         got = self.inputs()[self.co]
         self.assertEqual(got.no_go, "lifted")
         self.assertIsNone(decide_hide(got, CFG))
-        made_anyway = Hide("no_sponsorship", "x", False, posting_id=1, quote=REFUSE)
-        self.assertFalse(write_no_go(self.conn, self.co, made_anyway))
         rows = self.conn.execute("SELECT lifted_at IS NOT NULL FROM no_go").fetchall()
         self.assertEqual([r[0] for r in rows], [1])
 
@@ -223,27 +221,21 @@ class NoGoTests(Store):
         self.assertEqual(hide.kind, "no_go")
         self.assertIn("said no", hide.reason)
 
-    def test_a_lifted_no_go_on_a_merged_away_duplicate_blocks_the_write_for_the_survivor(self):
+    def test_a_lifted_no_go_on_a_merged_away_duplicate_is_the_survivors_lift(self):
         dup = seed_company(self.conn, "Acme Inc")
         rs.no_go(self.conn, dup, lifted=True)
         rs.merge(self.conn, dup, self.co)
         self.refusal(final=True)
         self.assertEqual(self.inputs()[self.co].no_go, "lifted")
         self.assertIsNone(self.hide_for())
-        self.assertFalse(write_no_go(self.conn, self.co, Hide("no_sponsorship", "x", False, posting_id=1)))
         self.assertEqual(self.count("no_go"), 1)
 
-    def test_a_merged_away_company_is_never_written_and_a_lift_up_its_chain_counts(self):
-        # A merge that commits while the rank job computes leaves the job holding a refusal for the duplicate: its
-        # survivor's lift is up the chain, and a no-go row on the duplicate would re-hide the survivor.
+    def test_a_lift_up_a_merge_chain_counts_for_every_duplicate(self):
         dup = seed_company(self.conn, "Acme Inc")
         rs.no_go(self.conn, self.co, lifted=True)
         rs.merge(self.conn, dup, self.co)
-        made = Hide("no_sponsorship", "x", False, posting_id=1, quote=REFUSE)
-        self.assertFalse(write_no_go(self.conn, dup, made))
-        bare = seed_company(self.conn, "Bare dup")  # no no-go row anywhere in its family: still refused
+        bare = seed_company(self.conn, "Bare dup")
         rs.merge(self.conn, bare, self.co)
-        self.assertFalse(write_no_go(self.conn, bare, made))
         self.assertEqual(self.count("no_go"), 1)
         self.assertEqual(self.inputs()[self.co].no_go, "lifted")
 
@@ -294,8 +286,6 @@ class NoGoTests(Store):
         self.assertEqual(got.no_go, "lifted")
         hide = decide_hide(got, CFG)
         self.assertIsNone(hide)
-        made = Hide("no_sponsorship", "x", False, posting_id=1, quote=REFUSE)
-        self.assertFalse(write_no_go(self.conn, self.co, made))
         self.assertEqual(self.count("no_go"), 2)
         # Claude is not him, and an import replays old lists: neither undoes his lift.
         for source in ("claude", "import"):
@@ -319,15 +309,16 @@ class NoGoTests(Store):
 
 
 class TrustedBoardTests(Store):
-    def test_postings_on_a_doubtful_board_never_hide(self):
+    def test_postings_on_a_doubtful_board_count_for_nothing(self):
         b = rs.board(self.conn, self.co)
-        self.refusal(board_id=b)
+        pid = self.refusal(board_id=b)
         item = rs.flag_board(self.conn, self.co, b, "board match doubtful: org name differs")
         self.assertIn(b, doubtful_board_ids(self.conn))
-        self.assertIsNone(self.hide_for())
+        self.assertEqual(self.refused(), [])
         rs.resolve(self.conn, item, "marked_ok")
         self.assertNotIn(b, doubtful_board_ids(self.conn))
-        self.assertEqual(self.hide_for().kind, "no_sponsorship")
+        self.assertEqual(self.refused(), [pid])
+        self.assertIsNone(self.hide_for())
 
     def test_only_an_open_crawler_doubtful_item_makes_a_board_doubtful(self):
         b = rs.board(self.conn, self.co)
@@ -335,18 +326,19 @@ class TrustedBoardTests(Store):
         rs.flag_board(self.conn, self.co, b, BOARD_DOUBTFUL_PREFIX + ": org name differs", raised_by="claude")
         self.assertEqual(doubtful_board_ids(self.conn), frozenset())
 
-    def test_a_stapply_name_board_never_hides_before_its_first_read(self):
+    def test_a_stapply_name_board_counts_for_nothing_before_its_first_read(self):
         for found_by in ("stapply_name", "slug_probe"):
             with self.subTest(found_by=found_by):
                 co = seed_company(self.conn, found_by)
                 b = rs.board(self.conn, co, found_by=found_by, last_read=None)
                 pid = rs.posting(self.conn, co, board_id=b)
                 rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote=REFUSE, provisional=0)
-                self.assertIsNone(decide_hide(self.inputs()[co], CFG))
+                self.assertEqual(self.refused(co), [])
                 self.conn.execute("UPDATE board SET last_read = 'ok', last_read_at = '2026-10-21T08:00:00Z', "
                                   "streak_since = '2026-10-21T08:00:00Z' WHERE board_id = ?", (b,))
-                self.assertEqual(decide_hide(self.inputs()[co], CFG).kind, "no_sponsorship")
+                self.assertEqual(self.refused(co), [pid])
                 rs.flag_board(self.conn, co, b)
+                self.assertEqual(self.refused(co), [])
                 self.assertIsNone(decide_hide(self.inputs()[co], CFG))
 
     def test_a_guessed_board_whose_first_reads_errored_is_still_doubtful(self):
@@ -376,12 +368,12 @@ class TrustedBoardTests(Store):
         b = rs.board(self.conn, self.co, active=0)
         self.refusal(board_id=b)
         self.assertIn(b, doubtful_board_ids(self.conn))
-        self.assertIsNone(self.hide_for())
+        self.assertEqual(self.refused(), [])
 
     def test_an_import_board_never_read_is_trusted(self):
         b = rs.board(self.conn, self.co, found_by="import", last_read=None)
-        self.refusal(board_id=b)
-        self.assertEqual(self.hide_for().kind, "no_sponsorship")
+        pid = self.refusal(board_id=b)
+        self.assertEqual(self.refused(), [pid])
 
 
 class CrawlerContractTests(Store):
@@ -433,7 +425,7 @@ class CrawlerContractTests(Store):
 
 
 class ConflictTests(Store):
-    def test_a_refusal_with_a_sponsoring_posting_hides_nothing(self):
+    def test_a_refusal_with_a_sponsoring_posting_is_a_conflict_not_a_hide(self):
         self.refusal(final=True)
         for stance in ("yes", "opt_only"):
             with self.subTest(stance=stance):
@@ -452,7 +444,7 @@ class ConflictTests(Store):
         got = self.inputs()[self.co]
         self.assertEqual(got.sponsors, ())
         self.assertFalse(got.conflict)
-        self.assertEqual(decide_hide(got, CFG).kind, "no_sponsorship")
+        self.assertIsNone(decide_hide(got, CFG))
         self.assertEqual(self.count("no_go"), 0)
 
     def test_an_intern_posting_that_sponsors_also_cancels_a_refusal(self):
@@ -463,7 +455,7 @@ class ConflictTests(Store):
 
 
 class StaleTests(Store):
-    def test_a_stale_refusal_never_hides_and_writes_no_no_go(self):
+    def test_a_stale_refusal_is_not_counted(self):
         pid = self.refusal(final=True, posted_on="2016-03-02")
         stale = load_stale(self.conn, TODAY, max_age_months=12)
         self.assertEqual(stale[pid].reason, "posted 2016-03-02, over 12 months")
@@ -471,21 +463,21 @@ class StaleTests(Store):
         self.assertEqual(got.refusals, ())
         self.assertIsNone(decide_hide(got, CFG))
         self.assertEqual(self.count("no_go"), 0)
-        hide = self.hide_for(stale={})  # the same refusal, live
-        self.assertEqual((hide.kind, hide.posting_id), ("no_sponsorship", pid))
+        self.assertEqual(self.refused(stale={}), [pid])  # the same refusal, live: counted, and still no hide
+        self.assertIsNone(self.hide_for(stale={}))
 
-    def test_a_refusal_absent_from_the_latest_read_is_stale_and_never_hides(self):
+    def test_a_refusal_absent_from_the_latest_read_is_stale_and_not_counted(self):
         b = rs.board(self.conn, self.co, last_read="empty")
         pid = self.refusal(final=True, board_id=b)
         stale = load_stale(self.conn, TODAY, max_age_months=12)
         self.assertIn("not on the board at its latest read", stale[pid].reason)
-        self.assertIsNone(self.hide_for())
+        self.assertEqual(self.refused(), [])
 
     def test_a_failed_read_keeps_a_refusal_live(self):
         b = rs.board(self.conn, self.co, last_read="error")
         self.refusal(final=True, board_id=b)
         self.assertEqual(load_stale(self.conn, TODAY, max_age_months=12), {})
-        self.assertEqual(self.hide_for().kind, "no_sponsorship")
+        self.assertEqual(len(self.refused()), 1)
 
     def test_a_stale_sponsoring_posting_does_not_cancel_a_live_refusal(self):
         self.refusal(final=True)
@@ -494,7 +486,7 @@ class StaleTests(Store):
         got = self.inputs()[self.co]
         self.assertEqual(got.sponsors, ())
         self.assertFalse(got.conflict)
-        self.assertEqual(decide_hide(got, CFG).kind, "no_sponsorship")
+        self.assertIsNone(decide_hide(got, CFG))
         live = self.inputs(stale={})[self.co]
         self.assertEqual(live.sponsors, (pid,))
         self.assertTrue(live.conflict)
@@ -515,7 +507,8 @@ class MergedTests(Store):
         rs.merge(self.conn, dup, self.co)
         pid = rs.posting(self.conn, dup)
         rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote=REFUSE, provisional=0)
-        self.assertEqual(self.hide_for().posting_id, pid)
+        self.assertEqual(self.refused(), [pid])
+        self.assertIsNone(self.hide_for())
 
     def test_canonical_ids_follow_a_chain_and_refuse_a_cycle(self):
         a, b = seed_company(self.conn, "A"), seed_company(self.conn, "B")
@@ -563,26 +556,23 @@ class CommonTests(unittest.TestCase):
 
 
 class ReasonTextTests(Store):
+    def size_hide(self, company, source_ref):
+        rs.evidence(self.conn, company, "size", value="400+", num_low=400, confidence="confirmed",
+                    source_ref=source_ref)
+        return self.hide_for(company)
+
     def test_hide_reasons_hold_no_dashes_and_one_line(self):
-        quote = "We cannot sponsor " + chr(0x2014) + " sorry.\nThanks"
-        pid = rs.posting(self.conn, self.co)
-        rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote=quote, provisional=0)
-        hide = self.hide_for()
+        hide = self.size_hide(self.co, "https://example.com/about " + chr(0x2014) + " team\nthanks")
+        self.assertEqual(hide.kind, "over_size")
         self.assertFalse(set(hide.reason) & {chr(0x2013), chr(0x2014), "\n"})
 
-    def test_a_quote_is_kept_whole_up_to_300_characters(self):
-        whole = "We do not sponsor visas. " + "x" * 270
-        self.assertEqual(len(whole), 295)
-        pid = rs.posting(self.conn, self.co)
-        rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote=whole, provisional=0)
-        self.assertIn(f'"{whole}"', self.hide_for().reason)
-        long = seed_company(self.conn, "Long quote")
-        pid = rs.posting(self.conn, long)
-        rs.decision(self.conn, pid, sponsorship="no", sponsorship_quote="We do not sponsor visas. " + "y" * 400,
-                    provisional=0)
-        quoted = self.hide_for(long).reason.split('"')[1]
-        self.assertEqual(len(quoted), 300)
-        self.assertTrue(quoted.endswith("..."))
+    def test_a_reason_is_kept_whole_up_to_300_characters(self):
+        whole = "https://example.com/" + "x" * 150
+        self.assertIn(f"(confirmed evidence, {whole})", self.size_hide(self.co, whole).reason)
+        long = seed_company(self.conn, "Long source")
+        reason = self.size_hide(long, "https://example.com/" + "y" * 400).reason
+        self.assertEqual(len(reason), 300)
+        self.assertTrue(reason.endswith("..."))
 
 
 if __name__ == "__main__":

@@ -8,6 +8,11 @@ from outreach.api.models.company import CompanyRef, ImportSource, PersonRef
 from outreach.api.models.needs_you import NoGoReason
 
 NoGoSource = Literal["devanshu", "rules", "reply", "import", "claude"]
+# Who wrote the row, in the page's words. Rows with source `rules` were written by the ranker, from before #154
+# stopped it (a sponsorship refusal is a flag now); they stay until he lifts them.
+WrittenBy = Literal["you", "ranker", "reply", "import", "claude"]
+WRITTEN_BY: dict[str, WrittenBy] = {"devanshu": "you", "rules": "ranker", "reply": "reply", "import": "import",
+                                    "claude": "claude"}
 HideKind = Literal["no_go", "over_size", "no_sponsorship"]  # outreach.ranking.hide.HIDE_KINDS
 
 
@@ -33,6 +38,7 @@ class NoGoRow(Wire):
     quote: str
     note: str
     source: NoGoSource
+    written_by: WrittenBy
     source_ref: str
     source_url: str | None  # the source_ref when it is a web address
     import_source: ImportSource | None  # from `import:<source>:<key>`

@@ -276,10 +276,10 @@ class GoldenTests(Base):
             self.role(cid, board, title, posted_on="2026-07-01", level_tier=tier, level_basis=basis,
                       years_asked=years, years_quote=f"{years} years" if years is not None else "")
             ids[key] = cid
-        cid, board = self.company("Refuses")  # a final refusal: hidden, one no-go row
+        cid, board = self.company("Refuses")  # a final refusal: a flag, no hide, no no-go row (#154)
         self.refusal(cid, board)
         ids["Refuses"] = cid
-        cid, board = self.company("Pending")  # a provisional refusal: hidden, pending the reader
+        cid, board = self.company("Pending")  # a provisional refusal: a flag too
         self.refusal(cid, board, final=False)
         ids["Pending"] = cid
         cid, board = self.company("Big")  # over 300 with evidence: hidden by size
@@ -324,8 +324,8 @@ class GoldenTests(Base):
             self.assertLess(now[ids[key]].score, then[ids[key]].score)
         self.assertEqual(live["Intern"], old["Intern"])
         self.assertAlmostEqual(live["Intern"], 0.4)
-        self.assertEqual("no_sponsorship", now[ids["Refuses"]].hide.kind)
-        self.assertTrue(now[ids["Pending"]].hide.provisional)
+        self.assertIsNone(now[ids["Refuses"]].hide)
+        self.assertIsNone(now[ids["Pending"]].hide)
         self.assertEqual("over_size", now[ids["Big"]].hide.kind)
         self.assertEqual("no_go", now[ids["Banned"]].hide.kind)
         self.assertIsNone(now[ids["Later"]].hide)
@@ -352,7 +352,7 @@ class GoldenTests(Base):
         finally:
             self.conn = mine
         self.assertEqual(with_tiers, with_flat)
-        self.assertEqual(sorted([ids["Refuses"], ids["Banned"]]), sorted({r[0] for r in with_tiers}))
+        self.assertEqual([ids["Banned"]], sorted({r[0] for r in with_tiers}))
 
 
 def best(pid, tier, *, lane="level_role", age=5, basis="", years=None, sponsorship="silent"):

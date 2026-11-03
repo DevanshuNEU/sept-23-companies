@@ -246,8 +246,9 @@ def _ranking_rows(h):
 @invariant("rank")
 def ranking_puts_the_sponsoring_new_grad_employer_first_and_keeps_every_rule(h):
     """Counts only the fixture companies (A to U), never a global total: the earlier stages put other rows in the
-    store. A live new-grad posting that says it sponsors ranks first and its reasons name both; a final refusal is
-    the one rules no-go; a stale posting is never the best posting; every row says how sure it is."""
+    store. A live new-grad posting that says it sponsors ranks first and its reasons name both; a sponsorship refusal
+    writes no rules no-go (it is a flag, #154); a stale posting is never the best posting; every row says how sure it
+    is."""
     ids = h.ranking.ids
     rows = _ranking_rows(h)
     assert "L" not in rows and set(rows) == set(ids) - {"L"}, "every fixture company but the merged one is scored"
@@ -258,7 +259,7 @@ def ranking_puts_the_sponsoring_new_grad_employer_first_and_keeps_every_rule(h):
     marks = ",".join("?" * len(ids))
     rules_rows = h.conn.execute(f"SELECT company_id FROM no_go WHERE source = 'rules' AND company_id IN ({marks})",
                                 tuple(ids.values())).fetchall()
-    assert [r[0] for r in rules_rows] == [ids["E"]], f"rules no-go rows: {[r[0] for r in rules_rows]}"
+    assert rules_rows == [], f"rules no-go rows: {[r[0] for r in rules_rows]}"
     for key, row in rows.items():
         stale = {b["posting_id"] for b in row.signals["stale_postings"]}
         assert row.signals["best_posting_id"] not in stale, f"{key}: a stale posting is the best posting"
@@ -782,17 +783,12 @@ class RankFlowTests(HarnessCase):
         h = self.flow()
         ids = h.ranking.ids
         hidden = {r.company_id: r.signals["hide"] for r in hidden_list(h.conn)}
-        # E: a final refusal. The run wrote the rules no-go row and stores the hide that row gives, as the next run
-        # computes it: an active no-go for no sponsorship.
-        self.assertIn(ids["E"], hidden)
-        self.assertEqual((hidden[ids["E"]]["kind"], hidden[ids["E"]]["provisional"]), ("no_go", False))
-        self.assertIn("no sponsorship", hidden[ids["E"]]["reason"])
-        rows = self.no_go(h, "E")
-        self.assertEqual([(r["reason"], r["source"], r["lifted_at"]) for r in rows], [("no_sponsorship", "rules", None)])
-        self.assertTrue(rows[0]["source_ref"])
-        # F: the same refusal, still provisional: hidden pending the reader, nothing written.
-        self.assertEqual((hidden[ids["F"]]["kind"], hidden[ids["F"]]["provisional"]), ("no_sponsorship", True))
-        self.assertEqual(self.no_go(h, "F"), [])
+        # E: a final refusal, and F: the same refusal still provisional. Sponsorship is a flag (#154): both stay
+        # shown and ranked, and the run writes no no-go row for either.
+        for key in ("E", "F"):
+            self.assertNotIn(ids[key], hidden, key)
+            self.assertIn(ids[key], self.order(h), key)
+            self.assertEqual(self.no_go(h, key), [], key)
         # G: a lifted no-go and a final refusal: shown, ranked, and the lifted row is the only row.
         self.assertNotIn(ids["G"], hidden)
         self.assertIn(ids["G"], self.order(h))
@@ -803,11 +799,11 @@ class RankFlowTests(HarnessCase):
         self.assertIn(ids["H"], self.order(h))
         self.assertEqual(self.points(self.row(h, "H"), "live_role"), 0)
         self.assertNotIn("level_role", self.row(h, "H").lanes)
-        self.assertEqual(set(hidden) & set(ids.values()), {ids["E"], ids["F"]}, "only E and F are hidden")
+        self.assertEqual(set(hidden) & set(ids.values()), set(), "no fixture company is hidden by a refusal")
         marks = ",".join("?" * len(ids))
         rules_rows = _rows(h, f"SELECT company_id FROM no_go WHERE source = 'rules' AND company_id IN ({marks})",
                            *ids.values())
-        self.assertEqual([r[0] for r in rules_rows], [ids["E"]])
+        self.assertEqual(rules_rows, [])
 
     def test_flow_rank_keeps_a_company_with_a_sponsoring_posting_visible_and_flags_the_conflict(self):
         h = self.flow()
@@ -815,9 +811,8 @@ class RankFlowTests(HarnessCase):
         self.assertIn(n, self.order(h))
         self.assertEqual(self.no_go(h, "N"), [])
         self.assertIn("postings disagree on sponsorship", self.row(h, "N").signals["flags"])
-        items = _rows(h, "SELECT * FROM review_item WHERE company_id = ? AND kind = 'flagged' AND raised_by = 'ranker' "
-                         "AND state = 'open'", n)
-        self.assertEqual(len(items), 1)
+        items = _rows(h, "SELECT * FROM review_item WHERE company_id = ? AND kind = 'flagged' AND raised_by = 'ranker'", n)
+        self.assertEqual(len(items), 0, "the conflict keeps its flag but opens no Needs-you item (#154)")
         refusals = _rows(h, "SELECT d.provisional FROM posting p JOIN current_decision d USING (posting_id) "
                             "WHERE p.company_id = ? AND d.sponsorship = 'no'", n)
         self.assertEqual([r[0] for r in refusals], [0], "N's refusal is final: the sponsoring posting is what saves it")
@@ -1048,7 +1043,8 @@ class RankFlowTests(HarnessCase):
         h = self.flow()
         self.assertEqual(h.ranking.report.version, latest_version(h.conn))
         self.assertEqual(stages_ranking.TODAY, date(2026, 10, 21))
-        self.assertEqual(h.ranking.report.stale_postings, 3, "O, P and Q each have one stale posting")
+        self.assertEqual(h.ranking.report.stale_postings, 4,
+                         "O, P, Q and S each have one stale posting (S's 2016 refusal shows now: sponsorship only flags)")
 
 
 class PlanFlowTests(HarnessCase):
@@ -1290,14 +1286,14 @@ class ReaderFlowTests(HarnessCase):
         return h
 
     def test_flow_refused_quote_leaves_the_decision_provisional(self):
-        h = self.flow(promote=True, sponsorship=("wont_sponsor", "no visa sponsorship is offered"))
+        h = self.flow(promote=True, citizenship_or_clearance=("yes", "citizenship is required for this role"))
         r = _reader_posting(h)
         self.assertEqual(r.readings, [], "a refused reading is never stored as a fact")
         self.assertEqual((r.decision["provisional"], r.decision["reader_version"]), (1, None))
         self.assertFalse(passes(stored_decision(r.decision)), "still a rules hide, read again next night")
         (queued,) = r.queue
         self.assertEqual((queued["state"], queued["attempts"]), ("queued", 1))
-        self.assertIn("sponsorship", queued["last_error"])
+        self.assertIn("citizenship_or_clearance", queued["last_error"])
         self.assertEqual(r.items, [])
 
     def test_flow_agreeing_verified_reading_makes_the_decision_final(self):
@@ -1322,7 +1318,7 @@ class ReaderFlowTests(HarnessCase):
     def test_flow_disagreement_with_a_provisional_hide_shows_the_posting_and_raises_the_review(self):
         # The plan wrote provisional = 0 here; combine.py stays stricter (ledger, batch 4-5): a disputed hide is shown
         # and stays provisional, so a later agreeing read can still decide it.
-        h = self.flow(promote=True, sponsorship=("unknown", ""))
+        h = self.flow(promote=True, citizenship_or_clearance=("unknown", ""))
         r = _reader_posting(h)
         self.assertEqual((r.decision["provisional"], r.decision["reader_version"]), (1, None))
         self.assertTrue(passes(stored_decision(r.decision)), "shown again")
@@ -1333,7 +1329,7 @@ class ReaderFlowTests(HarnessCase):
     def test_flow_queue_order_ignores_company_score_when_absent_and_reads_it_when_present(self):
         h = self.harness()
         h.run(through="read_boards")
-        body = h.fixture("posting_hide.txt").read_text(encoding="utf-8").replace(stages_reader.REFUSAL, "")
+        body = h.fixture("posting_hide.txt").read_text(encoding="utf-8").replace(stages_reader.HIDE_LINE, "")
         alder = seed_company(h.conn, "Alder Labs")
         birch = seed_company(h.conn, "Birch Works")
         first = seed_posting(h.conn, alder, "Software Engineer, New Grad", body + " Alder.", "Austin, TX")

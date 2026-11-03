@@ -28,7 +28,7 @@ from typing import Any
 from outreach.store import append_event, atomic, connect, finish_job, start_job, transaction, utcnow
 
 from .config import Config, load_config
-from .decide import Decision, PostingInput, decide, passes
+from .decide import Decision, PostingInput, decide, interim_level_state, passes
 from .facts import EvidenceDraft
 from .version import ruleset_version
 
@@ -39,7 +39,7 @@ BATCH_SIZE = 500
 
 _COLUMNS = ("lane", "level_tier", "level_ok", "level_basis", "years_asked", "years_quote", "us", "sponsorship",
             "sponsorship_quote", "citizenship", "citizenship_quote", "eligibility", "eligibility_reason",
-            "eligibility_quote", "start_2027")
+            "eligibility_quote", "start_2027", "level_state", "years_ms")
 _WRITTEN = _COLUMNS + ("provisional", "reader_version")
 _UPSERT = (
     "INSERT INTO decision(posting_id, ruleset_version, decided_at, " + ", ".join(_WRITTEN) + ") VALUES (?, ?, ?, "
@@ -50,7 +50,7 @@ _UPSERT = (
 # reader_version (outreach.reader.combine.Combined). Typed loosely so this module needs no reader import.
 Combiner = Callable[[sqlite3.Connection, int, Decision], Any]
 # The fields passes() reads: what a shown-to-hidden flip is explained by.
-_HIDING_FIELDS = ("lane", "us", "sponsorship", "citizenship", "eligibility")
+_HIDING_FIELDS = ("lane", "us", "citizenship", "eligibility")
 
 
 class RulesetNotCurrent(Exception):
@@ -62,7 +62,7 @@ class Flip:
     posting_id: int
     company: str
     title: str
-    change: str  # for example "sponsorship silent -> no"
+    change: str  # for example "citizenship no -> yes"
 
 
 @dataclass(frozen=True)
@@ -96,6 +96,8 @@ def stored_decision(row: sqlite3.Row) -> Decision:
     values = {c: row[c] for c in _COLUMNS}
     for flag in ("level_ok", "citizenship", "start_2027"):
         values[flag] = bool(values[flag])
+    if values["level_state"] is None:  # a row stored before 0007 and not yet rebuilt
+        values["level_state"] = interim_level_state(values["level_ok"], values["level_tier"])
     return Decision(**values)
 
 

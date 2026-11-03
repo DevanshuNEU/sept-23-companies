@@ -1,4 +1,4 @@
-"""The hide policy: which companies Devanshu never sees, and the one no-go row ranking may write (#6, #9).
+"""The hide policy: which companies Devanshu never sees (#6, #9). Ranking writes no `no_go` row.
 
 Hidden only with evidence. `outreach.rules.passes()` is the posting-level half and is called, never restated; this
 module adds the company level, in the order of the plan's Decisions:
@@ -13,10 +13,10 @@ module adds the company level, in the order of the plan's Decisions:
 4. likely over the cap with no size on file (no `size` or `headcount` row at all): more open roles than
    `hide.likely_large_open_roles` (trusted, live, not stale: `Roles.open_count`), or more software H-1B filings in one
    fiscal year than `hide.likely_large_lca_software`;
-5. a sponsorship refusal: an open, live (not stale) engineering posting on a trusted board, not outside the US,
-   whose decision says `sponsorship = 'no'`. It hides nothing when another open live trusted posting says `yes`
-   or `opt_only` (ruling 9: the postings disagree). It is final when a refusal's decision is final
-   (`provisional = 0`); else the company is "hidden, pending reader" and nothing is written.
+A sponsorship refusal is not a hide (#154, #9 2026-11-01: he wants F-1 OPT and STEM OPT, not H-1B): the company stays
+shown and ranked, the posting carries the flag, and no `no_go` row is written. The refusals are still collected, for
+the sponsorship-conflict review item and flag (a refusal and a sponsoring posting at one company). Older `no_go` rows
+the ranker wrote stay: a no-go is his to lift.
 
 A stale posting neither refuses nor sponsors (ruling 2026-10-22), and a posting on a doubtful board counts for
 nothing (ruling 7). Unknown size with no sign of being large is neutral: most startups have no size on file. Every
@@ -36,12 +36,12 @@ from outreach.ranking.common import clean_text, size_order_key
 from outreach.ranking.config import RankerConfig
 from outreach.ranking.giants import Giant, Giants, default_giants
 from outreach.rules import Decision, passes
-from outreach.store import append_event, atomic, utcnow
 from outreach.store.writes import NAME_ALIAS_SOURCES, name_key
 
 __all__ = ["HIDE_KINDS", "posting_visible", "Refusal", "SizeEvidence", "HideInputs", "Hide", "load_hide_inputs",
-           "decide_hide", "write_no_go"]
+           "decide_hide"]
 
+# `no_sponsorship` is no longer decided (#154); it stays a kind so a score row stored before it still reads.
 HIDE_KINDS = ("no_go", "over_size", "no_sponsorship")
 _SPONSORS = ("yes", "opt_only")
 _QUOTE_MAX = 300
@@ -97,7 +97,7 @@ class HideInputs:
 
     @property
     def conflict(self) -> bool:
-        """A refusal and a sponsoring posting at once: ruling 9 keeps the company shown and flags it."""
+        """A refusal and a sponsoring posting at once: the company is flagged for review (ruling 9)."""
         return bool(self.refusals) and bool(self.sponsors)
 
 
@@ -226,7 +226,7 @@ def _likely_large(inputs: HideInputs, cfg: RankerConfig) -> list[str]:
 
 
 def decide_hide(inputs: HideInputs, cfg: RankerConfig) -> Hide | None:
-    """The company's hide, or None to show it. Pure."""
+    """The company's hide, or None to show it. Pure. A sponsorship refusal never hides (#154)."""
     if inputs.no_go == "active":
         return Hide("no_go", f"On the no-go list: {inputs.no_go_reason.replace('_', ' ')}", False)
     if inputs.no_go == "lifted":
@@ -242,44 +242,4 @@ def decide_hide(inputs: HideInputs, cfg: RankerConfig) -> Hide | None:
     signs = _likely_large(inputs, cfg) if s is None else []
     if signs:
         return Hide("over_size", _one_line(f"Likely over {over} people, size not on file: {'; '.join(signs)}"), False)
-    if not inputs.refusals or inputs.sponsors:
-        return None
-    final = [r for r in inputs.refusals if not r.provisional]
-    chosen = final[0] if final else inputs.refusals[0]
-    quote = _one_line(chosen.quote)
-    if final:
-        reason = f'A US engineering posting says it does not sponsor visas: "{quote}"'
-    else:
-        reason = f'hidden, pending reader: a US engineering posting may not sponsor visas: "{quote}"'
-    return Hide("no_sponsorship", reason, not final, posting_id=chosen.posting_id, quote=chosen.quote)
-
-
-def write_no_go(conn: sqlite3.Connection, company_id: int, hide: Hide) -> bool:
-    """Write the `no_go` row for a final sponsorship refusal and its event; return whether a row was written.
-
-    Nothing is written for any other hide, for a company merged into another (its row would hide the survivor, whose
-    lift sits up the chain), or when the company's merged family, read from the root of the chain (the company
-    itself once it is not merged away), already has a no-go row of any kind, lifted or not: a lifted row means he
-    put the company back on the list, so it is never re-added. Joins the caller's transaction when there is one.
-    """
-    if hide.kind != "no_sponsorship" or hide.provisional or hide.posting_id is None:
-        return False
-    with atomic(conn, "rank_no_go"):
-        merged = conn.execute("SELECT merged_into FROM company WHERE company_id = ?", (company_id,)).fetchone()
-        if merged is not None and merged[0] is not None:
-            return False
-        exists = conn.execute(
-            "WITH RECURSIVE grp(id) AS (SELECT ? UNION SELECT c.company_id FROM company c JOIN grp "
-            "ON c.merged_into = grp.id) SELECT 1 FROM no_go WHERE company_id IN (SELECT id FROM grp) LIMIT 1",
-            (company_id,)).fetchone()
-        if exists is not None:
-            return False
-        cur = conn.execute(
-            "INSERT INTO no_go(company_id, reason, quote, source, source_ref, created_at) "
-            "VALUES (?, 'no_sponsorship', ?, 'rules', ?, ?) ON CONFLICT DO NOTHING",
-            (company_id, hide.quote, str(hide.posting_id), utcnow()))
-        if not cur.rowcount:
-            return False
-        append_event(conn, entity="no_go", kind="added", actor="rules", entity_id=cur.lastrowid,
-                     company_id=company_id, detail={"reason": "no_sponsorship", "posting_id": hide.posting_id})
-    return True
+    return None

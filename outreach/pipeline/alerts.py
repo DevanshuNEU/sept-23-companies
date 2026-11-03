@@ -1,9 +1,10 @@
 """The Mac alert for a new job at his level (#156): one grouped notice, never a stream.
 
-A posting alerts when it is in "your level" with `level_ok = 1` on its current decision (read from the decision, not
-from the tag: an `open` tier posting with `level_ok = 1` is tagged "level not stated" but is at his level, while a
-`not_stated` posting never has `level_ok = 1`), its date (posted, or seen when it has no posted date) is today in New
-York, it is not passed, and it has no `alert:posting:<id>` event yet. Uncertain rows (`level_ok = 0`) never alert.
+A posting alerts when it is in "your level" with `level_state = 'fit'` on its current decision (read from the
+decision, not from the tag: an `uncertain` posting at a small company is in the list, tagged "level not stated", but
+never alerts). A row from before migration 0007 that the rebuild has not reached has no state: the v1 rule stands in
+for it (`fit` when `level_ok = 1`). Its date (posted, or seen when it has no posted date) is today in New York, it is
+not passed, and it has no `alert:posting:<id>` event yet. Uncertain and reject rows never alert.
 
 Quiet hours are 22:00 to 08:00 New York: nothing is sent or recorded then, so what came in waits for the first tick
 after 08:00 (and only alerts if its date is still today). At most one notice goes out per 15 minutes: the time of the
@@ -19,7 +20,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from outreach.pipeline.joblist import JobFilters, JobRow, query
+from outreach.pipeline.joblist import STATE_SQL, JobFilters, JobRow, query
 from outreach.sending.notify import Notifier
 from outreach.store import append_event, atomic
 from outreach.store.timefmt import ISO_FMT, iso_utc
@@ -65,11 +66,11 @@ def _todays(conn: sqlite3.Connection, now: str, today: str) -> list[JobRow]:
     return out
 
 
-def _level_ok(conn: sqlite3.Connection, ids: list[int]) -> set[int]:
-    """Which of these postings have `level_ok = 1` on the current decision."""
+def _fit(conn: sqlite3.Connection, ids: list[int]) -> set[int]:
+    """Which of these postings are `fit` on the current decision (the v1 rule stands in for a missing state)."""
     return {r[0] for r in conn.execute(
-        "SELECT posting_id FROM decision WHERE ruleset_version = (SELECT ruleset_version FROM ruleset "
-        "WHERE is_current = 1) AND level_ok = 1 AND posting_id IN (SELECT value FROM json_each(?))",
+        "SELECT d.posting_id FROM decision d WHERE d.ruleset_version = (SELECT ruleset_version FROM ruleset "
+        f"WHERE is_current = 1) AND {STATE_SQL} = 'fit' AND d.posting_id IN (SELECT value FROM json_each(?))",
         (json.dumps(ids),))}
 
 
@@ -96,7 +97,7 @@ def run(conn: sqlite3.Connection, notifier: Notifier, now: str) -> int:
     if not rows:
         return 0
     ids = [r.posting_id for r in rows]
-    ok, done = _level_ok(conn, ids), _announced(conn, ids)
+    ok, done = _fit(conn, ids), _announced(conn, ids)
     fresh = [r for r in rows if r.posting_id in ok and r.posting_id not in done]
     if not fresh:
         return 0

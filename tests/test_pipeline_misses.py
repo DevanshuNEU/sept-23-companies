@@ -92,16 +92,21 @@ class DiagnoseTests(MissCase):
         self.assertEqual(diagnose(conn, ashby("acme", "ns")).cause, "found")
         self.assertEqual(diagnose(conn, ashby("acme", "open")).cause, "found")
 
-    def test_postings_the_rules_hide_for_other_reasons(self):
+    def test_no_sponsorship_is_a_flag_so_the_job_is_found(self):
         conn = self.conn
         board = seed_board(conn, seed_company(conn, "Acme"), "ashby", "acme")
         store_posting(conn, "ashby:acme:nospons", board_id=board,
                       level=dict(level_tier="new_grad", level_ok=1, sponsorship="no"))
+        got = diagnose(conn, ashby("acme", "nospons"))
+        self.assertEqual((got.cause, got.detail["passes"], got.detail["sponsorship"]), ("found", True, "no"))
+
+    def test_postings_the_rules_hide_for_other_reasons(self):
+        conn = self.conn
+        board = seed_board(conn, seed_company(conn, "Acme"), "ashby", "acme")
         store_posting(conn, "ashby:acme:abroad", board_id=board,
                       level=dict(level_tier="new_grad", level_ok=1, us="no"))
         store_posting(conn, "ashby:acme:student", board_id=board,
                       level=dict(level_tier="new_grad", level_ok=1, eligibility="excluded"))
-        self.assertEqual(diagnose(conn, ashby("acme", "nospons")).cause, "hidden_visa")
         self.assertEqual(diagnose(conn, ashby("acme", "student")).cause, "read_wrong_level")
         abroad = diagnose(conn, ashby("acme", "abroad"))
         self.assertEqual((abroad.cause, abroad.detail["passes"], abroad.detail["us"]), ("not_us", False, "no"))

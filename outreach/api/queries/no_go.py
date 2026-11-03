@@ -16,7 +16,8 @@ from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
 from outreach.api.models.base import Empty
 from outreach.api.models.no_go import (
-    HiddenCompany, NoGoRow, NoGoTargetCompany, NoGoTargetPerson, NoGoView, ReasonCount, RemovedCompany, RemovedRow,
+    WRITTEN_BY, HiddenCompany, NoGoRow, NoGoTargetCompany, NoGoTargetPerson, NoGoView, ReasonCount, RemovedCompany,
+    RemovedRow,
 )
 from outreach.api.queries.company import IMPORT_SOURCES, company_holds, merge_parents, person_ref, survivor_of
 from outreach.api.queries.outcomes import by_ids, company_refs, people_by_ids
@@ -69,9 +70,9 @@ def no_go_view(conn: sqlite3.Connection, now: str) -> NoGoView:
             target = NoGoTargetPerson(kind="person", person=person_ref(person),
                                       company_name=refs[survivor_of(parents, person["company_id"])].name)
         return NoGoRow(kind="no_go", no_go_id=r["no_go_id"], target=target, reason=r["reason"], quote=r["quote"],
-                       note=r["note"], source=r["source"], source_ref=r["source_ref"],
-                       source_url=source_url(r["source_ref"]), import_source=import_source(r["source_ref"]),
-                       added_at=r["created_at"])
+                       note=r["note"], source=r["source"], written_by=WRITTEN_BY[r["source"]],
+                       source_ref=r["source_ref"], source_url=source_url(r["source_ref"]),
+                       import_source=import_source(r["source_ref"]), added_at=r["created_at"])
 
     company_rows = [row_of(r) for r in rows if r["company_id"] is not None]
     person_rows = [row_of(r) for r in rows if r["company_id"] is None]

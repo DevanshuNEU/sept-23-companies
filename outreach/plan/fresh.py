@@ -9,9 +9,10 @@ employer that can hire him. So up to `queue.fresh_slots` of the day's companies 
   York start of its posted date (a posting the crawler found days after it went up is not new);
 - the fresh lane takes only an early career fit (`early_career_fit`): new grad, early career, SWE I, or an open level
   that asks 2 years or fewer. SWE II, senior and an open level with no years can still be picked by rank;
-- the visa gate (`visa_clear`): the posting does not refuse sponsorship and the company's sponsorship fact is not a
-  no, and the company is E-Verify enrolled, or the posting says it sponsors or welcomes OPT, or it is silent. A no-go
-  never reaches here (`load_prospects` drops it), and the ranker's hide already keeps a refusing company off the list;
+- the visa gate (`visa_clear`): the company is E-Verify enrolled, or the posting says it sponsors or welcomes OPT, or
+  it is silent. A posting that says "no sponsorship" is a flag, not a hide (#154, #9 2026-11-01: he wants F-1 OPT and
+  STEM OPT, not H-1B): it is treated like an unclear one and clears only with E-Verify. The company's sponsorship fact
+  is shown, never a gate. A no-go never reaches here (`load_prospects` drops it);
 - Not now (a `pick_passed` event) keeps the company out of the picks for `queue.pass_cooldown_days`, unless an early
   career opening that clears the gate was first seen after the pass: that is the case he wants, and it is fresh again;
 - a company he applied to stays out of the picks until such an opening was first seen on a day after the application.
@@ -83,7 +84,7 @@ class Opening:
     lane: str  # level_role or intern_junior
     level_tier: str
     years_asked: int | None
-    stance: str  # the posting's sponsorship: yes, opt_only, unclear or silent (a no is never visible)
+    stance: str  # the posting's sponsorship: yes, no, opt_only, unclear or silent (a no is a flag, #154)
     posted_on: date | None
     first_seen_at: datetime  # aware, UTC
     first_seen_on: date  # its New York date
@@ -128,10 +129,9 @@ def is_fresh(opened_at: datetime, now: datetime, cfg: PlanConfig) -> bool:
 
 
 def visa_clear(stance: str | None, everify: str | None, company_sponsorship: str | None) -> bool:
-    """The visa gate: neither the posting nor the company's sponsorship fact says no, and the company is E-Verify
-    enrolled, or the posting sponsors, welcomes OPT or is silent. An unclear posting passes only with E-Verify."""
-    if stance == "no" or company_sponsorship == "no":
-        return False
+    """The visa gate: the company is E-Verify enrolled, or the posting sponsors, welcomes OPT or is silent. An unclear
+    posting and one that says "no sponsorship" pass only with E-Verify. `company_sponsorship` is a flag the callers
+    show, not a gate (#154), so it is not read here."""
     return everify == "enrolled" or stance in _GATE_SPONSORS
 
 

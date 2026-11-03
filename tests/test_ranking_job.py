@@ -34,7 +34,7 @@ from tests.storetest import fresh_store, seed_company
 TODAY = date(2026, 10, 22)
 T1, T2, T3, T4, T5 = ("2026-10-22T0%d:00:00Z" % h for h in (1, 2, 3, 4, 5))
 REFUSE = "We are unable to sponsor visas for this role."
-SUMMARY_KEYS = {"version", "scored", "hidden", "no_go_written", "size_items", "conflict_items", "undecided_postings",
+SUMMARY_KEYS = {"version", "scored", "hidden", "size_items", "undecided_postings",
                 "ignored_postings", "stale_postings", "interview_companies"}
 
 
@@ -152,33 +152,26 @@ class WriteTests(Base):
         self.assertIsNone(row.signals["hide"])
         self.assertIn(cid, [r.company_id for r in ranked_list(self.conn)])
 
-    def test_final_refusal_writes_no_go_and_hides_but_a_provisional_one_only_hides(self):
+    def test_no_sponsorship_is_flag_not_hide(self):
+        """#154: a refusal to sponsor (final or provisional) neither hides the company nor writes a no_go row."""
         final_co, fb = self.company("Final")
-        pid = self.refusal(final_co, fb, final=True)
+        self.refusal(final_co, fb, final=True)
         maybe_co, mb = self.company("Maybe")
         self.refusal(maybe_co, mb, final=False)
         got = self.rank()
-        no_go = self.all_rows("no_go")
-        self.assertEqual(len(no_go), 1)
-        row = self.conn.execute("SELECT * FROM no_go").fetchone()
-        self.assertEqual((row["company_id"], row["reason"], row["source"], row["source_ref"], row["quote"]),
-                         (final_co, "no_sponsorship", "rules", str(pid), REFUSE))
-        self.assertIsNotNone(self.row(final_co).signals["hide"])
-        maybe = self.row(maybe_co).signals["hide"]
-        self.assertTrue(maybe["provisional"])
-        self.assertTrue(maybe["reason"].startswith("hidden, pending reader"))
-        self.assertEqual(ranked_list(self.conn), [])
-        self.assertEqual(sorted(r.company_id for r in hidden_list(self.conn)), [final_co, maybe_co])
-        self.assertEqual(got.no_go_written, 1)
-        self.assertEqual(got.hidden["provisional"], 1)
-        self.assertEqual(sum(got.hidden.values()), 2)
+        self.assertEqual(self.all_rows("no_go"), [])
+        self.assertEqual(self.events("added"), [])
+        for cid in (final_co, maybe_co):
+            self.assertIsNone(self.row(cid).signals["hide"])
+        self.assertEqual(sorted(r.company_id for r in ranked_list(self.conn)), [final_co, maybe_co])
+        self.assertEqual(hidden_list(self.conn), [])
+        self.assertEqual(sum(got.hidden.values()), 0)
 
-    def test_a_lifted_no_go_is_never_written_again(self):
+    def test_a_lifted_no_go_stays_lifted_and_no_row_is_added(self):
         cid, board = self.company()
         self.refusal(cid, board, final=True)
         rs.no_go(self.conn, cid, lifted=True)
-        got = self.rank()
-        self.assertEqual(got.no_go_written, 0)
+        self.rank()
         self.assertEqual(len(self.all_rows("no_go")), 1)
         self.assertIsNone(self.row(cid).signals["hide"])
 
@@ -221,28 +214,38 @@ class WriteTests(Base):
         self.assertEqual(sorted(self.rows()), [live])
         self.assertEqual([s.company_id for s in got.scored], [live])
 
-    def test_conflict_company_is_listed_unhidden_with_one_flagged_item(self):
+    def test_conflict_company_is_listed_unhidden_with_the_flag_and_no_item(self):
+        """#154: the flag stays on the company, but a sponsorship conflict raises no Needs-you item."""
         cid, board = self.company()
         self.refusal(cid, board, final=True)
         self.role(cid, board, sponsorship="yes", sponsorship_quote="We sponsor H-1B visas.")
-        got = self.rank()
+        self.rank()
         row = self.row(cid)
         self.assertIsNone(row.signals["hide"])
         self.assertIn("postings disagree on sponsorship", row.signals["flags"])
         self.assertIn(cid, [r.company_id for r in ranked_list(self.conn)])
-        items = list(self.conn.execute("SELECT * FROM review_item WHERE kind = 'flagged' AND raised_by = 'ranker'"))
-        self.assertEqual([(i["company_id"], i["state"]) for i in items], [(cid, "open")])
+        self.assertEqual(list(self.conn.execute("SELECT * FROM review_item WHERE raised_by = 'ranker'")), [])
         self.assertEqual(self.all_rows("no_go"), [])
-        self.assertEqual(got.conflict_items, 1)
+
+    def test_an_open_conflict_item_from_an_earlier_run_is_cleared(self):
+        cid, board = self.company()
+        self.refusal(cid, board, final=True)
+        self.role(cid, board, sponsorship="yes", sponsorship_quote="We sponsor H-1B visas.")
+        item = self.conn.execute(
+            "INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) VALUES "
+            "('flagged', ?, 'Postings disagree on sponsorship', 'sponsorship-conflict:1', 'ranker', ?)",
+            (cid, T1)).lastrowid
+        self.rank()
+        got = self.conn.execute("SELECT state, resolution FROM review_item WHERE review_id = ?", (item,)).fetchone()
+        self.assertEqual(tuple(got), ("resolved", "cleared"))
 
     def test_a_hidden_company_raises_no_conflict_item(self):
         cid, board = self.company()
         self.refusal(cid, board, final=True)
         self.role(cid, board, sponsorship="yes", sponsorship_quote="We sponsor H-1B visas.")
         rs.no_go(self.conn, cid, "said_no", created_at="2026-10-01T08:00:00Z")
-        got = self.rank()
+        self.rank()
         self.assertEqual(self.row(cid).signals["hide"]["kind"], "no_go")
-        self.assertEqual(got.conflict_items, 0)
         self.assertEqual(list(self.conn.execute("SELECT * FROM review_item WHERE raised_by = 'ranker'")), [])
 
     def test_summary_counts_undecided_postings(self):
@@ -311,7 +314,7 @@ class WindowTests(Base):
                  "WHERE company_id = ?", (keep, dup))
         with self.during_compute(merge), self.at(T1):
             got = self.rank()
-        self.assertEqual(got.no_go_written, 0)
+        self.assertEqual(sum(got.hidden.values()), 0)
         self.assertEqual(len(self.all_rows("no_go")), 1)  # only his lifted row
         with self.at(T2):
             self.rank()
@@ -323,8 +326,7 @@ class WindowTests(Base):
         self.refusal(cid, board, final=True)
         close = ("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?", (cid,))
         with self.during_compute(close):
-            got = self.rank()
-        self.assertEqual(got.no_go_written, 0)
+            self.rank()
         self.assertEqual(self.all_rows("no_go"), [])
 
     def test_a_ruleset_change_during_the_compute_aborts_the_write(self):
@@ -358,7 +360,7 @@ class RerunTests(Base):
         self.seed_everything()
         with self.at(T1):
             first = self.rank()
-        self.assertEqual((first.no_go_written, first.size_items, first.conflict_items), (1, 1, 1))
+        self.assertEqual(first.size_items, 1)
         rows, no_go = self.stored_rows(), self.all_rows("no_go")
         items, events = self.all_rows("review_item"), self.all_rows("event")
         with self.at(T2):
@@ -368,7 +370,7 @@ class RerunTests(Base):
         self.assertEqual(self.all_rows("no_go"), no_go)
         self.assertEqual(self.all_rows("review_item"), items)
         self.assertEqual(self.all_rows("event"), events)
-        self.assertEqual((second.no_go_written, second.size_items, second.conflict_items), (0, 0, 0))
+        self.assertEqual(second.size_items, 0)
         self.assertEqual(second.hidden, first.hidden)
         self.assertEqual([j["status"] for j in self.jobs()], ["ok", "ok"])
 
@@ -378,7 +380,7 @@ class RerunTests(Base):
             self.rank()
         before = {t: self.all_rows(t) for t in ("company_score", "no_go", "review_item", "event")}
         late, lb = self.company("Late")
-        self.refusal(late, lb, final=True)  # would write a second no_go row
+        self.refusal(late, lb, final=True)
         boom = RuntimeError("disk on fire")
         with self.versioned("rk-000000000002"), self.at(T2), \
                 mock.patch.object(job, "sync_size_items", side_effect=boom):
@@ -400,7 +402,6 @@ class RerunTests(Base):
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.jobs(), [])
         self.assertEqual(len(got.scored), 4)
-        self.assertEqual(got.no_go_written, 0)
 
     def test_a_stale_ruleset_raises_and_writes_no_scores(self):
         self.seed_everything()
@@ -583,7 +584,7 @@ class TiltTests(Base):
         for i, cid in enumerate(ids.values(), 1):
             self.interviewed(cid, f"2026-10-0{i}")
         ids.update({f"Like{i}": self.like_them(f"Like {i}") for i in range(1, 7)})
-        cid, board = self.company("Refuses", ats="ashby")  # a final sponsorship refusal: hidden, a no-go row
+        cid, board = self.company("Refuses", ats="ashby")  # a final sponsorship refusal: a flag, no hide, no no-go row
         self.ev(cid, "size", "150 people", num_low=150, num_high=150)
         self.refusal(cid, board)
         ids["Refuses"] = cid
@@ -619,7 +620,7 @@ class TiltTests(Base):
         self.assertGreaterEqual(lifted, 6, "the six like companies are lifted, so the check is not empty")
         for key in ("Unknown1", "Unknown2", "Half"):
             self.assertEqual(by_tilt[ids[key]].score, by_flat[ids[key]].score, key)
-        self.assertEqual("no_sponsorship", by_tilt[ids["Refuses"]].hide.kind)
+        self.assertIsNone(by_tilt[ids["Refuses"]].hide)
         self.assertEqual("over_size", by_tilt[ids["Big"]].hide.kind)
         self.assertGreater(by_tilt[ids["Big"]].values["interview_like"].points, 0, "a hidden company keeps its reason")
         self.assertIsNone(by_tilt[ids["Later"]].hide)
@@ -640,7 +641,7 @@ class TiltTests(Base):
         finally:
             self.conn = mine
         self.assertEqual(with_tilt, without)
-        self.assertEqual([ids["Refuses"]], [r[0] for r in with_tilt])
+        self.assertEqual([], with_tilt)  # a refusal writes no no-go row (#154)
 
     def test_the_profile_counts_only_interview_outcomes(self):
         ids = self.seed_tilt()
@@ -789,10 +790,9 @@ class StaleTests(Base):
     def test_a_stale_refusal_writes_no_no_go_and_hides_nothing(self):
         cid, board = self.company()
         self.refusal(cid, board, final=True, posted_on="2016-03-02")
-        got = self.rank()
+        self.rank()
         self.assertEqual(self.all_rows("no_go"), [])
         self.assertIsNone(self.row(cid).signals["hide"])
-        self.assertEqual(got.no_go_written, 0)
 
     def test_every_stored_row_has_a_rank_confidence_and_every_component_a_basis(self):
         empty, _ = self.company("Empty", board=False)

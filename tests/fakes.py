@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+import re
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from outreach.net import FetchError, Response
 
-__all__ = ["FakeClient", "UnexpectedRequest", "json_response", "text_response", "status_response"]
+__all__ = ["FakeClient", "UnexpectedRequest", "json_response", "text_response", "status_response",
+           "with_greenhouse_details"]
 
 
 class UnexpectedRequest(AssertionError):
@@ -99,3 +101,39 @@ class FakeClient:
         part.write_bytes(r.body)
         os.replace(part, dest)
         return len(r.body)
+
+
+_GH_LIST = re.compile(r"https://boards-api(?:\.eu)?\.greenhouse\.io/v1/boards/[a-z0-9-]+/jobs")
+_GH_DETAIL_FIXTURE = Path(__file__).parent / "fixtures" / "crawl" / "greenhouse_detail.json"
+
+
+def with_greenhouse_details(routes: Mapping[object, object], details: Mapping[str, object] | None = None,
+                            ids: Iterable[str] = ()) -> dict:
+    """`routes` plus a detail answer (`<list url>/<id>`) for every job a Greenhouse list route carries and for each of
+    `ids`, so a read of the board can fetch bodies (#152: the list carries none). `ids` covers a read whose list
+    answer carries no jobs (a 304) but whose stored postings still lack a body. `details` maps a job id to the
+    answer: a `Response`, or text, which becomes the posting's HTML content. A job it does not name answers like the
+    fixture's job (4012345001) when it is that one, and 404 otherwise. A route already in `routes` is kept."""
+    out = dict(routes)
+    for url, value in routes.items():
+        if not isinstance(url, str) or not _GH_LIST.fullmatch(url):
+            continue
+        found = {str(i) for i in ids}
+        for item in value if isinstance(value, list) else [value]:
+            raw = item.body if isinstance(item, Response) else item if isinstance(item, (bytes, bytearray)) else None
+            try:
+                jobs = json.loads(raw).get("jobs") if raw else None
+            except (ValueError, AttributeError):
+                continue
+            found |= {str(j.get("id")) for j in jobs if isinstance(j, dict)} if isinstance(jobs, list) else set()
+        for native_id in sorted(found):
+            if f"{url}/{native_id}" in out:
+                continue
+            answer = (details or {}).get(native_id)
+            if isinstance(answer, str):
+                answer = json_response({"id": native_id, "content": answer})
+            elif answer is None:
+                answer = (Response(200, "", _GH_DETAIL_FIXTURE.read_bytes(), {})
+                          if native_id == "4012345001" else status_response(404))
+            out[f"{url}/{native_id}"] = answer
+    return out

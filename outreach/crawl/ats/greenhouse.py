@@ -1,23 +1,28 @@
-"""Greenhouse: one list request carries every posting with its text (#21, Task 4).
+"""Greenhouse: one list request carries every posting, a detail request carries one posting's text (#21, #152).
 
-`boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` answers `{"jobs": [...], "meta": {...}}`, sends an ETag
-and answers 304 to If-None-Match. A board found at `boards.eu.greenhouse.io` is stored as a plain `greenhouse` token
-(#31), and the US host answers 404 for it, so a 404 is tried once on the EU API host. The plan names no EU host:
-`boards-api.eu.greenhouse.io` is the API host that mirrors the US one.
+`boards-api.greenhouse.io/v1/boards/{token}/jobs` answers `{"jobs": [...], "meta": {...}}`, sends an ETag and answers
+304 to If-None-Match. It is read without `?content=true`: that flag adds every job's full HTML to the list, which is
+most of the bytes of a big board and mostly postings nobody reads. A body comes from `.../jobs/{id}` instead, and
+ingest asks for it only for the postings it wants (#152). A board found at `boards.eu.greenhouse.io` is stored as a
+plain `greenhouse` token (#31), and the US host answers 404 for it, so a 404 is tried once on the EU API host. The
+plan names no EU host: `boards-api.eu.greenhouse.io` is the API host that mirrors the US one. The adapter is made for
+one board read, so it remembers which host answered the list and asks that host for the details.
 """
 from __future__ import annotations
 
 import html
+import re
 
 from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token
 from outreach.crawl.base import JobRef, ReadResult, Validators
 from outreach.crawl.text import html_to_text
-from outreach.net import HttpClient, Response
+from outreach.net import FetchError, HttpClient, Response
 
 __all__ = ["GreenhouseAdapter"]
 
-_US = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
-_EU = "https://boards-api.eu.greenhouse.io/v1/boards/{token}/jobs?content=true"
+_US = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
+_EU = "https://boards-api.eu.greenhouse.io/v1/boards/{token}/jobs"
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
 
 
 def _text(value) -> str:
@@ -45,11 +50,9 @@ def _parse(job: object) -> JobRef | None:
     native_id, title = _native_id(job), _text(job.get("title"))
     if not native_id or not title:
         return None
-    content = job.get("content")
-    body = html_to_text(html.unescape(content)) if isinstance(content, str) else ""
     return JobRef(native_id=native_id, title=title, url=_text(job.get("absolute_url")), location=_location(job),
                   country=None, posted_on=d10(job.get("first_published")) or d10(job.get("updated_at")),
-                  body=body or None)
+                  body=None)
 
 
 class GreenhouseAdapter:
@@ -57,13 +60,17 @@ class GreenhouseAdapter:
 
     def __init__(self, client: HttpClient):
         self.client = client
+        self._listed_on: str | None = None  # the host template that answered this board's list, once it has
 
     def _fetch(self, token: str, validators: Validators) -> Response | ReadResult:
         got = fetch_list(self.client, _US.format(token=token), validators, use_etag=True)
-        if isinstance(got, ReadResult) and got.http_status == 404:
+        if not (isinstance(got, ReadResult) and got.http_status == 404):
+            self._listed_on = _US
+        else:
             got = fetch_list(self.client, _EU.format(token=token), validators, use_etag=True)
             if isinstance(got, ReadResult) and got.http_status == 404:
                 return read_error("HTTP 404 from both the US and the EU Greenhouse hosts", status=404)
+            self._listed_on = _EU
         return got
 
     def list(self, token: str, validators: Validators) -> ReadResult:
@@ -91,5 +98,31 @@ class GreenhouseAdapter:
         name = next((n for n in (_text(j.get("company_name")) for j in raw) if n), "")
         return finish_list(jobs, resp, validators, use_etag=True, board_name=name)
 
+    def _detail(self, url: str) -> Response | None:
+        try:
+            return self.client.get(url)
+        except FetchError:
+            return None
+
     def body(self, token: str, job: JobRef) -> str | None:
-        return None
+        """The posting's text from its detail answer, or None when there is none: a bad token or id, a 404, any other
+        failure, a page that is not JSON or a blank `content`. One posting's failure never raises; only `HostTripped`
+        does, because it says nothing about the posting."""
+        if not safe_token(self.ats, token) or not _SAFE_ID.fullmatch(job.native_id):
+            return None
+        hosts = [self._listed_on] if self._listed_on else [_US, _EU]
+        resp = None
+        for host in hosts:
+            resp = self._detail(f"{host.format(token=token)}/{job.native_id}")
+            if resp is None or resp.status != 404:
+                break
+        if resp is None or resp.status != 200:
+            return None
+        try:
+            data = resp.json()
+        except ValueError:
+            return None
+        content = data.get("content") if isinstance(data, dict) else None
+        if not isinstance(content, str):
+            return None
+        return html_to_text(html.unescape(content)) or None

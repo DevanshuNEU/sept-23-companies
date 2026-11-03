@@ -65,3 +65,13 @@ body_refetch_days = 30
 [ats_off]
 smartrecruiters = "robots.txt on api.smartrecruiters.com allows only LinkedInBot (checked 2026-10-23)"
 pinpoint = "robots.txt on {tenant}.pinpointhq.com is Disallow: / (checked 2026-10-23)"
+
+# A big board with few US engineering jobs is read at most every interval_s seconds (#152): at least min_open open
+# postings, under max_share of them US engineering (lane engineering, not outside the US), and none of those at his
+# level (or with no stated level) first seen in the last quiet_days. interval_s lies between floor_s and ceiling_s.
+# A company on today's plan is still read at the floor.
+[big_board]
+min_open = 200
+max_share = 0.10
+quiet_days = 30
+interval_s = 86400

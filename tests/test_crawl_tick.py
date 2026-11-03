@@ -36,11 +36,11 @@ FLOOR = 21600
 
 
 def gh(token: str) -> str:
-    return f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
+    return f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
 
 
 def gh_eu(token: str) -> str:
-    return f"https://boards-api.eu.greenhouse.io/v1/boards/{token}/jobs?content=true"
+    return f"https://boards-api.eu.greenhouse.io/v1/boards/{token}/jobs"
 
 
 def lever(token: str) -> str:
@@ -78,7 +78,9 @@ class TickCase(unittest.TestCase):
             self.addCleanup(patch.stop)
         self.conn = fresh_store()
         self.addCleanup(self.conn.close)
-        self.cfg = load_crawl_config()
+        # The Greenhouse list carries no text (#152), so a read would ask for each engineering body. These tests are about
+        # the tick, not the bodies (test_crawl_ingest.py), so no body is asked for.
+        self.cfg = dataclasses.replace(load_crawl_config(), detail_per_read=0)
         self.clock = Clock()
         self.client = None
 
@@ -279,7 +281,7 @@ class JobRunTests(TickCase):
         routes = {"https://detail.example/acme/list": check,
                   **{f"https://detail.example/acme/{n}": check for n in range(3)}}
         with mock.patch.object(tick, "adapter_for", lambda ats, client: Detail(client)):
-            report = self.tick(routes)
+            report = self.tick(routes, cfg=dataclasses.replace(self.cfg, detail_per_read=150))
         self.assertEqual(report.ok, 1)
         self.assertEqual(len(self.client.requests), 4)
         self.assertEqual(self.count("posting_body"), 3)

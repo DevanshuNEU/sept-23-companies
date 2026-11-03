@@ -42,7 +42,7 @@ import sqlite3
 import time
 import urllib.parse
 from collections.abc import Callable, Collection, Iterator, Mapping
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -73,6 +73,9 @@ _BOARD_STATUSES = frozenset({404, 410})
 _GOOD_LAST = frozenset({"ok", "unchanged", "empty"})
 # Empty reads of boards with open postings, from one bucket in one tick, that make a mass-empty outage.
 MASS_EMPTY_BOARDS = 5
+# The keys of a `by_ats` row (`profile` reads them by name, #152).
+_PROFILE_KEYS = ("boards", "list_requests", "list_ms", "body_requests", "body_ms", "ingest_ms", "new", "closed",
+                 "reopened")
 _MAX_ERROR_LINES = 20  # board failures named in job_run.error; the count is always complete
 
 
@@ -82,7 +85,10 @@ class TickReport:
     `read` counts the boards whose read was recorded (ok, empty, error, unchanged); `deferred` the boards put off
     with no read recorded; `tripped` the host buckets the breaker stopped or that read a mass empty. The plan's
     `queued` is gone (ruling 2). `switched_off` counts the boards left alone because their ATS's reader is switched
-    off in config.toml (#46): not read, not deferred, nothing about them written."""
+    off in config.toml (#46): not read, not deferred, nothing about them written. `by_ats` says where the tick's time
+    went (#152): per ATS, the boards listed, the list requests and milliseconds, the body requests and milliseconds,
+    the milliseconds of everything else a read wrote, and the postings it found new, closed and reopened. A board's
+    list is counted when it is made, so a read held for the end of the tick is counted once."""
     run_id: int | None
     rebuilt: bool
     read: int = 0
@@ -101,6 +107,7 @@ class TickReport:
     watch_error: str = ""
     probe: ProbeReport | None = None  # the daily slug-probe pass; None when it did not run (or failed: `probe_error`)
     probe_error: str = ""
+    by_ats: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 class AlreadyRunning(Exception):
@@ -158,11 +165,13 @@ def _bucket_of(url: str, cfg: CrawlConfig) -> str:
 
 class _TickClient:
     """The PoliteClient as the tick hands it out: it refuses a bucket the tick has tripped (as the breaker refuses
-    its own) and remembers the bucket of the first request, which is the board's list request."""
+    its own) and remembers the bucket of the first request, which is the board's list request.
+    `requests` counts the requests it let through to the polite client (#152)."""
 
     def __init__(self, polite: HttpClient, cfg: CrawlConfig, down: set[str]):
         self.polite, self.cfg, self.down = polite, cfg, down
         self.first_bucket: str | None = None
+        self.requests = 0
 
     def _check(self, url: str) -> None:
         bucket = _bucket_of(url, self.cfg)
@@ -173,30 +182,38 @@ class _TickClient:
 
     def get(self, url: str, headers: Mapping[str, str] | None = None, *, follow_redirects: bool = False) -> Response:
         self._check(url)
+        self.requests += 1
         return self.polite.get(url, headers, follow_redirects=follow_redirects)
 
     def post(self, url: str, body: bytes, headers: Mapping[str, str] | None = None) -> Response:
         self._check(url)
+        self.requests += 1
         return self.polite.post(url, body, headers)
 
     def download(self, url: str, dest: Path, headers: Mapping[str, str] | None = None) -> int:
         self._check(url)
+        self.requests += 1
         return self.polite.download(url, dest, headers)
 
 
 class _Listed:
     """An adapter whose list answer the tick already has: `read_board` writes it without a second list request, and
-    body requests go to the real adapter."""
+    body requests go to the real adapter. It is made once the list request is done, so `body_requests` is what the
+    view has sent since (#152): a body an adapter builds without asking the board counts for nothing."""
 
-    def __init__(self, adapter: Adapter, result: ReadResult):
+    def __init__(self, adapter: Adapter, result: ReadResult, view: _TickClient):
         self.ats = adapter.ats
-        self._adapter, self._result = adapter, result
+        self._adapter, self._result, self._view, self._listed = adapter, result, view, view.requests
 
     def list(self, token: str, validators: Validators) -> ReadResult:
         return self._result
 
     def body(self, token: str, job: JobRef) -> str | None:
         return self._adapter.body(token, job)
+
+    @property
+    def body_requests(self) -> int:
+        return self._view.requests - self._listed
 
 
 @dataclass(frozen=True)
@@ -206,14 +223,18 @@ class _Held:
     result: ReadResult
     now: str
     bucket: str | None
+    view: _TickClient
 
 
 class _Pass:
     """One run over a list of boards, inside one `read_boards` job run."""
 
-    def __init__(self, conn, polite: PoliteClient, cfg: CrawlConfig, rules_cfg, combiner, now_fn, run_id: int):
+    def __init__(self, conn, polite: PoliteClient, cfg: CrawlConfig, rules_cfg, combiner, now_fn, run_id: int,
+                 clock: Callable[[], float] = time.monotonic):
         self.conn, self.polite, self.cfg = conn, polite, cfg
         self.rules_cfg, self.combiner, self.now_fn, self.run_id = rules_cfg, combiner, now_fn, run_id
+        self.clock = clock
+        self.by_ats: dict[str, dict[str, int]] = {}
         self.counts = {k: 0 for k in ("read", "ok", "empty", "error", "unchanged", "deferred", "failed", "new",
                                       "closed")}
         self.down: set[str] = set()  # buckets the tick will not send to again
@@ -235,6 +256,7 @@ class _Pass:
         adapter = adapter_for(board.ats, view)
         if adapter is None:  # due_boards selects the ATSs the crawler reads only
             return
+        listed_at = self.clock()
         try:
             result = list_board(adapter, board, full=full_read_due(self.conn, board, now))
         except HostTripped as e:
@@ -242,11 +264,12 @@ class _Pass:
             self._push(board, add_seconds(now, self.cfg.defer_s))
             self.counts["deferred"] += 1
             return
+        self._profile(board.ats, boards=1, list_requests=view.requests, list_ms=self._ms(listed_at))
         bucket = view.first_bucket
         if bucket is not None:
             self.seen.add(bucket)
         if result.result == "error":
-            self.held.append(_Held(board, adapter, result, now, bucket))
+            self.held.append(_Held(board, adapter, result, now, bucket, view))
             if bucket is not None and board.last_read in _GOOD_LAST and result.http_status not in _BOARD_STATUSES:
                 self.error_run[bucket] = self.error_run.get(bucket, 0) + 1
                 if self.error_run[bucket] >= self.cfg.breaker_failures:
@@ -255,10 +278,19 @@ class _Pass:
         if bucket is not None:
             self.error_run[bucket] = 0
         if result.result == "empty" and bucket is not None and self._shielded(board, now) and self._has_open(board):
-            self.held_empty.append(_Held(board, adapter, result, now, bucket))
+            self.held_empty.append(_Held(board, adapter, result, now, bucket, view))
             self.empties[bucket] = self.empties.get(bucket, 0) + 1
             return
-        self._ingest(board, _Listed(adapter, result), now, bucket)
+        self._ingest(board, _Listed(adapter, result, view), now, bucket)
+
+    def _ms(self, since: float) -> int:
+        return round((self.clock() - since) * 1000)
+
+    def _profile(self, ats: str, **add: int) -> None:
+        """Add to the ATS's row of `by_ats` (#152). Every key starts at 0 so the row always has the same shape."""
+        row = self.by_ats.setdefault(ats, dict.fromkeys(_PROFILE_KEYS, 0))
+        for key, n in add.items():
+            row[key] += n
 
     def finish(self) -> None:
         """The held reads. An error: a deferral when its bucket tripped and the board is shielded, else the error read
@@ -268,13 +300,13 @@ class _Pass:
             if h.bucket is not None and h.bucket in self.down and self._shielded(h.board, h.now):
                 self._defer(h)
             else:
-                self._ingest(h.board, _Listed(h.adapter, h.result), h.now, h.bucket)
+                self._ingest(h.board, _Listed(h.adapter, h.result, h.view), h.now, h.bucket)
         for h in self.held_empty:
             if self.empties[h.bucket] >= MASS_EMPTY_BOARDS:
                 self._trip(h.bucket)
                 self._defer(h)
             else:
-                self._ingest(h.board, _Listed(h.adapter, h.result), h.now, h.bucket)
+                self._ingest(h.board, _Listed(h.adapter, h.result, h.view), h.now, h.bucket)
         self.held.clear()
         self.held_empty.clear()
 
@@ -295,10 +327,11 @@ class _Pass:
         self.down.add(bucket)
         self.seen.add(bucket)
 
-    def _ingest(self, board: BoardRow, adapter: Adapter, now: str, bucket: str | None) -> None:
+    def _ingest(self, board: BoardRow, adapter: _Listed, now: str, bucket: str | None) -> None:
+        started = self.clock()
         try:
             out = read_board(self.conn, board, adapter, run_id=self.run_id, now=now, cfg=self.cfg,
-                             rules_cfg=self.rules_cfg, combiner=self.combiner, bucket=bucket)
+                             rules_cfg=self.rules_cfg, combiner=self.combiner, bucket=bucket, clock=self.clock)
         except HostTripped as e:  # read_board ends its body fetches itself; kept so a trip can never fail a board
             self._rollback()
             self._trip(e.bucket)
@@ -326,6 +359,9 @@ class _Pass:
         self.counts[out.result] += 1
         self.counts["new"] += out.new
         self.counts["closed"] += out.closed
+        self._profile(board.ats, body_requests=adapter.body_requests, body_ms=out.body_ms,
+                      ingest_ms=max(0, self._ms(started) - out.body_ms), new=out.new, closed=out.closed,
+                      reopened=out.reopened)
         if out.tripped:
             self._trip(out.tripped)
 
@@ -353,7 +389,7 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
     """One `read_boards` job run over `select(now)`, starting no board once the budget is spent. `switched_off` is
     the count of boards `select` leaves out because their reader is off; it goes into the report as it is."""
     run_id = start_job(conn, "read_boards", ruleset_version())
-    run = _Pass(conn, polite, cfg, rules_cfg, combiner, now_fn, run_id)
+    run = _Pass(conn, polite, cfg, rules_cfg, combiner, now_fn, run_id, clock)
     try:
         for board in select(now_fn()):
             if run.stopped or clock() - started >= cfg.tick_budget_s:
@@ -369,7 +405,7 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
             e.add_note(f"could not record the failed run: {describe_error(finish_err)}")
         raise
     report = TickReport(run_id=run_id, rebuilt=rebuilt, **run.counts, switched_off=switched_off,
-                        seconds=round(clock() - started, 3), tripped=tuple(sorted(run.down)))
+                        seconds=round(clock() - started, 3), tripped=tuple(sorted(run.down)), by_ats=run.by_ats)
     summary = {k: v for k, v in asdict(report).items()
                if k not in ("watch", "watch_error", "probe", "probe_error")}
     if run.failed_ids:

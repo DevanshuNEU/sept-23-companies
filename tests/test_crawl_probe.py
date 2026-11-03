@@ -34,11 +34,11 @@ ASHBY_EMPTY = (FIXTURES / "ashby_empty.json").read_bytes()
 
 
 def gh(slug):
-    return f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
+    return f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
 
 
 def gh_eu(slug):
-    return f"https://boards-api.eu.greenhouse.io/v1/boards/{slug}/jobs?content=true"
+    return f"https://boards-api.eu.greenhouse.io/v1/boards/{slug}/jobs"
 
 
 def lever(slug):

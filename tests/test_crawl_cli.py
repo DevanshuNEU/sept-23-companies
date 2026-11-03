@@ -4,6 +4,7 @@ Nothing here touches the network or the live store; the template is parsed, neve
 """
 import contextlib
 import io
+import json
 import os
 import plistlib
 import shutil
@@ -22,7 +23,10 @@ from tests.storetest import fresh_store, seed_board, seed_company
 
 ROOT = Path(__file__).resolve().parent.parent
 JOBS = (ROOT / "tests" / "fixtures" / "crawl" / "greenhouse_jobs.json").read_bytes()
-ACME = "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true"
+# One sales posting for the reads: an engineering one would make a read ask for its body too (#152), and the read
+# tests are about the commands, not the bodies.
+SALES_ONLY = json.dumps({"jobs": [j for j in json.loads(JOBS)["jobs"] if j["title"] == "Account Executive"]}).encode()
+ACME = "https://boards-api.greenhouse.io/v1/boards/acme/jobs"
 
 
 def temp_dir(case: unittest.TestCase) -> str:
@@ -76,7 +80,7 @@ class CommandTests(unittest.TestCase):
 
     def test_tick_reads_the_due_boards_and_prints_one_line(self):
         seed_board(self.conn, seed_company(self.conn, "Acme"))
-        client = FakeClient({ACME: Response(200, "", JOBS, {"etag": '"A"'})})
+        client = FakeClient({ACME: Response(200, "", SALES_ONLY, {"etag": '"A"'})})
         code, out, _ = self.run_cli(["tick"], client)
         self.assertEqual(code, 0)
         self.assertEqual(len(out.strip().splitlines()), 1)
@@ -98,7 +102,7 @@ class CommandTests(unittest.TestCase):
         acme = seed_company(self.conn, "Acme")
         seed_board(self.conn, acme)
         seed_board(self.conn, seed_company(self.conn, "Other"), token="other")
-        client = FakeClient({ACME: Response(200, "", JOBS, {"etag": '"A"'})})
+        client = FakeClient({ACME: Response(200, "", SALES_ONLY, {"etag": '"A"'})})
         code, out, _ = self.run_cli(["read", "--company", str(acme)], client)
         self.assertEqual(code, 0, out)
         self.assertEqual(client.requests, [ACME])

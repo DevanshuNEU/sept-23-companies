@@ -21,6 +21,7 @@ keeps a snapshot of those boards (`off_before`), and the invariant checks that t
 """
 from __future__ import annotations
 
+import json
 from unittest import mock
 
 from outreach.crawl.cadence import add_seconds
@@ -46,7 +47,7 @@ OFF_READ_AT = "2026-10-15T08:00:00Z"  # a week before the first tick: the boards
 
 
 def list_url(token: str = TOKEN) -> str:
-    return f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
+    return f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
 
 
 def fixture_jobs(harness) -> bytes:
@@ -70,7 +71,10 @@ class CrawlStage:
     def __init__(self, harness):
         self.harness = harness
         self.conn = harness.conn
-        self.body = fixture_jobs(harness)
+        listed = json.loads(fixture_jobs(harness))
+        # The Greenhouse list carries no text (#152): the fixture's text is served per posting, as the detail API does.
+        self.content = {str(j["id"]): j.pop("content") for j in listed["jobs"] if "content" in j}
+        self.body = json.dumps(listed).encode("utf-8")
         self.ticks = 0
         self.report: TickReport | None = None
         self.client: FakeClient | None = None
@@ -151,6 +155,13 @@ class CrawlStage:
             return Response(304, url, b"", {"etag": ETAG})
         return Response(200, url, self.body, {"etag": ETAG, "content-type": "application/json"})
 
+    def detail(self, native_id: str):
+        """One posting's detail answer, with the text as it is when the request comes."""
+        def answer(method, url, headers, body) -> Response:
+            return Response(200, url, json.dumps({"id": native_id, "content": self.content[native_id]}).encode(),
+                            {"content-type": "application/json"})
+        return answer
+
     def run(self, answer=None) -> TickReport:
         """One tick, a day after the last. `answer` is what the board's list URL says this once (a `Response`, bytes,
         an exception or a callable, as `FakeClient` takes them); None serves the fixture."""
@@ -160,7 +171,9 @@ class CrawlStage:
         now = add_seconds(FIRST_TICK, DAY_S * self.ticks)
         self.ticks += 1
         clock = _Clock()
-        self.client = FakeClient({list_url(): self.serve if answer is None else answer})
+        routes = {list_url(): self.serve if answer is None else answer}
+        routes |= {f"{list_url()}/{native_id}": self.detail(native_id) for native_id in self.content}
+        self.client = FakeClient(routes)
         # The daily slug probe (Task 26a) is not this stage: it would ask the three ATSs about every board-less company.
         with mock.patch("outreach.crawl.tick.probe_slugs", return_value=ProbeReport(0, 0, 0, 0, 0, 0)):
             self.report = run_tick(self.conn, self.client, cfg=self.cfg, now_fn=lambda: now, clock=clock,

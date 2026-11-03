@@ -57,7 +57,7 @@ def _report(run: RankRun, dry_run: bool) -> str:
     lines = [
         f"Ranker {run.version}{' (dry run, nothing written)' if dry_run else ''}",
         f"Scored {len(run.scored)} companies; hidden: {hidden}",
-        f"No-go rows written {run.no_go_written}; size items {run.size_items}; conflict items {run.conflict_items}",
+        f"Size items {run.size_items}; conflict items {run.conflict_items}",
         f"Postings: {run.undecided_postings} undecided, {run.ignored_postings} ignored (board match doubtful), "
         f"{run.stale_postings} stale",
         f"Interview companies: {run.interview_companies} (tilt weight "

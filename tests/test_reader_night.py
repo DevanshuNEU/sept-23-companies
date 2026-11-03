@@ -33,8 +33,8 @@ REPO = Path(__file__).resolve().parent.parent
 TEMPLATE = REPO / "launchd" / "com.devanshu.outreach-reader-night.plist.template"
 TITLE = "Software Engineer, New Grad"
 FILLER = " We build control software for warehouse robots and ship to real customers every week."
-REFUSAL = "We do not sponsor visas for this role."
-PARAPHRASE = "they cannot sponsor anyone at all"
+REFUSAL = "Applicants must be U.S. citizens."  # a rules hide (sponsorship only flags since #154)
+PARAPHRASE = "they require citizenship of every hire"
 QUOTED_LIMIT = "Customers never hit a usage limit on our platform."
 DEAD = "2026-01-01T00:00:00Z"  # a lease taken then and never given back ran out long ago
 LIMIT_TEXT = "Claude AI usage limit reached. Your limit resets at 7am."
@@ -418,7 +418,7 @@ class FailOpenTests(NightCase):
     def test_refused_quotes_requeue_and_finish_at_the_limit(self):
         ids = self.postings(45, lead=REFUSAL)
         self.assertFalse(any(passes(stored_decision(self.decision(pid))) for pid in ids))  # the rules hide them
-        fake = Fake(lambda n, p: ok(json.dumps(readings(p, sponsorship=("wont_sponsor", PARAPHRASE)))))
+        fake = Fake(lambda n, p: ok(json.dumps(readings(p, citizenship_or_clearance=("yes", PARAPHRASE)))))
         nights = 0
         while self.states().get("queued", 0) or not self.queue_rows():
             nights += 1
@@ -431,7 +431,7 @@ class FailOpenTests(NightCase):
         for pid in ids:
             row = self.decision(pid)
             self.assertTrue(passes(stored_decision(row)), pid)  # fails open: shown
-            self.assertEqual((row["sponsorship"], row["provisional"]), ("unclear", 1))
+            self.assertEqual((row["citizenship"], row["provisional"]), (0, 1))
         self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE kind = 'reader_disagrees'")
                          .fetchone()[0], 45)
 
@@ -456,7 +456,7 @@ class FailOpenTests(NightCase):
         self.assertEqual(self.row(poison)["state"], "refused")
         row = self.decision(poison)
         self.assertTrue(passes(stored_decision(row)))
-        self.assertEqual(row["sponsorship"], "unclear")
+        self.assertEqual(row["citizenship"], 0)
         self.assertLessEqual(len(fake.calls), 30)
 
 

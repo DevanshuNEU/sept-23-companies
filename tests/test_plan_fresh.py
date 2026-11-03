@@ -125,8 +125,8 @@ class VisaGateTest(unittest.TestCase):
                 ("yes", None, None, True), ("opt_only", "not_enrolled", None, True),
                 ("unclear", None, None, False), ("unclear", "not_enrolled", None, False),
                 ("unclear", "enrolled", None, True),
-                ("no", "enrolled", None, False),
-                ("silent", "enrolled", "no", False), ("yes", "enrolled", "no", False),
+                ("no", "enrolled", None, True), ("no", "not_enrolled", None, False), ("no", None, None, False),
+                ("silent", "enrolled", "no", True), ("yes", "enrolled", "no", True), ("silent", None, "no", True),
                 ("silent", None, "yes", True)):
             with self.subTest(stance=stance, everify=everify, fact=fact):
                 self.assertIs(visa_clear(stance, everify, fact), ok)
@@ -172,10 +172,23 @@ class FreshLaneTest(unittest.TestCase):
         self.assertIsNone(fresh_pick(unclear, CFG))
         self.assertIsNotNone(fresh_pick(dataclasses.replace(unclear, everify="enrolled"), CFG))
         self.assertIsNotNone(fresh_pick(silent, CFG))  # no E-Verify fact and silent sponsorship
-        self.assertIsNone(fresh_pick(dataclasses.replace(silent, company_sponsorship="no"), CFG))
+        self.assertIsNotNone(fresh_pick(dataclasses.replace(silent, company_sponsorship="no"), CFG))  # a flag (#154)
         rows = choose_rows([prospect(1, score=90), unclear, silent], Caps(8, 0, 7, 1), CFG)
         self.assertEqual(ids(rows), [3, 1, 2])  # the unclear one is still picked, by rank, not as fresh
         self.assertIsNone(rows[2].opening)
+
+    def test_today_keeps_a_no_sponsorship_company(self):
+        """#154: a posting that says "no sponsorship" is a flag. The company is still picked, and it takes the fresh
+        lane when it is E-Verify enrolled (OPT and STEM OPT work there), like an unclear one."""
+        refuses = prospect(2, score=10, openings=[opening(2, stance="no")])
+        self.assertIsNone(fresh_pick(refuses, CFG))  # not E-Verify enrolled: out of the lane, like unclear
+        self.assertIsNotNone(fresh_pick(dataclasses.replace(refuses, everify="enrolled"), CFG))
+        rows = choose_rows([prospect(1, score=90), refuses], Caps(8, 0, 7, 1), CFG)
+        self.assertEqual(ids(rows), [1, 2])
+        rows = choose_rows([prospect(1, score=90), dataclasses.replace(refuses, everify="enrolled")],
+                           Caps(8, 0, 7, 1), CFG)
+        self.assertEqual(ids(rows), [2, 1])
+        self.assertEqual(rows[0].opening.stance, "no")
 
     def test_only_early_career_fits_take_the_lane(self):
         for tier, years, fresh in (("new_grad", None, True), ("early_career", None, True), ("swe1", None, True),
@@ -356,6 +369,12 @@ class LoadOpeningsTest(unittest.TestCase):
                       last_seen_at=_ts(NOW))
         decision(self.conn, pid)
         self.assertEqual([o.posting_id for o in self.openings()], [good])
+
+    def test_a_no_sponsorship_posting_is_an_opening(self):
+        """#154: `passes()` no longer drops a refusal, so the fresh lane reads it with its stance."""
+        pid = _opening(self.conn, self.c, hours=5, sponsorship="no", sponsorship_quote="We do not sponsor visas.")
+        [o] = self.openings()
+        self.assertEqual((o.posting_id, o.stance), (pid, "no"))
 
     def test_an_old_posting_first_seen_today_is_not_new(self):
         _opening(self.conn, self.c, hours=1, posted_on="2026-10-20")

@@ -59,6 +59,17 @@ class NoGoView(NoGoCase):
         self.assertEqual(person["reason"], "said_no")
         self.assertEqual(body["countsByReason"], [{"reason": "no_sponsorship", "count": 2}, {"reason": "removed", "count": 1}])
 
+    def test_no_go_page_marks_ranker_rows(self):
+        """A row the ranker wrote (source `rules`, from before #154 stopped it) says so; his own rows say "you"."""
+        a = s.company(self.conn, "Acme", "candidate")
+        b = s.company(self.conn, "Bolt", "candidate")
+        c = s.company(self.conn, "Cog", "candidate")
+        no_go(self.conn, company=a, reason="no_sponsorship", source="rules", created_at="2026-11-01T09:00:00Z")
+        no_go(self.conn, company=b, reason="no_sponsorship", source="devanshu", created_at="2026-11-02T09:00:00Z")
+        no_go(self.conn, company=c, reason="said_no", source="reply", created_at="2026-11-03T09:00:00Z")
+        by = {r["target"]["company"]["name"]: r["writtenBy"] for r in self.view()["companies"]}
+        self.assertEqual(by, {"Acme": "ranker", "Bolt": "you", "Cog": "reply"})
+
     def test_a_no_go_on_a_merged_duplicate_shows_its_survivor(self):
         keep = s.company(self.conn, "Keep", "candidate")
         dup = s.company(self.conn, "Keep Inc", "removed", merged_into=keep)

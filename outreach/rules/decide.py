@@ -148,7 +148,8 @@ def passes(d: Decision) -> bool:
     """The posting-level half of #9's hidden list: false when the posting is hidden for its own sake.
 
     This is hide policy, not a classification. #6 calls it and adds the company-level half (size over 300 with
-    evidence, no-go); it must not restate it. OPT-only sponsorship and a failed level are not hidden here.
+    evidence, no-go); it must not restate it. Sponsorship is a flag, never a hide (#9, 2026-11-01: he wants F-1 OPT
+    and STEM OPT, not H-1B), so "no sponsorship", OPT-only wording and a failed level are not hidden here. Citizenship,
+    clearance and ITAR "US person" wording are, and hide the posting only.
     """
-    return (d.lane == "engineering" and d.us != "no" and d.sponsorship != "no" and not d.citizenship
-            and d.eligibility == "ok")
+    return d.lane == "engineering" and d.us != "no" and not d.citizenship and d.eligibility == "ok"

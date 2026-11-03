@@ -129,6 +129,12 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(r.sponsorship, "opt_only")
         self.assertTrue(passes(r))
 
+    def test_no_sponsorship_passes(self):
+        """#154 (#9, 2026-11-01): "no sponsorship" is a flag on the posting, not a hide."""
+        r = d("Software Engineer, New Grad", "We are unable to sponsor visas for this role.")
+        self.assertEqual(r.sponsorship, "no")
+        self.assertTrue(passes(r))
+
     def test_citizenship_fails_passes(self):
         r = d("Software Engineer, New Grad", "Applicants must be U.S. citizens.")
         self.assertTrue(r.citizenship)

@@ -5,13 +5,14 @@ a posting for good. This module is the only code that sets `decision.provisional
 
 Per field the two answers are compared (the mapping table in the plan's "Decisions"): `agree`, `disagree`, `missing`
 (the reader said unknown, or the field was refused, where the rules claim something) or `reader_only` (no rules
-counterpart). Four fields can hide a posting (`HIDE_FIELDS`); the others only flag.
+counterpart). Three fields can hide a posting (`HIDE_FIELDS`); the others only flag. Sponsorship is one that only
+flags (#154, #9 2026-11-01): its rules value is stored as it is, never relaxed, and a disagreement raises no item.
 
-- A rules hide survives only when its field agrees. Otherwise it is relaxed in the stored row (sponsorship no to
-  unclear, citizenship 1 to 0, eligibility excluded to ok with no reason, us no to unknown; the rules' quote stays),
-  so `passes()` shows the posting again.
-- A reader hide the rules do not claim (reader `wont_sponsor`, rules `silent`) never hides. A real quote can carry
-  the opposite value (a flipped negation), so the rules are the guard.
+- A rules hide survives only when its field agrees. Otherwise it is relaxed in the stored row (citizenship 1 to 0,
+  eligibility excluded to ok with no reason, us no to unknown; the rules' quote stays), so `passes()` shows the
+  posting again.
+- A reader hide the rules do not claim (reader `yes` on citizenship, rules false) never hides. A real quote can
+  carry the opposite value (a flipped negation), so the rules are the guard.
 - A hide field that disagrees or is missing where either side would hide is `raised`: one `reader_disagrees` review
   item for the posting. So is the engineering field, when it is not `agree` and the row still hides: a refusal on a
   posting the reader does not call engineering is no evidence about the role ranking would hide the company for.
@@ -51,7 +52,7 @@ from outreach.store import append_event, atomic, body_sha256, utcnow
 __all__ = ["HIDE_FIELDS", "FieldVerdict", "Combined", "compare", "combine", "reading_state", "apply_reading",
            "apply_all", "explain", "reader_combiner"]
 
-HIDE_FIELDS = ("sponsorship", "citizenship_or_clearance", "student_or_grad_window", "location")
+HIDE_FIELDS = ("citizenship_or_clearance", "student_or_grad_window", "location")
 _READER_ONLY = ("years_high", "remote", "pay")
 _SPONSORSHIP = {"wont_sponsor": "no", "will_sponsor": "yes", "opt_only": "opt_only", "silent": "silent"}
 _LEVEL = {"new_grad": ("new_grad",), "early_career": ("early_career", "swe1"), "mid": ("swe2", "open"),
@@ -90,8 +91,8 @@ class Combined:
 
 
 def _hides(d: Decision) -> bool:
-    """A hide on one of the four hide fields (lane is the title's filter, not evidence)."""
-    return d.us == "no" or d.sponsorship == "no" or d.citizenship or d.eligibility == "excluded"
+    """A hide on one of the three hide fields (lane is the title's filter, not evidence; sponsorship is a flag)."""
+    return d.us == "no" or d.citizenship or d.eligibility == "excluded"
 
 
 def _unconfirmed_sponsor(rules: Decision, verdicts: tuple[FieldVerdict, ...]) -> bool:
@@ -126,6 +127,7 @@ def compare(rules: Decision, reading: PostingReading | None, refused: frozenset[
             out.append(FieldVerdict(name, state, value, rules_value, quote, hide_rules, hide_reader))
 
         if name == "sponsorship":
+            # A flag, not a hide: `would_hide_*` here mean "says no", which the company page shows when they differ.
             add(_state(value not in (None, "unknown"), _SPONSORSHIP.get(value) == rules.sponsorship,
                        rules.sponsorship not in ("unclear", "silent")),
                 rules.sponsorship, rules.sponsorship == "no", value == "wont_sponsor")
@@ -163,8 +165,6 @@ def _relax(rules: Decision, verdicts: tuple[FieldVerdict, ...]) -> Decision:
     """Every rules hide whose field is not `agree`, turned to its non-hide value; the rules' quotes stay."""
     states = {v.field: v.state for v in verdicts}
     d = rules
-    if d.sponsorship == "no" and states["sponsorship"] != "agree":
-        d = replace(d, sponsorship="unclear")
     if d.citizenship and states["citizenship_or_clearance"] != "agree":
         d = replace(d, citizenship=False)
     if d.eligibility == "excluded" and states["student_or_grad_window"] != "agree":
@@ -205,9 +205,10 @@ def _posting(conn: sqlite3.Connection, posting_id: int) -> sqlite3.Row | None:
         (posting_id,)).fetchone()
 
 
-# The fields whose quotes are checked again at combine time: the four that can hide, engineering, which a final hide
-# needs (a title edit can drop its quote), and pay, which is written to the posting row.
-_RECHECKED = HIDE_FIELDS + ("engineering", "pay")
+# The fields whose quotes are checked again at combine time: the three that can hide, sponsorship (a flag whose yes
+# or opt_only the reader must confirm, `_unconfirmed_sponsor`), engineering, which a final hide needs (a title edit
+# can drop its quote), and pay, which is written to the posting row.
+_RECHECKED = HIDE_FIELDS + ("sponsorship", "engineering", "pay")
 
 
 def _gone_quotes(reading: PostingReading, post: sqlite3.Row) -> set[str]:

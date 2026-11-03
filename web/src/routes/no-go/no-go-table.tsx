@@ -1,6 +1,6 @@
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table';
 import { MoreHorizontal } from 'lucide-react';
-import type { NoGoReason, NoGoRow, NoGoSource, RemovedRow, RemoveReason } from '@/api';
+import type { NoGoReason, NoGoRow, NoGoWrittenBy, RemovedRow, RemoveReason } from '@/api';
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,9 +33,10 @@ const REMOVE_REASON: Record<RemoveReason, string> = {
   other: 'Other',
 };
 
-const SOURCE_WORD: Record<NoGoSource, string> = {
-  devanshu: 'You',
-  rules: 'Rules',
+// A row written by the ranker (before #154 stopped it) says so; the rest name who set them.
+const WRITTEN_BY_WORD: Record<NoGoWrittenBy, string> = {
+  you: 'You',
+  ranker: 'Written by the ranker',
   reply: 'Reply',
   import: 'Imported',
   claude: 'Claude',
@@ -110,7 +111,7 @@ function CompanySource({ row }: { row: CompanyEntry }) {
     );
   }
   // A quote fills the evidence, so a note (who closed it) moves under the source.
-  const who = row.quote && row.note ? row.note : SOURCE_WORD[row.source];
+  const who = row.quote && row.note ? row.note : WRITTEN_BY_WORD[row.writtenBy];
   const sub = who === row.sourceRef ? shortDay(row.addedAt) : `${who}, ${shortDay(row.addedAt)}`;
   return (
     <>

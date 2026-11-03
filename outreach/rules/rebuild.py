@@ -50,7 +50,7 @@ _UPSERT = (
 # reader_version (outreach.reader.combine.Combined). Typed loosely so this module needs no reader import.
 Combiner = Callable[[sqlite3.Connection, int, Decision], Any]
 # The fields passes() reads: what a shown-to-hidden flip is explained by.
-_HIDING_FIELDS = ("lane", "us", "sponsorship", "citizenship", "eligibility")
+_HIDING_FIELDS = ("lane", "us", "citizenship", "eligibility")
 
 
 class RulesetNotCurrent(Exception):
@@ -62,7 +62,7 @@ class Flip:
     posting_id: int
     company: str
     title: str
-    change: str  # for example "sponsorship silent -> no"
+    change: str  # for example "citizenship no -> yes"
 
 
 @dataclass(frozen=True)

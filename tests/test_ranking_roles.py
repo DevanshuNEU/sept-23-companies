@@ -96,11 +96,19 @@ class LaneTests(Store):
         self.assertEqual(r.best.posting_id, senior)
         self.assertEqual(r.open_count, 2)
         only = seed_company(self.conn, "Only hidden")
-        self.add("ng", company_id=only, board_id=None, sponsorship="no")
+        self.add("ng", company_id=only, board_id=None, citizenship=1)
         self.add("ng", company_id=only, board_id=None, us="no")
         r = self.role(only)
         self.assertIsNone(r.best)
         self.assertEqual((r.lanes, r.visible, r.stale), ((), (), ()))
+
+    def test_a_no_sponsorship_posting_is_a_role(self):
+        """#154: "no sponsorship" is a flag on the posting, not a hide."""
+        refuses = self.add("ng", sponsorship="no")
+        r = self.role()
+        self.assertEqual([b.posting_id for b in r.visible], [refuses])
+        self.assertEqual(r.best.posting_id, refuses)
+        self.assertEqual(r.best.sponsorship, "no")
 
     def test_student_only_intern_is_not_visible(self):
         self.add("intern", eligibility="excluded", eligibility_reason="current_student")

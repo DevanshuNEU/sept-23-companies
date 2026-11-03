@@ -2,15 +2,13 @@
 
 `compute_rank` is the read-only half. It reads the store in bulk (a few queries over whole tables, never one per
 company) inside one read transaction, so every loader sees the same snapshot and no write lock is held. `run_rank`
-then writes, in one `BEGIN IMMEDIATE` transaction: the rules `no_go` rows for final sponsorship refusals, the
-version's full set of `company_score` rows (rows of the version for companies not in the run are deleted), the
-ranker's review items, the `weights_changed` event of a version change (ruling 8), the prune of old versions and
-the job's `ok`. Any exception rolls all of it back, closes the run `failed` and re-raises, so the previous rows and
-the no-go table are untouched. A dry run writes nothing, not even a `job_run`.
+then writes, in one `BEGIN IMMEDIATE` transaction: the version's full set of `company_score` rows (rows of the
+version for companies not in the run are deleted), the ranker's review items, the `weights_changed` event of a
+version change (ruling 8), the prune of old versions and the job's `ok`. Any exception rolls all of it back, closes the run `failed` and re-raises, so the previous rows are
+untouched. A dry run writes nothing, not even a `job_run`. It writes no `no_go` row: a sponsorship refusal is a flag,
+not a hide (#154).
 
-The write transaction first re-checks the ruleset (a change since the compute fails the run as a stale one
-does) and re-reads which companies are still their own survivor and still listed: a merge or a close that
-committed during the compute gets no no-go row.
+The write transaction first re-checks the ruleset (a change since the compute fails the run as a stale one does).
 
 Staleness is the crawler's rule: `outreach.crawl.stale.load_stale` is called once per run and its mapping is passed
 to `load_roles` and `load_hide_inputs`. Because stale depends on `today`, a run on a later day may change rows; the
@@ -18,7 +16,6 @@ same day over the same store never does.
 """
 from __future__ import annotations
 
-import dataclasses
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -29,8 +26,8 @@ from outreach.insights.dataset import load_outcome_rows
 from outreach.insights.similar import interview_profile
 from outreach.ranking.common import canonical_ids, doubtful_board_ids
 from outreach.ranking.config import RankerConfig, default_ranker_config
-from outreach.ranking.facts import LISTED_STATUSES, load_facts
-from outreach.ranking.hide import Hide, HideInputs, decide_hide, load_hide_inputs, write_no_go
+from outreach.ranking.facts import load_facts
+from outreach.ranking.hide import HideInputs, decide_hide, load_hide_inputs
 from outreach.ranking.pay import load_wages
 from outreach.ranking.review import sync_conflict_items, sync_size_items
 from outreach.ranking.roles import load_roles
@@ -46,8 +43,8 @@ from outreach.store.timefmt import ISO_FMT
 __all__ = ["CONFLICT_FLAG", "HIDDEN_KINDS", "RankRun", "compute_rank", "run_rank", "weights_text"]
 
 CONFLICT_FLAG = "postings disagree on sponsorship"
-# The summary's hidden counts: the three hide kinds, and a provisional hide (pending reader) as its own count.
-HIDDEN_KINDS = ("no_go", "over_size", "no_sponsorship", "provisional")
+# The summary's hidden counts, by the kinds ranking still decides (a sponsorship refusal is a flag, not a hide, #154).
+HIDDEN_KINDS = ("no_go", "over_size")
 _LABELS = {"everify": "E-Verify", "interview_like": "Like your interview companies",
            "profile_fit": "Fits what you build"}
 _TEXT_MAX_CHANGES = 3
@@ -57,8 +54,7 @@ _TEXT_MAX_CHANGES = 3
 class RankRun:
     version: str
     scored: tuple[Scored, ...]
-    hidden: dict[str, int]      # by hide kind; a provisional hide counts as `provisional`
-    no_go_written: int
+    hidden: dict[str, int]      # by hide kind
     size_items: int             # size_guess and size_check items raised or reopened by this run
     conflict_items: int         # sponsorship-conflict items raised or reopened by this run
     undecided_postings: int     # trusted open postings with no current decision
@@ -140,7 +136,7 @@ def _hidden_counts(scored: list[Scored]) -> dict[str, int]:
     counts = dict.fromkeys(HIDDEN_KINDS, 0)
     for s in scored:
         if s.hide is not None:
-            counts["provisional" if s.hide.provisional else s.hide.kind] += 1
+            counts[s.hide.kind] += 1
     return counts
 
 
@@ -191,21 +187,6 @@ def _scored_at(conn: sqlite3.Connection, version: str) -> str:
     return now
 
 
-def _still_listed(conn: sqlite3.Connection) -> set[int]:
-    """Companies that are still their own survivor and still listed, read inside the write transaction. A merge or a
-    close that committed during the compute takes the company out, so no no-go row is written for it (a row on a
-    duplicate would re-hide a survivor he put back)."""
-    canon = canonical_ids(conn)
-    marks = ", ".join("?" for _ in LISTED_STATUSES)
-    return {cid for (cid,) in conn.execute(f"SELECT company_id FROM company WHERE status IN ({marks})",
-                                            LISTED_STATUSES) if canon.get(cid) == cid}
-
-
-def _as_no_go(cfg: RankerConfig) -> Hide:
-    """The hide a written no_go gives on every later run, so this run's row already matches them."""
-    return decide_hide(HideInputs(0, "active", "no_sponsorship", (), (), None), cfg)
-
-
 def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: RankerConfig | None = None,
              dry_run: bool = False) -> RankRun:
     """Ranks every listed company under this code's ranker version; see the module text for what is written."""
@@ -214,7 +195,7 @@ def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: Ranker
     version = ranker_version()
     if dry_run:
         scored, data = compute_rank(conn, today=today, cfg=cfg)
-        return _result(version, scored, data, 0, 0, 0)
+        return _result(version, scored, data, 0, 0)
 
     code_ruleset = ruleset_version()
     known = conn.execute("SELECT 1 FROM ruleset WHERE ruleset_version = ?", (code_ruleset,)).fetchone()
@@ -224,15 +205,7 @@ def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: Ranker
         with transaction(conn):
             # The compute read a snapshot and held no lock: whatever committed since must not be written over.
             _check_ruleset(conn)
-            listed = _still_listed(conn)
             before = latest_version(conn)
-            written = 0
-            for i, s in enumerate(scored):
-                if s.hide is not None and s.hide.kind == "no_sponsorship" and not s.hide.provisional \
-                        and s.company_id in listed:
-                    if write_no_go(conn, s.company_id, s.hide):
-                        written += 1
-                        scored[i] = dataclasses.replace(s, hide=_as_no_go(cfg))
             now = _scored_at(conn, version)
             write_scores(conn, scored, version, now)
             conn.execute("DELETE FROM company_score WHERE ranker_version = ? "
@@ -243,7 +216,7 @@ def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: Ranker
             if before is not None and before != version:
                 _weights_changed(conn, before, version, cfg, run_id)
             prune_versions(conn, cfg.ranker["keep_versions"])
-            run = _result(version, scored, data, written, size_items, conflict_items)
+            run = _result(version, scored, data, size_items, conflict_items)
             finish_job(conn, run_id, "ok", _summary(run))
     except BaseException as err:
         try:
@@ -256,9 +229,8 @@ def run_rank(conn: sqlite3.Connection, *, today: date | None = None, cfg: Ranker
     return run
 
 
-def _result(version: str, scored: list[Scored], data: dict, written: int, size_items: int,
-            conflict_items: int) -> RankRun:
-    return RankRun(version=version, scored=tuple(scored), hidden=_hidden_counts(scored), no_go_written=written,
+def _result(version: str, scored: list[Scored], data: dict, size_items: int, conflict_items: int) -> RankRun:
+    return RankRun(version=version, scored=tuple(scored), hidden=_hidden_counts(scored),
                    size_items=size_items, conflict_items=conflict_items,
                    undecided_postings=data["undecided_postings"], ignored_postings=data["ignored_postings"],
                    stale_postings=data["stale_postings"], interview_companies=data["interview_companies"],
@@ -267,6 +239,6 @@ def _result(version: str, scored: list[Scored], data: dict, written: int, size_i
 
 def _summary(run: RankRun) -> dict:
     return {"version": run.version, "scored": len(run.scored), "hidden": run.hidden,
-            "no_go_written": run.no_go_written, "size_items": run.size_items, "conflict_items": run.conflict_items,
+            "size_items": run.size_items, "conflict_items": run.conflict_items,
             "undecided_postings": run.undecided_postings, "ignored_postings": run.ignored_postings,
             "stale_postings": run.stale_postings, "interview_companies": run.interview_companies}

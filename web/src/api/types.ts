@@ -24,6 +24,8 @@ export type ReviewKind =
   | 'merge_candidate' | 'reader_disagrees' | 'careers_changed' | 'size_check';
 export type NoGoReason = 'no_sponsorship' | 'citizenship' | 'over_300' | 'defence_contractor' | 'agency' | 'said_no' | 'stop_reply' | 'not_a_fit' | 'other';
 export type NoGoSource = 'devanshu' | 'rules' | 'reply' | 'import' | 'claude';
+// Who wrote a no-go row, in the page's words: `rules` rows were written by the ranker (it stopped in #154).
+export type NoGoWrittenBy = 'you' | 'ranker' | 'reply' | 'import' | 'claude';
 export type Actor = 'devanshu' | 'claude' | 'sender' | 'crawler' | 'rules' | 'daily_list' | 'import' | 'system' | 'source' | 'reader';
 export type ImportSource = 'data_js' | 'local_storage' | 'contacts_json' | 'radar_db' | 'devboard' | 'contacted_txt' | 'devvault_notes';
 export type JobKind =
@@ -216,7 +218,7 @@ export type ReviewFix =
 export interface NoGoRow {
   kind: 'no_go'; noGoId: Id;
   target: { kind: 'company'; company: CompanyRef } | { kind: 'person'; person: PersonRef; companyName: string };
-  reason: NoGoReason; quote: string; note: string; source: NoGoSource; sourceRef: string;
+  reason: NoGoReason; quote: string; note: string; source: NoGoSource; writtenBy: NoGoWrittenBy; sourceRef: string;
   sourceUrl: string | null; importSource: ImportSource | null; // derived from source_ref
   addedAt: IsoTime;
 }

@@ -262,7 +262,7 @@ class PriorityTests(QueueCase):
         e = self.posting(company=plain, level_tier="senior")        # newer ordinary
         c = self.posting(company=low)                               # lane 1, lower company
         b = self.posting(company=top)                               # lane 1, top company
-        a = self.posting(company=plain, sponsorship="no")           # provisional hide
+        a = self.posting(company=plain, citizenship=1)              # provisional hide
         self.enqueue_all(d, e, c, b, a)
         self.assertEqual(self.order(5), [a, b, c, e, d])
         self.assertEqual(self.row(a)["priority"], 3_000_000)
@@ -339,14 +339,14 @@ class PriorityTests(QueueCase):
     def test_an_intern_posting_that_shows_is_not_a_provisional_hide(self):
         intern = self.posting("Software Engineering Intern", lane="intern", level_tier="not_stated")
         hidden_intern = self.posting("Software Engineering Intern", lane="intern", level_tier="not_stated",
-                                     sponsorship="no")
+                                     citizenship=1)
         self.enqueue_all(intern, hidden_intern)
         queue.refresh_priorities(self.conn, cfg=self.cfg)
         self.assertEqual(self.row(intern)["priority"], 1_000_000)
         self.assertEqual(self.row(hidden_intern)["priority"], 3_000_000)
 
     def test_a_final_decision_is_not_a_provisional_hide(self):
-        final = self.posting(sponsorship="no", provisional=0)
+        final = self.posting(citizenship=1, provisional=0)
         self.enqueue_all(final)
         queue.refresh_priorities(self.conn, cfg=self.cfg)
         self.assertEqual(self.row(final)["priority"], 2_000_000)

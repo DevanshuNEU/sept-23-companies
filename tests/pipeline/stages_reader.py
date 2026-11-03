@@ -7,13 +7,13 @@ combiner=reader_combiner(conn, cfg))`, after a `rebuild` when the store's curren
 
 The crawl fixture's one engineering posting has a body under the 500-character floor, so it is never read. The stage
 seeds, once, the posting the reader is about: `HIDE_TITLE` at `HIDE_COMPANY` in Austin, whose body
-(`posting_hide.txt`) says "We do not sponsor visas." and nothing else that hides it. Its rules decision is a
-provisional hide.
+(`posting_hide.txt`) says "Applicants must be U.S. citizens." and nothing else that hides it. Its rules decision is
+a provisional hide (citizenship hides a posting; "no sponsorship" only flags since #154).
 
 The runner is a fake unless `register` is given one, and the real `claude_runner` is never built here. The fake
 answers each posting from `stage.script`, keyed by posting title: (value, quote) per field over a reading that says
-unknown everywhere. By default it agrees with the rules on the hide posting (engineering yes, sponsorship
-wont_sponsor with the posting's own words). `stage.calls` counts the calls.
+unknown everywhere. By default it agrees with the rules on the hide posting (engineering yes, citizenship_or_clearance
+yes with the posting's own words). `stage.calls` counts the calls.
 
 The stage runs with the shipped reader config except for two things: `max_batches` is 1, so each run of the stage is
 one night batch (a refused reading is read again on the next run, not three times in one), and `promoted_version` is
@@ -37,14 +37,14 @@ from outreach.rules import ruleset_version
 from outreach.rules.rebuild import decide_and_store, rebuild
 from tests.storetest import seed_company, seed_posting
 
-__all__ = ["register", "ReaderStage", "HIDE_TITLE", "HIDE_COMPANY", "HIDE_LOCATION", "REFUSAL", "AGREE"]
+__all__ = ["register", "ReaderStage", "HIDE_TITLE", "HIDE_COMPANY", "HIDE_LOCATION", "HIDE_LINE", "AGREE"]
 
 HIDE_TITLE = "Backend Software Engineer"
 HIDE_COMPANY = "Ledgerline Systems"
 HIDE_LOCATION = "Austin, TX"
-REFUSAL = "We do not sponsor visas."
+HIDE_LINE = "Applicants must be U.S. citizens."
 # A reading that agrees with the rules on the hide posting.
-AGREE = {"engineering": ("yes", HIDE_TITLE), "sponsorship": ("wont_sponsor", REFUSAL)}
+AGREE = {"engineering": ("yes", HIDE_TITLE), "citizenship_or_clearance": ("yes", HIDE_LINE)}
 
 
 def blank_fields() -> dict:

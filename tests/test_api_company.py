@@ -192,7 +192,7 @@ class CompanyPage(ApiCase):
     def test_hidden_posting_names_its_rule(self):
         cid = s.company(self.conn)
         cases = {
-            "sponsorship": (dict(sponsorship="no"), "hidden", "Says it will not sponsor"),
+            "sponsorship": (dict(sponsorship="no"), "open", None),  # a flag, not a hide (#154)
             "citizenship": (dict(citizenship=1), "hidden", "Needs US citizenship or a clearance"),
             "non-US": (dict(us="no"), "hidden", "Not a US role"),
             "student": (dict(eligibility="excluded", eligibility_reason="current_student"), "hidden", "Only for current students"),
@@ -219,7 +219,7 @@ class CompanyPage(ApiCase):
     def test_the_role_to_name_is_the_best_open_posting_that_passes(self):
         cid = s.company(self.conn)
         hidden = s.posting(self.conn, cid, "Hidden role", first_seen_at="2026-11-09T10:00:00Z")
-        s.decision(self.conn, hidden, sponsorship="no", level_tier="new_grad")
+        s.decision(self.conn, hidden, citizenship=1, level_tier="new_grad")
         closed = s.posting(self.conn, cid, "Closed new grad", closed_at="2026-11-02T10:00:00Z")
         s.decision(self.conn, closed)
         swe1 = s.posting(self.conn, cid, "Software Engineer I", first_seen_at="2026-11-08T10:00:00Z")

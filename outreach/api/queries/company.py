@@ -53,7 +53,7 @@ ATS_URLS = {
     "dover": "https://app.dover.com/apply/{t}",
 }
 HIDDEN_RULES = {
-    "us": "Not a US role", "sponsorship": "Says it will not sponsor", "citizenship": "Needs US citizenship or a clearance",
+    "us": "Not a US role", "citizenship": "Needs US citizenship or a clearance",
     "grad_window": "Open only to a graduation window we are outside", "current_student": "Only for current students",
     "cohort_title": "A cohort or program role",
 }
@@ -216,8 +216,6 @@ def hidden_rule(d: sqlite3.Row) -> tuple[str, str | None]:
         return "out_of_lane", LANE_RULES.get(d["lane"], "Outside the engineering lane")
     if d["us"] == "no":
         return "hidden", HIDDEN_RULES["us"]
-    if d["sponsorship"] == "no":
-        return "hidden", HIDDEN_RULES["sponsorship"]
     if d["citizenship"]:
         return "hidden", HIDDEN_RULES["citizenship"]
     if d["eligibility"] == "excluded":

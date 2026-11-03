@@ -147,21 +147,19 @@ class Rank(unittest.TestCase):
     def setUp(self):
         self.conn = fresh_store()
         self.ids = {}
-        for name in ("Judged", "Thin", "Unjudged", "Old", "Refuses"):
+        for name in ("Judged", "Thin", "Unjudged", "Old", "Big"):
             cid = seed_company(self.conn, name)
             board = rs.board(self.conn, cid)
             pid = rs.posting(self.conn, cid, board_id=board, posted_on="2026-10-17")
-            if name == "Refuses":
-                rs.decision(self.conn, pid, provisional=0, sponsorship="no",
-                            sponsorship_quote="We are unable to sponsor visas for this role.")
-            else:
-                rs.decision(self.conn, pid)
+            rs.decision(self.conn, pid)
+            if name == "Big":  # hidden by size: a sponsorship refusal is only a flag now (#154)
+                rs.evidence(self.conn, cid, "size", value="400+", num_low=400, confidence="confirmed")
             self.ids[name] = cid
         pages = [{"kind": "home", "url": "https://a.example", "status": "ok", "text": "x"}]
         for name, fit, thin, at in (("Judged", 72, False, "2026-10-20T06:10:00Z"),
                                     ("Thin", 72, True, "2026-10-20T06:10:00Z"),
                                     ("Old", 90, False, "2026-09-01T06:10:00Z"),
-                                    ("Refuses", 95, False, "2026-10-20T06:10:00Z")):
+                                    ("Big", 95, False, "2026-10-20T06:10:00Z")):
             record_judgment(self.conn, self.ids[name], {**FIELDS, "fit": fit, "thin": thin}, version="jv-1", key="k",
                             posting="p", pages=pages, at=at)
 
@@ -179,7 +177,7 @@ class Rank(unittest.TestCase):
         self.assertEqual((0.0, "Not judged yet"), (on["Unjudged"].values["profile_fit"].points,
                                                    on["Unjudged"].values["profile_fit"].reason))
         self.assertEqual("Not judged yet", on["Old"].values["profile_fit"].reason, "older than max_age_days")
-        self.assertEqual("no_sponsorship", on["Refuses"].hide.kind, "a good fit never lifts a hide")
+        self.assertEqual("over_size", on["Big"].hide.kind, "a good fit never lifts a hide")
 
 
 if __name__ == "__main__":

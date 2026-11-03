@@ -4036,6 +4036,17 @@
               }
             ],
             "title": "Target"
+          },
+          "writtenBy": {
+            "enum": [
+              "you",
+              "ranker",
+              "reply",
+              "import",
+              "claude"
+            ],
+            "title": "Writtenby",
+            "type": "string"
           }
         },
         "required": [
@@ -4046,6 +4057,7 @@
           "quote",
           "note",
           "source",
+          "writtenBy",
           "sourceRef",
           "sourceUrl",
           "importSource",

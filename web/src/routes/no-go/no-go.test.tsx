@@ -62,7 +62,7 @@ describe('No-go list', () => {
       'href',
       'https://careers.example/halberdsystems/backendengineer',
     );
-    expect(within(halberd).getByText('Rules, Oct 14')).toBeInTheDocument();
+    expect(within(halberd).getByText('Written by the ranker, Oct 14')).toBeInTheDocument();
 
     const quill = rowOf('Quillfeather');
     expect(within(quill).getByText('Closed by you, Nov 3')).toBeInTheDocument();

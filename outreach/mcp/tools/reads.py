@@ -94,7 +94,7 @@ def posting_state(d: sqlite3.Row | None) -> str:
         return "open"
     if d["lane"] != "engineering":
         return "out_of_lane"
-    if d["us"] == "no" or d["sponsorship"] == "no" or d["citizenship"] or d["eligibility"] == "excluded":
+    if d["us"] == "no" or d["citizenship"] or d["eligibility"] == "excluded":  # sponsorship only flags (#154)
         return "hidden"
     if not d["level_ok"] and (d["level_tier"] != "not_stated" or d["years_asked"] is not None):
         return "out_of_lane"

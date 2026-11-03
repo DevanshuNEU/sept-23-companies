@@ -5,7 +5,7 @@
 1. The link names no board Knock reads (`urls.board_key` is None): `unknown_site`.
 2. Knock holds a posting for it (open or closed, matched as the scorecard matches: `match.py`). The posting's decision
    under the current ruleset says which: `read_not_tech` when the lane is not engineering; `hidden_visa` when it asks
-   for citizenship or says no sponsorship; `read_wrong_level` when his level fails (a tier other than `not_stated` or
+   for citizenship or a clearance (a "no sponsorship" posting is shown with a flag, #154); `read_wrong_level` when his level fails (a tier other than `not_stated` or
    `open`) or the posting excludes him by eligibility (grad window, current student); `not_us` when only the US rule
    hides it; else `found`. `found` means the decision passes (`rules.decide.passes`) and Knock shows the job; a posting
    that fails it for several reasons gets the first cause above. A posting with no decision under the current
@@ -50,7 +50,7 @@ CAUSE_TEXT = {
     "not_read_yet": "Knock has the company's job board but has not read this job yet.",
     "read_wrong_level": "Knock read the job and set it aside as the wrong level for you.",
     "read_not_tech": "Knock read the job and set it aside because it is not an engineering role.",
-    "hidden_visa": "Knock read the job and hid it because it asks for citizenship or says it does not sponsor.",
+    "hidden_visa": "Knock read the job and hid it because it asks for citizenship or a clearance.",
     "not_us": "Knock has this job but hides it because the posting is outside the US.",
     "wrong_date": "Knock had the job but showed a wrong date for it.",
     "found": "Knock already has this job and shows it.",
@@ -121,7 +121,7 @@ def _judge(row: sqlite3.Row) -> tuple[str, dict]:
              "sponsorship": d.sponsorship, "us": d.us, "eligibility": d.eligibility, "passes": passes(d)}
     if d.lane != "engineering":
         return "read_not_tech", facts
-    if d.citizenship or d.sponsorship == "no":
+    if d.citizenship:
         return "hidden_visa", facts
     if (not d.level_ok and d.level_tier not in _TIERS_NOT_HIS) or d.eligibility != "ok":
         return "read_wrong_level", facts

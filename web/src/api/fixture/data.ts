@@ -17,7 +17,7 @@
 import type {
   Actor, Check, CheckFix, CheckSeverity, CloseReason, CompanyEvent, CompanyPerson, CompanyRef, CompanyStatus, CompanyView, Confidence,
   DailyEntry, DoneView, DraftCompare, Fact, FactKind, Id, ImportSource, IsoDate, IsoTime, JobRunSummary, LevelTier, LinkedInGroup,
-  LinkedInActivity, LinkedInPerson, LinkedInReason, LinkedInStep, LinkedInView, MergeSide, MessageState, NeedsYouView, NoGoReason, NoGoRow, NoGoSource, NoGoView,
+  LinkedInActivity, LinkedInPerson, LinkedInReason, LinkedInStep, LinkedInView, MergeSide, MessageState, NeedsYouView, NoGoReason, NoGoRow, NoGoSource, NoGoView, NoGoWrittenBy,
   OutboxCounts, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, PostingRow, RemovedRow, ResolvedReview,
   ReviewItem, ReviewKind, RoleKind, RoleToName, Schedule, SearchCompany, SearchIndex, SearchPerson, SenderState, SendingStatus,
   ShellSummary, SourceKind, SponsorshipShown, StillEmailing, ThreadMessage, TodayView, TouchState,
@@ -1051,9 +1051,11 @@ const NO_SPONSOR_QUOTES = [
 ];
 const CITIZEN_QUOTES = ['US citizens only. Active clearance required.', 'Must be eligible for a Top Secret clearance.', 'ITAR rules: US persons only.'];
 
+const WRITTEN_BY: Record<NoGoSource, NoGoWrittenBy> = { devanshu: 'you', rules: 'ranker', reply: 'reply', import: 'import', claude: 'claude' };
+
 function buildNoGo(c: Ctx): NoGoView {
   const nogo = (company: string, reason: NoGoReason, o: { quote?: string; note?: string; source: NoGoSource; ref: string; url?: string | null; imp?: ImportSource | null; at: IsoTime }): NoGoRow => ({
-    kind: 'no_go', noGoId: c.next(), target: { kind: 'company', company: c.co(company) }, reason, quote: o.quote ?? '', note: o.note ?? '', source: o.source,
+    kind: 'no_go', noGoId: c.next(), target: { kind: 'company', company: c.co(company) }, reason, quote: o.quote ?? '', note: o.note ?? '', source: o.source, writtenBy: WRITTEN_BY[o.source],
     sourceRef: o.ref, sourceUrl: o.url ?? null, importSource: o.imp ?? null, addedAt: o.at,
   });
   const removed = (company: string, removeReason: string, note: string, date: IsoDate): RemovedRow =>
@@ -1082,7 +1084,7 @@ function buildNoGo(c: Ctx): NoGoView {
 
   const pnogo = (company: string, name: string, title: string, kind: RoleKind, reason: NoGoReason, source: NoGoSource, ref: string, date: IsoDate, o: { quote?: string; note?: string }): NoGoRow => ({
     kind: 'no_go', noGoId: c.next(), target: { kind: 'person', person: c.person(name, title, kind, company), companyName: company }, reason, quote: o.quote ?? '', note: o.note ?? '',
-    source, sourceRef: ref, sourceUrl: null, importSource: null, addedAt: et(date, '14:00'),
+    source, writtenBy: WRITTEN_BY[source], sourceRef: ref, sourceUrl: null, importSource: null, addedAt: et(date, '14:00'),
   });
   const people: NoGoRow[] = [
     pnogo('Supabase', 'Ruth Okonkwo', 'Staff Engineer', 'engineer', 'stop_reply', 'reply', 'Reply, Nov 4', '2026-11-04', { quote: 'Please take me off your list.' }),

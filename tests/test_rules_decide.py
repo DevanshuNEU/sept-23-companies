@@ -267,6 +267,21 @@ class DecideTests(unittest.TestCase):
             self.assertEqual(row["level_state"], state, title)
             self.assertIsNone(row["years_ms"], title)
 
+    def test_the_fallback_for_an_unrebuilt_row_is_the_job_list_rule(self):
+        """One fallback: the Python rule and the job list's STATE_SQL agree on every row, and a stored state wins."""
+        from outreach.pipeline.joblist import STATE_SQL
+        from outreach.rules.decide import interim_level_state, row_level_state
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        for ok in (0, 1):
+            for tier in (None, "not_stated", "open", "new_grad", "swe2", "senior"):
+                sql = conn.execute(f"SELECT {STATE_SQL} FROM (SELECT NULL AS level_state, ? AS level_ok, "
+                                   f"? AS level_tier) d", (ok, tier)).fetchone()[0]
+                with self.subTest(ok=ok, tier=tier):
+                    self.assertEqual(interim_level_state(bool(ok), tier), sql)
+                    self.assertEqual(row_level_state({"level_state": None, "level_ok": ok, "level_tier": tier}), sql)
+        self.assertEqual(row_level_state({"level_state": "reject", "level_ok": 1, "level_tier": "swe1"}), "reject")
+
     def test_level_state_has_no_default(self):
         field = next(f for f in dataclasses.fields(Decision) if f.name == "level_state")
         self.assertIs(field.default, dataclasses.MISSING)

@@ -49,7 +49,10 @@ _AFTER_YEARS = re.compile(r"\s{0,3}(?:of\s{1,3})?(?P<pre>(?:[\w+#.\-/]{1,20}\s{1
                           re.IGNORECASE | re.DOTALL)
 _EXPERIENCE_IN = re.compile(r"\s{1,3}(?:with|in|using|of|on|working\s{1,3}with)\s{1,3}", re.IGNORECASE)
 _TIE_END = re.compile(r"[,;()\[\]\n]")  # the tail of "experience with ..." ends at the first of these
-_TECH_JOIN = r"(?:\s{0,3}(?:and/or|and|or|&|/|plus)?\s{0,3})"
+# Between two technology names: spaces, an optional joiner word, spaces. Possessive, so each stretch of spaces can
+# belong to only one place and a long run of names that ends badly is given up in linear time (not 2**n).
+_TECH_JOIN = r"(?:\s{0,3}+(?:and/or|and|or|&|/|plus)?+\s{0,3}+)"
+_JOINER = r"\s*(?:and/or|and|or|&|/|plus)?\s*"
 _WORD = re.compile(r"\w")
 _LOOK = 80  # characters read either side of a number when counting words around it
 VOICE_WORDS = 3  # a company_voice phrase must end at most this many words before the number
@@ -74,7 +77,9 @@ class _Patterns:
         self.bachelor = phrases(y["bachelor_words"])
         self.upper_bound = re.compile("(?:" + phrases(y["upper_bound"]).pattern + r")\s{0,3}\Z", re.IGNORECASE)
         tech = "(?:" + phrases(y["technologies"]).pattern + ")"
-        self.tech_only = re.compile(r"\s*" + tech + "(?:" + _TECH_JOIN + tech + r")*[\s.!?]*\Z", re.IGNORECASE)
+        self.tech_only = re.compile(r"\s*" + tech + "(?:" + _TECH_JOIN + tech + r")*+[\s.!?]*+\Z", re.IGNORECASE)
+        self.one_tech = re.compile(r"\s*" + tech + r"[\s.!?]*+\Z", re.IGNORECASE)  # exactly one name and nothing else
+        self.tech_next = re.compile(_JOINER + tech, re.IGNORECASE)  # another name follows
         self.tech_before = re.compile(tech + r"\s{0,2}\Z", re.IGNORECASE)
 
 
@@ -155,25 +160,30 @@ class _Sentence:
         return last is not None and _ALTERNATIVE_JOIN.match(s, last.end(), at) is not None
 
     def tied_to_technology(self, end: int) -> bool:
-        """True when the years are tied to named technologies: "3+ years of experience with Python", "Go experience".
+        """True when the years belong to one named technology: "3+ years of experience with Python", "3 years of
+        Python experience".
 
-        Read after "years": optional words, "experience", and then either the words before "experience" are only
-        technologies ("3 years of Python experience") or "with/in/using/of/on" opens a tail up to the clause end
-        (a comma, bracket or semicolon) that is only technologies and "and", "or", "/" ("with Python or Go"). A
-        tail that says more ("in Python or Go building backend systems") leaves the figure standing.
+        Read after "years": optional words, "experience". The words before "experience" must be empty or only
+        technologies ("software engineering experience" is general work, whatever follows). Then, when
+        "with/in/using/of/on" follows, its tail up to the first comma, bracket or semicolon must name exactly one
+        technology, and no technology may open what comes after that comma ("in Java, Spring and AWS" is a list, so
+        its figure stands). With no such tail, only technologies before "experience" tie the figure.
         """
         m = _AFTER_YEARS.match(self.text[end:end + _TIE_CHARS])
         if m is None:
             return False
         pre = m.group("pre").strip()
-        if pre and self.p.tech_only.match(pre) is not None:
-            return True
+        if pre and self.p.tech_only.match(pre) is None:
+            return False
         post = m.group("post")
         w = _EXPERIENCE_IN.match(post)
         if w is None:
-            return False
+            return bool(pre)
         stop = _TIE_END.search(post, w.end())
-        return self.p.tech_only.match(post[w.end():stop.start() if stop else len(post)]) is not None
+        cut = stop.start() if stop else len(post)
+        if self.p.one_tech.match(post[w.end():cut]) is None:
+            return False
+        return stop is None or self.p.tech_next.match(post, stop.end()) is None
 
     def counts(self, start: int, end: int, tier: bool = False) -> bool:
         """True when the number at text[start:end] (its first digit through "years") is a requirement.

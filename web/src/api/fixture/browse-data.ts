@@ -78,14 +78,14 @@ export function toBrowse(b: BenchCompany, position: number, index: number): Brow
   return { ...structuredClone(b), position, blocked: BLOCKED[b.company.name] ?? null, worked: index % WORKED_EVERY === 0 && index > 0 };
 }
 
-/** The API's browse: stored order, the search and the three filters, then one page after the cursor. */
+/** The API's browse: stored order, the search and the level and not-worked filters, then one page after the cursor.
+ * `visaOk` narrows nothing, as in the API (#154): "no sponsorship" is a flag, not a reason to drop a company. */
 export function browseView(pool: BrowseCompany[], listed: ReadonlySet<Id>, p: BrowseParams, asOf: string, date: string, limit = 25): BrowseView {
   const key = nameKey(p.q);
   const fits = pool
     .filter((c) => !listed.has(c.company.id))
     .filter((c) => !p.q.trim() || (key !== '' && nameKey(c.company.name).includes(key)))
     .filter((c) => !p.levelRole || c.lane === 'level_role')
-    .filter((c) => !p.visaOk || !/does not sponsor|no sponsorship/i.test(c.queue.sponsorshipLine))
     .filter((c) => !p.unworked || !c.worked)
     .sort((a, b) => a.position - b.position);
   const ahead = fits.filter((c) => c.position > p.after);

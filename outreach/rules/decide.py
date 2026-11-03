@@ -114,12 +114,20 @@ def _level(lane: str, tier: str | None, title_basis: str, years: YearsAsked, ent
     return out_tier, ok, basis, _state(lane, out_tier, his, entry, max_years, phd)
 
 
-def interim_level_state(lane: str, level_ok: bool) -> str:
-    """The state of a row stored before 0007 and not yet rebuilt (stored_decision fills it): fit when level_ok, else
-    uncertain for tech, else reject. decide() computes the real state."""
+def interim_level_state(level_ok: bool, level_tier: str | None) -> str:
+    """The state of a row stored before 0007 and not yet rebuilt (the rebuild at deploy fills every row): the v1 job
+    list rule. Fit when level_ok; uncertain when the tier is not_stated or open; else reject. The job list's
+    `STATE_SQL` is this same rule in SQL, so a page that reads a row in Python and one that reads it in SQL agree.
+    decide() computes the real state."""
     if level_ok:
         return "fit"
-    return "uncertain" if lane == "engineering" else "reject"
+    return "uncertain" if level_tier in ("not_stated", "open") else "reject"
+
+
+def row_level_state(d) -> str:
+    """The level state of a decision row (a mapping with level_state, level_ok and level_tier): the stored state, or the
+    v1 rule while the row waits for the rebuild. The company page and the MCP read postings through this."""
+    return d["level_state"] or interim_level_state(bool(d["level_ok"]), d["level_tier"])
 
 
 def decide(p: PostingInput, cfg: Config | None = None) -> Decision:

@@ -219,10 +219,11 @@ phd_softeners = [
 ]
 # #154: "up to 5 years of experience" asks for nothing (it counts as 0)
 upper_bound = ["up to", "at most", "no more than", "maximum of"]
-# #154: a figure tied to named technologies is not a requirement for the level: "3+ years of experience with
-# Python", "3+ years of Python experience". Read only when what "experience with/in/using" opens, up to the clause
-# end, is nothing but these names and "and", "or", "/" ("in Python or Go building backend systems" says more, so
-# its figure stands). Also tells a version ("Python 3 and 5+ years") from the low end of a range.
+# #154: a figure tied to one named technology is not a requirement for the level: "3+ years of experience with
+# Python", "3+ years of Python experience". Tied only when the words before "experience" are empty or only these
+# names and what "experience with/in/using" opens (to the first comma) is exactly one of them, with no name opening
+# what follows ("in Java, Spring and AWS" is a list, so its figure stands). Also tells a version ("Python 3 and 5+
+# years") from the low end of a range.
 technologies = [
   "python", "java", "javascript", "typescript", "go", "golang", "rust", "c", "c++", "c#", "ruby", "php", "swift",
   "kotlin", "scala", "elixir", "react", "react native", "angular", "vue", "node", "node.js", "nodejs", "next.js",

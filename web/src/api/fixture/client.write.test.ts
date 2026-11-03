@@ -1477,15 +1477,15 @@ describe('Browse companies', () => {
     expect((await c.browse({ ...none, q: '...' })).companies).toEqual([]);
   });
 
-  it('filters by level role, visa and not worked', async () => {
+  it('filters by level role and not worked, and visa narrows nothing', async () => {
     const c = client('queue');
     const all = await c.browse(none);
     const level = await c.browse({ ...none, levelRole: true });
     expect(level.companies.every((x) => x.lane === 'level_role')).toBe(true);
     expect(level.total).toBeLessThan(all.total);
-    const visa = await c.browse({ ...none, visaOk: true });
-    expect(visa.companies.every((x) => !/does not sponsor/i.test(x.queue.sponsorshipLine))).toBe(true);
-    expect(visa.total).toBeLessThan(all.total);
+    const visa = await c.browse({ ...none, visaOk: true });  // kept for the wire; "no sponsorship" is a flag since #154
+    expect(visa.total).toBe(all.total);
+    expect(names(visa)).toEqual(names(all));
     const fresh = await c.browse({ ...none, unworked: true });
     expect(fresh.companies.every((x) => !x.worked)).toBe(true);
     expect(fresh.total).toBeLessThan(all.total);

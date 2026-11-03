@@ -97,7 +97,7 @@ def stored_decision(row: sqlite3.Row) -> Decision:
     for flag in ("level_ok", "citizenship", "start_2027"):
         values[flag] = bool(values[flag])
     if values["level_state"] is None:  # a row stored before 0007 and not yet rebuilt
-        values["level_state"] = interim_level_state(values["lane"], values["level_ok"])
+        values["level_state"] = interim_level_state(values["level_ok"], values["level_tier"])
     return Decision(**values)
 
 

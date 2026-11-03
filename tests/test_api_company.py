@@ -197,7 +197,8 @@ class CompanyPage(ApiCase):
             "non-US": (dict(us="no"), "hidden", "Not a US role"),
             "student": (dict(eligibility="excluded", eligibility_reason="current_student"), "hidden", "Only for current students"),
             "senior": (dict(level_tier="senior", level_ok=0, level_basis="Title says senior"), "out_of_lane", "Title says senior"),
-            "years": (dict(level_tier="not_stated", level_ok=0, level_basis="Asks 5 years", years_asked=5), "out_of_lane", "Asks 5 years"),
+            "years": (dict(level_tier="not_stated", level_ok=0, level_basis="Asks 5 years", years_asked=5, level_state="reject"),
+                      "out_of_lane", "Asks 5 years"),
             "off lane": (dict(lane="not_engineering", level_tier="not_stated", level_ok=0), "out_of_lane", "Not an engineering role"),
         }
         ids = {}
@@ -215,6 +216,28 @@ class CompanyPage(ApiCase):
         self.assertEqual((by[closed_id]["state"], by[closed_id]["closeReason"]), ("closed", "Closed on the board"))
         self.assertEqual((by[undecided_id]["state"], by[undecided_id]["levelTier"], by[undecided_id]["sponsorship"]), ("open", "not_stated", "silent"))
         self.assertEqual(by[open_id]["flags"], [])
+
+    def test_the_level_test_is_the_postings_level_state(self):
+        """The company page agrees with the job list (#154): a fit by the master's figure is open, a PhD-required
+        posting (level_ok still 1) is set aside, and a row not yet rebuilt reads the v1 rule."""
+        cid = s.company(self.conn)
+        cases = {
+            "fit by master's": (dict(level_tier="swe2", level_ok=0, level_basis="Asks 4 years", years_asked=4,
+                                     level_state="fit"), "open", None),
+            "phd required": (dict(level_tier="open", level_ok=1, level_basis="Needs a PhD", level_state="reject"),
+                             "out_of_lane", "Needs a PhD"),
+            "uncertain": (dict(level_tier="not_stated", level_ok=0, level_state="uncertain"), "open", None),
+            "not rebuilt, too senior": (dict(level_tier="senior", level_ok=0, level_basis="Title says senior"),
+                                        "out_of_lane", "Title says senior"),
+            "not rebuilt, level not stated": (dict(level_tier="not_stated", level_ok=0), "open", None),
+            "not rebuilt, fits": (dict(level_tier="new_grad", level_ok=1), "open", None),
+        }
+        ids = {name: s.posting(self.conn, cid, f"Role {name}") for name in cases}
+        for name, (cols, _state, _rule) in cases.items():
+            s.decision(self.conn, ids[name], **cols)
+        by = {p["id"]: p for p in self.view(cid)["postings"]}
+        for name, (_cols, state, rule) in cases.items():
+            self.assertEqual((by[ids[name]]["state"], by[ids[name]]["hiddenRule"]), (state, rule), name)
 
     def test_the_role_to_name_is_the_best_open_posting_that_passes(self):
         cid = s.company(self.conn)

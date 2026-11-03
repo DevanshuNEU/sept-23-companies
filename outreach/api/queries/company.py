@@ -16,6 +16,7 @@ from outreach.api.models.company import (
 from outreach.api.queries import people as people_queries
 from outreach.api.queries.people import scope
 from outreach.drafts.followups import company_map, company_reply_held, held_survivors, resolve_company
+from outreach.rules.decide import row_level_state
 from outreach.sending import calendar
 from outreach.sending.config import load_config
 from outreach.store.timefmt import ISO_FMT
@@ -220,7 +221,7 @@ def hidden_rule(d: sqlite3.Row) -> tuple[str, str | None]:
         return "hidden", HIDDEN_RULES["citizenship"]
     if d["eligibility"] == "excluded":
         return "hidden", HIDDEN_RULES.get(d["eligibility_reason"], "Not open to you")
-    if not d["level_ok"] and (d["level_tier"] != "not_stated" or d["years_asked"] is not None):
+    if row_level_state(d) == "reject":  # the job list's level test (#154): fit and uncertain stay open
         return "out_of_lane", d["level_basis"]
     return "open", None
 

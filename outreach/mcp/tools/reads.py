@@ -17,6 +17,7 @@ from pydantic import Field
 from outreach.drafts.followups import company_map, due_followups, held_survivors, no_go_sets, resolve_company
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
 from outreach.ranking.scores import latest_version, ranked_list
+from outreach.rules.decide import row_level_state
 
 __all__ = ["TOOLS"]
 
@@ -96,7 +97,7 @@ def posting_state(d: sqlite3.Row | None) -> str:
         return "out_of_lane"
     if d["us"] == "no" or d["citizenship"] or d["eligibility"] == "excluded":  # sponsorship only flags (#154)
         return "hidden"
-    if not d["level_ok"] and (d["level_tier"] != "not_stated" or d["years_asked"] is not None):
+    if row_level_state(d) == "reject":  # the job list's level test (#154): fit and uncertain stay open
         return "out_of_lane"
     return "open"
 
@@ -110,8 +111,8 @@ def open_postings(conn: sqlite3.Connection, ids: list[int], today: date) -> tupl
     if live:
         live_ids = [r["posting_id"] for r in live]
         decisions = {d["posting_id"]: d for d in conn.execute(
-            f"SELECT posting_id, lane, level_tier, level_ok, years_asked, us, sponsorship, citizenship, eligibility, "
-            f"start_2027, provisional FROM posting_decision WHERE posting_id IN ({marks(live_ids)})", live_ids)}
+            f"SELECT posting_id, lane, level_tier, level_ok, level_state, years_asked, us, sponsorship, citizenship, "
+            f"eligibility, start_2027, provisional FROM posting_decision WHERE posting_id IN ({marks(live_ids)})", live_ids)}
     out = []
     for r in sorted(live, key=lambda r: r["first_seen_at"], reverse=True):
         d = decisions.get(r["posting_id"])

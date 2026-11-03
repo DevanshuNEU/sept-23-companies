@@ -200,7 +200,9 @@ def _body_updates(conn: sqlite3.Connection, board: BoardRow, existing: dict[str,
         if job.native_id in seen or not job.body:
             continue
         seen.add(job.native_id)
-        if classify_title(clean_text(job.title), title_cfg, clean_text(job.body)).lane not in BODY_LANES:
+        # The title alone: an ambiguous title is engineering until its body says otherwise, so its body is kept and
+        # decide() scores it (the body is the only evidence, and a list-body ATS never fetches it again).
+        if classify_title(clean_text(job.title), title_cfg).lane not in BODY_LANES:
             continue
         e = existing.get(source_key(board.ats, board.token, job.native_id))
         if e is None:

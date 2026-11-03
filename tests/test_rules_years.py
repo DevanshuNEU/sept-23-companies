@@ -218,33 +218,60 @@ class MasterAndTechnologyTest(unittest.TestCase):
         self.assertEqual(self.read("Between 1 and 3 years of experience."), (1, None))
         self.assertEqual(self.read("Python 3 and 5+ years of experience."), (5, None))  # "3" is a version
 
-    def test_years_with_python_does_not_count(self):
+    def test_years_with_one_technology_does_not_count(self):
         for body in (
             "3+ years of experience with Python.",
-            "3+ years of experience in Python or Go.",
             "3+ years of Python experience.",
-            "3+ years experience using React and TypeScript.",
-            "4 years of professional experience with Node.js, AWS and Docker.",
+            "3+ years experience using React.",
+            "3+ years of experience in Node.js, building services.",
         ):
             with self.subTest(body=body):
                 self.assertEqual(self.read(body), (None, None))
 
-    def test_years_with_a_technology_and_more_still_count(self):
+    def test_years_with_several_technologies_still_count(self):
+        # The ruling: tied only when the tail names exactly one technology (and the words before "experience" are
+        # empty or technologies), so a list of them reads as a general requirement.
         for body, years in (
-            ("3+ years of experience in Python or Go building backend systems.", 3),
-            ("3+ years of experience with distributed systems.", 3),
-            ("3+ years of experience with Python and a record of shipping to production.", 3),
+            ("4 years of professional experience with Node.js, AWS and Docker.", 4),
+            ("You have 5+ years of experience in Java, Spring and AWS, ideally at a startup.", 5),
+            ("3+ years of experience in Python or Go.", 3),
+            ("3+ years experience using React and TypeScript.", 3),
+            ("3+ years of Python experience with AWS and Docker.", 3),
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(self.read(body), (years, None))
+
+    def test_years_of_general_work_with_a_technology_still_count(self):
+        # words other than technologies before "experience" make it general work, whatever follows
+        for body, years in (
+            ("5+ years of software engineering experience with Python.", 5),
+            ("3+ years of professional experience with Python.", 3),
         ):
             with self.subTest(body=body):
                 self.assertEqual(self.read(body), (years, None))
 
     def test_years_of_professional_experience_counts(self):
         self.assertEqual(self.read("3+ years of professional experience."), (3, None))
-        self.assertEqual(self.read("3+ years of professional experience with Python."), (None, None))
         self.assertEqual(self.read("3+ years of professional software experience."), (3, None))
 
     def test_technology_figure_leaves_the_other_figure(self):
         self.assertEqual(self.read("5+ years of experience with Rust. 2+ years of professional experience."), (2, None))
+
+    def test_a_long_run_of_technology_names_is_read_in_linear_time(self):
+        # The old joiner backtracked: 24 names took 20 seconds. 40 names, single and double spaced, then a word that
+        # is no technology (so the whole run is tried and given up), each read in under 50 ms.
+        from outreach.rules.years import _Patterns
+        p = _Patterns(self.cfg)
+        names = ["python", "java", "go", "rust", "sql", "docker", "react", "kafka"]
+        for gap in (" ", "  "):
+            run = gap.join(names[i % len(names)] for i in range(40))
+            for text in (run + gap + "building", run + " and " + gap + "building"):
+                with self.subTest(gap=len(gap), text=text[-20:]):
+                    start = time.perf_counter()
+                    self.assertIsNone(p.tech_only.match(text))
+                    read_years("3+ years of experience with " + text + ".", self.cfg)
+                    read_years("3+ years of " + text + " experience.", self.cfg)
+                    self.assertLess(time.perf_counter() - start, 0.05)
 
     def test_pathological_bodies_stay_fast(self):
         bodies = [

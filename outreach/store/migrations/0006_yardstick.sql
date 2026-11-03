@@ -31,7 +31,7 @@ CREATE TABLE miss (
   note        TEXT NOT NULL DEFAULT '',
   pasted_at   TEXT NOT NULL CHECK (pasted_at IS strftime('%Y-%m-%dT%H:%M:%SZ', pasted_at)),
   cause       TEXT NOT NULL CHECK (cause IN ('no_company','no_board','not_read_yet','read_wrong_level','read_not_tech',
-                                             'hidden_visa','wrong_date','found','unknown_site')),
+                                             'hidden_visa','not_us','wrong_date','found','unknown_site')),
   detail      TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(detail)),
   posting_id  INTEGER REFERENCES posting(posting_id),
   company_id  INTEGER REFERENCES company(company_id),

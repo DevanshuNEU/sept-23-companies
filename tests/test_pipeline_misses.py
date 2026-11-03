@@ -38,6 +38,8 @@ class DiagnoseTests(MissCase):
                               level=dict(lane="not_engineering"))
         citizen = store_posting(conn, "ashby:acme:citizen-1", company_id=acme, board_id=board,
                                 level=dict(level_tier="new_grad", level_ok=1, citizenship=1))
+        abroad = store_posting(conn, "ashby:acme:abroad-1", company_id=acme, board_id=board,
+                               level=dict(level_tier="new_grad", level_ok=1, us="no"))
         seed_company(conn, "Bolt Robotics")  # a company with no board
         cases = [
             ("https://example.com/careers/42", "unknown_site", {}),
@@ -45,6 +47,7 @@ class DiagnoseTests(MissCase):
             (ashby("acme", "senior-1"), "read_wrong_level", dict(posting_id=senior, company_id=acme, board_id=board)),
             (ashby("acme", "sales-1"), "read_not_tech", dict(posting_id=sales, company_id=acme, board_id=board)),
             (ashby("acme", "citizen-1"), "hidden_visa", dict(posting_id=citizen, company_id=acme, board_id=board)),
+            (ashby("acme", "abroad-1"), "not_us", dict(posting_id=abroad, company_id=acme, board_id=board)),
             (ashby("acme", "never-seen"), "not_read_yet", dict(company_id=acme, board_id=board)),
             ("https://jobs.ashbyhq.com/acme", "not_read_yet", dict(company_id=acme, board_id=board)),
             ("https://jobs.lever.co/boltrobotics/abc-123", "no_board", dict(company_id=conn.execute(
@@ -59,6 +62,27 @@ class DiagnoseTests(MissCase):
                                  (ids.get("posting_id"), ids.get("company_id"), ids.get("board_id")))
                 self.assertIsInstance(got.detail, dict)
         self.assertEqual({c for _, c, _ in cases} | {"wrong_date"}, set(CAUSES))
+
+    def test_found_means_the_job_passes_the_rules(self):
+        conn = self.conn
+        board = seed_board(conn, seed_company(conn, "Acme"), "ashby", "acme")
+        variants = {"ok": {}, "abroad": dict(us="no"), "nospons": dict(sponsorship="no"),
+                    "citizen": dict(citizenship=1), "student": dict(eligibility="excluded"),
+                    "sales": dict(lane="not_engineering")}
+        for name, extra in variants.items():
+            store_posting(conn, f"ashby:acme:{name}", board_id=board,
+                          level=dict(level_tier="new_grad", level_ok=1, **extra))
+        for name in variants:
+            got = diagnose(conn, ashby("acme", name))
+            self.assertEqual(got.cause == "found", got.detail["passes"], name)
+        self.assertEqual(diagnose(conn, ashby("acme", "ok")).cause, "found")
+
+    def test_a_job_that_fails_for_two_reasons_keeps_the_specific_cause_over_not_us(self):
+        conn = self.conn
+        board = seed_board(conn, seed_company(conn, "Acme"), "ashby", "acme")
+        store_posting(conn, "ashby:acme:both", board_id=board,
+                      level=dict(level_tier="new_grad", level_ok=1, us="no", citizenship=1))
+        self.assertEqual(diagnose(conn, ashby("acme", "both")).cause, "hidden_visa")
 
     def test_not_stated_and_open_levels_are_found(self):
         conn = self.conn
@@ -79,9 +103,8 @@ class DiagnoseTests(MissCase):
                       level=dict(level_tier="new_grad", level_ok=1, eligibility="excluded"))
         self.assertEqual(diagnose(conn, ashby("acme", "nospons")).cause, "hidden_visa")
         self.assertEqual(diagnose(conn, ashby("acme", "student")).cause, "read_wrong_level")
-        # no cause names a posting outside the US: it is `found`, and the detail says the rules hide it
         abroad = diagnose(conn, ashby("acme", "abroad"))
-        self.assertEqual((abroad.cause, abroad.detail["passes"], abroad.detail["us"]), ("found", False, "no"))
+        self.assertEqual((abroad.cause, abroad.detail["passes"], abroad.detail["us"]), ("not_us", False, "no"))
 
     def test_a_posting_with_no_decision_is_not_read_yet(self):
         conn = self.conn

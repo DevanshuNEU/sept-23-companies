@@ -6,9 +6,10 @@
 2. Knock holds a posting for it (open or closed, matched as the scorecard matches: `match.py`). The posting's decision
    under the current ruleset says which: `read_not_tech` when the lane is not engineering; `hidden_visa` when it asks
    for citizenship or says no sponsorship; `read_wrong_level` when his level fails (a tier other than `not_stated` or
-   `open`) or the posting excludes him by eligibility (grad window, current student); else `found`. `found` also
-   covers a posting `passes` hides only because it is outside the US, since no cause names that. A posting with no
-   decision under the current ruleset is `not_read_yet`.
+   `open`) or the posting excludes him by eligibility (grad window, current student); `not_us` when only the US rule
+   hides it; else `found`. `found` means the decision passes (`rules.decide.passes`) and Knock shows the job; a posting
+   that fails it for several reasons gets the first cause above. A posting with no decision under the current
+   ruleset is `not_read_yet`.
 3. Knock has the board (same `(ats, token)`, Workday compared in lower case) but no posting for the job:
    `not_read_yet`. A link to a board with no job lands here too.
 4. A company is known by a name or domain the link gives, but has no board: `no_board`. The name is read from the
@@ -40,8 +41,8 @@ from outreach.store.writes import NAME_ALIAS_SOURCES
 
 __all__ = ["CAUSES", "CAUSE_TEXT", "Diagnosis", "Miss", "diagnose", "log_miss"]
 
-CAUSES = ("no_company", "no_board", "not_read_yet", "read_wrong_level", "read_not_tech", "hidden_visa", "wrong_date",
-          "found", "unknown_site")
+CAUSES = ("no_company", "no_board", "not_read_yet", "read_wrong_level", "read_not_tech", "hidden_visa", "not_us",
+          "wrong_date", "found", "unknown_site")
 
 CAUSE_TEXT = {
     "no_company": "Knock does not know this company yet.",
@@ -50,6 +51,7 @@ CAUSE_TEXT = {
     "read_wrong_level": "Knock read the job and set it aside as the wrong level for you.",
     "read_not_tech": "Knock read the job and set it aside because it is not an engineering role.",
     "hidden_visa": "Knock read the job and hid it because it asks for citizenship or says it does not sponsor.",
+    "not_us": "Knock has this job but hides it because the posting is outside the US.",
     "wrong_date": "Knock had the job but showed a wrong date for it.",
     "found": "Knock already has this job and shows it.",
     "unknown_site": "This link is not a job board Knock reads.",
@@ -123,6 +125,8 @@ def _judge(row: sqlite3.Row) -> tuple[str, dict]:
         return "hidden_visa", facts
     if (not d.level_ok and d.level_tier not in _TIERS_NOT_HIS) or d.eligibility != "ok":
         return "read_wrong_level", facts
+    if d.us == "no":
+        return "not_us", facts
     return "found", facts
 
 

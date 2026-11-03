@@ -7,7 +7,7 @@ from outreach.api.models.base import Wire, WireRequest
 
 # outreach.pipeline.misses.CAUSES; tests/test_api_pipeline.py pins the two together.
 MissCause = Literal["no_company", "no_board", "not_read_yet", "read_wrong_level", "read_not_tech", "hidden_visa",
-                    "wrong_date", "found", "unknown_site"]
+                    "not_us", "wrong_date", "found", "unknown_site"]
 
 
 class MissBody(WireRequest):

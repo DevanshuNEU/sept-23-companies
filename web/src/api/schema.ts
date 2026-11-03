@@ -2359,7 +2359,7 @@ export interface components {
              * Cause
              * @enum {string}
              */
-            cause: "no_company" | "no_board" | "not_read_yet" | "read_wrong_level" | "read_not_tech" | "hidden_visa" | "wrong_date" | "found" | "unknown_site";
+            cause: "no_company" | "no_board" | "not_read_yet" | "read_wrong_level" | "read_not_tech" | "hidden_visa" | "not_us" | "wrong_date" | "found" | "unknown_site";
             /** Causetext */
             causeText: string;
             /** Missid */

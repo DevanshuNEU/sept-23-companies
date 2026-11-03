@@ -11,7 +11,8 @@ How the postings are found (the store holds about 360,000, the window about 1,80
 - A key query by `source_key IN (...)`, 500 keys at a time, which searches the unique index. The crawler's keys are
   not all lower case (Workday paths and Workable shortcodes keep their case), and `lower(source_key)` cannot use the
   index, so each listing offers two candidates: its key as built from the link, and that key lower-cased
-  (`urls.posting_key`). A returned key is matched to its listing by lower case.
+  (`urls.posting_key`). A Workday listing offers a third, built with the stored board's token (a board keeps its
+  site segment's case, a link may not). A returned key is matched to its listing by lower case.
 - A bare `gh_jid` listing has no token to build a key from. One range query over the `greenhouse:` keys (index only,
   about 40,000 of them) finds the keys ending in the native id. `LIKE` would not use the index, and one query per
   listing is what this avoids.
@@ -119,12 +120,24 @@ def _window(conn: sqlite3.Connection, now: str) -> list[_Listing]:
     return [_Listing(*row) for row in rows]
 
 
-def _key_candidates(listing: _Listing) -> tuple[str, ...]:
-    """The `source_key` a listing's link names, in the link's case and lower-cased; () when it names no job."""
+def _workday_tokens(conn: sqlite3.Connection) -> dict[str, str]:
+    """Stored Workday board tokens by lower-cased token. A board keeps its site segment's case (`acme.wd5/External`)
+    and a link may spell it another way."""
+    return {token.lower(): token for (token,) in conn.execute("SELECT token FROM board WHERE ats = 'workday'")}
+
+
+def _key_candidates(listing: _Listing, workday: dict[str, str]) -> tuple[str, ...]:
+    """The `source_key` a listing's link names, in the link's case and lower-cased, and for Workday also with the
+    stored board's token; () when the link names no job. The path's case is the link's own: a link whose path case
+    differs from the stored one is not found."""
     if not listing.ats or not listing.token or not listing.native_id:
         return ()
     exact = source_key(listing.ats, listing.token, listing.native_id)
-    return tuple(dict.fromkeys((exact, exact.lower())))
+    found = [exact, exact.lower()]
+    stored = workday.get(listing.token.lower()) if listing.ats == "workday" else None
+    if stored:
+        found.append(source_key("workday", stored, listing.native_id))
+    return tuple(dict.fromkeys(found))
 
 
 def _by_keys(conn: sqlite3.Connection, keys: list[str]) -> dict[str, _Posting]:
@@ -140,23 +153,25 @@ def _by_keys(conn: sqlite3.Connection, keys: list[str]) -> dict[str, _Posting]:
 def _greenhouse_by_native(conn: sqlite3.Connection, native_ids: set[str]) -> dict[str, _Posting]:
     """For listings with a `gh_jid` and no board token: the Greenhouse posting ending in `:<native_id>`, by native id.
     The earliest first sight wins when two boards hold the same number."""
-    ids: dict[str, int] = {}
+    by_id: dict[int, str] = {}
     for posting_id, key in conn.execute(_GREENHOUSE_KEYS_SQL):
         native = key.rsplit(":", 1)[1]
         if native in native_ids:
-            ids.setdefault(native, posting_id)
+            by_id[posting_id] = native
     found: dict[str, _Posting] = {}
-    by_id = {pid: native for native, pid in ids.items()}
     for chunk in _chunks(list(by_id)):
         sql = POSTING_BY_ID_SQL.format(marks=", ".join("?" for _ in chunk))
         for row in conn.execute(sql, chunk):
-            found[by_id[row["posting_id"]]] = _Posting(row["first_seen_at"], row["level_ok"], row["level_tier"])
+            native, posting = by_id[row["posting_id"]], _Posting(row["first_seen_at"], row["level_ok"], row["level_tier"])
+            if native not in found or posting.first_seen_at < found[native].first_seen_at:
+                found[native] = posting
     return found
 
 
 def _match(conn: sqlite3.Connection, listings: list[_Listing]) -> list[_Posting | None]:
     """The posting each listing is covered by, or None, in order."""
-    wanted = list(dict.fromkeys(k for listing in listings for k in _key_candidates(listing)))
+    workday = _workday_tokens(conn) if any(x.ats == "workday" for x in listings) else {}
+    wanted = list(dict.fromkeys(k for listing in listings for k in _key_candidates(listing, workday)))
     by_key = _by_keys(conn, wanted)
     bare = {x.native_id for x in listings if x.ats == "greenhouse" and not x.token and x.native_id}
     by_native = _greenhouse_by_native(conn, bare) if bare else {}
@@ -201,9 +216,9 @@ def _gap_top(conn: sqlite3.Connection, uncovered: list[_Listing]) -> list[GapCom
     known = _known_keys(conn, {key for (key, _), _ in top})
     gap = []
     for (key, ats), rows in top:
-        tokens = {r.token for r in rows if r.token}
-        has_board = bool(ats) and any(
-            conn.execute("SELECT 1 FROM board WHERE ats = ? AND token = ?", (ats, t)).fetchone() for t in tokens)
+        tokens = {r.token.lower() for r in rows if r.token}
+        has_board = bool(ats) and any(  # tokens compare in lower case: a Workday board keeps its site's case
+            conn.execute("SELECT 1 FROM board WHERE ats = ? AND lower(token) = ?", (ats, t)).fetchone() for t in tokens)
         gap.append(GapCompany(rows[0].company_name, ats, len(rows), key in known, has_board))
     return gap
 

@@ -15,14 +15,13 @@ import sqlite3
 import sys
 from collections.abc import Sequence
 
-from outreach.net import FetchError
 from outreach.pipeline import scorecard
 from outreach.pipeline.scorecard import Scorecard
 from outreach.store import StoreError, connect, describe_error, utcnow
 
 __all__ = ["main"]
 
-_EXPECTED = (ValueError, OSError, FetchError, StoreError, sqlite3.Error)
+_EXPECTED = (ValueError, OSError, StoreError, sqlite3.Error)
 
 
 def _parser() -> argparse.ArgumentParser:

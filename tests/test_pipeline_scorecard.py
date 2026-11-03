@@ -130,6 +130,28 @@ class ComputeTests(ScorecardCase):
         store_posting(self.conn, "workday:acme.wd5/External:/job/Seattle-WA/Software-Engineer_R-1001")
         self.assertEqual(scorecard.compute(self.conn, NOW).simplify_coverage, 1.0)
 
+    def test_workday_link_with_another_site_case_matches_the_stored_board(self):
+        # The board keeps the site segment's case (`External`); a link may spell it `external`.
+        company = seed_company(self.conn, "Acme")
+        seed_board(self.conn, company, "workday", "acme.wd5/External")
+        store_posting(self.conn, "workday:acme.wd5/External:/job/Seattle-WA/Software-Engineer_R-1001",
+                      company_id=company)
+        feed(self.conn, "https://acme.wd5.myworkdayjobs.com/external/job/Seattle-WA/Software-Engineer_R-1001")
+        self.assertEqual(scorecard.compute(self.conn, NOW).simplify_coverage, 1.0)
+
+    def test_has_board_ignores_the_case_of_the_token(self):
+        company = seed_company(self.conn, "Acme")
+        seed_board(self.conn, company, "workday", "acme.wd5/External")
+        feed(self.conn, "https://acme.wd5.myworkdayjobs.com/external/job/Seattle-WA/Other_R-2")  # not stored yet
+        (gap,) = scorecard.compute(self.conn, NOW).gap_top
+        self.assertEqual((gap.ats, gap.knock_has_board), ("workday", True))
+
+    def test_duplicate_greenhouse_number_takes_the_earliest_first_sight(self):
+        feed(self.conn, "https://careers.acme.com/open?gh_jid=777")  # the feed first saw it on 2026-10-26
+        store_posting(self.conn, "greenhouse:aaa:777", first_seen="2026-10-27T00:00:00Z")  # first key, seen later
+        store_posting(self.conn, "greenhouse:bbb:777", first_seen="2026-10-20T00:00:00Z")
+        self.assertEqual(scorecard.compute(self.conn, NOW).lead_over_simplify, 1.0)
+
     def test_gh_jid_row_matches_by_native_id(self):
         feed(self.conn, "https://careers.acme.com/open?gh_jid=4012345")
         feed(self.conn, "https://careers.acme.com/open?gh_jid=12345")  # 412345 and 9912345 are other jobs
@@ -171,7 +193,7 @@ class ComputeTests(ScorecardCase):
         self.assertIsNone(card.level_recall)
         self.assertIsNone(card.lead_over_simplify)
 
-    def test_company_is_known_by_an_alias_and_a_board_needs_the_exact_token(self):
+    def test_company_is_known_by_an_alias_and_another_token_is_not_its_board(self):
         company = seed_company(self.conn, "Initech Systems")
         add_alias(self.conn, company, "Initech Software", "name")
         seed_board(self.conn, company, "ashby", "initech")

@@ -202,6 +202,28 @@ class DecisionJoinPlanTests(IngestTestCase):
                 self.assertTrue(any(s.startswith("SEARCH d USING") for s in plan), plan)
 
 
+class BodyUpdateLaneTests(unittest.TestCase):
+    """_body_updates reads the same cleaned text decide() reads (#154): an invisible character inside a word must not
+    hide it from the ambiguous-title scorer in one place and not the other."""
+
+    BOARD = mock.Mock(ats="greenhouse", token="acme")
+
+    def job(self, title, body):
+        return JobRef("1", title, "https://x.test/1", "Boston, MA", "US", None, body)
+
+    def test_ambiguous_title_is_scored_on_the_cleaned_body(self):
+        from outreach.rules.config import default_config
+        body = "We use Py\u00adthon and Dock\u200ber every day."  # soft hyphen and zero-width space inside words
+        got = ingest._body_updates(None, self.BOARD, {}, (self.job("Systems Engineer", body),), default_config())
+        self.assertEqual([native for native, _ in got], ["1"])
+
+    def test_ambiguous_title_with_a_physical_body_is_not_kept(self):
+        from outreach.rules.config import default_config
+        got = ingest._body_updates(None, self.BOARD, {}, (self.job("Systems Engineer", "SolidWorks and FEA drawings."),),
+                                   default_config())
+        self.assertEqual(got, [])
+
+
 class DoubtfulBoardTests(IngestTestCase):
     company_name = "Acme"
 

@@ -51,7 +51,7 @@ off_lane = [
   # moved to `ambiguous` below, where the body decides.
 ]
 # #154: physical, supply chain and non-tech data roles. Unlike `off_lane`, these do not make a title off lane when it
-# also names software work (`software_titles`): "Software Engineer, Logistics" stays in, "Logistics Engineer" is out.
+# also names software work (`software_titles`, which also keeps an `ambiguous` title from the body scorer): "Software Engineer, Logistics" stays in, "Logistics Engineer" is out.
 # Data Analyst, BI and annotation roles are not tech.
 off_lane_unless_software = [
   "supply chain", "procurement", "logistics", "sourcing", "buyer", "planner", "thermal", "optical", "photonics",
@@ -61,7 +61,7 @@ off_lane_unless_software = [
 software_titles = [
   "software", "developer", "programmer", "swe", "sde", "full stack", "backend", "back end", "frontend", "front end",
   "machine learning", "ml", "ai engineer", "data engineer", "platform", "infrastructure", "devops",
-  "site reliability", "sre",
+  "site reliability", "sre", "distributed systems", "data scientist", "research scientist", "applied scientist",
 ]
 # #154: titles that can name a software or a physical role. The body decides: `software_words` against
 # `physical_words`, whole words (and their plurals), each word counted once; tech when software leads by `ambiguous_margin` or more, else

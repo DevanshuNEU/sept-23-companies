@@ -397,12 +397,12 @@ class AmbiguousTitleTests(unittest.TestCase):
                 self.assertEqual(classify_title(title, self.cfg, PHYSICAL_BODY).lane, "off_lane")
 
     def test_software_must_lead_by_two(self):
-        one_ahead = "We use Python every day. We also use a PLC on the line."  # 1 software, 1 physical
-        two_ahead = "We use Python and SQL every day. We also use a PLC on the line."  # 2 software, 1 physical
-        three_ahead = "We use Python, SQL and Docker every day. We also use a PLC on the line."
-        self.assertEqual(classify_title("Systems Engineer", self.cfg, one_ahead).lane, "off_lane")
-        self.assertEqual(classify_title("Systems Engineer", self.cfg, two_ahead).lane, "off_lane")
-        self.assertEqual(classify_title("Systems Engineer", self.cfg, three_ahead).lane, "engineering")
+        lead_0 = "We use Python every day. We also use a PLC on the line."  # 1 software, 1 physical
+        lead_1 = "We use Python and SQL every day. We also use a PLC on the line."  # 2 software, 1 physical
+        lead_2 = "We use Python, SQL and Docker every day. We also use a PLC on the line."  # 3 software, 1 physical
+        self.assertEqual(classify_title("Systems Engineer", self.cfg, lead_0).lane, "off_lane")
+        self.assertEqual(classify_title("Systems Engineer", self.cfg, lead_1).lane, "off_lane")
+        self.assertEqual(classify_title("Systems Engineer", self.cfg, lead_2).lane, "engineering")
 
     def test_a_body_with_neither_kind_of_word_is_off_lane(self):
         self.assertEqual(classify_title("Systems Engineer", self.cfg, "You will join a friendly team.").lane, "off_lane")
@@ -434,12 +434,28 @@ class AmbiguousTitleTests(unittest.TestCase):
         got = classify_title("Senior Test Engineer", self.cfg, SOFTWARE_BODY)
         self.assertEqual((got.lane, got.tier), ("engineering", "senior"))
 
+    def test_a_software_title_skips_the_body_scorer(self):
+        thin = "We use Python every day."  # one software word: the scorer alone would say off lane
+        for title in ("Software Systems Engineer", "Distributed Systems Engineer", "Software Design Engineer",
+                      "Software Test Engineer", "Platform Systems Engineer"):
+            with self.subTest(title=title):
+                self.assertEqual(classify_title(title, self.cfg, thin).lane, "engineering")
+                self.assertEqual(classify_title(title, self.cfg, PHYSICAL_BODY).lane, "engineering")
+                self.assertEqual(classify_title(title, self.cfg, "").lane, "engineering")
+        self.assertEqual(classify_title("Systems Engineer", self.cfg, thin).lane, "off_lane")  # control
+
+    def test_scientist_titles_are_software_titles(self):
+        for title in ("Data Scientist, Supply Chain", "Research Scientist, Materials", "Applied Scientist, Logistics"):
+            with self.subTest(title=title):
+                self.assertEqual(classify_title(title, self.cfg).lane, "engineering")
+
     def test_a_clear_title_ignores_the_body(self):
         self.assertEqual(classify_title("Software Engineer", self.cfg, PHYSICAL_BODY).lane, "engineering")
         self.assertEqual(classify_title("Mechanical Engineer", self.cfg, SOFTWARE_BODY).lane, "off_lane")
 
     def test_other_off_lane_words_beat_a_software_body(self):
         self.assertEqual(classify_title("Hardware Test Engineer", self.cfg, SOFTWARE_BODY).lane, "off_lane")
+        self.assertEqual(classify_title("Hardware Test Engineer", self.cfg).lane, "off_lane")
 
     def test_existing_ambiguous_titles_in_other_lanes_are_unchanged(self):
         self.assertEqual(classify_title("Systems Engineering Intern", self.cfg, SOFTWARE_BODY).lane, "intern")

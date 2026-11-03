@@ -39,6 +39,7 @@ from outreach.crawl.postings import (
 from outreach.crawl.streaks import closes_postings, next_streaks
 from outreach.rules import RulesetNotCurrent
 from outreach.rules.config import default_config
+from outreach.rules.text import clean_text
 from outreach.rules.title import classify_title
 from outreach.store import atomic, body_sha256, describe_error, name_key
 
@@ -199,7 +200,7 @@ def _body_updates(conn: sqlite3.Connection, board: BoardRow, existing: dict[str,
         if job.native_id in seen or not job.body:
             continue
         seen.add(job.native_id)
-        if classify_title(job.title, title_cfg, job.body).lane not in BODY_LANES:
+        if classify_title(clean_text(job.title), title_cfg, clean_text(job.body)).lane not in BODY_LANES:
             continue
         e = existing.get(source_key(board.ats, board.token, job.native_id))
         if e is None:

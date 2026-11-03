@@ -10,16 +10,9 @@ from .config import Config, default_config
 from .eligibility import eligibility, starts_2027
 from .location import us_status
 from .sponsorship import citizenship_required, sponsorship_stance
-from .text import strip_invisible
+from .text import clean_text
 from .title import classify_title
 from .years import entry_wording, read_years
-
-
-def _clean(text: str | None) -> str:
-    """The text without NUL bytes or invisible characters. SQLite's length() stops at a NUL, so a quote that holds one
-    fails the decision table's CHECKs; a NUL is never part of a word, so dropping it changes no reading. An invisible
-    character inside a word hides it from every word list (`strip_invisible`, #112)."""
-    return strip_invisible((text or "").replace("\x00", ""))
 
 
 @dataclass(frozen=True)
@@ -107,8 +100,8 @@ def interim_level_state(lane: str, level_ok: bool) -> str:
 
 def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
     cfg = cfg if cfg is not None else default_config()
-    title, body, location = _clean(p.title), _clean(p.body), _clean(p.location)
-    country = None if p.country is None else _clean(p.country)
+    title, body, location = clean_text(p.title), clean_text(p.body), clean_text(p.location)
+    country = None if p.country is None else clean_text(p.country)
     t = classify_title(title, cfg, body)
     asked = read_years(body, cfg)
     years, years_quote = asked.general, asked.quote

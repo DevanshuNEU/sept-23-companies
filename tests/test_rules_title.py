@@ -583,3 +583,93 @@ class BodyDecidesNonSoftwareTitleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+STARTUP_TITLE_FAMILIES = {
+    "plural": ("Data Engineers", "Research Engineers, Post-Training", "Founding Engineers", "Software Engineers"),
+    "founding": ("Founding Engineer", "Founding Product Engineer", "Founding Forward Deployment Engineer"),
+    "inference": ("Inference Engineer", "TPU Performance Engineer"),
+    "compiler": ("Compiler Engineer",),
+    "kernel": ("Kernel Engineer",),
+    "infra": ("Infra Engineer",),
+    "deployed": ("Deployed Engineer", "Deployment Engineer", "Forward Deployment Engineer"),
+    "agent": ("Agent Engineer", "Agents Engineer"),
+    "rl": ("RL Engineer",),
+    "growth": ("Growth Engineer",),
+    "developer experience": ("Developer Experience Engineer",),
+    "open source": ("Open Source Engineer",),
+    "quantitative": ("Quantitative Developer",),
+    "game": ("Game Developer", "Game Programmer (Unity)"),
+    "sql": ("Entry Level SQL Developer",),
+    "language": ("C# Engineer", ".NET Engineer", "Node.js Engineer", "Rust Engineer", "C++ Engineer"),
+    "staff": ("Member of Product Staff",),
+    "windows": ("Windows Engineer",),
+}
+
+
+class StartupSoftwareTitleTests(unittest.TestCase):
+    """Final review of #172: real startup software titles count outright, whatever the body says."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = load_config()
+
+    def test_each_family_is_engineering_with_no_body_and_with_a_physical_body(self):
+        self.assertGreaterEqual(len(PHYSICAL_BODY.strip()), 300)
+        for family, titles in STARTUP_TITLE_FAMILIES.items():
+            for title in titles:
+                with self.subTest(family=family, title=title):
+                    self.assertEqual(classify_title(title, self.cfg).lane, "engineering")
+                    self.assertEqual(classify_title(title, self.cfg, PHYSICAL_BODY).lane, "engineering")
+
+    def test_each_new_phrase_is_a_software_title(self):
+        for word in ("inference", "compiler", "kernel", "infra", "deployed", "deployment engineer", "forward deployment",
+                     "agent", "agents", "rl", "growth engineer", "developer experience", "open source",
+                     "quantitative developer", "game developer", "game programmer", "sql developer", "c#", ".net",
+                     "node.js", "rust", "c++", "member of product staff", "tpu", "windows engineer", "founding"):
+            with self.subTest(word=word):
+                self.assertIn(word, self.cfg.title["software_titles"])
+        self.assertNotIn("founding engineer", self.cfg.title["software_titles"])
+
+    def test_a_plural_title_counts_like_the_singular(self):
+        for title in ("Data Engineers", "Research Engineers", "Founding Engineers", "Platform Engineers"):
+            with self.subTest(title=title):
+                self.assertEqual(classify_title(title, self.cfg, PHYSICAL_BODY).lane, "engineering")
+
+    def test_founding_with_a_physical_noun_stays_off_lane(self):
+        for title in ("Founding Mechanical Engineer", "Founding Hardware Engineer", "Founding Electrical Engineer"):
+            with self.subTest(title=title):
+                self.assertEqual(classify_title(title, self.cfg).lane, "off_lane")
+                self.assertEqual(classify_title(title, self.cfg, SOFTWARE_BODY).lane, "off_lane")
+
+    def test_physical_security_is_off_lane(self):
+        self.assertIn("physical security", self.cfg.title["off_lane"])
+        self.assertEqual(classify_title("Physical Security Engineer", self.cfg).lane, "off_lane")
+        self.assertEqual(classify_title("Security Engineer", self.cfg).lane, "engineering")
+
+    def test_a_startup_body_keeps_a_plain_title_in_the_lane(self):
+        body = ("We build our product in TypeScript with Next.js on Postgres, and we ship LLMs features every week."
+                + FILLER)
+        self.assertGreaterEqual(len(body.strip()), 300)
+        for title in ("Product Engineer", "Engineer", "Engineer II", "Application Engineer"):
+            with self.subTest(title=title):
+                self.assertEqual(classify_title(title, self.cfg, body).lane, "engineering")
+
+    def test_words_with_punctuation_match_in_a_body(self):
+        # each pair of these counts as two distinct software words, so the lead reaches the margin
+        pairs = {
+            "c#": "We write C# and Rust services.", ".net": "We write C# and .NET services.",
+            "c++": "We write C++ and Rust services.", "node.js": "We write Node.js and Rust services.",
+            "next.js": "We write Next.js and Rust services.",
+        }
+        for word, line in pairs.items():
+            with self.subTest(word=word):
+                self.assertIn(word, self.cfg.title["software_words"])
+                self.assertEqual(classify_title("Engineer", self.cfg, line + FILLER).lane, "engineering")
+
+    def test_new_body_words_count_once_each(self):
+        for word in ("llm", "llms", "gpu", "cuda", "inference", "c#", ".net", "node.js", "postgres", "postgresql",
+                     "graphql", "git", "github", "terraform", "machine learning", "next.js", "ruby", "rails", "scala",
+                     "kotlin", "swift", "kafka", "spark", "airflow", "sdk", "compiler", "kernel"):
+            with self.subTest(word=word):
+                self.assertIn(word, self.cfg.title["software_words"])

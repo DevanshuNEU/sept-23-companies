@@ -4,6 +4,7 @@ Ported from refresh/finalcheck.py:25-44, 91-105, refresh/crawl_boards.py:26-28, 
 with the fixes in the #4 plan: "member of technical staff" is rewritten to MTS before any senior check, "staff" is
 always senior, and a level numeral counts only right after a level noun.
 """
+import functools
 import re
 from dataclasses import dataclass
 
@@ -62,6 +63,12 @@ def _distinct(words: list[str], text: str) -> int:
     return sum(1 for w in words if phrases([w, w + "s"]).search(text))
 
 
+@functools.lru_cache(maxsize=8)
+def _software_title_pattern(cfg: Config) -> re.Pattern:
+    """The `software_titles` pattern, with each word's simple plural ("Data Engineers"), built once per config."""
+    return phrases([form for w in cfg.title["software_titles"] for form in (w, w + "s")])
+
+
 def _software_lead(body: str, cfg: Config) -> int:
     """How many more distinct software words than physical words the body mentions."""
     t = cfg.title
@@ -83,10 +90,10 @@ def _lane(title: str, cfg: Config, body: str | None = None) -> tuple[str, str]:
         return "off_lane", f"Title says {academic.group(0)}, an academic post"
     if m := phrases(t["off_lane"]).search(title):
         return "off_lane", f"Title says {m.group(0)}, outside his lane"
-    if (m := phrases(t["off_lane_unless_software"]).search(title)) and not phrases(t["software_titles"]).search(title):
+    if (m := phrases(t["off_lane_unless_software"]).search(title)) and not _software_title_pattern(cfg).search(title):
         return "off_lane", f"Title says {m.group(0)}, outside his lane"
     # A title that names software work ("Software Systems Engineer", "Founding Engineer") is engineering outright.
-    if phrases(t["software_titles"]).search(title):
+    if _software_title_pattern(cfg).search(title):
         return "engineering", ""
     # #172: any other engineering title is decided by its body (#154 did this for the `ambiguous` titles). A body
     # under `min_body_chars` counts as no body, and with no body the title stays in the lane: the crawler fetches

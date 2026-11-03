@@ -404,7 +404,7 @@ export interface SwapResult { replacedEntryId: Id; replaced: CompanyRef; row: Pl
  */
 export interface JobRow {
   postingId: Id; title: string; url: string; location: string; levelTag: string; date: IsoDate; dateKind: 'posted' | 'seen'; ageDays: number;
-  companyId: Id; companyName: string; size: number | null; big: boolean;
+  companyId: Id; companyName: string; size: number | null; big: boolean /* known size over 300, or guessed big; size stays null then */;
   saysNoSponsorship: boolean; everify: boolean; yc: boolean; contactedOn: IsoDate | null;
 }
 export interface JobCounts { yourLevel: number; higher: number }

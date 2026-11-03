@@ -88,7 +88,7 @@ class JobRow:
     company_id: int  # the survivor of any merge
     company_name: str
     size: int | None
-    big: bool
+    big: bool  # known size over 300, or guessed big; size stays null then
     says_no_sponsorship: bool
     everify: bool
     yc: bool

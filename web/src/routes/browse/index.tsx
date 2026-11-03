@@ -42,8 +42,8 @@ const WINDOWS: { value: JobsWindow; label: string }[] = [
 const SIZES: { value: JobsSize; label: string; hint: string }[] = [
   { value: 'any', label: 'Any size', hint: 'Every company' },
   { value: 'small', label: 'Small', hint: '300 people or fewer' },
-  { value: 'big', label: 'Big', hint: 'More than 300 people' },
-  { value: 'unknown', label: 'Not known', hint: 'Companies with no size on file' },
+  { value: 'big', label: 'Big', hint: 'More than 300 people, or many open roles' },
+  { value: 'unknown', label: 'Not known', hint: 'No size on file and no sign of being big' },
 ];
 
 const LINK =

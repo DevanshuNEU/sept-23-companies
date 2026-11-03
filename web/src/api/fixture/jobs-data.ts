@@ -1,6 +1,6 @@
 /**
  * Sample data for the job list (#156), as the API answers it: open engineering postings, newest first, then the
- * smaller company, then the posting id; 50 a page by a cursor. 80 postings from 10 companies: every fourth is at a
+ * smaller company, then the posting id; 50 a page by a cursor. 80 postings from 11 companies: every fourth is at a
  * higher level, every fifth is dated by when Knock saw it, and the oldest is 94 days old, so each tab, window and size
  * has something to show.
  */

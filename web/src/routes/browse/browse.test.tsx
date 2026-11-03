@@ -11,7 +11,7 @@ import { AppShell } from '@/shell/app-shell';
 import BrowsePage from './index';
 
 /*
- * The job list (#156, the /browse page), on the sample: 80 postings from 10 companies, newest first. At your level: 60
+ * The job list (#156, the /browse page), on the sample: 80 postings from 11 companies, newest first. At your level: 60
  * (20 in the last 30 days, 6 in the last 7); at higher levels: 20 (6 in the last 30 days). He reads every posting
  * himself: Pass hides one, Go ahead puts its company on today's list.
  */

@@ -102,7 +102,7 @@ chord that waits 1 second for the second key.
 | ⌘K or / | Search and commands |
 | G T, G O, G L, G N, G X, G D | Today, Outbox, LinkedIn, Needs you, No-go, Done |
 | G P, G W | Progress, Wins (#33, section 16.6) |
-| G B | Browse companies (#120) |
+| G B | Jobs (#156; was Browse companies, #120) |
 | G I | Insights (#81, section 17) |
 | J / K or ↓ / ↑ | Next, previous row |
 | Enter | Open the row (company page, or the item's detail) |
@@ -1346,11 +1346,11 @@ Single keys work only outside text fields, as in section 3.
 | Today | 1 to 8 | With the chips open: pass with that reason (Visa worry, Too big, Too early, Role not for me, Not into the product, Already know it, Not a fit right now, Other) |
 | Today | Enter, Esc | With the chips open: pass with no reason |
 | Today | B | Open or close More options (the bench) |
-| Today | F | Go to Browse companies (the full page) |
-| Browse companies | ↓ / ↑ | Next, previous company (also from the search box); with the list of picks open, next, previous pick |
-| Browse companies | Enter | Open Use instead of... on the highlighted company; with the list of picks open, choose the highlighted pick |
-| Browse companies | 1 to 9 | With the list of picks open: choose that pick |
-| Browse companies | Esc | Close the list of picks (a second Esc goes back, as everywhere) |
+| Today | F | Go to Jobs (the full page) |
+| Jobs | ↓ / ↑ | Next, previous posting (also from the search box) |
+| Jobs | Enter | Open the posting in a new tab |
+| Jobs | X | Pass: hide this posting (never its company) |
+| Jobs | A | Go ahead: put its company on today's list |
 | Today | 1 / 2 / 3 | Answer the question: Accepted, Replied, Nothing yet (while the Not now chips are open, the digits are theirs) |
 | Today | W | Mark wins seen |
 | Today | ⇧C | Copy every company line for the terminal (a plan with person rows: every find-someone handoff) |

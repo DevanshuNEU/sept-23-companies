@@ -1,322 +1,408 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { useInfiniteQuery } from '@tanstack/react-query';
-import { ArrowRightLeft, Briefcase, Building, Globe } from 'lucide-react';
-import { pollMs, queryKeys, usePageClient, type BrowseCompany, type BrowseParams, type PlanRow } from '@/api';
-import { EmailChip } from '@/components/email-chip';
-import { FitChip } from '@/components/fit-chip';
-import { Monogram } from '@/components/monogram';
+import { keepPreviousData, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { Check, SearchX } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  ApiError,
+  newRequestId,
+  pollMs,
+  queryKeys,
+  usePageClient,
+  type Id,
+  type JobRow,
+  type JobsParams,
+  type JobsSize,
+  type JobsTab,
+  type JobsWindow,
+} from '@/api';
+import { EmptyState } from '@/components/state-views';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Kbd } from '@/components/ui/kbd';
-import { useHotkeys, type Binding } from '@/keyboard/hotkeys';
-import { safeHref } from '@/lib/safe-href';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useAnnounce, useHotkeys, type Binding } from '@/keyboard/hotkeys';
+import { formatDueDay } from '@/lib/format';
+import { openExternal, safeHref } from '@/lib/safe-href';
 import { cn } from '@/lib/utils';
-import { useViewQuery } from '@/pending/pending';
-import { FreshTag } from '@/routes/today/why-today';
-import { replaceable } from '@/routes/today/picks';
-import { usePlanActions } from '@/routes/today/use-plan-actions';
-import { Chooser } from './chooser';
 
-const GROUP = 'Browse companies';
+const GROUP = 'Jobs';
 /** How long typing waits before the search is asked. */
 const TYPING_MS = 180;
-/** Companies per page: the API's most. */
+/** Postings per page: the API's most. */
 const PAGE = 50;
 
-const FILTERS = [
-  { key: 'levelRole', label: 'Role at my level', hint: 'Has an open role at your level' },
-  { key: 'visaOk', label: 'Visa not a no', hint: 'Sponsorship is not marked no' },
-  { key: 'unworked', label: 'Not worked yet', hint: 'You have not reached or applied to it' },
-] as const;
-type FilterKey = (typeof FILTERS)[number]['key'];
-
-const COLUMNS = ['Rank', 'Company', 'Fit', 'Why it ranked', 'Open role', 'Size and stage', 'Visa', 'Email', 'Research', 'Action'] as const;
+const WINDOWS: { value: JobsWindow; label: string }[] = [
+  { value: '7', label: '7 days' },
+  { value: '30', label: '30 days' },
+  { value: '60', label: '60 days' },
+  { value: '90', label: '90 days' },
+  { value: 'any', label: 'Any time' },
+];
+const SIZES: { value: JobsSize; label: string; hint: string }[] = [
+  { value: 'any', label: 'Any size', hint: 'Every company' },
+  { value: 'small', label: 'Small', hint: '300 people or fewer' },
+  { value: 'big', label: 'Big', hint: 'More than 300 people' },
+  { value: 'unknown', label: 'Not known', hint: 'Companies with no size on file' },
+];
 
 const LINK =
-  'inline-flex items-center gap-1 rounded-sm text-xs text-muted-foreground underline decoration-foreground/30 underline-offset-3 outline-none hover:text-foreground hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70';
+  'rounded-sm underline decoration-foreground/30 underline-offset-3 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70';
+/** Small controls on a desk; thumb sized on a phone. */
+const CHIP = 'h-8 px-3 text-xs max-sm:h-11';
 
-function Research({ c }: { c: BrowseCompany }) {
-  const q = c.queue;
-  const items = [
-    { href: safeHref(q.careersUrl), label: 'Careers', icon: Briefcase },
-    { href: safeHref(q.websiteUrl), label: 'Website', icon: Globe },
-    { href: safeHref(q.linkedinCompanyUrl), label: 'LinkedIn page', icon: Building },
-  ];
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+const ago = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`);
+const sizeLine = (j: JobRow) => (j.size === null ? 'Size not known' : `${j.big ? 'Big company, ' : ''}${plural(j.size, 'person', 'people')}`);
+const windowText = (w: JobsWindow) => (w === 'any' ? '' : ` in the last ${w} days`);
+const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : 'at higher levels');
+const message = (err: unknown) => (err instanceof ApiError ? err.message : 'The change did not go through. Nothing was saved. Try again.');
+
+/** "Widen the window, clear the search, or turn off Not contacted yet." Names only what is on. */
+function whatToWiden(on: { window: boolean; q: boolean; size: boolean; notContacted: boolean }): string {
+  const steps = [
+    on.window ? 'widen the window' : null,
+    on.q ? 'clear the search' : null,
+    on.size ? 'clear the size' : null,
+    on.notContacted ? 'turn off Not contacted yet' : null,
+  ].filter((s): s is string => s !== null);
+  if (steps.length === 0) return 'Nothing is open here right now. New postings appear after the next crawl.';
+  const last = steps[steps.length - 1] as string;
+  const text = steps.length === 1 ? last : `${steps.slice(0, -1).join(', ')}${steps.length > 2 ? ',' : ''} or ${last}`;
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+}
+
+function Flags({ job }: { job: JobRow }) {
+  if (!job.saysNoSponsorship && !job.everify && !job.yc && !job.contactedOn) return null;
   return (
-    <div role="group" aria-label="Research" className="grid gap-1">
-      {items.map(({ href, label, icon: Icon }) =>
-        href ? (
-          <a key={label} href={href} target="_blank" rel="noopener noreferrer" className={LINK}>
-            <Icon aria-hidden className="size-3" />
-            {label}
-          </a>
-        ) : null,
-      )}
+    <div className="flex flex-wrap gap-1.5">
+      {job.saysNoSponsorship ? <Badge variant="warn">Says no sponsorship</Badge> : null}
+      {job.everify ? <Badge variant="idle">E-Verify</Badge> : null}
+      {job.yc ? <Badge variant="idle">YC</Badge> : null}
+      {job.contactedOn ? <Badge variant="info">You contacted them on {formatDueDay(job.contactedOn)}</Badge> : null}
     </div>
   );
 }
 
-function OpenRole({ c }: { c: BrowseCompany }) {
-  const o = c.queue.opening;
-  if (!o) return <span className="text-muted-foreground">No open role</span>;
-  const href = safeHref(o.url);
+function JobItem({
+  job,
+  current,
+  answer,
+  busy,
+  onSelect,
+  onPass,
+  onGoAhead,
+}: {
+  job: JobRow;
+  current: boolean;
+  answer: string | undefined;
+  busy: boolean;
+  onSelect: () => void;
+  onPass: () => void;
+  onGoAhead: () => void;
+}) {
+  const href = safeHref(job.url);
   return (
-    <div className="grid gap-0.5">
-      {href ? (
-        <a href={href} target="_blank" rel="noopener noreferrer" className="w-fit rounded-sm font-medium underline decoration-foreground/30 underline-offset-3 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70">
-          {o.title}
-        </a>
+    <li
+      data-job={job.postingId}
+      data-company={job.companyName}
+      aria-current={current ? 'true' : undefined}
+      onClick={onSelect}
+      className={cn('grid items-start gap-x-6 gap-y-2 border-b border-l-2 py-3 pr-6 pl-[22px] text-[13px] sm:grid-cols-[minmax(0,1fr)_auto]', current ? 'border-l-ring bg-muted/40' : 'border-l-transparent hover:bg-muted/20')}
+    >
+      <div className="grid min-w-0 gap-1.5">
+        <p className="flex flex-wrap items-baseline gap-x-2">
+          {href ? (
+            <a href={href} target="_blank" rel="noopener noreferrer" className={cn(LINK, 'text-sm font-medium')}>
+              {job.title}
+            </a>
+          ) : (
+            <span className="text-sm font-medium">{job.title}</span>
+          )}
+          <span className="text-xs text-muted-foreground">{job.levelTag}</span>
+        </p>
+        <p className="flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
+          <Link to={`/companies/${job.companyId}`} className="rounded-sm font-medium text-foreground outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/70">
+            {job.companyName}
+          </Link>
+          <span>{`${job.dateKind} ${ago(job.ageDays)}`}</span>
+          <span>{sizeLine(job)}</span>
+          <span>{job.location}</span>
+        </p>
+        <Flags job={job} />
+      </div>
+      {answer !== undefined ? (
+        <p role="status" className="flex max-w-72 items-start gap-1.5 text-xs text-foreground">
+          <Check aria-hidden className="mt-0.5 size-3.5 shrink-0 text-ok" />
+          {answer}
+        </p>
       ) : (
-        <span className="font-medium">{o.title}</span>
+        <div role="group" aria-label="Your answer" className="flex gap-1.5">
+          <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'x' : undefined} disabled={busy} onClick={onPass}>
+            Pass
+          </Button>
+          <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'a' : undefined} disabled={busy} onClick={onGoAhead}>
+            Go ahead
+          </Button>
+        </div>
       )}
-      <span className="text-muted-foreground">{[o.level, o.age].filter(Boolean).join(', ')}</span>
-      {o.appliedNote ? <span className="text-muted-foreground">{o.appliedNote}</span> : null}
+    </li>
+  );
+}
+
+function Skeletons() {
+  return (
+    <div aria-busy className="grid" role="status" aria-label="Loading the jobs">
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className="grid gap-2 border-b px-6 py-3">
+          <Skeleton className="h-4 w-80" />
+          <Skeleton className="h-3.5 w-[28rem]" />
+        </div>
+      ))}
     </div>
   );
 }
 
 /**
- * Browse companies (sidebar, or F on Today; #120): every company the plan could pick, best ranked first, in one table
- * with a name search and three filters. "Use instead of..." chooses which of today's picks gives up its slot; the swap is
- * not a Not now and uses no room, so it works when Add to today is off. A company he said Not now to or applied to is
- * listed with the reason and has no button. The list never names a company already on today's list. Nothing here hides
- * a company.
+ * Jobs (sidebar, or F on Today; #156): the open engineering postings, newest first, in two tabs (your level, higher
+ * levels). He reads every posting himself: the title opens it in a new tab, Pass hides that posting for good (never
+ * its company) and Go ahead puts its company on today's list as his own pick. There is no score and no ranking text.
  *
- * Keys: the arrows move through the rows (also from the search box), Enter opens "Use instead of...", a digit or Enter
- * chooses the pick, Escape closes the chooser.
+ * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Go ahead keeps the
+ * row and writes the API's own sentence in it ("Added ... to today's list.", or when it is kept for the next list).
+ *
+ * Keys: the arrows move through the rows (also from the search box), Enter opens the posting, X passes, A goes ahead.
+ * The page sets no focus on arrival: the keys listen on the whole page.
  */
 export default function BrowsePage() {
   const client = usePageClient('plan');
-  const plan = useViewQuery(queryKeys.plan, () => client.plan(), { pollMs: pollMs.default });
-  const actions = usePlanActions();
+  const queryClient = useQueryClient();
+  const announce = useAnnounce();
+  const [tab, setTab] = useState<JobsTab>('your_level');
+  const [windowDays, setWindowDays] = useState<JobsWindow>('30');
+  const [size, setSize] = useState<JobsSize>('any');
+  const [notContacted, setNotContacted] = useState(false);
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
-  const [on, setOn] = useState<Record<FilterKey, boolean>>({ levelRole: false, visaOk: false, unworked: false });
-  const [active, setActive] = useState<number | null>(null);
-  const [choosing, setChoosing] = useState<number | null>(null);
-  const [at, setAt] = useState(0);
-  const body = useRef<HTMLTableSectionElement>(null);
+  const [active, setActive] = useState<Id | null>(null);
+  const [hidden, setHidden] = useState<ReadonlySet<Id>>(new Set());
+  const [answers, setAnswers] = useState<ReadonlyMap<Id, string>>(new Map());
+  const [busy, setBusy] = useState<ReadonlySet<Id>>(new Set());
+  const list = useRef<HTMLUListElement>(null);
   const searchBox = useRef<HTMLInputElement>(null);
-
-  // The search box has focus on arrival, so the arrows and Enter work at once (a focused sidebar link would take Enter).
-  useEffect(() => searchBox.current?.focus(), []);
 
   useEffect(() => {
     const id = setTimeout(() => setQ(text.trim()), TYPING_MS);
     return () => clearTimeout(id);
   }, [text]);
 
-  const params: Omit<BrowseParams, 'after'> = { q, ...on, limit: PAGE };
+  const params: Omit<JobsParams, 'after'> = { view: tab, window: windowDays, size, notContacted, q, limit: PAGE };
   const query = useInfiniteQuery({
-    queryKey: queryKeys.browse(params),
-    queryFn: ({ pageParam }) => client.browse({ ...params, after: pageParam }),
-    initialPageParam: 0,
+    queryKey: queryKeys.jobs(params),
+    queryFn: ({ pageParam }) => client.jobs({ ...params, after: pageParam }),
+    initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextAfter ?? undefined,
-    // Like the bench: the pulse refetches it when anything is written, and this keeps ages and cooldowns fresh.
+    // Rows of the last ask stay on screen, dimmed, while a new ask loads. The pulse refetches it when anything is written.
+    placeholderData: keepPreviousData,
     refetchInterval: pollMs.default,
   });
+  const stale = query.isPlaceholderData;
 
-  const rows = useMemo<PlanRow[]>(() => plan.data?.rows ?? [], [plan.data]);
-  const onToday = useMemo(() => new Set(rows.map((r) => r.company.id)), [rows]);
-  const companies = useMemo(() => {
-    const seen = new Set<number>();
-    return (query.data?.pages ?? []).flatMap((p) => p.companies).filter((c) => {
-      if (onToday.has(c.company.id) || seen.has(c.company.id)) return false;
-      seen.add(c.company.id);
-      return true;
-    });
-  }, [query.data, onToday]);
-  const total = query.data?.pages.at(-1)?.total;
-  const picks = replaceable(rows);
+  const loaded = useMemo(() => {
+    const seen = new Set<Id>();
+    return (query.data?.pages ?? []).flatMap((p) => p.rows).filter((j) => !seen.has(j.postingId) && !!seen.add(j.postingId));
+  }, [query.data]);
+  const jobs = useMemo(() => loaded.filter((j) => !hidden.has(j.postingId)), [loaded, hidden]);
+  // A pass the server has not been read after yet still counts: the numbers follow the rows.
+  const passed = loaded.length - jobs.length;
+  const last = query.data?.pages.at(-1);
+  const total = last ? Math.max(last.total - passed, 0) : undefined;
+  const counts = last ? { your_level: last.counts.yourLevel - (tab === 'your_level' ? passed : 0), higher: last.counts.higher - (tab === 'higher' ? passed : 0) } : undefined;
 
-  const current = companies.find((c) => c.company.id === active) ?? companies[0] ?? null;
-  const chosen = choosing === null ? null : (companies.find((c) => c.company.id === choosing) ?? null);
-  const index = current ? companies.indexOf(current) : -1;
-
-  // The company he is choosing for left the list (it was swapped in, or the list changed): put the chooser away.
-  if (choosing !== null && chosen === null) setChoosing(null);
+  const current = jobs.find((j) => j.postingId === active) ?? jobs[0] ?? null;
+  const index = current ? jobs.indexOf(current) : -1;
 
   useEffect(() => {
-    if (current) body.current?.querySelector(`[data-browse="${current.company.id}"]`)?.scrollIntoView?.({ block: 'nearest' });
-  }, [current?.company.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (current) list.current?.querySelector(`[data-job="${current.postingId}"]`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [current?.postingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const move = (step: 1 | -1) => {
-    const next = companies[Math.min(Math.max(index + step, 0), companies.length - 1)];
-    if (next) setActive(next.company.id);
-  };
-  const askFor = (c: BrowseCompany) => {
-    if (c.blocked) return;
-    setActive(c.company.id);
-    setChoosing(c.company.id);
-    setAt(0);
-  };
-  const choose = (row: PlanRow | undefined) => {
-    if (chosen && row) actions.swapPick(row, chosen);
+    if (document.activeElement === searchBox.current) searchBox.current?.blur();
+    const next = jobs[Math.min(Math.max(index + step, 0), jobs.length - 1)];
+    if (next) setActive(next.postingId);
   };
 
-  const inChooser = chosen !== null;
-  const bindings: Binding[] = [
-    { keys: 'arrowdown', label: 'Next company', group: GROUP, inInputs: true, enabled: !inChooser, run: () => move(1) },
-    { keys: 'arrowup', label: 'Previous company', group: GROUP, inInputs: true, enabled: !inChooser, run: () => move(-1) },
-    { keys: 'enter', label: 'Use instead of...', group: GROUP, inInputs: true, enabled: !inChooser && current !== null, run: () => current && askFor(current) },
-    { keys: 'arrowdown', label: 'Next pick', group: GROUP, inInputs: true, enabled: inChooser, run: () => setAt((i) => Math.min(i + 1, Math.min(picks.length, 9) - 1)) },
-    { keys: 'arrowup', label: 'Previous pick', group: GROUP, inInputs: true, enabled: inChooser, run: () => setAt((i) => Math.max(i - 1, 0)) },
-    { keys: 'enter', label: 'Use instead of this pick', group: GROUP, inInputs: true, enabled: inChooser, run: () => choose(picks[at]) },
-    {
-      keys: 'escape',
-      label: 'Close the list of picks',
-      group: GROUP,
-      enabled: inChooser,
-      run: () => {
-        setChoosing(null);
-        searchBox.current?.focus();
+  const mark = <T,>(set: ReadonlySet<T>, item: T, on: boolean): ReadonlySet<T> => {
+    const next = new Set(set);
+    if (on) next.add(item);
+    else next.delete(item);
+    return next;
+  };
+
+  const pass = (job: JobRow) => {
+    const id = job.postingId;
+    if (hidden.has(id) || busy.has(id) || answers.has(id)) return;
+    // The row he is on leaves, and the one below it (else the one above) becomes the current one.
+    if (current?.postingId === id) setActive((jobs[index + 1] ?? jobs[index - 1])?.postingId ?? null);
+    setHidden((h) => mark(h, id, true));
+    announce(`Passed. ${job.title} is off the list.`);
+    client.passJob(id, { requestId: newRequestId() }).then(
+      () => void queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll }),
+      (err: unknown) => {
+        setHidden((h) => mark(h, id, false));
+        toast.error(message(err));
       },
-    },
-    ...Array.from({ length: 9 }, (_, i): Binding => ({ keys: String(i + 1), label: `Use instead of pick ${i + 1}`, group: GROUP, inInputs: true, enabled: inChooser && i < picks.length, run: () => choose(picks[i]) })),
+    );
+  };
+
+  const goAhead = (job: JobRow) => {
+    const id = job.postingId;
+    if (hidden.has(id) || busy.has(id) || answers.has(id)) return;
+    setBusy((b) => mark(b, id, true));
+    client.goAhead(id, { requestId: newRequestId() }).then(
+      (res) => {
+        setAnswers((a) => new Map(a).set(id, res.text));
+        announce(res.text);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.plan, exact: true });
+      },
+      (err: unknown) => toast.error(message(err)),
+    ).finally(() => setBusy((b) => mark(b, id, false)));
+  };
+
+  const open = current !== null;
+  const bindings: Binding[] = [
+    { keys: 'arrowdown', label: 'Next job', group: GROUP, inInputs: true, enabled: open, run: () => move(1) },
+    { keys: 'arrowup', label: 'Previous job', group: GROUP, inInputs: true, enabled: open, run: () => move(-1) },
+    { keys: 'enter', label: 'Open the posting', group: GROUP, enabled: open, run: () => current && openExternal(current.url) },
+    { keys: 'x', label: 'Pass', group: GROUP, enabled: open, run: () => current && pass(current) },
+    { keys: 'a', label: 'Go ahead', group: GROUP, enabled: open, run: () => current && goAhead(current) },
   ];
   useHotkeys(bindings);
 
-  const any = q !== '' || on.levelRole || on.visaOk || on.unworked;
+  const on = { window: windowDays !== 'any', q: q !== '', size: size !== 'any', notContacted };
+  const other: JobsTab = tab === 'your_level' ? 'higher' : 'your_level';
+  const otherCount = counts?.[other] ?? 0;
+  const headline = total === undefined || stale ? 'Loading the jobs' : `${total.toLocaleString('en-US')} ${levelText(tab)}${windowText(windowDays)}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="grid flex-none gap-3 border-b px-6 pt-5 pb-3">
-        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-1">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">Browse companies</h1>
-            <p className="mt-0.5 text-[13px] text-muted-foreground">
-              Every company Knock could pick, best ranked first. Use one instead of a pick on Today. A swap uses no room this week.
-            </p>
-          </div>
-          <p className="text-[13px] text-muted-foreground tabular-nums" aria-live="polite">
-            {query.data ? `Showing ${companies.length} of ${total ?? companies.length} ${total === 1 ? 'company' : 'companies'}` : 'Loading the companies'}
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Jobs</h1>
+          <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums" aria-live="polite">
+            {headline}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <Tabs
+            value={tab}
+            onValueChange={(next) => {
+              setTab(next as JobsTab);
+              setActive(null);
+            }}
+          >
+            <TabsList aria-label="Level" className="max-sm:min-h-[3.25rem]">
+              <TabsTrigger value="your_level" className="gap-1.5 px-3 max-sm:min-h-11">
+                Your level
+                {counts ? <span className="text-xs tabular-nums text-muted-foreground">{counts.your_level.toLocaleString('en-US')}</span> : null}
+              </TabsTrigger>
+              <TabsTrigger value="higher" className="gap-1.5 px-3 max-sm:min-h-11">
+                Higher levels
+                {counts ? <span className="text-xs tabular-nums text-muted-foreground">{counts.higher.toLocaleString('en-US')}</span> : null}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <p className="flex items-center gap-3 text-xs text-muted-foreground" aria-hidden>
+            <span className="inline-flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
+            <span className="inline-flex items-center gap-1"><Kbd>Enter</Kbd> open</span>
+            <span className="inline-flex items-center gap-1"><Kbd>X</Kbd> pass</span>
+            <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> go ahead</span>
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <Input
             ref={searchBox}
             type="search"
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Search by company name"
-            aria-label="Search companies by name"
+            aria-label="Search by company name"
             autoComplete="off"
-            className="h-8 w-72"
+            className="h-8 w-64 max-sm:h-11"
           />
-          <div role="group" aria-label="Filters" className="flex flex-wrap gap-1.5">
-            {FILTERS.map((f) => (
-              <Button
-                key={f.key}
-                type="button"
-                variant={on[f.key] ? 'secondary' : 'outline'}
-                size="sm"
-                aria-pressed={on[f.key]}
-                title={f.hint}
-                className="h-8 px-3 text-xs"
-                onClick={() => setOn((o) => ({ ...o, [f.key]: !o[f.key] }))}
-              >
-                {f.label}
+          <div role="group" aria-label="Posted within" className="flex flex-wrap gap-1.5">
+            {WINDOWS.map((w) => (
+              <Button key={w.value} type="button" variant={windowDays === w.value ? 'secondary' : 'outline'} size="sm" aria-pressed={windowDays === w.value} className={CHIP} onClick={() => setWindowDays(w.value)}>
+                {w.label}
               </Button>
             ))}
           </div>
-          <p className="ml-auto flex items-center gap-3 text-xs text-muted-foreground" aria-hidden>
-            <span className="inline-flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
-            <span className="inline-flex items-center gap-1"><Kbd>Enter</Kbd> use instead of...</span>
-            <span className="inline-flex items-center gap-1"><Kbd>Esc</Kbd> cancel</span>
-          </p>
+          <div role="group" aria-label="Company size" className="flex flex-wrap gap-1.5">
+            {SIZES.map((s) => (
+              <Button key={s.value} type="button" variant={size === s.value ? 'secondary' : 'outline'} size="sm" aria-pressed={size === s.value} title={s.hint} className={CHIP} onClick={() => setSize(s.value)}>
+                {s.label}
+              </Button>
+            ))}
+          </div>
+          <Button type="button" variant={notContacted ? 'secondary' : 'outline'} size="sm" aria-pressed={notContacted} title="Hide companies you have already contacted" className={CHIP} onClick={() => setNotContacted((v) => !v)}>
+            Not contacted yet
+          </Button>
         </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {query.isError ? (
+        {query.isError && !query.data ? (
           <p role="alert" className="px-6 py-6 text-sm">
-            The companies did not load. Nothing was changed.{' '}
+            The jobs did not load. Nothing was changed.{' '}
             <button type="button" className="underline underline-offset-3" onClick={() => void query.refetch()}>
               Try again
             </button>
           </p>
-        ) : query.data && companies.length === 0 ? (
-          <p className="px-6 py-6 text-sm text-muted-foreground">{any ? 'No company matches. Clear the search or a filter.' : "Every company is on today's list or has a wave out."}</p>
+        ) : !query.data ? (
+          <Skeletons />
+        ) : jobs.length === 0 && !stale ? (
+          <EmptyState
+            icon={SearchX}
+            title={`No jobs ${levelText(tab)}${windowText(windowDays)}.`}
+            action={
+              otherCount > 0 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setTab(other);
+                    setActive(null);
+                  }}
+                >
+                  {`Show ${otherCount.toLocaleString('en-US')} ${levelText(other)}`}
+                </Button>
+              ) : undefined
+            }
+          >
+            {whatToWiden(on)}
+          </EmptyState>
         ) : (
-          <table aria-label="Companies" className="w-full min-w-[1240px] border-separate border-spacing-0 text-[13px]">
-            <thead className="sticky top-0 z-10 bg-background">
-              <tr>
-                {COLUMNS.map((name) => (
-                  <th key={name} scope="col" className={cn('border-b px-3 py-2 text-left text-xs font-medium text-muted-foreground first:pl-6 last:pr-6', name === 'Rank' && 'w-14 text-right')}>
-                    {name}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody ref={body}>
-              {companies.map((c) => {
-                const isCurrent = c.company.id === current?.company.id;
-                const cell = 'border-b px-3 py-3 align-top first:pl-6 last:pr-6';
-                return (
-                  <Fragment key={c.company.id}>
-                    <tr
-                      data-browse={c.company.id}
-                      aria-current={isCurrent ? 'true' : undefined}
-                      onClick={() => setActive(c.company.id)}
-                      className={cn(isCurrent ? 'bg-muted/40 shadow-[inset_2px_0_0_var(--ring)]' : 'hover:bg-muted/20')}
-                    >
-                      <td className={cn(cell, 'text-right text-muted-foreground tabular-nums')}>{c.position}</td>
-                      <td className={cn(cell, 'w-[230px]')}>
-                        <div className="flex items-start gap-2.5">
-                          <Monogram name={c.company.name} className="mt-0.5 size-7 text-[13px]" />
-                          <div className="grid min-w-0 gap-0.5">
-                            <Link to={`/companies/${c.company.id}`} className="w-fit rounded-sm font-medium outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/70">
-                              {c.company.name}
-                            </Link>
-                            <FreshTag opening={c.queue.opening} />
-                            {c.worked && !c.blocked ? <span className="text-xs text-muted-foreground">You reached this company before.</span> : null}
-                          </div>
-                        </div>
-                      </td>
-                      <td className={cn(cell, 'w-[84px] whitespace-nowrap')}>{c.queue.judgeFit !== null ? <FitChip fit={c.queue.judgeFit} /> : <span className="text-xs text-muted-foreground">Not judged</span>}</td>
-                      <td className={cn(cell, 'w-[260px]')}>
-                        <p>{c.queue.whyToday}</p>
-                        <p className="mt-0.5 text-muted-foreground">{c.queue.reasons.filter((r) => r !== c.queue.whyToday).slice(0, 2).join('. ')}</p>
-                      </td>
-                      <td className={cn(cell, 'w-[230px]')}>
-                        <OpenRole c={c} />
-                      </td>
-                      <td className={cn(cell, 'w-[140px]')}>{c.queue.sizeLine ?? <span className="text-muted-foreground">Size not known</span>}</td>
-                      <td className={cn(cell, 'w-[170px]')}>{c.queue.sponsorshipLine}</td>
-                      <td className={cell}>
-                        <EmailChip fit={c.queue.emailFit} />
-                      </td>
-                      <td className={cn(cell, 'w-[120px] whitespace-nowrap')}>
-                        <Research c={c} />
-                      </td>
-                      <td className={cn(cell, 'w-[190px]')}>
-                        {c.blocked ? (
-                          <p className="text-xs text-muted-foreground">{c.blocked}</p>
-                        ) : (
-                          <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-keyshortcuts={isCurrent ? 'enter' : undefined} onClick={() => askFor(c)}>
-                            <ArrowRightLeft aria-hidden />
-                            Use instead of...
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                    {chosen?.company.id === c.company.id ? (
-                      <tr>
-                        <td colSpan={COLUMNS.length} className="border-b bg-muted/20 px-6 py-3">
-                          <Chooser company={c} picks={picks} at={at} onAt={setAt} onChoose={choose} />
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
+          <ul ref={list} aria-label="Jobs" aria-busy={stale} className={cn(stale && 'opacity-60 transition-opacity')}>
+            {jobs.map((j) => (
+              <JobItem
+                key={j.postingId}
+                job={j}
+                current={j.postingId === current?.postingId}
+                answer={answers.get(j.postingId)}
+                busy={busy.has(j.postingId)}
+                onSelect={() => setActive(j.postingId)}
+                onPass={() => pass(j)}
+                onGoAhead={() => goAhead(j)}
+              />
+            ))}
+          </ul>
         )}
         {query.hasNextPage ? (
           <div className="grid justify-items-center border-t px-6 py-4">
-            <Button type="button" variant="outline" size="sm" className="h-8 px-3 text-xs" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
+            <Button type="button" variant="outline" size="sm" className={CHIP} disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
               {query.isFetchingNextPage ? 'Loading' : 'Show more'}
             </Button>
           </div>

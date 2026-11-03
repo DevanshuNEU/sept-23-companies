@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult, JobsParams, JobsView, PassJobResult, GoAheadResult } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -89,6 +89,12 @@ export interface OutreachClient {
   /** Swap: the company takes the pick's slot and the pick goes back to the bench (not a Not now, no cooldown, no room used).
    *  `idempotencyKey` is `pick-swap:<entryId>:<companyId>`. A no-go, in flight or held back company, or a pick he already reached, is 'not_allowed'. */
   swapPick(entryId: Id, input: { companyId: Id; idempotencyKey: string }, revision: Revision, o: WriteOptions): Promise<SwapResult>;
+  /** The job list (#156): one page of open postings, newest first; `after` is the cursor the last page sent. */
+  jobs(params: JobsParams): Promise<JobsView>;
+  /** Pass hides one posting, never its company; the same request id answers the same. */
+  passJob(postingId: Id, o: WriteOptions): Promise<PassJobResult>;
+  /** Go ahead puts the posting's company on today's list as his own pick. 'not_allowed' says why not (a no-go company, one already on the list, someone contacted and waiting). */
+  goAhead(postingId: Id, o: WriteOptions): Promise<GoAheadResult>;
   saveNote(noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions): Promise<NoteDraft>;
   confirmReason(noteId: Id, revision: Revision, o: WriteOptions): Promise<NoteDraft>; // reasonState becomes 'confirmed'; 'not_allowed' with an empty line
   markWinsSeen(winIds: Id[], o: WriteOptions): Promise<void>; // 'not_found' for an unknown id

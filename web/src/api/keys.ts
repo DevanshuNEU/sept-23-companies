@@ -16,6 +16,8 @@ export const queryKeys = {
   bench: ['plan', 'bench'],
   browseAll: ['plan', 'browse'],
   browse: (params: object) => ['plan', 'browse', params],
+  jobsAll: ['jobs'],
+  jobs: (params: object) => ['jobs', params],
   outcomePrompt: ['outcome-prompt'],
   wins: ['wins'],
   progress: ['progress'],

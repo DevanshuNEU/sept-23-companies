@@ -176,7 +176,7 @@ function ListItems({ s }: { s: ShellSummary | undefined }) {
       <nav aria-label="Lists">
         <SidebarGroupLabel className="text-muted-foreground">Lists</SidebarGroupLabel>
         <SidebarMenu className="gap-0.5">
-          <NavItem to="/browse" icon={Telescope} label="Browse companies" />
+          <NavItem to="/browse" icon={Telescope} label="Jobs" />
           <NavItem to="/no-go" icon={Ban} label="No-go" described={s && s.noGoCount > 0 ? `${s.noGoCount}` : undefined}>
             {s && s.noGoCount > 0 ? <Count value={s.noGoCount} /> : null}
           </NavItem>

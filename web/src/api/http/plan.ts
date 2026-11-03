@@ -31,6 +31,10 @@ export const planMethods = (t: Transport): LiveMethods => ({
     sendJson(t, 'post', '/api/plan/bench/{company_id}/add', input, o, { params: { company_id: companyId } }),
   browse: (p) =>
     getJson(t, '/api/plan/browse', { query: { q: p.q || undefined, levelRole: p.levelRole ? 'true' : undefined, visaOk: p.visaOk ? 'true' : undefined, unworked: p.unworked ? 'true' : undefined, after: p.after || undefined, limit: p.limit } }),
+  jobs: (p) =>
+    getJson(t, '/api/jobs', { query: { view: p.view, window: p.window, size: p.size, notContacted: p.notContacted ? 'true' : undefined, q: p.q || undefined, after: p.after || undefined, limit: p.limit } }),
+  passJob: (postingId, o) => sendJson(t, 'post', '/api/jobs/{posting_id}/pass', {}, o, { params: { posting_id: postingId } }),
+  goAhead: (postingId, o) => sendJson(t, 'post', '/api/jobs/{posting_id}/go-ahead', {}, o, { params: { posting_id: postingId } }),
   swapPick: (entryId, input, revision, o) =>
     sendJson(t, 'post', '/api/plan/{entry_id}/swap', { ...input, revision }, o, { params: { entry_id: entryId } }),
   saveNote: (noteId, edit, o) =>

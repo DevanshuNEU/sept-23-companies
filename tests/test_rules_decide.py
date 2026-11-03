@@ -1,6 +1,7 @@
 """decide() and passes() (issue #4, Task 14)."""
 import ast
 import dataclasses
+import json
 import re
 import time
 import unittest
@@ -10,6 +11,66 @@ from outreach.rules import Decision, PostingInput, decide, load_config, passes, 
 from tests.storetest import fresh_store
 
 ROOT = Path(__file__).resolve().parent.parent
+
+OLD_FIXTURE = [  # (title, lane, level_ok) of each tests/fixtures/ranking/postings.json row, by index
+    ("Research Engineer (New Grad)", "engineering", 1),
+    ("Research Scientist (post-training)", "not_engineering", 0),
+    ("Research Scientist (diffusion)", "not_engineering", 0),
+    ("GPU Performance Engineer", "engineering", 0),
+    ("Analytics Engineer", "engineering", 1),
+    ("Growth Data Engineer", "engineering", 1),
+    ("Sales Account Executive", "not_engineering", 0),
+    ("Research Engineer, Climate Modeling", "engineering", 1),
+    ("Lead Product Designer, AI for the Planet", "not_engineering", 0),
+    ("Lead Security Engineer", "engineering", 0),
+    ("Research Engineer, Climate Modeling", "engineering", 1),
+    ("Lead Product Designer, AI for the Planet", "not_engineering", 0),
+    ("Lead Security Engineer", "engineering", 0),
+    ("Research Engineer, Climate Modeling", "engineering", 1),
+    ("Postdoctoral Associate-Systems Engineering", "off_lane", 0),
+    ("Assistant Director of Graduate Student Life", "not_engineering", 0),
+    ("Campus Police Dispatcher", "not_engineering", 0),
+    ("Coordinator, Schaefer School of Engineering and Science", "engineering", 0),
+    ("Implementation Engineer", "engineering", 1),
+    ("Full Stack Engineer", "engineering", 1),
+    ("Forward Deployed Engineer", "engineering", 1),
+    ("AI Account Executive, Revenue Growth", "not_engineering", 0),
+    ("Customer Success Engineer - Remote in the US", "off_lane", 0),
+    ("Director of Accounting", "not_engineering", 0),
+    ("Space Systems Engineer, Space Operations", "engineering", 1),
+    ("Analyst, Sales Strategy & GTM Planning", "not_engineering", 0),
+    ("Senior Camera Systems Engineer", "engineering", 0),
+    ("Software Engineer - Platform & Application", "engineering", 1),
+    ("Developer Relations Manager", "off_lane", 0),
+    ("Software Engineer", "engineering", 1),
+    ("Enterprise Account Executive", "not_engineering", 0),
+    ("Lead Full-Stack Software Engineer", "engineering", 0),
+    ("Software Development Engineer in Test (SDET)", "engineering", 1),
+    ("Software Engineer - Platform & Application", "engineering", 1),
+    ("Software Development Engineer in Test (SDET)", "engineering", 1),
+    ("Analog IC Design and Verification Engineer", "off_lane", 0),
+    ("Forward Deployed Engineer (Training)", "engineering", 1),
+    ("Software Engineer", "engineering", 1),
+    ("Software Engineer, Full Stack - Emerging Talent", "engineering", 1),
+    ("Data Analyst", "not_engineering", 0),
+    ("Scientific Data Engineer", "engineering", 1),
+    ("Junior Account Executive", "not_engineering", 0),
+    ("Scientific Data Engineer", "engineering", 1),
+    ("Junior Account Executive", "not_engineering", 0),
+]
+
+OLD_SYNTHETIC = [  # (title, body, level_ok), one case per way level_ok is reached
+    ("Software Engineer I", "5+ years of experience building services.", 0), ("Software Engineer I", "", 1),
+    ("Software Engineer II", "", 1), ("Software Engineer II", "3 years of experience.", 1),
+    ("Software Engineer II", "4+ years of experience.", 0), ("Software Engineer", "2 years of experience.", 1),
+    ("Software Engineer", "3+ years of experience in industry.", 1),
+    ("Software Engineer", "4+ years of experience in industry.", 0), ("Software Engineer", "0-1 years of experience.", 1),
+    ("Software Engineer", "This is an entry-level role.", 1),
+    ("Software Engineer", "BS and 5 years of experience, or MS and 0 years of experience.", 0),
+    ("Software Engineer, New Grad", "5+ years of experience.", 0), ("Senior Software Engineer", "1 year of experience.", 0),
+    ("Member of Technical Staff", "", 1), ("Software Engineer", "", 0), ("Accountant", "entry-level", 0),
+    ("Software Engineer Intern", "", 0), ("Junior Software Engineer", "6 years of experience.", 0),
+]
 
 
 def d(title, body="", location="Boston, MA", country=None):
@@ -192,14 +253,18 @@ class DecideTests(unittest.TestCase):
         self.assertIn(row["level_ok"], (0, 1))
 
     def test_as_row_carries_level_state_and_years_ms(self):
-        # Interim rule until the level rules land: fit when level_ok, else uncertain for tech, reject for the rest.
         for title, body, state in (("Software Engineer, New Grad", "", "fit"),
-                                   ("Senior Software Engineer", "", "uncertain"),
+                                   ("Senior Software Engineer", "", "reject"),
                                    ("Software Engineer", "", "uncertain"),
                                    ("Accountant", "", "reject")):
             row = d(title, body).as_row()
             self.assertEqual(row["level_state"], state, title)
             self.assertIsNone(row["years_ms"], title)
+
+    def test_level_state_has_no_default(self):
+        field = next(f for f in dataclasses.fields(Decision) if f.name == "level_state")
+        self.assertIs(field.default, dataclasses.MISSING)
+        self.assertIs(field.default_factory, dataclasses.MISSING)
 
     def test_decision_carries_the_masters_figure(self):
         r = d("Software Engineer", "BS and 2+ years of experience, or MS and 0+ years.")
@@ -274,6 +339,113 @@ class DecideTests(unittest.TestCase):
                 if any(w in low for w in banned) or states.search(arg.value):
                     found.append(f"{rel}:{node.lineno}: {arg.value!r}")
         self.assertEqual(found, [], "classification wording outside outreach/rules")
+
+
+class LevelStateTests(unittest.TestCase):
+    """#154: fit, reject or uncertain for each posting. His years: the master's figure first, else the general one."""
+
+    def state(self, title, body=""):
+        return d(title, body).level_state
+
+    def test_swe_iii_two_years_or_one_with_ms_is_fit(self):
+        google = "2 years of experience in software development, or 1 year of experience with an advanced degree."
+        r = d("Software Engineer III", google)
+        self.assertEqual((r.years_asked, r.years_ms), (2, 1))
+        self.assertEqual((r.level_tier, r.level_ok, r.level_state), ("swe2", True, "fit"))
+        self.assertEqual(r.level_basis, "Title says III")
+        # the master's figure decides: 6 years for a bachelor's, 2 for a master's is within his band
+        r = d("Software Engineer III", "BS and 6 years of experience, or MS and 2 years of experience.")
+        self.assertEqual((r.level_ok, r.level_state), (True, "fit"))
+        # a general figure alone over the limit still fails
+        r = d("Software Engineer III", "6+ years of experience building backend systems.")
+        self.assertEqual((r.level_ok, r.level_state), (False, "reject"))
+        # exactly 3, or none: his level is not clear
+        self.assertEqual(self.state("Software Engineer III", "3 years of experience in software development."),
+                         "uncertain")
+        self.assertEqual(self.state("Software Engineer III"), "uncertain")
+
+    def test_plain_title_no_years_is_uncertain(self):
+        self.assertEqual(self.state("Software Engineer"), "uncertain")
+        self.assertEqual(self.state("Software Engineer", "Build backend services with a small team."), "uncertain")
+        self.assertEqual(self.state("Member of Technical Staff"), "uncertain")  # open tier, no years
+        self.assertEqual(self.state("Forward Deployed Engineer"), "uncertain")
+        self.assertEqual(self.state("Software Engineer II"), "uncertain")  # swe2 with no years
+        self.assertEqual(self.state("Software Engineer", "3+ years of experience in industry."), "uncertain")
+        self.assertEqual(self.state("Research Scientist", "Train and evaluate large models."), "uncertain")
+
+    def test_fit_by_tier_years_or_entry_wording(self):
+        for title, body in (("Software Engineer, New Grad", ""), ("Early Career Software Engineer", ""),
+                            ("Junior Software Engineer", ""), ("Software Engineer I", ""),
+                            ("Software Engineer", "2 years of experience."),
+                            ("Software Engineer", "0-1 years of experience."),
+                            ("Software Engineer", "This is an entry-level role for recent graduates."),
+                            ("Software Engineer", "BS and 5 years of experience, or MS and 0 years of experience."),
+                            ("Software Engineer II", "2+ years of experience.")):
+            self.assertEqual(self.state(title, body), "fit", (title, body))
+
+    def test_research_scientist_phd_required_is_reject(self):
+        for body in ("PhD required.", "You must have a PhD in machine learning.",
+                     "A PhD in computer science or a related field is required.",
+                     "Ph.D. in Machine Learning required.", "Candidates must hold a doctorate in a related field."):
+            self.assertEqual(self.state("Research Scientist", body), "reject", body)
+            self.assertEqual(self.state("Applied Scientist", body), "reject", body)
+        # a preference, or an alternative he meets, is not a requirement
+        for body in ("A PhD is preferred.", "MS or PhD in computer science.", "PhD or equivalent experience.",
+                     "A PhD is a plus.", "We require a BS, MS or PhD in a quantitative field.",
+                     "Bachelor's degree required; PhD a bonus."):
+            self.assertEqual(self.state("Research Scientist", body), "uncertain", body)
+        # only a scientist or researcher title: an engineer is not turned away for a PhD line
+        self.assertEqual(self.state("Software Engineer", "PhD required."), "uncertain")
+        self.assertEqual(self.state("Research Engineer", "PhD required."), "uncertain")
+        # senior tier and years still decide first
+        self.assertEqual(self.state("Senior Research Scientist", "PhD preferred."), "reject")
+
+    def test_more_than_three_years_is_reject(self):
+        self.assertEqual(self.state("Software Engineer", "4+ years of experience in industry."), "reject")
+        self.assertEqual(self.state("Software Engineer", "5 years of professional experience."), "reject")
+        self.assertEqual(self.state("Software Engineer, New Grad", "5+ years of experience."), "reject")
+        self.assertEqual(self.state("Software Engineer I", "5+ years of experience building services."), "reject")
+        self.assertEqual(self.state("Senior Software Engineer", "1 year of experience."), "reject")  # senior tier
+        self.assertEqual(self.state("Staff Engineer", ""), "reject")
+        # the master's figure first: over the limit for a bachelor's, within it for a master's
+        both = "BS and 5 years of experience, or MS and 4 years of experience."
+        self.assertEqual(self.state("Software Engineer", both), "reject")
+
+    def test_masters_figure_can_fit_where_level_ok_stays_as_before(self):
+        r = d("Software Engineer", "BS and 5 years of experience, or MS and 0 years of experience.")
+        self.assertEqual((r.years_asked, r.years_ms, r.level_state), (5, 0, "fit"))
+        self.assertFalse(r.level_ok)  # level_ok keeps reading the general figure
+
+    def test_non_tech_is_reject(self):
+        for title, body in (("Accountant", "entry-level"), ("Software Engineer Intern", ""),
+                            ("Solutions Engineer", ""), ("Data Analyst", "0-1 years of experience."),
+                            ("Account Executive, New Grad", ""), ("Staff Scientist, Biology", ""),
+                            ("Systems Engineer", "Model parts in SolidWorks and run FEA in ANSYS.")):
+            self.assertEqual(self.state(title, body), "reject", title)
+
+    def test_every_state_is_one_of_the_three(self):
+        for title, body in (("Software Engineer", ""), ("Accountant", ""), ("Software Engineer, New Grad", ""),
+                            ("Software Engineer III", "9 years of experience."), ("", "")):
+            self.assertIn(self.state(title, body), ("fit", "reject", "uncertain"))
+
+
+class LevelOkUnchangedTests(unittest.TestCase):
+    """#154 changes level_state, not level_ok: the merge base's (092a34c) level_ok is kept for every tier except III."""
+
+    def test_level_ok_unchanged_for_existing_tiers(self):
+        postings = json.loads((ROOT / "tests" / "fixtures" / "ranking" / "postings.json").read_text(encoding="utf-8"))
+        self.assertEqual([p["title"] for p in postings], [t for t, _, _ in OLD_FIXTURE])
+        excluded = []
+        for i, (p, (title, old_lane, old_ok)) in enumerate(zip(postings, OLD_FIXTURE)):
+            self.assertNotRegex(title, r"\b(?:III|3)\b")  # the III case changes on purpose
+            new = d(title, p.get("body", ""), p.get("location", ""), p.get("country"))
+            if new.lane != old_lane:  # Task 3 moved the lane (scientist titles, systems titles): not a level change
+                excluded.append(i)
+                continue
+            self.assertEqual(int(new.level_ok), old_ok, (i, title))
+        self.assertEqual(excluded, [1, 2, 24, 26])
+        for title, body, old_ok in OLD_SYNTHETIC:
+            self.assertEqual(int(d(title, body).level_ok), old_ok, (title, body))
 
 
 if __name__ == "__main__":

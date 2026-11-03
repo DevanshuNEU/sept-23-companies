@@ -34,7 +34,7 @@ def rules(**over) -> Decision:
     base = dict(lane="engineering", level_tier="new_grad", level_ok=True, level_basis="Title says new grad",
                 years_asked=None, years_quote="", us="yes", sponsorship="silent", sponsorship_quote="",
                 citizenship=False, citizenship_quote="", eligibility="ok", eligibility_reason=None,
-                eligibility_quote="", start_2027=False)
+                eligibility_quote="", start_2027=False, level_state="fit")
     base.update(over)
     return Decision(**base)
 

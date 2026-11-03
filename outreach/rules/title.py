@@ -26,6 +26,7 @@ _SWE1 = {"i", "1", "i/ii", "1/2"}
 _SWE2 = {"ii", "2"}
 # #154: "III" and "3" are swe2 for the tier; the body's years decide fit or reject later (decide.py).
 _III = {"iii", "3"}
+III_BASIS = "Title says III"  # decide.py reads this basis to know a swe2 tier came from III
 _SENIOR_NUMERALS = {"iv", "v", "4", "5"}
 
 
@@ -114,7 +115,7 @@ def _tier(title: str, cfg: Config) -> tuple[str | None, str]:
             if num in nums:
                 return tier, f"Title says {written}"
     if any(num in _III for _, num in levels):
-        return "swe2", "Title says III"
+        return "swe2", III_BASIS
     if m := phrases(t["open_level"]).search(tt):
         return "open", f"{m.group(0)} role, no level in the title"
     return None, "Title states no level"

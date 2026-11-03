@@ -267,3 +267,23 @@ def entry_wording(body: str, cfg: Config) -> str:
     if m is None:
         return ""
     return quote_around(body, m.start(), m.end()) or m.group(0)
+
+
+def requires_phd(title: str, body: str, cfg: Config) -> bool:
+    """True when a scientist or researcher title (`title.phd_titles`) has a body that requires a PhD (#154).
+
+    A sentence counts when it names a PhD, says it is required (`years.phd_cues`), and neither softens it ("preferred",
+    "a plus", "or equivalent experience": `years.phd_softeners`) nor offers a lower degree beside it ("MS or PhD",
+    "BS, MS or PhD").
+    """
+    if not phrases(cfg.title["phd_titles"]).search(title):
+        return False
+    y = cfg.years
+    phd, cue, soft = phrases(y["phd_words"]), phrases(y["phd_cues"]), phrases(y["phd_softeners"])
+    lower = phrases(y["master_words"] + y["bachelor_words"])
+    lower_abbreviations = phrases(y["master_abbreviations"], case=True)
+    for sentence in sentences(body):
+        if (phd.search(sentence) and cue.search(sentence) and not soft.search(sentence)
+                and not lower.search(sentence) and not lower_abbreviations.search(sentence)):
+            return True
+    return False

@@ -447,6 +447,27 @@ class RecordEvidenceTests(RebuildTestCase):
         self.assertEqual((row["level_state"], row["years_ms"]), (decided.level_state, decided.years_ms))
         self.assertIsNotNone(row["level_state"])
 
+    def test_rebuild_writes_level_state_for_every_posting(self):
+        cases = [(NEW_GRAD, ""), ("Software Engineer", ""), ("Senior Software Engineer", ""),
+                 ("Accountant", ""), ("Software Engineer Intern", ""), ("Solutions Engineer", ""),
+                 ("Software Engineer III", "2 years of experience, or 1 year with an advanced degree."),
+                 ("Research Scientist", "PhD required."), ("Software Engineer", "BS and 5 years or MS and 0 years."),
+                 ("Software Engineer", "6+ years of experience.")]
+        ids = {self.posting(title, body): (title, body) for title, body in cases}
+        closed = self.posting("Software Engineer II")
+        close(self.conn, closed)
+        ids[closed] = ("Software Engineer II", "")
+        report = rebuild(self.conn, version=V1)
+        self.assertEqual(report.decided, len(ids))
+        rows = self.conn.execute("SELECT posting_id, level_state FROM decision WHERE ruleset_version = ?",
+                                 (V1,)).fetchall()
+        self.assertEqual({r["posting_id"] for r in rows}, set(ids))
+        for r in rows:
+            title, body = ids[r["posting_id"]]
+            self.assertIn(r["level_state"], ("fit", "reject", "uncertain"), title)
+            self.assertEqual(r["level_state"], decide(PostingInput(title, body, "Boston, MA")).level_state, title)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM decision WHERE level_state IS NULL").fetchone()[0], 0)
+
     def test_record_evidence_ignores_repeats(self):
         drafts = from_old_dashboard({"sizeWhy": "about 40 people"})
         self.assertEqual(record_evidence(self.conn, self.company, drafts), 1)

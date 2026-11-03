@@ -50,6 +50,8 @@ off_lane = [
   # #154: "scientist" left this list (data and research scientists are tech); "design engineer" and "test engineer"
   # moved to `ambiguous` below, where the body decides.
 ]
+# #154: titles whose body may require a PhD (`years.phd_cues`): such a posting is out of his band
+phd_titles = ["scientist", "scientists", "researcher", "researchers"]
 # #154: physical, supply chain and non-tech data roles. Unlike `off_lane`, these do not make a title off lane when it
 # also names software work (`software_titles`, which also keeps an `ambiguous` title from the body scorer): "Software Engineer, Logistics" stays in, "Logistics Engineer" is out.
 # Data Analyst, BI and annotation roles are not tech.
@@ -202,6 +204,18 @@ master_words = [
 master_abbreviations = ["MS", "M.S.", "M.S", "MSc", "M.Sc.", "MEng"]
 bachelor_words = [
   "bachelor's", "bachelors", "bachelor", "bs", "b.s.", "b.s", "ba", "b.a.", "bsc", "undergraduate",
+]
+# #154: a scientist or researcher title (title.phd_titles) whose body requires a PhD is out of his band. A sentence
+# counts when it names a PhD (phd_words) and says it is required (phd_cues), unless it softens it (phd_softeners) or
+# names a lower degree beside it (master_words, bachelor_words and master_abbreviations above: "MS or PhD").
+phd_words = ["phd", "ph.d", "doctorate", "doctoral degree"]
+phd_cues = [
+  "required", "requires", "require", "must have", "must hold", "must possess", "mandatory", "need a",
+  "needs a", "minimum",
+]
+phd_softeners = [
+  "preferred", "nice to have", "a plus", "bonus", "ideally", "desired", "desirable", "helpful", "or equivalent",
+  "equivalent experience", "equivalent practical experience", "or related experience",
 ]
 # #154: "up to 5 years of experience" asks for nothing (it counts as 0)
 upper_bound = ["up to", "at most", "no more than", "maximum of"]

@@ -267,7 +267,7 @@ class SponsorshipTest(unittest.TestCase):
         base = Decision(lane="engineering", level_tier="new_grad", level_ok=True, level_basis="x", years_asked=None,
                         years_quote="", us="yes", sponsorship="unclear", sponsorship_quote="q", citizenship=False,
                         citizenship_quote="", eligibility="ok", eligibility_reason=None, eligibility_quote="",
-                        start_2027=False)
+                        start_2027=False, level_state="fit")
         for lane, us, spons, cit, elig in itertools.product(
                 ("engineering", "intern", "off_lane", "not_engineering", "general_application"),
                 ("yes", "no", "unknown"), ("yes", "no", "opt_only", "unclear", "silent"), (False, True),

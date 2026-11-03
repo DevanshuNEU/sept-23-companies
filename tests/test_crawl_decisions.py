@@ -81,7 +81,7 @@ class DecidePostingsTests(DecisionTestCase):
         def fake(conn, posting_id, **kw):
             calls.append((posting_id, kw))
             return Decision("engineering", "new_grad", True, "title", None, "", "yes", "silent", "", False, "", "ok",
-                            None, "", False)
+                            None, "", False, "fit")
 
         with mock.patch.dict(decide_postings.__globals__, {"decide_and_store": fake}):
             decide_postings(self.conn, ids, batch=1, combiner=combiner, rules_cfg="CFG")

@@ -1,9 +1,10 @@
 """The Mac alert for a new job at his level (#156): one grouped notice, never a stream.
 
-A posting alerts when it is in "your level" with `level_state = 'fit'` on its current decision (read from the decision,
-not from the tag: an `uncertain` posting at a small company is in the list, tagged "level not stated", but never
-alerts; a row from before migration 0007 with no state yet counts as `fit` when `level_ok = 1`), its date (posted, or seen when it has no posted date) is today in New
-York, it is not passed, and it has no `alert:posting:<id>` event yet. Uncertain and reject rows never alert.
+A posting alerts when it is in "your level" with `level_state = 'fit'` on its current decision (read from the
+decision, not from the tag: an `uncertain` posting at a small company is in the list, tagged "level not stated", but
+never alerts). A row from before migration 0007 that the rebuild has not reached has no state: the v1 rule stands in
+for it (`fit` when `level_ok = 1`). Its date (posted, or seen when it has no posted date) is today in New York, it is
+not passed, and it has no `alert:posting:<id>` event yet. Uncertain and reject rows never alert.
 
 Quiet hours are 22:00 to 08:00 New York: nothing is sent or recorded then, so what came in waits for the first tick
 after 08:00 (and only alerts if its date is still today). At most one notice goes out per 15 minutes: the time of the
@@ -66,7 +67,7 @@ def _todays(conn: sqlite3.Connection, now: str, today: str) -> list[JobRow]:
 
 
 def _fit(conn: sqlite3.Connection, ids: list[int]) -> set[int]:
-    """Which of these postings are `fit` on the current decision (the interim rule stands in for a missing state)."""
+    """Which of these postings are `fit` on the current decision (the v1 rule stands in for a missing state)."""
     return {r[0] for r in conn.execute(
         "SELECT d.posting_id FROM decision d WHERE d.ruleset_version = (SELECT ruleset_version FROM ruleset "
         f"WHERE is_current = 1) AND {STATE_SQL} = 'fit' AND d.posting_id IN (SELECT value FROM json_each(?))",

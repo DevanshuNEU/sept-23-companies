@@ -11,10 +11,11 @@ The list reads the decision's columns:
   company not an active no-go, and the posting not passed (`passed_posting_ids`).
 - Your level (#154): `level_state = 'fit'`, or `uncertain` at a company of 300 people or fewer or of unknown size.
   Higher levels: every other listed posting (`uncertain` at a big company, `reject`). A row from before migration 0007
-  that the rebuild has not reached has no state yet: it falls back to the interim rule (`fit` when `level_ok = 1`,
-  else `uncertain`, as every listed row is engineering), so the list reads the same before and after the rebuild.
+  that the rebuild has not reached has no state yet: it falls back to the v1 rule (`fit` when `level_ok = 1`, else
+  `uncertain` for tier `not_stated` or `open`, else `reject`), so such a row is listed as it was before #154 and
+  changes only when the rebuild gives it a real state.
 - The level tag: `fit` and `reject` show the tier (new grad, early career, SDE 1, SDE 2); `uncertain` shows "level not
-  stated", whatever its tier.
+  stated", whatever its tier; a `fit` posting whose tier is `not_stated` or `open` shows "entry level".
 - Date: `posted_on` when there is one (`posted`), else the New York date of the first sighting (`seen`).
 - Order: date newest first, then the smaller company (known sizes by size, then unknown, then big), then posting id.
   `after` is a keyset cursor of `(date, size_rank, posting_id)`, so a write between two pages never repeats a row.
@@ -48,13 +49,14 @@ _NY = ZoneInfo(_TZ)
 # Size ranks: a small company by its size, then unknown, then big by its size.
 _UNKNOWN_RANK = 10_000_000
 _BIG_RANK = 20_000_000
+_NOT_STATED = "level not stated"
 _LEVEL_TAGS = {"new_grad": "new grad", "early_career": "early career", "swe1": "SDE 1", "swe2": "SDE 2",
-               "not_stated": "level not stated", "open": "level not stated"}
+               "not_stated": _NOT_STATED, "open": _NOT_STATED}
+_ENTRY_TAG = "entry level"  # a `fit` posting whose tier names no level (fit by years or entry wording)
 _PASS_REASON = "role"
-_UNCERTAIN_TAG = "level not stated"
-# A decision's level state, with the interim rule for a row the 0007 rebuild has not reached (the alerts use it too).
+# A decision's level state, with the v1 job list rule for a row the 0007 rebuild has not reached (alerts use it too).
 STATE_SQL = ("COALESCE(d.level_state, CASE WHEN d.level_ok = 1 THEN 'fit' "
-             "WHEN d.lane = 'engineering' THEN 'uncertain' ELSE 'reject' END)")
+             "WHEN d.level_tier IN ('not_stated', 'open') THEN 'uncertain' ELSE 'reject' END)")
 
 
 @dataclass(frozen=True)
@@ -266,12 +268,20 @@ def query(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, 
                    counts)
 
 
+def _level_tag(state: str, tier: str) -> str:
+    if state == "uncertain":
+        return _NOT_STATED
+    if state == "fit" and tier in ("not_stated", "open"):
+        return _ENTRY_TAG
+    return _LEVEL_TAGS[tier]
+
+
 def _row(r: sqlite3.Row, today: date, contacted: dict[int, date]) -> JobRow:
     size = r["size"]
     when = contacted.get(r["cid"])
     return JobRow(
         posting_id=r["posting_id"], title=r["title"], url=r["url"], location=r["location"],
-        level_tag=_UNCERTAIN_TAG if r["state"] == "uncertain" else _LEVEL_TAGS[r["level_tier"]], date=r["day"], date_kind=r["kind"],
+        level_tag=_level_tag(r["state"], r["level_tier"]), date=r["day"], date_kind=r["kind"],
         age_days=max((today - date.fromisoformat(r["day"])).days, 0), company_id=r["cid"], company_name=r["name"],
         size=size, big=size is not None and size > BIG_OVER, says_no_sponsorship=r["sponsorship"] == "no",
         everify=bool(r["everify"]), yc=bool(r["yc"]), contacted_on=when.isoformat() if when else None)

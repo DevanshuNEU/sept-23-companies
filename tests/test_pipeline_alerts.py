@@ -170,7 +170,6 @@ class LevelTests(AlertCase):
         self.job("Big company SDE 2", tier="swe2", ok=0, company=self.big())
         self.assertEqual(self.alert(), 0)
 
-
     def test_only_fit_alerts_not_uncertain_at_a_small_company(self):
         small = seed_company(self.conn, "Tiny")
         evidence(self.conn, small, "size", num_low=5, num_high=5)
@@ -185,7 +184,7 @@ class LevelTests(AlertCase):
         self.assertEqual(self.alert(), 0)
 
     def test_a_row_with_no_state_alerts_by_level_ok(self):
-        # Before the rebuild fills `level_state`, the interim rule decides: fit when level_ok.
+        # Before the rebuild fills `level_state`, the v1 rule decides: fit when level_ok.
         small = seed_company(self.conn, "Tiny")
         evidence(self.conn, small, "size", num_low=5, num_high=5)
         self.job("Unsure", company=small, tier="not_stated", ok=0)

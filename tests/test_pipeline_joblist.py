@@ -151,7 +151,7 @@ class LevelTests(JobListCase):
     def test_your_level_is_the_fit_postings(self):
         co = self.company(size=50)
         ng, ec, s1, s2 = (self.job(co, tier=t) for t in ("new_grad", "early_career", "swe1", "swe2"))
-        too_senior = self.job(co, tier="swe2", ok=0, years_asked=5, years_quote="5 years", level_state="reject")
+        too_senior = self.job(co, tier="swe2", ok=0, years_asked=5, years_quote="5 years")
         tags = {r.posting_id: r.level_tag for r in self.run_query().rows}
         self.assertEqual(tags, {ng: "new grad", ec: "early career", s1: "SDE 1", s2: "SDE 2"})
         self.assertEqual(self.ids(view="higher"), [too_senior])
@@ -182,7 +182,7 @@ class LevelTests(JobListCase):
         co = self.company(size=50)
         self.job(co)
         self.job(co)
-        self.job(co, tier="swe2", ok=0, level_state="reject")
+        self.job(co, tier="swe2", ok=0)
         old = self.job(co, posted="2026-08-01")
         page = self.run_query()
         self.assertEqual((page.total, page.counts), (2, {"your_level": 2, "higher": 1}))
@@ -257,8 +257,9 @@ class LevelStateTests(JobListCase):
         self.assertEqual(self.ids(), [fit])
         self.assertEqual(self.ids(view="higher"), [rejected])
 
-    def test_a_row_with_no_state_yet_falls_back_to_the_interim_rule(self):
-        # Rows decided before 0007 have a NULL state until the rebuild: fit when level_ok, else uncertain.
+    def test_a_row_with_no_state_yet_falls_back_to_the_v1_rule(self):
+        # Rows decided before 0007 have a NULL state until the rebuild: fit when level_ok, else uncertain for a tier
+        # that names no level.
         small, big = self.company(size=50), self.company(size=5000)
         fit_big = self.job(big)
         unsure_small = self.job(small, tier="not_stated", ok=0)
@@ -266,6 +267,20 @@ class LevelStateTests(JobListCase):
         self.assertEqual(set(self.ids()), {fit_big, unsure_small})
         self.assertEqual(self.ids(view="higher"), [unsure_big])
         self.assertEqual(self.run_query().counts, {"your_level": 2, "higher": 1})
+
+    def test_a_row_with_no_state_follows_the_v1_rule_a_swe2_without_level_ok_is_higher(self):
+        # The v1 list put a tier it could name without level_ok in higher at every size: the fallback keeps that.
+        small, unknown = self.company(size=50), self.company()
+        ids = [self.job(small, tier="swe2", ok=0), self.job(unknown, tier="swe2", ok=0)]
+        self.assertEqual(self.ids(), [])
+        self.assertEqual(set(self.ids(view="higher")), set(ids))
+
+    def test_a_fit_posting_with_no_tier_is_tagged_entry_level(self):
+        co = self.company(size=50)
+        a = self.job(co, tier="not_stated", ok=0, level_state="fit")
+        b = self.job(co, tier="open", ok=0, level_state="fit")
+        self.assertEqual({r.posting_id: r.level_tag for r in self.run_query().rows},
+                         {a: "entry level", b: "entry level"})
 
     def test_counts_and_pages_use_the_state_in_one_pass(self):
         small = self.company(size=20)

@@ -18,17 +18,20 @@ from outreach.crawl.polite import HostTripped
 from outreach.net import Response
 from outreach.rules import ruleset_version
 from outreach.store import body_sha256, start_job
-from tests.fakes import FakeClient, status_response, text_response
+from tests.fakes import FakeClient, json_response, status_response, text_response, with_greenhouse_details
 from tests.storetest import fresh_store, seed_board, seed_company
 
 FIXTURES = Path(__file__).parent / "fixtures" / "crawl"
-US = "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true"
+US = "https://boards-api.greenhouse.io/v1/boards/acme/jobs"
 JOBS = (FIXTURES / "greenhouse_jobs.json").read_bytes()
 CHANGED = (FIXTURES / "greenhouse_changed.json").read_bytes()
 EMPTY = (FIXTURES / "greenhouse_empty.json").read_bytes()
 T0 = "2026-10-22T08:00:00Z"
 SWE, SALES, DATA, BACKEND = "4012345001", "4012399001", "4020001001", "4031000001"
 FLOOR = 21600
+H1B = ("&lt;p&gt;We are hiring a &lt;strong&gt;new grad&lt;/strong&gt; engineer. We sponsor H-1B visas.&lt;/p&gt;"
+       "&lt;ul&gt;&lt;li&gt;Build things&lt;/li&gt;&lt;li&gt;Ship &amp;amp; learn&lt;/li&gt;&lt;/ul&gt;")
+REFETCH = 31  # days: past `body_refetch_days`, when an engineering body is read again
 
 
 def at(days: float) -> str:
@@ -99,9 +102,11 @@ class IngestTestCase(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def read(self, answer, now=T0, *, board_id=None, adapter=None, cfg=None, combiner=None, url=US):
-        """One read of the board with the real Greenhouse adapter (or `adapter`) at `now`."""
-        client = FakeClient({url: answer})
+    def read(self, answer, now=T0, *, board_id=None, adapter=None, cfg=None, combiner=None, url=US,
+             details=None):
+        """One read of the board with the real Greenhouse adapter (or `adapter`) at `now`. The list carries no text, so
+        every listed job also gets a detail answer (`with_greenhouse_details`; `details` maps an id to its text)."""
+        client = FakeClient(with_greenhouse_details({url: answer}, details, ids=(SWE, SALES, DATA, BACKEND)))
         self.client = client
         self.clock[0] = now
         board = load_board(self.conn, board_id or self.board_id)
@@ -246,7 +251,7 @@ class DoubtfulBoardTests(IngestTestCase):
                 self.set_found_by(how, bid)
                 self.add_lca(cid)
                 self.read(ok(many_jobs(n, name)), board_id=bid,
-                          url=f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true")
+                          url=f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs")
                 self.assertEqual(self.conn.execute("SELECT count(*) FROM review_item WHERE board_id = ?",
                                                    (bid,)).fetchone()[0], 0)
 
@@ -309,7 +314,7 @@ class DoubtfulBoardTests(IngestTestCase):
         cid = seed_company(self.conn, "Acme Robotics")
         bid = seed_board(self.conn, cid, "greenhouse", "zeta")
         self.set_found_by("slug_probe", bid)
-        self.read(ok(), board_id=bid, url="https://boards-api.greenhouse.io/v1/boards/zeta/jobs?content=true")
+        self.read(ok(), board_id=bid, url="https://boards-api.greenhouse.io/v1/boards/zeta/jobs")
         self.assertEqual(len(self.items("flagged")), 1)
 
     def test_a_slug_probe_board_whose_read_names_no_org_always_raises_the_item(self):
@@ -319,7 +324,7 @@ class DoubtfulBoardTests(IngestTestCase):
         lever_url = "https://api.lever.co/v0/postings/acmelever?mode=json"
         no_name = board_json(lambda jobs: [j.pop("company_name", None) for j in jobs])
         cases = (("lever", "acmelever", lever_url, (FIXTURES / "lever_list.json").read_bytes(), LeverAdapter),
-                 ("greenhouse", "acmenoname", "https://boards-api.greenhouse.io/v1/boards/acmenoname/jobs?content=true",
+                 ("greenhouse", "acmenoname", "https://boards-api.greenhouse.io/v1/boards/acmenoname/jobs",
                   no_name, GreenhouseAdapter))
         for ats, token, url, body, adapter in cases:
             with self.subTest(ats=ats):
@@ -354,7 +359,7 @@ class DoubtfulBoardTests(IngestTestCase):
                           "VALUES ('acmerobotics', ?, 'Acme Robotics', 'dba', ?)", (cid, T0))
         bid = seed_board(self.conn, cid, "greenhouse", "zeta")
         self.set_found_by("stapply_name", bid)
-        zeta = "https://boards-api.greenhouse.io/v1/boards/zeta/jobs?content=true"
+        zeta = "https://boards-api.greenhouse.io/v1/boards/zeta/jobs"
         self.read(ok(), board_id=bid, url=zeta)
         other = board_json(lambda jobs: [j.update(company_name="Someone Else") for j in jobs])
         self.read(ok(other, '"B"'), at(1), board_id=bid, url=zeta)
@@ -441,15 +446,15 @@ class CombinerTests(IngestTestCase):
         combiner = object()
         with mock.patch.dict(decide_postings.__globals__, {"decide_and_store": spy}):
             self.read(ok(), combiner=combiner)
-        self.assertEqual(calls, [combiner] * 3)
+        self.assertEqual(calls, [combiner] * 4)  # three new postings, then the one body the detail request fetched
 
 
 class GreenhouseFlowTests(IngestTestCase):
     def test_greenhouse_fixture_end_to_end(self):
         out = self.read(ok())
-        self.assertEqual(out, ReadOutcome(board_id=self.board_id, result="ok", new=3, changed=0, reopened=0,
-                                          closed=0, decided=3, bodies=1, interval_s=FLOOR,
-                                          body_requests=1))  # asked the adapter once; Greenhouse sends nothing
+        self.assertEqual(dataclasses.replace(out, body_ms=0), ReadOutcome(board_id=self.board_id, result="ok", new=3, changed=0, reopened=0,
+                                          closed=0, decided=4, bodies=1, interval_s=FLOOR,
+                                          body_requests=2))  # the list carries no text: both engineering postings are asked
         rows = self.conn.execute("SELECT * FROM posting WHERE board_id = ? ORDER BY source_key",
                                  (self.board_id,)).fetchall()
         self.assertEqual([r["source_key"] for r in rows], [f"greenhouse:acme:{i}" for i in (SWE, SALES, DATA)])
@@ -457,7 +462,8 @@ class GreenhouseFlowTests(IngestTestCase):
         self.assertEqual((swe["title"], swe["location"], swe["posted_on"], swe["first_seen_at"], swe["last_seen_at"]),
                          ("Software Engineer, New Grad", "San Francisco, CA", "2026-09-15", T0, T0))
         self.assertEqual(swe["company_id"], self.company)
-        # A body only for the engineering title that carried one; none for sales, none for the empty content.
+        # A body only for the engineering title whose detail has one; none for sales (never asked), none for the
+        # Data Engineer whose detail answers 404.
         bodies = self.conn.execute("SELECT posting_id, body, body_sha256 FROM posting_body").fetchall()
         self.assertEqual([b["posting_id"] for b in bodies], [swe["posting_id"]])
         self.assertIn("new grad", bodies[0]["body"])
@@ -466,6 +472,8 @@ class GreenhouseFlowTests(IngestTestCase):
                                       "ORDER BY posting_id").fetchall()
         self.assertEqual(len(decisions), 3)
         self.assertEqual({d["ruleset_version"] for d in decisions}, {ruleset_version()})
+        self.assertEqual(sorted(self.client.requests),
+                         sorted([US, f"{US}/{SWE}", f"{US}/{DATA}"]))  # the list has no query and the sales posting is skipped
         lanes = {d["posting_id"]: d["lane"] for d in decisions}
         self.assertEqual(lanes, {self.pid(SWE): "engineering", self.pid(SALES): "not_engineering",
                                  self.pid(DATA): "engineering"})
@@ -479,6 +487,26 @@ class GreenhouseFlowTests(IngestTestCase):
         self.assertEqual((read["result"], read["postings"], read["at"]), ("ok", 3, T0))
         self.assertEqual(self.count("read_queue"), 0)  # ruling 2: #32 owns every queue write
         self.assertFalse(self.conn.in_transaction)
+
+    def test_greenhouse_new_engineering_bodies_first(self):
+        def job(native_id, title, published):
+            return {"id": native_id, "title": title, "absolute_url": f"https://job-boards.greenhouse.io/acme/jobs/{native_id}",
+                    "location": {"name": "Boston, MA"}, "company_name": "Acme Robotics", "first_published": published}
+
+        listed = json.dumps({"jobs": [job(6000001, "Software Engineer I", "2026-10-20T09:00:00-04:00"),
+                                      job(6000003, "Account Executive", "2026-10-22T09:00:00-04:00"),
+                                      job(6000002, "Backend Engineer I", "2026-10-21T09:00:00-04:00")],
+                             "meta": {"total": 3}}).encode("utf-8")
+        details = {"6000001": "&lt;p&gt;Older engineering text.&lt;/p&gt;", "6000002": "&lt;p&gt;Newer engineering text.&lt;/p&gt;",
+                   "6000003": "&lt;p&gt;Sales text.&lt;/p&gt;"}
+        out = self.read(ok(listed), details=details)
+        self.assertEqual((out.new, out.bodies, out.body_requests), (3, 2, 2))
+        # The list is asked for with no text, then the two engineering postings, the newer one first; sales is not.
+        self.assertEqual(self.client.requests, [US, f"{US}/6000002", f"{US}/6000001"])
+        stored = {r["source_key"]: r["body"] for r in self.conn.execute(
+            "SELECT p.source_key, b.body FROM posting_body b JOIN posting p USING (posting_id)")}
+        self.assertEqual(stored, {"greenhouse:acme:6000001": "Older engineering text.",
+                                  "greenhouse:acme:6000002": "Newer engineering text."})
 
     def test_the_crawler_writes_no_queue_rows(self):
         self.read(ok())
@@ -550,8 +578,9 @@ class GreenhouseFlowTests(IngestTestCase):
         self.read(ok())
         swe = self.pid(SWE)
         self.make_final(swe)
-        out = self.read(ok(CHANGED, '"B"'), at(1))
-        self.assertEqual((out.result, out.new, out.changed, out.closed, out.bodies), ("ok", 1, 0, 1, 2))
+        # The list shows no body change, so the body is read again when it is `body_refetch_days` old.
+        out = self.read(ok(CHANGED, '"B"'), at(REFETCH), details={SWE: H1B})
+        self.assertEqual((out.result, out.new, out.changed, out.closed, out.bodies), ("ok", 1, 0, 1, 1))
         body = self.conn.execute("SELECT body, body_sha256 FROM posting_body WHERE posting_id = ?", (swe,)).fetchone()
         self.assertIn("We sponsor H-1B visas.", body["body"])
         self.assertEqual(body["body_sha256"], body_sha256(body["body"]))
@@ -569,15 +598,15 @@ class GreenhouseFlowTests(IngestTestCase):
         self.make_final(swe)
         stored = self.conn.execute("SELECT * FROM posting_body WHERE posting_id = ?", (swe,)).fetchone()
 
-        def spaced(jobs):
-            jobs[0]["content"] = jobs[0]["content"].replace("&lt;p&gt;We are", "&lt;p&gt;\n\n   We   are  ")
-
+        spaced = {SWE: H1B.replace(" We sponsor H-1B visas.", "").replace("&lt;p&gt;We are", "&lt;p&gt;\n\n   We   are  ")}
         with mock.patch.object(ingest, "decide_postings", wraps=ingest.decide_postings) as decide:
-            out = self.read(ok(board_json(spaced), '"B"'), at(1))
+            out = self.read(ok(JOBS, '"B"'), at(REFETCH), details=spaced)  # read again: its age is past the limit
         self.assertEqual((out.result, out.bodies, out.decided, out.changed), ("ok", 0, 0, 0))
+        self.assertEqual(out.body_requests, 2)
         decide.assert_not_called()
-        self.assertEqual(tuple(self.conn.execute("SELECT * FROM posting_body WHERE posting_id = ?", (swe,)).fetchone()),
-                         tuple(stored))
+        again = self.conn.execute("SELECT * FROM posting_body WHERE posting_id = ?", (swe,)).fetchone()
+        self.assertEqual((again["body"], again["body_sha256"]), (stored["body"], stored["body_sha256"]))
+        self.assertEqual(again["fetched_at"], at(REFETCH))  # only the time of the fetch moves
         decision = self.decision(swe)
         self.assertEqual((decision["provisional"], decision["reader_version"]), (0, "reader-1"))
 
@@ -593,14 +622,21 @@ class GreenhouseFlowTests(IngestTestCase):
         self.read(ok())
         swe = self.pid(SWE)
         old_body = self.conn.execute("SELECT body FROM posting_body WHERE posting_id = ?", (swe,)).fetchone()[0]
-        with mock.patch.object(ingest, "decide_postings", side_effect=RuntimeError("crash in the decide")):
+        real = ingest.decide_postings
+
+        def crash_on_the_body(conn, posting_ids, **kw):
+            if posting_ids == [swe]:  # the decision that goes with the fetched body
+                raise RuntimeError("crash in the decide")
+            return real(conn, posting_ids, **kw)
+
+        with mock.patch.object(ingest, "decide_postings", side_effect=crash_on_the_body):
             with self.assertRaises(RuntimeError):
-                self.read(ok(CHANGED, '"B"'), at(1))
+                self.read(ok(CHANGED, '"B"'), at(REFETCH), details={SWE: H1B})
         # The crash undid the body with its decision, so the stored body never runs ahead of the decision on it.
         self.assertEqual(self.conn.execute("SELECT body FROM posting_body WHERE posting_id = ?", (swe,)).fetchone()[0],
                          old_body)
         self.assertEqual(self.board()["etag"], '"A"')  # the crash kept the old validators: the board is listed again
-        self.read(ok(CHANGED, '"B"'), at(1.1))
+        self.read(ok(CHANGED, '"B"'), at(REFETCH + 0.1), details={SWE: H1B})
         self.assertIn("H-1B", self.conn.execute("SELECT body FROM posting_body WHERE posting_id = ?",
                                                 (swe,)).fetchone()[0])
         self.assertEqual(self.decision(swe)["sponsorship"], "yes")
@@ -613,11 +649,12 @@ class GreenhouseFlowTests(IngestTestCase):
             jobs[1]["title"] = "Software Engineer I"
 
         retitled = board_json(retitle)
+        sales_text = {SALES: "&lt;p&gt;Own the full sales cycle.&lt;/p&gt;"}
         with mock.patch.object(ingest, "decide_postings", side_effect=RuntimeError("crash in the decide")):
             with self.assertRaises(RuntimeError):
-                self.read(ok(retitled, '"B"'), at(1))
+                self.read(ok(retitled, '"B"'), at(1), details=sales_text)
         self.assertEqual(self.posting(SALES)["title"], "Account Executive")  # undone with its decision
-        self.read(ok(retitled, '"B"'), at(1.1))
+        self.read(ok(retitled, '"B"'), at(1.1), details=sales_text)
         self.assertEqual(self.posting(SALES)["title"], "Software Engineer I")
         self.assertEqual(self.decision(sales)["lane"], "engineering")
         self.assertIsNotNone(self.conn.execute("SELECT 1 FROM posting_body WHERE posting_id = ?", (sales,)).fetchone())

@@ -73,7 +73,7 @@ class ByAtsTests(ProfileCase):
                   f"{sr}?limit=100&offset=2": Response(200, "", (FIXTURES / "smartrecruiters_p1.json").read_bytes(), {})}
         routes |= {f"{sr}/{i}": self.slow(Response(200, "", detail, {})) for i in
                    ("743999000111222", "743999000111333", "743999000111444")}
-        report = self.tick(routes, cfg=dataclasses.replace(self.cfg, ats_off={}))  # the reader is off by default
+        report = self.tick(routes, cfg=dataclasses.replace(self.cfg, ats_off={}, detail_per_read=150))  # the reader is off by default
         row = report.by_ats["smartrecruiters"]
         details = [u for u in self.client.requests if u.startswith(f"{sr}/")]
         self.assertGreaterEqual(len(details), 1)

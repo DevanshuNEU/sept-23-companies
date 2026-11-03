@@ -29,7 +29,10 @@ from tests.fakes import FakeClient, status_response
 from tests.storetest import fresh_store, seed_board, seed_company
 
 FIXTURES = Path(__file__).parent / "fixtures" / "crawl"
-GH_JOBS = (FIXTURES / "greenhouse_jobs.json").read_bytes()
+# One sales posting: an engineering one would make a read ask for its body too (#152), and these tests are about the
+# switch, not the bodies.
+GH_JOBS = json.dumps({"jobs": [j for j in json.loads((FIXTURES / "greenhouse_jobs.json").read_bytes())["jobs"]
+                               if j["title"] == "Account Executive"]}).encode()
 PINPOINT_LIST = (FIXTURES / "pinpoint_list.json").read_bytes()
 OFF = load_crawl_config()  # the shipped config: SmartRecruiters and Pinpoint off
 ON = dataclasses.replace(OFF, ats_off={})  # every reader on, as after the two lines are deleted
@@ -43,7 +46,7 @@ PP_LIST = "https://acme.pinpointhq.com/postings.json"
 
 
 def gh(token):
-    return f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
+    return f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
 
 
 def ok(body, etag='"A"'):

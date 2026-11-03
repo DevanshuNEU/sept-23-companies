@@ -13,10 +13,14 @@ from tests.contracts import check_adapter
 from tests.fakes import FakeClient, json_response, status_response, text_response
 
 FIXTURES = Path(__file__).parent / "fixtures" / "crawl"
-US = "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true"
-EU = "https://boards-api.eu.greenhouse.io/v1/boards/acme/jobs?content=true"
+US = "https://boards-api.greenhouse.io/v1/boards/acme/jobs"
+EU = "https://boards-api.eu.greenhouse.io/v1/boards/acme/jobs"
+DETAIL_US = US + "/4012345001"
+DETAIL_EU = EU + "/4012345001"
 JOBS = (FIXTURES / "greenhouse_jobs.json").read_bytes()
 EMPTY = (FIXTURES / "greenhouse_empty.json").read_bytes()
+DETAIL = (FIXTURES / "greenhouse_detail.json").read_bytes()
+BODY = "We are hiring a new grad engineer.\nBuild things\nShip & learn"
 ETAG = 'W/"7147bb1aa914061391564153d73b13e4"'
 IDS = ["4012345001", "4012399001", "4020001001"]
 
@@ -61,31 +65,94 @@ class GreenhouseTests(unittest.TestCase):
         self.assertEqual(r.validators, Validators(etag=ETAG, ids_fingerprint=ids_fingerprint(IDS)))
         self.assertEqual(r.board_name, "Acme Robotics")
 
-    def test_requests_content_true(self):
+    def test_list_url_has_no_content(self):
         _, client = read({US: ok()})
         self.assertEqual(client.requests, [US])
-        self.assertTrue(client.requests[0].endswith("?content=true"))
+        self.assertNotIn("?", client.requests[0])
 
-    def test_content_is_plain_text(self):
+    def test_the_list_carries_no_body(self):
         r, _ = read({US: ok()})
-        for j in r.jobs:
-            if j.body is not None:
-                self.assertNotIn("<", j.body)
-                self.assertNotIn("&lt;", j.body)
-                self.assertNotIn("&amp;", j.body)
-        self.assertEqual(r.jobs[0].body, "We are hiring a new grad engineer.\nBuild things\nShip & learn")
-        self.assertEqual(r.jobs[1].body, "Own the full sales cycle.")
+        self.assertEqual([j.body for j in r.jobs], [None, None, None])
 
-    def test_a_job_without_content_has_no_body(self):
-        r, _ = read({US: ok()})
-        self.assertIsNone(r.jobs[2].body)
-        self.assertIsNone(GreenhouseAdapter(FakeClient({})).body("acme", r.jobs[2]))
-
-    def test_a_job_whose_content_is_blank_has_no_body(self):
+    def test_a_listed_content_is_ignored(self):
         jobs = fixture_jobs()[:1]
-        jobs[0]["content"] = ""
+        jobs[0]["content"] = "&lt;p&gt;Listed.&lt;/p&gt;"
         r, _ = read({US: json_response({"jobs": jobs})})
         self.assertIsNone(r.jobs[0].body)
+
+    def test_body_reads_detail(self):
+        r, _ = read({US: ok()})
+        client = FakeClient({DETAIL_US: Response(200, "", DETAIL, {})})
+        text = GreenhouseAdapter(client).body("acme", r.jobs[0])
+        self.assertEqual(text, BODY)
+        self.assertNotIn("<", text)
+        self.assertNotIn("&lt;", text)
+        self.assertNotIn("&amp;", text)
+        self.assertEqual(client.requests, [DETAIL_US])
+        self.assertEqual(client.unrouted, [])
+
+    def test_body_404_is_none(self):
+        r, _ = read({US: ok()})
+        client = FakeClient({DETAIL_US: status_response(404), DETAIL_EU: status_response(404)})
+        self.assertIsNone(GreenhouseAdapter(client).body("acme", r.jobs[0]))
+
+    def test_body_without_content_or_with_blank_content_is_none(self):
+        r, _ = read({US: ok()})
+        detail = json.loads(DETAIL)
+        for name, change in (("missing", lambda d: d.pop("content")), ("blank", lambda d: d.update(content="  ")),
+                             ("null", lambda d: d.update(content=None)), ("number", lambda d: d.update(content=7)),
+                             ("tags only", lambda d: d.update(content="&lt;p&gt;&lt;/p&gt;"))):
+            doc = json.loads(json.dumps(detail))
+            change(doc)
+            client = FakeClient({DETAIL_US: json_response(doc)})
+            self.assertIsNone(GreenhouseAdapter(client).body("acme", r.jobs[0]), name)
+
+    def test_body_failures_are_none_not_errors(self):
+        r, _ = read({US: ok()})
+        for name, answer in (("500", status_response(500)), ("403", status_response(403)),
+                             ("html", text_response("<html>blocked</html>")), ("list", json_response([1])),
+                             ("null", json_response(None)), ("network", FetchError("network", "down"))):
+            client = FakeClient({DETAIL_US: answer})
+            self.assertIsNone(GreenhouseAdapter(client).body("acme", r.jobs[0]), name)
+            self.assertEqual(client.requests, [DETAIL_US], name)
+
+    def test_body_of_a_bad_token_makes_no_request(self):
+        r, _ = read({US: ok()})
+        client = FakeClient({})
+        self.assertIsNone(GreenhouseAdapter(client).body("a/b", r.jobs[0]))
+        self.assertEqual(client.calls, [])
+
+    def test_a_tripped_host_propagates_from_body(self):
+        r, _ = read({US: ok()})
+        client = FakeClient({DETAIL_US: HostTripped("greenhouse.io")})
+        with self.assertRaises(HostTripped):
+            GreenhouseAdapter(client).body("acme", r.jobs[0])
+
+    def test_body_follows_the_host_that_answered_the_list(self):
+        client = FakeClient({US: status_response(404), EU: ok(), DETAIL_EU: Response(200, "", DETAIL, {})})
+        adapter = GreenhouseAdapter(client)
+        r = adapter.list("acme", Validators())
+        self.assertEqual(adapter.body("acme", r.jobs[0]), BODY)
+        self.assertEqual(client.requests, [US, EU, DETAIL_EU])
+
+    def test_a_fresh_adapter_tries_the_us_host_then_the_eu_host_for_a_body(self):
+        r, _ = read({US: ok()})
+        client = FakeClient({DETAIL_US: status_response(404), DETAIL_EU: Response(200, "", DETAIL, {})})
+        self.assertEqual(GreenhouseAdapter(client).body("acme", r.jobs[0]), BODY)
+        self.assertEqual(client.requests, [DETAIL_US, DETAIL_EU])
+
+    def test_the_eu_host_is_tried_for_a_body_only_after_a_404(self):
+        r, _ = read({US: ok()})
+        client = FakeClient({DETAIL_US: status_response(500)})
+        self.assertIsNone(GreenhouseAdapter(client).body("acme", r.jobs[0]))
+        self.assertEqual(client.requests, [DETAIL_US])
+
+    def test_a_us_list_keeps_the_body_on_the_us_host(self):
+        client = FakeClient({US: ok(), DETAIL_US: status_response(404)})
+        adapter = GreenhouseAdapter(client)
+        r = adapter.list("acme", Validators())
+        self.assertIsNone(adapter.body("acme", r.jobs[0]))
+        self.assertEqual(client.requests, [US, DETAIL_US])
 
     def test_location_may_be_a_string_and_the_date_falls_back_to_updated_at(self):
         jobs = fixture_jobs()[1:2]

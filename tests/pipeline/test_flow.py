@@ -477,7 +477,8 @@ class CrawlFlowTests(HarnessCase):
         boards = h.conn.execute("SELECT board_id, token FROM board").fetchall()
         off = h.crawl.off_board_ids()  # the stage's own switched-off fixture (#46), read by nobody
         self.assertEqual([r["token"] for r in boards if r["board_id"] not in off], ["kestrelrobotics"])
-        self.assertEqual(h.crawl.client.requests, [stages_crawl.list_url()])
+        # The list, then the one engineering posting's detail (the list carries no text; the sales posting is skipped).
+        self.assertEqual(h.crawl.client.requests, [stages_crawl.list_url(), f"{stages_crawl.list_url()}/4001001"])
 
     def test_flow_read_boards_passes_with_smartrecruiters_and_pinpoint_off_and_leaves_their_boards_alone(self):
         h = self.flow()  # the read_boards invariant ran after the first tick
@@ -520,8 +521,10 @@ class CrawlFlowTests(HarnessCase):
         self.assertEqual(h.conn.execute("SELECT count(*) FROM read_queue").fetchone()[0], 0)
         before = h.conn.execute("SELECT body_sha256 FROM posting_body WHERE posting_id = ?",
                                 (engineering,)).fetchone()[0]
+        # The list shows no text, so a changed listing (here the title) is what makes the read fetch the body again.
         changed = json.loads(h.crawl.body)
-        changed["jobs"][0]["content"] += "&lt;p&gt;We also run a paid summer cohort.&lt;/p&gt;"
+        changed["jobs"][0]["title"] += " (Boston)"
+        h.crawl.content["4001001"] += "&lt;p&gt;We also run a paid summer cohort.&lt;/p&gt;"
         h.conn.execute("UPDATE decision SET provisional = 0, reader_version = 'flow-test' WHERE posting_id = ?",
                        (engineering,))  # a verified reading had decided it
         h.crawl.run(json_response(changed, etag='"flow-2"'))
@@ -554,6 +557,7 @@ class CrawlFlowTests(HarnessCase):
         old = json.loads(fixture.read_text(encoding="utf-8"))["jobs"][0]
         listed = json.loads(stages_crawl.fixture_jobs(h))
         listed["jobs"].append(old)
+        h.crawl.content[str(old["id"])] = "&lt;p&gt;Software engineering, new grads welcome.&lt;/p&gt;"
         listed["meta"]["total"] = len(listed["jobs"])  # the adapter refuses a list that disagrees with meta.total
         h.crawl.run(json_response(listed, etag='"flow-old"'))
         self.assertEqual(self.last_result(h), "ok")

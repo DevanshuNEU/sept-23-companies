@@ -15,7 +15,7 @@ from outreach.crawl.config import load_crawl_config
 from outreach.crawl.stale import STALE_NOT_ON_BOARD, STALE_OLD, Stale, load_stale, months_before, stale_reason
 from outreach.net import FetchError, Response
 from outreach.store import start_job
-from tests.fakes import FakeClient, status_response, text_response
+from tests.fakes import FakeClient, status_response, text_response, with_greenhouse_details
 from tests.storetest import fresh_store, seed_board, seed_company
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -247,7 +247,7 @@ class LoadStaleTests(StoreCase):
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter  # noqa: E402
 from outreach.crawl.ingest import read_board  # noqa: E402
 
-URL = "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true"
+URL = "https://boards-api.greenhouse.io/v1/boards/acme/jobs"
 JOBS = (FIXTURES / "greenhouse_jobs.json").read_bytes()
 OLD2016 = (FIXTURES / "greenhouse_2016.json").read_bytes()
 EMPTY = (FIXTURES / "greenhouse_empty.json").read_bytes()
@@ -273,7 +273,8 @@ class ThroughReadBoardTests(StoreCase):
             self.addCleanup(patch.stop)
 
     def read(self, answer, now=T0):
-        client = FakeClient({URL: answer})
+        # The list carries no text (#152): every listed job also gets a detail answer.
+        client = FakeClient(with_greenhouse_details({URL: answer}, ids=("4012345001", "4012399001", "4020001001")))
         self.clock[0] = now
         board = load_board(self.conn, self.board_id)
         out = read_board(self.conn, board, GreenhouseAdapter(client), run_id=start_job(self.conn, "read_boards"),

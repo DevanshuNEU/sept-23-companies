@@ -24,13 +24,13 @@ class BodyTestCase(unittest.TestCase):
         self.board = load_board(self.conn, self.board_id)
 
     def posting(self, native_id, title="Software Engineer", *, posted_on=None, first_seen=T, decide=True,
-                board_id=None, closed=False):
+                board_id=None, closed=False, location="Boston, MA", country="US"):
         cur = self.conn.execute(
             "INSERT INTO posting(company_id, board_id, source_key, title, location, country, url, posted_on, "
-            "first_seen_at, last_seen_at, closed_at, close_reason) VALUES (?, ?, ?, ?, 'Boston, MA', 'US', ?, ?, ?, ?, ?, ?)",
+            "first_seen_at, last_seen_at, closed_at, close_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (self.company, board_id or self.board_id, source_key("workday", "acme.wd5/Careers", native_id), title,
-             f"https://example.com/{native_id}", posted_on, first_seen, first_seen, T if closed else None,
-             "gone_from_board" if closed else None))
+             location, country, f"https://example.com/{native_id}", posted_on, first_seen, first_seen,
+             T if closed else None, "gone_from_board" if closed else None))
         if decide:
             decide_and_store(self.conn, cur.lastrowid)
         return cur.lastrowid
@@ -165,6 +165,17 @@ class MissingBodyTests(BodyTestCase):
         for i in range(5):
             self.posting(str(i), posted_on=f"2026-10-0{i + 1}")
         self.assertEqual([n for _, n in missing_body_ids(self.conn, self.board, 2)], ["4", "3"])
+
+    def test_bodies_only_for_us_postings(self):
+        # A non-US engineering posting is a wasted request; an unknown US status still fetches (the body may settle it).
+        us = self.posting("us", posted_on="2026-10-10")
+        unknown = self.posting("unknown", posted_on="2026-10-09", location="Remote", country=None)
+        abroad = self.posting("abroad", posted_on="2026-10-11", location="Berlin, Germany", country="Germany")
+        self.assertEqual(self.conn.execute("SELECT us FROM current_decision WHERE posting_id = ?",
+                                           (abroad,)).fetchone()[0], "no")
+        self.assertEqual(self.conn.execute("SELECT us FROM current_decision WHERE posting_id = ?",
+                                           (unknown,)).fetchone()[0], "unknown")
+        self.assertEqual(missing_body_ids(self.conn, self.board, 10), [(us, "us"), (unknown, "unknown")])
 
 
 class FakeAdapter:
@@ -323,6 +334,18 @@ class RefetchTests(BodyTestCase):
     def test_a_changed_posting_without_a_body_is_left_to_the_missing_pass(self):
         pid = self.posting("a")
         self.assertEqual(refetch_body_ids(self.conn, self.board, [pid], NOW, 30, 10), [])
+
+    def test_refetch_skips_non_us(self):
+        # A changed non-US posting and an old lane-1 non-US body are both left alone; the US one still refetches.
+        abroad_changed = self.posting("abroad-changed", location="Berlin, Germany", country="Germany")
+        abroad_old = self.posting("abroad-old", "Software Engineer, New Grad", location="Toronto, ON, Canada",
+                                  country="Canada")
+        us_changed = self.posting("us-changed")
+        for pid in (abroad_changed, abroad_old, us_changed):
+            save_body(self.conn, pid, "Body")
+            self.set_age(pid, 90)
+        self.assertEqual(refetch_body_ids(self.conn, self.board, [abroad_changed, us_changed], NOW, 30, 10),
+                         [(us_changed, "us-changed")])
 
 
 if __name__ == "__main__":

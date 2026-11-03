@@ -71,7 +71,8 @@ def save_body(conn: sqlite3.Connection, posting_id: int, text: str) -> str:
 
 def missing_body_ids(conn: sqlite3.Connection, board: BoardRow, limit: int) -> list[tuple[int, str]]:
     """`(posting_id, native_id)` of the board's open postings that have no body and whose current decision is in
-    `BODY_LANES`, newest first (posted date, then first seen; an undated posting sorts after the dated ones)."""
+    `BODY_LANES` and not a non-US posting (`us` 'unknown' still fetches: the body may settle it), newest first (posted
+    date, then first seen; an undated posting sorts after the dated ones)."""
     marks = ", ".join("?" * len(BODY_LANES))
     rows = conn.execute(
         "SELECT p.posting_id, p.source_key FROM posting p "
@@ -79,6 +80,7 @@ def missing_body_ids(conn: sqlite3.Connection, board: BoardRow, limit: int) -> l
         "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
         "LEFT JOIN posting_body b ON b.posting_id = p.posting_id "
         f"WHERE p.board_id = ? AND p.closed_at IS NULL AND b.posting_id IS NULL AND d.lane IN ({marks}) "
+        "AND d.us != 'no' "
         "ORDER BY p.posted_on DESC, p.first_seen_at DESC, p.posting_id DESC LIMIT ?",
         (board.board_id, *BODY_LANES, limit)).fetchall()
     return [(r[0], native_id_of(r[1], board.ats, board.token)) for r in rows]
@@ -89,8 +91,8 @@ def refetch_body_ids(conn: sqlite3.Connection, board: BoardRow, changed_posting_
     """`(posting_id, native_id)` of bodies to fetch again (ruling 6): open postings of the board that already have a
     body and are either in `changed_posting_ids` (the list showed a changed title or date) with a decision in
     `BODY_LANES`, or lane 1 (engineering, `level_ok`) with a body fetched `max_age_days` ago or longer (an imported
-    body has no fetch time and counts as old). Changed ones first, then the oldest; at most `limit`. A posting with no
-    body at all belongs to `missing_body_ids`."""
+    body has no fetch time and counts as old). A non-US posting (`us` 'no') is never refetched. Changed ones first, then
+    the oldest; at most `limit`. A posting with no body at all belongs to `missing_body_ids`."""
     if limit < 1:
         return []
     marks = ", ".join("?" * len(BODY_LANES))
@@ -99,7 +101,7 @@ def refetch_body_ids(conn: sqlite3.Connection, board: BoardRow, changed_posting_
         "JOIN decision d ON d.posting_id = p.posting_id "
         "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
         "JOIN posting_body b ON b.posting_id = p.posting_id "
-        "WHERE p.board_id = ? AND p.closed_at IS NULL AND ("
+        "WHERE p.board_id = ? AND p.closed_at IS NULL AND d.us != 'no' AND ("
         f"(p.posting_id IN (SELECT value FROM json_each(?)) AND d.lane IN ({marks})) "
         "OR (d.lane = 'engineering' AND d.level_ok = 1 AND "
         "(b.fetched_at IS NULL OR b.fetched_at <= strftime('%Y-%m-%dT%H:%M:%SZ', ?, ?)))) "

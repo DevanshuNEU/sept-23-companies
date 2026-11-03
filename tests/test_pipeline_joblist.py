@@ -148,10 +148,10 @@ class ListedTests(JobListCase):
 
 
 class LevelTests(JobListCase):
-    def test_your_level_is_level_ok(self):
+    def test_your_level_is_the_fit_postings(self):
         co = self.company(size=50)
         ng, ec, s1, s2 = (self.job(co, tier=t) for t in ("new_grad", "early_career", "swe1", "swe2"))
-        too_senior = self.job(co, tier="swe2", ok=0, years_asked=5, years_quote="5 years")
+        too_senior = self.job(co, tier="swe2", ok=0, years_asked=5, years_quote="5 years", level_state="reject")
         tags = {r.posting_id: r.level_tag for r in self.run_query().rows}
         self.assertEqual(tags, {ng: "new grad", ec: "early career", s1: "SDE 1", s2: "SDE 2"})
         self.assertEqual(self.ids(view="higher"), [too_senior])
@@ -182,7 +182,7 @@ class LevelTests(JobListCase):
         co = self.company(size=50)
         self.job(co)
         self.job(co)
-        self.job(co, tier="swe2", ok=0)
+        self.job(co, tier="swe2", ok=0, level_state="reject")
         old = self.job(co, posted="2026-08-01")
         page = self.run_query()
         self.assertEqual((page.total, page.counts), (2, {"your_level": 2, "higher": 1}))
@@ -199,6 +199,81 @@ class LevelTests(JobListCase):
         self.job(big, tier="swe2", ok=0)
         self.assertEqual(self.run_query(size="small").counts, {"your_level": 1, "higher": 0})
         self.assertEqual(self.run_query(size="big").counts, {"your_level": 1, "higher": 1})
+
+
+class LevelStateTests(JobListCase):
+    """Your level reads `level_state` (#154): fit, or uncertain at a small or unknown-size company."""
+
+    def test_fit_is_your_level_at_any_size(self):
+        small, big = self.company(size=50), self.company(size=5000)
+        a, b = self.job(small, level_state="fit"), self.job(big, level_state="fit")
+        self.assertEqual(set(self.ids()), {a, b})
+        self.assertEqual(self.ids(view="higher"), [])
+
+    def test_uncertain_is_your_level_at_a_small_or_unknown_size_company_and_says_so(self):
+        edge, unknown = self.company(size=300), self.company()
+        a = self.job(edge, tier="swe2", ok=0, level_state="uncertain")
+        b = self.job(unknown, tier="open", ok=0, level_state="uncertain")
+        rows = {r.posting_id: r.level_tag for r in self.run_query().rows}
+        self.assertEqual(rows, {a: "level not stated", b: "level not stated"})
+        self.assertEqual(self.ids(view="higher"), [])
+
+    def test_uncertain_at_a_big_company_is_higher_and_says_so(self):
+        pid = self.job(self.company(size=301), tier="not_stated", ok=0, level_state="uncertain")
+        self.assertEqual(self.ids(), [])
+        row, = self.run_query(view="higher").rows
+        self.assertEqual((row.posting_id, row.level_tag), (pid, "level not stated"))
+
+    def test_reject_is_higher_at_every_size_and_keeps_its_tier_tag(self):
+        small, unknown, big = self.company(size=20), self.company(), self.company(size=900)
+        ids = [self.job(c, tier="swe2", ok=0, level_state="reject") for c in (small, unknown, big)]
+        self.assertEqual(self.ids(), [])
+        page = self.run_query(view="higher")
+        self.assertEqual({r.posting_id: r.level_tag for r in page.rows}, {i: "SDE 2" for i in ids})
+        self.assertEqual(page.counts, {"your_level": 0, "higher": 3})
+
+    def test_a_fit_posting_keeps_its_tier_tag(self):
+        co = self.company(size=50)
+        tags = {t: self.job(co, tier=t, level_state="fit") for t in ("new_grad", "early_career", "swe1", "swe2")}
+        got = {r.posting_id: r.level_tag for r in self.run_query().rows}
+        self.assertEqual(got, {tags["new_grad"]: "new grad", tags["early_career"]: "early career",
+                               tags["swe1"]: "SDE 1", tags["swe2"]: "SDE 2"})
+
+    def test_a_senior_tier_is_never_listed_whatever_its_state(self):
+        co = self.company(size=50)
+        for state in ("fit", "uncertain", "reject"):
+            self.job(co, tier="senior", ok=0, level_state=state)
+        self.assertEqual((self.ids(), self.ids(view="higher")), ([], []))
+
+    def test_a_non_tech_lane_is_never_listed(self):
+        co = self.company(size=50)
+        self.job(co, lane="off_lane", ok=0, level_state="reject")
+        self.assertEqual((self.ids(), self.ids(view="higher")), ([], []))
+
+    def test_state_wins_over_level_ok_and_tier(self):
+        co = self.company(size=50)
+        rejected = self.job(co, tier="new_grad", ok=1, level_state="reject")
+        fit = self.job(co, tier="not_stated", ok=0, level_state="fit")
+        self.assertEqual(self.ids(), [fit])
+        self.assertEqual(self.ids(view="higher"), [rejected])
+
+    def test_a_row_with_no_state_yet_falls_back_to_the_interim_rule(self):
+        # Rows decided before 0007 have a NULL state until the rebuild: fit when level_ok, else uncertain.
+        small, big = self.company(size=50), self.company(size=5000)
+        fit_big = self.job(big)
+        unsure_small = self.job(small, tier="not_stated", ok=0)
+        unsure_big = self.job(big, tier="swe2", ok=0)
+        self.assertEqual(set(self.ids()), {fit_big, unsure_small})
+        self.assertEqual(self.ids(view="higher"), [unsure_big])
+        self.assertEqual(self.run_query().counts, {"your_level": 2, "higher": 1})
+
+    def test_counts_and_pages_use_the_state_in_one_pass(self):
+        small = self.company(size=20)
+        self.job(small, level_state="fit")
+        self.job(small, tier="swe2", ok=0, level_state="uncertain")
+        self.job(small, tier="swe2", ok=0, level_state="reject")
+        page = self.run_query(limit=1)
+        self.assertEqual((page.total, page.counts), (2, {"your_level": 2, "higher": 1}))
 
 
 class DateTests(JobListCase):
@@ -437,12 +512,12 @@ class ScaleTests(JobListCase):
     def test_thousands_of_postings_in_one_query(self):
         companies = [self.company(size=s) for s in (10, 80, 250, 900, None)]
         for i in range(3000):
-            tier, ok = (("new_grad", 1), ("swe2", 0), ("not_stated", 0))[i % 3]
-            self.job(companies[i % 5], posted=f"2026-10-{1 + i % 28:02d}", tier=tier, ok=ok)
+            tier, ok, state = (("new_grad", 1, "fit"), ("swe2", 0, "reject"), ("not_stated", 0, "uncertain"))[i % 3]
+            self.job(companies[i % 5], posted=f"2026-10-{1 + i % 28:02d}", tier=tier, ok=ok, level_state=state)
         page = self.run_query(window_days=0)
         self.assertEqual(len(page.rows), 50)
-        # new grad rows are all his level (1000); not stated counts at the four small or unknown companies (800 of
-        # 1000); SDE 2 asking too much (1000) and not stated at the big one (200) are higher.
+        # fit rows are all his level (1000); uncertain counts at the four small or unknown companies (800 of
+        # 1000); rejected SDE 2 (1000) and uncertain at the big one (200) are higher.
         self.assertEqual(page.counts, {"your_level": 1800, "higher": 1200})
         self.assertEqual(page.total, 1800)
 

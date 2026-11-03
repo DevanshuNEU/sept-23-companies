@@ -19,10 +19,10 @@ class JobsCase(ApiCase):
             evidence(self.conn, cid, "size", num_low=size, num_high=size)
         return cid
 
-    def job(self, company, title="Software Engineer", *, posted="2026-11-09", tier="new_grad", ok=1):
+    def job(self, company, title="Software Engineer", *, posted="2026-11-09", tier="new_grad", ok=1, **dec):
         pid = posting(self.conn, company, title, posted_on=posted, first_seen_at="2026-11-01T12:00:00Z",
                       last_seen_at="2026-11-09T12:00:00Z")
-        decision(self.conn, pid, level_tier=tier, level_ok=ok)
+        decision(self.conn, pid, level_tier=tier, level_ok=ok, **dec)
         return pid
 
     def jobs(self, status=200, **params):
@@ -39,7 +39,7 @@ class ListTest(JobsCase):
         co = self.company(size=40)
         new, old = self.job(co, posted="2026-11-09"), self.job(co, posted="2026-10-20")
         self.job(co, posted="2026-09-01")  # outside 30 days
-        self.job(co, tier="swe2", ok=0)  # higher level
+        self.job(co, tier="swe2", ok=0, level_state="reject")  # higher level
         body = self.jobs()
         self.assertEqual([r["postingId"] for r in body["rows"]], [new, old])
         self.assertEqual((body["total"], body["nextAfter"], body["asOf"]), (2, None, self.now))
@@ -60,7 +60,7 @@ class ListTest(JobsCase):
     def test_view_higher_lists_the_other_postings(self):
         co = self.company(size=40)
         self.job(co)
-        high = self.job(co, tier="swe2", ok=0)
+        high = self.job(co, tier="swe2", ok=0, level_state="reject")
         self.assertEqual(self.ids(view="higher"), [high])
 
     def test_window_any_and_7(self):

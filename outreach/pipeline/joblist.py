@@ -5,12 +5,16 @@ ruleset (never through the `current_decision` view, which SQLite materializes an
 from the `company_fact` view for the company the posting belongs to after any merge, and every filter is in SQL, so a
 page costs one pass over the open postings and one count, never a query per row.
 
-v1 reads today's decision columns:
+The list reads the decision's columns:
 
 - Listed at all: open, lane `engineering`, `us <> 'no'`, no citizenship rule, eligibility `ok`, tier not `senior`, the
   company not an active no-go, and the posting not passed (`passed_posting_ids`).
-- Your level: `level_ok = 1`, or an unstated or open level (`not_stated`, `open`) at a company of 300 people or fewer
-  or of unknown size. Higher levels: every other listed posting.
+- Your level (#154): `level_state = 'fit'`, or `uncertain` at a company of 300 people or fewer or of unknown size.
+  Higher levels: every other listed posting (`uncertain` at a big company, `reject`). A row from before migration 0007
+  that the rebuild has not reached has no state yet: it falls back to the interim rule (`fit` when `level_ok = 1`,
+  else `uncertain`, as every listed row is engineering), so the list reads the same before and after the rebuild.
+- The level tag: `fit` and `reject` show the tier (new grad, early career, SDE 1, SDE 2); `uncertain` shows "level not
+  stated", whatever its tier.
 - Date: `posted_on` when there is one (`posted`), else the New York date of the first sighting (`seen`).
 - Order: date newest first, then the smaller company (known sizes by size, then unknown, then big), then posting id.
   `after` is a keyset cursor of `(date, size_rank, posting_id)`, so a write between two pages never repeats a row.
@@ -32,7 +36,8 @@ from outreach.plan.outbound import load_outbound
 from outreach.ranking.common import canonical_ids
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
-__all__ = ["JobFilters", "JobRow", "JobPage", "query", "passed_posting_ids", "explain", "WINDOWS", "BIG_OVER"]
+__all__ = ["JobFilters", "JobRow", "JobPage", "query", "passed_posting_ids", "explain", "WINDOWS", "BIG_OVER",
+           "STATE_SQL"]
 
 WINDOWS = (7, 30, 60, 90, 0)  # days back from today, 0 for any
 BIG_OVER = 300  # a company is big above this many people
@@ -46,6 +51,10 @@ _BIG_RANK = 20_000_000
 _LEVEL_TAGS = {"new_grad": "new grad", "early_career": "early career", "swe1": "SDE 1", "swe2": "SDE 2",
                "not_stated": "level not stated", "open": "level not stated"}
 _PASS_REASON = "role"
+_UNCERTAIN_TAG = "level not stated"
+# A decision's level state, with the interim rule for a row the 0007 rebuild has not reached (the alerts use it too).
+STATE_SQL = ("COALESCE(d.level_state, CASE WHEN d.level_ok = 1 THEN 'fit' "
+             "WHEN d.lane = 'engineering' THEN 'uncertain' ELSE 'reject' END)")
 
 
 @dataclass(frozen=True)
@@ -113,7 +122,7 @@ _SQL = """
 WITH canon(src, dst) AS (SELECT key, value FROM json_each(:canon)),
 cand AS MATERIALIZED (
   SELECT p.posting_id, p.title, p.url, p.location, COALESCE(cn.dst, p.company_id) AS cid,
-         d.level_tier, d.level_ok, d.sponsorship,
+         d.level_tier, {state} AS state, d.sponsorship,
          COALESCE(p.posted_on, jl_ny_day(p.first_seen_at)) AS day,
          CASE WHEN p.posted_on IS NULL THEN 'seen' ELSE 'posted' END AS kind
   FROM posting p
@@ -138,8 +147,8 @@ co AS MATERIALIZED (
 ),
 rows AS (
   SELECT c.posting_id, c.title, c.url, c.location, c.cid, co.name, co.size, co.everify, co.yc, c.day, c.kind,
-         c.level_tier, c.sponsorship,
-         CASE WHEN c.level_ok = 1 OR (c.level_tier IN ('not_stated', 'open') AND (co.size IS NULL OR co.size <= :big))
+         c.level_tier, c.state, c.sponsorship,
+         CASE WHEN c.state = 'fit' OR (c.state = 'uncertain' AND (co.size IS NULL OR co.size <= :big))
               THEN 1 ELSE 0 END AS yl,
          CASE WHEN co.size IS NULL THEN :unknown_rank WHEN co.size <= :big THEN co.size
               ELSE :big_rank + co.size END AS rank
@@ -149,7 +158,7 @@ rows AS (
                    WHEN 'unknown' THEN co.size IS NULL ELSE 1 END
     AND (:not_contacted = 0 OR c.cid NOT IN (SELECT value FROM json_each(:contacted)))
 )
-"""
+""".replace("{state}", STATE_SQL)
 _COUNT = _SQL + "SELECT COALESCE(SUM(yl), 0) AS yl, COUNT(*) AS n FROM rows"
 # The page and both counts in one pass: the window functions run over every row of the filters, before the view
 # and the cursor narrow it to the page.
@@ -262,7 +271,7 @@ def _row(r: sqlite3.Row, today: date, contacted: dict[int, date]) -> JobRow:
     when = contacted.get(r["cid"])
     return JobRow(
         posting_id=r["posting_id"], title=r["title"], url=r["url"], location=r["location"],
-        level_tag=_LEVEL_TAGS[r["level_tier"]], date=r["day"], date_kind=r["kind"],
+        level_tag=_UNCERTAIN_TAG if r["state"] == "uncertain" else _LEVEL_TAGS[r["level_tier"]], date=r["day"], date_kind=r["kind"],
         age_days=max((today - date.fromisoformat(r["day"])).days, 0), company_id=r["cid"], company_name=r["name"],
         size=size, big=size is not None and size > BIG_OVER, says_no_sponsorship=r["sponsorship"] == "no",
         everify=bool(r["everify"]), yc=bool(r["yc"]), contacted_on=when.isoformat() if when else None)

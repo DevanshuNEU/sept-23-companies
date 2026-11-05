@@ -32,6 +32,14 @@ export function patchRow(view: OutboxView, touchId: Id, change: (i: OutboxItem) 
   return recount({ ...view, items: view.items.map((i) => (i.touchId === touchId ? change(i) : i)) });
 }
 
+/** The named rows move to Approved, with the counts to match. */
+export function approveRows(view: OutboxView, touchIds: ReadonlySet<Id>): OutboxView {
+  return recount({
+    ...view,
+    items: view.items.map((i) => (touchIds.has(i.touchId) ? { ...i, state: 'approved' as const, group: 'approved' as const } : i)),
+  });
+}
+
 /** Every row of one company gets `change` applied to its company. */
 export function patchCompany(view: OutboxView, companyId: Id, change: Partial<CompanyRef>): OutboxView {
   return { ...view, items: view.items.map((i) => (i.company.id === companyId ? { ...i, company: { ...i.company, ...change } } : i)) };

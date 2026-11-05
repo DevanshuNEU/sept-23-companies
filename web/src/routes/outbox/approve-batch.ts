@@ -52,6 +52,9 @@ export function batchSummary(drafts: OutboxItem[]): string {
   return `${parts.join(' and ')}. No blocks, no warnings.`;
 }
 
+/** The dialog's title; it follows the ticks. */
+export const approveTitle = (n: number): string => (n === 0 ? 'Approve drafts' : `Approve ${n} ${plural(n, 'draft', 'drafts')}`);
+
 export const approvedText = (n: number): string => `Approved ${n} ${plural(n, 'draft', 'drafts')}.`;
 
 /** The server's own closing sentence says "Nothing was approved", which is wrong for one draft in a batch. */

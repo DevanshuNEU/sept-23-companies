@@ -1,6 +1,6 @@
 import type { Id, OutboxItem } from '@/api';
 import { buildFixture } from '@/api/fixture/data';
-import { approvedText, batchSummary, cleanDrafts, heldBack, heldBackText, refusedSummary } from './approve-batch';
+import { approvedText, approveTitle, batchSummary, cleanDrafts, heldBack, heldBackText, refusedSummary } from './approve-batch';
 import { approveRows } from './outbox-patches';
 
 const base = (): OutboxItem => {
@@ -72,6 +72,12 @@ describe('copy', () => {
     expect(batchSummary(mixed)).toBe('4 first emails and 7 follow-ups. No blocks, no warnings.');
     expect(batchSummary([draft({ seq: 1 })])).toBe('1 follow-up. No blocks, no warnings.');
     expect(batchSummary([draft()])).toBe('1 first email. No blocks, no warnings.');
+  });
+
+  it('approveTitle follows the count', () => {
+    expect(approveTitle(11)).toBe('Approve 11 drafts');
+    expect(approveTitle(1)).toBe('Approve 1 draft');
+    expect(approveTitle(0)).toBe('Approve drafts');
   });
 
   it('approvedText is singular for one', () => {

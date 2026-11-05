@@ -139,7 +139,8 @@ export function CompanyPanel({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
-          <Badge variant="idle">{q?.opening?.level ?? laneLabel[row.lane]}</Badge>
+          {/* The opening line below names the level, so the chip shows only when there is no opening to say it. */}
+          {q?.opening ? null : <Badge variant="idle">{laneLabel[row.lane]}</Badge>}
           <FitChip fit={q?.judgeFit} className="h-[22px]" />
           {q ? <EmailChip fit={q.emailFit} interactive className="h-[22px]" /> : null}
           <CarriedOver row={row} asOf={asOf} />
@@ -170,7 +171,7 @@ export function CompanyPanel({
             {hasApply ? <LogButton row={row} kind="apply" filled={false} quiet onLog={actions.onLog} /> : null}
           </div>
         ) : null}
-        {q ? <ResearchLinks q={q} variant="secondary" /> : null}
+        {q ? <ResearchLinks q={q} variant="links" /> : null}
       </div>
 
       {passing && actions.onPass && actions.onCancelPass ? (

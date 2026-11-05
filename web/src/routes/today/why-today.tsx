@@ -55,6 +55,8 @@ function ReasonChip({ icon: Icon, tone = 'plain', children }: { icon: LucideIcon
   );
 }
 
+const REPEATS_OPENING = /^(open role at your level|new opening)/i;
+
 /**
  * Why it should answer, as chips: the new opening, E-Verify, sponsorship, size and stage, recent hiring, then the
  * ranker's own reasons (each once: a reason that says what a chip already says is dropped). Every word is the API's.
@@ -67,7 +69,8 @@ function reasonChips(q: CompanyQueue): { icon: LucideIcon; tone: 'plain' | 'fres
     { icon: FileCheck2, tone: 'plain', text: p.sponsorship.text },
     { icon: Users, tone: 'plain', text: q.sizeLine },
     { icon: TrendingUp, tone: 'plain', text: q.hiring > 0 ? q.hiringLine : null },
-    ...q.reasons.map((text) => ({ icon: Check, tone: 'plain' as const, text })),
+    // "Open role at your level" and "New opening today" only repeat the opening line and the new tag above them.
+    ...q.reasons.filter((text) => !REPEATS_OPENING.test(text)).map((text) => ({ icon: Check, tone: 'plain' as const, text })),
   ];
   const seen = new Set<string>();
   const out: { icon: LucideIcon; tone: 'plain' | 'fresh'; text: string }[] = [];
@@ -81,16 +84,11 @@ function reasonChips(q: CompanyQueue): { icon: LucideIcon; tone: 'plain' | 'fres
   return out;
 }
 
-/** The judge's one-line reason in a quieter quote style, with its risk line; or that it has not judged this company. */
+/** The judge's one-line reason in a quieter quote style, with its risk line. Nothing when it has not judged this company. */
 function Verdict({ q }: { q: CompanyQueue }) {
   const p = q.profile;
-  if (q.judgeFit === null || p.verdict.text === null) {
-    return (
-      <p data-judge className="text-[13px] text-muted-foreground">
-        {q.judgeLine}
-      </p>
-    );
-  }
+  // Not judged yet is said once, in the header ("What they build is not known yet") and the profile, not a third time here.
+  if (q.judgeFit === null || p.verdict.text === null) return null;
   return (
     <blockquote data-judge className="grid gap-1 border-l-2 pl-3.5 text-sm leading-[1.6]">
       <p className="text-foreground/90">{p.verdict.text}</p>
@@ -126,37 +124,47 @@ export function WhyToday({ q }: { q: CompanyQueue }) {
 }
 
 /** The three research links: Careers (O), the company's website, its LinkedIn page (a company search; never fetched). */
-export function ResearchLinks({ q, keys = true, variant = 'outline' }: { q: CompanyQueue; keys?: boolean; variant?: 'outline' | 'secondary' }) {
+export function ResearchLinks({ q, keys = true, variant = 'outline' }: { q: CompanyQueue; keys?: boolean; variant?: 'outline' | 'secondary' | 'links' }) {
   const careers = safeHref(q.careersUrl);
   const site = safeHref(q.websiteUrl);
   const linkedin = safeHref(q.linkedinCompanyUrl);
+  const items = [
+    { href: careers, Icon: Briefcase, label: 'Careers', key: keys ? 'O' : null },
+    { href: site, Icon: Globe, label: 'Website', key: null },
+    { href: linkedin, Icon: Building, label: 'LinkedIn page', key: null },
+  ].flatMap((i) => (i.href ? [{ ...i, href: i.href }] : []));
+  // As links they sit on one quiet line under the main actions: the page leads with one button, not six.
+  if (variant === 'links') {
+    return (
+      <div role="group" aria-label="Research" className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px] text-muted-foreground">
+        {items.map(({ href, Icon, label, key }) => (
+          <a
+            key={label}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-keyshortcuts={key?.toLowerCase()}
+            className="inline-flex items-center gap-1.5 rounded-sm py-1 outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70"
+          >
+            <Icon aria-hidden className="size-3.5" />
+            {label}
+            {key ? <KeyHint k={key} /> : null}
+          </a>
+        ))}
+      </div>
+    );
+  }
   return (
     <div role="group" aria-label="Research" className="flex flex-wrap items-center gap-2">
-      {careers ? (
-        <Button asChild variant={variant} size="sm" className={MAIN}>
-          <a href={careers} target="_blank" rel="noopener noreferrer" aria-keyshortcuts={keys ? 'o' : undefined}>
-            <Briefcase aria-hidden />
-            Careers
-            {keys ? <KeyHint k="O" /> : null}
+      {items.map(({ href, Icon, label, key }) => (
+        <Button key={label} asChild variant={variant} size="sm" className={MAIN}>
+          <a href={href} target="_blank" rel="noopener noreferrer" aria-keyshortcuts={key?.toLowerCase()}>
+            <Icon aria-hidden />
+            {label}
+            {key ? <KeyHint k={key} /> : null}
           </a>
         </Button>
-      ) : null}
-      {site ? (
-        <Button asChild variant={variant} size="sm" className={MAIN}>
-          <a href={site} target="_blank" rel="noopener noreferrer">
-            <Globe aria-hidden />
-            Website
-          </a>
-        </Button>
-      ) : null}
-      {linkedin ? (
-        <Button asChild variant={variant} size="sm" className={MAIN}>
-          <a href={linkedin} target="_blank" rel="noopener noreferrer">
-            <Building aria-hidden />
-            LinkedIn page
-          </a>
-        </Button>
-      ) : null}
+      ))}
     </div>
   );
 }

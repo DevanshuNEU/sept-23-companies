@@ -72,12 +72,13 @@ describe('three columns from 1280 px', () => {
     expect(profile).not.toHaveTextContent('Builds a support platform');
   });
 
-  it('says Not known for what is unknown, and nothing in it is red', async () => {
+  it('lists what is unknown in one line, and nothing in it is red', async () => {
     await open();
     fireEvent.click(options()[6]!); // Trigger.dev
     await screen.findByRole('heading', { level: 2, name: 'Trigger.dev' });
     const profile = screen.getByRole('complementary', { name: 'Company profile' });
-    expect(within(profile).getAllByText('Not known').length).toBeGreaterThanOrEqual(6);
+    expect(within(profile).getByRole('region', { name: 'Not known yet' })).toHaveTextContent('Not known: Stage, HQ');
+    expect(within(profile).queryAllByText('Not known')).toHaveLength(0);
     expect(profile.innerHTML).not.toMatch(/\b(?:text|bg|border)-(?:bad|destructive)|\bred\b/);
   });
 
@@ -103,7 +104,7 @@ describe('under 1280 px the profile folds under the company', () => {
     expect(within(main()).queryByRole('heading', { level: 3, name: 'Visa' })).toBeNull();
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    for (const h of ['What they build', 'Stage and funding', 'Headcount', 'Where', 'Visa', 'Open roles at your level', 'People on record', 'Your history', 'Links']) {
+    for (const h of ['What they build', 'Stage and funding', 'Headcount', 'Where', 'Visa', 'Open roles at your level', 'People on record', 'Your history']) {
       expect(within(main()).getByRole('heading', { level: 3, name: h })).toBeInTheDocument();
     }
     expect(main()).toHaveTextContent('4 software LCA filings in FY2024 and FY2025');
@@ -122,11 +123,11 @@ describe('under 1280 px the profile folds under the company', () => {
 describe('the company, calmer', () => {
   beforeEach(() => setWindow(true));
 
-  it('leads with the name, what they build, the level chip and the fit chip', async () => {
+  it('leads with the name, what they build and the fit chip (the opening line names the level)', async () => {
     await open();
     expect(screen.getByRole('heading', { level: 2, name: 'Pylon' }).className).toMatch(/text-\[28px\].*tracking-\[-0\.025em\]/);
     expect(main()).toHaveTextContent('Builds a support platform for B2B teams, with AI agents that answer tickets.');
-    expect(within(main()).getByText('SWE I role')).toBeInTheDocument();
+    expect(within(main()).getByRole('region', { name: 'Why today' })).toHaveTextContent('SWE I role');
     expect(within(main()).getByText('Fit 82')).toHaveAttribute('data-band', 'good');
   });
 
@@ -145,10 +146,13 @@ describe('the company, calmer', () => {
     await open();
     const filled = Array.from(main().querySelectorAll('[data-slot="button"][data-variant="default"]'));
     expect(filled.map((e) => e.textContent)).toEqual(['Open LinkedIn searchS']);
-    for (const name of ['Careers', 'Website', 'LinkedIn page', 'Copy for terminal', 'Log applied']) {
-      const quiet = within(main()).getByRole(name === 'Copy for terminal' || name === 'Log applied' ? 'button' : 'link', { name: new RegExp(`^${name}`) });
-      expect(quiet).toHaveAttribute('data-variant', 'secondary');
+    for (const name of ['Copy for terminal', 'Log applied']) {
+      expect(within(main()).getByRole('button', { name: new RegExp(`^${name}`) })).toHaveAttribute('data-variant', 'secondary');
     }
+    // The research links are plain links on one quiet line, not buttons.
+    const research = within(main()).getByRole('group', { name: 'Research' });
+    expect(within(research).getAllByRole('link').map((a) => a.textContent?.replace(/O$/, ''))).toEqual(['Careers', 'Website', 'LinkedIn page']);
+    expect(research.querySelector('[data-slot="button"]')).toBeNull();
   });
 
   it('keeps Log people you asked and Save this search closed, and Carry and Not now at the bottom', async () => {

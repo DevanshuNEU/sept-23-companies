@@ -50,7 +50,7 @@ test('the company queue: facts, the search link, a pasted log, a saved search an
   await expect(page.getByText('Logged: 2 people at Trigger.dev.')).toBeVisible();
   await expect(rail.getByRole('option', { name: '7. Trigger.dev, Done' })).toBeVisible();
   await expect(page.getByRole('meter', { name: 'Picks reached today' })).toHaveAttribute('aria-valuetext', '3 of 8 reached');
-  await expect(profile).toContainText('Not known');
+  await expect(profile).toContainText('Not known yet');
   await expect(panel.getByRole('heading', { level: 2, name: 'Hex' })).toBeVisible();
   await page.clock.runFor(9000); // the undo window closes and the log commits
 

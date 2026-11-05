@@ -66,10 +66,9 @@ describe('Today with the email flag', () => {
     expect(pylon).toHaveAccessibleName('1. Pylon, To do, new opening, 6 hours ago');
     expect(pylon).toHaveAccessibleDescription('Email');
     expect(cerebrium).toHaveAccessibleDescription('LinkedIn only');
-    // Only Email shows on the rail; LinkedIn only is for a screen reader there, and the panel says it.
-    expect(options().map((o) => o.querySelector('[data-email-fit]')?.getAttribute('data-email-fit') ?? null)).toEqual(
-      ['email', null, 'email', 'email', 'email', 'email', 'email', null],
-    );
+    // The rail shows no email chip at all: the header counts the picks that can be emailed, a screen reader hears each
+    // row's flag as its description, and the panel shows the chip.
+    expect(options().map((o) => o.querySelector('[data-email-fit]'))).toEqual(Array(8).fill(null));
   });
 
   it('shows the chip and the reasons on the panel', async () => {
@@ -86,7 +85,8 @@ describe('Today with the email flag', () => {
     expect(site).toHaveTextContent('estimate, your old dashboard');
     unmount();
     render(<ProfilePanel row={rows.find((r) => r.company.name === 'Cerebrium')!} />);
-    expect(document.querySelector('[data-fact="website"]')).toHaveTextContent('Not on file');
+    expect(document.querySelector('[data-fact="website"]')).toBeNull();
+    expect(document.querySelector('[data-unknown]')).toHaveTextContent('Not on file: Website');
   });
 
   it('says why a pick is LinkedIn only', async () => {

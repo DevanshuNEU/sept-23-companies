@@ -88,9 +88,10 @@ describe('Today as a company queue', () => {
     expect(within(why).getByRole('link', { name: 'Software Engineer I' })).toHaveAttribute('href', pylon.role?.url);
     expect(why).toHaveTextContent('SWE I role, first seen 6 hours ago');
     // The reasons are small chips: the new opening, E-Verify, sponsorship, size, hiring, then the ranker's own (each once).
+    // "Open role at your level" and "New opening today" only repeat the opening line and the new tag, so they are dropped.
     expect(within(why).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       'New opening, 6 hours ago', 'E-Verify enrolled', 'Says it sponsors', '30 people (estimate), Series A',
-      '3 new engineering roles in the last 30 days', 'Open role at your level', 'New opening today',
+      '3 new engineering roles in the last 30 days',
     ]);
     const about = within(panel()).getByLabelText('About Pylon');
     expect(about).toHaveTextContent('Where it standsNew');
@@ -112,12 +113,13 @@ describe('Today as a company queue', () => {
     expect(within(why).getByText('Risk: No E-Verify statement on its pages.')).toBeInTheDocument();
     expect(option(1)).toHaveTextContent('Fit 82');
     expect(within(panel()).getByText('Fit 82')).toBeInTheDocument();
-    // Inngest has no judgment: the panel says so plainly, and the rail says nothing.
+    // Inngest has no judgment: the header and the profile say so once, and Why today and the rail say nothing.
     expect(option(5)).not.toHaveTextContent('Judge');
     fireEvent.click(option(5));
     await screen.findByRole('heading', { level: 2, name: 'Inngest' });
     const inngest = within(panel()).getByRole('region', { name: 'Why today' });
-    expect(within(inngest).getByText('Judge: not judged yet.')).toBeInTheDocument();
+    expect(inngest).not.toHaveTextContent('Judge');
+    expect(panel()).toHaveTextContent('What they build is not known yet.');
   });
 
   it('the three research links and S, O open in a new tab; the app never fetches LinkedIn', async () => {

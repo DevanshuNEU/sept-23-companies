@@ -19,3 +19,12 @@ describe('approve guard', () => {
     for (const path of callers) expect(ALLOWED).toContain(path);
   });
 });
+
+describe('batch approve guard', () => {
+  it('only the Outbox list opens the batch (useApproveBatch is used nowhere else)', () => {
+    const users = Object.entries(sources)
+      .filter(([path, text]) => !isTest(path) && text.includes('useApproveBatch(') && !path.endsWith('use-approve-batch.ts'))
+      .map(([path]) => path);
+    expect(users).toEqual(['/src/routes/outbox/outbox-list.tsx']);
+  });
+});

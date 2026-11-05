@@ -140,4 +140,40 @@ describe('useApproveBatch', () => {
     expect(approve).toHaveBeenCalledTimes(drafts.length);
     for (const call of approve.mock.calls) expect(call[2]).toMatchObject({ keepalive: true });
   });
+
+  it('S on a draft inside the window skips it and takes it out of the batch: the others still approve', async () => {
+    const { client, drafts } = await setup();
+    const approve = vi.spyOn(client, 'approve');
+    go();
+    await settle();
+    const skipped = drafts[0]!;
+    fireEvent.click(findRow(skipped.person.name)!);
+    await settle(200);
+    fireEvent.keyDown(document.body, { key: 's' });
+    await settle(8000);
+    await settle(1000);
+    expect(approve).toHaveBeenCalledTimes(drafts.length - 1);
+    expect(approve.mock.calls.map((c) => c[0])).not.toContain(skipped.messageId);
+    // A skipped email lives in Closed, which the list keeps collapsed: it is in neither Drafts nor Approved.
+    expect(groupOf(skipped.person.name)).toBeUndefined();
+    for (const d of drafts.slice(1)) expect(groupOf(d.person.name)).toBe('approved');
+  });
+
+  it('U on a draft inside the window pulls only that one out, and the others keep their Undo', async () => {
+    const { client, drafts } = await setup();
+    const approve = vi.spyOn(client, 'approve');
+    go();
+    await settle();
+    const pulled = drafts[0]!;
+    fireEvent.click(findRow(pulled.person.name)!);
+    await settle(200);
+    fireEvent.keyDown(document.body, { key: 'u' });
+    await settle();
+    expect(liveUndos()).toHaveLength(1);
+    expect(groupOf(pulled.person.name)).toBe('review');
+    expect(approve).not.toHaveBeenCalled();
+    await settle(8000);
+    expect(approve).toHaveBeenCalledTimes(drafts.length - 1);
+    expect(approve.mock.calls.map((c) => c[0])).not.toContain(pulled.messageId);
+  });
 });

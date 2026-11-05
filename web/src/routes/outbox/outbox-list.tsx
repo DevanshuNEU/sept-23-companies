@@ -409,7 +409,7 @@ export function OutboxList({
                   <div role="group" aria-label="Approve clean drafts" className="grid gap-1 border-b bg-subtle/60 px-3 py-1.5">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-muted-foreground tabular-nums">{`${clean.length} ready to approve`}</span>
-                      <Button type="button" variant="outline" size="xs" className="ml-auto" onClick={openBatch}>
+                      <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={openBatch}>
                         {`Approve ${clean.length}`}
                         <Kbd aria-hidden>⇧A</Kbd>
                       </Button>

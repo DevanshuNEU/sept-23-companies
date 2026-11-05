@@ -30,7 +30,7 @@ function Body({ drafts, onClose, onConfirm }: { drafts: OutboxItem[]; onClose: (
         <label className="flex items-center gap-2.5 border-b pb-2 text-sm font-medium">
           <Checkbox
             aria-label="Select all"
-            checked={all ? true : picked.length === 0 ? false : 'indeterminate'}
+            checked={all}
             onCheckedChange={() => setTicked(all ? new Set() : new Set(drafts.map((d) => d.messageId)))}
           />
           <span aria-hidden>Select all</span>

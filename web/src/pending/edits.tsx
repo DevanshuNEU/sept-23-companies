@@ -12,11 +12,15 @@ class EditsStore {
   private readonly map = new Map<Id, Edit>();
   private readonly listeners = new Set<() => void>();
   private count = 0;
+  private changes = 0;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
+
+  /** A number that changes whenever any email's unsaved text is set or dropped. */
+  version = (): number => this.changes;
 
   /** How many emails have unsaved text. */
   size = (): number => this.count;
@@ -46,6 +50,7 @@ class EditsStore {
 
   private changed(): void {
     this.count = this.map.size;
+    this.changes += 1;
     for (const l of this.listeners) l();
   }
 }
@@ -76,4 +81,11 @@ export function useEdits(): EditsStore {
   const store = useContext(EditsContext);
   if (!store) throw new Error('unsaved edits outside EditsProvider');
   return store;
+}
+
+/** Re-renders the caller whenever any email's unsaved text changes, so a count read from `get` stays true. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useEditsVersion(): number {
+  const store = useEdits();
+  return useSyncExternalStore(store.subscribe, store.version);
 }

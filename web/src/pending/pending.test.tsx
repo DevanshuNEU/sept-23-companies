@@ -327,6 +327,61 @@ describe('pending writes', () => {
     expect(text('status')).toBe('approved');
   });
 
+  it('cancel on a member of a queued batch takes only that one out: the rest still commits, with its own overlay and label', async () => {
+    await setup();
+    const commit = approveCommit();
+    // A batch of two: `without` rebuilds the write for what is left (nothing left means the whole write goes).
+    const build = (ids: string[]): PendingWrite => ({
+      id: `batch:${ids.join(',')}`,
+      label: `Approved ${ids.length} drafts.`,
+      afterCommit: `Approved ${ids.length} drafts.`,
+      patches: ids.length === 2 ? [approvePatch, shellPatch] : ids.length === 1 ? [starPatch] : [],
+      commit,
+      members: { ids, without: (id) => (ids.length === 1 ? null : build(ids.filter((i) => i !== id))) },
+    });
+    act(() => api.write!(build(['approve:m1', 'approve:m2'])));
+    await settle();
+    expect(text('status')).toBe('approved');
+    expect(screen.getByText('Approved 2 drafts.')).toBeInTheDocument();
+
+    let dropped = false;
+    act(() => {
+      dropped = api.cancel!('approve:m1');
+    });
+    await settle();
+    expect(dropped).toBe(true);
+    // The overlay is the rebuilt one: the approve patch is gone, the star patch is on.
+    expect(text('status')).toBe('drafted');
+    expect(text('starred')).toBe('true');
+    expect(screen.getByText('Approved 1 drafts.')).toBeInTheDocument();
+    expect(commit).not.toHaveBeenCalled();
+
+    await settle(8000);
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancel on the last member of a batch drops the whole write', async () => {
+    await setup();
+    const commit = approveCommit();
+    act(() =>
+      api.write!({
+        id: 'batch:one',
+        label: 'Approved 1 draft.',
+        afterCommit: 'Approved 1 draft.',
+        patches: [approvePatch],
+        commit,
+        members: { ids: ['approve:m1'], without: () => null },
+      }),
+    );
+    await settle();
+    act(() => {
+      expect(api.cancel!('approve:m1')).toBe(true);
+    });
+    await settle(8000);
+    expect(text('status')).toBe('drafted');
+    expect(commit).not.toHaveBeenCalled();
+  });
+
   it('flushes pending writes on pagehide', async () => {
     await setup();
     const commit = approveCommit();

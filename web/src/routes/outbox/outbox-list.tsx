@@ -6,10 +6,16 @@ import { EmptyState } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { Kbd } from '@/components/ui/kbd';
 import { useAnnounce, useHotkeys, useLiveSelection } from '@/keyboard/hotkeys';
+import { useEdits, useEditsVersion } from '@/pending/edits';
 import { ageDays, formatDay, formatLocalTime, formatSendDay } from '@/lib/format';
 import { FOLLOWUP_COUNT } from '@/lib/followups';
+import { ApproveBatchDialog } from './approve-batch-dialog';
+import { cleanDrafts, heldBack, heldBackText } from './approve-batch';
 import { byKey, isBlocked, slotOf, type Slot } from './outbox-order';
+import { useApproveBatch } from './use-approve-batch';
 import { useStableOrder } from '@/lib/stable-order';
 import { messageStatus, touchStatus, type Status } from '@/lib/status';
 import { cn } from '@/lib/utils';
@@ -185,6 +191,10 @@ export function OutboxList({
   advanceRef: MutableRefObject<((from: Id) => void) | null>;
 } & Extra) {
   const say = useAnnounce();
+  const edits = useEdits();
+  useEditsVersion(); // re-render when unsaved text appears or goes, so the Approve count stays true
+  const approveBatch = useApproveBatch();
+  const [batch, setBatch] = useState<OutboxItem[] | null>(null);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<ReadonlySet<OutboxGroup>>(() => new Set(['closed']));
   // Rows he has seen. A refetch that brings new ones holds them behind an "N new" pill until he asks.
@@ -200,6 +210,15 @@ export function OutboxList({
   const isFresh = (i: OutboxItem) => !seen.has(i.touchId) && i.touchId !== selected;
   const q = query.trim().toLowerCase();
   const matches = (i: OutboxItem) => q === '' || [i.person.name, i.company.name, i.subject].some((s) => s.toLowerCase().includes(q));
+
+  const hasUnsaved = (messageId: Id) => edits.get(messageId) !== undefined;
+  const clean = cleanDrafts(items, hasUnsaved);
+  const stays = heldBackText(heldBack(items, hasUnsaved));
+  // The dialog gets the drafts as they are the moment he asks, so what he reads is what he approves.
+  const openBatch = () => {
+    const now = cleanDrafts(items, hasUnsaved);
+    if (now.length > 0) setBatch(now);
+  };
 
   const buckets = GROUPS.map(({ group, label }) => {
     const all = ordered.filter((i) => (slot(i) === 'blocked' ? 'review' : slot(i)) === group && matches(i));
@@ -304,6 +323,7 @@ export function OutboxList({
     { keys: 'arrowup', label: 'Previous row', group: 'Everywhere', run: () => move(-1) },
     { keys: 'shift+j', label: 'Next group (shows new rows first)', group: 'Outbox', run: () => moveGroup(1) },
     { keys: 'shift+k', label: 'Previous group', group: 'Outbox', run: () => moveGroup(-1) },
+    { keys: 'shift+a', label: 'Review and approve the clean drafts', group: 'Outbox', enabled: clean.length > 0, run: openBatch },
   ]);
 
   const toggle = (group: OutboxGroup) =>
@@ -385,6 +405,18 @@ export function OutboxList({
                     </button>
                   </div>
                 ) : null}
+                {isOpen && b.group === 'review' && clean.length > 0 ? (
+                  <div role="group" aria-label="Approve clean drafts" className="grid gap-1 border-b bg-subtle/60 px-3 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-muted-foreground tabular-nums">{`${clean.length} ready to approve`}</span>
+                      <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={openBatch}>
+                        {`Approve ${clean.length}`}
+                        <Kbd aria-hidden>⇧A</Kbd>
+                      </Button>
+                    </div>
+                    {stays ? <p className="text-xs text-muted-foreground">{stays}</p> : null}
+                  </div>
+                ) : null}
                 {isOpen && (b.group !== 'review' || b.ready.length > 0 || b.blocked.length === 0) ? (
                   <div role="listbox" aria-label={b.label}>
                     {b.group === 'sent' && virtual ? (
@@ -433,6 +465,15 @@ export function OutboxList({
           })
         )}
       </div>
+      <ApproveBatchDialog
+        drafts={batch}
+        onClose={() => setBatch(null)}
+        onConfirm={(picked) => {
+          approveBatch(picked);
+          setBatch(null);
+          if (selected !== null && picked.some((d) => d.touchId === selected)) advance(selected);
+        }}
+      />
     </div>
   );
 }

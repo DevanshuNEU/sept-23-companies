@@ -22,6 +22,12 @@ export interface PendingWrite {
   immediate?: boolean;
   /** With `immediate`: no toast either, for a write that is not worth a word (marking wins seen). A failure still toasts. */
   silent?: boolean;
+  /**
+   * A write that holds several things at once (a batch approve). `ids` name them the way a single write would (`approve:m12`),
+   * so `cancel('approve:m12')` takes just that one out while the window runs. `without(id)` builds the write for what is left,
+   * or null when nothing is. The rest keeps its undo window, its toast and its place in the queue.
+   */
+  members?: { ids: readonly string[]; without: (id: string) => PendingWrite | null };
 }
 
 interface Overlay {
@@ -31,7 +37,9 @@ interface Overlay {
 }
 
 interface Queued {
+  /** Replaced when a member is taken out of a batch; the timer and a flush always read the current one. */
   write: PendingWrite;
+  windowMs: number;
   requestId: string;
   toastId: string;
   timer: ReturnType<typeof setTimeout>;
@@ -87,12 +95,13 @@ class PendingStore {
 
     const entry: Queued = {
       write,
+      windowMs,
       requestId,
       toastId,
       timer: setTimeout(() => {
         if (!this.take(entry)) return;
         toast.dismiss(toastId);
-        void this.run(write, requestId, toastId, { requestId });
+        void this.run(entry.write, requestId, toastId, { requestId });
       }, windowMs),
     };
     this.queue.push(entry);
@@ -111,7 +120,24 @@ class PendingStore {
   /** Drops the write with this id if it is still in its window: no commit, overlay and toast removed. False when there is none. */
   cancel(id: string): boolean {
     const entry = this.queue.find((e) => e.write.id === id);
-    return entry ? this.undo(entry) : false;
+    if (entry) return this.undo(entry);
+    const batch = this.queue.find((e) => e.write.members?.ids.includes(id));
+    return batch ? this.dropMember(batch, id) : false;
+  }
+
+  /** Takes one thing out of a queued batch; the batch goes on without it, or is dropped when it was the last. */
+  private dropMember(entry: Queued, id: string): boolean {
+    const next = entry.write.members?.without(id) ?? null;
+    if (next === null) return this.undo(entry);
+    this.setOverlays([
+      ...this.overlays.filter((o) => o.owner !== entry.requestId),
+      ...next.patches.map((p) => ({ owner: entry.requestId, hash: hashKey(p.key), apply: (d: unknown) => p.apply(d) })),
+    ]);
+    this.active.delete(entry.write.id);
+    this.active.add(next.id);
+    entry.write = next;
+    toast(next.label, { id: entry.toastId, duration: entry.windowMs, action: { label: 'Undo', onClick: () => this.undo(entry) } });
+    return true;
   }
 
   /** True from the moment a write with this id is queued until its commit and refetch settle (an undo ends it too). */

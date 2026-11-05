@@ -1071,8 +1071,10 @@ px the rail stacks above the company as before. The profile follows the selectio
 **The profile (`profile-panel.tsx`; every line is `queue.profile`, built in `outreach/api/queries/profile.py`).** Small
 icon headers, in order. Each fact shows its words, then in small muted text how sure it is and where it comes from
 ("estimate, LinkedIn", "confirmed, SEC Form D"; a fact he set himself says "set by you"). A fact nothing is known about
-says **Not known** in the muted colour, never red, and its row keeps a free column on the right for a future edit pencil
-(editing is not built).
+is not a row of its own (changed 2026-11-05): a section with nothing known is dropped, and one muted block at the foot,
+**Not known yet**, lists what is unknown in one line per word ("Not known: Stage, HQ, E-Verify", "Not checked: Headcount",
+"Not on file: Website", "Not judged yet: What they build"), never red. A known fact's row keeps a free column on the right
+for a future edit pencil (editing is not built).
 
 | Section | Shows | Comes from |
 |---|---|---|
@@ -1084,20 +1086,21 @@ says **Not known** in the muted colour, never red, and its row keeps a free colu
 | Open roles at your level | Up to 5: title (a link), level, age, place; early career fits first, then newest; else "None open at your level" | the postings under the current ruleset (`outreach/plan/fresh.py` `load_level_roles`) |
 | People on record | "2 on record, none asked yet", "4 on record, 4 asked, free again Nov 18" | the people and the contact state |
 | Your history | "You applied on Oct 20; this is a new role." (or "You applied on Oct 20."), the last touch, up to 3 "Not now on Nov 7: too big" lines; else "Nothing yet" | applications, outbound touches, `pick_passed` events |
-| Links | Careers, Website, LinkedIn page (new tab, `noopener`; never fetched) | as the three research links |
 
 **The company, calmer (`company-panel.tsx`, `why-today.tsx`).**
 
 - **Header.** A 44 px monogram, the name at 28 px with tight tracking (the focus target), one line under it: what they
   build (the judge's sentence, two lines at most, else "What they build is not known yet." in muted). Under that, chips:
-  the level word ("SWE I role", else the lane word) and **Fit 82** when the judge has read the company: green from 70,
+  the level word only when there is no opening line to say it (changed 2026-11-05; else the lane word) and **Fit 82** when the judge has read the company: green from 70,
   amber 50 to 69, muted below 50 (a weak fit is quiet, never red).
 - **Why today** is one card (`bg-card`, hairline, 12 px radius): the opening title as a link with its level and age, "You
   applied on Oct 20; this is a new role." when it applies, then the reasons as **chips with icons** (the new opening in
   the info hue, E-Verify, sponsorship, size and stage, new roles in 30 days, then the ranker's own reasons, each once),
-  then the judge's one-line reason in a quiet quote style with "Risk: ..." under it. Not judged: "Judge: not judged yet."
+  then the judge's one-line reason in a quiet quote style with "Risk: ..." under it. Not judged: nothing here (changed
+  2026-11-05; the header and the profile already say it). The ranker's "Open role at your level" and "New opening ..."
+  reasons are dropped as repeats of the opening line and the new tag.
 - **Actions.** One filled button, Open LinkedIn search (S). Quieter beside it: Copy for terminal (C), Log applied (A);
-  on the next line the research links, Careers (O), Website, LinkedIn page, all in the soft grey button.
+  on the next line the research links, Careers (O), Website, LinkedIn page, as one quiet row of text links, so the one filled button stays the only button. The profile has no Links section (a repeat).
 - **Where it stands** (and the email hint) in one quiet list. **Log people you asked** (L) and **Save this search** are
   two small rows that start closed (a chevron, the name, a hint in grey, the key); L opens the first and puts the cursor
   in it, and it closes again when he moves to another company. A company with no room in its wave has no such row, and L
@@ -1107,7 +1110,8 @@ says **Not known** in the muted colour, never red, and its row keeps a free colu
 **The rail, more alive.** The day first: "2 of 8 reached" over a slim bar (`role="meter"`, green), counting what is done and
 never what is left. Each row: a 32 px **monogram** (the company's first letter on one of eight calm hues chosen by a hash
 of the name, so it is the same colour every day; never the brand violet; `src/lib/monogram.ts`), the name, the fit chip
-on the right when judged, the new-opening tag, one reason line, and a word only once the row is Done, Logged or Carried
+on the right when judged (no Email chip on the rail since 2026-11-05: the head counts the emailable picks and the
+panel shows the chip), the new-opening tag, one reason line, and a word only once the row is Done, Logged or Carried
 over (a check, dot or half disc sits on the monogram). The selected row is a card with a hairline, a shadow and a 3 px
 foreground bar on its left. The head under the date says `8 picks` (`, 1 carried over`, `, 2 passed`); the reached count
 lives in the rail.

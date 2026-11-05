@@ -19,6 +19,7 @@ import {
   type ReviewKind,
   type ShellSummary,
 } from '@/api';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, QueryState, StateBanner } from '@/components/state-views';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -537,9 +538,7 @@ function ProgressLine({ data }: { data: NeedsYouView }) {
   if (open === 0) return null;
   const text = data.settledToday > 0 ? `${data.settledToday} settled today, ${open} open` : `${open} open`;
   return (
-    <p data-testid="ny-progress" className="mt-0.5 text-sm text-muted-foreground tabular-nums">
-      {text}
-    </p>
+    <p data-testid="ny-progress">{text}</p>
   );
 }
 
@@ -554,20 +553,22 @@ export default function NeedsYouPage() {
   const job = query.data?.boardsJob ?? null;
   return (
     <div className="max-w-[1080px] px-6 pt-5 pb-12">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Needs you</h1>
-          {query.data ? <ProgressLine data={query.data} /> : null}
-          <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
-            Things only you can settle. Your answer sticks.
-          </p>
-        </div>
-        {job ? (
-          <p className="text-xs text-muted-foreground">
-            {`Boards read ${formatDayTime(job.startedAt)}.${job.expectedNextAt ? ` Next read ${formatWeekdayTime(job.expectedNextAt)}` : ''}`}
-          </p>
-        ) : null}
-      </div>
+      <PageHeader
+        title="Needs you"
+        summary={
+          <>
+            {query.data ? <ProgressLine data={query.data} /> : null}
+            <p className="max-w-2xl">Things only you can settle. Your answer sticks.</p>
+          </>
+        }
+        aside={
+          job ? (
+            <p className="text-xs text-muted-foreground">
+              {`Boards read ${formatDayTime(job.startedAt)}.${job.expectedNextAt ? ` Next read ${formatWeekdayTime(job.expectedNextAt)}` : ''}`}
+            </p>
+          ) : null
+        }
+      />
       <QueryState query={query} skeleton={<NeedsYouSkeleton />} empty={null}>
         {(data) => (
           <>

@@ -316,6 +316,11 @@ function Footer({ s }: { s: ShellSummary | undefined }) {
   const sender = SENDER[s.sending.state];
   return (
     <SidebarFooter className="gap-2.5 border-t border-sidebar-border p-4 text-xs text-muted-foreground">
+      <div className="flex h-6 items-center gap-2">
+        <span aria-hidden className={cn('size-2 rounded-full', DOT[s.repliesThisMonth > 0 ? 'ok' : 'idle'])} />
+        <span className="text-sm leading-6 font-semibold tabular-nums text-foreground">{plural(s.repliesThisMonth, 'reply', 'replies')}</span>
+        <span className="ml-auto">{`in ${formatMonth(s.asOf)}`}</span>
+      </div>
       <div className="flex h-5 items-center gap-2">
         <span
           data-testid="sender-dot"
@@ -324,11 +329,6 @@ function Footer({ s }: { s: ShellSummary | undefined }) {
         />
         <span className="font-medium text-foreground">{sender.label}</span>
         <span className="ml-auto whitespace-nowrap tabular-nums">{`${s.sending.sentToday} of ${s.sending.limitToday} today`}</span>
-      </div>
-      <div className="flex h-5 items-center gap-2">
-        <span aria-hidden className={cn('size-2 rounded-full', DOT[s.repliesThisMonth > 0 ? 'ok' : 'idle'])} />
-        <span className="font-medium text-foreground">{plural(s.repliesThisMonth, 'reply', 'replies')}</span>
-        <span className="ml-auto">{`in ${formatMonth(s.asOf)}`}</span>
       </div>
       <BoardsRead jobs={s.jobs} />
       {s.pipeline ? <PipelineScore line={s.pipeline} /> : null}

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { CircleCheck } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
 import { pollMs, queryKeys, usePageClient, type DoneCompany, type DoneView } from '@/api';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, QueryState } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,12 +19,11 @@ export default function DonePage() {
   const query = useViewQuery(queryKeys.done, () => client.done(), { pollMs: pollMs.default });
   return (
     <div className="max-w-[1360px] px-6 pt-5 pb-12">
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold tracking-tight">Done companies</h1>
-        <p className="mt-0.5 text-[13px] text-muted-foreground">
-          Closed with an interview or a referral. They never come back to Today, and nothing is sent there.
-        </p>
-      </div>
+      <PageHeader
+        className="mb-4"
+        title="Done companies"
+        summary="Closed with an interview or a referral. They never come back to Today, and nothing is sent there."
+      />
       <QueryState query={query} skeleton={<DoneSkeleton />} empty={null}>
         {(view) => <DoneBody view={view} />}
       </QueryState>

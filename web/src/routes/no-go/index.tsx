@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { Ban, Search } from 'lucide-react';
 import { pollMs, queryKeys, usePageClient, type NoGoReason, type NoGoView, type ShellSummary } from '@/api';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, QueryState } from '@/components/state-views';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -227,12 +228,11 @@ export default function NoGoPage() {
 
   return (
     <div className="px-6 pt-5 pb-12">
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold tracking-tight">No-go list</h1>
-        <p className="mt-0.5 text-[13px] text-muted-foreground">
-          Every company and person kept out, why, and where that came from. Nothing here is proposed or emailed.
-        </p>
-      </div>
+      <PageHeader
+        className="mb-4"
+        title="No-go list"
+        summary="Every company and person kept out, why, and where that came from. Nothing here is proposed or emailed."
+      />
 
       <QueryState
         query={query}

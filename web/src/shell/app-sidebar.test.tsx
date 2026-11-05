@@ -187,6 +187,16 @@ describe('AppShell sidebar', () => {
     expect(screen.getByRole('button', { name: 'Boards read Mon 08:04' })).toBeInTheDocument();
   });
 
+  it('puts replies first in the footer and sets them larger than the housekeeping lines', async () => {
+    await shell();
+    const replies = screen.getByText('9 replies');
+    const sending = screen.getByText('Sending');
+    expect(replies.compareDocumentPosition(sending) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(replies.className).toMatch(/text-(sm|base)/);
+    expect(replies.className).toContain('font-semibold');
+    expect(sending.className).not.toContain('font-semibold');
+  });
+
   it('shows the scorecard line under "Boards read", in the same muted style', async () => {
     await shell();
     const line = screen.getByText('Coverage 32%, level 51%');

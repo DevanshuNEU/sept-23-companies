@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Award, ChevronRight } from 'lucide-react';
 import { pollMs, queryKeys, usePageClient, type Id, type Win, type WinsView } from '@/api';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, QueryState } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
 import { Badge } from '@/components/ui/badge';
@@ -137,10 +138,7 @@ export default function WinsPage() {
 
   return (
     <div data-testid="wins-page" className="max-w-[880px] px-6 pt-5 pb-12">
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold tracking-tight">Wins</h1>
-        <p className="mt-0.5 text-[13px] text-muted-foreground">Every win you have logged, newest first, with what you sent.</p>
-      </div>
+      <PageHeader className="mb-4" title="Wins" summary="Every win you have logged, newest first, with what you sent." />
       <QueryState
         query={query}
         skeleton={<WinsSkeleton />}

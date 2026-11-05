@@ -13,7 +13,7 @@ import { useEdits, useEditsVersion } from '@/pending/edits';
 import { ageDays, formatDay, formatLocalTime, formatSendDay } from '@/lib/format';
 import { FOLLOWUP_COUNT } from '@/lib/followups';
 import { ApproveBatchDialog } from './approve-batch-dialog';
-import { cleanDrafts, heldBack, heldBackText } from './approve-batch';
+import { approvableDrafts, cleanDrafts, heldBack, heldBackText, splitText } from './approve-batch';
 import { byKey, isBlocked, slotOf, type Slot } from './outbox-order';
 import { useApproveBatch } from './use-approve-batch';
 import { useStableOrder } from '@/lib/stable-order';
@@ -212,11 +212,13 @@ export function OutboxList({
   const matches = (i: OutboxItem) => q === '' || [i.person.name, i.company.name, i.subject].some((s) => s.toLowerCase().includes(q));
 
   const hasUnsaved = (messageId: Id) => edits.get(messageId) !== undefined;
-  const clean = cleanDrafts(items, hasUnsaved);
+  const approvable = approvableDrafts(items, hasUnsaved);
+  const cleanCount = cleanDrafts(items, hasUnsaved).length;
+  const split = splitText(cleanCount, approvable.length - cleanCount);
   const stays = heldBackText(heldBack(items, hasUnsaved));
   // The dialog gets the drafts as they are the moment he asks, so what he reads is what he approves.
   const openBatch = () => {
-    const now = cleanDrafts(items, hasUnsaved);
+    const now = approvableDrafts(items, hasUnsaved);
     if (now.length > 0) setBatch(now);
   };
 
@@ -323,7 +325,7 @@ export function OutboxList({
     { keys: 'arrowup', label: 'Previous row', group: 'Everywhere', run: () => move(-1) },
     { keys: 'shift+j', label: 'Next group (shows new rows first)', group: 'Outbox', run: () => moveGroup(1) },
     { keys: 'shift+k', label: 'Previous group', group: 'Outbox', run: () => moveGroup(-1) },
-    { keys: 'shift+a', label: 'Review and approve the clean drafts', group: 'Outbox', enabled: clean.length > 0, run: openBatch },
+    { keys: 'shift+a', label: 'Review and approve the clean drafts', group: 'Outbox', enabled: approvable.length > 0, run: openBatch },
   ]);
 
   const toggle = (group: OutboxGroup) =>
@@ -405,16 +407,22 @@ export function OutboxList({
                     </button>
                   </div>
                 ) : null}
-                {isOpen && b.group === 'review' && clean.length > 0 ? (
+                {isOpen && b.group === 'review' && approvable.length > 0 ? (
                   <div role="group" aria-label="Approve clean drafts" className="grid gap-1 border-b bg-subtle/60 px-3 py-1.5">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-muted-foreground tabular-nums">{`${clean.length} ready to approve`}</span>
+                      <span className="text-xs font-medium text-muted-foreground tabular-nums">{`${approvable.length} ready to approve`}</span>
                       <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={openBatch}>
-                        {`Approve ${clean.length}`}
+                        {`Review ${approvable.length}`}
                         <Kbd aria-hidden>⇧A</Kbd>
                       </Button>
                     </div>
-                    {stays ? <p className="text-xs text-muted-foreground">{stays}</p> : null}
+                    {split || stays ? (
+                      <p className="text-xs text-muted-foreground">
+                        {split ? <span>{split}</span> : null}
+                        {split && stays ? ' ' : null}
+                        {stays ? <span>{stays}</span> : null}
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
                 {isOpen && (b.group !== 'review' || b.ready.length > 0 || b.blocked.length === 0) ? (

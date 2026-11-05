@@ -68,28 +68,31 @@ test('a reply shows the hold alert', async ({ page, consoleErrors }) => {
   expect(consoleErrors).toEqual([]);
 });
 
-test('the Approve bar opens the clean drafts, and Undo takes the batch back', async ({ page, consoleErrors }) => {
+test('the Approve bar reviews the drafts he may tick, and Undo takes the batch back', async ({ page, consoleErrors }) => {
   await page.goto('/outbox');
   const bar = page.getByRole('group', { name: 'Approve clean drafts' });
-  await expect(bar.getByText('3 ready to approve')).toBeVisible();
+  // 3 clean and 2 with a warning; the 2 blocked drafts stay out.
+  await expect(bar.getByText('5 ready to approve')).toBeVisible();
+  await expect(bar.getByText('3 clean, 2 with warnings.')).toBeVisible();
   await page.screenshot({ path: '../.context/approve-bar.png' });
 
-  await bar.getByRole('button', { name: 'Approve 3' }).click();
+  await bar.getByRole('button', { name: 'Review 5' }).click();
   const dialog = page.getByRole('dialog'); // its title follows the ticks, so it is found by role alone
-  await expect(page.getByRole('dialog', { name: 'Approve 3 drafts' })).toBeVisible();
-  await expect(dialog.getByRole('checkbox', { name: 'Select all' })).toBeChecked();
+  await expect(dialog.getByRole('heading', { name: 'Approve 3 drafts' })).toBeVisible();
   await page.screenshot({ path: '../.context/approve-dialog.png' });
 
+  await dialog.getByRole('checkbox', { name: 'Select all' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Approve 5 drafts' })).toBeVisible();
   await dialog.getByRole('checkbox').nth(1).click();
-  await expect(page.getByRole('dialog', { name: 'Approve 2 drafts' })).toBeVisible();
-  await page.screenshot({ path: '../.context/approve-dialog-unticked.png' });
+  await expect(dialog.getByRole('heading', { name: 'Approve 4 drafts' })).toBeVisible();
+  await page.screenshot({ path: '../.context/approve-dialog-warned.png' });
 
-  await dialog.getByRole('button', { name: 'Approve 2' }).click();
-  await expect(page.getByText('Approved 2 drafts.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Approve 4' }).click();
+  await expect(page.getByText('Approved 4 drafts.')).toBeVisible();
   await expect(bar.getByText('1 ready to approve')).toBeVisible();
   await page.screenshot({ path: '../.context/approve-toast.png' });
 
   await page.keyboard.press('z');
-  await expect(bar.getByText('3 ready to approve')).toBeVisible();
+  await expect(bar.getByText('5 ready to approve')).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });

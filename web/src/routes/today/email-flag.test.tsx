@@ -74,7 +74,8 @@ describe('Today with the email flag', () => {
   it('shows the chip and the reasons on the panel', async () => {
     await open();
     expect(within(panel()).getByRole('button', { name: /^Email: Website known \(pylon\.example\)/ })).toBeInTheDocument();
-    expect(within(panel()).getByText('Email. Website known (pylon.example). About 30 people: a founder or engineer reads this.')).toBeInTheDocument();
+    // The row is labelled Email, so the sentence does not start with the word again; a LinkedIn only row keeps its label.
+    expect(within(panel()).getByText('Website known (pylon.example). About 30 people: a founder or engineer reads this.')).toBeInTheDocument();
   });
 
   it('shows the website in the profile, or that none is on file', () => {

@@ -39,11 +39,14 @@ export function OpeningLine({ opening }: { opening: QueueOpening }) {
   );
 }
 
-/** One reason as a plain line of text, no pill and no icon. The fresh one leads with a solid dot and reads in the main colour. */
+/**
+ * One reason as a plain line of text in a two-column grid, each led by a small marker so the eye finds the start of a line.
+ * The fresh one has a solid marker and reads in the main colour; the rest have a faint one. No pill, no icon, no hue.
+ */
 function Reason({ tone = 'plain', children }: { tone?: 'plain' | 'fresh'; children: string }) {
   return (
-    <li data-reason={tone} className={cn('inline-flex items-center gap-1.5', tone === 'fresh' && 'font-medium text-foreground')}>
-      {tone === 'fresh' ? <span aria-hidden className="size-1.5 rounded-full bg-foreground" /> : null}
+    <li data-reason={tone} className={cn('flex items-start gap-2.5', tone === 'fresh' && 'font-medium text-foreground')}>
+      <span aria-hidden className={cn('mt-[7px] size-1.5 flex-none rounded-full', tone === 'fresh' ? 'bg-foreground' : 'bg-muted-foreground/40')} />
       {children}
     </li>
   );
@@ -99,13 +102,13 @@ function Verdict({ q }: { q: CompanyQueue }) {
 export function WhyToday({ q }: { q: CompanyQueue }) {
   const lines = reasons(q);
   return (
-    <section aria-label="Why today" className="grid gap-4 border-t pt-5">
+    <section aria-label="Why today" className="grid gap-5 border-t pt-6">
       <div className="grid gap-2">
         <h3 className="text-xs font-medium text-muted-foreground">Why today</h3>
         {q.opening ? <OpeningLine opening={q.opening} /> : <p className="text-[15px] leading-6 text-muted-foreground">No open role at your level. {q.whyToday}</p>}
       </div>
       {lines.length > 0 ? (
-        <ul aria-label="Why it should answer" className="flex flex-wrap gap-x-6 gap-y-1.5 text-[13px] leading-5 text-muted-foreground">
+        <ul aria-label="Why it should answer" className="grid gap-x-8 gap-y-2 text-[13px] leading-5 text-muted-foreground sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
           {lines.map((c) => (
             <Reason key={c.text} tone={c.tone}>
               {c.text}

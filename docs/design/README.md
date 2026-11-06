@@ -1094,13 +1094,16 @@ for a future edit pencil (editing is not built).
   the level word only when there is no opening line to say it (changed 2026-11-05; else the lane word) and **Fit 82** when the judge has read the company.
   Plain text, no pill and no colour (2026-11-05): from 70 it reads in the main colour, below that in the muted one.
 - **Why today** is open text under a hairline, not a box (changed 2026-11-05, the sleek pass): the opening title as a link with its level and age, "You
-  applied on Oct 20; this is a new role." when it applies, then the reasons as **plain lines of text with no pill and no icon** (the new opening first, in the main colour with a
-  small solid dot, then E-Verify, sponsorship, size and stage, new roles in 30 days, then the ranker's own reasons, each once),
+  applied on Oct 20; this is a new role." when it applies, then the reasons as **plain lines of text in two columns, each led by a small marker, no pill and no icon** (the new
+  opening first, in the main colour with a solid marker, the rest with a faint one, then E-Verify, sponsorship, size and stage, new roles in 30 days, then the ranker's own reasons, each once),
   then the judge's one-line reason in a quiet quote style with "Risk: ..." under it. Not judged: nothing here (changed
   2026-11-05; the header and the profile already say it). The ranker's "Open role at your level" and "New opening ..."
   reasons are dropped as repeats of the opening line and the new tag.
 - **Actions.** One filled button, Open LinkedIn search (S). Quieter beside it: Copy for terminal (C), Log applied (A);
-  on the next line the research links, Careers (O), Website, LinkedIn page, as one quiet row of text links, so the one filled button stays the only button. The profile has no Links section (a repeat).
+  the research links, Careers (O), Website, LinkedIn page, are one quiet row of text links in the header, on the right of the
+  Fit and Email marks and under the name (2026-11-05), so the actions are three buttons and the one filled button stays
+  the only filled one. The profile has no Links section (a repeat). The Email line under Where it stands does not repeat
+  its own label ("Website known ...", not "Email. Website known ..."); a LinkedIn only row keeps its label.
 - **Where it stands** (and the email hint) in one quiet list. **Log people you asked** (L) and **Save this search** are
   two small rows that start closed (a chevron, the name, a hint in grey, the key); L opens the first and puts the cursor
   in it, and it closes again when he moves to another company. A company with no room in its wave has no such row, and L

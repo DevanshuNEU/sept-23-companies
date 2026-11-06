@@ -648,32 +648,33 @@ every card.
 
 | Token | Light | Dark |
 |---|---|---|
-| background | #f8f8f9 | #24252c |
-| foreground | #09090b | #f0f0f4 |
-| sidebar | #f2f2f4 | #1c1d23 |
-| subtle (table heads, group rows) | #f3f3f5 | #1f2026 |
-| card | #ffffff | #2e2f38 |
-| popover | #ffffff | #373843 |
-| muted | #eeeef1 | #353641 |
-| accent | #f0f0f3 | #30313b |
-| muted-foreground | #66666f | #a9a9b4 |
-| border | #e2e2e7 | white at 12% |
-| input | #c4c4cc | #707180 |
+| background | #f8f8f9 | #262624 |
+| foreground | #09090b | #eeece6 |
+| sidebar | #f2f2f4 | #1f1e1d |
+| subtle (table heads, group rows) | #f3f3f5 | #1b1a19 |
+| card | #ffffff | #30302e |
+| popover | #ffffff | #3a3937 |
+| muted | #eeeef1 | #363533 |
+| accent | #f0f0f3 | #2f2e2c |
+| muted-foreground | #66666f | #b0aea5 |
+| border | #e2e2e7 | #dedcd1 at 14% |
+| input | #c4c4cc | #7a7770 |
 | brand, ring | #5b48d9 | #a79ffb |
 | brand-foreground | #ffffff | #16122e |
-| primary, primary-foreground | #18181b, #fafafa | #ececf0, #24252c |
+| primary, primary-foreground | #18181b, #fafafa | #ece9e0, #262624 |
 | destructive | #dc2626 | #ef4444 |
 
 `web/src/styles/tokens.test.ts` holds this table and checks every text pair at 4.5:1 or better (muted-foreground on
 the canvas, muted, subtle, card, popover and sidebar; brand and brand-foreground on every surface it sits on) and
 the focus ring at 3:1 on the canvas and on cards.
 
-Dark theme (changed 2026-11-05, he uses it most, and the first two tries were "way too black"): slate charcoal, not
-black. The sidebar, canvas, card and popover are four clear lightness steps (#1c1d23, #24252c, #2e2f38, #373843), so
-each layer reads as its own surface, and raised cards carry a faint light top edge (`--shadow-xs` and `--shadow-sm` in
-`.dark`). Text is a soft off-white (#f0f0f4) and the filled button is #ececf0. The status colours are softer than the
-light theme's, tuned to one visual weight (the yellow no longer outshines the red). The violet is a little lighter
-(#a79ffb) so it still reads at 4.5:1 on the lighter surfaces.
+Dark theme colour (changed 2026-11-05, his words: "use Claude or Conductor style ... for dark theme I mean the color"): warm
+stone, the palette of Claude and Conductor, not cool grey, at the lightness he approved (a warm grey canvas, not
+near-black). The light theme and the violet accent are unchanged. In dark the sidebar, canvas, card and popover are
+four clear lightness steps (#1f1e1d, #262624, #30302e, #3a3937), so each layer reads as its own surface, and raised
+cards carry a faint light top edge (`--shadow-xs` and `--shadow-sm` in `.dark`). Text is a soft off-white (#eeece6) and the
+filled button #ece9e0. The status colours are softer in dark, tuned to one visual weight (the yellow no longer outshines
+the red). The violet in dark is #a79ffb so it still reads at 4.5:1 on every surface.
 
 ### Brand accent
 

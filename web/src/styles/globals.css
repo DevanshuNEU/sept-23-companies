@@ -79,37 +79,37 @@
 }
 
 .dark {
-  /* Charcoal with depth. Each layer is a clear step lighter than the one under it: sidebar, canvas, card, popover. Cards
+  /* Warm stone, the Claude and Conductor family, with depth. Each layer is a clear step lighter than the one under it: sidebar, canvas, card, popover. Cards
      and the selected rail row also carry a faint light edge along their top (the shadow tokens below), so a raised
      surface reads as raised, not as a flat rectangle. Text is a soft off-white, not pure white. */
-  --background: #24252c;
-  --foreground: #f0f0f4;
-  --card: #2e2f38;
-  --card-foreground: #f0f0f4;
-  --popover: #373843;
-  --popover-foreground: #f0f0f4;
-  --muted: #353641;
-  --muted-foreground: #a9a9b4;
-  --subtle: #1f2026;
-  --border: rgb(255 255 255 / 0.12);
-  --input: #707180;
+  --background: #262624;
+  --foreground: #eeece6;
+  --card: #30302e;
+  --card-foreground: #eeece6;
+  --popover: #3a3937;
+  --popover-foreground: #eeece6;
+  --muted: #363533;
+  --muted-foreground: #b0aea5;
+  --subtle: #1b1a19;
+  --border: rgb(222 220 209 / 0.14);
+  --input: #7a7770;
   --ring: #a79ffb;
   --brand: #a79ffb;
   --brand-foreground: #16122e;
-  --primary: #ececf0;
-  --primary-foreground: #24252c;
-  --secondary: #353641;
-  --secondary-foreground: #f0f0f4;
-  --accent: #30313b;
-  --accent-foreground: #f0f0f4;
+  --primary: #ece9e0;
+  --primary-foreground: #262624;
+  --secondary: #363533;
+  --secondary-foreground: #eeece6;
+  --accent: #2f2e2c;
+  --accent-foreground: #eeece6;
   --destructive: #ef4444;
-  --sidebar: #1c1d23;
-  --sidebar-foreground: #f0f0f4;
-  --sidebar-primary: #ececf0;
-  --sidebar-primary-foreground: #24252c;
-  --sidebar-accent: #2c2d36;
-  --sidebar-accent-foreground: #f0f0f4;
-  --sidebar-border: rgb(255 255 255 / 0.1);
+  --sidebar: #1f1e1d;
+  --sidebar-foreground: #eeece6;
+  --sidebar-primary: #ece9e0;
+  --sidebar-primary-foreground: #262624;
+  --sidebar-accent: #2d2c2a;
+  --sidebar-accent-foreground: #eeece6;
+  --sidebar-border: rgb(222 220 209 / 0.12);
   --sidebar-ring: #a79ffb;
 
   /* Status colours in dark: softer than the light theme's full strength, tuned to the same visual weight so the yellow
@@ -131,8 +131,8 @@
   --info-bd: rgb(59 130 246 / 0.28);
   --info-dot: #4f8fee;
   --idle: #cfcfd6;
-  --idle-bg: #34353f;
-  --idle-bd: #4a4b57;
+  --idle-bg: #383734;
+  --idle-bd: #4d4b47;
   --idle-dot: #71717a;
 
   --mono-teal-bg: #133632;

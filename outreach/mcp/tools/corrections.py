@@ -42,14 +42,15 @@ def _person(conn: sqlite3.Connection, person_id: int) -> sqlite3.Row:
     return row
 
 
-def already_sent(conn: sqlite3.Connection, person_id: int) -> bool:
+def already_sent(conn: sqlite3.Connection, person_id: int, *, thread_only: bool = False) -> bool:
     """Whether a first email went to this person on a thread that has not bounced: a sent touch, an import touch
-    (contacted before the system) or a first message in a sent state. A bounced thread is over."""
+    (contacted before the system) or a first message in a sent state. A bounced thread is over. `thread_only`
+    leaves the import touch out: it has no Gmail thread, so no follow-up can ride it."""
     touch = conn.execute("SELECT touch_id, state, origin, first_sent_at FROM touch WHERE person_id = ?",
                          (person_id,)).fetchone()
     if touch is None or touch["state"] == "bounced":
         return False
-    if touch["first_sent_at"] is not None or touch["origin"] == "import":
+    if touch["first_sent_at"] is not None or (touch["origin"] == "import" and not thread_only):
         return True
     marks = ",".join("?" * len(SENT_STATES))
     return conn.execute(f"SELECT 1 FROM message WHERE touch_id = ? AND seq = 0 AND state IN ({marks})",
@@ -66,17 +67,18 @@ def _shown(value) -> str:
 def record_edit(ctx: Ctx, person: sqlite3.Row, changes: dict[str, tuple], *, kind: str, summary: str,
                 company_id: int | None = None, extra: dict | None = None) -> dict:
     """The event and the review item for one edit, inside the caller's write transaction. `changes` maps each changed
-    field to (old, new); `summary` is the review reason. The item's key hashes the person and every old and new
-    value, so the same call is the same item and a later different change is a new one. `company_id` is the company
-    the person is at after the edit (the item and the event go there)."""
+    field to (old, new); `summary` is the review reason. The item's key hashes the person, their revision and every
+    old and new value, so a change made again after a later edit is a new notice, not a resolved one. `company_id`
+    is the company the person is at after the edit (the item and the event go there)."""
     conn = ctx.conn
     survivor = Family(conn).survivor(company_id if company_id is not None else person["company_id"])
     detail = {field: {"old": old, "new": new} for field, (old, new) in changes.items()}
     detail.update(extra or {})
     append_event(conn, entity="person", kind=kind, actor="claude", entity_id=person["person_id"],
                  company_id=survivor, at=ctx.now, detail=detail)
-    digest = hashlib.sha256(json.dumps([person["person_id"], sorted((f, o, n) for f, (o, n) in changes.items())],
-                                       default=str).encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256(json.dumps(
+        [person["person_id"], person["revision"], sorted((f, o, n) for f, (o, n) in changes.items())],
+        default=str).encode("utf-8")).hexdigest()[:16]
     raised = raise_flag_in(ctx, company_id=survivor, reason=summary, person_id=person["person_id"],
                            evidence_key=f"claude-edit:{digest}", detail={"edit": kind})
     return {"review_id": raised["review_id"], "review_created": raised["created"]}
@@ -95,7 +97,8 @@ def _email_changes(conn: sqlite3.Connection, person: sqlite3.Row, new_email: str
                                             f"{other['person_id']}).",
                             f"Check you have the right person. If {other['name']} is the same person, use "
                             f"person {other['person_id']}. Nothing was written.")
-        if old_email is not None and already_sent(conn, person["person_id"]):
+        # Clearing first does not get round this: with no address on record only a real thread still refuses.
+        if already_sent(conn, person["person_id"], thread_only=old_email is None):
             raise ToolError("email_sent_to", f"A first email already went to {old_email} and it did not bounce.",
                             "Follow-ups ride that thread, and the new address may be someone else. Clear the old "
                             "address with mark_email_bounced if it is dead, or ask Devanshu. Nothing was written.")
@@ -103,7 +106,10 @@ def _email_changes(conn: sqlite3.Connection, person: sqlite3.Row, new_email: str
     if new_email is None and person["channel"] == "email":
         changes["channel"] = ("email", "linkedin")
         changes["linkedin_reason"] = (person["linkedin_reason"], "no_email")
-    elif new_email is not None and person["channel"] == "linkedin":
+    elif new_email is not None and person["channel"] == "linkedin" and (
+            old_email is None or person["linkedin_reason"] == "no_email"):
+        # Only an address that fills a gap makes them an email contact. A LinkedIn person who already had an address
+        # (alum first, past budget) stays where their reason put them when the address is corrected.
         changes["channel"] = ("linkedin", "email")
         changes["linkedin_reason"] = (person["linkedin_reason"], None)
     return changes

@@ -70,13 +70,15 @@ happened at. The move event names both companies. A closed or no-go target compa
 
 A person on the email channel must have an address (`person` CHECK), except imports. Clearing an email on an
 email-channel person also sets `channel = linkedin` and `linkedin_reason = no_email`. Setting an email on a
-LinkedIn-channel person flips them to `email` and clears the reason, as `add_people` already does when it fills an
-address. An edit that would break a `person` CHECK or the unique email and LinkedIn indexes returns a plain
+LinkedIn-channel person flips them to `email` and clears the reason only when the address fills a gap (they had none,
+or their reason is `no_email`), as `add_people` already does. A LinkedIn person who already had an address (alum first,
+past budget) stays on LinkedIn when it is corrected. An edit that would break a `person` CHECK or the unique email and LinkedIn indexes returns a plain
 `{code, message, fix}` error and writes nothing.
 
 ## Replacing an email
 
-- Never sent to: applies at once.
+- Never sent to: applies at once. So does giving a first address to someone with none on record, unless a real Gmail
+  thread is already open (clearing an address first does not get round the next rule).
 - First email sent and not bounced (a touch with `first_sent_at`, an import touch, or a first message in a sent
   state, the same test as `why_not_email`): refused. Follow-ups ride the same Gmail thread and a new address may be a
   different human. The fix says to clear it with `mark_email_bounced` or ask Devanshu.
@@ -92,8 +94,8 @@ address. An edit that would break a `person` CHECK or the unique email and Linke
 - Audit is the existing `event` table. No new table.
 - Needs-you items reuse the `flagged` kind (`raise_flag` in `outreach/mcp/tools/research.py`): no new kind, no
   migration. Claude may only insert review items, so each call inserts one item. Its `evidence_key` is `claude-edit:`
-  plus a hash of the person and the changed fields with old and new values: a repeat of the same call returns the
-  same item, and a later different change gets a new one. Its company is the person's company after the edit. `ok`
+  plus a hash of the person, their revision and the changed fields with old and new values: a repeat of the same
+  call returns the same item, and a change made again after a later edit gets a new one. Its company is the person's company after the edit. `ok`
   clears it.
 - `SERVER_VERSION` goes from "2" to "3", since what tools write changes.
 

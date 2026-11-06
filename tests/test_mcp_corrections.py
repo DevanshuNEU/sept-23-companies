@@ -89,6 +89,46 @@ class UpdatePersonTest(CorrectionsCase):
         self.ok("update_person", {"person_id": self.pat, "email": "new@acme.example"})
         self.assertEqual(self.row(self.pat)["email"], "new@acme.example")
 
+    def test_clearing_then_replacing_cannot_get_round_the_sent_email_refusal(self):
+        touch = seed.touch(self.db, self.pat)
+        seed.send_first(self.db, touch)
+        self.ok("mark_email_bounced", {"person_id": self.pat, "reason": "I saw it bounce in Gmail"})
+        before = fingerprint(self.db)
+        err = self.error("update_person", {"person_id": self.pat, "email": "other@acme.example"})
+        self.assertEqual(err["code"], "email_sent_to")
+        self.assertEqual(fingerprint(self.db), before)
+        self.db.execute("UPDATE touch SET state = 'bounced', bounced_at = '2026-11-06T10:00:00Z' WHERE touch_id = ?",
+                        (touch,))
+        self.ok("update_person", {"person_id": self.pat, "email": "other@acme.example"})
+
+    def test_an_import_person_with_no_address_may_be_given_one(self):
+        old = seed.person(self.db, self.acme, "Ian Import", channel="linkedin")
+        self.db.execute("UPDATE person SET added_by = 'import', channel = 'email', linkedin_reason = NULL "
+                        "WHERE person_id = ?", (old,))
+        seed.touch(self.db, old, origin="import")
+        self.ok("update_person", {"person_id": old, "email": "ian@acme.example"})
+        self.assertEqual(self.row(old)["email"], "ian@acme.example")
+
+    def test_a_correction_keeps_a_linkedin_person_on_linkedin_when_they_already_had_an_address(self):
+        for reason in ("alum_first", "past_budget"):
+            with self.subTest(reason=reason):
+                sam = seed.person(self.db, self.acme, f"Sam {reason}", channel="linkedin")
+                self.db.execute("UPDATE person SET email = ?, linkedin_reason = ? WHERE person_id = ?",
+                                (f"{reason}@acme.example", reason, sam))
+                self.ok("update_person", {"person_id": sam, "email": f"fixed-{reason}@acme.example"})
+                row = self.row(sam)
+                self.assertEqual((row["email"], row["channel"], row["linkedin_reason"]),
+                                 (f"fixed-{reason}@acme.example", "linkedin", reason))
+
+    def test_a_repeated_change_after_the_first_notice_was_cleared_raises_a_new_notice(self):
+        self.ok("update_person", {"person_id": self.pat, "title": "Staff Engineer"})
+        self.db.execute("UPDATE review_item SET state = 'resolved', resolution = 'marked_ok', resolved_at = ?", (NOW,))
+        self.ok("update_person", {"person_id": self.pat, "title": "Software Engineer"})
+        self.db.execute("UPDATE review_item SET state = 'resolved', resolution = 'marked_ok', resolved_at = ?", (NOW,))
+        again = self.ok("update_person", {"person_id": self.pat, "title": "Staff Engineer"})
+        self.assertEqual([r["state"] for r in self.items()], ["resolved", "resolved", "open"])
+        self.assertEqual(again["review_id"], self.items()[2]["review_id"])
+
     def test_an_import_touch_counts_as_sent(self):
         seed.touch(self.db, self.pat, origin="import")
         self.assertEqual(self.error("update_person", {"person_id": self.pat, "email": "new@acme.example"})["code"],

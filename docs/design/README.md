@@ -648,30 +648,32 @@ every card.
 
 | Token | Light | Dark |
 |---|---|---|
-| background | #f8f8f9 | #141418 |
-| foreground | #09090b | #ececf0 |
-| sidebar | #f2f2f4 | #0e0e11 |
-| subtle (table heads, group rows) | #f3f3f5 | #101014 |
-| card | #ffffff | #1b1b21 |
-| popover | #ffffff | #222229 |
-| muted | #eeeef1 | #25252d |
-| accent | #f0f0f3 | #212128 |
-| muted-foreground | #66666f | #a1a1aa |
-| border | #e2e2e7 | white at 10% |
-| input | #c4c4cc | #52525b |
-| brand, ring | #5b48d9 | #9187f7 |
+| background | #f8f8f9 | #24252c |
+| foreground | #09090b | #f0f0f4 |
+| sidebar | #f2f2f4 | #1c1d23 |
+| subtle (table heads, group rows) | #f3f3f5 | #1f2026 |
+| card | #ffffff | #2e2f38 |
+| popover | #ffffff | #373843 |
+| muted | #eeeef1 | #353641 |
+| accent | #f0f0f3 | #30313b |
+| muted-foreground | #66666f | #a9a9b4 |
+| border | #e2e2e7 | white at 12% |
+| input | #c4c4cc | #707180 |
+| brand, ring | #5b48d9 | #a79ffb |
 | brand-foreground | #ffffff | #16122e |
-| primary, primary-foreground | #18181b, #fafafa | #e6e6ea, #141418 |
+| primary, primary-foreground | #18181b, #fafafa | #ececf0, #24252c |
 | destructive | #dc2626 | #ef4444 |
 
 `web/src/styles/tokens.test.ts` holds this table and checks every text pair at 4.5:1 or better (muted-foreground on
 the canvas, muted, subtle, card, popover and sidebar; brand and brand-foreground on every surface it sits on) and
 the focus ring at 3:1 on the canvas and on cards.
 
-Dark theme (changed 2026-11-05, he uses it most): charcoal, not near-black. The sidebar, canvas, card and popover are four
-visible lightness steps (#0e0e11, #141418, #1b1b21, #222229), so surfaces separate without heavy borders. Text is a
-soft off-white (#ececf0, not #fafafa) and the filled button is #e6e6ea, so a long session does not glare. The status
-colours are softer than the light theme's, tuned to one visual weight (the yellow no longer outshines the red).
+Dark theme (changed 2026-11-05, he uses it most, and the first two tries were "way too black"): slate charcoal, not
+black. The sidebar, canvas, card and popover are four clear lightness steps (#1c1d23, #24252c, #2e2f38, #373843), so
+each layer reads as its own surface, and raised cards carry a faint light top edge (`--shadow-xs` and `--shadow-sm` in
+`.dark`). Text is a soft off-white (#f0f0f4) and the filled button is #ececf0. The status colours are softer than the
+light theme's, tuned to one visual weight (the yellow no longer outshines the red). The violet is a little lighter
+(#a79ffb) so it still reads at 4.5:1 on the lighter surfaces.
 
 ### Brand accent
 
@@ -711,7 +713,7 @@ Status tokens (text, soft background, border, dot):
 | warn | #a16207, #fefce8, #fde68a, #eab308 | #e6c25c, amber at 10%, amber at 26%, #d6a928 |
 | bad | #b91c1c, #fef2f2, #fecaca, #ef4444 | #f28b8b, red at 10%, red at 28%, #ec5b5b |
 | info | #1d4ed8, #eff6ff, #bfdbfe, #3b82f6 | #7fb2f5, blue at 12%, blue at 28%, #4f8fee |
-| idle | #52525b, #f4f4f5, #e4e4e7, #a1a1aa | #cfcfd6, #26262d, #3a3a43, #71717a |
+| idle | #52525b, #f4f4f5, #e4e4e7, #a1a1aa | #cfcfd6, #34353f, #4a4b57, #71717a |
 
 Muted foreground is one step darker than shadcn's zinc-500 (#71717a) in light so that secondary text passes 4.5:1
 on the muted grey: light 5.4 on the canvas, 5.7 on cards, 4.9 on muted; dark 7.7, 7.2, 6.1. Brand on the canvas,

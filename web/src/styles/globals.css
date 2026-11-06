@@ -79,38 +79,38 @@
 }
 
 .dark {
-  /* Charcoal, not black, and each layer a visible step above the last (sidebar, canvas, card, popover): the surfaces
-     separate by lightness, as the design standard asks, so there is no need for heavy borders. Text is a soft off-white,
-     not pure white, so a long session does not glare. */
-  --background: #141418;
-  --foreground: #ececf0;
-  --card: #1b1b21;
-  --card-foreground: #ececf0;
-  --popover: #222229;
-  --popover-foreground: #ececf0;
-  --muted: #25252d;
-  --muted-foreground: #a1a1aa;
-  --subtle: #101014;
-  --border: rgb(255 255 255 / 0.1);
-  --input: #52525b;
-  --ring: #9187f7;
-  --brand: #9187f7;
+  /* Charcoal with depth. Each layer is a clear step lighter than the one under it: sidebar, canvas, card, popover. Cards
+     and the selected rail row also carry a faint light edge along their top (the shadow tokens below), so a raised
+     surface reads as raised, not as a flat rectangle. Text is a soft off-white, not pure white. */
+  --background: #24252c;
+  --foreground: #f0f0f4;
+  --card: #2e2f38;
+  --card-foreground: #f0f0f4;
+  --popover: #373843;
+  --popover-foreground: #f0f0f4;
+  --muted: #353641;
+  --muted-foreground: #a9a9b4;
+  --subtle: #1f2026;
+  --border: rgb(255 255 255 / 0.12);
+  --input: #707180;
+  --ring: #a79ffb;
+  --brand: #a79ffb;
   --brand-foreground: #16122e;
-  --primary: #e6e6ea;
-  --primary-foreground: #141418;
-  --secondary: #25252d;
-  --secondary-foreground: #ececf0;
-  --accent: #212128;
-  --accent-foreground: #ececf0;
+  --primary: #ececf0;
+  --primary-foreground: #24252c;
+  --secondary: #353641;
+  --secondary-foreground: #f0f0f4;
+  --accent: #30313b;
+  --accent-foreground: #f0f0f4;
   --destructive: #ef4444;
-  --sidebar: #0e0e11;
-  --sidebar-foreground: #ececf0;
-  --sidebar-primary: #e6e6ea;
-  --sidebar-primary-foreground: #141418;
-  --sidebar-accent: #1e1e25;
-  --sidebar-accent-foreground: #ececf0;
-  --sidebar-border: rgb(255 255 255 / 0.08);
-  --sidebar-ring: #9187f7;
+  --sidebar: #1c1d23;
+  --sidebar-foreground: #f0f0f4;
+  --sidebar-primary: #ececf0;
+  --sidebar-primary-foreground: #24252c;
+  --sidebar-accent: #2c2d36;
+  --sidebar-accent-foreground: #f0f0f4;
+  --sidebar-border: rgb(255 255 255 / 0.1);
+  --sidebar-ring: #a79ffb;
 
   /* Status colours in dark: softer than the light theme's full strength, tuned to the same visual weight so the yellow
      does not shout over the red or the green. */
@@ -131,8 +131,8 @@
   --info-bd: rgb(59 130 246 / 0.28);
   --info-dot: #4f8fee;
   --idle: #cfcfd6;
-  --idle-bg: #26262d;
-  --idle-bd: #3a3a43;
+  --idle-bg: #34353f;
+  --idle-bd: #4a4b57;
   --idle-dot: #71717a;
 
   --mono-teal-bg: #133632;
@@ -151,6 +151,10 @@
   --mono-slate-fg: #aebfe0;
   --mono-olive-bg: #2c3310;
   --mono-olive-fg: #cbdb78;
+
+  /* Raised surfaces in dark: a 1px light edge along the top and a soft contact shadow below. */
+  --shadow-xs: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-sm: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 2px 6px rgb(0 0 0 / 0.32);
 
   color-scheme: dark;
 }

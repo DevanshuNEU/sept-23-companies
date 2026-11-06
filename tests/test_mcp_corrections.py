@@ -133,5 +133,67 @@ class UpdatePersonTest(CorrectionsCase):
         self.assertEqual(found[approved], "no_address")
 
 
+class MarkEmailBouncedTest(CorrectionsCase):
+    def bo(self):
+        """Bo's case: a guessed address, a sent first email, a bounced touch."""
+        bo = seed.person(self.db, self.acme, "Bo C", email="bo@prophetsecurity.ai")
+        touch = seed.touch(self.db, bo, "bounced")
+        seed.send_first(self.db, touch)
+        return bo, touch
+
+    def test_a_bounce_clears_the_address_and_records_the_reason(self):
+        bo, touch = self.bo()
+        messages = [tuple(r) for r in self.db.execute("SELECT * FROM message ORDER BY message_id")]
+        touch_row = tuple(self.db.execute("SELECT * FROM touch WHERE touch_id = ?", (touch,)).fetchone())
+        got = self.ok("mark_email_bounced", {"person_id": bo, "reason": "Gmail says no such mailbox"})
+        row = self.row(bo)
+        self.assertEqual((row["email"], row["channel"], row["linkedin_reason"]), (None, "linkedin", "no_email"))
+        self.assertEqual(got["cleared_email"], "bo@prophetsecurity.ai")
+        (event,) = self.events("email_bounced")
+        self.assertEqual(event["detail"]["email"], {"old": "bo@prophetsecurity.ai", "new": None})
+        self.assertEqual(event["detail"]["reason"], "Gmail says no such mailbox")
+        (item,) = self.items()
+        self.assertIn("bo@prophetsecurity.ai", item["reason"])
+        self.assertIn("Gmail says no such mailbox", item["reason"])
+        self.assertEqual([tuple(r) for r in self.db.execute("SELECT * FROM message ORDER BY message_id")], messages)
+        self.assertEqual(tuple(self.db.execute("SELECT * FROM touch WHERE touch_id = ?", (touch,)).fetchone()),
+                         touch_row)
+
+    def test_the_person_tool_reads_no_email_after_a_bounce(self):
+        bo, _touch = self.bo()
+        self.assertEqual(self.ok("person", {"person_id": bo})["why_not"], "already_emailed")
+        self.ok("mark_email_bounced", {"person_id": bo, "reason": "no such mailbox"})
+        self.assertEqual(self.ok("person", {"person_id": bo})["why_not"], "no_email")
+
+    def test_a_person_with_no_address_is_an_error_and_nothing_is_written(self):
+        sam = seed.person(self.db, self.acme, "Sam Park", channel="linkedin")
+        before = fingerprint(self.db)
+        self.assertEqual(self.error("mark_email_bounced", {"person_id": sam, "reason": "bounced"})["code"],
+                         "no_email")
+        self.assertEqual(fingerprint(self.db), before)
+
+    def test_it_works_before_the_sender_has_seen_the_bounce(self):
+        touch = seed.touch(self.db, self.pat)
+        seed.send_first(self.db, touch)
+        self.ok("mark_email_bounced", {"person_id": self.pat, "reason": "I saw it bounce in Gmail"})
+        self.assertIsNone(self.row(self.pat)["email"])
+        self.assertEqual(self.db.execute("SELECT state FROM touch WHERE touch_id = ?", (touch,)).fetchone()[0],
+                         "open")
+
+    def test_the_reason_is_bounded_and_dashes_become_hyphens(self):
+        self.assertEqual(self.error("mark_email_bounced", {"person_id": self.pat, "reason": "no"})["code"],
+                         "bad_input")
+        self.assertEqual(self.error("mark_email_bounced", {"person_id": self.pat, "reason": "x" * 301})["code"],
+                         "bad_input")
+        self.ok("mark_email_bounced", {"person_id": self.pat, "reason": "mailbox full \u2014 permanent"})
+        (item,) = self.items()
+        self.assertNotIn("\u2014", item["reason"])
+        self.assertNotIn("\u2014", json.dumps(self.events("email_bounced")[0]["detail"], ensure_ascii=False))
+
+    def test_a_missing_person_is_not_found(self):
+        self.assertEqual(self.error("mark_email_bounced", {"person_id": 9999, "reason": "bounced"})["code"],
+                         "not_found")
+
+
 if __name__ == "__main__":
     unittest.main()

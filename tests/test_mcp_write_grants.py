@@ -27,6 +27,9 @@ PERSON_EDIT = frozenset({"name", "title", "role_kind", "email", "linkedin_url", 
                          "linkedin_reason", "updated_at", "revision"})
 PINNED = {
     "update_person": {"person": Grant(update=PERSON_EDIT), "review_item": INSERT, "event": INSERT},
+    "mark_email_bounced": {"person": Grant(update=frozenset({"email", "channel", "linkedin_reason", "updated_at",
+                                                              "revision"})),
+                           "review_item": INSERT, "event": INSERT},
     "record_research": {"evidence": INSERT, "event": INSERT},
     "flag_review": {"review_item": INSERT, "event": INSERT},
     "mark_no_go": {"review_item": INSERT, "event": INSERT},
@@ -277,6 +280,14 @@ class GrantsCase(McpCase):
              "VALUES (?, 'Dev Anshu', 'engineer', 'dev@acme.example', 'email', 'claude', ?, ?)",
              (self.acme, NOW, NOW)),
         ], {"person_id": self.pat, "title": "Staff Engineer"})
+
+    def test_mark_email_bounced_cannot_write_beyond_its_grants(self):
+        self.check_tool("mark_email_bounced", [
+            ("UPDATE person SET name = 'Someone Else' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET company_id = ? WHERE person_id = ?", (seed.company(self.db, "Elsewhere"), self.pat)),
+            ("UPDATE touch SET state = 'bounced', bounced_at = ? WHERE touch_id = ?", (NOW, self.touch)),
+            ("UPDATE message SET state = 'skipped' WHERE message_id = ?", (self.drafted,)),
+        ], {"person_id": self.pat, "reason": "Gmail says no such mailbox"})
 
     def test_add_people_cannot_write_beyond_its_grants(self):
         self.check_tool("add_people", [

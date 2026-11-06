@@ -108,6 +108,10 @@ def _email_changes(conn: sqlite3.Connection, person: sqlite3.Row, new_email: str
     return changes
 
 
+def _channel_after(person: sqlite3.Row, changes: dict[str, tuple]) -> str:
+    return changes["channel"][1] if "channel" in changes else person["channel"]
+
+
 def _write(conn: sqlite3.Connection, person_id: int, changes: dict[str, tuple], now: str) -> None:
     sets = [f"{field} = ?" for field in changes]
     try:
@@ -188,8 +192,36 @@ def update_person(ctx: Ctx, args: UpdatePersonInput) -> dict:
         noted = record_edit(ctx, person, changes, kind="edited",
                             summary=clean(f"Claude changed {person['name']}: {said}"))
     return {"person_id": person["person_id"], "changed": sorted(changes), "review_id": noted["review_id"],
-            "channel": changes.get("channel", (None, person["channel"]))[1],
+            "channel": _channel_after(person, changes),
             "message": "Done. Devanshu sees it in Needs you; the old values are in the event."}
+
+
+# ---------------------------------------------------------------------------------------------- mark_email_bounced
+
+class BouncedInput(Input):
+    person_id: int = Field(ge=1, le=MAX_ID)
+    reason: str = Field(min_length=3, max_length=REASON_CHARS,
+                        description="Why you know it is dead: what Gmail or the sender said, or what he saw.")
+
+
+def mark_email_bounced(ctx: Ctx, args: BouncedInput) -> dict:
+    conn = ctx.conn
+    person = _person(conn, args.person_id)
+    reason = clean(args.reason)
+    if len(reason) < 3:
+        raise ToolError("bad_input", "reason is empty.", "Say why the address is dead. Nothing was written.")
+    old = person["email"]
+    if old is None:
+        raise ToolError("no_email", f"{person['name']} has no address on record.",
+                        "Nothing to clear. Nothing was written.")
+    changes = _email_changes(conn, person, None)
+    with transaction(conn):
+        _write(conn, person["person_id"], changes, ctx.now)
+        noted = record_edit(ctx, person, changes, kind="email_bounced", extra={"reason": reason},
+                            summary=clean(f"Claude cleared {person['name']}'s email {old} as bounced: {reason}"))
+    return {"person_id": person["person_id"], "cleared_email": old, "channel": _channel_after(person, changes),
+            "review_id": noted["review_id"],
+            "message": "Cleared. The sender holds any email still queued for them. Devanshu sees it in Needs you."}
 
 
 TOOLS = (
@@ -201,4 +233,11 @@ TOOLS = (
              UpdatePersonInput, update_person,
              {"person": Grant(update=PERSON_EDIT_COLUMNS), "review_item": Grant(insert=True),
               "event": Grant(insert=True)}),
+    ToolSpec("mark_email_bounced",
+             "An address bounced or is dead: clear it from the person and record why. They become a LinkedIn "
+             "contact. Writes no message and no touch: the sender already holds any email to a person with no "
+             "address. Applies at once, logs the old address and raises a Needs-you note.",
+             BouncedInput, mark_email_bounced,
+             {"person": Grant(update=frozenset({"email", "channel", "linkedin_reason", "updated_at", "revision"})),
+              "review_item": Grant(insert=True), "event": Grant(insert=True)}),
 )

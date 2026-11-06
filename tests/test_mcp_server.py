@@ -30,7 +30,7 @@ READ_TOOLS = {"ranked_companies", "company", "person", "followups_due", "prepare
               "contact_check", "connect_followups", "draft_brief"}
 WRITE_TOOLS = {"record_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people",
                "save_linkedin_note", "reader_next", "reader_submit", "submit_candidates", "intake", "log_sent", "log_miss",
-               "update_person"}
+               "update_person", "mark_email_bounced"}
 PINNED_TOOLS = READ_TOOLS | WRITE_TOOLS
 FORBIDDEN_PROPERTIES = frozenset({
     "state", "approved", "approved_at", "approve", "send", "sent", "sent_at", "skip", "unapprove", "pause", "paused",
@@ -204,8 +204,8 @@ class RealToolsTest(unittest.TestCase):
     def test_tool_list_is_pinned(self):
         names = [s.name for s in server.tool_specs()]
         self.assertEqual(set(names), PINNED_TOOLS)
-        self.assertEqual(len(names), 23)
-        self.assertEqual(len(set(names)), 23)
+        self.assertEqual(len(names), 24)
+        self.assertEqual(len(set(names)), 24)
 
     def test_only_the_write_tools_declare_grants(self):
         self.assertEqual({s.name for s in server.tool_specs() if s.grants}, WRITE_TOOLS)

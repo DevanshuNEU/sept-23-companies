@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { Check, Flag, Sparkles } from 'lucide-react';
+import { Check, Flag } from 'lucide-react';
 import { FitChip } from '@/components/fit-chip';
 import { Monogram } from '@/components/monogram';
 import type { Id, IsoTime, PlanRow, PlanView } from '@/api';
@@ -56,9 +56,9 @@ function StateMark({ node }: { node: Node }) {
       aria-hidden
       className={cn(
         'absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full border-2 border-background',
-        node === 'done' && 'bg-ok-dot text-white',
-        node === 'logged' && 'bg-info-dot',
-        node === 'carried' && 'bg-muted-foreground',
+        node === 'done' && 'bg-foreground text-background',
+        node === 'logged' && 'bg-foreground/60',
+        node === 'carried' && 'bg-muted-foreground/70',
       )}
     >
       {node === 'done' ? <Check className="size-2.5" strokeWidth={4} /> : null}
@@ -121,14 +121,14 @@ function RailRow({ row, props, current, asOf }: { row: PlanRow; props: RowProps;
           ) : null}
         </span>
         {fresh ? (
-          <span data-fresh className="flex min-w-0 items-center gap-1 text-xs leading-4 font-medium text-info">
-            <Sparkles aria-hidden className="size-3 flex-none" />
+          <span data-fresh className="flex min-w-0 items-center gap-1.5 text-xs leading-4 font-medium text-foreground">
+            <span aria-hidden className="size-1.5 flex-none rounded-full bg-foreground" />
             <span className="truncate">{fresh}</span>
           </span>
         ) : null}
         <span className="truncate text-[13px] leading-5 text-muted-foreground">{sub(row)}</span>
         {node === 'done' || node === 'logged' || node === 'carried' ? (
-          <span className={cn('text-xs leading-4', node === 'logged' ? 'text-info' : 'text-muted-foreground')}>{word}</span>
+          <span className="text-xs leading-4 text-muted-foreground">{word}</span>
         ) : null}
         {carried ? <span className="truncate text-xs leading-4 text-muted-foreground">{carried}</span> : null}
         {ask ? <span className="truncate text-xs leading-4 text-muted-foreground">{ask}</span> : null}
@@ -152,7 +152,7 @@ function Progress({ done, total, queue }: { done: number; total: number; queue: 
         aria-valuetext={word}
         className="h-1 overflow-hidden rounded-full bg-muted"
       >
-        <div className="h-full rounded-full bg-ok transition-[width] duration-150" style={{ width: total > 0 ? `${Math.round((done / total) * 100)}%` : '0%' }} />
+        <div className="h-full rounded-full bg-foreground/70 transition-[width] duration-150" style={{ width: total > 0 ? `${Math.round((done / total) * 100)}%` : '0%' }} />
       </div>
     </div>
   );

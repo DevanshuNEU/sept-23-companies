@@ -1091,11 +1091,11 @@ for a future edit pencil (editing is not built).
 
 - **Header.** A 44 px monogram, the name at 28 px with tight tracking (the focus target), one line under it: what they
   build (the judge's sentence, two lines at most, else "What they build is not known yet." in muted). Under that, chips:
-  the level word only when there is no opening line to say it (changed 2026-11-05; else the lane word) and **Fit 82** when the judge has read the company: green from 70,
-  amber 50 to 69, muted below 50 (a weak fit is quiet, never red).
-- **Why today** is one card (`bg-card`, hairline, 12 px radius): the opening title as a link with its level and age, "You
-  applied on Oct 20; this is a new role." when it applies, then the reasons as **chips with icons** (the new opening in
-  the info hue, E-Verify, sponsorship, size and stage, new roles in 30 days, then the ranker's own reasons, each once),
+  the level word only when there is no opening line to say it (changed 2026-11-05; else the lane word) and **Fit 82** when the judge has read the company.
+  Plain text, no pill and no colour (2026-11-05): from 70 it reads in the main colour, below that in the muted one.
+- **Why today** is open text under a hairline, not a box (changed 2026-11-05, the sleek pass): the opening title as a link with its level and age, "You
+  applied on Oct 20; this is a new role." when it applies, then the reasons as **plain lines of text with no pill and no icon** (the new opening first, in the main colour with a
+  small solid dot, then E-Verify, sponsorship, size and stage, new roles in 30 days, then the ranker's own reasons, each once),
   then the judge's one-line reason in a quiet quote style with "Risk: ..." under it. Not judged: nothing here (changed
   2026-11-05; the header and the profile already say it). The ranker's "Open role at your level" and "New opening ..."
   reasons are dropped as repeats of the opening line and the new tag.
@@ -1107,12 +1107,12 @@ for a future edit pencil (editing is not built).
   says "Nothing to log at Baseten: its wave is full." Carry to tomorrow (X) and Not now (P) stay at the bottom with the
   step marks. In flight, the 7-day question and the watch list stay below, closed.
 
-**The rail, more alive.** The day first: "2 of 8 reached" over a slim bar (`role="meter"`, green), counting what is done and
-never what is left. Each row: a 32 px **monogram** (the company's first letter on one of eight calm hues chosen by a hash
-of the name, so it is the same colour every day; never the brand violet; `src/lib/monogram.ts`), the name, the fit chip
+**The rail, more alive.** The day first: "2 of 8 reached" over a slim bar (`role="meter"`, neutral), counting what is done and
+never what is left. Each row: a 32 px **monogram** (the company's first letter on one quiet neutral tile, the same for every company; 2026-11-05, his
+ruling: no colour for decoration, so the eight hues are gone), the name, the fit chip
 on the right when judged (no Email chip on the rail since 2026-11-05: the head counts the emailable picks and the
-panel shows the chip), the new-opening tag, one reason line, and a word only once the row is Done, Logged or Carried
-over (a check, dot or half disc sits on the monogram). The selected row is a card with a hairline, a shadow and a 3 px
+panel shows the chip), the new-opening tag (a solid dot and plain words, no hue), one reason line, and a word only once the row is Done, Logged or Carried
+over (a check, dot or half disc sits on the monogram, all neutral). The selected row is a card with a hairline, a shadow and a 3 px
 foreground bar on its left. The head under the date says `8 picks` (`, 1 carried over`, `, 2 passed`); the reached count
 lives in the rail.
 
@@ -1120,18 +1120,11 @@ lives in the rail.
 and hairlines rather than boxes, 150 ms colour and rotate transitions only (off under reduced motion), a hover and
 press state on every control. No serif here: the serif stays for the notes he writes.
 
-**Monogram tokens** (`globals.css`, checked in `tokens.test.ts`: text on tile 6:1 or more, neither is the brand):
-
-| Hue | Light tile, text | Dark tile, text |
-|---|---|---|
-| teal | #d3eeea, #0b5650 | #133632, #86ddd3 |
-| cyan | #d2ebf6, #0b5372 | #12344a, #92d4f2 |
-| green | #d6efda, #165f2b | #143821, #8ddfa0 |
-| amber | #f5e5bf, #764606 | #3d2c0d, #f2c870 |
-| orange | #f9dac7, #85380b | #40240f, #f6ad82 |
-| rose | #f8d7df, #99193b | #42192a, #f59fb5 |
-| slate | #dce2ee, #2d4266 | #212a3d, #aebfe0 |
-| olive | #e4ecc2, #4a5809 | #2c3310, #cbdb78 |
+**Colour on Today** (2026-11-05, his ruling after seeing the page: "all the shit colours", Pylon in yellow, the green and
+amber Fit pills and the blue new-opening pill): Today is neutral. The monogram, the Fit text, the Email mark, the new
+opening tag, the progress bar and the row state marks use the foreground and muted colours only. Status colours stay for
+status (a warning, an error, a reply, the sender), never for decoration. The `--mono-*` tokens in `globals.css` are no
+longer used by any component and can be deleted once the dark theme PR is merged.
 
 #### 16.1a Today as a company queue (P2)
 

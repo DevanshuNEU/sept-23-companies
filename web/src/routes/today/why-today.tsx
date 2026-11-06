@@ -1,4 +1,4 @@
-import { Briefcase, Building, Check, FileCheck2, Globe, ShieldCheck, Sparkles, TrendingUp, Users, type LucideIcon } from 'lucide-react';
+import { Briefcase, Building, Globe } from 'lucide-react';
 import type { CompanyQueue, QueueOpening } from '@/api';
 import { Button } from '@/components/ui/button';
 import { safeHref } from '@/lib/safe-href';
@@ -8,12 +8,12 @@ import { KeyHint, MAIN } from './plan-panel';
 const link =
   'rounded-sm underline decoration-foreground/30 underline-offset-3 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70';
 
-/** "New opening, 6 hours ago": the small tag a pick with a new opening carries, in the calm info hue. */
+/** "New opening, 6 hours ago": a pick with a new opening says so in plain words, led by a small solid dot. No hue. */
 export function FreshTag({ opening, className }: { opening: QueueOpening | null | undefined; className?: string }) {
   if (!opening?.fresh || !opening.freshTag) return null;
   return (
-    <span data-fresh className={cn('inline-flex w-fit items-center gap-1 rounded-sm bg-info-bg px-1.5 text-xs leading-5 font-medium text-info', className)}>
-      <Sparkles aria-hidden className="size-3" />
+    <span data-fresh className={cn('inline-flex w-fit items-center gap-1.5 text-xs leading-5 font-medium text-foreground', className)}>
+      <span aria-hidden className="size-1.5 rounded-full bg-foreground" />
       {opening.freshTag}
     </span>
   );
@@ -39,17 +39,11 @@ export function OpeningLine({ opening }: { opening: QueueOpening }) {
   );
 }
 
-/** One reason as a small chip: an icon, then the API's words. The fresh one is the only coloured chip (the info hue). */
-function ReasonChip({ icon: Icon, tone = 'plain', children }: { icon: LucideIcon; tone?: 'plain' | 'fresh'; children: string }) {
+/** One reason as a plain line of text, no pill and no icon. The fresh one leads with a solid dot and reads in the main colour. */
+function Reason({ tone = 'plain', children }: { tone?: 'plain' | 'fresh'; children: string }) {
   return (
-    <li
-      data-reason={tone}
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] leading-5',
-        tone === 'fresh' ? 'border-info-bd bg-info-bg text-info' : 'bg-subtle text-foreground',
-      )}
-    >
-      <Icon aria-hidden className={cn('size-3.5 flex-none', tone === 'plain' && 'text-muted-foreground')} />
+    <li data-reason={tone} className={cn('inline-flex items-center gap-1.5', tone === 'fresh' && 'font-medium text-foreground')}>
+      {tone === 'fresh' ? <span aria-hidden className="size-1.5 rounded-full bg-foreground" /> : null}
       {children}
     </li>
   );
@@ -58,28 +52,28 @@ function ReasonChip({ icon: Icon, tone = 'plain', children }: { icon: LucideIcon
 const REPEATS_OPENING = /^(open role at your level|new opening)/i;
 
 /**
- * Why it should answer, as chips: the new opening, E-Verify, sponsorship, size and stage, recent hiring, then the
- * ranker's own reasons (each once: a reason that says what a chip already says is dropped). Every word is the API's.
+ * Why it should answer, as plain lines: the new opening, E-Verify, sponsorship, size and stage, recent hiring, then the
+ * ranker's own reasons (each once: a reason that says what a line already says is dropped). Every word is the API's.
  */
-function reasonChips(q: CompanyQueue): { icon: LucideIcon; tone: 'plain' | 'fresh'; text: string }[] {
+function reasons(q: CompanyQueue): { tone: 'plain' | 'fresh'; text: string }[] {
   const p = q.profile;
-  const all: { icon: LucideIcon; tone: 'plain' | 'fresh'; text: string | null }[] = [
-    { icon: Sparkles, tone: 'fresh', text: q.opening?.fresh ? q.opening.freshTag : null },
-    { icon: ShieldCheck, tone: 'plain', text: p.everify.text },
-    { icon: FileCheck2, tone: 'plain', text: p.sponsorship.text },
-    { icon: Users, tone: 'plain', text: q.sizeLine },
-    { icon: TrendingUp, tone: 'plain', text: q.hiring > 0 ? q.hiringLine : null },
+  const all: { tone: 'plain' | 'fresh'; text: string | null }[] = [
+    { tone: 'fresh', text: q.opening?.fresh ? q.opening.freshTag : null },
+    { tone: 'plain', text: p.everify.text },
+    { tone: 'plain', text: p.sponsorship.text },
+    { tone: 'plain', text: q.sizeLine },
+    { tone: 'plain', text: q.hiring > 0 ? q.hiringLine : null },
     // "Open role at your level" and "New opening today" only repeat the opening line and the new tag above them.
-    ...q.reasons.filter((text) => !REPEATS_OPENING.test(text)).map((text) => ({ icon: Check, tone: 'plain' as const, text })),
+    ...q.reasons.filter((text) => !REPEATS_OPENING.test(text)).map((text) => ({ tone: 'plain' as const, text })),
   ];
   const seen = new Set<string>();
-  const out: { icon: LucideIcon; tone: 'plain' | 'fresh'; text: string }[] = [];
+  const out: { tone: 'plain' | 'fresh'; text: string }[] = [];
   for (const c of all) {
     if (!c.text) continue;
     const key = c.text.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ ...c, text: c.text });
+    out.push({ tone: c.tone, text: c.text });
   }
   return out;
 }
@@ -98,23 +92,24 @@ function Verdict({ q }: { q: CompanyQueue }) {
 }
 
 /**
- * Why today, first in the panel (top picks): the opening and its age, why the company should answer as chips, and the
- * profile judge's one-line reason and risk (or that it has not judged the company). Every line is the API's.
+ * Why today, first in the panel (top picks): the opening and its age, why the company should answer as plain lines of
+ * text, and the profile judge's one-line reason and risk. It is open text on the page, not a box: a hairline above it
+ * and space around it do the separating. Every line is the API's.
  */
 export function WhyToday({ q }: { q: CompanyQueue }) {
-  const chips = reasonChips(q);
+  const lines = reasons(q);
   return (
-    <section aria-label="Why today" className="grid gap-4 rounded-xl border bg-card px-5 py-4.5 shadow-xs">
+    <section aria-label="Why today" className="grid gap-4 border-t pt-5">
       <div className="grid gap-2">
         <h3 className="text-xs font-medium text-muted-foreground">Why today</h3>
         {q.opening ? <OpeningLine opening={q.opening} /> : <p className="text-[15px] leading-6 text-muted-foreground">No open role at your level. {q.whyToday}</p>}
       </div>
-      {chips.length > 0 ? (
-        <ul aria-label="Why it should answer" className="flex flex-wrap gap-2">
-          {chips.map((c) => (
-            <ReasonChip key={c.text} icon={c.icon} tone={c.tone}>
+      {lines.length > 0 ? (
+        <ul aria-label="Why it should answer" className="flex flex-wrap gap-x-6 gap-y-1.5 text-[13px] leading-5 text-muted-foreground">
+          {lines.map((c) => (
+            <Reason key={c.text} tone={c.tone}>
               {c.text}
-            </ReasonChip>
+            </Reason>
           ))}
         </ul>
       ) : null}

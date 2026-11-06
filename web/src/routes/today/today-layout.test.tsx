@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient } from '@tanstack/react-query';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
-import { monogramHue } from '@/lib/monogram';
 import { renderWithApp } from '@/test/render';
 import TodayPage from './index';
 
@@ -147,7 +146,7 @@ describe('the company, calmer', () => {
     const filled = Array.from(main().querySelectorAll('[data-slot="button"][data-variant="default"]'));
     expect(filled.map((e) => e.textContent)).toEqual(['Open LinkedIn searchS']);
     for (const name of ['Copy for terminal', 'Log applied']) {
-      expect(within(main()).getByRole('button', { name: new RegExp(`^${name}`) })).toHaveAttribute('data-variant', 'secondary');
+      expect(within(main()).getByRole('button', { name: new RegExp(`^${name}`) })).toHaveAttribute('data-variant', 'outline');
     }
     // The research links are plain links on one quiet line, not buttons.
     const research = within(main()).getByRole('group', { name: 'Research' });
@@ -212,13 +211,19 @@ describe('the company, calmer', () => {
 describe('the rail, more alive', () => {
   beforeEach(() => setWindow(true));
 
-  it('gives every company a monogram tile in a hue its name always gets', async () => {
+  it('gives every company the same quiet monogram tile, with no hue of its own', async () => {
     await open();
-    const tiles = options().map((o) => o.querySelector('[data-hue]'));
+    const tiles = options().map((o) => o.querySelector('[aria-hidden="true"].rounded-lg') as HTMLElement | null);
     expect(tiles.map((t) => t?.textContent)).toEqual(['P', 'C', 'R', 'B', 'I', 'T', 'T', 'H']);
-    expect(tiles.map((t) => t?.getAttribute('data-hue'))).toEqual(
-      ['Pylon', 'Cerebrium', 'Resend', 'Baseten', 'Inngest', 'Turso', 'Trigger.dev', 'Hex'].map(monogramHue),
-    );
+    expect(new Set(tiles.map((t) => t?.className)).size).toBe(1);
+    expect(tiles.every((t) => !t?.hasAttribute('style') && !t?.hasAttribute('data-hue'))).toBe(true);
+  });
+
+  it('draws no colour on the rail but status: no coloured fit, new tag or progress bar', async () => {
+    await open();
+    const rail = screen.getByRole('listbox', { name: "Today's picks" });
+    expect(rail.innerHTML).not.toMatch(/\b(?:text|bg|border)-(?:ok|warn|bad|info)\b|\bmono-/);
+    expect(screen.getByRole('meter', { name: 'Picks reached today' }).innerHTML).not.toMatch(/bg-ok/);
   });
 
   it('has the fit chip on the right of a judged company, and none on one the judge has not read', async () => {

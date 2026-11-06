@@ -93,11 +93,12 @@ function PlanHead({ plan }: { plan: PlanView }) {
   const finished = plan.rows.length > 0 && plan.rows.every((r) => r.state !== 'todo');
   const carried = finished ? plan.rows.filter((r) => r.state === 'skipped').length : 0;
   return (
-    <div className="flex flex-none items-end gap-4 border-b px-6 pt-5 pb-4">
-      <div>
+    <div className="flex flex-none items-baseline gap-4 border-b px-6 py-4">
+      {/* The date and what it holds on one line: a title with its muted continuation, not three stacked lines. */}
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-0.5">
         <h2 className="text-xl leading-7 font-semibold tracking-[-0.01em]">{formatLongDate(plan.date)}</h2>
         {plan.notReady ? null : (
-          <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums">
+          <p className="text-[13px] text-muted-foreground tabular-nums">
             {isQueue(plan)
               ? `${plural(plan.total, 'pick', 'picks')}${carried > 0 ? `, ${carried} carried over` : ''}${plan.passed > 0 ? `, ${plan.passed} passed` : ''}`
               : `${plural(plan.total, 'person', 'people')}, ${plan.done} done${carried > 0 ? `, ${carried} carried over` : ''}`}
@@ -109,7 +110,7 @@ function PlanHead({ plan }: { plan: PlanView }) {
           </p>
         )}
       </div>
-      <div className="ml-auto flex items-center gap-2 text-[13px]">
+      <div className="ml-auto flex flex-none items-center gap-2 text-[13px]">
         <p data-quota="week" className="flex items-baseline gap-1.5 tabular-nums">
           <span className="text-muted-foreground">Requests this week</span> <b className="font-semibold">{used}</b>{' '}
           <span className="text-muted-foreground">{`of ${limit}`}</span>

@@ -5,7 +5,6 @@ import { EmailChip } from '@/components/email-chip';
 import { FitChip } from '@/components/fit-chip';
 import { Monogram } from '@/components/monogram';
 import { StepMarks } from '@/components/step-marks';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
@@ -29,11 +28,11 @@ function Fact({ label, children, muted = false }: { label: string; children: Rea
   );
 }
 
-/** "In flight" and "Asked before" in a calm grey, a reply in the info hue; never red. */
+/** "In flight" and "Asked before" in a calm grey, a reply in the main colour and a heavier weight; never a hue. */
 function Standing({ row }: { row: PlanRow }) {
   const s = row.queue?.standing;
   if (!s) return null;
-  return <span className={cn(s.status === 'replied' && 'text-info')}>{s.text}</span>;
+  return <span className={cn(s.status === 'replied' && 'font-medium text-foreground')}>{s.text}</span>;
 }
 
 /**
@@ -138,11 +137,11 @@ export function CompanyPanel({
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-[13px]">
-          {/* The opening line below names the level, so the chip shows only when there is no opening to say it. */}
-          {q?.opening ? null : <Badge variant="idle">{laneLabel[row.lane]}</Badge>}
-          <FitChip fit={q?.judgeFit} className="h-[22px]" />
-          {q ? <EmailChip fit={q.emailFit} interactive className="h-[22px]" /> : null}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+          {/* The opening line below names the level, so the level shows here only when there is no opening to say it. */}
+          {q?.opening ? null : <span>{laneLabel[row.lane]}</span>}
+          <FitChip fit={q?.judgeFit} />
+          {q ? <EmailChip fit={q.emailFit} interactive /> : null}
           <CarriedOver row={row} asOf={asOf} />
         </div>
       </header>
@@ -162,13 +161,13 @@ export function CompanyPanel({
               </Button>
             ) : null}
             {q ? (
-              <Button type="button" variant="secondary" size="sm" className={MAIN} aria-keyshortcuts="c" onClick={actions.onCopyLine}>
+              <Button type="button" variant="outline" size="sm" className={MAIN} aria-keyshortcuts="c" onClick={actions.onCopyLine}>
                 <Terminal aria-hidden />
                 Copy for terminal
                 <KeyHint k="C" />
               </Button>
             ) : null}
-            {hasApply ? <LogButton row={row} kind="apply" filled={false} quiet onLog={actions.onLog} /> : null}
+            {hasApply ? <LogButton row={row} kind="apply" filled={false} onLog={actions.onLog} /> : null}
           </div>
         ) : null}
         {q ? <ResearchLinks q={q} variant="links" /> : null}

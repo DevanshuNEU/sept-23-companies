@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { BookmarkCheck, ChevronRight, Search, Terminal } from 'lucide-react';
+import { BookmarkCheck, ChevronRight, Search } from 'lucide-react';
 import type { IsoTime, PassReason, PlanRow } from '@/api';
 import { EmailChip } from '@/components/email-chip';
 import { FitChip } from '@/components/fit-chip';
@@ -160,13 +160,6 @@ export function CompanyPanel({
                   Open LinkedIn search
                   <KeyHint k="S" filled />
                 </a>
-              </Button>
-            ) : null}
-            {q ? (
-              <Button type="button" variant="outline" size="sm" className={MAIN} aria-keyshortcuts="c" onClick={actions.onCopyLine}>
-                <Terminal aria-hidden />
-                Copy for terminal
-                <KeyHint k="C" />
               </Button>
             ) : null}
             {hasApply ? <LogButton row={row} kind="apply" filled={false} onLog={actions.onLog} /> : null}

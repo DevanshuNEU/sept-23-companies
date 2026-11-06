@@ -96,30 +96,4 @@ describe('Today with the email flag', () => {
     await screen.findByRole('heading', { level: 2, name: 'Cerebrium' });
     expect(within(panel()).getByText('LinkedIn only. No website on file, so no address pattern.')).toBeInTheDocument();
   });
-
-  it('lists Email today collapsed, by rank, none of them on today\'s list', async () => {
-    const user = userEvent.setup();
-    await open();
-    const toggle = await screen.findByRole('button', { name: /Email today/ });
-    expect(toggle).toHaveTextContent('Email today6 companies');
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await user.click(toggle);
-    const list = screen.getByRole('list', { name: 'Companies to email today' });
-    const names = within(list).getAllByRole('listitem').map((li) => li.querySelector('a')?.textContent);
-    expect(names).toEqual(['Retell AI', 'Railway', 'Graphite', 'Supabase', 'Fly.io', 'Weaviate']);
-    const picks = options().map((o) => o.querySelector('b')?.textContent);
-    expect(names.filter((n) => picks.includes(n))).toEqual([]);
-    expect(screen.getByText(/^6 more companies you can email today, by rank\./)).toBeInTheDocument();
-    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Website known (retellai.example). About 40 people: a founder or engineer reads this');
-  });
-
-  it('copies a lane company\'s line for the terminal', async () => {
-    const user = userEvent.setup();
-    const writeText = vi.fn<(text: string) => Promise<void>>(async () => {});
-    await open();
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    await user.click(await screen.findByRole('button', { name: /Email today/ }));
-    await user.click(screen.getByRole('button', { name: 'Copy the line for Retell AI' }));
-    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^Knock: Retell AI \(company \d+\), role: Software Engineer, New Grad$/));
-  });
 });

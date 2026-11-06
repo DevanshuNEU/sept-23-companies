@@ -2,7 +2,7 @@ import { expect, test } from './fixtures';
 
 // Today as the top picks (#9 company-first ruling, P2; top picks 2026-10-26; the Today redesign), on the `queue` sample: 8
 // picks, new openings first, 2 reached, Pylon first to do, with the company's profile in a third column from 1280 px. He finds the people on LinkedIn; the page never reaches LinkedIn itself.
-test('the company queue: facts, the search link, a pasted log, a saved search and In flight', async ({ page, consoleErrors }) => {
+test('the company queue: facts, the search link, a pasted log, a saved search and In flight on the Pipeline page', async ({ page, consoleErrors }) => {
   const foreign: string[] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());
@@ -62,12 +62,12 @@ test('the company queue: facts, the search link, a pasted log, a saved search an
   await expect(page.getByText('Saved the search for Hex. S opens it.')).toBeVisible();
   await expect(panel.getByRole('link', { name: 'Open LinkedIn search' })).toHaveAttribute('href', url);
 
-  // In flight is collapsed under the queue.
-  const toggle = page.getByRole('button', { name: /In flight/ });
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await toggle.click();
+  // Nothing sits under the pick any more: In flight and the rest are on the Pipeline page, a sidebar link away.
+  await expect(page.getByRole('button', { name: /In flight/ })).toHaveCount(0);
+  await page.getByRole('link', { name: /^Pipeline/ }).click();
+  await page.getByRole('tab', { name: /^In flight/ }).click();
   const flight = page.getByRole('list', { name: 'Companies in flight' });
-  await expect(flight.getByRole('listitem').first()).toHaveText('BrowserbaseSomeone replied');
+  await expect(flight.getByRole('listitem').first()).toContainText('Browserbase');
   await expect(flight).toContainText('Warp4 asked 6 days ago, free again Nov 18');
 
   await expect(page.getByRole('button', { name: /^Send/i })).toHaveCount(0);

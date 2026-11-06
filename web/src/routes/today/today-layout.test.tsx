@@ -145,7 +145,7 @@ describe('the company, calmer', () => {
     await open();
     const filled = Array.from(main().querySelectorAll('[data-slot="button"][data-variant="default"]'));
     expect(filled.map((e) => e.textContent)).toEqual(['Open LinkedIn searchS']);
-    for (const name of ['Copy for terminal', 'Log applied']) {
+    for (const name of ['Log applied']) {
       expect(within(main()).getByRole('button', { name: new RegExp(`^${name}`) })).toHaveAttribute('data-variant', 'outline');
     }
     // The research links are plain links on one quiet line, not buttons.

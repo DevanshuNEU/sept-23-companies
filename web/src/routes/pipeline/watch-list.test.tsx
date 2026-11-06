@@ -4,7 +4,7 @@ import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture, type FixtureDb, type Scenario } from '@/api/fixture/data';
 import { AppShell } from '@/shell/app-shell';
 import { renderWithApp } from '@/test/render';
-import TodayPage from './index';
+import PipelinePage from './index';
 import { WatchList } from './watch-list';
 
 const press = (key: string) => fireEvent.keyDown(document.body, { key });
@@ -29,10 +29,9 @@ async function open(o: { db?: FixtureDb; scenario?: Scenario } = {}) {
 }
 
 const section = () => screen.getByRole('region', { name: /Watch list/ });
-/** The list is closed on arrival: open it to read the items. */
+/** The list is open on its own tab: read the items at once. */
 async function openList() {
   await screen.findByRole('region', { name: /Watch list/ });
-  fireEvent.click(within(section()).getByRole('button', { name: /Watch list/ }));
   return within(section());
 }
 const item = (name: RegExp | string) => {
@@ -47,16 +46,13 @@ afterEach(() => {
 });
 
 describe('WatchList', () => {
-  it('is closed on arrival, with a plain grey count', async () => {
+  it('is open with its items, and says its count in plain words, never as an alarm', async () => {
     await open();
     await screen.findByRole('region', { name: /Watch list/ });
-    const trigger = within(section()).getByRole('button', { name: /Watch list/ });
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(within(section()).queryByRole('list')).not.toBeInTheDocument();
+    expect(within(section()).getByRole('list')).toBeInTheDocument();
     const count = within(section()).getByTestId('count');
     expect(count).toHaveTextContent('3');
     expect(count.closest('[data-slot="badge"]')).toBeNull();
-    expect(count.className).toMatch(/text-muted-foreground/);
     expect(count.className).not.toMatch(/bad|red|warn/);
   });
 
@@ -171,18 +167,21 @@ describe('WatchList', () => {
     expect(section().textContent).not.toMatch(/overdue|behind|missed|streak|keep it up/i);
   });
 
-  describe('on Today', () => {
-    it('sits below the 7-day question', async () => {
+  describe('on the Pipeline page', () => {
+    it('is the last tab, with its count, and opens by its address', async () => {
       renderWithApp(
         <>
           <AppShell />
-          <TodayPage />
+          <PipelinePage />
         </>,
-        { client: new FixtureClient(buildFixture()) },
+        { client: new FixtureClient(buildFixture()), route: '/pipeline?tab=watch' },
       );
-      const prompt = await screen.findByRole('region', { name: /Last week, what happened/ });
-      const watch = await screen.findByRole('region', { name: /Watch list/ });
-      expect(prompt.compareDocumentPosition(watch)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      const tab = await screen.findByRole('tab', { name: /^Watch list/ });
+      expect(tab).toHaveAttribute('aria-selected', 'true');
+      await waitFor(() => expect(tab).toHaveTextContent('3'));
+      expect(await screen.findByRole('region', { name: /Watch list/ })).toBeInTheDocument();
+      const tabs = screen.getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, '').trim());
+      expect(tabs).toEqual(['Last week', 'In flight', 'Email today', 'Watch list']);
     });
   });
 });

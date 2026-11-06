@@ -26,19 +26,15 @@ import { openExternal, safeHref } from '@/lib/safe-href';
 import { useViewQuery } from '@/pending/pending';
 import { BenchDrawer } from './bench-drawer';
 import { CompanyPanel } from './company-panel';
-import { EmailLaneList } from './email-lane';
 import { EmailRowPanel } from './email-row-panel';
 import { FinishPanel } from './finish-panel';
-import { InFlightList } from './in-flight-list';
 import type { NoteEdit } from './note-editor';
 import { KeyHint, PersonPanel, type PanelActions } from './plan-panel';
 import { PlanEmpty, PlanJobBanner, PlanNotReady, PlanSkeleton } from './plan-states';
-import { OutcomePrompt } from './outcome-prompt';
 import { PassChips } from './pass-chips';
 import { ProfileFold, ProfilePanel } from './profile-panel';
 import { canLogPeople, isCompanyRow, nextTodoAfter, peopleFieldId } from './plan-steps';
 import { usePlanActions } from './use-plan-actions';
-import { WatchList } from './watch-list';
 import { WinStrip } from './win-strip';
 
 /** From this window width the profile is the third column; under it, it folds under the main column. */
@@ -71,21 +67,6 @@ const finishes = (row: PlanRow, kind: StepKind) =>
 
 /** The rows as they are once this one is no longer to do, for `nextTodoAfter`. */
 const without = (rows: PlanRow[], entryId: Id): PlanRow[] => rows.map((r) => (r.entryId === entryId ? { ...r, state: 'done' } : r));
-
-/**
- * Below the plan, quiet (design 16.1): the 7-day question, then the watch list. Each part draws nothing when it has nothing to say, so the
- * rule above them only shows with something under it.
- */
-function BelowPlan({ className, plan, bench }: { className?: string; plan?: PlanView; bench?: BenchView }) {
-  return (
-    <div className={cn('mt-8 grid max-w-[720px] gap-6 empty:hidden', className)}>
-      {bench ? <EmailLaneList lane={bench.emailLane} text={bench.emailLaneText} /> : null}
-      {plan ? <InFlightList items={plan.inFlight} /> : null}
-      <OutcomePrompt />
-      <WatchList />
-    </div>
-  );
-}
 
 function PlanHead({ plan }: { plan: PlanView }) {
   const { used, limit, hardUsed, hardLimit } = plan.linkedinWeek;
@@ -378,7 +359,7 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
       run: on((r) => (r.queue ? open(r.queue.careersUrl, `No careers page known for ${r.company.name}.`) : open(r.role?.url, 'No role on this row.'))),
     },
     { keys: 's', label: 'Open LinkedIn search', group, enabled: has, run: on((r) => open(r.queue?.peopleSearchUrl ?? r.findSomeone?.searchUrl, 'This row already has someone. Press L to open their profile.')) },
-    { keys: 'c', label: company ? 'Copy the line for your terminal' : 'Copy the note', group, enabled: has, run: on(copyNote) },
+    { keys: 'c', label: 'Copy the note', group, enabled: has && !company, run: on(copyNote) },
     { keys: 'a', label: 'Log applied', group, enabled: has, run: on((r) => log(r, 'apply')) },
     // The note keys and R act on a person row only; a company row has no note, and its people are logged with L.
     { keys: 'e', label: 'Edit the note', group, enabled: has && person !== null, run: on(edit) },
@@ -502,7 +483,6 @@ function PlanWork({ plan, bench }: { plan: PlanView; bench: BenchView | undefine
               <ProfileFold key={profileRow.entryId} row={profileRow} />
             </div>
           ) : null}
-          <BelowPlan plan={plan} bench={bench} />
         </div>
       </section>
       {sideProfile && profileRow ? (
@@ -540,7 +520,6 @@ function PlanContent({ plan, bench }: { plan: PlanView; bench: BenchView | undef
       {plan.notReady || plan.rows.length === 0 ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           {plan.notReady ? <PlanNotReady plan={plan} /> : <PlanEmpty />}
-          <BelowPlan className="mx-auto px-8 pb-12" plan={plan} bench={bench} />
         </div>
       ) : (
         <PlanWork plan={plan} bench={bench} />

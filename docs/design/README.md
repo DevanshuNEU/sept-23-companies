@@ -1108,7 +1108,8 @@ for a future edit pencil (editing is not built).
   two small rows that start closed (a chevron, the name, a hint in grey, the key); L opens the first and puts the cursor
   in it, and it closes again when he moves to another company. A company with no room in its wave has no such row, and L
   says "Nothing to log at Baseten: its wave is full." Carry to tomorrow (X) and Not now (P) stay at the bottom with the
-  step marks. In flight, the 7-day question and the watch list stay below, closed.
+  step marks. The 7-day question, In flight, Email today and the Watch list no longer sit under the pick (2026-11-06, his ruling:
+  "not needed here"): they are the tabs of the Pipeline page.
 
 **The rail, more alive.** The day first: "2 of 8 reached" over a slim bar (`role="meter"`, neutral), counting what is done and
 never what is left. Each row: a 32 px **monogram** (the company's first letter on one quiet neutral tile, the same for every company; 2026-11-05, his
@@ -1128,6 +1129,16 @@ amber Fit pills and the blue new-opening pill): Today is neutral. The monogram, 
 opening tag, the progress bar and the row state marks use the foreground and muted colours only. Status colours stay for
 status (a warning, an error, a reply, the sender), never for decoration. The `--mono-*` tokens in `globals.css` are no
 longer used by any component and can be deleted once the dark theme PR is merged.
+
+**Pipeline** (2026-11-06, `/pipeline`, sidebar Lists, key `g i`; the style of Conductor's own lists: a quiet underline tab
+strip with a count on each tab, grouped rows in one soft rounded container with hairline dividers, a monogram, a
+name and one muted line, nothing boxed inside a box). Four tabs: **Last week** (the 7-day question, one card with
+Accepted 1, Replied 2, Nothing yet 3), **In flight** (every company with a wave out or a reply), **Email today** (the
+companies beyond the picks that can be emailed, with their website; no per-company terminal button) and **Watch list**.
+It opens on the first tab that has something in it, the tab is in the address (`?tab=`), an empty tab says how it fills
+up, and the sidebar item carries the number of questions waiting. A win arrives on this page too, since answering
+Accepted happens here. The per-company Copy for terminal button and its C key are gone from Today (he does not use
+them); shift+C on the rail still copies every line.
 
 #### 16.1a Today as a company queue (P2)
 

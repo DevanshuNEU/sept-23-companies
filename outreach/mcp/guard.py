@@ -32,7 +32,7 @@ from outreach.reader.version import is_side_sql
 from outreach.store import connect, db_path
 from outreach.store.db import normalise
 
-__all__ = ["Grant", "GrantError", "NEVER_TABLES", "NEVER_COLUMNS", "BRIDGE_TABLES", "TRIGGER_PREFIX", "open_guarded",
+__all__ = ["Grant", "GrantError", "NEVER_TABLES", "NEVER_COLUMNS", "BRIDGE_TABLES", "MOVE_ONLY_COLUMNS", "TRIGGER_PREFIX", "open_guarded",
            "install_triggers", "install_authorizer", "check_grants", "check_store"]
 
 TRIGGER_PREFIX = "mcp_"
@@ -68,6 +68,11 @@ NEVER_COLUMNS: dict[str, frozenset[str] | None] = {
 }
 
 
+# `move_person` (#181) is the one tool that may change `person.company_id`. Its grant must be exactly these columns,
+# so no tool can pair a move with any other person write.
+MOVE_ONLY_COLUMNS = frozenset({"company_id", "updated_at", "revision"})
+
+
 class GrantError(ValueError):
     """A tool asked for a write no tool may have."""
 
@@ -88,6 +93,8 @@ def check_grants(grants: Mapping[str, Grant]) -> None:
         if never is None and grant.update:
             raise GrantError(f"no tool may update a {table} row")
         bad = sorted(grant.update & never) if never else []
+        if table == "person" and grant.update == MOVE_ONLY_COLUMNS:
+            bad = []
         if bad:
             raise GrantError(f"no tool may update {table}.{', '.join(bad)}")
 
@@ -199,7 +206,10 @@ _VALUE_TRIGGERS = (
 
 def _trigger_sql(conn: sqlite3.Connection, grants: Mapping[str, Grant]) -> list[str]:
     statements = []
+    person_grant = grants.get("person")
     for name, when_on, condition, why in _VALUE_TRIGGERS:
+        if name == "person_update" and person_grant is not None and person_grant.update == MOVE_ONLY_COLUMNS:
+            condition = "NEW.added_by IS NOT OLD.added_by"  # the move tool's connection: company_id may change
         when = f" WHEN {condition}" if condition else ""
         statements.append(f"CREATE TEMP TRIGGER {TRIGGER_PREFIX}{name} {when_on} FOR EACH ROW{when} "
                           f"BEGIN {_refuse(why)} END")

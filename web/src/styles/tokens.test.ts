@@ -113,14 +113,14 @@ describe.each([
 
 // The look PR's token table (docs/design/README.md, section 10).
 const TABLE: Record<string, [light: string, dark: string]> = {
-  background: ['#f8f8f9', '#0b0b0e'],
-  sidebar: ['#f2f2f4', '#09090b'],
-  subtle: ['#f3f3f5', '#101013'],
-  card: ['#ffffff', '#141418'],
-  popover: ['#ffffff', '#1a1a20'],
-  muted: ['#eeeef1', '#23232a'],
-  accent: ['#f0f0f3', '#1d1d23'],
-  border: ['#e2e2e7', 'rgb(255 255 255 / 0.09)'],
+  background: ['#f8f8f9', '#141418'],
+  sidebar: ['#f2f2f4', '#0e0e11'],
+  subtle: ['#f3f3f5', '#101014'],
+  card: ['#ffffff', '#1b1b21'],
+  popover: ['#ffffff', '#222229'],
+  muted: ['#eeeef1', '#25252d'],
+  accent: ['#f0f0f3', '#212128'],
+  border: ['#e2e2e7', 'rgb(255 255 255 / 0.1)'],
   input: ['#c4c4cc', '#52525b'],
   'muted-foreground': ['#66666f', '#a1a1aa'],
   brand: ['#5b48d9', '#9187f7'],

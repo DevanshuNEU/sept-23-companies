@@ -648,25 +648,30 @@ every card.
 
 | Token | Light | Dark |
 |---|---|---|
-| background | #f8f8f9 | #0b0b0e |
-| foreground | #09090b | #fafafa |
-| sidebar | #f2f2f4 | #09090b |
-| subtle (table heads, group rows) | #f3f3f5 | #101013 |
-| card | #ffffff | #141418 |
-| popover | #ffffff | #1a1a20 |
-| muted | #eeeef1 | #23232a |
-| accent | #f0f0f3 | #1d1d23 |
+| background | #f8f8f9 | #141418 |
+| foreground | #09090b | #ececf0 |
+| sidebar | #f2f2f4 | #0e0e11 |
+| subtle (table heads, group rows) | #f3f3f5 | #101014 |
+| card | #ffffff | #1b1b21 |
+| popover | #ffffff | #222229 |
+| muted | #eeeef1 | #25252d |
+| accent | #f0f0f3 | #212128 |
 | muted-foreground | #66666f | #a1a1aa |
-| border | #e2e2e7 | white at 9% |
+| border | #e2e2e7 | white at 10% |
 | input | #c4c4cc | #52525b |
 | brand, ring | #5b48d9 | #9187f7 |
 | brand-foreground | #ffffff | #16122e |
-| primary, primary-foreground | #18181b, #fafafa | #fafafa, #18181b |
+| primary, primary-foreground | #18181b, #fafafa | #e6e6ea, #141418 |
 | destructive | #dc2626 | #ef4444 |
 
 `web/src/styles/tokens.test.ts` holds this table and checks every text pair at 4.5:1 or better (muted-foreground on
 the canvas, muted, subtle, card, popover and sidebar; brand and brand-foreground on every surface it sits on) and
 the focus ring at 3:1 on the canvas and on cards.
+
+Dark theme (changed 2026-11-05, he uses it most): charcoal, not near-black. The sidebar, canvas, card and popover are four
+visible lightness steps (#0e0e11, #141418, #1b1b21, #222229), so surfaces separate without heavy borders. Text is a
+soft off-white (#ececf0, not #fafafa) and the filled button is #e6e6ea, so a long session does not glare. The status
+colours are softer than the light theme's, tuned to one visual weight (the yellow no longer outshines the red).
 
 ### Brand accent
 
@@ -702,11 +707,11 @@ Status tokens (text, soft background, border, dot):
 
 | Status | Light | Dark |
 |---|---|---|
-| ok | #15803d, #f0fdf4, #bbf7d0, #16a34a | #4ade80, green at 12%, green at 30%, #22c55e |
-| warn | #a16207, #fefce8, #fde68a, #eab308 | #facc15, amber at 12%, amber at 30%, #eab308 |
-| bad | #b91c1c, #fef2f2, #fecaca, #ef4444 | #f87171, red at 12%, red at 32%, #ef4444 |
-| info | #1d4ed8, #eff6ff, #bfdbfe, #3b82f6 | #60a5fa, blue at 13%, blue at 32%, #3b82f6 |
-| idle | #52525b, #f4f4f5, #e4e4e7, #a1a1aa | #d4d4d8, #27272a, #3f3f46, #71717a |
+| ok | #15803d, #f0fdf4, #bbf7d0, #16a34a | #62d28f, green at 10%, green at 26%, #34c46f |
+| warn | #a16207, #fefce8, #fde68a, #eab308 | #e6c25c, amber at 10%, amber at 26%, #d6a928 |
+| bad | #b91c1c, #fef2f2, #fecaca, #ef4444 | #f28b8b, red at 10%, red at 28%, #ec5b5b |
+| info | #1d4ed8, #eff6ff, #bfdbfe, #3b82f6 | #7fb2f5, blue at 12%, blue at 28%, #4f8fee |
+| idle | #52525b, #f4f4f5, #e4e4e7, #a1a1aa | #cfcfd6, #26262d, #3a3a43, #71717a |
 
 Muted foreground is one step darker than shadcn's zinc-500 (#71717a) in light so that secondary text passes 4.5:1
 on the muted grey: light 5.4 on the canvas, 5.7 on cards, 4.9 on muted; dark 7.7, 7.2, 6.1. Brand on the canvas,

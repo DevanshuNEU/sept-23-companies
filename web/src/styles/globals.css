@@ -79,55 +79,60 @@
 }
 
 .dark {
-  --background: #0b0b0e;
-  --foreground: #fafafa;
-  --card: #141418;
-  --card-foreground: #fafafa;
-  --popover: #1a1a20;
-  --popover-foreground: #fafafa;
-  --muted: #23232a;
+  /* Charcoal, not black, and each layer a visible step above the last (sidebar, canvas, card, popover): the surfaces
+     separate by lightness, as the design standard asks, so there is no need for heavy borders. Text is a soft off-white,
+     not pure white, so a long session does not glare. */
+  --background: #141418;
+  --foreground: #ececf0;
+  --card: #1b1b21;
+  --card-foreground: #ececf0;
+  --popover: #222229;
+  --popover-foreground: #ececf0;
+  --muted: #25252d;
   --muted-foreground: #a1a1aa;
-  --subtle: #101013;
-  --border: rgb(255 255 255 / 0.09);
+  --subtle: #101014;
+  --border: rgb(255 255 255 / 0.1);
   --input: #52525b;
   --ring: #9187f7;
   --brand: #9187f7;
   --brand-foreground: #16122e;
-  --primary: #fafafa;
-  --primary-foreground: #18181b;
-  --secondary: #23232a;
-  --secondary-foreground: #fafafa;
-  --accent: #1d1d23;
-  --accent-foreground: #fafafa;
+  --primary: #e6e6ea;
+  --primary-foreground: #141418;
+  --secondary: #25252d;
+  --secondary-foreground: #ececf0;
+  --accent: #212128;
+  --accent-foreground: #ececf0;
   --destructive: #ef4444;
-  --sidebar: #09090b;
-  --sidebar-foreground: #fafafa;
-  --sidebar-primary: #fafafa;
-  --sidebar-primary-foreground: #18181b;
-  --sidebar-accent: #23232a;
-  --sidebar-accent-foreground: #fafafa;
-  --sidebar-border: rgb(255 255 255 / 0.09);
+  --sidebar: #0e0e11;
+  --sidebar-foreground: #ececf0;
+  --sidebar-primary: #e6e6ea;
+  --sidebar-primary-foreground: #141418;
+  --sidebar-accent: #1e1e25;
+  --sidebar-accent-foreground: #ececf0;
+  --sidebar-border: rgb(255 255 255 / 0.08);
   --sidebar-ring: #9187f7;
 
-  --ok: #4ade80;
-  --ok-bg: rgb(34 197 94 / 0.12);
-  --ok-bd: rgb(34 197 94 / 0.3);
-  --ok-dot: #22c55e;
-  --warn: #facc15;
-  --warn-bg: rgb(234 179 8 / 0.12);
-  --warn-bd: rgb(234 179 8 / 0.3);
-  --warn-dot: #eab308;
-  --bad: #f87171;
-  --bad-bg: rgb(239 68 68 / 0.12);
-  --bad-bd: rgb(239 68 68 / 0.32);
-  --bad-dot: #ef4444;
-  --info: #60a5fa;
-  --info-bg: rgb(59 130 246 / 0.13);
-  --info-bd: rgb(59 130 246 / 0.32);
-  --info-dot: #3b82f6;
-  --idle: #d4d4d8;
-  --idle-bg: #27272a;
-  --idle-bd: #3f3f46;
+  /* Status colours in dark: softer than the light theme's full strength, tuned to the same visual weight so the yellow
+     does not shout over the red or the green. */
+  --ok: #62d28f;
+  --ok-bg: rgb(34 197 94 / 0.1);
+  --ok-bd: rgb(34 197 94 / 0.26);
+  --ok-dot: #34c46f;
+  --warn: #e6c25c;
+  --warn-bg: rgb(234 179 8 / 0.1);
+  --warn-bd: rgb(234 179 8 / 0.26);
+  --warn-dot: #d6a928;
+  --bad: #f28b8b;
+  --bad-bg: rgb(239 68 68 / 0.1);
+  --bad-bd: rgb(239 68 68 / 0.28);
+  --bad-dot: #ec5b5b;
+  --info: #7fb2f5;
+  --info-bg: rgb(59 130 246 / 0.12);
+  --info-bd: rgb(59 130 246 / 0.28);
+  --info-dot: #4f8fee;
+  --idle: #cfcfd6;
+  --idle-bg: #26262d;
+  --idle-bd: #3a3a43;
   --idle-dot: #71717a;
 
   --mono-teal-bg: #133632;

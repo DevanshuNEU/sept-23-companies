@@ -11,7 +11,7 @@ from outreach.sending import queue
 from outreach.sending.config import load_config as load_send_config
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase, fingerprint
-from tests.test_mcp_reads import merge, no_go
+from tests.test_mcp_reads import merge, no_go, outreach_touch
 
 
 class CorrectionsCase(McpCase):
@@ -193,6 +193,79 @@ class MarkEmailBouncedTest(CorrectionsCase):
     def test_a_missing_person_is_not_found(self):
         self.assertEqual(self.error("mark_email_bounced", {"person_id": 9999, "reason": "bounced"})["code"],
                          "not_found")
+
+
+class MovePersonTest(CorrectionsCase):
+    def setUp(self):
+        super().setUp()
+        self.elsewhere = seed.company(self.db, "Elsewhere", "working")
+
+    def test_a_move_changes_the_company_and_keeps_history_where_it_happened(self):
+        touch = seed.touch(self.db, self.pat)
+        seed.send_first(self.db, touch)
+        outreach_touch(self.db, self.acme, self.pat)
+        self.db.execute("INSERT INTO event(at, recorded_at, entity, entity_id, company_id, kind, actor) "
+                        "VALUES (?, ?, 'person', ?, ?, 'added', 'claude')", (NOW, NOW, self.pat, self.acme))
+        got = self.ok("move_person", {"person_id": self.pat, "company_id": self.elsewhere})
+        self.assertEqual((got["from_company"], got["to_company"], got["warnings"]),
+                         ({"id": self.acme, "name": "Acme"}, {"id": self.elsewhere, "name": "Elsewhere"}, []))
+        row = self.row(self.pat)
+        self.assertEqual((row["company_id"], row["email"], row["revision"]),
+                         (self.elsewhere, "pat@acme.example", 2))
+        self.assertEqual(self.db.execute("SELECT company_id FROM outreach_touch WHERE person_id = ?",
+                                         (self.pat,)).fetchone()[0], self.acme)
+        self.assertEqual(self.events("added")[0]["company_id"], self.acme)
+        (event,) = self.events("moved")
+        self.assertEqual(event["actor"], "claude")
+        self.assertEqual(event["company_id"], self.elsewhere)
+        self.assertEqual(event["detail"]["company_id"], {"old": self.acme, "new": self.elsewhere})
+        self.assertEqual((event["detail"]["from"], event["detail"]["to"]), ("Acme", "Elsewhere"))
+        (item,) = self.items()
+        self.assertEqual((item["kind"], item["raised_by"], item["company_id"], item["person_id"]),
+                         ("flagged", "claude", self.elsewhere, self.pat))
+        self.assertIn("Acme", item["reason"])
+        self.assertIn("Elsewhere", item["reason"])
+
+    def test_a_merged_company_lands_on_the_survivor(self):
+        duplicate = seed.company(self.db, "Elsewhere Inc", "working")
+        merge(self.db, duplicate, self.elsewhere)
+        got = self.ok("move_person", {"person_id": self.pat, "company_id": duplicate})
+        self.assertEqual(self.row(self.pat)["company_id"], self.elsewhere)
+        self.assertIn(str(duplicate), got["merged_note"])
+
+    def test_the_same_company_or_a_missing_one_is_refused_and_writes_nothing(self):
+        before = fingerprint(self.db)
+        self.assertEqual(self.error("move_person", {"person_id": self.pat, "company_id": self.acme})["code"],
+                         "same_company")
+        self.assertEqual(self.error("move_person", {"person_id": self.pat, "company_id": 9999})["code"], "not_found")
+        self.assertEqual(self.error("move_person", {"person_id": 9999, "company_id": self.acme})["code"],
+                         "not_found")
+        self.assertEqual(fingerprint(self.db), before)
+
+    def test_a_person_on_the_no_go_list_is_refused_but_a_lifted_one_moves(self):
+        no_go(self.db, person_id=self.pat)
+        before = fingerprint(self.db)
+        self.assertEqual(self.error("move_person", {"person_id": self.pat, "company_id": self.elsewhere})["code"],
+                         "person_no_go")
+        self.assertEqual(fingerprint(self.db), before)
+        self.db.execute("UPDATE no_go SET lifted_at = ?, lift_reason = 'back on' WHERE person_id = ?", (NOW, self.pat))
+        self.ok("move_person", {"person_id": self.pat, "company_id": self.elsewhere})
+
+    def test_a_closed_or_no_go_target_warns_but_moves_and_a_removed_one_is_refused(self):
+        closed = seed.company(self.db, "Closed Co", "closed")
+        got = self.ok("move_person", {"person_id": self.pat, "company_id": closed})
+        self.assertEqual(self.row(self.pat)["company_id"], closed)
+        self.assertEqual(got["warnings"], ["Closed Co is closed."])
+        blocked = seed.company(self.db, "Blocked Co", "working")
+        no_go(self.db, company_id=blocked)
+        sam = seed.person(self.db, self.acme, "Sam Park")
+        got = self.ok("move_person", {"person_id": sam, "company_id": blocked})
+        self.assertEqual(got["warnings"], ["Blocked Co is on the no-go list."])
+        gone = seed.company(self.db, "Gone Co", "removed")
+        before = fingerprint(self.db)
+        self.assertEqual(self.error("move_person", {"person_id": sam, "company_id": gone})["code"],
+                         "company_removed")
+        self.assertEqual(fingerprint(self.db), before)
 
 
 if __name__ == "__main__":

@@ -19,9 +19,10 @@ from typing import Literal
 
 from pydantic import Field
 
-from outreach.mcp.guard import Grant
+from outreach.drafts.followups import no_go_sets
+from outreach.mcp.guard import MOVE_ONLY_COLUMNS, Grant
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
-from outreach.mcp.tools.reads import MAX_ID, SENT_STATES, Family
+from outreach.mcp.tools.reads import MAX_ID, SENT_STATES, Family, company_row, resolve
 from outreach.mcp.tools.research import clean, raise_flag_in
 from outreach.sources.keys import EMAIL, linkedin_key
 from outreach.store import append_event, transaction
@@ -224,6 +225,47 @@ def mark_email_bounced(ctx: Ctx, args: BouncedInput) -> dict:
             "message": "Cleared. The sender holds any email still queued for them. Devanshu sees it in Needs you."}
 
 
+# ---------------------------------------------------------------------------------------------- move_person
+
+class MoveInput(Input):
+    person_id: int = Field(ge=1, le=MAX_ID)
+    company_id: int = Field(ge=1, le=MAX_ID, description="The company they work at now.")
+
+
+def move_person(ctx: Ctx, args: MoveInput) -> dict:
+    conn = ctx.conn
+    person = _person(conn, args.person_id)
+    family, target, merged_note = resolve(conn, args.company_id)
+    current = family.survivor(person["company_id"])
+    if target == current:
+        raise ToolError("same_company", f"{person['name']} is already at {company_row(conn, current)['name']}.",
+                        "Nothing to move. Nothing was written.")
+    people, blocked = no_go_sets(conn, family.companies)
+    if person["person_id"] in people:
+        raise ToolError("person_no_go", f"{person['name']} is on the no-go list.",
+                        "Devanshu lifts a no-go in the app. Nothing was written.")
+    to_row, from_row = company_row(conn, target), company_row(conn, current)
+    if to_row["status"] == "removed":
+        raise ToolError("company_removed", f"{to_row['name']} was removed.",
+                        "Use the company they work at now, or ask Devanshu. Nothing was written.")
+    warnings = []
+    if to_row["status"] == "closed":
+        warnings.append(f"{to_row['name']} is closed.")
+    if target in blocked:
+        warnings.append(f"{to_row['name']} is on the no-go list.")
+    changes = {"company_id": (person["company_id"], target)}
+    with transaction(conn):
+        _write(conn, person["person_id"], changes, ctx.now)
+        noted = record_edit(ctx, person, changes, kind="moved", company_id=target,
+                            extra={"from": from_row["name"], "to": to_row["name"]},
+                            summary=clean(f"Claude moved {person['name']} from {from_row['name']} to "
+                                          f"{to_row['name']}"))
+    return {"person_id": person["person_id"], "from_company": {"id": current, "name": from_row["name"]},
+            "to_company": {"id": target, "name": to_row["name"]}, "warnings": warnings, "merged_note": merged_note,
+            "review_id": noted["review_id"],
+            "message": "Moved. Earlier sends stay under the company they went to. Devanshu sees it in Needs you."}
+
+
 TOOLS = (
     ToolSpec("update_person",
              "Correct a person after the fact: name, title, role_kind, linkedin_url, email (null clears it), "
@@ -240,4 +282,11 @@ TOOLS = (
              BouncedInput, mark_email_bounced,
              {"person": Grant(update=frozenset({"email", "channel", "linkedin_reason", "updated_at", "revision"})),
               "review_item": Grant(insert=True), "event": Grant(insert=True)}),
+    ToolSpec("move_person",
+             "A person works at a different company now: move them there. Applies at once, logs both companies "
+             "and raises a Needs-you note. Earlier sends and events stay under the company they happened at. "
+             "Refused for someone on the no-go list or a removed company; a closed or no-go company is a warning.",
+             MoveInput, move_person,
+             {"person": Grant(update=MOVE_ONLY_COLUMNS), "review_item": Grant(insert=True),
+              "event": Grant(insert=True)}),
 )

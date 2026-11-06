@@ -27,6 +27,8 @@ PERSON_EDIT = frozenset({"name", "title", "role_kind", "email", "linkedin_url", 
                          "linkedin_reason", "updated_at", "revision"})
 PINNED = {
     "update_person": {"person": Grant(update=PERSON_EDIT), "review_item": INSERT, "event": INSERT},
+    "move_person": {"person": Grant(update=frozenset({"company_id", "updated_at", "revision"})),
+                    "review_item": INSERT, "event": INSERT},
     "mark_email_bounced": {"person": Grant(update=frozenset({"email", "channel", "linkedin_reason", "updated_at",
                                                               "revision"})),
                            "review_item": INSERT, "event": INSERT},
@@ -280,6 +282,20 @@ class GrantsCase(McpCase):
              "VALUES (?, 'Dev Anshu', 'engineer', 'dev@acme.example', 'email', 'claude', ?, ?)",
              (self.acme, NOW, NOW)),
         ], {"person_id": self.pat, "title": "Staff Engineer"})
+
+    def test_move_person_cannot_write_beyond_its_grants(self):
+        self.check_tool("move_person", [
+            ("UPDATE person SET email = 'new@acme.example' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET added_by = 'claude' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET name = 'Someone Else' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE touch SET state = 'closed', closed_at = ?, close_reason = 'skipped' WHERE touch_id = ?",
+             (NOW, self.touch)),
+        ], {"person_id": self.pat, "company_id": seed.company(self.db, "Elsewhere", "working")})
+
+    def test_only_move_person_may_update_company_id(self):
+        for name, grants in PINNED.items():
+            update = grants.get("person", Grant()).update
+            self.assertEqual("company_id" in update, name == "move_person", name)
 
     def test_mark_email_bounced_cannot_write_beyond_its_grants(self):
         self.check_tool("mark_email_bounced", [

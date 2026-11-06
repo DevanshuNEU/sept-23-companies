@@ -63,7 +63,7 @@ class KnockStatusTest(BridgeCase):
         before = fingerprint(self.db)
         out = self.ok("knock_status")
         self.assertEqual(fingerprint(self.db), before)
-        self.assertEqual((out["reachable"], out["server_version"]), (True, "2"))
+        self.assertEqual((out["reachable"], out["server_version"]), (True, "3"))
         week = out["linkedin_week"]
         self.assertEqual((week["used"], week["limit"], week["hard_used"], week["hard_limit"]), (1, 150, 2, 200))
         self.assertEqual(out["companies_in_flight"], 2)

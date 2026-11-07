@@ -23,7 +23,15 @@ READER_BODY = "We build tools for small teams and ship every week. " * 12
 INSERT = Grant(insert=True)
 PERSON_UPDATE = frozenset({"email", "linkedin_url", "channel", "linkedin_reason", "profile_text", "notes",
                            "updated_at", "revision"})
+PERSON_EDIT = frozenset({"name", "title", "role_kind", "email", "linkedin_url", "profile_text", "notes", "channel",
+                         "linkedin_reason", "updated_at", "revision"})
 PINNED = {
+    "update_person": {"person": Grant(update=PERSON_EDIT), "review_item": INSERT, "event": INSERT},
+    "move_person": {"person": Grant(update=frozenset({"company_id", "updated_at", "revision"})),
+                    "review_item": INSERT, "event": INSERT},
+    "mark_email_bounced": {"person": Grant(update=frozenset({"email", "channel", "linkedin_reason", "updated_at",
+                                                              "revision"})),
+                           "review_item": INSERT, "event": INSERT},
     "record_research": {"evidence": INSERT, "event": INSERT},
     "flag_review": {"review_item": INSERT, "event": INSERT},
     "mark_no_go": {"review_item": INSERT, "event": INSERT},
@@ -263,6 +271,39 @@ class GrantsCase(McpCase):
             ("UPDATE person SET notes = 'x' WHERE person_id = ?", (self.sam,)),
         ], {"person_id": self.sam, "seq": 1, "body": "Hi Sam, one more note on the ledger idea. Thanks, Devanshu",
             "brief_id": brief})
+
+    def test_update_person_cannot_write_beyond_its_grants(self):
+        self.check_tool("update_person", [
+            ("UPDATE person SET company_id = ? WHERE person_id = ?", (seed.company(self.db, "Elsewhere"), self.pat)),
+            ("UPDATE person SET added_by = 'claude' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET tz = 'UTC' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE message SET subject = 'Changed' WHERE message_id = ?", (self.planned,)),
+            ("INSERT INTO person(company_id, name, role_kind, email, channel, added_by, created_at, updated_at) "
+             "VALUES (?, 'Dev Anshu', 'engineer', 'dev@acme.example', 'email', 'claude', ?, ?)",
+             (self.acme, NOW, NOW)),
+        ], {"person_id": self.pat, "title": "Staff Engineer"})
+
+    def test_move_person_cannot_write_beyond_its_grants(self):
+        self.check_tool("move_person", [
+            ("UPDATE person SET email = 'new@acme.example' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET added_by = 'claude' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET name = 'Someone Else' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE touch SET state = 'closed', closed_at = ?, close_reason = 'skipped' WHERE touch_id = ?",
+             (NOW, self.touch)),
+        ], {"person_id": self.pat, "company_id": seed.company(self.db, "Elsewhere", "working")})
+
+    def test_only_move_person_may_update_company_id(self):
+        for name, grants in PINNED.items():
+            update = grants.get("person", Grant()).update
+            self.assertEqual("company_id" in update, name == "move_person", name)
+
+    def test_mark_email_bounced_cannot_write_beyond_its_grants(self):
+        self.check_tool("mark_email_bounced", [
+            ("UPDATE person SET name = 'Someone Else' WHERE person_id = ?", (self.pat,)),
+            ("UPDATE person SET company_id = ? WHERE person_id = ?", (seed.company(self.db, "Elsewhere"), self.pat)),
+            ("UPDATE touch SET state = 'bounced', bounced_at = ? WHERE touch_id = ?", (NOW, self.touch)),
+            ("UPDATE message SET state = 'skipped' WHERE message_id = ?", (self.drafted,)),
+        ], {"person_id": self.pat, "reason": "Gmail says no such mailbox"})
 
     def test_add_people_cannot_write_beyond_its_grants(self):
         self.check_tool("add_people", [

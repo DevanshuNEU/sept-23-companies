@@ -38,7 +38,7 @@ FIX = ROOT / "tests" / "fixtures"
 ALL_TOOLS = ("ranked_companies", "company", "person", "followups_due", "record_research", "flag_review", "mark_no_go",
             "save_draft", "save_followup", "save_linkedin_note", "add_people", "reader_next", "reader_submit",
             "prepare_targets", "submit_candidates", "knock_status", "contact_check", "intake", "log_sent", "draft_brief",
-             "connect_followups", "log_miss")
+             "connect_followups", "log_miss", "update_person", "mark_email_bounced", "move_person")
 BODY = ("Hi Lee,\n\nI read your post on the queue rewrite at Acme and how the team moved billing off a nightly batch. "
         "I build backend systems in Go and Python, and last year I shipped a queue that handled thousands of "
         "requests a minute without a page. I would like to help your team keep that kind of work calm, and I am "
@@ -107,6 +107,10 @@ class SweepCase(McpCase):
         self.states["sent"] = self.db.execute("SELECT message_id FROM message WHERE state = 'sent'").fetchone()[0]
         self.lin = seed.person(self.db, self.acme, "Lin Kedin", channel="linkedin")
         self.lee = seed.person(self.db, self.acme, "Lee New", email="lee@acme.example")
+        self.fixable = seed.person(self.db, self.acme, "Una Update", email="una@acme.example")
+        self.bouncy = seed.person(self.db, self.acme, "Bea Bounce", email="bea@acme.example")
+        self.mover = seed.person(self.db, self.acme, "Moe Mover", email="moe@acme.example")
+        self.elsewhere = seed.company(self.db, "Elsewhere", "working")
         self.reader_posting = self.db.execute(
             "INSERT INTO posting(company_id, source_key, title, location, first_seen_at, last_seen_at) "
             "VALUES (?, 'url:sweep-1', 'Software Engineer', 'Austin, TX', ?, ?)", (self.acme, NOW, NOW)).lastrowid
@@ -153,6 +157,9 @@ class SweepCase(McpCase):
             "contact_check": ({"company": "Acme", "people": [{"name": "Lin Kedin"}]}, None),
             "intake": ({"people": [{"name": "Ida Intake", "title": "Software Engineer", "company": "Acme",
                                     "linkedin_url": "https://www.linkedin.com/in/ida-intake"}]}, None),
+            "update_person": ({"person_id": self.fixable, "title": "Staff Engineer"}, None),
+            "mark_email_bounced": ({"person_id": self.bouncy, "reason": "Gmail says no such mailbox"}, None),
+            "move_person": ({"person_id": self.mover, "company_id": self.elsewhere}, None),
             "log_miss": ({"url": "https://jobs.ashbyhq.com/acme/never-seen", "note": "from a friend"}, None),
             "log_sent": ({"requests": [{"person_id": self.lin, "channel": "linkedin_request",
                                         "note_text": "Hi Lin, I read your post on the queue rewrite."}]}, None),
@@ -171,7 +178,7 @@ class ToolListTest(unittest.TestCase):
     def test_the_tool_list_is_exactly_the_pinned_tools(self):
         names = [s.name for s in server.tool_specs()]
         self.assertEqual(sorted(names), sorted(ALL_TOOLS))
-        self.assertEqual(len(names), 22)
+        self.assertEqual(len(names), 25)
 
 
 class SweepTest(SweepCase):
@@ -245,7 +252,7 @@ class RawStoreTest(SweepCase):
         calls = self.valid()
         statements = self.statements()
         writers = [name for name in ALL_TOOLS if spec(name).grants]
-        self.assertEqual(len(writers), 13)
+        self.assertEqual(len(writers), 16)
         for name in writers:
             args, _named = calls[name] if name != "reader_submit" else self.valid()["reader_submit"]
             self.ok(name, args)

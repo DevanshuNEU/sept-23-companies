@@ -97,6 +97,16 @@ the no-go list (a reply that says no or stop) and only raises a Needs-you item h
 a size, stage, domain or HQ you found on a public page, with the page and a quote, as a guess. None of them hides a
 company or stops email on its own.
 
+## A person is wrong, or an address bounced
+
+`mark_email_bounced` (person, why you know it is dead) takes a bounced or dead address off the person: they become a
+LinkedIn contact, and the sender holds any email still queued for them. Do it as soon as he says an address bounced or
+you see the sender's bounce. `update_person` fixes a name, title, role kind, LinkedIn URL, profile text or notes, and
+sets or clears the email (`email: null`). `move_person` moves someone who changed employer. Each applies at once, keeps
+the old value in the log and raises a Needs-you note he clears with ok. A new address for someone whose first email
+already went out and did not bounce is refused: ask him. Removing a person and a second first email to a corrected
+address are not tools yet (#183, #182).
+
 ## From the terminal: intake and log_sent
 
 - **First, `knock_status`.** If it fails or is not loaded, say "Not logged in Knock", print a paste block (one line

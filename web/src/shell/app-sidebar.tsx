@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { NavLink } from 'react-router';
-import { Activity, Award, Ban, Building2, CalendarCheck, ChartColumn, CircleAlert, CircleCheck, Gauge, Moon, Search, Send, Sun, Telescope } from 'lucide-react';
+import { Activity, Award, Ban, Building2, CalendarCheck, ChartColumn, CircleAlert, CircleCheck, Gauge, Moon, Search, Send, Sun, Telescope, Workflow } from 'lucide-react';
 import { pollMs, queryKeys, useClient, type JobRunSummary, type PipelineLine, type SenderState, type ShellSummary } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -171,12 +171,19 @@ function ResultItems({ s }: { s: ShellSummary | undefined }) {
 }
 
 function ListItems({ s }: { s: ShellSummary | undefined }) {
+  const client = useClient();
+  // The same query the Pipeline page reads: the number of last-week questions waiting for an answer.
+  const outcomes = useViewQuery(queryKeys.outcomePrompt, () => client.outcomePrompt(), { pollMs: pollMs.default });
+  const waiting = outcomes.data?.touches.length ?? 0;
   return (
     <SidebarGroup className="px-0 pt-2 pb-1">
       <nav aria-label="Lists">
         <SidebarGroupLabel className="text-muted-foreground">Lists</SidebarGroupLabel>
         <SidebarMenu className="gap-0.5">
           <NavItem to="/browse" icon={Telescope} label="Jobs" />
+          <NavItem to="/pipeline" icon={Workflow} label="Pipeline" described={waiting > 0 ? plural(waiting, 'question', 'questions') + ' to answer' : undefined}>
+            {waiting > 0 ? <Count value={waiting} /> : null}
+          </NavItem>
           <NavItem to="/no-go" icon={Ban} label="No-go" described={s && s.noGoCount > 0 ? `${s.noGoCount}` : undefined}>
             {s && s.noGoCount > 0 ? <Count value={s.noGoCount} /> : null}
           </NavItem>

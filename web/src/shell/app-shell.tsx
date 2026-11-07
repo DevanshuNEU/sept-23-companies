@@ -32,6 +32,7 @@ const VIEW_TITLE: Record<string, string> = {
   'no-go': 'No-go list',
   progress: 'Progress',
   wins: 'Wins',
+  pipeline: 'Pipeline',
   done: 'Done',
 };
 
@@ -45,6 +46,7 @@ const GO: [key: string, path: string, name: string][] = [
   ['p', '/progress', 'Progress'],
   ['w', '/wins', 'Wins'],
   ['b', '/browse', 'Jobs'],
+  ['i', '/pipeline', 'Pipeline'],
 ];
 
 /** The first path segment names the view: `/outbox/12?sel=12` is the `outbox` view. */

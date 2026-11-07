@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient } from '@tanstack/react-query';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
-import { monogramHue } from '@/lib/monogram';
 import { renderWithApp } from '@/test/render';
 import TodayPage from './index';
 
@@ -72,12 +71,13 @@ describe('three columns from 1280 px', () => {
     expect(profile).not.toHaveTextContent('Builds a support platform');
   });
 
-  it('says Not known for what is unknown, and nothing in it is red', async () => {
+  it('lists what is unknown in one line, and nothing in it is red', async () => {
     await open();
     fireEvent.click(options()[6]!); // Trigger.dev
     await screen.findByRole('heading', { level: 2, name: 'Trigger.dev' });
     const profile = screen.getByRole('complementary', { name: 'Company profile' });
-    expect(within(profile).getAllByText('Not known').length).toBeGreaterThanOrEqual(6);
+    expect(within(profile).getByRole('region', { name: 'Not known yet' })).toHaveTextContent('Not known: Stage, HQ');
+    expect(within(profile).queryAllByText('Not known')).toHaveLength(0);
     expect(profile.innerHTML).not.toMatch(/\b(?:text|bg|border)-(?:bad|destructive)|\bred\b/);
   });
 
@@ -103,7 +103,7 @@ describe('under 1280 px the profile folds under the company', () => {
     expect(within(main()).queryByRole('heading', { level: 3, name: 'Visa' })).toBeNull();
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    for (const h of ['What they build', 'Stage and funding', 'Headcount', 'Where', 'Visa', 'Open roles at your level', 'People on record', 'Your history', 'Links']) {
+    for (const h of ['What they build', 'Stage and funding', 'Headcount', 'Where', 'Visa', 'Open roles at your level', 'People on record', 'Your history']) {
       expect(within(main()).getByRole('heading', { level: 3, name: h })).toBeInTheDocument();
     }
     expect(main()).toHaveTextContent('4 software LCA filings in FY2024 and FY2025');
@@ -122,11 +122,11 @@ describe('under 1280 px the profile folds under the company', () => {
 describe('the company, calmer', () => {
   beforeEach(() => setWindow(true));
 
-  it('leads with the name, what they build, the level chip and the fit chip', async () => {
+  it('leads with the name, what they build and the fit chip (the opening line names the level)', async () => {
     await open();
     expect(screen.getByRole('heading', { level: 2, name: 'Pylon' }).className).toMatch(/text-\[28px\].*tracking-\[-0\.025em\]/);
     expect(main()).toHaveTextContent('Builds a support platform for B2B teams, with AI agents that answer tickets.');
-    expect(within(main()).getByText('SWE I role')).toBeInTheDocument();
+    expect(within(main()).getByRole('region', { name: 'Why today' })).toHaveTextContent('SWE I role');
     expect(within(main()).getByText('Fit 82')).toHaveAttribute('data-band', 'good');
   });
 
@@ -145,10 +145,13 @@ describe('the company, calmer', () => {
     await open();
     const filled = Array.from(main().querySelectorAll('[data-slot="button"][data-variant="default"]'));
     expect(filled.map((e) => e.textContent)).toEqual(['Open LinkedIn searchS']);
-    for (const name of ['Careers', 'Website', 'LinkedIn page', 'Copy for terminal', 'Log applied']) {
-      const quiet = within(main()).getByRole(name === 'Copy for terminal' || name === 'Log applied' ? 'button' : 'link', { name: new RegExp(`^${name}`) });
-      expect(quiet).toHaveAttribute('data-variant', 'secondary');
+    for (const name of ['Log applied']) {
+      expect(within(main()).getByRole('button', { name: new RegExp(`^${name}`) })).toHaveAttribute('data-variant', 'outline');
     }
+    // The research links are plain links on one quiet line, not buttons.
+    const research = within(main()).getByRole('group', { name: 'Research' });
+    expect(within(research).getAllByRole('link').map((a) => a.textContent?.replace(/O$/, ''))).toEqual(['Careers', 'Website', 'LinkedIn page']);
+    expect(research.querySelector('[data-slot="button"]')).toBeNull();
   });
 
   it('keeps Log people you asked and Save this search closed, and Carry and Not now at the bottom', async () => {
@@ -208,13 +211,19 @@ describe('the company, calmer', () => {
 describe('the rail, more alive', () => {
   beforeEach(() => setWindow(true));
 
-  it('gives every company a monogram tile in a hue its name always gets', async () => {
+  it('gives every company the same quiet monogram tile, with no hue of its own', async () => {
     await open();
-    const tiles = options().map((o) => o.querySelector('[data-hue]'));
+    const tiles = options().map((o) => o.querySelector('[aria-hidden="true"].rounded-lg') as HTMLElement | null);
     expect(tiles.map((t) => t?.textContent)).toEqual(['P', 'C', 'R', 'B', 'I', 'T', 'T', 'H']);
-    expect(tiles.map((t) => t?.getAttribute('data-hue'))).toEqual(
-      ['Pylon', 'Cerebrium', 'Resend', 'Baseten', 'Inngest', 'Turso', 'Trigger.dev', 'Hex'].map(monogramHue),
-    );
+    expect(new Set(tiles.map((t) => t?.className)).size).toBe(1);
+    expect(tiles.every((t) => !t?.hasAttribute('style') && !t?.hasAttribute('data-hue'))).toBe(true);
+  });
+
+  it('draws no colour on the rail but status: no coloured fit, new tag or progress bar', async () => {
+    await open();
+    const rail = screen.getByRole('listbox', { name: "Today's picks" });
+    expect(rail.innerHTML).not.toMatch(/\b(?:text|bg|border)-(?:ok|warn|bad|info)\b|\bmono-/);
+    expect(screen.getByRole('meter', { name: 'Picks reached today' }).innerHTML).not.toMatch(/bg-ok/);
   });
 
   it('has the fit chip on the right of a judged company, and none on one the judge has not read', async () => {

@@ -1,16 +1,15 @@
-import { monogramHue } from '@/lib/monogram';
 import { cn } from '@/lib/utils';
 
-/** The company's first letter on its own hue. Decorative: the name is always written next to it. */
+/**
+ * The company's first letter on a quiet neutral tile. No hue of its own (2026-11-05, his ruling: no colour for decoration):
+ * the list reads as one calm column, and colour is kept for status. Decorative: the name is always written next to it.
+ */
 export function Monogram({ name, className }: { name: string; className?: string }) {
-  const hue = monogramHue(name);
   const letter = name.trim().charAt(0).toUpperCase() || '?';
   return (
     <span
       aria-hidden
-      data-hue={hue}
-      style={{ backgroundColor: `var(--mono-${hue}-bg)`, color: `var(--mono-${hue}-fg)` }}
-      className={cn('grid size-8 flex-none place-items-center rounded-lg text-sm leading-none font-semibold select-none', className)}
+      className={cn('grid size-8 flex-none place-items-center rounded-lg border bg-muted/60 text-sm leading-none font-semibold text-foreground/85 select-none', className)}
     >
       {letter}
     </span>

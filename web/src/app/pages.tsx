@@ -14,6 +14,7 @@ export const DonePage = lazy(() => import('@/routes/done/index'));
 export const ProgressPage = lazy(() => import('@/routes/progress/index'));
 export const BrowsePage = lazy(() => import('@/routes/browse/index'));
 export const WinsPage = lazy(() => import('@/routes/wins/index'));
+export const PipelinePage = lazy(() => import('@/routes/pipeline/index'));
 
 /**
  * Element for child paths the parent view reads itself (`/outbox/:touchId`, `/no-go/people`).

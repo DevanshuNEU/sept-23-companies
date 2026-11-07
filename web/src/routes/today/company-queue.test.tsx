@@ -88,9 +88,10 @@ describe('Today as a company queue', () => {
     expect(within(why).getByRole('link', { name: 'Software Engineer I' })).toHaveAttribute('href', pylon.role?.url);
     expect(why).toHaveTextContent('SWE I role, first seen 6 hours ago');
     // The reasons are small chips: the new opening, E-Verify, sponsorship, size, hiring, then the ranker's own (each once).
+    // "Open role at your level" and "New opening today" only repeat the opening line and the new tag, so they are dropped.
     expect(within(why).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       'New opening, 6 hours ago', 'E-Verify enrolled', 'Says it sponsors', '30 people (estimate), Series A',
-      '3 new engineering roles in the last 30 days', 'Open role at your level', 'New opening today',
+      '3 new engineering roles in the last 30 days',
     ]);
     const about = within(panel()).getByLabelText('About Pylon');
     expect(about).toHaveTextContent('Where it standsNew');
@@ -112,12 +113,13 @@ describe('Today as a company queue', () => {
     expect(within(why).getByText('Risk: No E-Verify statement on its pages.')).toBeInTheDocument();
     expect(option(1)).toHaveTextContent('Fit 82');
     expect(within(panel()).getByText('Fit 82')).toBeInTheDocument();
-    // Inngest has no judgment: the panel says so plainly, and the rail says nothing.
+    // Inngest has no judgment: the header and the profile say so once, and Why today and the rail say nothing.
     expect(option(5)).not.toHaveTextContent('Judge');
     fireEvent.click(option(5));
     await screen.findByRole('heading', { level: 2, name: 'Inngest' });
     const inngest = within(panel()).getByRole('region', { name: 'Why today' });
-    expect(within(inngest).getByText('Judge: not judged yet.')).toBeInTheDocument();
+    expect(inngest).not.toHaveTextContent('Judge');
+    expect(panel()).toHaveTextContent('What they build is not known yet.');
   });
 
   it('the three research links and S, O open in a new tab; the app never fetches LinkedIn', async () => {
@@ -149,12 +151,13 @@ describe('Today as a company queue', () => {
     ]);
   });
 
-  it('C copies the one line for the terminal, and shift+C every company still to do', async () => {
+  it('has no per-company Copy for terminal button or C key (he does not use it); shift+C still copies every line', async () => {
     const writeText = stubClipboard();
     const { db } = await open();
+    expect(within(panel()).queryByRole('button', { name: /Copy for terminal/ })).not.toBeInTheDocument();
     press('c');
-    expect(await screen.findByText('Copied the line for your terminal.')).toBeInTheDocument();
-    expect(writeText).toHaveBeenLastCalledWith(`Knock: Pylon (company ${rowOf(db, 'Pylon').company.id}), role: Software Engineer I`);
+    expect(screen.queryByText('Copied the line for your terminal.')).not.toBeInTheDocument();
+    expect(writeText).not.toHaveBeenCalled();
     press('C', { shiftKey: true });
     expect(await screen.findByText('Copied 6 lines for your terminal.')).toBeInTheDocument();
     const all = writeText.mock.calls.at(-1)?.[0].split('\n') ?? [];
@@ -253,23 +256,12 @@ describe('Today as a company queue', () => {
     expect(saved).toHaveBeenCalledWith(rowOf(buildFixture('queue'), 'Hex').entryId, url, expect.anything());
   });
 
-  it('In flight is collapsed under the queue and lists each company with where it stands', async () => {
-    const user = userEvent.setup();
+  it('has nothing under the pick: Email today, In flight, Last week and the Watch list are on the Pipeline page', async () => {
     await open();
-    const toggle = screen.getByRole('button', { name: /In flight/ });
-    expect(toggle).toHaveTextContent('In flight5 companies, 1 reply');
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('list', { name: 'Companies in flight' })).not.toBeInTheDocument();
-    await user.click(toggle);
-    const list = screen.getByRole('list', { name: 'Companies in flight' });
-    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
-      'BrowserbaseSomeone replied',
-      'Warp4 asked 6 days ago, free again Nov 18',
-      'Zed Industries2 asked 5 days ago, room for 2 more, free again Nov 19',
-      'Baseten2 asked today, room for 2 more, free again Nov 24',
-      'Resend3 asked today, room for 1 more, free again Nov 24',
-    ]);
-    expect(within(list).getByRole('link', { name: 'Warp' }).getAttribute('href')).toMatch(/^\/companies\/\d+$/);
+    for (const name of [/In flight/, /Email today/, /Last week/, /Watch list/]) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name })).not.toBeInTheDocument();
+    }
   });
 
   it('X carries a pick; N and P both open Not now, never the old Not a fit dialog', async () => {

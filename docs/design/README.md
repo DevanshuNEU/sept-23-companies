@@ -648,25 +648,33 @@ every card.
 
 | Token | Light | Dark |
 |---|---|---|
-| background | #f8f8f9 | #0b0b0e |
-| foreground | #09090b | #fafafa |
-| sidebar | #f2f2f4 | #09090b |
-| subtle (table heads, group rows) | #f3f3f5 | #101013 |
-| card | #ffffff | #141418 |
-| popover | #ffffff | #1a1a20 |
-| muted | #eeeef1 | #23232a |
-| accent | #f0f0f3 | #1d1d23 |
-| muted-foreground | #66666f | #a1a1aa |
-| border | #e2e2e7 | white at 9% |
-| input | #c4c4cc | #52525b |
-| brand, ring | #5b48d9 | #9187f7 |
+| background | #f8f8f9 | #262624 |
+| foreground | #09090b | #eeece6 |
+| sidebar | #f2f2f4 | #1f1e1d |
+| subtle (table heads, group rows) | #f3f3f5 | #1b1a19 |
+| card | #ffffff | #30302e |
+| popover | #ffffff | #3a3937 |
+| muted | #eeeef1 | #363533 |
+| accent | #f0f0f3 | #2f2e2c |
+| muted-foreground | #66666f | #b0aea5 |
+| border | #e2e2e7 | #dedcd1 at 14% |
+| input | #c4c4cc | #7a7770 |
+| brand, ring | #5b48d9 | #a79ffb |
 | brand-foreground | #ffffff | #16122e |
-| primary, primary-foreground | #18181b, #fafafa | #fafafa, #18181b |
+| primary, primary-foreground | #18181b, #fafafa | #ece9e0, #262624 |
 | destructive | #dc2626 | #ef4444 |
 
 `web/src/styles/tokens.test.ts` holds this table and checks every text pair at 4.5:1 or better (muted-foreground on
 the canvas, muted, subtle, card, popover and sidebar; brand and brand-foreground on every surface it sits on) and
 the focus ring at 3:1 on the canvas and on cards.
+
+Dark theme colour (changed 2026-11-05, his words: "use Claude or Conductor style ... for dark theme I mean the color"): warm
+stone, the palette of Claude and Conductor, not cool grey, at the lightness he approved (a warm grey canvas, not
+near-black). The light theme and the violet accent are unchanged. In dark the sidebar, canvas, card and popover are
+four clear lightness steps (#1f1e1d, #262624, #30302e, #3a3937), so each layer reads as its own surface, and raised
+cards carry a faint light top edge (`--shadow-xs` and `--shadow-sm` in `.dark`). Text is a soft off-white (#eeece6) and the
+filled button #ece9e0. The status colours are softer in dark, tuned to one visual weight (the yellow no longer outshines
+the red). The violet in dark is #a79ffb so it still reads at 4.5:1 on every surface.
 
 ### Brand accent
 
@@ -702,11 +710,11 @@ Status tokens (text, soft background, border, dot):
 
 | Status | Light | Dark |
 |---|---|---|
-| ok | #15803d, #f0fdf4, #bbf7d0, #16a34a | #4ade80, green at 12%, green at 30%, #22c55e |
-| warn | #a16207, #fefce8, #fde68a, #eab308 | #facc15, amber at 12%, amber at 30%, #eab308 |
-| bad | #b91c1c, #fef2f2, #fecaca, #ef4444 | #f87171, red at 12%, red at 32%, #ef4444 |
-| info | #1d4ed8, #eff6ff, #bfdbfe, #3b82f6 | #60a5fa, blue at 13%, blue at 32%, #3b82f6 |
-| idle | #52525b, #f4f4f5, #e4e4e7, #a1a1aa | #d4d4d8, #27272a, #3f3f46, #71717a |
+| ok | #15803d, #f0fdf4, #bbf7d0, #16a34a | #62d28f, green at 10%, green at 26%, #34c46f |
+| warn | #a16207, #fefce8, #fde68a, #eab308 | #e6c25c, amber at 10%, amber at 26%, #d6a928 |
+| bad | #b91c1c, #fef2f2, #fecaca, #ef4444 | #f28b8b, red at 10%, red at 28%, #ec5b5b |
+| info | #1d4ed8, #eff6ff, #bfdbfe, #3b82f6 | #7fb2f5, blue at 12%, blue at 28%, #4f8fee |
+| idle | #52525b, #f4f4f5, #e4e4e7, #a1a1aa | #cfcfd6, #34353f, #4a4b57, #71717a |
 
 Muted foreground is one step darker than shadcn's zinc-500 (#71717a) in light so that secondary text passes 4.5:1
 on the muted grey: light 5.4 on the canvas, 5.7 on cards, 4.9 on muted; dark 7.7, 7.2, 6.1. Brand on the canvas,

@@ -412,9 +412,13 @@ class ReviewFixesTest(BridgeCase):
         return self.ok("log_sent", {"requests": [{"channel": "linkedin_request", **r} for r in requests]})
 
     def test_a_three_day_backdate_across_the_clock_change_is_logged(self):
-        server = build_server(path=self.path, clock=lambda: "2026-11-04T04:59:00Z")  # Nov 3, 23:59 in New York
-        is_error, out = call(server, "log_sent", {"requests": [
-            {"channel": "linkedin_request", "person_id": self.lin, "at": "2026-10-31T04:30:00Z"}]})
+        now = "2026-11-04T04:59:00Z"  # Nov 3, 23:59 in New York
+        server = build_server(path=self.path, clock=lambda: now)
+        # `log_touch` stamps created_at from `utcnow`, and the guard refuses a touch recorded more than 5 days after
+        # it was sent: the wall clock must read the same fake time, or this test ages out by itself.
+        with mock.patch("outreach.store.writes.utcnow", return_value=now):
+            is_error, out = call(server, "log_sent", {"requests": [
+                {"channel": "linkedin_request", "person_id": self.lin, "at": "2026-10-31T04:30:00Z"}]})
         self.assertFalse(is_error, out)
         self.assertEqual((out["results"][0]["status"], out["results"][0]["sent_on"]), ("logged", "2026-10-31"))
 

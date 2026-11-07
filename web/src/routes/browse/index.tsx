@@ -13,6 +13,7 @@ import {
   type JobsTab,
   type JobsWindow,
 } from '@/api';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/state-views';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -307,12 +308,7 @@ export default function BrowsePage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="grid flex-none gap-3 border-b px-6 pt-5 pb-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Jobs</h1>
-          <p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums" aria-live="polite">
-            {headline}
-          </p>
-        </div>
+        <PageHeader title="Jobs" summary={headline} />
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <Tabs
             value={tab}

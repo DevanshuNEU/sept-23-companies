@@ -14,6 +14,7 @@ import {
   type LinkedInView,
   type ShellSummary,
 } from '@/api';
+import { PageHeader } from '@/components/page-header';
 import { ReplyKindDialog, type LoggedReply } from '@/components/reply-kind-dialog';
 import { EmptyState, QueryState } from '@/components/state-views';
 import { Input } from '@/components/ui/input';
@@ -313,25 +314,28 @@ export default function LinkedInPage() {
 
   return (
     <div ref={topRef} className="max-w-[1360px] px-6 pt-5 pb-12">
-      <div className="mb-4 flex items-end gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">LinkedIn replies</h1>
-          <p className="mt-0.5 text-[13px] text-muted-foreground">
-            The people who answered on LinkedIn. Everyone you message stays recorded, for the weekly limit and so nobody
-            is asked twice.
-          </p>
-          <p className="mt-0.5 text-[13px] text-muted-foreground">
-            Who to reach first each day is on{' '}
-            <Link
-              to="/today"
-              className="rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              Today&apos;s plan
-            </Link>
-            .
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        className="mb-4"
+        title="LinkedIn replies"
+        summary={
+          <>
+            <p>
+              The people who answered on LinkedIn. Everyone you message stays recorded, for the weekly limit and so nobody
+              is asked twice.
+            </p>
+            <p>
+              Who to reach first each day is on{' '}
+              <Link
+                to="/today"
+                className="rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                Today&apos;s plan
+              </Link>
+              .
+            </p>
+          </>
+        }
+      />
       {view ? <p className="mb-4 text-sm text-muted-foreground tabular-nums">{activityLine(view.activity)}</p> : null}
 
       <MarkReplied recorded={recorded} onPick={markReplied} />

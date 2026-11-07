@@ -575,6 +575,14 @@ closed date, note. Imported companies show an Imported tag and blank fields wher
 - **Motion:** overlays fade and scale in 120 ms; the sender dot pulses; nothing else animates. With reduced
   motion, the pulse and all transitions are off.
 - Large lists (Sent, History, Backlog) are virtualized (TanStack Virtual) past 200 rows.
+- **Page header** (2026-11-05, the design pass, `components/page-header.tsx`): every view opens with `PageHeader`: the
+  title at 20 px with tight tracking, one muted line under it (13 px, polite live region), and an optional aside at the
+  right of the title row. No view sets its own `<h1>` size.
+- **Key hints** (2026-11-05): a key hint is drawn only on a screen's one primary action and on the selected row. Every
+  other key keeps working, shows in the button's tooltip and is listed in the `?` sheet (built from the keys mounted).
+  A legend of keys never sits on the canvas.
+- **Footer weight** (2026-11-05): replies this month come first in the sidebar footer and are the heaviest line in it
+  (replies per month is the goal); the sender, the last board read and the scorecard follow, muted.
 
 ## 7. Shared states
 

@@ -1,6 +1,7 @@
 import { ChartColumn } from 'lucide-react';
 import { Link } from 'react-router';
 import { pollMs, queryKeys, usePageClient, type ProgressPeriod, type ProgressView } from '@/api';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, QueryState } from '@/components/state-views';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -85,14 +86,11 @@ export default function ProgressPage() {
 
   return (
     <div className="max-w-[1120px] px-6 pt-5 pb-12">
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold tracking-tight">Progress</h1>
-        {query.data ? (
-          <p className="mt-0.5 text-[13px] text-muted-foreground">
-            What you logged, counted plainly. A rate shows once a period has {query.data.base.minRequests} requests.
-          </p>
-        ) : null}
-      </div>
+      <PageHeader
+        className="mb-4"
+        title="Progress"
+        summary={query.data ? `What you logged, counted plainly. A rate shows once a period has ${query.data.base.minRequests} requests.` : undefined}
+      />
       <QueryState query={query} skeleton={<PageSkeleton />} empty={null}>
         {(v) => {
           const current = period === 'month' ? v.month : v.week;

@@ -4,8 +4,8 @@ import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture, type FixtureDb, type Scenario } from '@/api/fixture/data';
 import { AppShell } from '@/shell/app-shell';
 import { renderWithApp } from '@/test/render';
-import TodayPage from './index';
-import { OutcomePrompt } from './outcome-prompt';
+import PipelinePage from './index';
+import { OutcomePrompt } from './last-week';
 
 const press = (key: string) => fireEvent.keyDown(document.body, { key });
 
@@ -51,20 +51,6 @@ describe('OutcomePrompt', () => {
       .getAllByRole('button')
       .map((b) => b.textContent);
     expect(keys).toEqual(expect.arrayContaining(['Accepted1', 'Replied2', 'Nothing yet3']));
-  });
-
-  it('is shown open, and a collapsed section hides the question and its keys', async () => {
-    const { client } = await open();
-    await screen.findByRole('region', { name: /Last week, what happened/ });
-    const trigger = within(section()).getByRole('button', { name: /Last week, what happened/ });
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    fireEvent.click(trigger);
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(within(section()).queryByTestId('question')).not.toBeInTheDocument();
-    const log = vi.spyOn(client, 'logOutcome');
-    press('1');
-    await leavePage();
-    expect(log).not.toHaveBeenCalled();
   });
 
   it('1 logs accepted, the question moves to the next touch, and a win appears in the wins view', async () => {
@@ -204,28 +190,37 @@ describe('OutcomePrompt', () => {
     expect(section().textContent).not.toMatch(/overdue|behind|missed|streak|keep it up/i);
   });
 
-  describe('on Today', () => {
-    it('sits under the selected person, and answering from there works', async () => {
+  describe('on the Pipeline page', () => {
+    it('is the first tab when questions are waiting, and answering from there works', async () => {
       const client = new FixtureClient(buildFixture());
       renderWithApp(
         <>
           <AppShell />
-          <TodayPage />
+          <PipelinePage />
         </>,
         { client },
       );
-      await screen.findByRole('heading', { level: 2, name: 'Lena Ortiz' });
-      const person = screen.getByRole('region', { name: 'Selected person' });
-      const prompt = await within(person).findByRole('region', { name: /Last week, what happened/ });
-      // After the person's panel, in the same scrolling column.
-      expect(person.firstElementChild?.firstElementChild?.compareDocumentPosition(prompt)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      const tab = await screen.findByRole('tab', { name: /^Last week/ });
+      await waitFor(() => expect(tab).toHaveTextContent('2'));
+      expect(tab).toHaveAttribute('aria-selected', 'true');
+      await screen.findByRole('region', { name: /Last week, what happened/ });
       press('3');
       expect(await screen.findByText('Logged: nothing yet from Owen Brandt.')).toBeInTheDocument();
     });
 
+    it('answers no key on another tab: the keys exist only while the question is on screen', async () => {
+      const client = new FixtureClient(buildFixture());
+      const log = vi.spyOn(client, 'logOutcome');
+      renderWithApp(<PipelinePage />, { client, route: '/pipeline?tab=in-flight' });
+      await screen.findByRole('region', { name: 'In flight' });
+      press('1');
+      await leavePage();
+      expect(log).not.toHaveBeenCalled();
+    });
+
     it('shows on a weekend, when there is no plan', async () => {
       const client = new FixtureClient(buildFixture('weekend'));
-      renderWithApp(<TodayPage />, { client });
+      renderWithApp(<PipelinePage />, { client });
       expect(await screen.findByRole('region', { name: /Last week, what happened/ })).toBeInTheDocument();
     });
   });

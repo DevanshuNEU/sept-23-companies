@@ -656,25 +656,33 @@ every card.
 
 | Token | Light | Dark |
 |---|---|---|
-| background | #f8f8f9 | #0b0b0e |
-| foreground | #09090b | #fafafa |
-| sidebar | #f2f2f4 | #09090b |
-| subtle (table heads, group rows) | #f3f3f5 | #101013 |
-| card | #ffffff | #141418 |
-| popover | #ffffff | #1a1a20 |
-| muted | #eeeef1 | #23232a |
-| accent | #f0f0f3 | #1d1d23 |
-| muted-foreground | #66666f | #a1a1aa |
-| border | #e2e2e7 | white at 9% |
-| input | #c4c4cc | #52525b |
-| brand, ring | #5b48d9 | #9187f7 |
+| background | #f8f8f9 | #262624 |
+| foreground | #09090b | #eeece6 |
+| sidebar | #f2f2f4 | #1f1e1d |
+| subtle (table heads, group rows) | #f3f3f5 | #1b1a19 |
+| card | #ffffff | #30302e |
+| popover | #ffffff | #3a3937 |
+| muted | #eeeef1 | #363533 |
+| accent | #f0f0f3 | #2f2e2c |
+| muted-foreground | #66666f | #b0aea5 |
+| border | #e2e2e7 | #dedcd1 at 14% |
+| input | #c4c4cc | #7a7770 |
+| brand, ring | #5b48d9 | #a79ffb |
 | brand-foreground | #ffffff | #16122e |
-| primary, primary-foreground | #18181b, #fafafa | #fafafa, #18181b |
+| primary, primary-foreground | #18181b, #fafafa | #ece9e0, #262624 |
 | destructive | #dc2626 | #ef4444 |
 
 `web/src/styles/tokens.test.ts` holds this table and checks every text pair at 4.5:1 or better (muted-foreground on
 the canvas, muted, subtle, card, popover and sidebar; brand and brand-foreground on every surface it sits on) and
 the focus ring at 3:1 on the canvas and on cards.
+
+Dark theme colour (changed 2026-11-05, his words: "use Claude or Conductor style ... for dark theme I mean the color"): warm
+stone, the palette of Claude and Conductor, not cool grey, at the lightness he approved (a warm grey canvas, not
+near-black). The light theme and the violet accent are unchanged. In dark the sidebar, canvas, card and popover are
+four clear lightness steps (#1f1e1d, #262624, #30302e, #3a3937), so each layer reads as its own surface, and raised
+cards carry a faint light top edge (`--shadow-xs` and `--shadow-sm` in `.dark`). Text is a soft off-white (#eeece6) and the
+filled button #ece9e0. The status colours are softer in dark, tuned to one visual weight (the yellow no longer outshines
+the red). The violet in dark is #a79ffb so it still reads at 4.5:1 on every surface.
 
 ### Brand accent
 
@@ -710,11 +718,11 @@ Status tokens (text, soft background, border, dot):
 
 | Status | Light | Dark |
 |---|---|---|
-| ok | #15803d, #f0fdf4, #bbf7d0, #16a34a | #4ade80, green at 12%, green at 30%, #22c55e |
-| warn | #a16207, #fefce8, #fde68a, #eab308 | #facc15, amber at 12%, amber at 30%, #eab308 |
-| bad | #b91c1c, #fef2f2, #fecaca, #ef4444 | #f87171, red at 12%, red at 32%, #ef4444 |
-| info | #1d4ed8, #eff6ff, #bfdbfe, #3b82f6 | #60a5fa, blue at 13%, blue at 32%, #3b82f6 |
-| idle | #52525b, #f4f4f5, #e4e4e7, #a1a1aa | #d4d4d8, #27272a, #3f3f46, #71717a |
+| ok | #15803d, #f0fdf4, #bbf7d0, #16a34a | #62d28f, green at 10%, green at 26%, #34c46f |
+| warn | #a16207, #fefce8, #fde68a, #eab308 | #e6c25c, amber at 10%, amber at 26%, #d6a928 |
+| bad | #b91c1c, #fef2f2, #fecaca, #ef4444 | #f28b8b, red at 10%, red at 28%, #ec5b5b |
+| info | #1d4ed8, #eff6ff, #bfdbfe, #3b82f6 | #7fb2f5, blue at 12%, blue at 28%, #4f8fee |
+| idle | #52525b, #f4f4f5, #e4e4e7, #a1a1aa | #cfcfd6, #34353f, #4a4b57, #71717a |
 
 Muted foreground is one step darker than shadcn's zinc-500 (#71717a) in light so that secondary text passes 4.5:1
 on the muted grey: light 5.4 on the canvas, 5.7 on cards, 4.9 on muted; dark 7.7, 7.2, 6.1. Brand on the canvas,
@@ -1079,8 +1087,10 @@ px the rail stacks above the company as before. The profile follows the selectio
 **The profile (`profile-panel.tsx`; every line is `queue.profile`, built in `outreach/api/queries/profile.py`).** Small
 icon headers, in order. Each fact shows its words, then in small muted text how sure it is and where it comes from
 ("estimate, LinkedIn", "confirmed, SEC Form D"; a fact he set himself says "set by you"). A fact nothing is known about
-says **Not known** in the muted colour, never red, and its row keeps a free column on the right for a future edit pencil
-(editing is not built).
+is not a row of its own (changed 2026-11-05): a section with nothing known is dropped, and one muted block at the foot,
+**Not known yet**, lists what is unknown in one line per word ("Not known: Stage, HQ, E-Verify", "Not checked: Headcount",
+"Not on file: Website", "Not judged yet: What they build"), never red. A known fact's row keeps a free column on the right
+for a future edit pencil (editing is not built).
 
 | Section | Shows | Comes from |
 |---|---|---|
@@ -1092,31 +1102,37 @@ says **Not known** in the muted colour, never red, and its row keeps a free colu
 | Open roles at your level | Up to 5: title (a link), level, age, place; early career fits first, then newest; else "None open at your level" | the postings under the current ruleset (`outreach/plan/fresh.py` `load_level_roles`) |
 | People on record | "2 on record, none asked yet", "4 on record, 4 asked, free again Nov 18" | the people and the contact state |
 | Your history | "You applied on Oct 20; this is a new role." (or "You applied on Oct 20."), the last touch, up to 3 "Not now on Nov 7: too big" lines; else "Nothing yet" | applications, outbound touches, `pick_passed` events |
-| Links | Careers, Website, LinkedIn page (new tab, `noopener`; never fetched) | as the three research links |
 
 **The company, calmer (`company-panel.tsx`, `why-today.tsx`).**
 
 - **Header.** A 44 px monogram, the name at 28 px with tight tracking (the focus target), one line under it: what they
   build (the judge's sentence, two lines at most, else "What they build is not known yet." in muted). Under that, chips:
-  the level word ("SWE I role", else the lane word) and **Fit 82** when the judge has read the company: green from 70,
-  amber 50 to 69, muted below 50 (a weak fit is quiet, never red).
-- **Why today** is one card (`bg-card`, hairline, 12 px radius): the opening title as a link with its level and age, "You
-  applied on Oct 20; this is a new role." when it applies, then the reasons as **chips with icons** (the new opening in
-  the info hue, E-Verify, sponsorship, size and stage, new roles in 30 days, then the ranker's own reasons, each once),
-  then the judge's one-line reason in a quiet quote style with "Risk: ..." under it. Not judged: "Judge: not judged yet."
+  the level word only when there is no opening line to say it (changed 2026-11-05; else the lane word) and **Fit 82** when the judge has read the company.
+  Plain text, no pill and no colour (2026-11-05): from 70 it reads in the main colour, below that in the muted one.
+- **Why today** is open text under a hairline, not a box (changed 2026-11-05, the sleek pass): the opening title as a link with its level and age, "You
+  applied on Oct 20; this is a new role." when it applies, then the reasons as **plain lines of text in two columns, each led by a small marker, no pill and no icon** (the new
+  opening first, in the main colour with a solid marker, the rest with a faint one, then E-Verify, sponsorship, size and stage, new roles in 30 days, then the ranker's own reasons, each once),
+  then the judge's one-line reason in a quiet quote style with "Risk: ..." under it. Not judged: nothing here (changed
+  2026-11-05; the header and the profile already say it). The ranker's "Open role at your level" and "New opening ..."
+  reasons are dropped as repeats of the opening line and the new tag.
 - **Actions.** One filled button, Open LinkedIn search (S). Quieter beside it: Copy for terminal (C), Log applied (A);
-  on the next line the research links, Careers (O), Website, LinkedIn page, all in the soft grey button.
+  the research links, Careers (O), Website, LinkedIn page, are one quiet row of text links in the header, on the right of the
+  Fit and Email marks and under the name (2026-11-05), so the actions are three buttons and the one filled button stays
+  the only filled one. The profile has no Links section (a repeat). The Email line under Where it stands does not repeat
+  its own label ("Website known ...", not "Email. Website known ..."); a LinkedIn only row keeps its label.
 - **Where it stands** (and the email hint) in one quiet list. **Log people you asked** (L) and **Save this search** are
   two small rows that start closed (a chevron, the name, a hint in grey, the key); L opens the first and puts the cursor
   in it, and it closes again when he moves to another company. A company with no room in its wave has no such row, and L
   says "Nothing to log at Baseten: its wave is full." Carry to tomorrow (X) and Not now (P) stay at the bottom with the
-  step marks. In flight, the 7-day question and the watch list stay below, closed.
+  step marks. The 7-day question, In flight, Email today and the Watch list no longer sit under the pick (2026-11-06, his ruling:
+  "not needed here"): they are the tabs of the Pipeline page.
 
-**The rail, more alive.** The day first: "2 of 8 reached" over a slim bar (`role="meter"`, green), counting what is done and
-never what is left. Each row: a 32 px **monogram** (the company's first letter on one of eight calm hues chosen by a hash
-of the name, so it is the same colour every day; never the brand violet; `src/lib/monogram.ts`), the name, the fit chip
-on the right when judged, the new-opening tag, one reason line, and a word only once the row is Done, Logged or Carried
-over (a check, dot or half disc sits on the monogram). The selected row is a card with a hairline, a shadow and a 3 px
+**The rail, more alive.** The day first: "2 of 8 reached" over a slim bar (`role="meter"`, neutral), counting what is done and
+never what is left. Each row: a 32 px **monogram** (the company's first letter on one quiet neutral tile, the same for every company; 2026-11-05, his
+ruling: no colour for decoration, so the eight hues are gone), the name, the fit chip
+on the right when judged (no Email chip on the rail since 2026-11-05: the head counts the emailable picks and the
+panel shows the chip), the new-opening tag (a solid dot and plain words, no hue), one reason line, and a word only once the row is Done, Logged or Carried
+over (a check, dot or half disc sits on the monogram, all neutral). The selected row is a card with a hairline, a shadow and a 3 px
 foreground bar on its left. The head under the date says `8 picks` (`, 1 carried over`, `, 2 passed`); the reached count
 lives in the rail.
 
@@ -1124,18 +1140,21 @@ lives in the rail.
 and hairlines rather than boxes, 150 ms colour and rotate transitions only (off under reduced motion), a hover and
 press state on every control. No serif here: the serif stays for the notes he writes.
 
-**Monogram tokens** (`globals.css`, checked in `tokens.test.ts`: text on tile 6:1 or more, neither is the brand):
+**Colour on Today** (2026-11-05, his ruling after seeing the page: "all the shit colours", Pylon in yellow, the green and
+amber Fit pills and the blue new-opening pill): Today is neutral. The monogram, the Fit text, the Email mark, the new
+opening tag, the progress bar and the row state marks use the foreground and muted colours only. Status colours stay for
+status (a warning, an error, a reply, the sender), never for decoration. The `--mono-*` tokens in `globals.css` are no
+longer used by any component and can be deleted once the dark theme PR is merged.
 
-| Hue | Light tile, text | Dark tile, text |
-|---|---|---|
-| teal | #d3eeea, #0b5650 | #133632, #86ddd3 |
-| cyan | #d2ebf6, #0b5372 | #12344a, #92d4f2 |
-| green | #d6efda, #165f2b | #143821, #8ddfa0 |
-| amber | #f5e5bf, #764606 | #3d2c0d, #f2c870 |
-| orange | #f9dac7, #85380b | #40240f, #f6ad82 |
-| rose | #f8d7df, #99193b | #42192a, #f59fb5 |
-| slate | #dce2ee, #2d4266 | #212a3d, #aebfe0 |
-| olive | #e4ecc2, #4a5809 | #2c3310, #cbdb78 |
+**Pipeline** (2026-11-06, `/pipeline`, sidebar Lists, key `g i`; the style of Conductor's own lists: a quiet underline tab
+strip with a count on each tab, grouped rows in one soft rounded container with hairline dividers, a monogram, a
+name and one muted line, nothing boxed inside a box). Four tabs: **Last week** (the 7-day question, one card with
+Accepted 1, Replied 2, Nothing yet 3), **In flight** (every company with a wave out or a reply), **Email today** (the
+companies beyond the picks that can be emailed, with their website; no per-company terminal button) and **Watch list**.
+It opens on the first tab that has something in it, the tab is in the address (`?tab=`), an empty tab says how it fills
+up, and the sidebar item carries the number of questions waiting. A win arrives on this page too, since answering
+Accepted happens here. The per-company Copy for terminal button and its C key are gone from Today (he does not use
+them); shift+C on the rail still copies every line.
 
 #### 16.1a Today as a company queue (P2)
 

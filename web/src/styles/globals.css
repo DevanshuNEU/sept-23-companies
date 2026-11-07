@@ -79,55 +79,60 @@
 }
 
 .dark {
-  --background: #0b0b0e;
-  --foreground: #fafafa;
-  --card: #141418;
-  --card-foreground: #fafafa;
-  --popover: #1a1a20;
-  --popover-foreground: #fafafa;
-  --muted: #23232a;
-  --muted-foreground: #a1a1aa;
-  --subtle: #101013;
-  --border: rgb(255 255 255 / 0.09);
-  --input: #52525b;
-  --ring: #9187f7;
-  --brand: #9187f7;
+  /* Warm stone, the Claude and Conductor family, with depth. Each layer is a clear step lighter than the one under it: sidebar, canvas, card, popover. Cards
+     and the selected rail row also carry a faint light edge along their top (the shadow tokens below), so a raised
+     surface reads as raised, not as a flat rectangle. Text is a soft off-white, not pure white. */
+  --background: #262624;
+  --foreground: #eeece6;
+  --card: #30302e;
+  --card-foreground: #eeece6;
+  --popover: #3a3937;
+  --popover-foreground: #eeece6;
+  --muted: #363533;
+  --muted-foreground: #b0aea5;
+  --subtle: #1b1a19;
+  --border: rgb(222 220 209 / 0.14);
+  --input: #7a7770;
+  --ring: #a79ffb;
+  --brand: #a79ffb;
   --brand-foreground: #16122e;
-  --primary: #fafafa;
-  --primary-foreground: #18181b;
-  --secondary: #23232a;
-  --secondary-foreground: #fafafa;
-  --accent: #1d1d23;
-  --accent-foreground: #fafafa;
+  --primary: #ece9e0;
+  --primary-foreground: #262624;
+  --secondary: #363533;
+  --secondary-foreground: #eeece6;
+  --accent: #2f2e2c;
+  --accent-foreground: #eeece6;
   --destructive: #ef4444;
-  --sidebar: #09090b;
-  --sidebar-foreground: #fafafa;
-  --sidebar-primary: #fafafa;
-  --sidebar-primary-foreground: #18181b;
-  --sidebar-accent: #23232a;
-  --sidebar-accent-foreground: #fafafa;
-  --sidebar-border: rgb(255 255 255 / 0.09);
-  --sidebar-ring: #9187f7;
+  --sidebar: #1f1e1d;
+  --sidebar-foreground: #eeece6;
+  --sidebar-primary: #ece9e0;
+  --sidebar-primary-foreground: #262624;
+  --sidebar-accent: #2d2c2a;
+  --sidebar-accent-foreground: #eeece6;
+  --sidebar-border: rgb(222 220 209 / 0.12);
+  --sidebar-ring: #a79ffb;
 
-  --ok: #4ade80;
-  --ok-bg: rgb(34 197 94 / 0.12);
-  --ok-bd: rgb(34 197 94 / 0.3);
-  --ok-dot: #22c55e;
-  --warn: #facc15;
-  --warn-bg: rgb(234 179 8 / 0.12);
-  --warn-bd: rgb(234 179 8 / 0.3);
-  --warn-dot: #eab308;
-  --bad: #f87171;
-  --bad-bg: rgb(239 68 68 / 0.12);
-  --bad-bd: rgb(239 68 68 / 0.32);
-  --bad-dot: #ef4444;
-  --info: #60a5fa;
-  --info-bg: rgb(59 130 246 / 0.13);
-  --info-bd: rgb(59 130 246 / 0.32);
-  --info-dot: #3b82f6;
-  --idle: #d4d4d8;
-  --idle-bg: #27272a;
-  --idle-bd: #3f3f46;
+  /* Status colours in dark: softer than the light theme's full strength, tuned to the same visual weight so the yellow
+     does not shout over the red or the green. */
+  --ok: #62d28f;
+  --ok-bg: rgb(34 197 94 / 0.1);
+  --ok-bd: rgb(34 197 94 / 0.26);
+  --ok-dot: #34c46f;
+  --warn: #e6c25c;
+  --warn-bg: rgb(234 179 8 / 0.1);
+  --warn-bd: rgb(234 179 8 / 0.26);
+  --warn-dot: #d6a928;
+  --bad: #f28b8b;
+  --bad-bg: rgb(239 68 68 / 0.1);
+  --bad-bd: rgb(239 68 68 / 0.28);
+  --bad-dot: #ec5b5b;
+  --info: #7fb2f5;
+  --info-bg: rgb(59 130 246 / 0.12);
+  --info-bd: rgb(59 130 246 / 0.28);
+  --info-dot: #4f8fee;
+  --idle: #cfcfd6;
+  --idle-bg: #383734;
+  --idle-bd: #4d4b47;
   --idle-dot: #71717a;
 
   --mono-teal-bg: #133632;
@@ -146,6 +151,10 @@
   --mono-slate-fg: #aebfe0;
   --mono-olive-bg: #2c3310;
   --mono-olive-fg: #cbdb78;
+
+  /* Raised surfaces in dark: a 1px light edge along the top and a soft contact shadow below. */
+  --shadow-xs: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-sm: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 2px 6px rgb(0 0 0 / 0.32);
 
   color-scheme: dark;
 }

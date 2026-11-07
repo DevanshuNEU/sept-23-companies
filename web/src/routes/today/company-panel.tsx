@@ -1,11 +1,10 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { BookmarkCheck, ChevronRight, Search, Terminal } from 'lucide-react';
+import { BookmarkCheck, ChevronRight, Search } from 'lucide-react';
 import type { IsoTime, PassReason, PlanRow } from '@/api';
 import { EmailChip } from '@/components/email-chip';
 import { FitChip } from '@/components/fit-chip';
 import { Monogram } from '@/components/monogram';
 import { StepMarks } from '@/components/step-marks';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
@@ -29,11 +28,11 @@ function Fact({ label, children, muted = false }: { label: string; children: Rea
   );
 }
 
-/** "In flight" and "Asked before" in a calm grey, a reply in the info hue; never red. */
+/** "In flight" and "Asked before" in a calm grey, a reply in the main colour and a heavier weight; never a hue. */
 function Standing({ row }: { row: PlanRow }) {
   const s = row.queue?.standing;
   if (!s) return null;
-  return <span className={cn(s.status === 'replied' && 'text-info')}>{s.text}</span>;
+  return <span className={cn(s.status === 'replied' && 'font-medium text-foreground')}>{s.text}</span>;
 }
 
 /**
@@ -125,24 +124,27 @@ export function CompanyPanel({
   const sub = q?.profile.builds.text ?? null;
 
   return (
-    <div className="grid gap-5">
-      <header className="grid gap-3">
-        <div className="flex items-start gap-4">
-          <Monogram name={row.company.name} className="mt-0.5 size-11 rounded-xl text-lg" />
-          <div className="grid min-w-0 gap-1">
-            <h2 id={headingId} tabIndex={-1} className="text-[28px] leading-9 font-semibold tracking-[-0.025em] outline-none">
-              {row.company.name}
-            </h2>
-            <p className={cn('line-clamp-2 text-sm leading-[1.6]', sub === null && 'text-muted-foreground')}>
-              {isProvisional(row) ? 'Coming in from the bench once your Not now is saved.' : (sub ?? 'What they build is not known yet.')}
-            </p>
-          </div>
+    <div className="grid gap-7">
+      <header className="grid grid-cols-[44px_minmax(0,1fr)] gap-x-4 gap-y-3">
+        <Monogram name={row.company.name} className="mt-0.5 size-11 rounded-xl text-lg" />
+        <div className="grid min-w-0 gap-1">
+          <h2 id={headingId} tabIndex={-1} className="text-[28px] leading-9 font-semibold tracking-[-0.025em] outline-none">
+            {row.company.name}
+          </h2>
+          <p className={cn('line-clamp-2 text-sm leading-[1.6]', sub === null && 'text-muted-foreground')}>
+            {isProvisional(row) ? 'Coming in from the bench once your Not now is saved.' : (sub ?? 'What they build is not known yet.')}
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-[13px]">
-          <Badge variant="idle">{q?.opening?.level ?? laneLabel[row.lane]}</Badge>
-          <FitChip fit={q?.judgeFit} className="h-[22px]" />
-          {q ? <EmailChip fit={q.emailFit} interactive className="h-[22px]" /> : null}
-          <CarriedOver row={row} asOf={asOf} />
+        {/* What it is on the left, where to read more on the right, both under the name so the column has one spine. */}
+        <div className="col-start-2 flex flex-wrap items-center justify-between gap-x-6 gap-y-1">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+            {/* The opening line below names the level, so the level shows here only when there is no opening to say it. */}
+            {q?.opening ? null : <span>{laneLabel[row.lane]}</span>}
+            <FitChip fit={q?.judgeFit} />
+            {q ? <EmailChip fit={q.emailFit} interactive /> : null}
+            <CarriedOver row={row} asOf={asOf} />
+          </div>
+          {q ? <ResearchLinks q={q} variant="links" /> : null}
         </div>
       </header>
 
@@ -150,7 +152,7 @@ export function CompanyPanel({
 
       <div className="grid gap-2.5">
         {todo ? (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
             {search ? (
               <Button asChild size="sm" className="h-9 gap-2 px-4 text-sm">
                 <a href={search} target="_blank" rel="noopener noreferrer" aria-keyshortcuts="s">
@@ -160,17 +162,9 @@ export function CompanyPanel({
                 </a>
               </Button>
             ) : null}
-            {q ? (
-              <Button type="button" variant="secondary" size="sm" className={MAIN} aria-keyshortcuts="c" onClick={actions.onCopyLine}>
-                <Terminal aria-hidden />
-                Copy for terminal
-                <KeyHint k="C" />
-              </Button>
-            ) : null}
-            {hasApply ? <LogButton row={row} kind="apply" filled={false} quiet onLog={actions.onLog} /> : null}
+            {hasApply ? <LogButton row={row} kind="apply" filled={false} onLog={actions.onLog} /> : null}
           </div>
         ) : null}
-        {q ? <ResearchLinks q={q} variant="secondary" /> : null}
       </div>
 
       {passing && actions.onPass && actions.onCancelPass ? (
@@ -178,12 +172,12 @@ export function CompanyPanel({
       ) : null}
 
       {q ? (
-        <dl aria-label={`About ${row.company.name}`} className="grid border-t pt-3">
+        <dl aria-label={`About ${row.company.name}`} className="-mt-1 grid">
           <Fact label="Where it stands">
             <Standing row={row} />
           </Fact>
           <Fact label="Email" muted={q.emailFit.verdict !== 'email'}>
-            <span data-email-reasons>{`${q.emailFit.label}. ${q.emailFit.reasons.join('. ')}.`}</span>
+            <span data-email-reasons>{`${q.emailFit.verdict === 'email' ? '' : `${q.emailFit.label}. `}${q.emailFit.reasons.join('. ')}.`}</span>
             {q.emailHint ? <span className="block text-muted-foreground">{q.emailHint}</span> : null}
           </Fact>
         </dl>

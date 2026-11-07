@@ -113,18 +113,18 @@ describe.each([
 
 // The look PR's token table (docs/design/README.md, section 10).
 const TABLE: Record<string, [light: string, dark: string]> = {
-  background: ['#f8f8f9', '#0b0b0e'],
-  sidebar: ['#f2f2f4', '#09090b'],
-  subtle: ['#f3f3f5', '#101013'],
-  card: ['#ffffff', '#141418'],
-  popover: ['#ffffff', '#1a1a20'],
-  muted: ['#eeeef1', '#23232a'],
-  accent: ['#f0f0f3', '#1d1d23'],
-  border: ['#e2e2e7', 'rgb(255 255 255 / 0.09)'],
-  input: ['#c4c4cc', '#52525b'],
-  'muted-foreground': ['#66666f', '#a1a1aa'],
-  brand: ['#5b48d9', '#9187f7'],
-  ring: ['#5b48d9', '#9187f7'],
+  background: ['#f8f8f9', '#262624'],
+  sidebar: ['#f2f2f4', '#1f1e1d'],
+  subtle: ['#f3f3f5', '#1b1a19'],
+  card: ['#ffffff', '#30302e'],
+  popover: ['#ffffff', '#3a3937'],
+  muted: ['#eeeef1', '#363533'],
+  accent: ['#f0f0f3', '#2f2e2c'],
+  border: ['#e2e2e7', 'rgb(222 220 209 / 0.14)'],
+  input: ['#c4c4cc', '#7a7770'],
+  'muted-foreground': ['#66666f', '#b0aea5'],
+  brand: ['#5b48d9', '#a79ffb'],
+  ring: ['#5b48d9', '#a79ffb'],
   'brand-foreground': ['#ffffff', '#16122e'],
 };
 

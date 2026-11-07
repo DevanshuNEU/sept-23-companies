@@ -16,7 +16,7 @@ describe('the profile panel: a company that is well known', () => {
   beforeEach(() => void render(<ProfilePanel row={rowOf('Pylon')} />));
 
   it('has a section for each kind of fact, each with its own small header', () => {
-    for (const name of ['What they build', 'Stage and funding', 'Headcount', 'Where', 'Visa', 'Open roles at your level', 'People on record', 'Your history', 'Links']) {
+    for (const name of ['What they build', 'Stage and funding', 'Headcount', 'Where', 'Visa', 'Open roles at your level', 'People on record', 'Your history']) {
       expect(screen.getByRole('heading', { level: 3, name })).toBeInTheDocument();
     }
   });
@@ -57,12 +57,9 @@ describe('the profile panel: a company that is well known', () => {
     expect(fact('people')).toHaveTextContent('1 on record, none asked yet');
   });
 
-  it('links to the careers page, the website and the LinkedIn page', () => {
-    const links = screen.getByRole('region', { name: 'Links' });
-    expect(within(links).getByRole('link', { name: /Careers/ })).toHaveAttribute('href', 'https://pylon.example/careers/swe-1');
-    expect(within(links).getByRole('link', { name: /Website/ })).toHaveAttribute('href', expect.stringMatching(/^https:\/\/.*pylon/i));
-    expect(within(links).getByRole('link', { name: /LinkedIn page/ })).toHaveAttribute('href', expect.stringContaining('linkedin.com/search/results/companies'));
-    for (const a of within(links).getAllByRole('link')) expect(a).toHaveAttribute('rel', expect.stringContaining('noopener'));
+  it('has no Not known line when everything is known, and no Links section (the main column has the links)', () => {
+    expect(document.querySelector('[data-unknown]')).toBeNull();
+    expect(screen.queryByRole('heading', { level: 3, name: 'Links' })).toBeNull();
   });
 
   it('reserves a place beside every fact for a future edit pencil, and builds no editing', () => {
@@ -72,20 +69,19 @@ describe('the profile panel: a company that is well known', () => {
 });
 
 describe('the profile panel: a company with unknown values', () => {
-  it('says Not known, muted and never red, where nothing is known', () => {
+  it('lists what is unknown in one muted line at the foot, never red, and gives it no row of its own', () => {
     render(<ProfilePanel row={rowOf('Trigger.dev')} />);
-    for (const id of ['stage', 'hq', 'everify', 'sponsorship', 'lca', 'roleplaces']) {
-      expect(fact(id), id).toHaveTextContent('Not known');
-      const word = within(fact(id)).getByText('Not known');
-      expect(word.className).toContain('text-muted-foreground');
-      expect(word.className).not.toMatch(/bad|destructive|red/);
-    }
+    for (const id of ['stage', 'hq', 'everify', 'sponsorship', 'lca', 'roleplaces', 'headcount']) expect(fact(id), id).toBeNull();
+    const unknown = screen.getByRole('region', { name: 'Not known yet' });
+    expect(unknown).toHaveTextContent('Not known: Stage, HQ, Where the roles are, E-Verify, Sponsorship, H-1B filings');
     // The size gate keeps a likely large company off Today, so a headcount nobody looked up is "Not checked".
-    expect(fact('headcount')).toHaveTextContent('Not checked');
-    expect(fact('headcount')).not.toHaveTextContent('Not known');
-    expect(within(fact('headcount')).getByText('Not checked').className).toContain('text-muted-foreground');
+    expect(unknown).toHaveTextContent('Not checked: Headcount');
+    expect(unknown).toHaveTextContent('Not judged yet: What they build');
+    expect(unknown.innerHTML).toContain('text-muted-foreground');
+    expect(unknown.innerHTML).not.toMatch(/bad|destructive|red/);
+    // A section with nothing known has no header, so no empty "Visa" or "Headcount" block.
+    expect(screen.queryByRole('heading', { level: 3, name: 'Visa' })).toBeNull();
     expect(fact('funding')).toHaveTextContent('$5,500,000 raised');
-    expect(screen.getByText('Not judged yet')).toBeInTheDocument();
     expect(screen.getByText('None open at your level')).toBeInTheDocument();
     expect(fact('people')).toHaveTextContent('Nobody on record yet');
   });

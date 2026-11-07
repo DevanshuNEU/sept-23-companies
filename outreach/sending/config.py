@@ -34,6 +34,13 @@ class SendConfig:
     per_company_daily: int
     per_company_gap_minutes: int
     gap_minutes: tuple[float, float]
+    gap_median_minutes: float
+    gap_spread: float
+    break_chance: float
+    break_minutes: tuple[float, float]
+    pick_pool: int
+    day_start_jitter_minutes: int
+    per_company_gap_jitter_minutes: int
     followup_business_days: tuple[int, ...]
     followup_lapse_business_days: int
     close_after_business_days: int
@@ -49,10 +56,11 @@ class SendConfig:
 COUNT_KEYS = ("ramp_step", "bounce_days", "stop_replies_hard",
               "stop_replies_days", "per_company_daily", "followup_lapse_business_days", "close_after_business_days",
               "reconcile_after_minutes", "max_send_attempts", "rethread_days", "inbound_meta_cap",
-              "prune_noop_after_days")
+              "prune_noop_after_days", "pick_pool")
 # Whole numbers that may be zero.
-WHOLE_KEYS = ("ramp_start", "ramp_ceiling", "ramp_floor", "per_company_gap_minutes")
-RATE_KEYS = ("clean_bounce_rate",)
+WHOLE_KEYS = ("ramp_start", "ramp_ceiling", "ramp_floor", "per_company_gap_minutes", "day_start_jitter_minutes",
+              "per_company_gap_jitter_minutes")
+RATE_KEYS = ("clean_bounce_rate", "break_chance")
 TEXT_KEYS = ("from_address", "from_name", "day_tz", "old_sender_label")
 
 
@@ -124,6 +132,12 @@ def _check(cfg: SendConfig) -> None:
     low, high = cfg.gap_minutes
     if low < 0 or low > high:
         raise ValueError(f"gap_minutes must be [low, high] with 0 <= low <= high, not {list(cfg.gap_minutes)}")
+    if cfg.gap_median_minutes <= 0 or cfg.gap_spread < 0:
+        raise ValueError("gap_median_minutes must be above 0 and gap_spread 0 or more, not "
+                         f"{cfg.gap_median_minutes} and {cfg.gap_spread}")
+    break_low, break_high = cfg.break_minutes
+    if break_low < 0 or break_low > break_high:
+        raise ValueError(f"break_minutes must be [low, high] with 0 <= low <= high, not {list(cfg.break_minutes)}")
     if not cfg.weekdays or any(not 0 <= d <= 6 for d in cfg.weekdays):
         raise ValueError(f"weekdays must be a non-empty list of 0 (Monday) to 6 (Sunday), not {list(cfg.weekdays)}")
 
@@ -152,6 +166,13 @@ def load_config(path: Path = DEFAULT_PATH) -> SendConfig:
     if not isinstance(gap, list) or len(gap) != 2 or not all(isinstance(g, (int, float)) for g in gap):
         raise ValueError(f"gap_minutes must be [low, high], not {gap!r}")
     values["gap_minutes"] = (gap[0], gap[1])
+    for key in ("gap_median_minutes", "gap_spread"):
+        if isinstance(raw[key], bool) or not isinstance(raw[key], (int, float)):
+            raise ValueError(f"{key} must be a number, not {raw[key]!r}")
+    breaks = raw["break_minutes"]
+    if not isinstance(breaks, list) or len(breaks) != 2 or not all(isinstance(b, (int, float)) for b in breaks):
+        raise ValueError(f"break_minutes must be [low, high], not {breaks!r}")
+    values["break_minutes"] = (breaks[0], breaks[1])
     cfg = SendConfig(**values)
     _check(cfg)
     return cfg

@@ -17,6 +17,24 @@ os.environ["OUTREACH_CONTACTED_TXT"] = os.path.join(tempfile.mkdtemp(prefix="out
 os.environ["OUTREACH_NO_NOTIFY"] = "1"
 SCRATCH = True
 
+# The shipped send limit is flat 100 a day and its pacing is human (#9, 2026-11-06). Most sending tests walk the
+# adaptive ramp (20 up to 100, a warning steps down) with exact times, so every default `load_config()` in a test reads
+# a scratch copy with the old ramp floor and start, no start or company-gap jitter and first-come order.
+# `SHIPPED_SEND_CONFIG` is the real file, for the tests that check what ships.
+import pathlib as _pathlib
+from outreach.sending import config as _send_config
+
+SHIPPED_SEND_CONFIG = _send_config.DEFAULT_PATH
+_ramp_copy = _pathlib.Path(tempfile.mkdtemp(prefix="outreach-sending-config-test-")) / "config.toml"
+_ramp_copy.write_text(SHIPPED_SEND_CONFIG.read_text(encoding="utf-8").replace("ramp_start = 100", "ramp_start = 20")
+                      .replace("ramp_floor = 100", "ramp_floor = 20")
+                      .replace("pick_pool = 5", "pick_pool = 1")
+                      .replace("day_start_jitter_minutes = 25", "day_start_jitter_minutes = 0")
+                      .replace("per_company_gap_jitter_minutes = 60", "per_company_gap_jitter_minutes = 0"),
+                      encoding="utf-8")
+_send_config.DEFAULT_PATH = _ramp_copy
+_send_config.load_config.__defaults__ = (_ramp_copy,)
+
 
 # No test reaches the network or opens a browser. Every urllib request (urlopen and any custom opener) goes through
 # OpenerDirector.open, so that is where loopback-only is enforced; tests that serve on 127.0.0.1 keep working. The

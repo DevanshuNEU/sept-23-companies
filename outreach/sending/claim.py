@@ -30,7 +30,7 @@ from outreach.drafts.followups import (canonical_company, company_map, held_surv
                                        resolve_company)
 from outreach.outcomes.context import build_context
 from outreach.sending import calendar as cal
-from outreach.sending import proof
+from outreach.sending import human, proof
 from outreach.sending.config import SendConfig
 from outreach.sending.followups import plan_followups
 from outreach.sending.gmail import new_message_id
@@ -259,7 +259,7 @@ def email_context(conn: sqlite3.Connection, person_id: int, company_id: int, *, 
 
 def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Random) -> None:
     """`sender.next_send_at` becomes `at` plus a random gap, unless it is already later: a gap never shrinks."""
-    candidate = (as_datetime(at) + timedelta(minutes=rng.uniform(*cfg.gap_minutes))).strftime(ISO_FMT)
+    candidate = (as_datetime(at) + timedelta(minutes=human.next_gap_minutes(rng, cfg))).strftime(ISO_FMT)
     current = conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()[0]
     if current is None or candidate > current:
         conn.execute("UPDATE sender SET next_send_at = ? WHERE sender_id = 1", (candidate,))

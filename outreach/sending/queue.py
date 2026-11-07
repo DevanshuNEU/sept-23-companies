@@ -6,6 +6,7 @@ will never go out as it stands (the tick's sweep removes it); every other reason
 follows `merged_into` to its end (`canonical_company`), so holds, pauses, status and the per-company counts all use
 the surviving company.
 """
+import random
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -14,7 +15,7 @@ from zoneinfo import ZoneInfo
 from outreach.drafts.followups import (canonical_company, company_map, held_survivors, no_go_sets,
                                        replied_people, resolve_company)
 from outreach.sending import calendar as cal
-from outreach.sending import ramp, signals
+from outreach.sending import human, ramp, signals
 from outreach.sending.config import SendConfig, load_config
 from outreach.sending.ramp import DayState
 from outreach.store.timefmt import ISO_FMT
@@ -42,7 +43,7 @@ REASON_TEXT = {
     "message_id_unproven": "The first email goes out alone, then Gmail is checked. The rest follow.",
     "not_business_day": "Not a sending day: emails go out on weekdays, New York time.",
     "daily_limit": "Today's send limit is used up. This goes out on the next sending day.",
-    "spacing": "Waiting a few minutes after the last send.",
+    "spacing": "Waiting a few minutes, so sends are spaced like a person's.",
     "window": "Outside this person's sending hours in their own time zone.",
     "bad_timezone": "This person's time zone is not one the sender knows, so their sending hours are unknown. "
                     "Fix the time zone.",
@@ -51,7 +52,7 @@ REASON_TEXT = {
     "company_paused": "This company is paused. Unpause it to send.",
     "company_held": "This company is held because someone there replied. Release the hold to send.",
     "per_company_limit": "The daily limit for this company is used up. This goes out on the next sending day.",
-    "per_company_gap": "Another email went to this company less than an hour ago. Waiting out the gap.",
+    "per_company_gap": "Another email went to this company a little while ago. Waiting out the gap (an hour or more).",
     "recruiter_waits": "A recruiter waits while an email to someone else at this company is still queued.",
     "no_address": "No email address for this person.",
     "no_thread": "This follow-up has no Gmail thread to reply in, so it is not sent. Skip it, or send it as a new "
@@ -216,7 +217,7 @@ def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: Da
     now = now.astimezone(timezone.utc)
     today = cal.ny_date(now, cfg)
     day_start, _ = cal.ny_day_bounds(today, cfg)
-    gap = timedelta(minutes=cfg.per_company_gap_minutes)
+    gap = human.max_company_gap(cfg)  # how far back a company's last send can still hold the next one
     limit = ramp.effective_limit(conn, today, cfg)
     if day is not None and day.day == today:
         limit = min(limit, day.effective_limit)  # the tick's snapshot can only be older, so it can only be higher
@@ -254,12 +255,14 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
                                      and now < _due_start(q.due_on, cal.recipient_zone(q.tz), cfg))}
     today = cal.ny_date(now, cfg)
     day_begins = _utc(cal.ny_day_bounds(today, cfg)[0])
-    gap = timedelta(minutes=cfg.per_company_gap_minutes)
     tomorrow = _local(cal.add_business_days(today, 1, cfg), cfg.window_start, ZoneInfo(cfg.day_tz))
     day_full = sent_by_day.get(today, 0) >= limit
+    # The day's first send waits a different few minutes each day after the window opens (`human.day_start_offset`).
+    day_opens = (_local(today, cfg.window_start, ZoneInfo(cfg.day_tz)) + human.day_start_offset(today, cfg)
+                 if sent_by_day.get(today, 0) == 0 else None)
     return [Verdict(q.message_id, *_decide(
         q, p.stops, gate, p.companies[q.company_id], q.company_id in p.held, now, cfg, today, day_full,
-        sends.get(q.company_id, []), day_begins, gap, tomorrow, next_send, q.company_id in live_others,
+        sends.get(q.company_id, []), day_begins, day_opens, tomorrow, next_send, q.company_id in live_others,
         no_thread=q.message_id in p.no_thread, behind=q.message_id in p.behind,
         not_before=p.not_before.get(q.message_id))) for q in pending]
 
@@ -282,8 +285,8 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: D
 
 
 def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held: bool, now: datetime, cfg: SendConfig,
-            today: date, day_full: bool, sends: list[tuple[datetime, bool]], day_begins: datetime, gap: timedelta,
-            tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
+            today: date, day_full: bool, sends: list[tuple[datetime, bool]], day_begins: datetime,
+            day_opens: datetime | None, tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
             no_thread: bool = False, behind: bool = False,
             not_before: date | None = None) -> tuple[str, datetime | None]:
     if q.message_id in stops:
@@ -316,14 +319,16 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
     if q.seq == 0 and sum(1 for at, first in sends if first and at >= day_begins) >= cfg.per_company_daily:
         return "per_company_limit", tomorrow
     last = max((at for at, _ in sends), default=None)
-    if last is not None and now < last + gap:
-        return "per_company_gap", last + gap
+    if last is not None and now < last + human.company_gap(q.company_id, last, cfg):
+        return "per_company_gap", last + human.company_gap(q.company_id, last, cfg)
     if not cal.in_window(now, zone, cfg):
         return "window", cal.next_window_start(now, zone, cfg)
     if q.role_kind == "recruiter" and others_queued:
         return "recruiter_waits", None
     if next_send is not None and now < next_send:
         return "spacing", next_send
+    if day_opens is not None and now < day_opens:
+        return "spacing", day_opens
     return "ready", None
 
 
@@ -342,7 +347,10 @@ def first_only(verdicts: list[Verdict]) -> list[Verdict]:
             else Verdict(v.message_id, "message_id_unproven", None) for v in verdicts]
 
 
-def pick(verdicts: list[Verdict], queue: list[Queued]) -> Queued | None:
-    """The first message in queue order whose verdict is `ready`, or None."""
+def pick(verdicts: list[Verdict], queue: list[Queued], rng: random.Random | None = None,
+         pool: int = 1) -> Queued | None:
+    """A message whose verdict is `ready`, or None. With no `rng` it is the first in queue order; with one it is any
+    of the first `pool` ready messages, so the order is not strictly first come, first served (`human.choose`)."""
     ready = {v.message_id for v in verdicts if v.reason == "ready"}
-    return next((q for q in queue if q.message_id in ready), None)
+    candidates = [q for q in queue if q.message_id in ready]
+    return human.choose(candidates, rng, pool) if rng is not None else (candidates[0] if candidates else None)

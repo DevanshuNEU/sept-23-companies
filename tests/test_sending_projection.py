@@ -1,16 +1,18 @@
+import dataclasses
 import unittest
 from collections import Counter
 from datetime import date, datetime, timedelta
 
 from outreach.sending import calendar as cal
-from outreach.sending import projection, queue, ramp
+from outreach.sending import human, projection, queue, ramp
 from outreach.sending.config import load_config
 from outreach.sending import status
 from tests.sendtest import prove, put_day
 from tests.storetest import seed_company
 from tests.test_sending_queue import LA, NY, Base, ny, stamp
 
-CFG = load_config()
+# A floor of 1 so a test can set a day's limit as low as it likes: the floor lifts any lower row (#9, 2026-11-06).
+CFG = dataclasses.replace(load_config(), ramp_floor=1)
 FRI = ny(6, 13, 6)  # Friday 2026-11-06, 13:06 New York
 
 
@@ -50,7 +52,7 @@ class ProjectionTest(Base):
     def test_spacing_separates_different_companies_by_the_mean_gap(self):
         mids = [self.approve(company=seed_company(self.db, f"Co{i}"))[1] for i in range(3)]
         got = self.project()
-        mean = timedelta(minutes=sum(CFG.gap_minutes) / 2)
+        mean = timedelta(minutes=human.mean_gap_minutes(CFG))
         self.assertEqual([got[m] for m in mids], [FRI, FRI + mean, FRI + 2 * mean])
 
     def test_daily_limit_holds_flat_for_later_days(self):

@@ -65,18 +65,20 @@ def limit_for(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> int:
     outcome = prev["outcome"]
     if outcome is None and prev["closed_at"] is None:
         outcome = _close_outcome(conn, date.fromisoformat(prev["day"]), cfg)[0]
+    # A row written under an older, lower floor is lifted to today's floor (flat 100, #9 2026-11-06).
+    level = max(prev["send_limit"], cfg.ramp_floor)
     if outcome == "clean":
-        return _step_up(prev["send_limit"], cfg)
+        return _step_up(level, cfg)
     if outcome in ("warning", "hard_block"):
-        return _step_down(prev["send_limit"], cfg)
-    return prev["send_limit"]
+        return _step_down(level, cfg)
+    return level
 
 
 def effective_limit(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> int:
     """Read only: how many `d` may send. Its start limit (its row, else `limit_for`), one level lower (floor 20)
     when a warning or hard-block signal belongs to `d`. #15's `current_send_limit` is this."""
     row = _row(conn, d)
-    start = row["send_limit"] if row is not None else limit_for(conn, d, cfg)
+    start = max(row["send_limit"], cfg.ramp_floor) if row is not None else limit_for(conn, d, cfg)
     lowered = row is not None and row["outcome"] in ("warning", "hard_block")
     if not lowered:
         kinds = signals.WARNING_KINDS + signals.HARD_KINDS

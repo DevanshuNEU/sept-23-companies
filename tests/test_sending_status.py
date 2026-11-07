@@ -1,3 +1,4 @@
+import dataclasses
 """Task 16: the snapshot and the queue schedule the API and the daily plan read.
 
 Read only: every test that reads also checks that nothing was written. A store has no marker_verified event by
@@ -16,6 +17,7 @@ from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, se
 from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()
+LOW = dataclasses.replace(CFG, ramp_floor=1)  # a floor of 1 lets a test set a day's limit as low as it likes
 NY = ZoneInfo("America/New_York")
 MON_DAY = date(2026, 11, 2)
 
@@ -75,7 +77,7 @@ class Base(unittest.TestCase):
 
     def schedule(self, now=MON, **kw) -> dict:
         before = self.db.total_changes
-        out = queue_schedule(self.db, now, CFG, **kw)
+        out = queue_schedule(self.db, now, getattr(self, "cfg", CFG), **kw)
         self.assertEqual(self.db.total_changes, before, "the schedule wrote to the store")
         return out
 
@@ -299,6 +301,7 @@ class ScheduleTest(Base):
     def test_schedule_reason_and_time_for_each_wait(self):
         self.prove()
         # daily_limit: today's limit is used up (earliest: the next sending day's window start).
+        self.cfg = LOW
         put_day(self.db, MON_DAY, 1)
         sent_company = seed_company(self.db, "Sent")
         seed_sent(self.db, self.person(company=sent_company), at=ny(2, 8))

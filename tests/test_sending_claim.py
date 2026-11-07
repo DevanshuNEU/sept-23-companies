@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from unittest import mock
 
 from outreach.outcomes.context import CONTEXT_KEYS
-from outreach.sending import claim, proof, queue
+from outreach.sending import claim, human, proof, queue
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import plan_followups, stop_planned
@@ -216,14 +216,15 @@ class RecordSentTest(Base):
                                                     (3, "planned", "2026-11-20", "sender", ""),
                                                     (4, "planned", "2026-12-01", "sender", "")])
 
-    def test_next_send_at_is_four_to_nine_minutes_later(self):
+    def test_next_send_at_is_a_human_gap_later(self):
         _, mid = self.approve()
         self.send(mid)
-        gap = random.Random(7).uniform(*CFG.gap_minutes)
+        gap = human.next_gap_minutes(random.Random(7), CFG)
         expected = iso(MON + timedelta(minutes=gap))
         got = self.db.execute("SELECT next_send_at FROM sender").fetchone()[0]
         self.assertEqual(got, expected)
-        self.assertTrue(MON + timedelta(minutes=4) <= parse(got) <= MON + timedelta(minutes=9))
+        self.assertTrue(MON + timedelta(minutes=CFG.gap_minutes[0]) <= parse(got)
+                        <= MON + timedelta(minutes=max(CFG.gap_minutes[1], CFG.break_minutes[1])))
 
     def test_a_reconciled_record_never_moves_next_send_at_earlier(self):
         _, mid = self.approve()
@@ -416,7 +417,8 @@ class UnclearTest(Base):
         with self.assertRaises(GmailError):
             self.send(mid)
         got = parse(self.db.execute("SELECT next_send_at FROM sender").fetchone()[0])
-        self.assertTrue(MON + timedelta(minutes=4) <= got <= MON + timedelta(minutes=9))
+        self.assertTrue(MON + timedelta(minutes=CFG.gap_minutes[0]) <= got
+                        <= MON + timedelta(minutes=max(CFG.gap_minutes[1], CFG.break_minutes[1])))
 
     def test_a_rewritten_message_id_is_recorded_sent_and_does_not_pause(self):
         # What Gmail did on the first live send. It is how a send normally ends, not a failure.

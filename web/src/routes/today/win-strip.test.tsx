@@ -8,6 +8,7 @@ import { useLocation } from 'react-router';
 import { AppShell } from '@/shell/app-shell';
 import { renderWithApp } from '@/test/render';
 import TodayPage from './index';
+import PipelinePage from '../pipeline/index';
 
 const press = (key: string) => fireEvent.keyDown(document.body, { key });
 
@@ -17,7 +18,7 @@ const leavePage = () =>
     window.dispatchEvent(new Event('pagehide'));
   });
 
-type Open = { db?: FixtureDb; scenario?: Scenario; queryClient?: QueryClient };
+type Open = { db?: FixtureDb; scenario?: Scenario; queryClient?: QueryClient; page?: 'today' | 'pipeline' };
 
 async function open(o: Open = {}) {
   const db = o.db ?? buildFixture(o.scenario ?? 'win');
@@ -26,7 +27,7 @@ async function open(o: Open = {}) {
   const view = renderWithApp(
     <>
       <AppShell />
-      <TodayPage />
+      {o.page === 'pipeline' ? <PipelinePage /> : <TodayPage />}
     </>,
     { client, queryClient },
   );
@@ -159,7 +160,7 @@ describe('WinStrip', () => {
     renderWithApp(
       <>
         <AppShell />
-        <TodayPage />
+        <PipelinePage />
       </>,
       { client },
     );
@@ -170,7 +171,7 @@ describe('WinStrip', () => {
   });
 
   it('undoing an accept inside the window removes its win with it', async () => {
-    const { client } = await open({ scenario: 'default' });
+    const { client } = await open({ scenario: 'default', page: 'pipeline' });
     await screen.findByRole('region', { name: /Last week, what happened/ });
     const log = vi.spyOn(client, 'logOutcome');
     press('1');
@@ -182,7 +183,7 @@ describe('WinStrip', () => {
   });
 
   it('an accept that is kept arrives as a win once it is committed, and plays the entrance once', async () => {
-    await open({ scenario: 'default' });
+    await open({ scenario: 'default', page: 'pipeline' });
     await screen.findByRole('region', { name: /Last week, what happened/ });
     expect(maybeStrip()).not.toBeInTheDocument();
     press('1');
@@ -209,7 +210,7 @@ describe('WinStrip', () => {
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(() => false),
     }));
-    await open({ scenario: 'default' });
+    await open({ scenario: 'default', page: 'pipeline' });
     await screen.findByRole('region', { name: /Last week, what happened/ });
     press('1');
     await leavePage();

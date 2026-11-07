@@ -211,9 +211,10 @@ describe('Today as a plan', () => {
     expect(option(5)).toHaveAccessibleName('5. Cerebrium, To do');
     expect(region).not.toHaveTextContent(/Claude/);
     expect(within(region).queryByRole('region', { name: 'Note to send' })).not.toBeInTheDocument();
+    // The per-company terminal copy is gone (2026-11-06): C does nothing on a company row.
     press('c');
-    expect(await screen.findByText('Copied the line for your terminal.')).toBeInTheDocument();
-    expect(writeText).toHaveBeenCalledWith(cerebrium.queue.terminalLine);
+    expect(screen.queryByText('Copied the line for your terminal.')).not.toBeInTheDocument();
+    expect(writeText).not.toHaveBeenCalled();
     toast.dismiss();
     press('C', { shiftKey: true });
     expect(await screen.findByText('Copied 1 line for your terminal.')).toBeInTheDocument();

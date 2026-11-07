@@ -8,7 +8,7 @@ const fitWords = (fit: EmailFitView) => `${fit.label}: ${fit.reasons.join('. ')}
 
 /**
  * The email flag (2026-10-27): a small "Email" chip where a cold email is worth it, else "LinkedIn only" in muted text.
- * Calm on purpose: no colour of its own. The reasons show on hover (`title` in the rail, where the row is the control),
+ * Calm on purpose: no colour of its own and no pill, just an icon and a word. The reasons show on hover (`title` in the rail, where the row is the control),
  * or in a tooltip when `interactive` (the chip is then a focusable button, so a keyboard reaches the reasons too).
  */
 export function EmailChip({ fit, interactive = false, id, className }: { fit: EmailFitView; interactive?: boolean; id?: string; className?: string }) {
@@ -19,9 +19,9 @@ export function EmailChip({ fit, interactive = false, id, className }: { fit: Em
         id={id}
         data-email-fit="email"
         title={interactive ? undefined : words}
-        className={cn('inline-flex h-5 flex-none items-center gap-1 rounded-full border bg-subtle px-2 text-xs leading-none font-medium whitespace-nowrap text-foreground', className)}
+        className={cn('inline-flex h-5 flex-none items-center gap-1 text-xs leading-none whitespace-nowrap text-muted-foreground', className)}
       >
-        <Mail aria-hidden className="size-3 text-muted-foreground" />
+        <Mail aria-hidden className="size-3" />
         Email
       </span>
     ) : (

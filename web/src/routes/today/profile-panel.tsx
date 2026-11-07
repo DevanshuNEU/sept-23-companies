@@ -1,5 +1,5 @@
 import { useId, useState, type ReactNode } from 'react';
-import { Boxes, Briefcase, ChevronRight, ExternalLink, History, Link2, MapPin, ShieldCheck, TrendingUp, Users, UsersRound } from 'lucide-react';
+import { Boxes, Briefcase, ChevronRight, CircleHelp, History, MapPin, ShieldCheck, TrendingUp, Users, UsersRound } from 'lucide-react';
 import type { CompanyProfile, CompanyQueue, PlanRow, ProfileValue } from '@/api';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { safeHref } from '@/lib/safe-href';
@@ -76,75 +76,84 @@ function Roles({ roles }: { roles: CompanyProfile['roles'] }) {
   );
 }
 
-function OutLink({ href, children }: { href: string | null; children: string }) {
-  const safe = safeHref(href);
-  return safe ? (
-    <a href={safe} target="_blank" rel="noopener noreferrer" className={cn(link, 'inline-flex items-center gap-1')}>
-      {children}
-      <ExternalLink aria-hidden className="size-3 text-muted-foreground" />
-    </a>
-  ) : null;
-}
-
 /** The one line the fold shows while closed: what is known about stage, size and place, or that little is. */
 function profileSummary(p: CompanyProfile): string {
   const known = [p.stage.text, p.headcount.text, p.hq.text].filter((t): t is string => t !== null);
   return known.length > 0 ? known.join(', ') : 'Not much known yet';
 }
 
+/** One fact the panel can show: its id, the label beside it, its value, the name it goes by in the unknown line. */
+type FactSpec = { id: string; label: string; name: string; v: ProfileValue; unknown: string };
+
+/** A group of facts under one header: only the known ones show; the rest go to the unknown line. */
+type FactGroup = { icon: typeof Boxes; title: string; facts: FactSpec[] };
+
 /**
  * The profile of a pick: the things that do not change. Every line is the API's (`queue.profile`), each with its
- * confidence and source in small muted text, and "Not known" (muted, never red) where nothing is. Nothing here edits.
+ * confidence and source in small muted text. What nothing is known about is not a row each: it is one muted line at
+ * the foot ("Not known: Stage, HQ, E-Verify"), so a company with little on file shows a short panel, not a wall of
+ * "Not known". Nothing here edits.
  */
 export function ProfilePanel({ row, className }: { row: PlanRow; className?: string }) {
   const q: CompanyQueue | null = row.queue;
   if (!q) return null;
   const p = q.profile;
+  const spec = (id: string, label: string, name: string, v: ProfileValue, unknown = 'Not known'): FactSpec => ({ id, label, name, v, unknown });
+  const groups: FactGroup[] = [
+    { icon: TrendingUp, title: 'Stage and funding', facts: [spec('stage', 'Stage', 'Stage', p.stage), spec('funding', 'Funding', 'Funding', p.funding)] },
+    // The size gate keeps a giant or a likely large company off Today, so an unknown size here was never looked up.
+    { icon: Users, title: 'Headcount', facts: [spec('headcount', 'People', 'Headcount', p.headcount, 'Not checked')] },
+    {
+      icon: MapPin,
+      title: 'Where',
+      facts: [spec('hq', 'HQ', 'HQ', p.hq), spec('website', 'Website', 'Website', q.emailFit.website, 'Not on file'), spec('roleplaces', 'Roles in', 'Where the roles are', p.rolePlaces)],
+    },
+    {
+      icon: ShieldCheck,
+      title: 'Visa',
+      facts: [spec('everify', 'E-Verify', 'E-Verify', p.everify), spec('sponsorship', 'Sponsors', 'Sponsorship', p.sponsorship), spec('lca', 'H-1B', 'H-1B filings', p.lca)],
+    },
+  ];
+  // Unknown words in the order they first appear, each with the names that share it.
+  const missing = new Map<string, string[]>();
+  const note = (word: string, name: string) => missing.set(word, [...(missing.get(word) ?? []), name]);
+  const builds = p.builds.text !== null || p.domains.length > 0;
+  if (!builds) note('Not judged yet', 'What they build');
+  for (const g of groups) for (const f of g.facts) if (f.v.text === null) note(f.unknown, f.name);
   return (
     <div className={cn('grid', className)}>
-      <Section icon={Boxes} title="What they build">
-        <div data-fact="builds" className="grid gap-1.5">
-          {p.builds.text !== null ? (
-            <>
-              <p className="text-sm leading-[1.55]">{p.builds.text}</p>
-              {p.builds.note ? <p className="text-xs leading-5 text-muted-foreground">{p.builds.note}</p> : null}
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">Not judged yet</p>
-          )}
-          {p.domains.length > 0 ? (
-            <ul aria-label="Domains" className="flex flex-wrap gap-1.5">
-              {p.domains.map((d) => (
-                <li key={d} className="rounded-md bg-muted px-2 py-0.5 text-xs leading-5 text-foreground">
-                  {d}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      </Section>
+      {builds ? (
+        <Section icon={Boxes} title="What they build">
+          <div data-fact="builds" className="grid gap-1.5">
+            {p.builds.text !== null ? (
+              <>
+                <p className="text-sm leading-[1.55]">{p.builds.text}</p>
+                {p.builds.note ? <p className="text-xs leading-5 text-muted-foreground">{p.builds.note}</p> : null}
+              </>
+            ) : null}
+            {p.domains.length > 0 ? (
+              <ul aria-label="Domains" className="flex flex-wrap gap-1.5">
+                {p.domains.map((d) => (
+                  <li key={d} className="rounded-md bg-muted px-2 py-0.5 text-xs leading-5 text-foreground">
+                    {d}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </Section>
+      ) : null}
 
-      <Section icon={TrendingUp} title="Stage and funding">
-        <Fact id="stage" label="Stage" v={p.stage} />
-        <Fact id="funding" label="Funding" v={p.funding} />
-      </Section>
-
-      <Section icon={Users} title="Headcount">
-        {/* The size gate keeps a giant or a likely large company off Today, so an unknown size here was never looked up. */}
-        <Fact id="headcount" label="People" v={p.headcount} unknown="Not checked" />
-      </Section>
-
-      <Section icon={MapPin} title="Where">
-        <Fact id="hq" label="HQ" v={p.hq} />
-        <Fact id="website" label="Website" v={q.emailFit.website} unknown="Not on file" />
-        <Fact id="roleplaces" label="Roles in" v={p.rolePlaces} />
-      </Section>
-
-      <Section icon={ShieldCheck} title="Visa">
-        <Fact id="everify" label="E-Verify" v={p.everify} />
-        <Fact id="sponsorship" label="Sponsors" v={p.sponsorship} />
-        <Fact id="lca" label="H-1B" v={p.lca} />
-      </Section>
+      {groups.map((g) => {
+        const known = g.facts.filter((f) => f.v.text !== null);
+        return known.length === 0 ? null : (
+          <Section key={g.title} icon={g.icon} title={g.title}>
+            {known.map((f) => (
+              <Fact key={f.id} id={f.id} label={f.label} v={f.v} />
+            ))}
+          </Section>
+        );
+      })}
 
       <Section icon={Briefcase} title="Open roles at your level">
         <Roles roles={p.roles} />
@@ -168,13 +177,15 @@ export function ProfilePanel({ row, className }: { row: PlanRow; className?: str
         )}
       </Section>
 
-      <Section icon={Link2} title="Links">
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
-          <OutLink href={q.careersUrl}>Careers</OutLink>
-          <OutLink href={q.websiteUrl}>Website</OutLink>
-          <OutLink href={q.linkedinCompanyUrl}>LinkedIn page</OutLink>
-        </div>
-      </Section>
+      {missing.size > 0 ? (
+        <Section icon={CircleHelp} title="Not known yet">
+          <ul data-unknown className="grid gap-1 text-[13px] leading-5 text-muted-foreground">
+            {[...missing].map(([word, names]) => (
+              <li key={word}>{`${word}: ${names.join(', ')}`}</li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
     </div>
   );
 }

@@ -66,16 +66,16 @@ describe('Today with the email flag', () => {
     expect(pylon).toHaveAccessibleName('1. Pylon, To do, new opening, 6 hours ago');
     expect(pylon).toHaveAccessibleDescription('Email');
     expect(cerebrium).toHaveAccessibleDescription('LinkedIn only');
-    // Only Email shows on the rail; LinkedIn only is for a screen reader there, and the panel says it.
-    expect(options().map((o) => o.querySelector('[data-email-fit]')?.getAttribute('data-email-fit') ?? null)).toEqual(
-      ['email', null, 'email', 'email', 'email', 'email', 'email', null],
-    );
+    // The rail shows no email chip at all: the header counts the picks that can be emailed, a screen reader hears each
+    // row's flag as its description, and the panel shows the chip.
+    expect(options().map((o) => o.querySelector('[data-email-fit]'))).toEqual(Array(8).fill(null));
   });
 
   it('shows the chip and the reasons on the panel', async () => {
     await open();
     expect(within(panel()).getByRole('button', { name: /^Email: Website known \(pylon\.example\)/ })).toBeInTheDocument();
-    expect(within(panel()).getByText('Email. Website known (pylon.example). About 30 people: a founder or engineer reads this.')).toBeInTheDocument();
+    // The row is labelled Email, so the sentence does not start with the word again; a LinkedIn only row keeps its label.
+    expect(within(panel()).getByText('Website known (pylon.example). About 30 people: a founder or engineer reads this.')).toBeInTheDocument();
   });
 
   it('shows the website in the profile, or that none is on file', () => {
@@ -86,7 +86,8 @@ describe('Today with the email flag', () => {
     expect(site).toHaveTextContent('estimate, your old dashboard');
     unmount();
     render(<ProfilePanel row={rows.find((r) => r.company.name === 'Cerebrium')!} />);
-    expect(document.querySelector('[data-fact="website"]')).toHaveTextContent('Not on file');
+    expect(document.querySelector('[data-fact="website"]')).toBeNull();
+    expect(document.querySelector('[data-unknown]')).toHaveTextContent('Not on file: Website');
   });
 
   it('says why a pick is LinkedIn only', async () => {
@@ -94,31 +95,5 @@ describe('Today with the email flag', () => {
     await userEvent.setup().click(options()[1]!);
     await screen.findByRole('heading', { level: 2, name: 'Cerebrium' });
     expect(within(panel()).getByText('LinkedIn only. No website on file, so no address pattern.')).toBeInTheDocument();
-  });
-
-  it('lists Email today collapsed, by rank, none of them on today\'s list', async () => {
-    const user = userEvent.setup();
-    await open();
-    const toggle = await screen.findByRole('button', { name: /Email today/ });
-    expect(toggle).toHaveTextContent('Email today6 companies');
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await user.click(toggle);
-    const list = screen.getByRole('list', { name: 'Companies to email today' });
-    const names = within(list).getAllByRole('listitem').map((li) => li.querySelector('a')?.textContent);
-    expect(names).toEqual(['Retell AI', 'Railway', 'Graphite', 'Supabase', 'Fly.io', 'Weaviate']);
-    const picks = options().map((o) => o.querySelector('b')?.textContent);
-    expect(names.filter((n) => picks.includes(n))).toEqual([]);
-    expect(screen.getByText(/^6 more companies you can email today, by rank\./)).toBeInTheDocument();
-    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Website known (retellai.example). About 40 people: a founder or engineer reads this');
-  });
-
-  it('copies a lane company\'s line for the terminal', async () => {
-    const user = userEvent.setup();
-    const writeText = vi.fn<(text: string) => Promise<void>>(async () => {});
-    await open();
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    await user.click(await screen.findByRole('button', { name: /Email today/ }));
-    await user.click(screen.getByRole('button', { name: 'Copy the line for Retell AI' }));
-    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^Knock: Retell AI \(company \d+\), role: Software Engineer, New Grad$/));
   });
 });

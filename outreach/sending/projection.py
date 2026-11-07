@@ -5,14 +5,15 @@ A walk down the approved queue on a virtual clock. At each moment it asks the se
 company and the day, and moves on: to the next moment a wait ends when nothing can go. So the business days, the
 recipient's hours, the per-company limit and gap and the daily limit are the sender's, not a second copy of them.
 
-Two things are estimates. Spacing between sends is random (`gap_minutes`), so the walk uses its mean. Later days
+Two things are estimates. Spacing between sends is random (`human.next_gap_minutes`), so the walk uses its mean; the first send of a day
+and each company's gap use their fixed offsets. Later days
 use today's limit as it stands (the ramp may allow more, so mail can only come earlier than shown). Read only: the
 store is read once, by `queue.prepare`.
 """
 from datetime import datetime, timedelta, timezone
 
 from outreach.sending import calendar as cal
-from outreach.sending import queue
+from outreach.sending import human, queue
 from outreach.sending.config import SendConfig
 
 __all__ = ["MAX_DAYS", "project"]
@@ -26,7 +27,7 @@ def project(p: queue.Prepared, now: datetime, cfg: SendConfig) -> dict[int, date
     cannot go within `MAX_DAYS` days is absent."""
     now = now.astimezone(timezone.utc)
     end = now + timedelta(days=MAX_DAYS)
-    spacing = timedelta(minutes=sum(cfg.gap_minutes) / 2)
+    spacing = timedelta(minutes=human.mean_gap_minutes(cfg))
     pending = list(p.queue)
     sends = {company: list(sent) for company, sent in p.sends.items()}
     sent_by_day = {cal.ny_date(now, cfg): p.sent_today}

@@ -13,7 +13,11 @@ from zoneinfo import ZoneInfo
 from outreach.sending.config import load_config
 from outreach.sending.simulate import TWO_WEEKS, Event, Scenario, format_table, ny, simulate
 
-CFG = dataclasses.replace(load_config(), followup_business_days=(7,))  # built for one follow-up at 7 business days; the 4-follow-up schedule is tested in test_sending_followups
+# Built for one follow-up at 7 business days (the 4-follow-up schedule is tested in test_sending_followups) and for slow,
+# steady pacing of 4 to 9 minutes, since its bounces and limits sit at fixed positions in the day. The shipped human pacing
+# is checked in test_sending_human and test_sending_queue.
+CFG = dataclasses.replace(load_config(), followup_business_days=(7,), gap_minutes=(4, 9), gap_median_minutes=5.5,
+                          gap_spread=0.2, break_chance=0.0)
 NY = ZoneInfo("America/New_York")
 MON = date(2026, 11, 2)
 D = {n: date(2026, 11, 2) + timedelta(days=d) for n, d in
@@ -97,10 +101,10 @@ class TwoWeeksTest(unittest.TestCase):
             local = s.at.astimezone(ZoneInfo(s.zone))
             self.assertLess(local.weekday(), 5, s)
             self.assertTrue(CFG.window_start <= local.time() <= CFG.window_end, f"{s.person} at {local}")
-        # The stored gap is cut to whole seconds, so allow a second under the 4 minute floor.
+        # The stored gap is cut to whole seconds, so allow a second under the shortest gap.
         ordered = sorted(s.at for s in self.r.sends)
         for a, b in zip(ordered, ordered[1:]):
-            self.assertGreaterEqual(b - a, timedelta(minutes=4) - timedelta(seconds=1))
+            self.assertGreaterEqual(b - a, timedelta(minutes=CFG.gap_minutes[0]) - timedelta(seconds=1))
         self.assertTrue({"America/Los_Angeles", "Europe/London"} <= {s.zone for s in self.r.sends})
 
     def test_two_weeks_follow_up_dates(self):
@@ -202,7 +206,9 @@ class StopRulesTest(unittest.TestCase):
         return [s for s in result.sends if s.at >= at]
 
     def test_stop_bounce_rate_warning(self):
-        r = self.run_scenario(short(2, [morning(1, 40), morning(2, 40), Event(ny(D[2], "11:00"), "bounce", {"nth": 0})]))
+        # Two bounces: sends come faster now (human gaps), so one in about 50 sent would no longer reach 2%.
+        r = self.run_scenario(short(2, [morning(1, 40), morning(2, 40), Event(ny(D[2], "11:00"), "bounce", {"nth": 0}),
+                                        Event(ny(D[2], "11:00"), "bounce", {"nth": 1})]))
         self.assertIn("bounce_warning", self.kinds(r))
         self.assertEqual(self.paused(r)["paused"], 0)
         day = r.days[1]

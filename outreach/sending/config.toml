@@ -8,11 +8,12 @@ from_name = "Devanshu Chicholikar"
 # The sender's day (send_day.day, daily counts) is this zone's date.
 day_tz = "America/New_York"
 
-# Adaptive ramp (#9): 20 a day to start, +10 each clean sending day, up to 100 (the send_day CHECK is the hard ceiling).
-ramp_start = 20
+# Send limit (#9, 2026-11-06): flat 100 a day. Start, floor and ceiling are all 100, so no warning lowers it and no
+# clean day raises it. To bring the adaptive ramp back, set start and floor to 20 (the send_day CHECK is the ceiling).
+ramp_start = 100
 ramp_step = 10
 ramp_ceiling = 100
-ramp_floor = 20
+ramp_floor = 100
 
 # A day is clean when bounces are under 2% over the last 3 days (#9).
 clean_bounce_rate = 0.02
@@ -36,8 +37,20 @@ holidays = []
 per_company_daily = 3
 per_company_gap_minutes = 60
 
-# Random gap between any two sends, in minutes (the deliverability research's pacing range).
-gap_minutes = [4, 9]
+# Human pacing (#9, 2026-11-06). The gap after a send is log-normal around gap_median_minutes (gap_spread is its
+# width), clipped to gap_minutes, and now and then (break_chance) a real break of break_minutes. Mean about 3 minutes
+# (the sender ticks every 2, so about 4 in practice), so a window day fits 100 sends.
+gap_minutes = [1, 25]
+gap_median_minutes = 2.0
+gap_spread = 0.6
+break_chance = 0.04
+break_minutes = [10, 25]
+# The next send is one of the first pick_pool ready messages, not strictly the oldest.
+pick_pool = 5
+# The first send of a day starts up to this many minutes after the window opens (a different offset each day).
+day_start_jitter_minutes = 25
+# A company's gap is per_company_gap_minutes plus up to this many (a different amount after each send).
+per_company_gap_jitter_minutes = 60
 
 # Follow-ups (#9, 2026-10-31): 4, at 3, 7, 14 and 21 business days after the first email; at most 4 (message.seq 0 to 4).
 followup_business_days = [3, 7, 14, 21]

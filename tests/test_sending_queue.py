@@ -1,13 +1,16 @@
+import dataclasses
 import unittest
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from outreach.sending import queue, ramp
+from outreach.sending import human, queue, ramp
 from outreach.sending.config import load_config
+from tests import SHIPPED_SEND_CONFIG
 from tests.sendtest import MON, UTC, bounce, put_day, seed_email_person, seed_message, seed_sent
 from tests.storetest import fresh_store, seed_company
 
-CFG = load_config()
+# A floor of 1 so a test can set a day's limit as low as it likes: the floor lifts any lower row (#9, 2026-11-06).
+CFG = dataclasses.replace(load_config(), ramp_floor=1)
 NY = ZoneInfo("America/New_York")
 LA = ZoneInfo("America/Los_Angeles")
 MON_DAY = date(2026, 11, 2)
@@ -61,6 +64,57 @@ class Base(unittest.TestCase):
 
     def reason(self, message, now=MON, **kw) -> str:
         return self.verdicts_at(now, **kw)[message].reason
+
+
+HUMAN = load_config(SHIPPED_SEND_CONFIG)  # the shipped pacing: jittered day start and company gaps, a pick pool
+
+
+class HumanPacingTest(Base):
+    def verdicts_with_human(self, now):
+        day = ramp.open_day(self.db, now, HUMAN)
+        return {v.message_id: v for v in queue.verdicts(self.db, now, HUMAN, day=day, gate=None)}
+
+    def test_the_first_send_of_the_day_starts_a_little_after_the_window_opens(self):
+        _, message = self.approve()
+        opens = ny(2, 8, 30)
+        offset = human.day_start_offset(MON_DAY, HUMAN)
+        self.assertGreater(offset, timedelta(0))
+        verdict = self.verdicts_with_human(opens)[message]
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("spacing", opens + offset))
+        self.assertEqual(self.verdicts_with_human(opens + offset)[message].reason, "ready")
+
+    def test_the_day_start_wait_ends_once_something_has_been_sent_today(self):
+        _, message = self.approve()
+        self.sent_at(seed_company(self.db, "Other"), ny(2, 8, 31))
+        self.assertEqual(self.verdicts_with_human(ny(2, 8, 32))[message].reason, "ready")
+
+    def test_a_company_waits_its_own_jittered_gap_not_a_flat_hour(self):
+        _, message = self.approve()
+        last = MON - timedelta(minutes=60)
+        self.sent_at(self.company, last)
+        gap = human.company_gap(self.company, last, HUMAN)
+        self.assertGreater(gap, timedelta(minutes=60))
+        verdict = self.verdicts_with_human(MON)[message]
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("per_company_gap", last + gap))
+        self.assertEqual(self.verdicts_with_human(last + gap)[message].reason, "ready")
+
+    def test_the_company_gap_is_never_under_an_hour(self):
+        for company in range(1, 40):
+            for minute in range(0, 600, 37):
+                at = MON + timedelta(minutes=minute)
+                self.assertGreaterEqual(human.company_gap(company, at, HUMAN), timedelta(minutes=60))
+
+    def test_pick_takes_the_first_ready_without_an_rng(self):
+        ids = [self.approve(company=seed_company(self.db, f"C{i}"))[1] for i in range(4)]
+        found = list(self.verdicts_at().values())
+        self.assertEqual(queue.pick(found, queue.load_queue(self.db)).message_id, ids[0])
+
+    def test_pick_with_an_rng_varies_inside_the_pool(self):
+        import random
+        ids = [self.approve(company=seed_company(self.db, f"C{i}"))[1] for i in range(8)]
+        found = list(self.verdicts_at().values())
+        picked = {queue.pick(found, queue.load_queue(self.db), random.Random(s), 3).message_id for s in range(60)}
+        self.assertEqual(picked, set(ids[:3]))
 
 
 class PrepareTest(Base):

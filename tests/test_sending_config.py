@@ -5,6 +5,7 @@ import unittest
 from datetime import date, time
 from pathlib import Path
 
+from tests import SHIPPED_SEND_CONFIG
 from outreach.sending.config import DEFAULT_PATH, HARD_CEILING, SendConfig, load_config
 
 
@@ -27,14 +28,18 @@ class SendConfigTest(unittest.TestCase):
         self.assertIn(key, str(cm.exception))
 
     def test_defaults_are_the_nine_numbers(self):
-        cfg = load_config()
-        self.assertEqual((cfg.ramp_start, cfg.ramp_step, cfg.ramp_ceiling, cfg.ramp_floor), (20, 10, 100, 20))
+        cfg = load_config(SHIPPED_SEND_CONFIG)
+        self.assertEqual((cfg.ramp_start, cfg.ramp_step, cfg.ramp_ceiling, cfg.ramp_floor), (100, 10, 100, 100))
         self.assertEqual((cfg.clean_bounce_rate, cfg.bounce_days), (0.02, 3))
         self.assertEqual((cfg.window_start, cfg.window_end), (time(8, 30), time(16, 30)))
         self.assertEqual(cfg.weekdays, (0, 1, 2, 3, 4))
         self.assertEqual((cfg.per_company_daily, cfg.per_company_gap_minutes), (3, 60))
         self.assertEqual(cfg.followup_business_days, (3, 7, 14, 21))
-        self.assertEqual(cfg.gap_minutes, (4, 9))
+        self.assertEqual(cfg.gap_minutes, (1, 25))
+        self.assertEqual((cfg.gap_median_minutes, cfg.gap_spread, cfg.break_chance, cfg.break_minutes),
+                         (2.0, 0.6, 0.04, (10, 25)))
+        self.assertEqual((cfg.pick_pool, cfg.day_start_jitter_minutes, cfg.per_company_gap_jitter_minutes),
+                         (5, 25, 60))
         self.assertEqual(cfg.holidays, ())
         self.assertEqual(cfg.day_tz, "America/New_York")
         self.assertEqual(HARD_CEILING, 100)
@@ -55,7 +60,7 @@ class SendConfigTest(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             cfg.ramp_start = 50
         self.assertIsInstance(cfg, SendConfig)
-        self.assertEqual(len(dataclasses.fields(SendConfig)), 27)
+        self.assertEqual(len(dataclasses.fields(SendConfig)), 34)
 
     def test_holidays_load_as_dates(self):
         cfg = load_config(config_with(holidays='["2026-11-26", "2026-12-25"]'))
@@ -89,6 +94,10 @@ class SendConfigTest(unittest.TestCase):
 
     def test_inverted_gap_is_refused(self):
         self.refused("gap_minutes", gap_minutes="[9, 4]")
+        self.refused("break_minutes", break_minutes="[30, 10]")
+        self.refused("break_chance", break_chance="1.5")
+        self.refused("gap_median_minutes", gap_median_minutes="0")
+        self.refused("pick_pool", pick_pool="0")
 
     def test_weekday_outside_zero_to_six_is_refused(self):
         self.refused("weekdays", weekdays="[0, 1, 2, 3, 7]")

@@ -25,7 +25,7 @@ from outreach.rules.rebuild import record_evidence
 from outreach.sources.keys import classify_domain
 from outreach.store import append_event, transaction
 
-__all__ = ["TOOLS", "clean", "is_linkedin", "raise_flag"]
+__all__ = ["TOOLS", "clean", "is_linkedin", "raise_flag", "raise_flag_in"]
 
 DATE = r"^\d{4}-\d{2}-\d{2}$"
 HTTPS = r"^https://\S+$"
@@ -121,22 +121,29 @@ def raise_flag(ctx: Ctx, *, company_id: int, reason: str, evidence_key: str, pos
                person_id: int | None = None, detail: dict | None = None) -> dict:
     """One flagged review item raised by claude, or the one already there with this key (open or resolved, so a
     resolved item stays resolved). The event is appended only when the item is new."""
+    with transaction(ctx.conn):
+        return raise_flag_in(ctx, company_id=company_id, reason=reason, evidence_key=evidence_key,
+                             posting_id=posting_id, person_id=person_id, detail=detail)
+
+
+def raise_flag_in(ctx: Ctx, *, company_id: int, reason: str, evidence_key: str, posting_id: int | None = None,
+                  person_id: int | None = None, detail: dict | None = None) -> dict:
+    """`raise_flag` for a caller that already holds the write transaction (a person edit and its notice are one unit)."""
     conn = ctx.conn
-    with transaction(conn):
-        cur = conn.execute(
-            "INSERT INTO review_item(kind, company_id, posting_id, person_id, reason, evidence_key, raised_by, "
-            "created_at) VALUES ('flagged', ?, ?, ?, ?, ?, 'claude', ?) ON CONFLICT DO NOTHING",
-            (company_id, posting_id, person_id, reason[:ITEM_REASON_CHARS], evidence_key, ctx.now))
-        if cur.rowcount:
-            review_id, created, state = cur.lastrowid, True, "open"
-            append_event(conn, entity="review_item", kind="raised", actor="claude", entity_id=review_id,
-                         company_id=company_id, detail={"kind": "flagged", **(detail or {})}, at=ctx.now)
-        else:
-            row = conn.execute(
-                "SELECT review_id, state FROM review_item WHERE kind = 'flagged' AND company_id = ? "
-                "AND board_id IS NULL AND ifnull(posting_id, 0) = ? AND ifnull(person_id, 0) = ? "
-                "AND evidence_key = ?", (company_id, posting_id or 0, person_id or 0, evidence_key)).fetchone()
-            review_id, created, state = row["review_id"], False, row["state"]
+    cur = conn.execute(
+        "INSERT INTO review_item(kind, company_id, posting_id, person_id, reason, evidence_key, raised_by, "
+        "created_at) VALUES ('flagged', ?, ?, ?, ?, ?, 'claude', ?) ON CONFLICT DO NOTHING",
+        (company_id, posting_id, person_id, reason[:ITEM_REASON_CHARS], evidence_key, ctx.now))
+    if cur.rowcount:
+        review_id, created, state = cur.lastrowid, True, "open"
+        append_event(conn, entity="review_item", kind="raised", actor="claude", entity_id=review_id,
+                     company_id=company_id, detail={"kind": "flagged", **(detail or {})}, at=ctx.now)
+    else:
+        row = conn.execute(
+            "SELECT review_id, state FROM review_item WHERE kind = 'flagged' AND company_id = ? "
+            "AND board_id IS NULL AND ifnull(posting_id, 0) = ? AND ifnull(person_id, 0) = ? "
+            "AND evidence_key = ?", (company_id, posting_id or 0, person_id or 0, evidence_key)).fetchone()
+        review_id, created, state = row["review_id"], False, row["state"]
     return {"review_id": review_id, "created": created, "state": state}
 
 

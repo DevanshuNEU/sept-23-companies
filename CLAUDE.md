@@ -44,6 +44,9 @@ The MCP server's guard refuses every write on `linkedin_log` and `outreach_touch
 LinkedIn request Devanshu says he sent (a `request_sent` row and its `linkedin_request` touch under a `bridge:` key,
 no outcome, no undo). Claude calls it only after he says "sent"; it never records a reply, accept, interview,
 email touch or undo, and no update or delete of either table is allowed (#9, company-first ruling).
+The guard also refuses every write to `person.company_id` except on `move_person`'s grant, which may name only
+`company_id`, `updated_at` and `revision`. `update_person`, `mark_email_bounced` and `move_person` (#181) correct a
+person at once, log the old value in `event` and raise a flagged Needs-you item; they never write `touch` or `message`.
 
 **Retired at the switch (#17), kept on disk as `.disabled` plists:** `com.devanshu.outreach-mail-sender`,
 `-mail-server`, `-dashboard`, `-refresh`, and Job Radar (`com.devanshu.jobradar`, per #5). Their code (`mail/`,

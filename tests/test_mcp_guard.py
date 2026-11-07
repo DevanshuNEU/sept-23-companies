@@ -12,7 +12,7 @@ from unittest import mock
 
 import live_checkout
 from outreach.mcp import guard
-from outreach.mcp.guard import NEVER_COLUMNS, NEVER_TABLES, Grant, GrantError
+from outreach.mcp.guard import MOVE_ONLY_COLUMNS, NEVER_COLUMNS, NEVER_TABLES, Grant, GrantError
 from outreach.store import DEFAULT_PATH, StoreError, connect
 from tests import apiseed as seed
 from tests.storetest import fresh_store
@@ -511,3 +511,42 @@ class BridgeGuardTest(GuardCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MoveGuardTest(GuardCase):
+    """`move_person` alone may change `person.company_id` (#181): its grant is exactly the move-only columns."""
+
+    def other_company(self) -> int:
+        return seed.company(self.db, "Elsewhere", "working")
+
+    def test_company_id_with_another_person_column_is_refused(self):
+        with self.assertRaises(GrantError):
+            guard.check_grants({"person": Grant(update=frozenset({"company_id", "email"}))})
+        with self.assertRaises(GrantError):
+            guard.check_grants({"person": Grant(update=frozenset({"company_id"}))})
+
+    def test_the_exact_move_columns_are_allowed(self):
+        guard.check_grants({"person": Grant(update=MOVE_ONLY_COLUMNS)})
+        self.assertEqual(MOVE_ONLY_COLUMNS, frozenset({"company_id", "updated_at", "revision"}))
+
+    def test_a_move_connection_changes_company_id_but_not_added_by(self):
+        target = self.other_company()
+        conn = guard.open_guarded({"person": Grant(update=MOVE_ONLY_COLUMNS)}, path=self.path)
+        self.addCleanup(conn.close)
+        conn.execute("UPDATE person SET company_id = ?, updated_at = ?, revision = revision + 1 WHERE person_id = ?",
+                     (target, T, self.person))
+        self.assertEqual(self.db.execute("SELECT company_id FROM person WHERE person_id = ?",
+                                         (self.person,)).fetchone()[0], target)
+        with self.assertRaises(sqlite3.DatabaseError):
+            conn.execute("UPDATE person SET added_by = 'devanshu' WHERE person_id = ?", (self.person,))
+
+    def test_every_other_connection_still_refuses_company_id(self):
+        target = self.other_company()
+        sql = "UPDATE person SET company_id = ? WHERE person_id = ?"
+        self.assert_trigger_refuses(self.triggers_only(), sql, (target, self.person))
+        self.assert_trigger_refuses(self.triggers_only({"person": Grant(update=frozenset({"email"}))}), sql,
+                                    (target, self.person))
+        with self.assertRaises(sqlite3.DatabaseError):
+            conn = guard.open_guarded({"person": Grant(update=frozenset({"email", "updated_at"}))}, path=self.path)
+            self.addCleanup(conn.close)
+            conn.execute(sql, (target, self.person))

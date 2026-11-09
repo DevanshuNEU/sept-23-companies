@@ -1,11 +1,14 @@
 """Health: job runs, the read queue, boards, watched pages and the sender, read from a scratch store."""
+import dataclasses
 import json
 import re
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from outreach.api.models.health import JobKind
 from outreach.api.queries.jobs import SCHEDULED, UNSCHEDULED, expected_next_at, humanize, is_late
+from outreach.plan.config import default_plan_config
 from tests.apitest import ApiCase, NOW
 from tests.storetest import seed_company, seed_posting
 
@@ -125,6 +128,19 @@ class JobRuns(ApiCase):
         self.assertEqual(by["read_boards"]["expectedNextAt"], "2026-11-10T15:30:00Z")
         self.assertFalse(by["rank"]["late"])
         self.assertIsNone(by["rank"]["expectedNextAt"])
+
+    def test_a_job_switched_off_in_config_is_never_late(self):
+        self.add_run("prepare", "2026-10-26T09:30:00Z", status="partial")  # weeks ago: late if it were on
+        on = default_plan_config().prepare | {"enabled": True}
+        with mock.patch("outreach.api.queries.jobs.default_plan_config",
+                        return_value=dataclasses.replace(default_plan_config(), prepare=on)):
+            by = {j["job"]: j for j in self.health()["jobs"]}
+        self.assertTrue(by["prepare"]["late"])
+        self.assertIsNotNone(by["prepare"]["expectedNextAt"])
+        self.assertFalse(default_plan_config().prepare["enabled"])  # the shipped config has it off
+        by = {j["job"]: j for j in self.health()["jobs"]}
+        self.assertFalse(by["prepare"]["late"])
+        self.assertIsNone(by["prepare"]["expectedNextAt"])
 
     def test_summary_counts_keep_integers_only(self):
         summary = {"boards_read": 12, "postings_seen": 340, "ratio": 0.5, "note": "ok", "flag": True,

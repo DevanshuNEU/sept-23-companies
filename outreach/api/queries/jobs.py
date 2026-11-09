@@ -17,6 +17,7 @@ from outreach.api.models.health import (
     JobRunSummary,
     ReadQueueStatus,
 )
+from outreach.plan.config import default_plan_config
 from outreach.store.timefmt import ISO_FMT
 
 ET = ZoneInfo("America/New_York")
@@ -128,8 +129,13 @@ def counts_of(summary: str) -> list[JobCount]:
     ]
 
 
+def switched_off(job: str) -> bool:
+    """True for a job its config turns off: it expects no next run, so it is never late (`prepare`, company first, #9)."""
+    return job == "prepare" and not default_plan_config().prepare["enabled"]
+
+
 def run_summary(row: sqlite3.Row, now: str) -> JobRunSummary:
-    expected = expected_next_at(row["job"], row["started_at"], now)
+    expected = None if switched_off(row["job"]) else expected_next_at(row["job"], row["started_at"], now)
     return JobRunSummary(
         job=row["job"],
         started_at=row["started_at"],

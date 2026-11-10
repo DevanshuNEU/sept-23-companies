@@ -2,8 +2,9 @@
 
 One tick is one `read_boards` job run. It rebuilds first when the store's ruleset is not this code's, so a rebuild
 and a crawl never overlap; `tick_lock` keeps two ticks from running at once. Boards come from `due_boards` in its
-fixed order (today's plan, then never read, then the oldest due), and no new board starts once `tick_budget_s` has
-passed, so a Mac that slept for days reads what matters first and leaves the rest due. A board whose ATS's reader is
+fixed order (today's plan, then never read, then the oldest due), and once `tick_budget_s` has passed no new board
+is listed and no listed board still waiting for the writer is written, so a Mac that slept for days reads what
+matters first and leaves the rest due. A board whose ATS's reader is
 switched off in config.toml (`ats_off`, #46) is never due: nothing is sent, deferred or written for it, so its state,
 postings and decisions stay as they are until the reader is on again. The report counts such boards in `switched_off`.
 
@@ -47,12 +48,14 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from outreach.crawl import fanout
 from outreach.crawl.ats import adapter_for, reading_ats
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
 from outreach.crawl.boardstate import BoardRow
 from outreach.crawl.cadence import add_seconds, due_boards, error_backoff_s, plan_company_ids, switched_off_boards
 from outreach.crawl.config import CrawlConfig, load_crawl_config
-from outreach.crawl.ingest import full_read_due, list_board, read_board
+from outreach.crawl.fanout import Listed
+from outreach.crawl.ingest import full_read_due, read_board
 from outreach.crawl.polite import HostTripped, PoliteClient, bucket_for
 from outreach.crawl.probe import PROBE_LIMIT, ProbeReport, probe_slugs
 from outreach.crawl.watch import WatchReport, watch_pages
@@ -82,6 +85,7 @@ MASS_EMPTY_BOARDS = 5
 _PROFILE_KEYS = ("boards", "list_requests", "list_ms", "body_requests", "body_ms", "ingest_ms", "new", "closed",
                  "reopened")
 _MAX_ERROR_LINES = 20  # board failures named in job_run.error; the count is always complete
+_RULESET_CHANGED = "the ruleset changed during the tick; the next tick rebuilds first"
 
 
 @dataclass(frozen=True)
@@ -262,22 +266,35 @@ class _Pass:
     def client(self) -> _TickClient:
         return _TickClient(self.polite, self.cfg, self.down)
 
-    def read(self, board: BoardRow) -> None:
-        now = self.now_fn()
+    def start(self, board: BoardRow) -> tuple[Adapter | None, _TickClient]:
+        """The board's adapter (None when no adapter reads its ATS) and the view its requests go through. Writes
+        nothing: the fan-out calls it for every board before the first list is taken."""
         view = self.client()
-        adapter = adapter_for(board.ats, view)
-        if adapter is None:  # due_boards selects the ATSs the crawler reads only
+        return adapter_for(board.ats, view), view
+
+    def take(self, listed: Listed) -> None:
+        """Write one listed board, on the thread that owns the store. The time is taken here, when the board is
+        written, not when it was started.
+
+        The tick trips a bucket here, as it takes the error that reaches `breaker_failures`, but worker threads may
+        already have listed more of that bucket's boards by then. Their answers arrive late, and each is deferred,
+        as a serial tick that never sent them would: no read, no streak change. Those extra requests are bounded by
+        the bucket's boards already in flight or queued when the trip is taken."""
+        if listed.adapter is None:  # due_boards selects the ATSs the crawler reads only
             return
-        listed_at = self.clock()
-        try:
-            result = list_board(adapter, board, full=full_read_due(self.conn, board, now))
-        except HostTripped as e:
-            self._trip(e.bucket)
+        board, adapter, view, result = listed.board, listed.adapter, listed.view, listed.result
+        now = self.now_fn()
+        if listed.tripped is not None:
+            self._trip(listed.tripped)
             self._push(board, add_seconds(now, self.cfg.defer_s))
             self.counts["deferred"] += 1
             return
-        self._profile(board.ats, boards=1, list_requests=view.requests, list_ms=self._ms(listed_at))
+        self._profile(board.ats, boards=1, list_requests=view.requests, list_ms=listed.list_ms)
         bucket = view.first_bucket
+        if bucket is not None and bucket in self.down:  # listed before the writer took the trip: a late answer
+            self._push(board, add_seconds(now, self.cfg.defer_s))
+            self.counts["deferred"] += 1
+            return
         if bucket is not None:
             self.seen.add(bucket)
         if result.result == "error":
@@ -356,7 +373,7 @@ class _Pass:
             self._push(board, add_seconds(now, self.cfg.defer_s))
             self.counts["deferred"] += 1
             self.stopped = True
-            self.errors.append("the ruleset changed during the tick; the next tick rebuilds first")
+            self.errors.append(_RULESET_CHANGED)
             return
         except Exception as e:
             # Our bug, not the board's error: no streak change, and the wait its next error would get.
@@ -397,16 +414,41 @@ def _checkpoint(conn: sqlite3.Connection) -> None:
 
 def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callable[[str], list[BoardRow]], *,
                  cfg: CrawlConfig, rules_cfg, combiner, now_fn, clock, started: float,
-                 rebuilt: bool, switched_off: int = 0) -> tuple[TickReport, _Pass]:
-    """One `read_boards` job run over `select(now)`, starting no board once the budget is spent. `switched_off` is
-    the count of boards `select` leaves out because their reader is off; it goes into the report as it is."""
+                 rebuilt: bool, switched_off: int = 0,
+                 workers: Mapping[str, int] | None = None) -> tuple[TickReport, _Pass]:
+    """One `read_boards` job run over `select(now)`. Once the budget is spent (or the pass stopped) no board is
+    listed, and under `workers` no listed board still waiting for the writer is written: listing on threads is fast
+    and writing (with its body fetches) is not, so the budget bounds both. A board listed but not written keeps its
+    `next_read_at` and is read again next tick. Serially each board is written as soon as it is listed, as before.
+    `switched_off` is the count of boards `select` leaves out because their reader is off; it goes into the report
+    as it is.
+
+    The lists go through `fanout.list_boards`: inline in board order when `workers` is None, else on worker threads
+    (#158). Every write happens here, on the thread that owns `conn`, as each list comes back; the body fetches stay
+    inside `read_board`. A ruleset change a worker meets is handled as one an ingest meets: no new board starts, the
+    run ends `partial`, and the boards not written keep their `next_read_at`."""
     run_id = start_job(conn, "read_boards", ruleset_version())
     run = _Pass(conn, polite, cfg, rules_cfg, combiner, now_fn, run_id, clock)
     try:
-        for board in select(now_fn()):
-            if run.stopped or clock() - started >= cfg.tick_budget_s:
-                break
-            run.read(board)
+        now = now_fn()
+
+        def should_stop() -> bool:  # asked on worker threads: never touches the store
+            return run.stopped or clock() - started >= cfg.tick_budget_s
+
+        listed = fanout.list_boards(select(now), run.start, lambda b: full_read_due(conn, b, now), workers=workers,
+                                    should_stop=should_stop, clock=clock)
+        with contextlib.closing(listed):  # a break or a raise stops the workers now, not when the frame is collected
+            try:
+                for item in listed:
+                    # Serially a board is written as soon as it is listed. Fanned out, lists run ahead of the
+                    # writer, so a listed board may wait here, and the budget stops its write too.
+                    if workers is not None and should_stop():
+                        break
+                    run.take(item)
+            except RulesetNotCurrent:  # a worker met it; an ingest that met it first has said so already
+                if not run.stopped:
+                    run.errors.append(_RULESET_CHANGED)
+                run.stopped = True
         run.finish()
     except BaseException as e:
         try:
@@ -528,7 +570,7 @@ def _no_notice(title: str, text: str) -> None:
 def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig | None = None, rules_cfg=None,
              combiner=None, now_fn: Callable[[], str] = utcnow, clock: Callable[[], float] = time.monotonic,
              sleep: Callable[[float], None] = time.sleep, limit: int | None = None,
-             notifier: Notifier = _no_notice) -> TickReport:
+             notifier: Notifier = _no_notice, workers: Mapping[str, int] | None = None) -> TickReport:
     """One tick: the ruleset check, the due boards (at most `limit or cfg.boards_per_tick`, within the budget), then
     the daily slug probe (Task 26a, `probe`), then the watched-page pass (Task 14), then the SimplifyJobs feed poll
     (#153, `feed`), all through the same client and breaker; the watch pass is its own `watch_pages` run. A failed
@@ -538,6 +580,8 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
     holds `tick_lock`.
 
     `combiner=None` means `resolve_combiner(conn)`. `clock` and `sleep` drive the budget and the polite spacing.
+    `workers` (the `[workers]` table, #158) lists the boards on that many threads per ATS; None lists them one by one
+    on this thread. Only the board lists fan out: the probe, watch and feed passes run here as before.
     """
     cfg = cfg or load_crawl_config()
     started = clock()
@@ -554,7 +598,8 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
 
         off = len(switched_off_boards(conn, cfg.ats_off))
         report, run = _read_boards(conn, polite, select, cfg=cfg, rules_cfg=rules_cfg, combiner=combiner,
-                                   now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt, switched_off=off)
+                                   now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt, switched_off=off,
+                                   workers=workers)
         probe, probe_error = _probe_step(conn, run, cfg, now_fn, clock, started)
         report = replace(report, probe=probe, probe_error=probe_error)
         try:
@@ -577,14 +622,15 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
 def read_company_boards(conn: sqlite3.Connection, client: HttpClient, company_ids: Collection[int], *,
                         cfg: CrawlConfig | None = None, rules_cfg=None, combiner=None,
                         now_fn: Callable[[], str] = utcnow, clock: Callable[[], float] = time.monotonic,
-                        sleep: Callable[[float], None] = time.sleep) -> TickReport:
+                        sleep: Callable[[float], None] = time.sleep,
+                        workers: Mapping[str, int] | None = None) -> TickReport:
     """Read these companies' boards now, for a plan about to be built (#15, #13): `due_boards` with `force`, which
     skips `next_read_at` but keeps the floor and an erroring board's backoff. Its own `read_boards` run, the same
     breaker rules as a tick, and no watched-page pass. It takes the crawl lock itself (raising `AlreadyRunning` while
-    a tick holds it), so it never reads a board a tick is reading."""
+    a tick holds it), so it never reads a board a tick is reading. `workers` as in `run_tick`."""
     with _store_lock(conn):
         return _read_company_boards(conn, client, company_ids, cfg=cfg, rules_cfg=rules_cfg, combiner=combiner,
-                                    now_fn=now_fn, clock=clock, sleep=sleep)
+                                    now_fn=now_fn, clock=clock, sleep=sleep, workers=workers)
 
 
 @contextlib.contextmanager
@@ -598,7 +644,8 @@ def _store_lock(conn: sqlite3.Connection) -> Iterator[None]:
         yield
 
 
-def _read_company_boards(conn, client, company_ids, *, cfg, rules_cfg, combiner, now_fn, clock, sleep) -> TickReport:
+def _read_company_boards(conn, client, company_ids, *, cfg, rules_cfg, combiner, now_fn, clock, sleep,
+                         workers) -> TickReport:
     cfg = cfg or load_crawl_config()
     started = clock()
     ids = sorted(set(company_ids))
@@ -615,7 +662,8 @@ def _read_company_boards(conn, client, company_ids, *, cfg, rules_cfg, combiner,
 
         off = len(switched_off_boards(conn, cfg.ats_off, only_company_ids=ids))
         report, _ = _read_boards(conn, polite, select, cfg=cfg, rules_cfg=rules_cfg, combiner=combiner,
-                                 now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt, switched_off=off)
+                                 now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt, switched_off=off,
+                                 workers=workers)
         return report
     finally:
         _checkpoint(conn)

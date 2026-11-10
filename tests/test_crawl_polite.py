@@ -1,8 +1,11 @@
 """Polite client: host buckets, spacing and the breaker (issue #21, Task 2)."""
+import threading
+import time
 import unittest
+from dataclasses import replace
 
 from outreach.crawl.config import load_crawl_config
-from outreach.crawl.polite import HostTripped, PoliteClient, bucket_for
+from outreach.crawl.polite import HostTripped, PoliteClient, bucket_for, spacing_key
 from outreach.net import FetchError, Response
 from tests.fakes import FakeClient, json_response, status_response
 
@@ -13,6 +16,9 @@ BAMBOO_A = "https://a.bamboohr.com/careers/list"
 BAMBOO_B = "https://b.bamboohr.com/careers/list"
 LEVER = "https://api.lever.co/v0/postings/acme"
 PLAIN = "https://jobs.example.org/list"
+WD_A = "https://a.wd5.myworkdayjobs.com/x"
+WD_A2 = "https://a.wd5.myworkdayjobs.com/y"
+WD_B = "https://b.wd5.myworkdayjobs.com/x"
 
 
 class Clock:
@@ -35,6 +41,12 @@ def make(routes):
 
 
 class PoliteClientTests(unittest.TestCase):
+    def assertWaits(self, slept, expected):
+        """The waits equal `expected`, to a microsecond (a clock near 1000 s loses float digits)."""
+        self.assertEqual(len(slept), len(expected), slept)
+        for got, want in zip(slept, expected):
+            self.assertAlmostEqual(got, want, places=6)
+
     def test_polite_sets_the_declared_user_agent(self):
         polite, inner, _ = make({GH: json_response({})})
         polite.get(GH, {"user-agent": "something else", "Accept": "application/json"})
@@ -61,14 +73,14 @@ class PoliteClientTests(unittest.TestCase):
         polite.get(GH)
         self.assertEqual(clock.slept, [])
         polite.get(GH)
-        self.assertEqual(clock.slept, [CFG.host_interval_s["greenhouse.io"]])
+        self.assertWaits(clock.slept, [CFG.host_interval_s["greenhouse.io"]])
 
     def test_polite_counts_time_already_passed(self):
         polite, _, clock = make({GH: [json_response({}), json_response({})]})
         polite.get(GH)
-        clock.now += 0.1
+        clock.now += 0.02
         polite.get(GH)
-        self.assertAlmostEqual(clock.slept[0], 0.15)
+        self.assertWaits(clock.slept, [0.03])
 
     def test_polite_buckets_share_by_suffix(self):
         self.assertEqual(bucket_for("a.bamboohr.com", CFG), "bamboohr.com")
@@ -76,10 +88,10 @@ class PoliteClientTests(unittest.TestCase):
         self.assertEqual(bucket_for("bamboohr.com", CFG), "bamboohr.com")
         self.assertEqual(bucket_for("notbamboohr.com", CFG), "notbamboohr.com")
         self.assertEqual(bucket_for("jobs.example.org", CFG), "jobs.example.org")
-        polite, _, clock = make({BAMBOO_A: json_response({}), BAMBOO_B: json_response({})})
-        polite.get(BAMBOO_A)
-        polite.get(BAMBOO_B)
-        self.assertEqual(clock.slept, [CFG.host_interval_s["bamboohr.com"]])
+        polite, _, clock = make({GH: json_response({}), "https://job-boards.greenhouse.io/x": json_response({})})
+        polite.get(GH)
+        polite.get("https://job-boards.greenhouse.io/x")
+        self.assertWaits(clock.slept, [CFG.host_interval_s["greenhouse.io"]])
 
     def test_polite_longest_suffix_wins(self):
         from dataclasses import replace
@@ -158,7 +170,7 @@ class PoliteClientTests(unittest.TestCase):
         for _ in range(3):
             polite.get(GH)
         gap = CFG.host_interval_s["greenhouse.io"]
-        self.assertEqual(clock.slept, [gap, gap])
+        self.assertWaits(clock.slept, [gap, gap])
         self.assertAlmostEqual(clock.now, 1000.0 + 2 * gap)
 
     def test_polite_a_tripped_bucket_raises_without_sleeping(self):
@@ -308,11 +320,146 @@ class PoliteClientTests(unittest.TestCase):
         polite.post(GH, b"{}")
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(polite.download(GH2, Path(d) / "x"), 4)
-        self.assertEqual(clock.slept, [CFG.host_interval_s["greenhouse.io"]])
+        self.assertWaits(clock.slept, [CFG.host_interval_s["greenhouse.io"]])
         polite.post(GH, b"{}")
         self.assertTrue(polite.tripped("greenhouse.io"))
         for call in inner.calls:
             self.assertEqual({k.lower(): v for k, v in call[2].items()}["user-agent"], CFG.user_agent)
+
+
+SPLIT = replace(CFG, host_interval_s={**CFG.host_interval_s, "myworkdayjobs.com": 1.0},
+                split_hosts=frozenset({"myworkdayjobs.com"}))
+
+
+def make_split(routes):
+    inner = FakeClient(routes)
+    clock = Clock()
+    return PoliteClient(inner, SPLIT, clock=clock, sleep=clock.sleep), inner, clock
+
+
+class SplitHostTests(unittest.TestCase):
+    def test_spacing_key_is_the_host_for_a_split_bucket_and_the_bucket_otherwise(self):
+        self.assertEqual(spacing_key("A.wd5.myworkdayjobs.com", SPLIT), "a.wd5.myworkdayjobs.com")
+        self.assertEqual(spacing_key("boards-api.greenhouse.io", SPLIT), "greenhouse.io")
+        self.assertEqual(spacing_key("jobs.example.org", SPLIT), "jobs.example.org")
+
+    def test_split_host_spaced_per_host(self):
+        polite, _, clock = make_split({WD_A: json_response({}), WD_B: json_response({}), WD_A2: json_response({})})
+        polite.get(WD_A)
+        polite.get(WD_B)
+        self.assertEqual(clock.slept, [])  # two tenants do not wait on each other
+        polite.get(WD_A2)
+        self.assertEqual(clock.slept, [1.0])  # the same tenant waits its interval
+
+    def test_breaker_still_per_bucket_for_split_hosts(self):
+        polite, _, _ = make_split({WD_A: [status_response(500)] * 3, WD_B: [status_response(500)] * 2})
+        for _ in range(3):
+            polite.get(WD_A)
+        for _ in range(2):
+            polite.get(WD_B)
+        self.assertEqual(CFG.breaker_failures, 5)
+        self.assertTrue(polite.tripped("myworkdayjobs.com"))
+        with self.assertRaises(HostTripped) as ctx:
+            polite.get(WD_B)
+        self.assertEqual(ctx.exception.bucket, "myworkdayjobs.com")
+
+
+class _TimingClient:
+    """An inner client that records when each get started, on the real clock."""
+
+    def __init__(self):
+        self.start_times: list[float] = []
+        self._lock = threading.Lock()
+
+    def get(self, url, headers=None, *, follow_redirects=False, max_bytes=None):
+        with self._lock:
+            self.start_times.append(time.monotonic())
+        return json_response({})
+
+
+class ThreadSafetyTests(unittest.TestCase):
+    def test_spacing_holds_under_threads(self):
+        cfg = replace(CFG, host_interval_s={**CFG.host_interval_s, "greenhouse.io": 0.2})
+        inner = _TimingClient()
+        polite = PoliteClient(inner, cfg)
+        errors = []
+
+        def work():
+            try:
+                for _ in range(3):
+                    polite.get(GH)
+            except Exception as e:  # pragma: no cover - reported below
+                errors.append(e)
+
+        threads = [threading.Thread(target=work) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        starts = sorted(inner.start_times)
+        self.assertEqual(len(starts), 12)
+        # a 0.2 s interval with a 0.06 s margin for thread wake-up jitter on a busy machine
+        self.assertTrue(all(b - a >= 0.14 for a, b in zip(starts, starts[1:])))
+
+    def test_the_lock_is_not_held_while_sleeping(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def slow_sleep(_s):
+            entered.set()
+            release.wait(2)
+
+        polite = PoliteClient(FakeClient({GH: [json_response({})] * 2, LEVER: json_response({})}), CFG,
+                              sleep=slow_sleep)
+        polite.get(GH)
+        t = threading.Thread(target=lambda: polite.get(GH))
+        t.start()
+        self.assertTrue(entered.wait(2))
+        done = threading.Event()
+        threading.Thread(target=lambda: (polite.get(LEVER), done.set())).start()
+        self.assertTrue(done.wait(1), "another bucket must not wait behind a sleeping thread")
+        release.set()
+        t.join()
+
+    def test_a_worker_that_slept_through_a_trip_does_not_send(self):
+        a_in_flight, b_asleep, release = threading.Event(), threading.Event(), threading.Event()
+        sent = []
+
+        class Inner:
+            def get(self, url, headers=None, *, follow_redirects=False, max_bytes=None):
+                sent.append(url)
+                if len(sent) == 1:
+                    a_in_flight.set()
+                    b_asleep.wait(5)
+                    return status_response(429)
+                return json_response({})
+
+        def sleep(_s):
+            b_asleep.set()
+            release.wait(5)
+
+        cfg = replace(CFG, host_interval_s={**CFG.host_interval_s, "greenhouse.io": 5.0})
+        polite = PoliteClient(Inner(), cfg, sleep=sleep)
+        first = threading.Thread(target=lambda: polite.get(GH))
+        first.start()
+        self.assertTrue(a_in_flight.wait(5))
+        raised = []
+
+        def second_get():
+            try:
+                polite.get(GH2)
+            except HostTripped as e:
+                raised.append(e)
+
+        second = threading.Thread(target=second_get)
+        second.start()
+        self.assertTrue(b_asleep.wait(5))
+        first.join(5)
+        self.assertTrue(polite.tripped("greenhouse.io"))
+        release.set()
+        second.join(5)
+        self.assertEqual([e.bucket for e in raised], ["greenhouse.io"])
+        self.assertEqual(sent, [GH], "the sleeping worker must not reach the inner client")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ of an ATS whose reader is switched off (`ats_off`, #46) is never sent to: `HostO
 from __future__ import annotations
 
 import re
+import threading
 import time
 import urllib.parse
 from collections.abc import Mapping
@@ -16,7 +17,7 @@ from pathlib import Path
 from outreach.crawl.config import CrawlConfig
 from outreach.net import FetchError, HttpClient, Response
 
-__all__ = ["HostTripped", "HostOff", "bucket_for", "PoliteClient"]
+__all__ = ["HostTripped", "HostOff", "bucket_for", "spacing_key", "PoliteClient"]
 
 
 class HostTripped(Exception):
@@ -48,6 +49,13 @@ def bucket_for(host: str, cfg: CrawlConfig) -> str:
     return best or host
 
 
+def spacing_key(host: str, cfg: CrawlConfig) -> str:
+    """What a request waits behind: the host itself when its bucket is in `split_hosts` (each tenant of an ATS is its
+    own server), else the bucket. The breaker always counts by bucket."""
+    bucket = bucket_for(host, cfg)
+    return host.lower().rstrip(".") if bucket in cfg.split_hosts else bucket
+
+
 _REDIRECTS = (301, 302, 303, 307, 308)
 _HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
 
@@ -62,21 +70,21 @@ def _status_of(e: FetchError) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _bucket_of_url(url: str, cfg: CrawlConfig) -> str:
-    return bucket_for(urllib.parse.urlsplit(url).hostname or "", cfg)
-
-
 class PoliteClient:
     def __init__(self, inner: HttpClient, cfg: CrawlConfig, *, clock=time.monotonic, sleep=time.sleep):
         self.inner = inner
         self.cfg = cfg
         self._clock = clock
         self._sleep = sleep
+        # One lock guards the two dicts below and nothing else: never a sleep, never a request. Several worker
+        # threads share one client (#158).
+        self._lock = threading.Lock()
         self._next_start: dict[str, float] = {}
         self._failures: dict[str, int] = {}
 
     def tripped(self, bucket: str) -> bool:
-        return self._failures.get(bucket, 0) >= self.cfg.breaker_failures
+        with self._lock:
+            return self._failures.get(bucket, 0) >= self.cfg.breaker_failures
 
     def _headers(self, headers: Mapping[str, str] | None) -> dict[str, str]:
         merged = {k: v for k, v in (headers or {}).items() if k.lower() != "user-agent"}
@@ -84,25 +92,39 @@ class PoliteClient:
         return merged
 
     def _begin(self, url: str) -> str:
-        """Refuse a switched-off ATS's host and a tripped bucket, then wait out the bucket's spacing. Returns the
-        bucket. Every request and every redirect hop starts here, so nothing reaches a switched-off host."""
-        bucket = _bucket_of_url(url, self.cfg)
-        ats = self.cfg.off_host(_host(url))
+        """Refuse a switched-off ATS's host and a tripped bucket, wait out the bucket's spacing, then refuse a bucket
+        that tripped meanwhile. Returns the bucket. Every request and every redirect hop starts here, so nothing
+        reaches a switched-off host."""
+        host = _host(url)
+        bucket = bucket_for(host, self.cfg)
+        ats = self.cfg.off_host(host)
         if ats is not None:
-            raise HostOff(bucket, _host(url), ats, self.cfg.ats_off[ats])
-        if self.tripped(bucket):
-            raise HostTripped(bucket)
+            raise HostOff(bucket, host, ats, self.cfg.ats_off[ats])
+        key = spacing_key(host, self.cfg)
         interval = self.cfg.host_interval_s.get(bucket, self.cfg.default_host_interval_s)
-        now = self._clock()
-        due = self._next_start.get(bucket, now)
+        with self._lock:
+            if self._failures.get(bucket, 0) >= self.cfg.breaker_failures:
+                raise HostTripped(bucket)
+            # Reserve this request's start slot under the lock, then wait for it outside the lock.
+            now = self._clock()
+            due = self._next_start.get(key, now)
+            self._next_start[key] = max(now, due) + interval
         wait = max(0.0, due - now)
         if wait:
             self._sleep(wait)
-        self._next_start[bucket] = max(now, due) + interval
+            # Another worker's 429 may have opened the breaker while this one slept. The switched-off check needs
+            # no repeat: the config never changes.
+            if self.tripped(bucket):
+                raise HostTripped(bucket)
         return bucket
 
     def _failed(self, bucket: str, *, at_once: bool = False) -> None:
-        self._failures[bucket] = self.cfg.breaker_failures if at_once else self._failures.get(bucket, 0) + 1
+        with self._lock:
+            self._failures[bucket] = self.cfg.breaker_failures if at_once else self._failures.get(bucket, 0) + 1
+
+    def _reset(self, bucket: str) -> None:
+        with self._lock:
+            self._failures[bucket] = 0
 
     def _judge(self, bucket: str, status: int) -> None:
         if status == 429:
@@ -110,7 +132,7 @@ class PoliteClient:
         elif status == 403 or status >= 500:
             self._failed(bucket)
         elif status < 400 or status in (404, 410):
-            self._failures[bucket] = 0
+            self._reset(bucket)
         # any other 4xx says nothing about the host: the count stays where it is
 
     def _failed_fetch(self, bucket: str, e: FetchError) -> None:
@@ -168,5 +190,5 @@ class PoliteClient:
         except FetchError as e:
             self._failed_fetch(bucket, e)
             raise
-        self._failures[bucket] = 0
+        self._reset(bucket)
         return n

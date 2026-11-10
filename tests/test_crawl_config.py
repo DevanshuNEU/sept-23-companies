@@ -28,6 +28,27 @@ def _load_text(text):
         return load_crawl_config(p)
 
 
+_SPLIT_LINE = re.compile(r"(?ms)^split_hosts\s*=\s*\[.*?\]")
+
+
+def _with_split(value):
+    """The shipped config with its `split_hosts` entry replaced by `split_hosts = <value>` (None drops it)."""
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    assert _SPLIT_LINE.search(text), "the shipped config has split_hosts"
+    return _SPLIT_LINE.sub(lambda _: "" if value is None else f"split_hosts = {value}", text)
+
+
+_WORKERS_TABLE = re.compile(r"(?ms)^\[workers\]\n.*?(?=^\[|\Z)")
+
+
+def _with_workers(lines):
+    """The shipped config with its `[workers]` table replaced by these lines (None drops the table)."""
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    assert _WORKERS_TABLE.search(text), "the shipped config has a [workers] table"
+    table = "" if lines is None else "[workers]\n" + "".join(line + "\n" for line in lines) + "\n"
+    return _WORKERS_TABLE.sub(lambda _: table, text)
+
+
 _OFF_TABLE = re.compile(r"(?ms)^\[ats_off\]\n.*?(?=^\[|\Z)")
 
 
@@ -102,9 +123,32 @@ class CrawlConfigTests(unittest.TestCase):
                          (2000, 100, 150, 500))
         self.assertEqual((cfg.tick_budget_s, cfg.top_companies), (1500, 300))
         self.assertEqual((cfg.watch_interval_s, cfg.watch_per_tick, cfg.watch_min_text_chars), (604800, 40, 200))
-        self.assertEqual(cfg.host_interval_s["greenhouse.io"], 0.25)
         self.assertEqual(cfg.host_interval_s["workable.com"], 2.0)
         self.assertEqual(len(cfg.host_interval_s), 14)
+
+    def test_rates(self):
+        hosts = load_crawl_config().host_interval_s
+        self.assertEqual((hosts["greenhouse.io"], hosts["ashbyhq.com"], hosts["lever.co"]), (0.05, 0.1, 1.0))
+
+    def test_shipped_split_hosts_are_the_tenant_hosts(self):
+        cfg = load_crawl_config()
+        self.assertIsInstance(cfg.split_hosts, frozenset)
+        self.assertEqual(cfg.split_hosts, frozenset({"myworkdayjobs.com", "oraclecloud.com", "bamboohr.com", "breezy.hr",
+                                                     "teamtailor.com", "recruitee.com", "applytojob.com"}))
+
+    def test_split_hosts_are_known_buckets(self):
+        with self.assertRaisesRegex(ValueError, "split_hosts.*nowhere.example"):
+            _load_text(_with_split('["myworkdayjobs.com", "nowhere.example"]'))
+
+    def test_split_hosts_must_be_a_list_of_text(self):
+        for bad in ('"myworkdayjobs.com"', "[1]", '[""]'):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, "split_hosts"):
+                    _load_text(_with_split(bad))
+
+    def test_a_missing_split_hosts_is_named(self):
+        with self.assertRaisesRegex(KeyError, "split_hosts"):
+            _load_text(_with_split(None))
 
     def test_shipped_big_board_values(self):
         big = load_crawl_config().big_board
@@ -197,13 +241,37 @@ class CrawlConfigTests(unittest.TestCase):
     def test_a_host_interval_must_be_finite_and_positive(self):
         text = CONFIG_PATH.read_text(encoding="utf-8")
         for bad in ("nan", "inf", "0", "-1"):
-            broken = text.replace('"greenhouse.io" = 0.25', f'"greenhouse.io" = {bad}')
+            broken = text.replace('"greenhouse.io" = 0.05', f'"greenhouse.io" = {bad}')
             self.assertNotEqual(broken, text)
             with tempfile.TemporaryDirectory() as d:
                 p = Path(d) / "config.toml"
                 p.write_text(broken, encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "host_interval_s"):
                     load_crawl_config(p)
+
+    def test_shipped_workers(self):
+        self.assertEqual(load_crawl_config().workers,
+                         {"default": 2, "greenhouse": 6, "ashby": 4, "lever": 1, "workable": 1})
+
+    def test_workers_default_is_required(self):
+        with self.assertRaisesRegex(ValueError, "workers.default"):
+            _load_text(_with_workers(["greenhouse = 6"]))
+
+    def test_a_missing_workers_table_is_named(self):
+        with self.assertRaisesRegex(KeyError, "workers"):
+            _load_text(_with_workers(None))
+
+    def test_workers_are_whole_numbers_from_1_to_16(self):
+        for bad in ("0", "17", "-1", "2.5", '"2"', "true"):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, "workers.greenhouse"):
+                    _load_text(_with_workers(["default = 2", f"greenhouse = {bad}"]))
+        cfg = _load_text(_with_workers(["default = 1", "greenhouse = 16"]))
+        self.assertEqual(cfg.workers, {"default": 1, "greenhouse": 16})
+
+    def test_workers_name_only_ats_the_crawler_reads(self):
+        with self.assertRaisesRegex(ValueError, "workers.grenhouse"):
+            _load_text(_with_workers(["default = 2", "grenhouse = 6"]))
 
 
 if __name__ == "__main__":

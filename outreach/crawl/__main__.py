@@ -164,8 +164,11 @@ def _locked_run(what: str, client: HttpClient | None, run, *, lock: bool) -> int
 
 def _tick(client: HttpClient | None) -> int:
     from outreach.crawl.tick import run_tick
-    return _locked_run("tick", client, lambda conn, polite, cfg: run_tick(conn, polite, cfg=cfg, notifier=mac_notifier),
-                       lock=True)
+
+    def run(conn, polite, cfg):
+        return run_tick(conn, polite, cfg=cfg, notifier=mac_notifier, workers=cfg.workers)
+
+    return _locked_run("tick", client, run, lock=True)
 
 
 def _read(company_ids: list[int], client: HttpClient | None) -> int:
@@ -179,7 +182,7 @@ def _read(company_ids: list[int], client: HttpClient | None) -> int:
             _say(f"company {board.company_id}: not reading its {board.ats} board {board.token}: the {board.ats} "
                  f"reader is switched off ({cfg.ats_off[board.ats]})")
             refused.append(board.board_id)
-        return read_company_boards(conn, polite, company_ids, cfg=cfg)
+        return read_company_boards(conn, polite, company_ids, cfg=cfg, workers=cfg.workers)
 
     code = _locked_run("read", client, run, lock=False)
     return 1 if refused else code
@@ -247,6 +250,7 @@ def _profile(runs: int, as_json: bool) -> int:
         print(f"{r.ats:<18}{r.boards:>7}{r.seconds:>10.1f}{r.seconds_per_board:>9.2f}{r.share * 100:>7.1f}%"
               f"{r.list_requests:>7}{r.body_requests:>8}{r.new:>6}{r.closed:>8}{r.reopened:>9}")
     print("seconds = list calls + bodies (fetch and store) + ingest; lists and bodies are request counts")
+    print("list time is added up across worker threads (waits included), so rows can sum past the tick time")
     return 0
 
 

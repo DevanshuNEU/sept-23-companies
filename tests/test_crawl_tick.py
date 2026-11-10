@@ -9,12 +9,14 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from outreach.crawl import tick
+from outreach.crawl import fanout, tick
 from outreach.crawl.base import JobRef, ReadResult, Validators, ids_fingerprint
 from outreach.crawl.cadence import add_seconds
 from outreach.crawl.config import load_crawl_config
@@ -24,8 +26,8 @@ from outreach.crawl.probe import ProbeReport
 from outreach.crawl.tick import (
     AlreadyRunning, TickReport, ensure_ruleset_current, read_company_boards, resolve_combiner, run_tick, tick_lock)
 from outreach.net import Response
-from outreach.rules import ruleset_version
-from tests.fakes import FakeClient, feed_off, status_response, text_response
+from outreach.rules import RulesetNotCurrent, ruleset_version
+from tests.fakes import FakeClient, feed_off, status_response, text_response, with_greenhouse_details
 from tests.storetest import fresh_store, seed_board, seed_company
 
 FIXTURES = Path(__file__).parent / "fixtures" / "crawl"
@@ -1012,6 +1014,321 @@ class CompanyBoardsTests(TickCase):
         self.client = FakeClient({})
         report = read_company_boards(self.conn, self.client, [], cfg=self.cfg, now_fn=lambda: T0)
         self.assertEqual((report.read, self.client.requests), (0, []))
+
+    def test_read_company_boards_lists_through_the_workers(self):
+        company = seed_company(self.conn, "Acme")
+        ids = [self.board(f"g{i}", company=company) for i in range(4)]
+        self.client = FakeClient({gh(f"g{i}"): ok() for i in range(4)})
+        report = read_company_boards(self.conn, self.client, [company], cfg=self.cfg, now_fn=lambda: T0,
+                                     clock=self.clock, sleep=self.clock.sleep, workers=self.cfg.workers)
+        self.assertEqual(report.ok, 4)
+        self.assertEqual({self.row(b)["last_read"] for b in ids}, {"ok"})
+        self.assertEqual(listing_threads(), [])
+
+
+def lever_ok(etag='"L"'):
+    return Response(200, "", LEVER_JOBS, {"etag": etag})
+
+
+def ashby(token: str) -> str:
+    return f"https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true"
+
+
+def workday(i: int) -> tuple[str, str]:
+    return ("POST", f"https://t{i}.wd5.myworkdayjobs.com/wday/cxs/t{i}/site/jobs")
+
+
+def listing_threads():
+    """The fan-out's worker threads still alive."""
+    return [t.name for t in threading.enumerate() if t.name.startswith("list-")]
+
+
+LEVER_JOBS = (FIXTURES / "lever_list.json").read_bytes()
+ASHBY_JOBS = (FIXTURES / "ashby_jobs.json").read_bytes()
+GH_CHANGED = (FIXTURES / "greenhouse_changed.json").read_bytes()
+WORKDAY_JOBS = (FIXTURES / "workday_list.json").read_bytes()
+_WD = json.loads(WORKDAY_JOBS)
+WORKDAY_FEWER = json.dumps({**_WD, "total": 2, "jobPostings": _WD["jobPostings"][:2]}).encode()
+WORKDAY_EMPTY = json.dumps({"total": 0, "jobPostings": [], "facets": []}).encode()
+
+
+class ThreadedTickTests(TickCase):
+    """The tick lists boards on worker threads (#158) and writes every one of them on its own thread."""
+
+    def seed_mixed(self, conn):
+        """30 boards on four ATSs, all read ok at T0 (serially), so the next tick has etags, fingerprints, open
+        postings and shielded boards to work with. Returns the routes for that next tick: a mix of ok, unchanged,
+        empty and error answers that leads to the same outcome in any order (no bucket's error count can reach the
+        breaker; five Ashby empties are a mass empty however they arrive)."""
+        first, second = {}, {}
+        for i in range(12):
+            seed_board(conn, seed_company(conn, f"G{i}"), "greenhouse", f"g{i}")
+            first[gh(f"g{i}")] = ok()
+        for i in range(6):
+            seed_board(conn, seed_company(conn, f"L{i}"), "lever", f"l{i}")
+            first[lever(f"l{i}")] = lever_ok()
+            seed_board(conn, seed_company(conn, f"A{i}"), "ashby", f"a{i}")
+            first[ashby(f"a{i}")] = Response(200, "", ASHBY_JOBS, {"etag": '"S"'})
+            seed_board(conn, seed_company(conn, f"W{i}"), "workday", f"t{i}.wd5/site")
+            first[workday(i)] = Response(200, "", WORKDAY_JOBS, {})
+        run_tick(conn, FakeClient(first), cfg=self.cfg, now_fn=lambda: T0, clock=Clock(), sleep=lambda s: None)
+        for i in range(12):
+            second[gh(f"g{i}")] = (Response(200, "", GH_CHANGED, {"etag": '"B"'}) if i < 3 else
+                                   status_response(304) if i < 6 else status_response(503) if i < 8 else
+                                   status_response(404) if i == 8 else
+                                   Response(200, "", (FIXTURES / "greenhouse_empty.json").read_bytes(), {}))
+        second[gh_eu("g8")] = status_response(404)
+        for i in range(6):
+            second[lever(f"l{i}")] = (lever_ok('"L2"') if i < 2 else status_response(304) if i < 4 else
+                                      status_response(503) if i == 4 else Response(200, "", b"[]", {}))
+            second[ashby(f"a{i}")] = (Response(200, "", ASHBY_JOBS, {"etag": '"S2"'}) if i == 0 else
+                                      Response(200, "", b'{"apiVersion": "1", "jobs": []}', {}))
+            second[workday(i)] = (Response(200, "", WORKDAY_JOBS, {}) if i < 3 else
+                                  Response(200, "", WORKDAY_FEWER, {}) if i == 3 else
+                                  status_response(503) if i == 4 else Response(200, "", WORKDAY_EMPTY, {}))
+        return second
+
+    def outcome(self, *, workers):
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        routes = self.seed_mixed(conn)
+        client = FakeClient(routes)
+        clock = Clock()
+        report = run_tick(conn, client, cfg=self.cfg, now_fn=lambda: at(FLOOR + 60), clock=clock, sleep=clock.sleep,
+                          workers=workers)
+        self.assertEqual(client.unrouted, [])
+        boards = [{k: r[k] for k in r.keys() if k != "created_at"}
+                  for r in conn.execute("SELECT * FROM board ORDER BY board_id")]
+        open_keys = [r[0] for r in conn.execute(
+            "SELECT source_key FROM posting WHERE closed_at IS NULL ORDER BY source_key")]
+        counts = {k: getattr(report, k) for k in ("read", "ok", "empty", "error", "unchanged", "deferred", "failed",
+                                                  "new", "closed", "tripped")}
+        return boards, open_keys, counts, len(client.requests)
+
+    def test_threaded_tick_matches_serial_outcome(self):
+        serial = self.outcome(workers=None)
+        threaded = self.outcome(workers=self.cfg.workers)
+        self.assertEqual(threaded[0], serial[0])
+        self.assertEqual(threaded[1], serial[1])
+        self.assertEqual(threaded[2], serial[2])
+        self.assertEqual(threaded[3], serial[3])
+        # The mix really is a mix: every kind of answer, and the Ashby mass empty.
+        counts = serial[2]
+        self.assertEqual((counts["ok"], counts["unchanged"], counts["error"], counts["empty"], counts["deferred"]),
+                         (7, 8, 5, 5, 5))
+        self.assertEqual(counts["tripped"], ("ashbyhq.com",))
+        self.assertGreater(len(serial[1]), 0)
+        self.assertEqual(listing_threads(), [])
+
+    def test_slow_host_does_not_delay_other_hosts(self):
+        lv = [self.board(f"l{i}", ats="lever") for i in range(3)]  # first in board order
+        gs = [self.board(f"g{i}") for i in range(10)]
+        written = []
+        real = tick.read_board
+
+        def spy(conn, board, adapter, **kw):
+            written.append(board.board_id)
+            return real(conn, board, adapter, **kw)
+
+        def slow(method, url, headers, body):
+            time.sleep(0.3)  # a real wait: the Lever host is slow
+            return lever_ok()
+
+        routes = {gh(f"g{i}"): ok() for i in range(10)}
+        routes.update({lever(f"l{i}"): slow for i in range(3)})
+        with mock.patch.object(tick, "read_board", spy):
+            report = self.tick(routes, workers=self.cfg.workers)
+        self.assertEqual(report.ok, 13)
+        third_lever = written.index(lv[2])
+        self.assertTrue(all(written.index(g) < third_lever for g in gs), written)
+
+    def test_trip_stops_other_workers_on_that_bucket(self):
+        gs = [self.board(f"g{i}") for i in range(10)]
+        for bid in gs:
+            self.read_before(bid, 3600, next_in=-60)
+        lv = self.board("lv", ats="lever")
+        polite = None
+
+        def wait_for_the_trip(seconds):
+            # Every Greenhouse request after the first waits its spacing here; it wakes once the 429 has tripped the
+            # bucket, so the re-check after the sleep is what must refuse it.
+            deadline = time.monotonic() + 10
+            while not polite.tripped("greenhouse.io"):
+                if time.monotonic() > deadline:
+                    raise AssertionError("the 429 never tripped the bucket")
+                time.sleep(0.001)
+
+        self.client = FakeClient({**{gh(f"g{i}"): status_response(429) for i in range(10)}, lever("lv"): lever_ok()})
+        polite = PoliteClient(self.client, self.cfg, clock=lambda: 0.0, sleep=wait_for_the_trip)
+        report = run_tick(self.conn, polite, cfg=self.cfg, now_fn=lambda: T0, clock=self.clock, workers=self.cfg.workers)
+        self.assertEqual(self.client.unrouted, [])
+        self.assertEqual(len([u for u in self.client.requests if "greenhouse" in u]), 1)
+        # As in a serial tick: the 429's own error read is held and deferred (its board is shielded), and the boards
+        # the breaker refused are deferred, with no read and no streak change.
+        for bid in gs:
+            row = self.row(bid)
+            self.assertEqual((row["last_read"], row["error_streak"], row["next_read_at"]),
+                             ("ok", 0, at(self.cfg.defer_s)))
+            self.assertEqual(self.reads(bid), [])
+        self.assertEqual(self.row(lv)["last_read"], "ok")
+        self.assertEqual((report.deferred, report.error, report.ok, report.tripped), (10, 0, 1, ("greenhouse.io",)))
+
+    def test_stop_after_budget_starts_no_new_board_threaded(self):
+        tokens = ["b1", "b2", "b3", "b4", "b5"]
+        ids = [self.board(t) for t in tokens]
+        b1_written = threading.Event()
+        real = tick.read_board
+
+        def spy(conn, board, adapter, **kw):
+            out = real(conn, board, adapter, **kw)
+            if board.token == "b1":
+                b1_written.set()
+            return out
+
+        def slow(method, url, headers, body):
+            if url == gh("b2"):  # b2 is listed once b1 is written, so the order is fixed
+                self.assertTrue(b1_written.wait(10))
+            self.clock.t += 1000
+            return ok()
+
+        # One Greenhouse worker, so the boards are listed one after another and the budget is seen between them.
+        workers = {"default": 2, "greenhouse": 1}
+        with mock.patch.object(tick, "read_board", spy):
+            report = self.tick({gh(t): slow for t in tokens}, cfg=dataclasses.replace(self.cfg, tick_budget_s=1500),
+                               workers=workers)
+        self.assertEqual(self.client.requests, [gh("b1"), gh("b2")])
+        # b1 was written at 1000 s; b2 was listed then (within the budget) but came back at 2000 s, past it: not
+        # written, still due.
+        self.assertEqual(report.read, 1)
+        self.assertEqual(self.row(ids[0])["last_read"], "ok")
+        for bid in ids[1:]:
+            row = self.row(bid)
+            self.assertIsNone(row["last_read"])
+            self.assertIsNone(row["next_read_at"])  # started on the writer's side only: still due
+        self.assertEqual(listing_threads(), [])
+
+    def test_the_budget_stops_writing_boards_already_listed(self):
+        # Listing is fast and the bodies are slow: the budget runs out while listed boards wait for the writer. No
+        # board is written and no body is asked for after that, and the boards left keep their next_read_at.
+        tokens = [f"g{i}" for i in range(6)]
+        ids = [self.board(t) for t in tokens]
+        for bid in ids:
+            self.read_before(bid, 3600, next_in=-60)
+        cfg = dataclasses.replace(load_crawl_config(), tick_budget_s=1500)  # bodies on: detail_per_read as shipped
+        slow_once: set[str] = set()
+
+        def slow_body(method, url, headers, body):
+            token = url.split("/boards/")[1].split("/")[0]
+            if token not in slow_once:  # each board's bodies take 1000 s on the fake clock
+                slow_once.add(token)
+                self.clock.t += 1000
+            return status_response(404)
+
+        routes = {gh(t): ok() for t in tokens}
+        routes = {url: (slow_body if url not in routes else value)
+                  for url, value in with_greenhouse_details(routes).items()}
+        lists = set(routes) & {gh(t) for t in tokens}
+        real = tick.read_board
+        written = []
+
+        def spy(conn, board, adapter, **kw):
+            deadline = time.monotonic() + 10
+            while not lists <= set(self.client.requests):  # every board listed before the first is written
+                if time.monotonic() > deadline:
+                    raise AssertionError("the workers never listed every board")
+                time.sleep(0.001)
+            written.append(board.token)
+            return real(conn, board, adapter, **kw)
+
+        with mock.patch.object(tick, "read_board", spy):
+            report = self.tick(routes, cfg=cfg, workers=self.cfg.workers)
+        self.assertEqual(len(written), 2)  # 0 s, then 1000 s: the third would start at 2000 s
+        self.assertEqual(report.read, 2)
+        bodies = [u for u in self.client.requests if u not in lists]
+        self.assertEqual({u.split("/boards/")[1].split("/")[0] for u in bodies}, set(written))
+        for token, bid in zip(tokens, ids):
+            if token in written:
+                continue
+            row = self.row(bid)
+            self.assertEqual((row["last_read_at"], row["next_read_at"]), (at(-3600), at(-60)))
+            self.assertEqual(self.reads(bid), [])
+        self.assertEqual(listing_threads(), [])
+
+    def test_a_ruleset_change_while_listing_stops_the_pass(self):
+        ids = [self.board(f"g{i}") for i in range(4)]
+        for bid in ids:
+            self.read_before(bid, 3600, next_in=-60)
+
+        def changed(method, url, headers, body):
+            raise RulesetNotCurrent("changed")
+
+        routes = {gh("g0"): ok(), gh("g1"): changed, gh("g2"): ok(), gh("g3"): ok()}
+        report = self.tick(routes, workers={"default": 1})
+        self.assertEqual((report.ok, report.read, report.deferred), (1, 1, 0))
+        self.assertEqual(self.row(ids[0])["last_read_at"], T0)
+        for bid in ids[1:]:  # not written: each keeps its next_read_at
+            row = self.row(bid)
+            self.assertEqual((row["last_read_at"], row["next_read_at"]), (at(-3600), at(-60)))
+        job, = self.jobs("read_boards")
+        self.assertEqual(job["status"], "partial")
+        self.assertIn("the ruleset changed", job["error"])
+        self.assertEqual(listing_threads(), [])
+
+    def test_a_failure_on_the_writer_thread_closes_the_fan_out_at_once(self):
+        for i in range(4):
+            self.board(f"g{i}")
+        made = []
+        real = fanout.list_boards
+
+        def spy(*a, **kw):
+            made.append(real(*a, **kw))
+            return made[-1]
+
+        self.client = FakeClient({gh(f"g{i}"): ok() for i in range(4)})
+        with mock.patch.object(fanout, "list_boards", spy), \
+                mock.patch.object(tick._Pass, "take", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                run_tick(self.conn, self.client, cfg=self.cfg, now_fn=lambda: T0, clock=self.clock,
+                         sleep=self.clock.sleep, workers=self.cfg.workers)
+            # The traceback still holds the tick's frame, so only an explicit close has stopped the workers by now.
+            self.assertIsNone(made[0].gi_frame)
+            self.assertEqual(listing_threads(), [])
+        job, = self.jobs("read_boards")
+        self.assertEqual(job["status"], "failed")
+
+    def wrong_shape_outage(self, *, read_ago, workers):
+        """12 Greenhouse boards last read ok `read_ago` seconds before T0, every one now answering a challenge page
+        (a 200 the polite breaker counts as healthy, so only the tick's own count trips the bucket), on a fresh
+        store. Returns the board states with the board's identity left out, sorted (which boards came first may
+        differ between threads), and the report's counts."""
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        then = at(-read_ago)
+        for i in range(12):
+            bid = seed_board(conn, seed_company(conn, f"G{i}"), "greenhouse", f"g{i}")
+            conn.execute("UPDATE board SET last_read = 'ok', last_read_at = ?, streak_since = ?, next_read_at = ? "
+                         "WHERE board_id = ?", (then, then, at(-60), bid))
+        client = FakeClient({gh(f"g{i}"): text_response("<html>Just a moment...</html>") for i in range(12)})
+        clock = Clock()
+        report = run_tick(conn, client, cfg=dataclasses.replace(self.cfg, breaker_failures=3), now_fn=lambda: T0,
+                          clock=clock, sleep=clock.sleep, workers=workers)
+        self.assertEqual(client.unrouted, [])
+        keep = ("last_read", "last_read_at", "empty_streak", "error_streak", "streak_since", "next_read_at",
+                "last_error")
+        states = sorted(tuple(r[k] for k in keep) for r in conn.execute("SELECT * FROM board"))
+        reads = conn.execute("SELECT count(*) FROM board_read").fetchone()[0]
+        return states, (report.error, report.deferred, reads, report.tripped)
+
+    def test_a_bucket_the_tick_tripped_defers_late_answers_as_serial_does(self):
+        # The tick's own breaker (three wrong-shape 200s in a row) trips the bucket on the writer's side, after the
+        # workers have already listed boards queued behind. Those late answers must be deferrals, as in a serial tick
+        # where they are never sent: no extra error reads, streaks or backoffs.
+        for read_ago in (3600, 2 * 86400):  # shielded, then past the grace
+            with self.subTest(read_ago=read_ago):
+                serial = self.wrong_shape_outage(read_ago=read_ago, workers=None)
+                threaded = self.wrong_shape_outage(read_ago=read_ago, workers=self.cfg.workers)
+                self.assertEqual(threaded, serial)
+        self.assertEqual(serial[1], (3, 9, 3, ("greenhouse.io",)))  # the unshielded case: three errors written
 
 
 if __name__ == "__main__":

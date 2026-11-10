@@ -62,8 +62,9 @@ def finish_list(jobs: Iterable[JobRef], resp: Response, validators: Validators, 
                 fingerprint_ids: Iterable[str] | None = None, board_name: str = "") -> ReadResult:
     """Turn parsed jobs into the read's result: repeated ids dropped (first wins), then empty, unchanged or ok.
 
-    An ETag adapter never reports `unchanged` here: its 200 already says the board changed. A fingerprint adapter
-    reports `unchanged` when the ids are the ones it saw last time.
+    An ETag adapter whose 200 carries an `etag` header never reports `unchanged` here: the 200 already says the board
+    changed. A fingerprint adapter, and an ETag adapter whose 200 has no `etag` header (some big boards send none),
+    report `unchanged` when the ids are the ones they saw last time.
     """
     seen: set[str] = set()
     unique: list[JobRef] = []
@@ -74,6 +75,7 @@ def finish_list(jobs: Iterable[JobRef], resp: Response, validators: Validators, 
     if not unique:
         return ReadResult("empty", (), Validators(), board_name=board_name)
     fingerprint = ids_fingerprint(list(fingerprint_ids) if fingerprint_ids is not None else seen)
+    use_etag = use_etag and bool(resp.headers.get("etag"))
     if not use_etag and fingerprint == validators.ids_fingerprint:
         return ReadResult("unchanged", (), validators, board_name=board_name)
     etag = resp.headers.get("etag", "") if use_etag else ""

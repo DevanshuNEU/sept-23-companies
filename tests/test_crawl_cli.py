@@ -108,6 +108,32 @@ class CommandTests(unittest.TestCase):
         self.assertIsNot(default, cli.mac_notifier)
         self.assertIsNone(default("title", "text"))
 
+    def test_tick_command_passes_configured_workers(self):
+        from outreach.crawl import tick as tick_module
+        from outreach.crawl.config import load_crawl_config
+        seen = {}
+
+        def fake_tick(conn, polite, **kwargs):
+            seen.update(kwargs)
+            return tick_module.TickReport(run_id=None, rebuilt=False)
+
+        with mock.patch("outreach.crawl.tick.run_tick", fake_tick):
+            self.run_cli(["tick"], FakeClient({}))
+        self.assertEqual(seen["workers"], load_crawl_config().workers)
+
+    def test_read_command_passes_configured_workers(self):
+        from outreach.crawl import tick as tick_module
+        from outreach.crawl.config import load_crawl_config
+        seen = {}
+
+        def fake_read(conn, polite, company_ids, **kwargs):
+            seen.update(kwargs)
+            return tick_module.TickReport(run_id=None, rebuilt=False)
+
+        with mock.patch("outreach.crawl.tick.read_company_boards", fake_read):
+            self.run_cli(["read", "--company", "1"], FakeClient({}))
+        self.assertEqual(seen["workers"], load_crawl_config().workers)
+
     def test_the_tick_line_names_the_feed_and_the_alarm_error(self):
         from outreach.crawl.tick import TickReport
         base = dict(run_id=1, rebuilt=False)

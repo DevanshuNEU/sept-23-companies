@@ -137,6 +137,21 @@ class FinishListTests(unittest.TestCase):
         self.assertEqual(r.result, "ok")
         self.assertEqual(r.validators, Validators(etag='"new"', ids_fingerprint=ids_fingerprint(["1"])))
 
+    def test_etag_adapter_with_etag_header_never_unchanged_on_200(self):
+        seen = Validators(etag='"old"', ids_fingerprint=ids_fingerprint(["1", "2"]))
+        r = finish_list([job("1"), job("2")], json_response({}, etag='"old"'), seen, use_etag=True)
+        self.assertEqual(r.result, "ok")
+        self.assertEqual(r.validators.etag, '"old"')
+
+    def test_etag_adapter_without_etag_header_falls_back_to_fingerprint(self):
+        # A server that sends no ETag on this 200 cannot say "changed", so the ids decide, as for a fingerprint adapter.
+        seen = Validators(ids_fingerprint=ids_fingerprint(["1", "2"]))
+        r = finish_list([job("2"), job("1")], json_response({}), seen, use_etag=True)
+        self.assertEqual((r.result, r.jobs, r.validators), ("unchanged", (), seen))
+        r = finish_list([job("1"), job("2"), job("3")], json_response({}), seen, use_etag=True)
+        self.assertEqual(r.result, "ok")
+        self.assertEqual(r.validators, Validators(ids_fingerprint=ids_fingerprint(["1", "2", "3"])))
+
     def test_a_fingerprint_adapter_keeps_no_etag(self):
         r = finish_list([job("1")], json_response({}, etag='"e"'), Validators())
         self.assertEqual(r.validators.etag, "")

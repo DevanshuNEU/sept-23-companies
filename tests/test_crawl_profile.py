@@ -130,6 +130,7 @@ class ProfileCliTests(ProfileCase):
         self.assertIn("greenhouse", out)
         self.assertIn("40.0%", out)
         self.assertIn("3 runs", out)
+        self.assertIn("list time is added up across worker threads", out)  # #158: thread time, not elapsed
 
     def test_profile_cli_with_no_runs(self):
         code, out, _ = self.run_cli(["profile"])

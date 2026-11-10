@@ -2828,21 +2828,73 @@
             "title": "Everify",
             "type": "boolean"
           },
+          "firstRead": {
+            "title": "Firstread",
+            "type": "boolean"
+          },
+          "firstSeenAt": {
+            "title": "Firstseenat",
+            "type": "string"
+          },
           "levelTag": {
             "title": "Leveltag",
             "type": "string"
+          },
+          "listAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listat"
           },
           "location": {
             "title": "Location",
             "type": "string"
           },
+          "postedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postedat"
+          },
           "postingId": {
             "title": "Postingid",
             "type": "integer"
           },
+          "repostedFrom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repostedfrom"
+          },
           "saysNoSponsorship": {
             "title": "Saysnosponsorship",
             "type": "boolean"
+          },
+          "seenGapS": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seengaps"
           },
           "size": {
             "anyOf": [
@@ -2877,6 +2929,12 @@
           "date",
           "dateKind",
           "ageDays",
+          "listAt",
+          "postedAt",
+          "firstSeenAt",
+          "seenGapS",
+          "firstRead",
+          "repostedFrom",
           "companyId",
           "companyName",
           "size",

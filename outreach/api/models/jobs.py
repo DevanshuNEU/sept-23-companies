@@ -1,6 +1,7 @@
 """The job list (#156): `JobsView` for `GET /api/jobs` and the answers of Pass and Go ahead.
 
-A row is the facts he checks, never a score and never a reason for its place: the list sorts by date.
+A row is the facts he checks, never a score and never a reason for its place: the list sorts by when each job was
+posted (`list_at`).
 """
 from typing import Literal
 
@@ -21,6 +22,12 @@ class JobRowWire(Wire):
     date: str  # YYYY-MM-DD
     date_kind: Literal["posted", "seen"]
     age_days: int
+    list_at: str | None  # the time the list sorts by (UTC); null: Date unknown, listed after every dated row
+    posted_at: str | None  # the board's own posting time, when it gives one Knock trusts
+    first_seen_at: str  # when Knock first saw it
+    seen_gap_s: int | None  # seconds since the board's last good read when Knock first saw it
+    first_read: bool  # found on the board's first read (no seen gap)
+    reposted_from: str | None  # a repost: when Knock first saw the posting it repeats
     company_id: int
     company_name: str
     size: int | None

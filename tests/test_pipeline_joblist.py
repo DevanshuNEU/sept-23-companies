@@ -11,7 +11,7 @@ from outreach.pipeline.joblist import JobFilters, JobRow, passed_posting_ids, qu
 from outreach.store import append_event
 from outreach.store.timefmt import utcnow
 from tests.plan_seed import seed_outbound, seed_person
-from tests.ranking_store import board, decision, evidence, merge, no_go, posting
+from tests.ranking_store import BACKFILL, board, decision, evidence, merge, no_go, posting
 from tests.storetest import fresh_store, seed_company
 
 NOW = "2026-11-03T15:00:00Z"  # 10:00 on 2026-11-03 in New York
@@ -37,9 +37,14 @@ class JobListCase(unittest.TestCase):
             evidence(self.conn, cid, "stage", value="yc")
         return cid
 
-    def job(self, company, title="Software Engineer", *, posted="2026-11-02", seen="2026-11-01T12:00:00Z",
-            tier="new_grad", ok=1, **dec):
-        pid = posting(self.conn, company, title, posted_on=posted, first_seen_at=seen, last_seen_at=seen)
+    def job(self, company, title="Software Engineer", *, posted="2026-11-02", seen=None, tier="new_grad", ok=1,
+            board_id=None, posted_at=None, seen_gap_s=None, repost_of=None, list_at=BACKFILL, **dec):
+        """A listed posting. First seen at noon UTC on its posted day unless `seen` says otherwise; its list time is
+        what the 0009 backfill gives those dates unless `list_at` says otherwise (None: Date unknown)."""
+        seen = seen or (f"{posted}T12:00:00Z" if posted else "2026-11-01T12:00:00Z")
+        pid = posting(self.conn, company, title, posted_on=posted, first_seen_at=seen, last_seen_at=seen,
+                      board_id=board_id, posted_at=posted_at, seen_gap_s=seen_gap_s, repost_of=repost_of,
+                      list_at=list_at)
         decision(self.conn, pid, level_tier=tier, level_ok=ok, **dec)
         return pid
 
@@ -357,6 +362,90 @@ class OrderTests(JobListCase):
         self.assertEqual(self.ids(), [seen_later, posted])
 
 
+class ListTimeTests(JobListCase):
+    """The list sorts by each row's list time (#193, design 4.4); a row with none is in the Date unknown group."""
+
+    def test_sorts_by_list_at_to_the_minute(self):
+        small, big = self.company(size=10), self.company(size=5000)
+        gh, ashby = board(self.conn, small, ats="greenhouse"), board(self.conn, big, ats="ashby")
+        # 10:38 and 10:42 New York on Nov 3, both posted the same day: the later one heads the list even though the
+        # earlier one is at the smaller company.
+        at_1038 = self.job(small, posted=None, seen="2026-11-03T15:40:00Z", board_id=gh, seen_gap_s=300,
+                           posted_at="2026-11-03T15:38:00Z", list_at="2026-11-03T15:38:00Z")
+        at_1042 = self.job(big, posted=None, seen="2026-11-03T15:44:00Z", board_id=ashby, seen_gap_s=300,
+                           posted_at="2026-11-03T15:42:00Z", list_at="2026-11-03T15:42:00Z")
+        older = self.job(small, posted="2026-11-02")
+        self.assertEqual(self.ids(), [at_1042, at_1038, older])
+
+    def test_unknown_group_after_dated_rows(self):
+        co = self.company(size=10)
+        old_dated = self.job(co, posted="2026-10-10")
+        unknown_new = self.job(co, posted=None, seen="2026-11-03T14:00:00Z", list_at=None)
+        unknown_old = self.job(co, posted=None, seen="2026-11-02T14:00:00Z", list_at=None)
+        dated = self.job(co, posted="2026-11-01")
+        self.assertEqual(self.ids(), [dated, old_dated, unknown_new, unknown_old])
+        self.assertEqual(self.ids(view="higher"), [])
+
+    def test_unknown_group_shows_in_7_day_window(self):
+        co = self.company(size=10)
+        months_old = self.job(co, posted=None, seen="2026-08-01T14:00:00Z", list_at=None)
+        fresh = self.job(co, posted="2026-11-02")
+        for window in (7, 30, 60, 90, 0):
+            with self.subTest(window=window):
+                self.assertEqual(self.ids(window_days=window), [fresh, months_old])
+        self.assertEqual(self.run_query(window_days=7).counts, {"your_level": 2, "higher": 0})
+
+    def test_window_filters_on_list_at(self):
+        co = self.company(size=10)
+        # Seen yesterday, but the board says it went up 40 days ago: outside 30 days.
+        old_post = self.job(co, posted=None, seen="2026-11-02T12:00:00Z", seen_gap_s=600,
+                            posted_at="2026-09-24T12:00:00Z", list_at="2026-09-24T12:00:00Z")
+        # The 7 day window starts at 00:00 New York on Oct 27 (04:00 UTC, still daylight time then).
+        edge_in = self.job(co, posted=None, seen="2026-11-02T12:00:00Z", list_at="2026-10-27T04:00:00Z")
+        edge_out = self.job(co, posted=None, seen="2026-11-02T12:00:00Z", list_at="2026-10-27T03:59:00Z")
+        self.assertEqual(self.ids(window_days=7), [edge_in])
+        self.assertEqual(self.ids(window_days=30), [edge_in, edge_out])
+        self.assertEqual(self.ids(window_days=60), [edge_in, edge_out, old_post])
+
+    def test_repost_row_carries_old_first_seen(self):
+        co = self.company(size=10)
+        gone = posting(self.conn, co, "Software Engineer", first_seen_at="2026-08-01T12:00:00Z",
+                       last_seen_at="2026-10-20T12:00:00Z", closed=True)
+        again = self.job(co, posted=None, seen="2026-11-03T14:00:00Z", seen_gap_s=1800, repost_of=gone,
+                         posted_at="2026-11-03T13:30:00Z", list_at="2026-11-03T13:30:00Z")
+        first_read = self.job(co, posted=None, seen="2026-11-02T14:00:00Z")
+        rows = {r.posting_id: r for r in self.run_query().rows}
+        self.assertEqual(set(rows), {again, first_read})
+        self.assertEqual((rows[again].list_at, rows[again].posted_at, rows[again].first_seen_at,
+                          rows[again].seen_gap_s, rows[again].first_read, rows[again].reposted_from),
+                         ("2026-11-03T13:30:00Z", "2026-11-03T13:30:00Z", "2026-11-03T14:00:00Z", 1800, False,
+                          "2026-08-01T12:00:00Z"))
+        self.assertEqual((rows[first_read].list_at, rows[first_read].posted_at, rows[first_read].seen_gap_s,
+                          rows[first_read].first_read, rows[first_read].reposted_from),
+                         ("2026-11-02T14:00:00Z", None, None, True, None))
+
+    def test_cursor_pages_across_unknown_group(self):
+        small, big = self.company(size=10), self.company(size=5000)
+        for co in (big, small):
+            for day in ("2026-11-01", "2026-11-02"):
+                self.job(co, posted=day)
+            for seen in ("2026-11-02T12:00:00Z", "2026-11-03T12:00:00Z"):
+                self.job(co, posted=None, seen=seen, list_at=None)
+        full = self.ids(limit=100)
+        self.assertEqual(len(full), 8)
+        unknown = {r[0] for r in self.conn.execute("SELECT posting_id FROM posting WHERE list_at IS NULL")}
+        self.assertEqual(set(full[4:]), unknown)  # every dated row first
+        for limit in (1, 2, 3, 5):
+            seen, after = [], None
+            while True:
+                page = self.run_query(after=after, limit=limit)
+                seen += [r.posting_id for r in page.rows]
+                if page.next_after is None:
+                    break
+                after = page.next_after
+            self.assertEqual(seen, full, msg=f"limit {limit}")
+
+
 class FilterTests(JobListCase):
     def test_size_filter(self):
         small, edge, big, unknown = (self.company(size=s) for s in (50, 300, 301, None))
@@ -440,7 +529,8 @@ class FlagTests(JobListCase):
 
     def test_row_fields(self):
         co = self.company("Acme", size=40)
-        pid = posting(self.conn, co, "Backend Engineer", location="Austin, TX", posted_on="2026-11-01")
+        pid = posting(self.conn, co, "Backend Engineer", location="Austin, TX", posted_on="2026-11-01",
+                      first_seen_at="2026-11-01T12:00:00Z", last_seen_at="2026-11-02T12:00:00Z")
         self.conn.execute("UPDATE posting SET url = 'https://example.com/j/1' WHERE posting_id = ?", (pid,))
         decision(self.conn, pid, level_tier="swe1")
         row = self.run_query().rows[0]

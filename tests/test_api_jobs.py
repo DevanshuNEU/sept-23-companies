@@ -20,7 +20,7 @@ class JobsCase(ApiCase):
         return cid
 
     def job(self, company, title="Software Engineer", *, posted="2026-11-09", tier="new_grad", ok=1):
-        pid = posting(self.conn, company, title, posted_on=posted, first_seen_at="2026-11-01T12:00:00Z",
+        pid = posting(self.conn, company, title, posted_on=posted, first_seen_at=f"{posted}T12:00:00Z",
                       last_seen_at="2026-11-09T12:00:00Z")
         decision(self.conn, pid, level_tier=tier, level_ok=ok)
         return pid
@@ -52,10 +52,31 @@ class ListTest(JobsCase):
         self.assertEqual(row["postingId"], pid)
         self.assertEqual(
             sorted(row), sorted(["postingId", "title", "url", "location", "levelTag", "date", "dateKind", "ageDays",
+                                 "listAt", "postedAt", "firstSeenAt", "seenGapS", "firstRead", "repostedFrom",
                                  "companyId", "companyName", "size", "big", "saysNoSponsorship", "everify", "yc",
                                  "contactedOn"]))
         self.assertEqual((row["companyName"], row["size"], row["big"], row["levelTag"], row["dateKind"],
                           row["ageDays"], row["date"]), ("Acme", 40, False, "new grad", "posted", 1, "2026-11-09"))
+
+    def test_jobs_row_has_time_fields(self):
+        co = self.company(size=40)
+        gone = posting(self.conn, co, "Software Engineer", first_seen_at="2026-08-01T12:00:00Z",
+                       last_seen_at="2026-10-01T12:00:00Z", closed=True)
+        again = posting(self.conn, co, "Software Engineer", first_seen_at="2026-11-10T15:10:00Z",
+                        last_seen_at="2026-11-10T15:10:00Z", posted_at="2026-11-10T15:02:00Z", seen_gap_s=1800,
+                        repost_of=gone, list_at="2026-11-10T15:02:00Z")
+        unknown = posting(self.conn, co, "Backend Engineer", first_seen_at="2026-11-09T12:00:00Z",
+                          last_seen_at="2026-11-09T12:00:00Z", list_at=None)
+        for pid in (again, unknown):
+            decision(self.conn, pid, level_tier="new_grad", level_ok=1)
+        rows = {r["postingId"]: r for r in self.jobs()["rows"]}
+        self.assertEqual(list(rows), [again, unknown])
+        time = ("listAt", "postedAt", "firstSeenAt", "seenGapS", "firstRead", "repostedFrom")
+        self.assertEqual(tuple(rows[again][k] for k in time),
+                         ("2026-11-10T15:02:00Z", "2026-11-10T15:02:00Z", "2026-11-10T15:10:00Z", 1800, False,
+                          "2026-08-01T12:00:00Z"))
+        self.assertEqual(tuple(rows[unknown][k] for k in time),
+                         (None, None, "2026-11-09T12:00:00Z", None, True, None))
 
     def test_view_higher_lists_the_other_postings(self):
         co = self.company(size=40)

@@ -45,13 +45,17 @@ export function buildJobs(today: IsoDate): { rows: JobRow[]; higher: ReadonlySet
     const ageDays = Math.floor(i * 1.2);
     const id = 9000 + i;
     if (up) higher.add(id);
+    const date = dayBefore(today, ageDays);
+    const seen = i % 5 === 4;
     return {
       postingId: id,
       title: up ? (HIGHER[(i >> 2) % HIGHER.length] as string) : (TITLES[i % 4] as string),
       url: `https://jobs.example/${nameKey(c.name)}/${id}`,
       location: PLACES[i % PLACES.length] as string,
       levelTag: up ? 'SDE 2' : (TAGS[i % 4] as string),
-      date: dayBefore(today, ageDays), dateKind: i % 5 === 4 ? 'seen' : 'posted', ageDays,
+      date, dateKind: seen ? 'seen' : 'posted', ageDays,
+      listAt: `${date}T15:00:00Z`, postedAt: seen ? null : `${date}T15:00:00Z`, firstSeenAt: `${date}T15:10:00Z`,
+      seenGapS: 1800, firstRead: false, repostedFrom: null,
       companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
       saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
     };

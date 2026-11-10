@@ -404,6 +404,10 @@ export interface SwapResult { replacedEntryId: Id; replaced: CompanyRef; row: Pl
  */
 export interface JobRow {
   postingId: Id; title: string; url: string; location: string; levelTag: string; date: IsoDate; dateKind: 'posted' | 'seen'; ageDays: number;
+  /** The time the list sorts by; null: Date unknown, listed after every dated row. */
+  listAt: IsoTime | null; postedAt: IsoTime | null /* the board's own posting time */; firstSeenAt: IsoTime;
+  seenGapS: number | null /* seconds since the board's last good read when Knock first saw it */;
+  firstRead: boolean /* found on the board's first read */; repostedFrom: IsoTime | null /* a repost: when Knock first saw the one it repeats */;
   companyId: Id; companyName: string; size: number | null; big: boolean /* known size over 300, or guessed big; size stays null then */;
   saysNoSponsorship: boolean; everify: boolean; yc: boolean; contactedOn: IsoDate | null;
 }

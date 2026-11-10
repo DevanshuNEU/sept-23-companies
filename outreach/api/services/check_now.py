@@ -10,17 +10,23 @@ from outreach.pipeline import check_state
 from outreach.store import append_event
 
 
-def request_check(ctx: WriteCtx) -> CheckNowResult:
-    """`started` when this call recorded the request (the caller then starts the crawl job after the commit)."""
+def request_check(ctx: WriteCtx) -> tuple[CheckNowResult, bool]:
+    """The answer and whether the caller starts the crawl job after the commit.
+
+    Nothing queued or running: record the request, answer `started`, start the job. A request already waiting
+    (queued: the job may not have started, say the kickstart failed): record nothing, answer `running`, start the job
+    again. A check running: record nothing, start nothing, answer `running`.
+    """
     conn = ctx.conn
-    current = check_state.status(conn)
-    if current.state in ("queued", "running"):
-        waiting = check_state.pending_request(conn) if current.state == "queued" else None
-        return CheckNowResult(requested_at=waiting or current.started_at or ctx.now, state="running")
+    current = check_state.status(conn, ctx.now)
+    if current.state == "running":
+        return CheckNowResult(requested_at=current.started_at or ctx.now, state="running"), False
+    if current.state == "queued":
+        return CheckNowResult(requested_at=check_state.pending_request(conn) or ctx.now, state="running"), True
     append_event(conn, entity="source", kind=check_state.REQUEST_KIND, actor="devanshu", at=ctx.now,
                  detail={}, idempotency_key=ctx.event_key(0))
-    return CheckNowResult(requested_at=ctx.now, state="started")
+    return CheckNowResult(requested_at=ctx.now, state="started"), True
 
 
-def read_status(conn) -> CheckStatus:
-    return CheckStatus(**vars(check_state.status(conn)))
+def read_status(conn, now: str) -> CheckStatus:
+    return CheckStatus(**vars(check_state.status(conn, now)))

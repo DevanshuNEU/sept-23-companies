@@ -23,7 +23,7 @@ ATS_HOSTS = {
 _INT_KEYS = ("floor_s", "ceiling_s", "age_divisor", "defer_s", "max_bytes", "max_redirects", "breaker_failures",
              "batch_rows", "decide_batch", "detail_per_read", "boards_per_tick", "tick_budget_s", "top_companies",
              "watch_interval_s", "watch_per_tick", "watch_min_text_chars", "stale_after_months", "body_refetch_days",
-             "outage_grace_s")
+             "outage_grace_s", "check_budget_s")
 _NUM_KEYS = ("timeout_s", "default_host_interval_s")
 
 
@@ -65,6 +65,7 @@ class CrawlConfig:
     stale_after_months: int
     body_refetch_days: int
     outage_grace_s: int
+    check_budget_s: int  # seconds a Check now run may take before it stops (#194); a progress row older than this plus 300 is stale
     ats_off: dict[str, str]  # ATS name -> why its reader is switched off (#46)
     big_board: BigBoardConfig
 
@@ -158,7 +159,7 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     if "@" in data["user_agent"]:
         raise ValueError("user_agent must not carry an email address")
     for key in _INT_KEYS:
-        if key != "max_redirects" and key != "batch_rows" and key != "stale_after_months" and data[key] <= 0:
+        if key not in ("max_redirects", "batch_rows", "stale_after_months", "check_budget_s") and data[key] <= 0:
             raise ValueError(f"{key} must be positive, got {data[key]}")
     if data["max_redirects"] < 0:
         raise ValueError(f"max_redirects must not be negative, got {data['max_redirects']}")
@@ -168,6 +169,8 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
         raise ValueError(f"batch_rows must be 2000 to 5000, got {data['batch_rows']}")
     if not 1 <= data["stale_after_months"] <= 60:
         raise ValueError(f"stale_after_months must be 1 to 60, got {data['stale_after_months']}")
+    if not 60 <= data["check_budget_s"] <= 3600:
+        raise ValueError(f"check_budget_s must be 60 to 3600, got {data['check_budget_s']}")
     for key in _NUM_KEYS:
         if not _is_positive(data[key]):
             raise ValueError(f"{key} must be a finite number above 0, got {data[key]!r}")

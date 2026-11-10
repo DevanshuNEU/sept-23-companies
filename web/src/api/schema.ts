@@ -344,8 +344,8 @@ export interface paths {
         put?: never;
         /**
          * Check Now
-         * @description Check now: record the request, then start the crawl job. A check already queued or running is answered as
-         *     `running` and nothing is recorded or started. A replayed key starts nothing again.
+         * @description Check now: record the request, then start the crawl job. A request already waiting is not recorded again, but
+         *     the job is started again; a check that is running is only reported. A replayed key starts nothing.
          */
         post: operations["check_now"];
         delete?: never;

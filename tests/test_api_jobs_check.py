@@ -45,14 +45,19 @@ class CheckNowTest(CheckCase):
         self.assertEqual((rows[0]["entity"], rows[0]["actor"], rows[0]["at"]), ("source", "devanshu", self.now))
         self.assertEqual(len(self.kicks), 1)
 
-    def test_check_now_twice_kicks_once(self):
+    def test_a_second_click_while_queued_kicks_again_and_records_nothing(self):
         first = self.check_now()
         second = self.check_now()
         self.assertEqual(second.status_code, 200, second.text)
-        self.assertEqual(second.json()["state"], "running")
-        self.assertEqual(second.json()["requestedAt"], first.json()["requestedAt"])
+        self.assertEqual(second.json(), {"requestedAt": first.json()["requestedAt"], "state": "running"})
         self.assertEqual(len(self.requests()), 1)
-        self.assertEqual(len(self.kicks), 1)
+        self.assertEqual(len(self.kicks), 2)
+
+    def test_a_queued_click_stays_running_when_the_kick_runs_nothing(self):
+        self.check_now()
+        self.app.state.kick_crawl = lambda: "not_live"
+        self.assertEqual(self.check_now().json()["state"], "running")
+        self.assertEqual(len(self.requests()), 1)
 
     def test_check_now_while_a_check_runs_records_and_kicks_nothing(self):
         self.progress(checked=10, total=100)
@@ -66,6 +71,15 @@ class CheckNowTest(CheckCase):
         res = self.check_now()
         self.assertEqual(res.json()["state"], "started")
         self.assertEqual(len(self.kicks), 1)
+
+    def test_a_progress_row_1201_s_old_with_no_end_is_stale_and_a_click_starts_a_check(self):
+        self.progress(started_at="2026-11-10T14:54:00Z")  # 1200 s old: the edge, still running
+        self.assertEqual(self.check_now().json()["state"], "running")
+        self.assertEqual((len(self.requests()), len(self.kicks)), (0, 0))
+        self.progress(started_at="2026-11-10T14:53:59Z")  # 1201 s
+        res = self.check_now()
+        self.assertEqual(res.json()["state"], "started")
+        self.assertEqual((len(self.requests()), len(self.kicks)), (1, 1))
 
     def test_a_replayed_key_kicks_once(self):
         self.check_now(key="check-key-0001")
@@ -115,6 +129,12 @@ class CheckStatusTest(CheckCase):
         self.assertEqual(self.status(), {"state": "running", "checked": 1240, "total": 4013, "new": 3,
                                          "startedAt": "2026-11-10T15:00:00Z", "finishedAt": None,
                                          "pausedHosts": ["boards.greenhouse.io"]})
+
+    def test_check_status_stale_progress_reads_idle_until_a_request_comes(self):
+        self.progress(checked=3, total=9, started_at="2026-11-10T14:53:59Z")  # 1201 s old, no end
+        self.assertEqual(self.status()["state"], "idle")
+        self.progress(checked=3, total=9, started_at="2026-11-10T14:54:01Z")  # 1199 s old
+        self.assertEqual(self.status()["state"], "running")
 
     def test_check_status_done_when_finished(self):
         self.progress(checked=4013, total=4013, new=6, finished_at="2026-11-10T15:03:10Z")

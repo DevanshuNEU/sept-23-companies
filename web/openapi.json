@@ -11195,7 +11195,7 @@
     },
     "/api/jobs/check-now": {
       "post": {
-        "description": "Check now: record the request, then start the crawl job. A check already queued or running is answered as\n`running` and nothing is recorded or started. A replayed key starts nothing again.",
+        "description": "Check now: record the request, then start the crawl job. A request already waiting is not recorded again, but\nthe job is started again; a check that is running is only reported. A replayed key starts nothing.",
         "operationId": "check_now",
         "requestBody": {
           "content": {

@@ -38,7 +38,7 @@ FIX = ROOT / "tests" / "fixtures"
 ALL_TOOLS = ("ranked_companies", "company", "person", "followups_due", "record_research", "flag_review", "mark_no_go",
             "save_draft", "save_followup", "save_linkedin_note", "add_people", "reader_next", "reader_submit",
             "prepare_targets", "submit_candidates", "knock_status", "contact_check", "intake", "log_sent", "draft_brief",
-             "connect_followups", "log_miss", "update_person", "mark_email_bounced", "move_person")
+             "connect_followups", "log_miss", "update_person", "mark_email_bounced", "move_person", "check_draft")
 BODY = ("Hi Lee,\n\nI read your post on the queue rewrite at Acme and how the team moved billing off a nightly batch. "
         "I build backend systems in Go and Python, and last year I shipped a queue that handled thousands of "
         "requests a minute without a page. I would like to help your team keep that kind of work calm, and I am "
@@ -128,6 +128,7 @@ class SweepCase(McpCase):
             "company": ({"company_id": self.acme}, None),
             "person": ({"person_id": self.pat}, None),
             "draft_brief": ({"person_id": self.pat}, None),
+            "check_draft": ({"person_id": self.lee, "subject": "Your queue rewrite", "body": BODY}, None),
             "followups_due": ({"days_ahead": 7}, None),
             "prepare_targets": ({}, None),
             "record_research": ({"company_id": self.acme, "items": [
@@ -178,7 +179,7 @@ class ToolListTest(unittest.TestCase):
     def test_the_tool_list_is_exactly_the_pinned_tools(self):
         names = [s.name for s in server.tool_specs()]
         self.assertEqual(sorted(names), sorted(ALL_TOOLS))
-        self.assertEqual(len(names), 25)
+        self.assertEqual(len(names), 26)
 
 
 class SweepTest(SweepCase):

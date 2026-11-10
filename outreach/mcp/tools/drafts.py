@@ -279,6 +279,53 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
 
 # ---------------------------------------------------------------------------------------------- save_followup
 
+class CheckDraftInput(Input):
+    person_id: int = Field(ge=1, le=MAX_ID)
+    subject: str = Field("", max_length=200, description="The subject; ignored for a follow-up (code sets it).")
+    body: str = Field(min_length=1, max_length=5000, description="The whole email, links and signature included.")
+    seq: int = Field(0, ge=0, le=4, description="0 for a first email, 1 to 4 for a follow-up.")
+    hook: str = Field("", max_length=HOOK_CHARS)
+
+
+def check_draft(ctx: Ctx, args: CheckDraftInput) -> dict:
+    """Every check a save runs, on a draft that is not stored (#203). It refuses the people save_draft refuses, needs
+    no brief and writes nothing; the person's own stored message is left out of the sameness counts."""
+    conn = ctx.conn
+    body = text(args.body, "body")
+    try:
+        evidence = read_evidence()
+    except VoiceUnreadable as caught:
+        raise voice_unreadable(caught) from None
+    p = person_row(conn, args.person_id)
+    family = Family(conn)
+    main = company_row(conn, family.survivor(p["company_id"]))
+    touch = conn.execute("SELECT touch_id, state, reply_kind, first_sent_at FROM touch WHERE person_id = ?",
+                         (p["person_id"],)).fetchone()
+    first = conn.execute("SELECT * FROM message WHERE touch_id = ? AND seq = 0",
+                         (touch["touch_id"],)).fetchone() if touch else None
+    if args.seq == 0:
+        why = why_not_email(p, main, family, conn, touch, first)
+        if why is not None and why != "already_emailed":
+            raise refuse(why, name=p["name"], company=main["name"])
+        subject, message_id = text(args.subject, "subject"), first["message_id"] if first else None
+    else:
+        if touch is None or first is None:
+            raise ToolError("first_email_not_sent", f"There is no first email to {p['name']} yet.",
+                            "A follow-up follows a first email; check that one with seq 0.")
+        problem = stopped(conn, p, touch)
+        if problem is not None:
+            raise problem
+        m = conn.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = ?",
+                         (touch["touch_id"], args.seq)).fetchone()
+        subject, message_id = f"Re: {first['subject']}", m["message_id"] if m else None
+    found = checks_of(ctx, p, message_id=message_id, seq=args.seq, subject=subject, body=body, hook=args.hook,
+                      banned=banned_list(), ground="\n".join((evidence, p["profile_text"], p["notes"])))
+    return {"word_count": word_count(body),
+            "blocks": [brief(c) for c in found if c["severity"] == "block"],
+            "warns": [brief(c) for c in found if c["severity"] == "warn"],
+            "passes": sum(1 for c in found if c["severity"] == "pass")}
+
+
 class SaveFollowupInput(Input):
     person_id: int = Field(ge=1, le=MAX_ID)
     seq: int = Field(ge=1, le=MAX_FOLLOWUPS, description="Which follow-up (followups_due gives it).")
@@ -468,6 +515,10 @@ TOOLS = (
              "files, the me.md evidence and the limits, plus the brief_id that save_draft and save_followup require. "
              "Reads only. "
              "Write from what it returns.", PersonInput, draft_brief),
+    ToolSpec("check_draft",
+             "Run every check save_draft or save_followup would run on a draft, without storing it. Use it to test a "
+             "draft, or a set of drafts for a judge run, before saving. Refuses the people save_draft refuses. Reads "
+             "only.", CheckDraftInput, check_draft),
     ToolSpec("save_draft",
              "Save the first email to a person as a draft for Devanshu to review. It runs the #9 checks and returns "
              "blocks, warns and a count of passes; a block still saves, so fix it and save again. It never "

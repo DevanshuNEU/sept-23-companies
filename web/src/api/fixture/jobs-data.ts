@@ -89,10 +89,50 @@ export function buildJobs(today: IsoDate, asOf: IsoTime): { rows: JobRow[]; high
     unknown(9080, COMPANIES[9] as Company, 'Software Engineer, Platform', at(dayBefore(today, 1), 14, 0), 'New York, NY'),
     unknown(9081, COMPANIES[1] as Company, 'Software Engineer, New Grad', at(dayBefore(today, 2), 14, 0), 'Remote (US)'),
   );
+  sortJobs(rows);
+  return { rows, higher, ages };
+}
+
+/** The list order, in place: dated rows newest first, then the smaller company, then the posting id; Date unknown last. */
+export function sortJobs(rows: JobRow[]): JobRow[] {
   const rank = (r: JobRow) => (r.size === null ? (r.big ? 20_000_000 : 10_000_000) : r.big ? 20_000_000 + r.size : r.size);
   const key = (r: JobRow) => r.listAt ?? r.firstSeenAt;
-  rows.sort((a, b) => Number(a.listAt === null) - Number(b.listAt === null) || key(b).localeCompare(key(a)) || rank(a) - rank(b) || a.postingId - b.postingId);
-  return { rows, higher, ages };
+  return rows.sort((a, b) => Number(a.listAt === null) - Number(b.listAt === null) || key(b).localeCompare(key(a)) || rank(a) - rank(b) || a.postingId - b.postingId);
+}
+
+/**
+ * Check now on the sample (#194): each status read after a click is one step of this walk, queued, then running, then
+ * done, so a page that polls every second sees it all in about five seconds. `found` is how many new postings the check
+ * has found by then; only the first check of a session finds any.
+ */
+export const CHECK_BOARDS = 4013;
+export const CHECK_WALK: readonly { state: 'queued' | 'running' | 'done'; checked: number; found: number }[] = [
+  { state: 'queued', checked: 0, found: 0 },
+  { state: 'running', checked: 1240, found: 3 },
+  { state: 'running', checked: 2710, found: 4 },
+  { state: 'running', checked: 3655, found: 6 },
+  { state: 'done', checked: CHECK_BOARDS, found: 6 },
+];
+/** The sample check took 3 min 10 s. */
+export const CHECK_TOOK_S = 190;
+
+/** The postings the sample check finds, newest first: posted in the minutes before `asOf` and first seen at it, all at his level. */
+export function foundJobs(asOf: IsoTime): JobRow[] {
+  const picks: [Company, string, string][] = [
+    [COMPANIES[1] as Company, 'Software Engineer, New Grad', 'New York, NY'],
+    [COMPANIES[9] as Company, 'Software Engineer, Early Career', 'San Francisco, CA'],
+    [COMPANIES[3] as Company, 'Software Engineer I', 'Remote (US)'],
+    [COMPANIES[6] as Company, 'Software Engineer, Backend', 'Seattle, WA'],
+    [COMPANIES[0] as Company, 'Software Engineer, Product', 'San Francisco, CA'],
+    [COMPANIES[7] as Company, 'Software Engineer, New Grad', 'Austin, TX'],
+  ];
+  const minus = (s: number) => new Date(Date.parse(asOf) - s * 1000).toISOString().replace('.000Z', 'Z');
+  return picks.map(([c, title, location], i): JobRow => ({
+    postingId: 9100 + i, title, url: `https://jobs.example/${nameKey(c.name)}/${9100 + i}`, location, levelTag: i % 2 ? 'early career' : 'new grad',
+    listAt: minus(30 * (i + 1)), postedAt: minus(30 * (i + 1)), firstSeenAt: asOf, seenGapS: 1800, firstRead: false, repostedFrom: null,
+    companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
+    saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
+  }));
 }
 
 /** The API's job list: the tab, the window (a row with no date is in every one), the size, the contacted filter and the company search, then one page after the cursor. */

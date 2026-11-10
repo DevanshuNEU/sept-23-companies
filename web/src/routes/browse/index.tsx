@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { keepPreviousData, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, SearchX } from 'lucide-react';
+import { ArrowUp, Check, SearchX } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
@@ -27,6 +27,8 @@ import { formatDueDay, gapTag, postedLabel, repostTag } from '@/lib/format';
 import { openExternal, safeHref } from '@/lib/safe-href';
 import { cn } from '@/lib/utils';
 import { usePendingWrite, useViewQuery } from '@/pending/pending';
+import { CheckLineView, CheckNowButton, useCheckNow } from './check-now';
+import { heldRows, isNew, markOpened, readLastOpened } from './new-rows';
 
 const GROUP = 'Jobs';
 /** How long typing waits before the search is asked. */
@@ -47,6 +49,9 @@ const SIZES: { value: JobsSize; label: string; hint: string }[] = [
   { value: 'big', label: 'Big', hint: 'More than 300 people, or many open roles' },
   { value: 'unknown', label: 'Not known', hint: 'No size on file and no sign of being big' },
 ];
+
+/** Scrolled this little or less still counts as at the top: new rows show at once there. */
+const TOP_PX = 8;
 
 const LINK =
   'rounded-sm underline decoration-foreground/30 underline-offset-3 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70';
@@ -100,6 +105,7 @@ function JobItem({
   job,
   asOf,
   current,
+  fresh,
   answer,
   going,
   onSelect,
@@ -109,6 +115,8 @@ function JobItem({
   job: JobRow;
   asOf: IsoTime;
   current: boolean;
+  /** First seen since his last visit. */
+  fresh: boolean;
   answer: string | undefined;
   going: boolean;
   onSelect: () => void;
@@ -134,6 +142,7 @@ function JobItem({
             <span className="text-sm font-medium">{job.title}</span>
           )}
           <span className="text-xs text-muted-foreground">{job.levelTag}</span>
+          {fresh ? <Badge variant="info">New</Badge> : null}
         </p>
         <p className="flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
           <Link to={`/companies/${job.companyId}`} className="rounded-sm font-medium text-foreground outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/70">
@@ -168,6 +177,11 @@ function JobItem({
   );
 }
 
+/** The same rows in the same order (the server's copies may differ; `heldRows` takes those). */
+function sameRows(a: readonly JobRow[], b: readonly JobRow[]): boolean {
+  return a.length === b.length && a.every((r, i) => r.postingId === b[i]?.postingId);
+}
+
 function Skeletons() {
   return (
     <div aria-busy className="grid" role="status" aria-label="Loading the jobs">
@@ -191,8 +205,12 @@ function Skeletons() {
  * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Go ahead keeps the
  * row and writes the API's own sentence in it ("Added ... to today's list.", or when it is kept for the next list).
  *
- * Keys: the arrows move through the rows (also from the search box), Enter opens the posting, X passes, A goes ahead.
- * The page sets no focus on arrival: the keys listen on the whole page.
+ * Check now (#194) asks the crawl job to read every Greenhouse and Ashby board; the line under the header says how it
+ * is going. New rows show at once while he is at the top on no row; scrolled down or on a row, the list stays put and an
+ * "N new" button shows them. A row first seen since his last visit (not a first read, not a repost) says New.
+ *
+ * Keys: the arrows move through the rows (also from the search box), Enter opens the posting, X passes, A goes ahead,
+ * C checks now. The page sets no focus on arrival: the keys listen on the whole page.
  */
 export default function BrowsePage() {
   const client = usePageClient('plan');
@@ -211,7 +229,15 @@ export default function BrowsePage() {
   const hidden = useMemo(() => new Set(marks.data?.hidden), [marks.data]);
   const ahead = useMemo(() => new Set(marks.data?.ahead), [marks.data]);
   const list = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const searchBox = useRef<HTMLInputElement>(null);
+  const check = useCheckNow();
+  // His last visit marks what is new; opening the page is the next one.
+  const [since] = useState(readLastOpened);
+  useEffect(() => markOpened(), []);
+  const [atTop, setAtTop] = useState(true);
+  /** The rows on screen for one ask (`key`), so new rows can wait while he is scrolled down or on a row. */
+  const [held, setHeld] = useState<{ key: string; rows: JobRow[] } | null>(null);
 
   useEffect(() => {
     const id = setTimeout(() => setQ(text.trim()), TYPING_MS);
@@ -234,9 +260,17 @@ export default function BrowsePage() {
     const seen = new Set<Id>();
     return (query.data?.pages ?? []).flatMap((p) => p.rows).filter((j) => !seen.has(j.postingId) && !!seen.add(j.postingId));
   }, [query.data]);
-  const jobs = useMemo(() => loaded.filter((j) => !hidden.has(j.postingId)), [loaded, hidden]);
+
+  // New rows never move the list under him: scrolled down or on a row, they wait behind "N new" (design 4.5). A new ask
+  // (a tab, a window, a search) starts from what it brings.
+  const listKey = JSON.stringify(params);
+  const sameAsk = !stale && query.data !== undefined && held?.key === listKey;
+  const shown = sameAsk && held ? heldRows(held.rows, loaded, atTop, active !== null) : { rows: loaded, waiting: 0 };
+  if (!stale && query.data !== undefined && (held?.key !== listKey || !sameRows(held.rows, shown.rows))) setHeld({ key: listKey, rows: shown.rows });
+
+  const jobs = useMemo(() => shown.rows.filter((j) => !hidden.has(j.postingId)), [shown.rows, hidden]);
   // A pass the server has not been read after yet still counts: the numbers follow the rows.
-  const passed = loaded.length - jobs.length;
+  const passed = loaded.filter((j) => hidden.has(j.postingId)).length;
   const last = query.data?.pages.at(-1);
   const total = last ? Math.max(last.total - passed, 0) : undefined;
   const dated = jobs.filter((j) => j.listAt !== null);
@@ -301,6 +335,15 @@ export default function BrowsePage() {
     });
   };
 
+  /** "N new": the waiting rows show, the list goes to its top, and this counts as a visit. */
+  const showNew = () => {
+    if (scroller.current) scroller.current.scrollTop = 0;
+    setAtTop(true);
+    setActive(null);
+    markOpened();
+    announce(`${shown.waiting.toLocaleString('en-US')} new at the top.`);
+  };
+
   const asOf = last?.asOf;
   const item = (j: JobRow) => (
     <JobItem
@@ -308,6 +351,7 @@ export default function BrowsePage() {
       job={j}
       asOf={asOf ?? j.firstSeenAt}
       current={j.postingId === current?.postingId}
+      fresh={isNew(j, since)}
       answer={answers.get(j.postingId)}
       going={ahead.has(j.postingId)}
       onSelect={() => setActive(j.postingId)}
@@ -323,6 +367,7 @@ export default function BrowsePage() {
     { keys: 'enter', label: 'Open the posting', group: GROUP, enabled: open, run: () => current && openExternal(current.url) },
     { keys: 'x', label: 'Pass', group: GROUP, enabled: open, run: () => current && pass(current) },
     { keys: 'a', label: 'Go ahead', group: GROUP, enabled: open, run: () => current && goAhead(current) },
+    { keys: 'c', label: 'Check now', group: GROUP, run: check.ask },
   ];
   useHotkeys(bindings);
 
@@ -334,7 +379,16 @@ export default function BrowsePage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="grid flex-none gap-3 border-b px-6 pt-5 pb-3">
-        <PageHeader title="Jobs" summary={headline} />
+        <PageHeader
+          title="Jobs"
+          summary={
+            <>
+              <p>{headline}</p>
+              {check.line ? <CheckLineView line={check.line} /> : null}
+            </>
+          }
+          aside={<CheckNowButton onClick={check.ask} />}
+        />
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <Tabs
             value={tab}
@@ -392,7 +446,18 @@ export default function BrowsePage() {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={scroller} data-jobs-scroll className="relative min-h-0 flex-1 overflow-auto" onScroll={(e) => setAtTop(e.currentTarget.scrollTop <= TOP_PX)}>
+        {shown.waiting > 0 ? (
+          // Zero height and sticky: the button floats over the rows and moves none of them.
+          <div className="pointer-events-none sticky top-0 z-10 h-0">
+            <div className="flex justify-center pt-2">
+              <Button type="button" size="sm" className="pointer-events-auto h-7 gap-1.5 rounded-full px-3 text-xs shadow-sm max-sm:h-11" title="Show the new jobs at the top" onClick={showNew}>
+                <ArrowUp aria-hidden className="size-3.5" />
+                {`${shown.waiting.toLocaleString('en-US')} new`}
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {query.isError && !query.data ? (
           <p role="alert" className="px-6 py-6 text-sm">
             The jobs did not load. Nothing was changed.{' '}

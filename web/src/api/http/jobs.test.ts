@@ -23,4 +23,15 @@ describe('the job list methods', () => {
     await planMethods(t).goAhead!(9000, o);
     expect(send).toHaveBeenLastCalledWith('POST', '/api/jobs/9000/go-ahead', {}, o);
   });
+
+  it('check now posts an empty body with the request id as the key; the status is a plain read', async () => {
+    const send = vi.fn(async () => ({}));
+    const get = vi.fn(async () => ({}));
+    const t = { get, send } as unknown as Transport;
+    const o = { requestId: 'req-12345678' };
+    await planMethods(t).checkNow!(o);
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/jobs/check-now', {}, o);
+    await planMethods(t).checkStatus!();
+    expect(get).toHaveBeenLastCalledWith('/api/jobs/check', undefined);
+  });
 });

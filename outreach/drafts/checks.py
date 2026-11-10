@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from outreach.drafting.sameness import core, load_corpus, opening_count, reused
 from outreach.drafting.signature import signature_lines
 from outreach.drafting.voice_checks import voice_checks
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
@@ -79,7 +80,8 @@ STOP_REPLIES = ("said_no", "asked_to_stop")
 BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "markdown_link", "visa_line", "too_many_links",
                "link_shortener", "followup_subject", "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
 WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_length",
-              "subject_reused", "link_count", "signature", "narrated_email", "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
+              "subject_reused", "link_count", "signature", "narrated_email", "reused_sentence", "same_opening",
+              "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
               "voice_recital", "voice_rhythm", "voice_ungrounded")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _RANK = {"block": 0, "warn": 1, "pass": 2}
@@ -419,6 +421,36 @@ def _narrated(d: DraftInput) -> Check | None:
     return _check("narrated_email", "pass", "No lines about the email", "Nothing talks about the email itself.")
 
 
+REUSED_MIN = 3     # other first emails a sentence may appear in before it warns
+OPENING_MIN = 5    # of his last OPENING_LAST first emails that may open the same way
+OPENING_LAST = 100
+OPENING_WORDS = 4
+
+
+def _sameness(conn, d: DraftInput) -> list[Check]:
+    """Two warns on a first email: a sentence he has used in other emails, and an opening many of his last ones share.
+    His other first emails only; the message itself is left out."""
+    if d.seq >= 1:
+        return []
+    corpus = load_corpus(conn, exclude_message_id=d.message_id)
+    out = []
+    hits = reused(d.body, corpus, min_count=REUSED_MIN)
+    if hits:
+        out.append(_check("reused_sentence", "warn", "Sentence used before",
+                          "; ".join(f'Used in {n} of your other emails: "{s}"' for s, n in hits[:3])
+                          + ". Say it a new way for this person."))
+    else:
+        out.append(_check("reused_sentence", "pass", "Sentences are new", "No sentence repeats your other emails."))
+    n = opening_count(d.body, corpus, last=OPENING_LAST, words=OPENING_WORDS)
+    if n >= OPENING_MIN:
+        out.append(_check("same_opening", "warn", "Same opening as other emails",
+                          f"{n} of your last {OPENING_LAST} emails open with the same {OPENING_WORDS} words. "
+                          "Open with what is true about this person instead."))
+    else:
+        out.append(_check("same_opening", "pass", "Opening is fresh", "The opening does not repeat your recent emails."))
+    return out
+
+
 def _recruiter(d: DraftInput) -> Check:
     if d.role_kind != "recruiter":
         return _check("recruiter", "pass", "Not a recruiter", f"Role kind is {d.role_kind}.")
@@ -487,21 +519,6 @@ def _closed(conn, chain: list[int]) -> Check:
                   f"{row['name']} is closed because it does not sponsor. Reopen it first if that changed.")
 
 
-def _core(body: str) -> str:
-    """The body without its greeting line, and without the signature and the sign-off word line before it."""
-    text = body.rstrip()
-    start = _signature_start(text)
-    if start is not None:
-        text = text[:start].rstrip()
-        last = text.rsplit("\n", 1)
-        if len(last) == 2 and len(last[1].split()) <= 3 and last[1].strip().endswith(","):
-            text = last[0].rstrip()
-    lines = text.split("\n", 1)
-    if len(lines) == 2 and re.match(r"^\s*(hi|hello|hey|dear)\b[^\n]{0,40},\s*$", lines[0], re.I):
-        text = lines[1]
-    return text.strip()
-
-
 def _near_identical(conn, d: DraftInput, family: list[int]) -> Check:
     rows = conn.execute(
         f"SELECT m.message_id, m.body, p.name FROM message m JOIN touch t ON t.touch_id = m.touch_id "
@@ -511,9 +528,9 @@ def _near_identical(conn, d: DraftInput, family: list[int]) -> Check:
     best, best_ratio = None, 0.0
     # autojunk off: on a body over 200 characters it junks common letters, so the score drops and depends on order.
     # The greeting, the sign-off word and the signature are the same in every email, so they are not compared.
-    matcher = difflib.SequenceMatcher(None, "", _core(d.body).lower(), autojunk=False)
+    matcher = difflib.SequenceMatcher(None, "", core(d.body).lower(), autojunk=False)
     for row in rows:
-        matcher.set_seq1(_core(row["body"]).lower())
+        matcher.set_seq1(core(row["body"]).lower())
         if matcher.real_quick_ratio() < SIMILAR or matcher.quick_ratio() < SIMILAR:
             continue  # both are upper bounds of ratio(), so skipping here never misses a match
         ratio = matcher.ratio()
@@ -577,6 +594,7 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         *_link_rules(d),
         _signature(d),
         _narrated(d),
+        *_sameness(conn, d),
         _length(d),
         _stale_hook(d, now),
         _subject_wording(d),

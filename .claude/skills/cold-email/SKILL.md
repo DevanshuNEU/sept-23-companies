@@ -65,6 +65,9 @@ get past.
      the role. The by-reader table below is the default, not a mold: when the paste shows something else (an engineer
      who owns hiring, a founder who still writes code), follow the person. The hard rules for a reader kind still hold
      (a recruiter gets the exact role title early).
+   - **Read what to avoid.** The brief's `avoid` block lists his last 30 openings and subjects, the sentences and
+     6-word runs he has used in 10 or more emails, and which projects he leaned on in the last 14 days. Open, title
+     and phrase this email differently, and prefer a fitting project he has not used much.
    - **Compete.** Draft at least three emails on substantially different strategies (for example peer to peer on a
      shared technical problem, evidence first, a direct and plain referral ask), not rewordings. Each follows every
      rule below.
@@ -82,7 +85,9 @@ get past.
      line he would not say. No corporate phrasing, no big claims, no cleverness for its own sake.
    - **Decide alone.** Never show him the other drafts, the angles or any ranking, and never ask him to pick. Only the
      one final email goes to `save_draft`. Done when every rule below holds for it.
-6. **Save.** `save_draft` with `person_id`, `brief_id`, `subject`, `body`, `hook`, `hook_on` (events only) and
+6. **Check, then save.** Run `check_draft` (person, subject, body) on the winner first: it runs every save check and
+   stores nothing. Fix its blocks and every `reused_sentence`, `same_opening` and `narrated_email` warning the facts
+   allow. Then `save_draft` with `person_id`, `brief_id`, `subject`, `body`, `hook`, `hook_on` (events only) and
    `project`. A missing or stale `brief_id` is refused and nothing is stored; call `draft_brief` again. It
    runs the #9 checks. Fix every `blocks` entry and save again; a block still saves, so he sees the draft either
    way. Fix each `warns` entry you can and carry the rest to the report. Done when `blocks` is empty. A person who

@@ -436,3 +436,57 @@ class SaveFollowupTest(DraftCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CheckDraftTest(DraftCase):
+    """check_draft (#203): every save check on a draft, nothing stored, no brief needed."""
+
+    def check_args(self, **changes) -> dict:
+        args = {"person_id": self.pat, "subject": SUBJECT, "body": BODY}
+        args.update(changes)
+        return args
+
+    def test_check_draft_returns_save_draft_checks_and_writes_nothing(self):
+        before = fingerprint(self.db)
+        got = self.ok("check_draft", self.check_args())
+        self.assertEqual(fingerprint(self.db), before)
+        self.assertEqual(set(got), {"word_count", "blocks", "warns", "passes"})
+        saved = self.ok("save_draft", self.draft_args())
+        self.assertEqual((got["blocks"], got["warns"]), (saved["blocks"], saved["warns"]))
+        self.assertEqual(got["word_count"], saved["word_count"])
+
+    def test_check_draft_shows_a_block_without_saving(self):
+        got = self.ok("check_draft", self.check_args(body=BODY.replace("I build", "I'm on F-1 OPT. I build")))
+        self.assertIn("visa_line", [b["code"] for b in got["blocks"]])
+        self.assertIsNone(self.first())
+
+    def test_check_draft_refuses_like_save_draft(self):
+        linked = seed.person(self.db, self.acme, "Lin Kedin", channel="linkedin")
+        banned = seed.person(self.db, self.acme, "Nora Nogo", email="nora@acme.example")
+        no_go(self.db, person_id=banned)
+        for pid, code in ((linked, "no_email"), (banned, "person_no_go"), (999, "not_found")):
+            with self.subTest(code=code):
+                self.assertEqual(self.error("check_draft", self.check_args(person_id=pid))["code"], code)
+
+    def test_check_draft_leaves_its_own_message_out_of_sameness(self):
+        line = "I graduated from Northeastern in May 2026 and I build agents."
+        body = BODY.replace("I build the same kind of thing.", line)
+        self.ok("save_draft", self.draft_args(body=body))
+        for name in ("Ana One", "Ben Two"):
+            pid = seed.person(self.db, seed.company(self.db, name), name, email=f"{name.split()[0].lower()}@x.example")
+            seed.message(self.db, seed.touch(self.db, pid), 0, subject=name, body=body)
+        got = self.ok("check_draft", self.check_args(body=body))
+        self.assertNotIn("reused_sentence", [w["code"] for w in got["warns"]])  # 2 others, not 3 with its own
+
+    def test_check_draft_runs_on_an_approved_or_sent_first_email(self):
+        # A judge run tests new versions of emails he already approved or sent (lab, 2026-11-09).
+        self.ok("save_draft", self.draft_args())
+        self.db.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?",
+                        (NOW, self.first()["message_id"]))
+        got = self.ok("check_draft", self.check_args())
+        self.assertIn("blocks", got)
+
+    def test_check_draft_is_registered_without_grants(self):
+        from outreach.mcp import server
+        spec = next(s for s in server.tool_specs() if s.name == "check_draft")
+        self.assertEqual(dict(spec.grants or {}), {})

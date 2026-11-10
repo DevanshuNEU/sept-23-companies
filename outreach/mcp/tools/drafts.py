@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from pydantic import Field
 
 from outreach.drafting.brief import brief_id, check_brief, read_evidence
 from outreach.drafting.voice import VoiceUnreadable, load_voice_pack
+from outreach.drafting.sameness import evidence_used, load_corpus, overused, recent_openings, recent_subjects
 from outreach.drafting.signature import read_signature
 from outreach.drafts.checks import (DEFAULT_BANNED_PHRASES, DEFAULT_WORDS, HOOK_DATE, MAX_LINKS, URL, DraftInput,
                                     cached_mx, email_domain, load_banned, run_checks)
@@ -145,6 +146,18 @@ def voice_unreadable(caught: VoiceUnreadable) -> ToolError:
                      "Check OUTREACH_VOICE_DIR, the DevVault folder and mail/me.md. Nothing was drafted.")
 
 
+EVIDENCE_DAYS = 14
+
+
+def avoid(ctx: Ctx) -> dict:
+    """What he has used lately, so the drafter writes around it (#203): advice only, it never changes the brief id."""
+    corpus = load_corpus(ctx.conn, exclude_message_id=None)
+    since = (datetime.fromisoformat(ctx.now.replace("Z", "+00:00")) - timedelta(days=EVIDENCE_DAYS)
+             ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"recent_openings": recent_openings(corpus), "recent_subjects": recent_subjects(corpus),
+            "overused": overused(corpus), "evidence_used": evidence_used(ctx.conn, since=since)}
+
+
 def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
     """Everything the drafter is given for one person, assembled by code (#135): the person as the `person` tool
     reads them, his DevVault voice files, me.md above its open questions, and the limits. Its `brief_id` is what
@@ -161,6 +174,7 @@ def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
         "voice": {"digest": pack.digest, "files": [{"path": path, "text": text} for path, text in pack.files]},
         "evidence": evidence,
         "signature": read_signature(),
+        "avoid": avoid(ctx),
         "limits": {"words": list(DEFAULT_WORDS), "max_links": MAX_LINKS,
                    "banned_phrases_path": DEFAULT_BANNED_PHRASES},
     }
@@ -264,6 +278,54 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------- save_followup
+
+class CheckDraftInput(Input):
+    person_id: int = Field(ge=1, le=MAX_ID)
+    subject: str = Field("", max_length=200, description="The subject; ignored for a follow-up (code sets it).")
+    body: str = Field(min_length=1, max_length=5000, description="The whole email, links and signature included.")
+    seq: int = Field(0, ge=0, le=4, description="0 for a first email, 1 to 4 for a follow-up.")
+    hook: str = Field("", max_length=HOOK_CHARS)
+
+
+def check_draft(ctx: Ctx, args: CheckDraftInput) -> dict:
+    """Every check a save runs, on a draft that is not stored (#203). It refuses the people save_draft refuses, needs
+    no brief and writes nothing; the person's own stored message is left out of the sameness counts."""
+    conn = ctx.conn
+    body = text(args.body, "body")
+    try:
+        evidence = read_evidence()
+    except VoiceUnreadable as caught:
+        raise voice_unreadable(caught) from None
+    p = person_row(conn, args.person_id)
+    family = Family(conn)
+    main = company_row(conn, family.survivor(p["company_id"]))
+    touch = conn.execute("SELECT touch_id, state, reply_kind, first_sent_at FROM touch WHERE person_id = ?",
+                         (p["person_id"],)).fetchone()
+    first = conn.execute("SELECT * FROM message WHERE touch_id = ? AND seq = 0",
+                         (touch["touch_id"],)).fetchone() if touch else None
+    if args.seq == 0:
+        why = why_not_email(p, main, family, conn, touch, first)
+        # A judge run tests new versions of emails he already wrote, approved or sent (lab, 2026-11-09).
+        if why is not None and why not in ("already_emailed", "approved_or_later", "edited_by_devanshu"):
+            raise refuse(why, name=p["name"], company=main["name"])
+        subject, message_id = text(args.subject, "subject"), first["message_id"] if first else None
+    else:
+        if touch is None or first is None:
+            raise ToolError("first_email_not_sent", f"There is no first email to {p['name']} yet.",
+                            "A follow-up follows a first email; check that one with seq 0.")
+        problem = stopped(conn, p, touch)
+        if problem is not None:
+            raise problem
+        m = conn.execute("SELECT message_id FROM message WHERE touch_id = ? AND seq = ?",
+                         (touch["touch_id"], args.seq)).fetchone()
+        subject, message_id = f"Re: {first['subject']}", m["message_id"] if m else None
+    found = checks_of(ctx, p, message_id=message_id, seq=args.seq, subject=subject, body=body, hook=args.hook,
+                      banned=banned_list(), ground="\n".join((evidence, p["profile_text"], p["notes"])))
+    return {"word_count": word_count(body),
+            "blocks": [brief(c) for c in found if c["severity"] == "block"],
+            "warns": [brief(c) for c in found if c["severity"] == "warn"],
+            "passes": sum(1 for c in found if c["severity"] == "pass")}
+
 
 class SaveFollowupInput(Input):
     person_id: int = Field(ge=1, le=MAX_ID)
@@ -454,6 +516,10 @@ TOOLS = (
              "files, the me.md evidence and the limits, plus the brief_id that save_draft and save_followup require. "
              "Reads only. "
              "Write from what it returns.", PersonInput, draft_brief),
+    ToolSpec("check_draft",
+             "Run every check save_draft or save_followup would run on a draft, without storing it. Use it to test a "
+             "draft, or a set of drafts for a judge run, before saving. Refuses the people save_draft refuses. Reads "
+             "only.", CheckDraftInput, check_draft),
     ToolSpec("save_draft",
              "Save the first email to a person as a draft for Devanshu to review. It runs the #9 checks and returns "
              "blocks, warns and a count of passes; a block still saves, so fix it and save again. It never "

@@ -92,8 +92,8 @@ class PoliteClient:
         return merged
 
     def _begin(self, url: str) -> str:
-        """Refuse a switched-off ATS's host and a tripped bucket, then wait out the bucket's spacing. Returns the
-        bucket. Every request and every redirect hop starts here, so nothing reaches a switched-off host."""
+        """Refuse a switched-off ATS's host and a tripped bucket, wait out the bucket's spacing, then refuse a bucket
+        that tripped meanwhile. Returns the bucket. Every request and every redirect hop starts here, so nothing reaches a switched-off host."""
         host = _host(url)
         bucket = bucket_for(host, self.cfg)
         ats = self.cfg.off_host(host)
@@ -111,6 +111,10 @@ class PoliteClient:
         wait = max(0.0, due - now)
         if wait:
             self._sleep(wait)
+            # Another worker's 429 may have opened the breaker while this one slept. The switched-off check needs
+            # no repeat: the config never changes.
+            if self.tripped(bucket):
+                raise HostTripped(bucket)
         return bucket
 
     def _failed(self, bucket: str, *, at_once: bool = False) -> None:

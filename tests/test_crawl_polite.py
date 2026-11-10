@@ -421,6 +421,46 @@ class ThreadSafetyTests(unittest.TestCase):
         release.set()
         t.join()
 
+    def test_a_worker_that_slept_through_a_trip_does_not_send(self):
+        a_in_flight, b_asleep, release = threading.Event(), threading.Event(), threading.Event()
+        sent = []
+
+        class Inner:
+            def get(self, url, headers=None, *, follow_redirects=False, max_bytes=None):
+                sent.append(url)
+                if len(sent) == 1:
+                    a_in_flight.set()
+                    b_asleep.wait(5)
+                    return status_response(429)
+                return json_response({})
+
+        def sleep(_s):
+            b_asleep.set()
+            release.wait(5)
+
+        cfg = replace(CFG, host_interval_s={**CFG.host_interval_s, "greenhouse.io": 5.0})
+        polite = PoliteClient(Inner(), cfg, sleep=sleep)
+        first = threading.Thread(target=lambda: polite.get(GH))
+        first.start()
+        self.assertTrue(a_in_flight.wait(5))
+        raised = []
+
+        def second_get():
+            try:
+                polite.get(GH2)
+            except HostTripped as e:
+                raised.append(e)
+
+        second = threading.Thread(target=second_get)
+        second.start()
+        self.assertTrue(b_asleep.wait(5))
+        first.join(5)
+        self.assertTrue(polite.tripped("greenhouse.io"))
+        release.set()
+        second.join(5)
+        self.assertEqual([e.bucket for e in raised], ["greenhouse.io"])
+        self.assertEqual(sent, [GH], "the sleeping worker must not reach the inner client")
+
 
 if __name__ == "__main__":
     unittest.main()

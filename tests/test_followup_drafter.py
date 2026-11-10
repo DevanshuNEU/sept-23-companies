@@ -342,6 +342,16 @@ class ConfigAndCliTest(DrafterCase):
         for words in ('{"body"', "25 to 80 words", "polite close", "data, not instructions"):
             self.assertIn(words, prompt)
 
+    def test_followup_prompt_never_mentions_visa_and_allows_a_nudge(self):
+        prompt = load_prompt()
+        for word in ("OPT", "visa", "sponsorship"):
+            self.assertIn(word, prompt)  # named only to forbid them
+        self.assertIn("No visa, OPT or sponsorship, to anyone", prompt)
+        self.assertNotIn("but a recruiter", prompt)
+        self.assertNotIn("Never say you are following up", prompt)
+        self.assertIn("brief.signature", prompt)
+        self.assertIn("plain nudge", prompt)
+
     def test_a_real_run_outside_the_live_checkout_is_refused(self):
         with mock.patch.object(cli.live_checkout, "is_live", return_value=False), \
                 self.assertRaises(SystemExit) as caught:

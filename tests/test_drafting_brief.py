@@ -73,3 +73,22 @@ class BriefIdCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShippedMeMdTest(unittest.TestCase):
+    """The repo's own mail/me.md, as the brief hands it over (#191, #9 2026-11-09)."""
+
+    def setUp(self):
+        self.evidence = read_evidence(Path(__file__).resolve().parents[1] / "mail" / "me.md")
+
+    def test_evidence_has_no_work_authorization(self):
+        for word in ("OPT", "F-1", "sponsor", "authorized to work", "H-1B"):
+            with self.subTest(word=word):
+                self.assertNotIn(word, self.evidence)
+
+    def test_evidence_lists_projects_before_experience(self):
+        self.assertLess(self.evidence.index("## Projects"), self.evidence.index("## Experience"))
+
+    def test_evidence_holds_no_phone_number(self):
+        import re
+        self.assertIsNone(re.search(r"\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}", self.evidence))

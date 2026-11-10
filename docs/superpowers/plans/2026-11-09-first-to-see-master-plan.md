@@ -69,14 +69,14 @@ Five conditions the spec implies that no happy-path test covers, each pinned by 
 
 Ask Devanshu before posting anything to GitHub.
 
-- [ ] Add the spec's section 10 ruling to #9 as a new bullet at the end of its body.
-- [ ] Edit #158 to say Part 1 takes its parallel reads (one writer thread) and the tiers are dropped; note on #161
+- [x] Add the spec's section 10 ruling to #9 as a new bullet at the end of its body.
+- [x] Edit #158 to say Part 1 takes its parallel reads (one writer thread) and the tiers are dropped; note on #161
   and #160 that Part 2 takes the Greenhouse and Ashby lists with a direct gate; note on #155 that Part 3 takes
   `repost_of` and the 120-day window.
-- [ ] Open issues for Part 2 (every Greenhouse and Ashby company), Part 3 (sorted by posting time), Part 4 (Check now
+- [x] Open issues for Part 2 (every Greenhouse and Ashby company), Part 3 (sorted by posting time), Part 4 (Check now
   and the self-updating list), Part 5 (Today goes away, Done replaces Go ahead). Each body: what, "Done when" from
   this plan, "Depends on", the plan link.
-- [ ] Close #169 and #33 as moot, each with a one-line comment linking the ruling.
+- [x] Close #169 and #33 as moot, each with a one-line comment linking the ruling.
 
 ---
 
@@ -232,7 +232,7 @@ serial figure.
 
 ---
 
-## Part 2: Every Greenhouse and Ashby company (from #160 and #161)
+## Part 2: Every Greenhouse and Ashby company (#192)
 
 Depends on: Part 1 merged (the gate reads through the fan-out). Deploy: the migration (`uv run python -m
 outreach.install`), then the seed by hand in the live checkout after Devanshu says go; the weekly part rides on the
@@ -308,7 +308,7 @@ Check now takes).
 
 ---
 
-## Part 3: Sorted by when the job was posted
+## Part 3: Sorted by when the job was posted (#193)
 
 Depends on: Part 2 merged (so the seed's first reads already get list times). Deploy: the migration, kickstart the
 API, `pnpm build`.
@@ -444,7 +444,7 @@ recently posted Greenhouse and Ashby jobs at his level, each with its posting ti
 
 ---
 
-## Part 4: Check now and the self-updating list
+## Part 4: Check now and the self-updating list (#194)
 
 Depends on: Part 3 merged. Deploy: kickstart the API, `pnpm build`. Ask before the first live Check now (Devanshu
 clicks it; Claude never does).
@@ -554,7 +554,7 @@ every Greenhouse and Ashby board in a few minutes with no tripped bucket.
 
 ---
 
-## Part 5: Today goes away, Done replaces Go ahead
+## Part 5: Today goes away, Done replaces Go ahead (#195)
 
 Depends on: Part 4 merged (same page). Deploy: kickstart the API, `pnpm build`; the plan job stays installed and
 prints one line.
@@ -634,10 +634,10 @@ in the live checkout, and Knock opens on Jobs.
 |---|---|---|---|
 | 0 | #9 ruling, issues | #9 | nothing |
 | 1 | Many boards at once | #158 | nothing |
-| 2 | Every Greenhouse and Ashby company | new (from #160, #161) | Part 1 |
-| 3 | Sorted by when the job was posted | new | Part 2 |
-| 4 | Check now, self-updating list | new | Part 3 |
-| 5 | Today goes away, Done | new | Part 4 |
+| 2 | Every Greenhouse and Ashby company | #192 (from #160, #161) | Part 1 |
+| 3 | Sorted by when the job was posted | #193 | Part 2 |
+| 4 | Check now, self-updating list | #194 | Part 3 |
+| 5 | Today goes away, Done | #195 | Part 4 |
 
 One open PR at a time, merged in this order. He has the full Greenhouse and Ashby coverage after Part 2, the
 sorted list after Part 3, the button after Part 4, and the finished product after Part 5.

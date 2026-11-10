@@ -4,8 +4,10 @@ The old plan here is a people plan (`PEOPLE_ON`, as the 08:00 build of 2026-10-2
 shipped config (company rows only). A replace refuses, writing nothing, as soon as he did anything on the list.
 """
 import json
+import io
 import unittest
 from datetime import date
+from unittest import mock
 
 from outreach.outcomes.requests import record_request
 from outreach.plan.build import ReplaceRefused, build_plan
@@ -13,8 +15,8 @@ from outreach.plan.config import default_plan_config
 from outreach.plan.drafts import confirm_reason, save_linkedin_draft
 from outreach.store import transaction
 from outreach.store.writes import append_event, log_touch
-from tests.plan_seed import (PEOPLE_ON, seed_daily_entry, seed_email_touch, seed_message, seed_outbound, seed_person,
-                             seed_scored_company)
+from tests.plan_seed import (PEOPLE_ON, pin_clock_before_today, seed_daily_entry, seed_email_touch, seed_message,
+                             seed_outbound, seed_person, seed_scored_company)
 from tests.storetest import fresh_store
 
 CFG = default_plan_config()
@@ -46,6 +48,7 @@ def rows(conn, table):
 
 class Fixture(unittest.TestCase):
     def setUp(self):
+        pin_clock_before_today(self)  # seeded rows must be older than Tuesday on any wall-clock date (#201)
         self.conn = fresh_store()
         self.addCleanup(self.conn.close)
         self.ids, self.people = [], {}
@@ -306,7 +309,7 @@ class RefusalTest(Fixture):
     def test_an_old_email_thread_does_not_refuse(self):
         _, company = self.row_person()
         someone = seed_person(self.conn, company, "Old Thread", "engineer", email="old@co.example")
-        seed_message(self.conn, seed_email_touch(self.conn, someone, None), 0, "drafted")  # written on the real clock
+        seed_message(self.conn, seed_email_touch(self.conn, someone, None), 0, "drafted")  # written before Tuesday (the pinned clock)
         self.assertEqual(self.replace().status, "built")
 
     def test_an_application(self):
@@ -447,3 +450,29 @@ class RefusalTest(Fixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WallClockTest(unittest.TestCase):
+    """#201: the plan replace tests built a plan for the fixed Tuesday and seeded rows with the real clock, so they
+    failed for good once the wall clock reached that Tuesday. With the wall clock set well past it, they still pass."""
+    NAMES = (
+        "tests.test_plan_replace.RefusalTest.test_an_old_email_thread_does_not_refuse",
+        "tests.test_plan_replace.ReplaceTest.test_nothing_outside_the_plan_rows_is_deleted_or_changed",
+        "tests.pipeline.test_flow.PlanFlowTests.test_flow_plan_replace_turns_the_people_plan_into_the_shipped_company_plan",
+    )
+
+    def test_the_replace_tests_pass_with_the_wall_clock_past_the_fixed_week(self):
+        from datetime import datetime, timezone
+
+        class Later(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                later = datetime(2026, 12, 1, 17, 0, 0, tzinfo=timezone.utc)
+                return later if tz else later.replace(tzinfo=None)
+
+        suite = unittest.defaultTestLoader.loadTestsFromNames(self.NAMES)
+        stream = io.StringIO()
+        with mock.patch("outreach.store.timefmt.datetime", Later):
+            result = unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
+        self.assertEqual(result.testsRun, 3)
+        self.assertTrue(result.wasSuccessful(), stream.getvalue())

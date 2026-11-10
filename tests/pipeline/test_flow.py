@@ -44,7 +44,7 @@ from outreach.rules.rebuild import stored_decision
 from tests.pipeline import stages_crawl, stages_mcp, stages_ranking, stages_reader, stages_rules, stages_sending
 import tests.pipeline.harness as harness_module
 from tests.pipeline.harness import STAGE_NAMES, PipelineHarness
-from tests.plan_seed import TODAY, seed_outbound, seed_person, seed_scored_company
+from tests.plan_seed import TODAY, pin_clock_before_today, seed_outbound, seed_person, seed_scored_company
 from tests.ranking_seed import EMPLOYERS, POSTINGS, seed_ranking_fixture
 from tests.storetest import fresh_store, seed_company, seed_posting
 
@@ -1201,6 +1201,7 @@ class PlanFlowTests(HarnessCase):
         # The 2026-10-26 case: the stage's people plan (person rows, the founder's email row) was built with the old
         # config and nothing on it was acted on. A replace with the shipped config gives company rows only, keeps the
         # blocked companies off, and leaves every person, note and touch the stage seeded.
+        pin_clock_before_today(self)  # the seeders stamp the real clock; a replace refuses rows written on TODAY (#201)
         h = self.flow()
         old = self.entries(h)
         self.assertTrue(any(r["person_id"] is not None for r in old))

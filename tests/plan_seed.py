@@ -9,9 +9,11 @@ import itertools
 import json
 import re
 import sqlite3
+import unittest
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from outreach.drafts.checks import load_banned
 from outreach.plan.config import default_plan_config
@@ -22,9 +24,27 @@ from outreach.store.writes import log_touch, record_outcome
 
 __all__ = ["TODAY", "PEOPLE_ON", "people_on", "seed_scored_company", "seed_person", "seed_source", "seed_outbound", "seed_log_only",
            "seed_send_day",
-           "seed_email_touch", "seed_message", "seed_daily_entry", "PlanSituation", "seed_plan_situation"]
+           "seed_email_touch", "seed_message", "seed_daily_entry", "PlanSituation", "seed_plan_situation", "BEFORE_TODAY",
+           "pin_clock_before_today"]
 
 TODAY = date(2026, 11, 10)
+BEFORE_TODAY = "2026-11-09T12:00:00Z"  # the Monday before `TODAY`: seeded rows are older than the planned day
+
+
+def pin_clock_before_today(case: unittest.TestCase, at: str = BEFORE_TODAY) -> None:
+    """Make every `utcnow()` read `at` for the rest of `case`'s test (#201). The seeders stamp created_at and
+    updated_at from it, and a plan replace refuses when any row looks written on the planned day: with the real
+    clock, those tests pass only until the wall clock reaches `TODAY`."""
+    fixed = datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+    class _Pinned(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed if tz else fixed.replace(tzinfo=None)
+
+    patch = mock.patch("outreach.store.timefmt.datetime", _Pinned)
+    patch.start()
+    case.addCleanup(patch.stop)
 
 
 def people_on(cfg):

@@ -77,7 +77,9 @@ class PageCheckTest(unittest.TestCase):
 
     def test_private_hosts_are_refused_without_a_fetch(self):
         hosts = ["https://10.0.0.5/x", "https://localhost:3100/x", "https://192.168.1.2/x", "https://[::1]/x",
-                 "https://printer.local/x", "https://db.internal/x", "https://127.0.0.1/x"]
+                 "https://printer.local/x", "https://db.internal/x", "https://127.0.0.1/x",
+                 "https://2130706433/", "https://127.1/", "https://0x7f.1/", "https://localhost./",
+                 "https://foo.local./", "https://db.internal./"]
         for url in hosts:
             with self.subTest(url=url):
                 self.assertEqual(refused_url(url), "private or local addresses are not used")
@@ -85,6 +87,10 @@ class PageCheckTest(unittest.TestCase):
                 kept, rejected = check_facts(c, [Fact("f", "q", url)])
                 self.assertEqual((kept, c.calls), ([], []))
                 self.assertEqual(rejected[0]["reason"], "private or local addresses are not used")
+
+    def test_a_public_host_still_passes(self):
+        for url in ("https://a.example/x", "https://example.com./x", "https://sub.acme.io/about"):
+            self.assertIsNone(refused_url(url))
 
     def test_a_redirect_to_a_private_or_refused_target_is_not_fetched(self):
         for target, reason in (("http://127.0.0.1:3100/", "only https pages"),

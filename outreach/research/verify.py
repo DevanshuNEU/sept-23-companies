@@ -5,6 +5,7 @@ Standard library only. The client is injected, so tests never reach the network.
 import html as html_lib
 import ipaddress
 import re
+import socket
 from collections.abc import Sequence
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
@@ -68,10 +69,16 @@ def quote_on_page(text: str, quote: str) -> bool:
 
 
 def _private(host: str) -> bool:
+    host = host.removesuffix(".")
     try:
         ipaddress.ip_address(host)  # any IP literal, v4 or v6 (urlsplit strips the brackets)
         return True
     except ValueError:
+        pass
+    try:
+        socket.inet_aton(host)  # decimal, short and hex IPv4 forms the resolver also accepts
+        return True
+    except (OSError, ValueError):
         pass
     return host == "localhost" or host.endswith((".localhost", ".local", ".internal"))
 
@@ -79,7 +86,7 @@ def _private(host: str) -> bool:
 def refused_url(url: str) -> str | None:
     """The reason a URL may not be used, or None."""
     parts = urlsplit(url.strip())
-    host = (parts.hostname or "").lower()
+    host = (parts.hostname or "").lower().removesuffix(".")
     labels = host.split(".")
     if host in ("linkedin.com", "lnkd.in") or host.endswith((".linkedin.com", ".lnkd.in")):
         return "LinkedIn pages are not used"

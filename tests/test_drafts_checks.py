@@ -3,10 +3,12 @@
 Every test runs on a scratch store and the fixture banned list, never the DevVault file.
 """
 import json
+import os
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 from outreach.drafts import checks
 from outreach.drafts.checks import DraftInput, cached_mx, draft_input, load_banned, run_checks
@@ -17,6 +19,7 @@ from tests.storetest import fresh_store
 NOW = "2026-11-10T15:14:00Z"
 FIXTURE_BANNED = Path(__file__).resolve().parent / "fixtures" / "banned_phrases.txt"
 PORTFOLIO = "https://www.devanshuchicholikar.com"
+SIGNATURE = f"Devanshu Chicholikar\n{PORTFOLIO}"  # the fallback signature: tests never read the real file
 PROJECT = "https://github.com/devanshu/runner"
 SUBJECT = "Your queue rewrite and the new grad backend role"
 HOOK = "His post on the queue rewrite (2026-11-02)"
@@ -25,15 +28,15 @@ BODY = (
     "I saw Acme just opened a new grad backend role, and your post on the queue rewrite is why I'm writing. "
     "I build the same kind of thing. Last spring I wrote a job runner in Go that moved forty thousand tasks an hour "
     "with retries and clean shutdowns, and I want to bring that to your team.\n\n"
-    f"My work is at {PORTFOLIO} and the runner is at {PROJECT}.\n\n"
+    f"The runner is at {PROJECT}.\n\n"
     "Would you be open to referring me for the role, or pointing me to the right person? "
     "I can send anything that helps, and I can keep it short.\n\n"
-    "Thanks,\nDevanshu"
+    f"Thanks,\n{SIGNATURE}"
 )
 CLEAN_CODES = [
     "no_mail_server", "placeholder", "too_many_links", "link_shortener", "near_identical", "no_go_person", "said_no",
     "closed_no_sponsorship", "banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused",
-    "link_count", "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
+    "link_count", "signature", "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
     "voice_rhythm", "voice_opt_line",
 ]
 NO_GO_REASONS = ("no_sponsorship", "citizenship", "over_300", "defence_contractor", "agency", "said_no",
@@ -47,8 +50,16 @@ def send_first(conn, touch_id: int, *, body: str, subject: str, at: str = "2026-
     return seed.message(conn, touch_id, 0, "sent", subject=subject, body=body, sent_at=at)
 
 
-def words(n: int, *, links: tuple[str, ...] = (PORTFOLIO, PROJECT)) -> str:
-    """A body of exactly `n` counted words (links are not counted) with the given links at the end."""
+def words(n: int, *, links: tuple[str, ...] = (PROJECT,), signoff: str = "Thanks,") -> str:
+    """A body of exactly `n` counted words (links are not counted): the given links in the body, then the sign-off
+    word and the signature (its name counts as 2 words, its portfolio link as none)."""
+    filler = n - 2 - 2 - len(signoff.split())
+    return ("Hi Pat, " + " ".join(["plain"] * filler) + "\n" + " ".join(links) + "\n\n"
+            + (signoff + "\n" if signoff else "") + SIGNATURE)
+
+
+def unsigned(n: int, *, links: tuple[str, ...] = (PORTFOLIO, PROJECT)) -> str:
+    """The old shape: `n` counted words with every link at the end of the body and no signature."""
     return "Hi Pat, " + " ".join(["plain"] * (n - 2)) + "\n" + " ".join(links)
 
 
@@ -146,7 +157,8 @@ class Blocks(ChecksCase):
         check = self.assert_blocks(self.run_on(body=body), "too_many_links")
         self.assertEqual(len(check["spans"]), 3)
         self.assertTrue(all(s["field"] == "body" for s in check["spans"]))
-        self.assertEqual(body[check["spans"][0]["start"]:check["spans"][0]["end"]], PORTFOLIO)
+        self.assertEqual(body[check["spans"][0]["start"]:check["spans"][0]["end"]], PROJECT)
+        self.assertEqual(body[check["spans"][-1]["start"]:check["spans"][-1]["end"]], PORTFOLIO)
         self.assert_passes(self.run_on(), "too_many_links")
 
     def test_bare_domain_counts_as_a_link(self):
@@ -461,20 +473,58 @@ class Warns(ChecksCase):
 
     def test_link_count_on_a_first_email_warns(self):
         cases = [
-            (words(95, links=(PORTFOLIO,)), "warn"),
-            (words(95, links=(PROJECT, PORTFOLIO)), "warn"),
-            (words(95, links=(PORTFOLIO + "/projects", PROJECT)), "warn"),
-            (words(95, links=("devanshuchicholikar.com", PROJECT)), "pass"),
-            (words(95, links=(PORTFOLIO + "/", PROJECT)), "pass"),
-            (words(95, links=()), "warn"),
+            (words(95, links=()), "warn"),                       # only the signature's portfolio
+            (words(95, links=(PROJECT,)), "pass"),               # one link in the body, the portfolio signed
+            (words(95, links=(PROJECT, PROJECT + "/b")), "warn"),  # three links (and a block for more than 2)
+            (unsigned(95, links=(PORTFOLIO, PROJECT)), "warn"),  # the old shape: portfolio first, no signature
+            (unsigned(95, links=(PROJECT, PORTFOLIO)), "warn"),  # portfolio last but not in a signature
         ]
         for body, severity in cases:
             with self.subTest(body=body[-80:]):
                 found = self.run_on(body=body)
                 self.assertEqual(self.one(found, "link_count")["severity"], severity)
-                self.assertEqual(self.codes(found, "block"), [])
+                if body.count("http") <= 2:
+                    self.assertEqual(self.codes(found, "block"), [])
         with self.subTest("a follow-up has no link count rule"):
             self.assertNotIn("link_count", [c["code"] for c in self.run_on(seq=1, body=words(40, links=()))])
+
+    def test_link_count_passes_with_project_in_body_and_portfolio_in_signature(self):
+        check = self.one(self.run_on(body=words(95)), "link_count")
+        self.assertEqual(check["severity"], "pass", check)
+
+    def test_link_count_warns_when_portfolio_is_not_in_signature(self):
+        check = self.one(self.run_on(body=unsigned(95)), "link_count")
+        self.assertEqual(check["severity"], "warn", check)
+        self.assertIn("signature", check["detail"])
+
+    def test_followup_with_signature_only_passes_links(self):
+        found = self.run_on(seq=1, body=words(40, links=()))
+        self.assert_passes(found, "too_many_links")
+        self.assert_passes(found, "signature")
+        self.assertNotIn("link_count", [c["code"] for c in found])
+
+    def test_signature_passes_when_body_ends_with_it(self):
+        self.assert_passes(self.run_on(body=words(95)), "signature")
+
+    def test_signature_passes_with_no_signoff_word(self):
+        self.assert_passes(self.run_on(body=words(95, signoff="")), "signature")
+
+    def test_signature_passes_with_trailing_blank_lines_and_spaces(self):
+        self.assert_passes(self.run_on(body=words(95).replace("Devanshu Chicholikar", "Devanshu Chicholikar  ")
+                                       + "\n\n"), "signature")
+
+    def test_signature_warns_when_missing(self):
+        body = words(95).replace(SIGNATURE, "Devanshu Chicholikar")
+        check = self.one(self.run_on(body=body), "signature")
+        self.assertEqual(check["severity"], "warn", check)
+        self.assertIn(PORTFOLIO, check["detail"])
+
+    def test_signature_follows_the_signature_file(self):
+        sig = Path(tempfile.mkdtemp(prefix="sig-")) / "signature.txt"
+        sig.write_text(f"Devanshu Chicholikar\n{PORTFOLIO}\n(555) 010-0199\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"OUTREACH_SIGNATURE": str(sig)}):
+            self.assertEqual(self.one(self.run_on(body=words(95)), "signature")["severity"], "warn")
+            self.assert_passes(self.run_on(body=words(95) + "\n(555) 010-0199"), "signature")
 
     def test_recruiter_warns_with_the_role_kind_fix(self):
         found = self.run_on(role_kind="recruiter", body=words(90))
@@ -516,7 +566,7 @@ class Shape(ChecksCase):
         rank = {"block": 0, "warn": 1, "pass": 2}
         self.assertEqual([rank[c["severity"]] for c in found], sorted(rank[c["severity"]] for c in found))
         self.assertEqual(self.codes(found, "block"), ["no_mail_server", "too_many_links"])
-        self.assertEqual(self.codes(found, "warn")[:3], ["dash", "length", "subject_wording"])
+        self.assertEqual(self.codes(found, "warn")[:3], ["dash", "subject_wording", "link_count"])
 
     def test_no_attachment_column_exists(self):
         names = [row["name"] for row in self.conn.execute("PRAGMA table_info(message)")]

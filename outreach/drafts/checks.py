@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from outreach.drafting.signature import signature_lines
 from outreach.drafting.voice_checks import voice_checks
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 
@@ -65,7 +66,7 @@ STOP_REPLIES = ("said_no", "asked_to_stop")
 BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "too_many_links", "link_shortener", "followup_subject",
                "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
 WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused", "link_count",
-              "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
+              "signature", "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
               "voice_recital", "voice_rhythm", "voice_opt_line", "voice_ungrounded")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _RANK = {"block": 0, "warn": 1, "pass": 2}
@@ -290,17 +291,38 @@ def _link_rules(d: DraftInput) -> list[Check]:
     else:
         out.append(_check("link_shortener", "pass", "No link shorteners", "Every link is a full link."))
     if d.seq == 0:
-        if len(found) == MAX_LINKS and _is_portfolio(found[0][2]):
-            out.append(_check("link_count", "pass", "Portfolio, then one project", "2 links, portfolio first."))
+        start = _signature_start(d.body)
+        signed = start is not None and found and _is_portfolio(found[-1][2]) and found[-1][0] >= start
+        if len(found) == MAX_LINKS and signed:
+            out.append(_check("link_count", "pass", "One link, then the signed portfolio",
+                              "2 links: one in the body, the portfolio in the signature."))
         elif len(found) != MAX_LINKS:
             out.append(_check("link_count", "warn", "Not 2 links",
-                              f"{len(found)} links. A first email has 2: https://www.{PORTFOLIO} first, then the "
-                              "relevant project.", spans=spans))
+                              f"{len(found)} links. A first email has 2: one link in the body (the project or the "
+                              "writing it leans on), and the portfolio in the signature.", spans=spans))
         else:
-            out.append(_check("link_count", "warn", "Portfolio not first",
-                              f"The first link is {found[0][2]}. Put https://www.{PORTFOLIO} first.",
-                              spans=spans[:1]))
+            out.append(_check("link_count", "warn", "Portfolio belongs in the signature",
+                              f"End with the signature; it carries https://www.{PORTFOLIO}. Keep one link in the "
+                              "body.", spans=spans))
     return out
+
+
+def _signature_start(body: str) -> int | None:
+    """Where the signature begins in `body` when the body ends with it (each line compared stripped, blank lines
+    skipped), else None."""
+    want = signature_lines()
+    lines = [(m.start(), m.group().strip()) for m in re.finditer(r"[^\n]+", body) if m.group().strip()]
+    if len(lines) < len(want) or [text for _, text in lines[-len(want):]] != want:
+        return None
+    return lines[-len(want)][0]
+
+
+def _signature(d: DraftInput) -> Check:
+    if _signature_start(d.body) is not None:
+        return _check("signature", "pass", "Signature is there", "The email ends with his signature.")
+    return _check("signature", "warn", "Signature missing",
+                  "End with an optional sign-off word, then his signature exactly: "
+                  + " / ".join(signature_lines()) + ".")
 
 
 def _length(d: DraftInput) -> Check:
@@ -478,6 +500,7 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         _dash(d),
         _placeholder(d),
         *_link_rules(d),
+        _signature(d),
         _length(d),
         _stale_hook(d, now),
         _subject_wording(d),

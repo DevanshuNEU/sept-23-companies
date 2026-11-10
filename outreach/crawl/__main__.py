@@ -164,8 +164,11 @@ def _locked_run(what: str, client: HttpClient | None, run, *, lock: bool) -> int
 
 def _tick(client: HttpClient | None) -> int:
     from outreach.crawl.tick import run_tick
-    return _locked_run("tick", client, lambda conn, polite, cfg: run_tick(conn, polite, cfg=cfg, notifier=mac_notifier),
-                       lock=True)
+
+    def run(conn, polite, cfg):
+        return run_tick(conn, polite, cfg=cfg, notifier=mac_notifier, workers=cfg.workers)
+
+    return _locked_run("tick", client, run, lock=True)
 
 
 def _read(company_ids: list[int], client: HttpClient | None) -> int:
@@ -179,7 +182,7 @@ def _read(company_ids: list[int], client: HttpClient | None) -> int:
             _say(f"company {board.company_id}: not reading its {board.ats} board {board.token}: the {board.ats} "
                  f"reader is switched off ({cfg.ats_off[board.ats]})")
             refused.append(board.board_id)
-        return read_company_boards(conn, polite, company_ids, cfg=cfg)
+        return read_company_boards(conn, polite, company_ids, cfg=cfg, workers=cfg.workers)
 
     code = _locked_run("read", client, run, lock=False)
     return 1 if refused else code

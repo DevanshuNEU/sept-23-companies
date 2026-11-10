@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 import live_checkout
+import live_checkout
 from outreach.drafting.brief import brief_id, read_evidence
 from outreach.drafting.voice import load_voice_pack
 from outreach.mcp import __main__ as cli
@@ -85,6 +86,9 @@ class SweepCase(McpCase):
         fetcher = mock.patch("outreach.mcp.tools.research._client", return_value=pages)
         fetcher.start()
         self.addCleanup(fetcher.stop)
+        live = mock.patch.object(live_checkout, "is_live", return_value=True)
+        live.start()
+        self.addCleanup(live.stop)
         self.acme = seed.company(self.db, "Acme", "working")
         self.pat = seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example")
         self.drafted = seed.message(self.db, seed.touch(self.db, self.pat), 0, subject="Pat and payments",

@@ -17,8 +17,9 @@ class FakeClient:
         if isinstance(page, Exception):
             raise page
         status, body, ctype = page
-        return Response(status=status, url=self.final.get(url, url), body=body.encode() if isinstance(body, str) else body,
-                        headers={"content-type": ctype})
+        headers = ctype if isinstance(ctype, dict) else {"content-type": ctype}
+        return Response(status=status, url=self.final.get(url, url),
+                        body=body.encode() if isinstance(body, str) else body, headers=headers)
 
 
 HTML = "text/html; charset=utf-8"
@@ -74,15 +75,41 @@ class PageCheckTest(unittest.TestCase):
         self.assertEqual((kept, c.calls), ([], []))
         self.assertEqual(rejected[0]["reason"], "LinkedIn pages are not used")
 
-    def test_redirect_to_a_refused_page_is_refused(self):
-        pages = {"https://a.example/r": (200, "<p>we ship daily</p>", HTML),
-                 "https://a.example/h": (200, "<p>we ship daily</p>", HTML)}
-        c = FakeClient(pages, final={"https://a.example/r": "https://www.linkedin.com/x",
-                                     "https://a.example/h": "http://a.example/plain"})
-        kept, rejected = check_facts(c, [Fact("a", "we ship daily", "https://a.example/r"),
-                                         Fact("b", "we ship daily", "https://a.example/h")])
+    def test_private_hosts_are_refused_without_a_fetch(self):
+        hosts = ["https://10.0.0.5/x", "https://localhost:3100/x", "https://192.168.1.2/x", "https://[::1]/x",
+                 "https://printer.local/x", "https://db.internal/x", "https://127.0.0.1/x"]
+        for url in hosts:
+            with self.subTest(url=url):
+                self.assertEqual(refused_url(url), "private or local addresses are not used")
+                c = FakeClient({})
+                kept, rejected = check_facts(c, [Fact("f", "q", url)])
+                self.assertEqual((kept, c.calls), ([], []))
+                self.assertEqual(rejected[0]["reason"], "private or local addresses are not used")
+
+    def test_a_redirect_to_a_private_or_refused_target_is_not_fetched(self):
+        for target, reason in (("http://127.0.0.1:3100/", "only https pages"),
+                               ("https://127.0.0.1:3100/", "private or local addresses are not used"),
+                               ("https://www.linkedin.com/x", "LinkedIn pages are not used")):
+            with self.subTest(target=target):
+                c = FakeClient({"https://a.example/r": (302, "", {"location": target})})
+                kept, rejected = check_facts(c, [Fact("a", "q", "https://a.example/r")])
+                self.assertEqual((kept, c.calls), ([], ["https://a.example/r"]))
+                self.assertEqual(rejected[0]["reason"], reason)
+
+    def test_a_normal_redirect_is_followed_and_the_quote_found_there(self):
+        c = FakeClient({"https://a.example/old": (301, "", {"location": "/new"}),
+                        "https://a.example/new": (200, "<p>we ship daily</p>", HTML)})
+        kept, rejected = check_facts(c, [Fact("a", "we ship daily", "https://a.example/old")])
+        self.assertEqual((len(kept), rejected), (1, []))
+        self.assertEqual(c.calls, ["https://a.example/old", "https://a.example/new"])
+
+    def test_more_than_three_hops_is_rejected(self):
+        pages = {f"https://a.example/{n}": (302, "", {"location": f"/{n + 1}"}) for n in range(6)}
+        c = FakeClient(pages)
+        kept, rejected = check_facts(c, [Fact("a", "q", "https://a.example/0")])
         self.assertEqual(kept, [])
-        self.assertEqual([r["reason"] for r in rejected], ["LinkedIn pages are not used", "only https pages"])
+        self.assertEqual(rejected[0]["reason"], "page redirected too many times")
+        self.assertEqual(len(c.calls), 4)
 
     def test_one_fetch_per_url(self):
         c = FakeClient({"https://a.example/x": (200, "<p>one two three</p>", HTML)})

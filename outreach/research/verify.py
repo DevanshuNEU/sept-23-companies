@@ -3,10 +3,11 @@
 Standard library only. The client is injected, so tests never reach the network.
 """
 import html as html_lib
+import ipaddress
 import re
 from collections.abc import Sequence
 from html.parser import HTMLParser
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from outreach.net import FetchError, HttpClient
 from outreach.research.store import Fact
@@ -14,6 +15,8 @@ from outreach.research.store import Fact
 __all__ = ["page_text", "quote_on_page", "refused_url", "check_facts"]
 
 MAX_BYTES = 3_000_000
+MAX_HOPS = 3
+_REDIRECTS = (301, 302, 303, 307, 308)
 _CONTACT_LABELS = {"rocketreach", "zoominfo", "lusha", "signalhire", "contactout"}
 _SKIP = {"script", "style", "noscript", "template", "head"}
 _BREAKS = {"p", "br", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article"}
@@ -64,6 +67,15 @@ def quote_on_page(text: str, quote: str) -> bool:
     return bool(q) and q in _squash(text).lower()
 
 
+def _private(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)  # any IP literal, v4 or v6 (urlsplit strips the brackets)
+        return True
+    except ValueError:
+        pass
+    return host == "localhost" or host.endswith((".localhost", ".local", ".internal"))
+
+
 def refused_url(url: str) -> str | None:
     """The reason a URL may not be used, or None."""
     parts = urlsplit(url.strip())
@@ -75,6 +87,8 @@ def refused_url(url: str) -> str | None:
         return "contact-data sites are not used"
     if parts.scheme != "https" or not host:
         return "only https pages"
+    if _private(host):
+        return "private or local addresses are not used"
     return None
 
 
@@ -85,10 +99,23 @@ def _charset(content_type: str) -> str:
 
 def _load(client: HttpClient, url: str) -> tuple[str | None, str | None]:
     """(page text, None) or (None, reason)."""
-    try:
-        r = client.get(url, follow_redirects=True, max_bytes=MAX_BYTES)
-    except FetchError as e:
-        return None, f"page could not be fetched: {e.kind}"
+    current = url
+    for _hop in range(MAX_HOPS + 1):
+        try:
+            r = client.get(current, follow_redirects=False, max_bytes=MAX_BYTES)
+        except FetchError as e:
+            return None, f"page could not be fetched: {e.kind}"
+        if r.status not in _REDIRECTS:
+            break
+        target = r.headers.get("location")
+        if not target:
+            return None, f"page answered {r.status}"
+        current = urljoin(current, target.strip())
+        reason = refused_url(current)
+        if reason:
+            return None, reason
+    else:
+        return None, "page redirected too many times"
     if r.status != 200:
         return None, f"page answered {r.status}"
     landed = refused_url(r.url) if r.url else None

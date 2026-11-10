@@ -2,6 +2,8 @@
 client; nothing here reaches the network."""
 from unittest import mock
 
+import live_checkout
+
 from outreach.mcp import server
 from outreach.net import Response
 from tests import apiseed as seed
@@ -33,6 +35,9 @@ class SaveResearchCase(McpCase):
         patcher = mock.patch("outreach.mcp.tools.research._client", return_value=self.client)
         patcher.start()
         self.addCleanup(patcher.stop)
+        live = mock.patch.object(live_checkout, "is_live", return_value=True)
+        live.start()
+        self.addCleanup(live.stop)
         self.acme = seed.company(self.db, "Acme", "working")
         self.pat = seed.person(self.db, self.acme, "Pat Lee")
 
@@ -113,3 +118,10 @@ class SaveResearchTest(SaveResearchCase):
         tool = next(s for s in server.tool_specs() if s.name == "save_research")
         self.assertEqual({t: (g.insert, set(g.update)) for t, g in tool.grants.items()},
                          {"research_fact": (True, set()), "person_source": (True, set()), "event": (True, set())})
+
+    def test_outside_the_live_checkout_nothing_is_fetched(self):
+        with mock.patch.object(live_checkout, "is_live", return_value=False):
+            err = self.error("save_research", {"company_id": self.acme, "facts": [fact()]})
+        self.assertEqual(err["code"], "not_live")
+        self.assertEqual(self.client.calls, [])
+        self.assertEqual(self.rows("research_fact"), [])

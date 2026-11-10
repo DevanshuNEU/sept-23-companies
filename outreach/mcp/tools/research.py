@@ -17,6 +17,8 @@ from typing import Literal
 
 from pydantic import Field, field_validator
 
+import live_checkout
+
 from outreach.drafts.checks import normalise_domain
 from outreach.mcp.guard import Grant
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
@@ -152,6 +154,9 @@ def _client() -> HttpClient:
 
 def save_research(ctx: Ctx, args: SaveResearchInput) -> dict:
     conn = ctx.conn
+    if not live_checkout.is_live():
+        raise ToolError("not_live", "save_research reads pages only in the live checkout.",
+                        "Ask Devanshu to run this from the live checkout. Nothing was fetched or written.")
     family, survivor, note = resolve(conn, args.company_id)
     if args.person_id is not None:
         p = conn.execute("SELECT company_id FROM person WHERE person_id = ?", (args.person_id,)).fetchone()
